@@ -129,7 +129,7 @@ Input Sources
 
 역할:
 
-- preview mp4 렌더
+- playable local preview artifact 렌더
 - subtitle 파일 생성
 - CapCut export
 
@@ -164,15 +164,13 @@ packages/
 
 ### `apps/desktop`
 
-- 로컬 운영 UI
-- 프로젝트 생성
-- 자산 연결
-- review 흐름
+- 장기 desktop wrapper 후보
+- 현재 주 구현 대상은 아님
 
 ### `apps/web`
 
-- 미래 확장용 웹 표면
-- 초기에는 비필수
+- 현재 로컬 우선 operator dashboard
+- review approval/output workflow의 기본 UI
 
 ### `services/api`
 

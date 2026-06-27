@@ -41,7 +41,7 @@
 - 음악 추천
 - 설명형 비주얼 계획
 - timeline JSON
-- preview mp4
+- 1차 playable local preview artifact
 - CapCut export 결과
 
 ## 4. MVP 범위
@@ -191,7 +191,7 @@
 - TTS: 사용자 본인 목소리 기반 TTS provider
 - 비전/자산 분석: OpenCV + 자산 메타데이터 인덱싱
 - 데이터 저장: 로컬 DB 우선
-- UI: 로컬 우선 앱 또는 얇은 review UI
+- UI: React + TypeScript 기반 로컬 우선 web review dashboard
 - export 대상: CapCut
 
 ## 8. BrollBox 재사용 방침
