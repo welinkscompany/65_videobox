@@ -415,7 +415,121 @@ class LocalProjectStore:
                 payload["created_at"],
             ),
         )
+        initial_review_status = (
+            "blocked"
+            if payload.get("review_flags") or payload.get("pending_recommendations")
+            else "draft"
+        )
+        self.save_review_state(
+            project_id=project_id,
+            timeline_id=timeline_id,
+            status=initial_review_status,
+        )
         return {"timeline_id": timeline_id, "file_uri": file_uri, "timeline": payload}
+
+    def save_review_state(
+        self,
+        *,
+        project_id: str,
+        timeline_id: str,
+        status: str,
+    ) -> dict[str, Any]:
+        if status not in {"draft", "blocked", "approved"}:
+            raise ValueError(f"Unsupported review status: {status}")
+        approved_at = self._now_iso() if status == "approved" else None
+        updated_at = self._now_iso()
+        self._execute(
+            project_id,
+            """
+            INSERT INTO review_approvals (
+                timeline_id,
+                project_id,
+                status,
+                approved_at,
+                updated_at
+            ) VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(timeline_id) DO UPDATE SET
+                status = excluded.status,
+                approved_at = excluded.approved_at,
+                updated_at = excluded.updated_at
+            """,
+            (timeline_id, project_id, status, approved_at, updated_at),
+        )
+        return self.get_review_state(project_id=project_id, timeline_id=timeline_id)
+
+    def get_review_state(self, *, project_id: str, timeline_id: str) -> dict[str, Any]:
+        row = self._fetchone(
+            project_id,
+            """
+            SELECT timeline_id, project_id, status, approved_at, updated_at
+            FROM review_approvals
+            WHERE timeline_id = ?
+            """,
+            (timeline_id,),
+        )
+        if row is None:
+            raise KeyError(f"Review state not found: {timeline_id}")
+        return dict(row)
+
+    def save_subtitle_run(
+        self,
+        *,
+        project_id: str,
+        timeline_id: str,
+        subtitle_payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        sequence = self._next_sequence(
+            self.project_root(project_id) / "subtitles",
+            "subtitle_*.srt",
+        )
+        subtitle_id = f"subtitle_{sequence:03d}"
+        subtitle_path = self.project_root(project_id) / "subtitles" / f"{subtitle_id}.srt"
+        file_uri = self._path_to_uri(project_id, subtitle_path)
+        entries = subtitle_payload.get("entries", [])
+        subtitle_path.write_text(
+            self._serialize_srt(entries),
+            encoding="utf-8",
+        )
+        payload = {
+            "subtitle_id": subtitle_id,
+            "project_id": project_id,
+            "timeline_id": timeline_id,
+            "format": subtitle_payload.get("format", "srt"),
+            "file_uri": file_uri,
+            "status": "succeeded",
+            "created_at": self._now_iso(),
+            "notes": subtitle_payload.get("notes", []),
+        }
+        summary_json = json.dumps(
+            {"entry_count": len(entries)},
+            ensure_ascii=True,
+        )
+        self._execute(
+            project_id,
+            """
+            INSERT INTO subtitle_renders (
+                subtitle_id,
+                project_id,
+                timeline_id,
+                format,
+                file_uri,
+                status,
+                summary_json,
+                created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                subtitle_id,
+                project_id,
+                timeline_id,
+                payload["format"],
+                file_uri,
+                payload["status"],
+                summary_json,
+                payload["created_at"],
+            ),
+        )
+        return {"subtitle_id": subtitle_id, "file_uri": file_uri, "subtitle": payload}
 
     def save_preview_run(
         self,
@@ -430,16 +544,21 @@ class LocalProjectStore:
         )
         preview_id = f"preview_{sequence:03d}"
         preview_path = self.project_root(project_id) / "previews" / f"{preview_id}.json"
+        player_path = self.project_root(project_id) / "previews" / f"{preview_id}.html"
         file_uri = self._path_to_uri(project_id, preview_path)
+        player_uri = self._path_to_uri(project_id, player_path)
         payload = {
             "preview_id": preview_id,
             "project_id": project_id,
             "timeline_id": timeline_id,
             "file_uri": file_uri,
+            "player_uri": player_uri,
             "status": "succeeded",
             "created_at": self._now_iso(),
-            **preview_payload,
+            **{key: value for key, value in preview_payload.items() if key != "player_html"},
         }
+        player_html = str(preview_payload.get("player_html", ""))
+        player_path.write_text(player_html, encoding="utf-8")
         preview_path.write_text(json.dumps(payload, indent=2, ensure_ascii=True), encoding="utf-8")
         summary_json = json.dumps(
             {
@@ -474,6 +593,7 @@ class LocalProjectStore:
             )
         except Exception:
             preview_path.unlink(missing_ok=True)
+            player_path.unlink(missing_ok=True)
             raise
         return {"preview_id": preview_id, "file_uri": file_uri, "preview": payload}
 
@@ -864,6 +984,23 @@ class LocalProjectStore:
         payload["summary"] = json.loads(row["summary_json"] or "{}")
         return payload
 
+    def get_subtitle_run(self, *, project_id: str, subtitle_id: str) -> dict[str, Any]:
+        row = self._fetchone(
+            project_id,
+            """
+            SELECT subtitle_id, project_id, timeline_id, format, file_uri, status, summary_json, created_at
+            FROM subtitle_renders
+            WHERE subtitle_id = ?
+            """,
+            (subtitle_id,),
+        )
+        if row is None:
+            raise KeyError(f"Subtitle not found: {subtitle_id}")
+        payload = dict(row)
+        payload["notes"] = ["Subtitle file generated from approved review timeline."]
+        payload["summary"] = json.loads(payload.pop("summary_json") or "{}")
+        return payload
+
     def get_export_run(self, *, project_id: str, export_id: str) -> dict[str, Any]:
         row = self._fetchone(
             project_id,
@@ -900,9 +1037,20 @@ class LocalProjectStore:
             item for item in recommendations
             if not (bool(item.get("auto_apply_allowed")) and not bool(item.get("review_required")))
         ]
+        if timeline_id:
+            try:
+                review_status = self.get_review_state(
+                    project_id=project_id,
+                    timeline_id=str(timeline_id),
+                )["status"]
+            except KeyError:
+                review_status = "blocked" if timeline_review_flags or pending else "draft"
+        else:
+            review_status = "blocked"
         return {
             "project_id": project_id,
             "timeline_id": timeline_id,
+            "review_status": review_status,
             "segments": segments,
             "applied_recommendations": applied,
             "pending_recommendations": pending,
@@ -930,6 +1078,7 @@ class LocalProjectStore:
             project_root / "analysis" / "recommendations",
             project_root / "timelines",
             project_root / "previews",
+            project_root / "subtitles",
             project_root / "exports" / "capcut",
             project_root / "cache",
             project_root / "logs",
@@ -1013,3 +1162,40 @@ class LocalProjectStore:
 
     def _now_iso(self) -> str:
         return datetime.now(UTC).isoformat()
+
+    def get_latest_subtitle_for_timeline(self, *, project_id: str, timeline_id: str) -> dict[str, Any] | None:
+        row = self._fetchone(
+            project_id,
+            """
+            SELECT subtitle_id
+            FROM subtitle_renders
+            WHERE timeline_id = ?
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (timeline_id,),
+        )
+        if row is None:
+            return None
+        return self.get_subtitle_run(project_id=project_id, subtitle_id=str(row["subtitle_id"]))
+
+    def _serialize_srt(self, entries: list[dict[str, Any]]) -> str:
+        blocks: list[str] = []
+        for entry in entries:
+            blocks.append(
+                "\n".join(
+                    [
+                        str(entry["index"]),
+                        f"{self._format_srt_timestamp(float(entry['start_sec']))} --> {self._format_srt_timestamp(float(entry['end_sec']))}",
+                        str(entry["text"]),
+                    ]
+                )
+            )
+        return "\n\n".join(blocks) + ("\n" if blocks else "")
+
+    def _format_srt_timestamp(self, seconds: float) -> str:
+        total_milliseconds = int(round(seconds * 1000))
+        hours, remainder = divmod(total_milliseconds, 3_600_000)
+        minutes, remainder = divmod(remainder, 60_000)
+        secs, milliseconds = divmod(remainder, 1000)
+        return f"{hours:02d}:{minutes:02d}:{secs:02d},{milliseconds:03d}"

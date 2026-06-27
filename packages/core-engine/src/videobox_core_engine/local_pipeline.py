@@ -361,6 +361,11 @@ class LocalPipelineRunner:
     def get_timeline_result(self, *, project_id: str, job_id: str) -> dict[str, Any]:
         job = self.store.get_job(project_id=project_id, job_id=job_id)
         timeline = self.store.get_timeline_run(project_id=project_id, timeline_id=job["output_ref"])
+        review_state = self.store.get_review_state(
+            project_id=project_id,
+            timeline_id=str(timeline["timeline_id"]),
+        )
+        timeline["review_status"] = review_state["status"]
         return {"job_id": job["job_id"], "status": job["status"], "timeline": timeline}
 
     def get_review_snapshot(self, *, project_id: str, job_id: str) -> dict[str, Any]:
@@ -375,6 +380,74 @@ class LocalPipelineRunner:
 
     def get_review_snapshot_result(self, *, project_id: str, job_id: str) -> dict[str, Any]:
         return self.get_review_snapshot(project_id=project_id, job_id=job_id)
+
+    def approve_timeline_review(self, *, project_id: str, timeline_job_id: str) -> dict[str, Any]:
+        timeline = self.get_timeline_result(project_id=project_id, job_id=timeline_job_id)["timeline"]
+        self._ensure_timeline_has_no_blockers(timeline)
+        return self.store.save_review_state(
+            project_id=project_id,
+            timeline_id=str(timeline["timeline_id"]),
+            status="approved",
+        )
+
+    def reopen_timeline_review(self, *, project_id: str, timeline_job_id: str) -> dict[str, Any]:
+        timeline = self.get_timeline_result(project_id=project_id, job_id=timeline_job_id)["timeline"]
+        status = "blocked" if timeline.get("review_flags") or timeline.get("pending_recommendations") else "draft"
+        return self.store.save_review_state(
+            project_id=project_id,
+            timeline_id=str(timeline["timeline_id"]),
+            status=status,
+        )
+
+    def start_subtitle_render(self, *, project_id: str, timeline_job_id: str) -> dict[str, Any]:
+        job = self.store.create_job(
+            project_id=project_id,
+            job_type=JobType.SUBTITLE_RENDER,
+            input_ref=timeline_job_id,
+            status=JobStatus.RUNNING,
+        )
+        try:
+            timeline = self.get_timeline_result(project_id=project_id, job_id=timeline_job_id)["timeline"]
+            self._ensure_timeline_ready_for_output(timeline)
+            segments = self.store.list_segments(project_id=project_id)
+            subtitle_payload = {
+                "format": "srt",
+                "entries": [
+                    {
+                        "index": index,
+                        "start_sec": float(segment["start_sec"]),
+                        "end_sec": float(segment["end_sec"]),
+                        "text": str(segment["text"]),
+                    }
+                    for index, segment in enumerate(segments, start=1)
+                ],
+                "notes": ["Subtitle file generated from approved review timeline."],
+            }
+            persisted = self.store.save_subtitle_run(
+                project_id=project_id,
+                timeline_id=str(timeline["timeline_id"]),
+                subtitle_payload=subtitle_payload,
+            )
+            self.store.update_job(
+                project_id=project_id,
+                job_id=job["job_id"],
+                status=JobStatus.SUCCEEDED,
+                output_ref=persisted["subtitle_id"],
+            )
+        except Exception as exc:
+            self.store.update_job(
+                project_id=project_id,
+                job_id=job["job_id"],
+                status=JobStatus.FAILED,
+                error_message=str(exc),
+            )
+            raise
+        return {"job_id": job["job_id"], "status": JobStatus.SUCCEEDED.value}
+
+    def get_subtitle_result(self, *, project_id: str, job_id: str) -> dict[str, Any]:
+        job = self.store.get_job(project_id=project_id, job_id=job_id)
+        subtitle = self.store.get_subtitle_run(project_id=project_id, subtitle_id=job["output_ref"])
+        return {"job_id": job["job_id"], "status": job["status"], "subtitle": subtitle}
 
     def start_preview_render(self, *, project_id: str, timeline_job_id: str) -> dict[str, Any]:
         job = self.store.create_job(
@@ -426,9 +499,14 @@ class LocalPipelineRunner:
         try:
             timeline = self.get_timeline_result(project_id=project_id, job_id=timeline_job_id)["timeline"]
             self._ensure_timeline_ready_for_output(timeline)
+            latest_subtitle = self.store.get_latest_subtitle_for_timeline(
+                project_id=project_id,
+                timeline_id=str(timeline["timeline_id"]),
+            )
             export_payload = self.capcut_exporter.build_payload(
                 project_id=project_id,
                 timeline=timeline,
+                subtitle_file_uri=latest_subtitle["file_uri"] if latest_subtitle else None,
             )
             persisted = self.store.save_capcut_export(
                 project_id=project_id,
@@ -524,9 +602,18 @@ class LocalPipelineRunner:
         )
 
     def _ensure_timeline_ready_for_output(self, timeline: dict[str, Any]) -> None:
+        self._ensure_timeline_has_no_blockers(timeline)
+        review_state = self.store.get_review_state(
+            project_id=str(timeline["project_id"]),
+            timeline_id=str(timeline["timeline_id"]),
+        )
+        if review_state["status"] != "approved":
+            raise ValueError("Timeline requires explicit approval before preview, subtitle, or export.")
+
+    def _ensure_timeline_has_no_blockers(self, timeline: dict[str, Any]) -> None:
         review_flags = timeline.get("review_flags", [])
         pending_recommendations = timeline.get("pending_recommendations", [])
         if review_flags or pending_recommendations:
             raise ValueError(
-                "Timeline still has review blockers. Clear review flags and pending recommendations before preview or export."
+                "Timeline still has review blockers. Clear review flags and pending recommendations before approval or output."
             )

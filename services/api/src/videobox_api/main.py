@@ -145,6 +145,7 @@ class TimelinePayloadResponse(BaseModel):
     project_id: str
     version: str
     output_mode: str
+    review_status: str = "draft"
     tracks: list[TimelineTrackResponse]
     review_flags: list[ReviewFlagResponse]
     applied_recommendations: list[RecommendationItemResponse] = Field(default_factory=list)
@@ -159,10 +160,19 @@ class TimelineJobResponse(StartJobResponse):
 class ReviewSnapshotResponse(BaseModel):
     project_id: str
     timeline_id: str
+    review_status: str
     segments: list[SegmentAnalysisRecord]
     applied_recommendations: list[RecommendationItemResponse]
     pending_recommendations: list[RecommendationItemResponse]
     review_flags: list[ReviewFlagResponse]
+
+
+class ReviewApprovalResponse(BaseModel):
+    timeline_id: str
+    project_id: str
+    review_status: str
+    approved_at: str | None = None
+    updated_at: str
 
 
 class PreviewArtifactResponse(BaseModel):
@@ -170,6 +180,7 @@ class PreviewArtifactResponse(BaseModel):
     project_id: str
     timeline_id: str
     file_uri: str
+    player_uri: str | None = None
     status: str
     artifact_kind: str
     notes: list[str] = Field(default_factory=list)
@@ -186,6 +197,7 @@ class ExportArtifactResponse(BaseModel):
     timeline_id: str
     export_type: str
     file_uri: str
+    subtitle_file_uri: str | None = None
     status: str
     adapter: str | None = None
     notes: list[str] = Field(default_factory=list)
@@ -194,6 +206,21 @@ class ExportArtifactResponse(BaseModel):
 
 class ExportJobResponse(StartJobResponse):
     export: ExportArtifactResponse
+
+
+class SubtitleArtifactResponse(BaseModel):
+    subtitle_id: str
+    project_id: str
+    timeline_id: str
+    format: str
+    file_uri: str
+    status: str
+    notes: list[str] = Field(default_factory=list)
+    created_at: str | None = None
+
+
+class SubtitleJobResponse(StartJobResponse):
+    subtitle: SubtitleArtifactResponse
 
 
 def create_app(*, projects_root: Path | None = None) -> FastAPI:
@@ -431,10 +458,62 @@ def create_app(*, projects_root: Path | None = None) -> FastAPI:
         return ReviewSnapshotResponse(
             project_id=result["project_id"],
             timeline_id=result["timeline_id"],
+            review_status=result["review_status"],
             segments=[SegmentAnalysisRecord(**item) for item in result["segments"]],
             applied_recommendations=[RecommendationItemResponse(**item) for item in result["applied_recommendations"]],
             pending_recommendations=[RecommendationItemResponse(**item) for item in result["pending_recommendations"]],
             review_flags=[ReviewFlagResponse(**item) for item in result["review_flags"]],
+        )
+
+    @app.post("/api/projects/{project_id}/review-approvals/{job_id}/approve", status_code=status.HTTP_202_ACCEPTED)
+    def approve_review(project_id: str, job_id: str) -> ReviewApprovalResponse:
+        try:
+            result = orchestrator.approve_timeline_review(project_id=project_id, job_id=job_id)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return ReviewApprovalResponse(
+            timeline_id=result["timeline_id"],
+            project_id=result["project_id"],
+            review_status=result["status"],
+            approved_at=result["approved_at"],
+            updated_at=result["updated_at"],
+        )
+
+    @app.post("/api/projects/{project_id}/review-approvals/{job_id}/reopen", status_code=status.HTTP_202_ACCEPTED)
+    def reopen_review(project_id: str, job_id: str) -> ReviewApprovalResponse:
+        try:
+            result = orchestrator.reopen_timeline_review(project_id=project_id, job_id=job_id)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return ReviewApprovalResponse(
+            timeline_id=result["timeline_id"],
+            project_id=result["project_id"],
+            review_status=result["status"],
+            approved_at=result["approved_at"],
+            updated_at=result["updated_at"],
+        )
+
+    @app.post("/api/projects/{project_id}/jobs/subtitle-render", status_code=status.HTTP_202_ACCEPTED)
+    def start_subtitle_render(project_id: str, payload: OutputJobRequest) -> StartJobResponse:
+        try:
+            result = orchestrator.start_subtitle_render(
+                project_id=project_id,
+                timeline_job_id=payload.timeline_job_id,
+            )
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return StartJobResponse(**result)
+
+    @app.get("/api/projects/{project_id}/subtitles/{job_id}")
+    def get_subtitle_result(project_id: str, job_id: str) -> SubtitleJobResponse:
+        try:
+            result = orchestrator.get_subtitle_result(project_id=project_id, job_id=job_id)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return SubtitleJobResponse(
+            job_id=result["job_id"],
+            status=result["status"],
+            subtitle=SubtitleArtifactResponse(**result["subtitle"]),
         )
 
     @app.post("/api/projects/{project_id}/jobs/preview-render", status_code=status.HTTP_202_ACCEPTED)

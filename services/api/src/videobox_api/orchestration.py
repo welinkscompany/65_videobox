@@ -163,6 +163,18 @@ class ApiOrchestrator:
     def get_review_snapshot(self, *, project_id: str, job_id: str) -> dict[str, Any]:
         return self.pipeline.get_review_snapshot(project_id=project_id, job_id=job_id)
 
+    def approve_timeline_review(self, *, project_id: str, job_id: str) -> dict[str, Any]:
+        return self.pipeline.approve_timeline_review(project_id=project_id, timeline_job_id=job_id)
+
+    def reopen_timeline_review(self, *, project_id: str, job_id: str) -> dict[str, Any]:
+        return self.pipeline.reopen_timeline_review(project_id=project_id, timeline_job_id=job_id)
+
+    def start_subtitle_render(self, *, project_id: str, timeline_job_id: str) -> dict[str, Any]:
+        return self.pipeline.start_subtitle_render(project_id=project_id, timeline_job_id=timeline_job_id)
+
+    def get_subtitle_result(self, *, project_id: str, job_id: str) -> dict[str, Any]:
+        return self.pipeline.get_subtitle_result(project_id=project_id, job_id=job_id)
+
     def start_preview_render(self, *, project_id: str, timeline_job_id: str) -> dict[str, Any]:
         return self.pipeline.start_preview_render(project_id=project_id, timeline_job_id=timeline_job_id)
 

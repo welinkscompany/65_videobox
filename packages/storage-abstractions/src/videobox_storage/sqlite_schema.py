@@ -99,10 +99,31 @@ PROJECT_SCHEMA_STATEMENTS = (
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS review_approvals (
+        timeline_id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        approved_at TEXT,
+        updated_at TEXT NOT NULL
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS preview_renders (
         preview_id TEXT PRIMARY KEY,
         project_id TEXT NOT NULL,
         timeline_id TEXT NOT NULL,
+        file_uri TEXT NOT NULL,
+        status TEXT NOT NULL,
+        summary_json TEXT,
+        created_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS subtitle_renders (
+        subtitle_id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        timeline_id TEXT NOT NULL,
+        format TEXT NOT NULL,
         file_uri TEXT NOT NULL,
         status TEXT NOT NULL,
         summary_json TEXT,

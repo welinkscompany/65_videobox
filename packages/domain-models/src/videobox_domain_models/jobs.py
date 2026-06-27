@@ -17,6 +17,7 @@ class JobType(StrEnum):
     BROLL_RECOMMENDATION = "broll_recommendation"
     MUSIC_RECOMMENDATION = "music_recommendation"
     TIMELINE_BUILD = "timeline_build"
+    SUBTITLE_RENDER = "subtitle_render"
     PREVIEW_RENDER = "preview_render"
     CAPCUT_EXPORT = "capcut_export"
 

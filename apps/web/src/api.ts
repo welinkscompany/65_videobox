@@ -57,6 +57,7 @@ export type TimelinePayload = {
   project_id: string;
   version: string;
   output_mode: string;
+  review_status: string;
   created_at?: string | null;
   tracks: TimelineTrack[];
   review_flags: ReviewFlag[];
@@ -83,6 +84,7 @@ export type SegmentRecord = {
 export type ReviewSnapshot = {
   project_id: string;
   timeline_id: string;
+  review_status: string;
   segments: SegmentRecord[];
   applied_recommendations: RecommendationItem[];
   pending_recommendations: RecommendationItem[];
@@ -103,6 +105,7 @@ export type PreviewArtifact = {
   project_id: string;
   timeline_id: string;
   file_uri: string;
+  player_uri?: string | null;
   status: string;
   artifact_kind: string;
   notes: string[];
@@ -121,6 +124,7 @@ export type ExportArtifact = {
   timeline_id: string;
   export_type: string;
   file_uri: string;
+  subtitle_file_uri?: string | null;
   status: string;
   adapter?: string | null;
   notes: string[];
@@ -131,6 +135,31 @@ export type ExportJob = {
   job_id: string;
   status: string;
   export: ExportArtifact;
+};
+
+export type SubtitleArtifact = {
+  subtitle_id: string;
+  project_id: string;
+  timeline_id: string;
+  format: string;
+  file_uri: string;
+  status: string;
+  notes: string[];
+  created_at?: string | null;
+};
+
+export type SubtitleJob = {
+  job_id: string;
+  status: string;
+  subtitle: SubtitleArtifact;
+};
+
+export type ReviewApproval = {
+  timeline_id: string;
+  project_id: string;
+  review_status: string;
+  approved_at: string | null;
+  updated_at: string;
 };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -159,6 +188,22 @@ export const api = {
       },
       body: JSON.stringify(payload),
     }),
+  approveTimeline: (projectId: string, jobId: string) =>
+    request<ReviewApproval>(`/api/projects/${projectId}/review-approvals/${jobId}/approve`, {
+      method: "POST",
+    }),
+  reopenTimeline: (projectId: string, jobId: string) =>
+    request<ReviewApproval>(`/api/projects/${projectId}/review-approvals/${jobId}/reopen`, {
+      method: "POST",
+    }),
+  renderSubtitle: (projectId: string, payload: OutputJobRequest) =>
+    request<{ job_id: string; status: string }>(`/api/projects/${projectId}/jobs/subtitle-render`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    }),
   renderPreview: (projectId: string, payload: OutputJobRequest) =>
     request<{ job_id: string; status: string }>(`/api/projects/${projectId}/jobs/preview-render`, {
       method: "POST",
@@ -179,6 +224,8 @@ export const api = {
     request<TimelineJob>(`/api/projects/${projectId}/timelines/${jobId}`),
   getReviewSnapshot: (projectId: string, jobId: string) =>
     request<ReviewSnapshot>(`/api/projects/${projectId}/review-snapshots/${jobId}`),
+  getSubtitle: (projectId: string, jobId: string) =>
+    request<SubtitleJob>(`/api/projects/${projectId}/subtitles/${jobId}`),
   getPreview: (projectId: string, jobId: string) =>
     request<PreviewJob>(`/api/projects/${projectId}/previews/${jobId}`),
   getExport: (projectId: string, jobId: string) =>

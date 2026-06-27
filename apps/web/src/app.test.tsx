@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import { App } from "./App";
 
@@ -92,6 +92,16 @@ const jobsResponse = {
       started_at: "2026-06-28T00:00:12Z",
       finished_at: "2026-06-28T00:00:13Z",
     },
+    {
+      job_id: "subtitle_render_job_008",
+      job_type: "subtitle_render",
+      status: "succeeded",
+      input_ref: "timeline_build_job_005",
+      output_ref: "subtitle_001",
+      error_message: null,
+      started_at: "2026-06-28T00:00:11Z",
+      finished_at: "2026-06-28T00:00:12Z",
+    },
   ],
 };
 
@@ -175,6 +185,7 @@ const timelineResponse = {
 const reviewSnapshotResponse = {
   project_id: "project_001",
   timeline_id: "timeline_001",
+  review_status: "approved",
   segments: [
     {
       segment_id: "seg_001",
@@ -206,10 +217,10 @@ const previewResponse = {
   preview: {
     preview_id: "preview_001",
     timeline_id: "timeline_001",
-    file_uri: "local://projects/project_001/previews/preview_001.json",
-    artifact_kind: "mock_preview_bundle",
+    file_uri: "local://projects/project_001/previews/preview_001.html",
+    artifact_kind: "playable_html_preview",
     created_at: "2026-06-28T00:00:11Z",
-    notes: ["Preview render is a structured local artifact in this phase."],
+    notes: ["Playable local HTML preview generated for operator review."],
   },
 };
 
@@ -221,8 +232,22 @@ const exportResponse = {
     timeline_id: "timeline_001",
     export_type: "capcut",
     file_uri: "local://projects/project_001/exports/capcut/export_001/capcut_payload.json",
+    subtitle_file_uri: "local://projects/project_001/subtitles/subtitle_001.srt",
     created_at: "2026-06-28T00:00:13Z",
     notes: ["Mock CapCut payload written for local post-editing handoff."],
+  },
+};
+
+const subtitleResponse = {
+  job_id: "subtitle_render_job_008",
+  status: "succeeded",
+  subtitle: {
+    subtitle_id: "subtitle_001",
+    timeline_id: "timeline_001",
+    format: "srt",
+    file_uri: "local://projects/project_001/subtitles/subtitle_001.srt",
+    created_at: "2026-06-28T00:00:12Z",
+    notes: ["Subtitle file generated from approved review timeline."],
   },
 };
 
@@ -278,14 +303,58 @@ describe("App", () => {
           ),
         );
       }
+      if (
+        url.endsWith("/api/projects/project_001/jobs/subtitle-render") &&
+        init?.method === "POST"
+      ) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              job_id: "subtitle_render_job_008",
+              status: "succeeded",
+            }),
+          ),
+        );
+      }
       if (url.endsWith("/api/projects/project_001/timelines/timeline_build_job_005")) {
         return Promise.resolve(new Response(JSON.stringify(timelineResponse)));
       }
       if (url.endsWith("/api/projects/project_001/review-snapshots/timeline_build_job_005")) {
         return Promise.resolve(new Response(JSON.stringify(reviewSnapshotResponse)));
       }
+      if (
+        url.endsWith("/api/projects/project_001/review-approvals/timeline_build_job_005/approve") &&
+        init?.method === "POST"
+      ) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              timeline_id: "timeline_001",
+              review_status: "approved",
+              approved_at: "2026-06-28T00:00:10Z",
+            }),
+          ),
+        );
+      }
+      if (
+        url.endsWith("/api/projects/project_001/review-approvals/timeline_build_job_005/reopen") &&
+        init?.method === "POST"
+      ) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              timeline_id: "timeline_001",
+              review_status: "draft",
+              approved_at: null,
+            }),
+          ),
+        );
+      }
       if (url.endsWith("/api/projects/project_001/previews/preview_render_job_006")) {
         return Promise.resolve(new Response(JSON.stringify(previewResponse)));
+      }
+      if (url.endsWith("/api/projects/project_001/subtitles/subtitle_render_job_008")) {
+        return Promise.resolve(new Response(JSON.stringify(subtitleResponse)));
       }
       if (url.endsWith("/api/projects/project_001/exports/capcut_export_job_007")) {
         return Promise.resolve(new Response(JSON.stringify(exportResponse)));
@@ -324,10 +393,13 @@ describe("App", () => {
       );
     });
 
+    expect(await screen.findByRole("button", { name: /reopen review/i })).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: /generate subtitle file/i }));
     fireEvent.click(await screen.findByRole("button", { name: /render preview artifact/i }));
     fireEvent.click(await screen.findByRole("button", { name: /export capcut payload/i }));
 
-    expect(await screen.findByText(/mock_preview_bundle/i)).toBeInTheDocument();
+    expect(await screen.findByText(/playable_html_preview/i)).toBeInTheDocument();
+    expect(await screen.findAllByText(/subtitle_001\.srt/i)).toHaveLength(2);
     expect(await screen.findByText(/mock capcut payload written/i)).toBeInTheDocument();
 
     await waitFor(() => {
@@ -365,6 +437,7 @@ describe("App", () => {
     };
     const blockedReviewSnapshotResponse = {
       ...reviewSnapshotResponse,
+      review_status: "blocked",
       segments: reviewSnapshotResponse.segments.map((segment) =>
         segment.segment_id === "seg_002"
           ? {
@@ -410,10 +483,141 @@ describe("App", () => {
     render(<App />);
 
     expect(
+      await screen.findByRole("button", { name: /approve timeline/i }),
+    ).toBeDisabled();
+    expect(
       await screen.findByRole("button", { name: /render preview artifact/i }),
     ).toBeDisabled();
     expect(
       await screen.findByRole("button", { name: /export capcut payload/i }),
     ).toBeDisabled();
+  });
+
+  it("keeps output actions disabled until operator approval even when blockers are clear", async () => {
+    const cleanTimelineResponse = {
+      ...timelineResponse,
+      timeline: {
+        ...timelineResponse.timeline,
+        review_flags: [],
+        pending_recommendations: [],
+      },
+    };
+    const draftReviewSnapshotResponse = {
+      ...reviewSnapshotResponse,
+      review_status: "draft",
+      review_flags: [],
+      pending_recommendations: [],
+    };
+    const draftJobsResponse = {
+      jobs: jobsResponse.jobs.filter(
+        (job) =>
+          job.job_type !== "preview_render" &&
+          job.job_type !== "capcut_export" &&
+          job.job_type !== "subtitle_render",
+      ),
+    };
+
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/api/projects")) {
+        return Promise.resolve(new Response(JSON.stringify(projectsResponse)));
+      }
+      if (url.endsWith("/api/projects/project_001")) {
+        return Promise.resolve(new Response(JSON.stringify(projectResponse)));
+      }
+      if (url.endsWith("/api/projects/project_001/jobs")) {
+        return Promise.resolve(new Response(JSON.stringify(draftJobsResponse)));
+      }
+      if (url.endsWith("/api/projects/project_001/timelines/timeline_build_job_005")) {
+        return Promise.resolve(new Response(JSON.stringify(cleanTimelineResponse)));
+      }
+      if (url.endsWith("/api/projects/project_001/review-snapshots/timeline_build_job_005")) {
+        return Promise.resolve(new Response(JSON.stringify(draftReviewSnapshotResponse)));
+      }
+      return Promise.reject(new Error(`Unhandled fetch: ${url}`));
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /approve timeline/i })).toBeEnabled();
+    });
+    expect(
+      await screen.findByRole("button", { name: /generate subtitle file/i }),
+    ).toBeDisabled();
+    expect(
+      await screen.findByRole("button", { name: /render preview artifact/i }),
+    ).toBeDisabled();
+    expect(
+      await screen.findByRole("button", { name: /export capcut payload/i }),
+    ).toBeDisabled();
+  });
+
+  it("hides stale output stage success from older timelines", async () => {
+    const staleOutputJobsResponse = {
+      jobs: [
+        {
+          job_id: "timeline_build_job_004",
+          job_type: "timeline_build",
+          status: "succeeded",
+          input_ref: "segment_analysis_job_002",
+          output_ref: "timeline_000",
+          error_message: null,
+          started_at: "2026-06-28T00:00:07Z",
+          finished_at: "2026-06-28T00:00:08Z",
+        },
+        ...jobsResponse.jobs.map((job) =>
+          job.job_type === "subtitle_render" ||
+          job.job_type === "preview_render" ||
+          job.job_type === "capcut_export"
+            ? {
+                ...job,
+                input_ref: "timeline_build_job_004",
+              }
+            : job,
+        ),
+      ],
+    };
+
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/api/projects")) {
+        return Promise.resolve(new Response(JSON.stringify(projectsResponse)));
+      }
+      if (url.endsWith("/api/projects/project_001")) {
+        return Promise.resolve(new Response(JSON.stringify(projectResponse)));
+      }
+      if (url.endsWith("/api/projects/project_001/jobs")) {
+        return Promise.resolve(new Response(JSON.stringify(staleOutputJobsResponse)));
+      }
+      if (url.endsWith("/api/projects/project_001/timelines/timeline_build_job_005")) {
+        return Promise.resolve(new Response(JSON.stringify(timelineResponse)));
+      }
+      if (url.endsWith("/api/projects/project_001/review-snapshots/timeline_build_job_005")) {
+        return Promise.resolve(new Response(JSON.stringify(reviewSnapshotResponse)));
+      }
+      return Promise.reject(new Error(`Unhandled fetch: ${url}`));
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    const subtitleCard = (await screen.findByText("Subtitle render")).closest("article");
+    const previewCard = (await screen.findByText("Preview render")).closest("article");
+    const exportCard = (await screen.findByText("CapCut export")).closest("article");
+
+    expect(subtitleCard).not.toBeNull();
+    expect(previewCard).not.toBeNull();
+    expect(exportCard).not.toBeNull();
+
+    expect(within(subtitleCard!).getByText("pending")).toBeInTheDocument();
+    expect(within(subtitleCard!).getByText("not-started")).toBeInTheDocument();
+    expect(within(previewCard!).getByText("pending")).toBeInTheDocument();
+    expect(within(previewCard!).getByText("not-started")).toBeInTheDocument();
+    expect(within(exportCard!).getByText("pending")).toBeInTheDocument();
+    expect(within(exportCard!).getByText("not-started")).toBeInTheDocument();
   });
 });

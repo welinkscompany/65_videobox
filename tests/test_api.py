@@ -449,6 +449,10 @@ def test_preview_and_capcut_export_flow_persist_outputs_and_statuses(
             "recommendation_job_ids": [broll_job_id, music_job_id],
         },
     ).json()["job_id"]
+    approve_response = client.post(
+        f"/api/projects/{project_id}/review-approvals/{timeline_job_id}/approve"
+    )
+    assert approve_response.status_code == 202
 
     preview_response = client.post(
         f"/api/projects/{project_id}/jobs/preview-render",
@@ -475,7 +479,8 @@ def test_preview_and_capcut_export_flow_persist_outputs_and_statuses(
     export_payload = export_result.json()
     assert preview_payload["status"] == "succeeded"
     assert preview_payload["preview"]["timeline_id"] == "timeline_001"
-    assert preview_payload["preview"]["artifact_kind"] == "mock_preview_bundle"
+    assert preview_payload["preview"]["artifact_kind"] == "playable_html_preview"
+    assert preview_payload["preview"]["player_uri"].endswith(".html")
     assert export_payload["status"] == "succeeded"
     assert export_payload["export"]["timeline_id"] == "timeline_001"
     assert export_payload["export"]["export_type"] == "capcut"
@@ -568,3 +573,227 @@ def test_preview_and_capcut_export_require_review_clearance(tmp_path: Path) -> N
     project_root = tmp_path / "projects" / project_id
     assert not list((project_root / "previews").glob("preview_*.json"))
     assert not list((project_root / "exports" / "capcut").glob("export_*"))
+
+
+def test_preview_export_and_subtitles_require_explicit_approval_even_without_blockers(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    def clean_transcribe(self, request):  # noqa: ANN001
+        return STTResult(
+            text="Office overview. Team meeting overview.",
+            segments=[
+                STTSegment(start_sec=0.0, end_sec=1.0, text="Office overview.", confidence=0.99),
+                STTSegment(
+                    start_sec=1.0,
+                    end_sec=2.2,
+                    text="Team meeting overview.",
+                    confidence=0.98,
+                ),
+            ],
+            provider_name="mock_stt",
+        )
+
+    monkeypatch.setattr(
+        "videobox_provider_interfaces.stt.MockSTTProvider.transcribe",
+        clean_transcribe,
+    )
+
+    source_audio = tmp_path / "source-narration.wav"
+    source_script = tmp_path / "source-script.txt"
+    broll_city = tmp_path / "city-office.mp4"
+    source_audio.write_bytes(b"fake wav data")
+    source_script.write_text("Office overview.\n\nTeam meeting overview.\n", encoding="utf-8")
+    broll_city.write_bytes(b"video bytes 1")
+
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "Approval Draft"}).json()["project_id"]
+
+    narration_asset_id = client.post(
+        f"/api/projects/{project_id}/assets/narration-audio",
+        json={"source_path": str(source_audio)},
+    ).json()["asset_id"]
+    script_asset_id = client.post(
+        f"/api/projects/{project_id}/assets/script-document",
+        json={"source_path": str(source_script)},
+    ).json()["asset_id"]
+    client.post(
+        f"/api/projects/{project_id}/assets/broll-video",
+        json={
+            "source_path": str(broll_city),
+            "title": "Office skyline",
+            "tags": ["office", "city", "overview"],
+        },
+    )
+
+    transcription_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/transcription",
+        json={"narration_asset_id": narration_asset_id},
+    ).json()["job_id"]
+    segment_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/segment-analysis",
+        json={
+            "transcription_job_id": transcription_job_id,
+            "script_asset_id": script_asset_id,
+        },
+    ).json()["job_id"]
+    broll_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/broll-recommendation",
+        json={"segment_analysis_job_id": segment_job_id},
+    ).json()["job_id"]
+    music_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/music-recommendation",
+        json={"segment_analysis_job_id": segment_job_id},
+    ).json()["job_id"]
+    timeline_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/build-timeline",
+        json={
+            "segment_analysis_job_id": segment_job_id,
+            "recommendation_job_ids": [broll_job_id, music_job_id],
+        },
+    ).json()["job_id"]
+
+    review_snapshot = client.get(f"/api/projects/{project_id}/review-snapshots/{timeline_job_id}")
+    assert review_snapshot.status_code == 200
+    assert review_snapshot.json()["pending_recommendations"] == []
+    assert review_snapshot.json()["review_flags"] == []
+
+    preview_response = client.post(
+        f"/api/projects/{project_id}/jobs/preview-render",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    export_response = client.post(
+        f"/api/projects/{project_id}/jobs/capcut-export",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    subtitle_response = client.post(
+        f"/api/projects/{project_id}/jobs/subtitle-render",
+        json={"timeline_job_id": timeline_job_id},
+    )
+
+    assert preview_response.status_code == 400
+    assert export_response.status_code == 400
+    assert subtitle_response.status_code == 400
+    assert "approval" in preview_response.json()["detail"].lower()
+
+
+def test_approved_timeline_can_generate_subtitles_preview_and_export(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    def clean_transcribe(self, request):  # noqa: ANN001
+        return STTResult(
+            text="Office overview. Team meeting overview.",
+            segments=[
+                STTSegment(start_sec=0.0, end_sec=1.0, text="Office overview.", confidence=0.99),
+                STTSegment(
+                    start_sec=1.0,
+                    end_sec=2.2,
+                    text="Team meeting overview.",
+                    confidence=0.98,
+                ),
+            ],
+            provider_name="mock_stt",
+        )
+
+    monkeypatch.setattr(
+        "videobox_provider_interfaces.stt.MockSTTProvider.transcribe",
+        clean_transcribe,
+    )
+
+    source_audio = tmp_path / "source-narration.wav"
+    source_script = tmp_path / "source-script.txt"
+    broll_city = tmp_path / "city-office.mp4"
+    source_audio.write_bytes(b"fake wav data")
+    source_script.write_text("Office overview.\n\nTeam meeting overview.\n", encoding="utf-8")
+    broll_city.write_bytes(b"video bytes 1")
+
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "Approved Output Draft"}).json()["project_id"]
+
+    narration_asset_id = client.post(
+        f"/api/projects/{project_id}/assets/narration-audio",
+        json={"source_path": str(source_audio)},
+    ).json()["asset_id"]
+    script_asset_id = client.post(
+        f"/api/projects/{project_id}/assets/script-document",
+        json={"source_path": str(source_script)},
+    ).json()["asset_id"]
+    client.post(
+        f"/api/projects/{project_id}/assets/broll-video",
+        json={
+            "source_path": str(broll_city),
+            "title": "Office skyline",
+            "tags": ["office", "city", "overview"],
+        },
+    )
+
+    transcription_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/transcription",
+        json={"narration_asset_id": narration_asset_id},
+    ).json()["job_id"]
+    segment_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/segment-analysis",
+        json={
+            "transcription_job_id": transcription_job_id,
+            "script_asset_id": script_asset_id,
+        },
+    ).json()["job_id"]
+    broll_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/broll-recommendation",
+        json={"segment_analysis_job_id": segment_job_id},
+    ).json()["job_id"]
+    music_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/music-recommendation",
+        json={"segment_analysis_job_id": segment_job_id},
+    ).json()["job_id"]
+    timeline_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/build-timeline",
+        json={
+            "segment_analysis_job_id": segment_job_id,
+            "recommendation_job_ids": [broll_job_id, music_job_id],
+        },
+    ).json()["job_id"]
+
+    approve_response = client.post(
+        f"/api/projects/{project_id}/review-approvals/{timeline_job_id}/approve"
+    )
+    subtitle_response = client.post(
+        f"/api/projects/{project_id}/jobs/subtitle-render",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    preview_response = client.post(
+        f"/api/projects/{project_id}/jobs/preview-render",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    export_response = client.post(
+        f"/api/projects/{project_id}/jobs/capcut-export",
+        json={"timeline_job_id": timeline_job_id},
+    )
+
+    assert approve_response.status_code == 202
+    assert subtitle_response.status_code == 202
+    assert preview_response.status_code == 202
+    assert export_response.status_code == 202
+
+    subtitle_job_id = subtitle_response.json()["job_id"]
+    preview_job_id = preview_response.json()["job_id"]
+    export_job_id = export_response.json()["job_id"]
+
+    review_snapshot = client.get(f"/api/projects/{project_id}/review-snapshots/{timeline_job_id}")
+    subtitle_result = client.get(f"/api/projects/{project_id}/subtitles/{subtitle_job_id}")
+    preview_result = client.get(f"/api/projects/{project_id}/previews/{preview_job_id}")
+    export_result = client.get(f"/api/projects/{project_id}/exports/{export_job_id}")
+
+    assert review_snapshot.status_code == 200
+    assert review_snapshot.json()["review_status"] == "approved"
+    assert subtitle_result.status_code == 200
+    assert subtitle_result.json()["subtitle"]["format"] == "srt"
+    assert subtitle_result.json()["subtitle"]["file_uri"].endswith(".srt")
+    assert preview_result.status_code == 200
+    assert preview_result.json()["preview"]["player_uri"].endswith(".html")
+    assert preview_result.json()["preview"]["artifact_kind"] == "playable_html_preview"
+    assert export_result.status_code == 200
+    assert export_result.json()["export"]["subtitle_file_uri"].endswith(".srt")

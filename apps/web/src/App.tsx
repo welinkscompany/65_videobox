@@ -7,6 +7,7 @@ import {
   type PreviewJob,
   type Project,
   type ReviewSnapshot,
+  type SubtitleJob,
   type TimelineJob,
 } from "./api";
 
@@ -53,11 +54,15 @@ export function App() {
   const [jobs, setJobs] = useState<JobRecord[]>([]);
   const [timelineJob, setTimelineJob] = useState<TimelineJob | null>(null);
   const [reviewSnapshot, setReviewSnapshot] = useState<ReviewSnapshot | null>(null);
+  const [subtitleJob, setSubtitleJob] = useState<SubtitleJob | null>(null);
   const [previewJob, setPreviewJob] = useState<PreviewJob | null>(null);
   const [exportJob, setExportJob] = useState<ExportJob | null>(null);
   const [loadState, setLoadState] = useState<LoadState>("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isRebuildingTimeline, setIsRebuildingTimeline] = useState(false);
+  const [isApprovingTimeline, setIsApprovingTimeline] = useState(false);
+  const [isReopeningTimeline, setIsReopeningTimeline] = useState(false);
+  const [isRenderingSubtitle, setIsRenderingSubtitle] = useState(false);
   const [isRenderingPreview, setIsRenderingPreview] = useState(false);
   const [isExportingCapcut, setIsExportingCapcut] = useState(false);
 
@@ -96,6 +101,7 @@ export function App() {
       setJobs([]);
       setTimelineJob(null);
       setReviewSnapshot(null);
+      setSubtitleJob(null);
       setPreviewJob(null);
       setExportJob(null);
       return;
@@ -120,8 +126,14 @@ export function App() {
         const latestPreviewJob = latestTimelineJob
           ? findLatestSucceededJob(jobItems, "preview_render", latestTimelineJob.job_id)
           : null;
+        const latestSubtitleJob = latestTimelineJob
+          ? findLatestSucceededJob(jobItems, "subtitle_render", latestTimelineJob.job_id)
+          : null;
         const latestExportJob = latestTimelineJob
           ? findLatestSucceededJob(jobItems, "capcut_export", latestTimelineJob.job_id)
+          : null;
+        const subtitle = latestSubtitleJob
+          ? await api.getSubtitle(projectId, latestSubtitleJob.job_id)
           : null;
         const preview = latestPreviewJob
           ? await api.getPreview(projectId, latestPreviewJob.job_id)
@@ -136,6 +148,7 @@ export function App() {
         setJobs(jobItems);
         setTimelineJob(timeline);
         setReviewSnapshot(review);
+        setSubtitleJob(subtitle);
         setPreviewJob(preview);
         setExportJob(capcutExport);
         setLoadState("ready");
@@ -154,6 +167,11 @@ export function App() {
     };
   }, [selectedProjectId]);
 
+  const latestTimelineBuildJob = useMemo(
+    () => findLatestTimelineJob(jobs),
+    [jobs],
+  );
+
   const pipelineStages = useMemo(
     () => [
       { label: "Transcription", jobType: "transcription" },
@@ -161,6 +179,7 @@ export function App() {
       { label: "B-roll recommendation", jobType: "broll_recommendation" },
       { label: "Music recommendation", jobType: "music_recommendation" },
       { label: "Timeline build", jobType: "timeline_build" },
+      { label: "Subtitle render", jobType: "subtitle_render" },
       { label: "Preview render", jobType: "preview_render" },
       { label: "CapCut export", jobType: "capcut_export" },
     ],
@@ -169,7 +188,19 @@ export function App() {
 
   const stageStatus = useMemo(() => {
     return pipelineStages.map((stage) => {
-      const matchingJobs = jobs.filter((job) => job.job_type === stage.jobType);
+      const matchingJobs = jobs.filter((job) => {
+        if (job.job_type !== stage.jobType) {
+          return false;
+        }
+        if (
+          stage.jobType === "subtitle_render" ||
+          stage.jobType === "preview_render" ||
+          stage.jobType === "capcut_export"
+        ) {
+          return job.input_ref === latestTimelineBuildJob?.job_id;
+        }
+        return true;
+      });
       const stageJob =
         matchingJobs.length > 0 ? matchingJobs[matchingJobs.length - 1] : undefined;
       return {
@@ -200,10 +231,7 @@ export function App() {
     };
   }, [jobs]);
 
-  const latestTimelineBuildJob = useMemo(
-    () => findLatestTimelineJob(jobs),
-    [jobs],
-  );
+  const reviewStatus = reviewSnapshot?.review_status ?? timelineJob?.timeline.review_status ?? "blocked";
   const hasReviewBlockers = useMemo(() => {
     if (!timelineJob || !reviewSnapshot) {
       return true;
@@ -213,6 +241,10 @@ export function App() {
       reviewSnapshot.pending_recommendations.length > 0
     );
   }, [reviewSnapshot, timelineJob]);
+  const canApproveTimeline = !!latestTimelineBuildJob && !hasReviewBlockers && reviewStatus !== "approved";
+  const canReopenTimeline = !!latestTimelineBuildJob && reviewStatus === "approved";
+  const canGenerateOutputs =
+    !!latestTimelineBuildJob && !hasReviewBlockers && reviewStatus === "approved";
 
   async function handleRebuildTimeline() {
     if (!selectedProjectId || !rebuildInputs) {
@@ -233,6 +265,7 @@ export function App() {
       setJobs(jobItems);
       setTimelineJob(timeline);
       setReviewSnapshot(review);
+      setSubtitleJob(null);
       setPreviewJob(null);
       setExportJob(null);
       setSelectedSection("timeline");
@@ -244,7 +277,7 @@ export function App() {
   }
 
   async function handleRenderPreview() {
-    if (!selectedProjectId || !latestTimelineBuildJob || hasReviewBlockers) {
+    if (!selectedProjectId || !latestTimelineBuildJob || !canGenerateOutputs) {
       return;
     }
     setIsRenderingPreview(true);
@@ -267,7 +300,7 @@ export function App() {
   }
 
   async function handleExportCapcut() {
-    if (!selectedProjectId || !latestTimelineBuildJob || hasReviewBlockers) {
+    if (!selectedProjectId || !latestTimelineBuildJob || !canGenerateOutputs) {
       return;
     }
     setIsExportingCapcut(true);
@@ -286,6 +319,76 @@ export function App() {
       setErrorMessage(error instanceof Error ? error.message : "Unknown error");
     } finally {
       setIsExportingCapcut(false);
+    }
+  }
+
+  async function handleApproveTimeline() {
+    if (!selectedProjectId || !latestTimelineBuildJob || !canApproveTimeline) {
+      return;
+    }
+    setIsApprovingTimeline(true);
+    setErrorMessage(null);
+    try {
+      await api.approveTimeline(selectedProjectId, latestTimelineBuildJob.job_id);
+      const [timeline, review] = await Promise.all([
+        api.getTimeline(selectedProjectId, latestTimelineBuildJob.job_id),
+        api.getReviewSnapshot(selectedProjectId, latestTimelineBuildJob.job_id),
+      ]);
+      setTimelineJob(timeline);
+      setReviewSnapshot(review);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Unknown error");
+    } finally {
+      setIsApprovingTimeline(false);
+    }
+  }
+
+  async function handleReopenTimeline() {
+    if (!selectedProjectId || !latestTimelineBuildJob || !canReopenTimeline) {
+      return;
+    }
+    setIsReopeningTimeline(true);
+    setErrorMessage(null);
+    try {
+      await api.reopenTimeline(selectedProjectId, latestTimelineBuildJob.job_id);
+      const [timeline, review, jobItems] = await Promise.all([
+        api.getTimeline(selectedProjectId, latestTimelineBuildJob.job_id),
+        api.getReviewSnapshot(selectedProjectId, latestTimelineBuildJob.job_id),
+        api.listJobs(selectedProjectId),
+      ]);
+      setTimelineJob(timeline);
+      setReviewSnapshot(review);
+      setJobs(jobItems);
+      setSubtitleJob(null);
+      setPreviewJob(null);
+      setExportJob(null);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Unknown error");
+    } finally {
+      setIsReopeningTimeline(false);
+    }
+  }
+
+  async function handleRenderSubtitle() {
+    if (!selectedProjectId || !latestTimelineBuildJob || !canGenerateOutputs) {
+      return;
+    }
+    setIsRenderingSubtitle(true);
+    setErrorMessage(null);
+    try {
+      const subtitleResult = await api.renderSubtitle(selectedProjectId, {
+        timeline_job_id: latestTimelineBuildJob.job_id,
+      });
+      const [jobItems, subtitle] = await Promise.all([
+        api.listJobs(selectedProjectId),
+        api.getSubtitle(selectedProjectId, subtitleResult.job_id),
+      ]);
+      setJobs(jobItems);
+      setSubtitleJob(subtitle);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Unknown error");
+    } finally {
+      setIsRenderingSubtitle(false);
     }
   }
 
@@ -364,7 +467,15 @@ export function App() {
             </button>
             <button
               className="action-button"
-              disabled={!latestTimelineBuildJob || hasReviewBlockers || isRenderingPreview}
+              disabled={!canGenerateOutputs || isRenderingSubtitle}
+              onClick={() => void handleRenderSubtitle()}
+              type="button"
+            >
+              {isRenderingSubtitle ? "Generating subtitles..." : "Generate subtitle file"}
+            </button>
+            <button
+              className="action-button"
+              disabled={!canGenerateOutputs || isRenderingPreview}
               onClick={() => void handleRenderPreview()}
               type="button"
             >
@@ -372,11 +483,27 @@ export function App() {
             </button>
             <button
               className="action-button"
-              disabled={!latestTimelineBuildJob || hasReviewBlockers || isExportingCapcut}
+              disabled={!canGenerateOutputs || isExportingCapcut}
               onClick={() => void handleExportCapcut()}
               type="button"
             >
               {isExportingCapcut ? "Exporting CapCut..." : "Export CapCut payload"}
+            </button>
+            <button
+              className="action-button"
+              disabled={!canApproveTimeline || isApprovingTimeline}
+              onClick={() => void handleApproveTimeline()}
+              type="button"
+            >
+              {isApprovingTimeline ? "Approving..." : "Approve timeline"}
+            </button>
+            <button
+              className="action-button"
+              disabled={!canReopenTimeline || isReopeningTimeline}
+              onClick={() => void handleReopenTimeline()}
+              type="button"
+            >
+              {isReopeningTimeline ? "Reopening..." : "Reopen review"}
             </button>
           </div>
         </section>
@@ -429,6 +556,10 @@ export function App() {
                     <dt>Review flags</dt>
                     <dd>{timelineJob.timeline.review_flags.length}</dd>
                   </div>
+                  <div>
+                    <dt>Review status</dt>
+                    <dd>{reviewStatus}</dd>
+                  </div>
                 </dl>
               ) : (
                 <p className="empty-state">No succeeded timeline build job yet.</p>
@@ -460,6 +591,10 @@ export function App() {
                     <dt>Flags</dt>
                     <dd>{reviewSnapshot.review_flags.length}</dd>
                   </div>
+                  <div>
+                    <dt>Status</dt>
+                    <dd>{reviewSnapshot.review_status}</dd>
+                  </div>
                 </dl>
               ) : (
                 <p className="empty-state">Build a timeline to unlock review snapshot data.</p>
@@ -474,6 +609,14 @@ export function App() {
                 </div>
               </div>
               <dl className="summary-list">
+                <div>
+                  <dt>Subtitle job</dt>
+                  <dd>{subtitleJob?.job_id ?? "not-started"}</dd>
+                </div>
+                <div>
+                  <dt>Subtitle file</dt>
+                  <dd>{subtitleJob?.subtitle.file_uri ?? "pending"}</dd>
+                </div>
                 <div>
                   <dt>Preview job</dt>
                   <dd>{previewJob?.job_id ?? "not-started"}</dd>
@@ -508,13 +651,20 @@ export function App() {
                 {previewJob ? (
                   <article className="artifact-card">
                     <h3>{previewJob.preview.artifact_kind}</h3>
-                    <p>{previewJob.preview.file_uri}</p>
+                    <p>{previewJob.preview.player_uri ?? previewJob.preview.file_uri}</p>
+                  </article>
+                ) : null}
+                {subtitleJob ? (
+                  <article className="artifact-card">
+                    <h3>{subtitleJob.subtitle.format}</h3>
+                    <p>{subtitleJob.subtitle.file_uri}</p>
                   </article>
                 ) : null}
                 {exportJob ? (
                   <article className="artifact-card">
                     <h3>{exportJob.export.export_type}</h3>
                     <p>{exportJob.export.file_uri}</p>
+                    <p>{exportJob.export.subtitle_file_uri ?? "No subtitle linked yet"}</p>
                     <p>{exportJob.export.notes[0]}</p>
                   </article>
                 ) : null}
