@@ -41,6 +41,26 @@ class ApiOrchestrator:
             storage_uri=asset["storage_uri"],
         )
 
+    def register_broll_asset(
+        self,
+        *,
+        project_id: str,
+        source_path: Path,
+        title: str | None,
+        tags: list[str],
+    ) -> RegisteredAsset:
+        asset = self.pipeline.register_broll_asset(
+            project_id=project_id,
+            source_path=source_path,
+            title=title,
+            tags=tags,
+        )
+        return RegisteredAsset(
+            asset_id=asset["asset_id"],
+            asset_type=asset["asset_type"],
+            storage_uri=asset["storage_uri"],
+        )
+
     def start_transcription(self, *, project_id: str, narration_asset_id: str) -> dict[str, Any]:
         result = self.pipeline.start_transcription(
             project_id=project_id,
@@ -92,4 +112,34 @@ class ApiOrchestrator:
             "job_id": result["job_id"],
             "status": result["status"],
             "segments": result["segments"],
+        }
+
+    def start_broll_recommendation(self, *, project_id: str, segment_analysis_job_id: str) -> dict[str, Any]:
+        return self.pipeline.start_broll_recommendation(
+            project_id=project_id,
+            segment_analysis_job_id=segment_analysis_job_id,
+        )
+
+    def get_broll_recommendation_job(self, *, project_id: str, job_id: str) -> dict[str, Any]:
+        result = self.pipeline.get_broll_recommendation_result(project_id=project_id, job_id=job_id)
+        return {
+            "job_id": result["job_id"],
+            "status": result["status"],
+            "recommendation_type": "broll",
+            "recommendations": result["recommendations"],
+        }
+
+    def start_music_recommendation(self, *, project_id: str, segment_analysis_job_id: str) -> dict[str, Any]:
+        return self.pipeline.start_music_recommendation(
+            project_id=project_id,
+            segment_analysis_job_id=segment_analysis_job_id,
+        )
+
+    def get_music_recommendation_job(self, *, project_id: str, job_id: str) -> dict[str, Any]:
+        result = self.pipeline.get_music_recommendation_result(project_id=project_id, job_id=job_id)
+        return {
+            "job_id": result["job_id"],
+            "status": result["status"],
+            "recommendation_type": "bgm",
+            "recommendations": result["recommendations"],
         }

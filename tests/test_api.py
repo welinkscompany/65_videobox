@@ -105,3 +105,98 @@ def test_ingest_and_analysis_flow_persists_files_and_records(tmp_path: Path) -> 
     assert segment_files
     persisted_segments = json.loads(segment_files[0].read_text(encoding="utf-8"))
     assert persisted_segments["script_asset_id"] == script_asset_id
+
+
+def test_recommendation_flow_persists_broll_and_music_results(tmp_path: Path) -> None:
+    source_audio = tmp_path / "source-narration.wav"
+    source_script = tmp_path / "source-script.txt"
+    broll_city = tmp_path / "city-office.mp4"
+    broll_team = tmp_path / "team-meeting.mp4"
+    source_audio.write_bytes(b"fake wav data")
+    source_script.write_text("Office overview.\n\nTeam meeting restart.\n", encoding="utf-8")
+    broll_city.write_bytes(b"video bytes 1")
+    broll_team.write_bytes(b"video bytes 2")
+
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "Recommendation Draft"}).json()["project_id"]
+
+    narration_asset_id = client.post(
+        f"/api/projects/{project_id}/assets/narration-audio",
+        json={"source_path": str(source_audio)},
+    ).json()["asset_id"]
+    script_asset_id = client.post(
+        f"/api/projects/{project_id}/assets/script-document",
+        json={"source_path": str(source_script)},
+    ).json()["asset_id"]
+    city_asset = client.post(
+        f"/api/projects/{project_id}/assets/broll-video",
+        json={
+            "source_path": str(broll_city),
+            "title": "Office skyline",
+            "tags": ["office", "city", "overview"],
+        },
+    )
+    team_asset = client.post(
+        f"/api/projects/{project_id}/assets/broll-video",
+        json={
+            "source_path": str(broll_team),
+            "title": "Team meeting",
+            "tags": ["team", "meeting", "collaboration"],
+        },
+    )
+    assert city_asset.status_code == 201
+    assert team_asset.status_code == 201
+
+    transcription_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/transcription",
+        json={"narration_asset_id": narration_asset_id},
+    ).json()["job_id"]
+    segment_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/segment-analysis",
+        json={
+            "transcription_job_id": transcription_job_id,
+            "script_asset_id": script_asset_id,
+        },
+    ).json()["job_id"]
+
+    broll_job = client.post(
+        f"/api/projects/{project_id}/jobs/broll-recommendation",
+        json={"segment_analysis_job_id": segment_job_id},
+    )
+    music_job = client.post(
+        f"/api/projects/{project_id}/jobs/music-recommendation",
+        json={"segment_analysis_job_id": segment_job_id},
+    )
+    assert broll_job.status_code == 202
+    assert music_job.status_code == 202
+
+    broll_result = client.get(
+        f"/api/projects/{project_id}/jobs/broll-recommendation/{broll_job.json()['job_id']}"
+    )
+    music_result = client.get(
+        f"/api/projects/{project_id}/jobs/music-recommendation/{music_job.json()['job_id']}"
+    )
+    assert broll_result.status_code == 200
+    assert music_result.status_code == 200
+
+    broll_payload = broll_result.json()
+    music_payload = music_result.json()
+    assert broll_payload["status"] == "succeeded"
+    assert music_payload["status"] == "succeeded"
+    assert len(broll_payload["recommendations"]) >= 2
+    assert len(music_payload["recommendations"]) >= 2
+    assert all("score" in item for item in broll_payload["recommendations"])
+    assert all("reason" in item for item in broll_payload["recommendations"])
+    assert all(item["auto_apply_allowed"] is True for item in broll_payload["recommendations"])
+    assert all(item["review_required"] is False for item in broll_payload["recommendations"])
+
+    project_root = tmp_path / "projects" / project_id
+    recommendation_files = list((project_root / "analysis" / "recommendations").glob("*.json"))
+    assert len(recommendation_files) >= 2
+    payloads = [
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in recommendation_files
+    ]
+    recommendation_types = {payload["recommendation_type"] for payload in payloads}
+    assert {"broll", "bgm"}.issubset(recommendation_types)

@@ -15,6 +15,11 @@ def get_recommendation_guardrail(recommendation_type: str) -> RecommendationGuar
             auto_apply_allowed=False,
             review_required=True,
         )
+    if recommendation_type in {"broll", "bgm", "overlay"}:
+        return RecommendationGuardrail(
+            auto_apply_allowed=True,
+            review_required=False,
+        )
     return RecommendationGuardrail(
         auto_apply_allowed=True,
         review_required=False,

@@ -14,6 +14,8 @@ class JobType(StrEnum):
     INGEST = "ingest"
     TRANSCRIPTION = "transcription"
     SEGMENT_ANALYSIS = "segment_analysis"
+    BROLL_RECOMMENDATION = "broll_recommendation"
+    MUSIC_RECOMMENDATION = "music_recommendation"
 
 
 class JobStatus(StrEnum):

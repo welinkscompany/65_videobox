@@ -3,8 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from videobox_core_engine.recommenders import KeywordBrollRecommender, RuleBasedMusicRecommender
 from videobox_domain_models.assets import AssetType
 from videobox_domain_models.jobs import JobStatus, JobType
+from videobox_domain_models.recommendations import RecommendationType
+from videobox_provider_interfaces.recommenders import RecommendationProvider, RecommendationRequest
 from videobox_provider_interfaces.stt import MockSTTProvider, STTProvider, STTRequest
 from videobox_storage.local_project_store import LocalProjectStore
 
@@ -15,9 +18,13 @@ class LocalPipelineRunner:
         store: LocalProjectStore,
         *,
         stt_provider: STTProvider | None = None,
+        broll_recommender: RecommendationProvider | None = None,
+        music_recommender: RecommendationProvider | None = None,
     ) -> None:
         self.store = store
         self.stt_provider = stt_provider or MockSTTProvider()
+        self.broll_recommender = broll_recommender or KeywordBrollRecommender()
+        self.music_recommender = music_recommender or RuleBasedMusicRecommender()
 
     def register_narration_asset(self, *, project_id: str, source_path: Path) -> dict[str, Any]:
         asset = self.store.register_asset(
@@ -25,12 +32,7 @@ class LocalPipelineRunner:
             asset_type=AssetType.NARRATION_AUDIO,
             source_path=source_path,
         )
-        return {
-            "asset_id": asset.asset_id,
-            "project_id": asset.project_id,
-            "asset_type": asset.asset_type.value,
-            "storage_uri": asset.storage_uri,
-        }
+        return self._asset_payload(asset)
 
     def register_script_asset(self, *, project_id: str, source_path: Path) -> dict[str, Any]:
         asset = self.store.register_asset(
@@ -38,12 +40,23 @@ class LocalPipelineRunner:
             asset_type=AssetType.SCRIPT_DOCUMENT,
             source_path=source_path,
         )
-        return {
-            "asset_id": asset.asset_id,
-            "project_id": asset.project_id,
-            "asset_type": asset.asset_type.value,
-            "storage_uri": asset.storage_uri,
-        }
+        return self._asset_payload(asset)
+
+    def register_broll_asset(
+        self,
+        *,
+        project_id: str,
+        source_path: Path,
+        title: str | None = None,
+        tags: list[str] | None = None,
+    ) -> dict[str, Any]:
+        asset = self.store.register_asset(
+            project_id=project_id,
+            asset_type=AssetType.BROLL_VIDEO,
+            source_path=source_path,
+            metadata={"title": title or source_path.stem, "tags": tags or []},
+        )
+        return self._asset_payload(asset)
 
     def start_transcription(self, *, project_id: str, narration_asset_id: str) -> dict[str, Any]:
         job = self.store.create_job(
@@ -138,6 +151,120 @@ class LocalPipelineRunner:
             "file_uri": analysis["file_uri"],
         }
 
+    def start_broll_recommendation(
+        self,
+        *,
+        project_id: str,
+        segment_analysis_job_id: str,
+    ) -> dict[str, Any]:
+        analysis = self._load_segment_analysis_from_job(
+            project_id=project_id,
+            segment_analysis_job_id=segment_analysis_job_id,
+        )
+        assets = self.store.list_assets(project_id=project_id, asset_type=AssetType.BROLL_VIDEO)
+        candidates = self.broll_recommender.recommend(
+            RecommendationRequest(
+                project_id=project_id,
+                recommendation_type=RecommendationType.BROLL,
+                segments=analysis["segments"],
+                assets=assets,
+            )
+        )
+        run = self.store.save_recommendation_run(
+            project_id=project_id,
+            recommendation_type=RecommendationType.BROLL,
+            source_job_id=segment_analysis_job_id,
+            recommendations=[self._candidate_payload(candidate) for candidate in candidates],
+        )
+        job = self.store.create_job(
+            project_id=project_id,
+            job_type=JobType.BROLL_RECOMMENDATION,
+            input_ref=segment_analysis_job_id,
+            status=JobStatus.RUNNING,
+        )
+        self.store.update_job(
+            project_id=project_id,
+            job_id=job["job_id"],
+            status=JobStatus.SUCCEEDED,
+            output_ref=run["recommendation_run_id"],
+        )
+        return {"job_id": job["job_id"], "status": JobStatus.SUCCEEDED.value}
+
+    def get_broll_recommendation_result(self, *, project_id: str, job_id: str) -> dict[str, Any]:
+        job = self.store.get_job(project_id=project_id, job_id=job_id)
+        run = self.store.get_recommendation_run(
+            project_id=project_id,
+            recommendation_run_id=job["output_ref"],
+            recommendation_type=RecommendationType.BROLL,
+        )
+        return {"job_id": job["job_id"], "status": job["status"], "recommendations": run["recommendations"]}
+
+    def start_music_recommendation(
+        self,
+        *,
+        project_id: str,
+        segment_analysis_job_id: str,
+    ) -> dict[str, Any]:
+        analysis = self._load_segment_analysis_from_job(
+            project_id=project_id,
+            segment_analysis_job_id=segment_analysis_job_id,
+        )
+        candidates = self.music_recommender.recommend(
+            RecommendationRequest(
+                project_id=project_id,
+                recommendation_type=RecommendationType.BGM,
+                segments=analysis["segments"],
+                assets=[],
+            )
+        )
+        run = self.store.save_recommendation_run(
+            project_id=project_id,
+            recommendation_type=RecommendationType.BGM,
+            source_job_id=segment_analysis_job_id,
+            recommendations=[self._candidate_payload(candidate) for candidate in candidates],
+        )
+        job = self.store.create_job(
+            project_id=project_id,
+            job_type=JobType.MUSIC_RECOMMENDATION,
+            input_ref=segment_analysis_job_id,
+            status=JobStatus.RUNNING,
+        )
+        self.store.update_job(
+            project_id=project_id,
+            job_id=job["job_id"],
+            status=JobStatus.SUCCEEDED,
+            output_ref=run["recommendation_run_id"],
+        )
+        return {"job_id": job["job_id"], "status": JobStatus.SUCCEEDED.value}
+
+    def get_music_recommendation_result(self, *, project_id: str, job_id: str) -> dict[str, Any]:
+        job = self.store.get_job(project_id=project_id, job_id=job_id)
+        run = self.store.get_recommendation_run(
+            project_id=project_id,
+            recommendation_run_id=job["output_ref"],
+            recommendation_type=RecommendationType.BGM,
+        )
+        return {"job_id": job["job_id"], "status": job["status"], "recommendations": run["recommendations"]}
+
+    def _asset_payload(self, asset: Any) -> dict[str, Any]:
+        return {
+            "asset_id": asset.asset_id,
+            "project_id": asset.project_id,
+            "asset_type": asset.asset_type.value,
+            "storage_uri": asset.storage_uri,
+        }
+
+    def _candidate_payload(self, candidate: Any) -> dict[str, Any]:
+        return {
+            "target_segment_id": candidate.target_segment_id,
+            "selected_asset_id": candidate.selected_asset_id,
+            "score": candidate.score,
+            "reason": candidate.reason,
+            "auto_apply_allowed": candidate.auto_apply_allowed,
+            "review_required": candidate.review_required,
+            "payload": candidate.payload,
+        }
+
     def _load_script_text(self, *, project_id: str, script_asset_id: str | None) -> str | None:
         if script_asset_id is None:
             return None
@@ -151,10 +278,7 @@ class LocalPipelineRunner:
         *,
         script_text: str | None,
     ) -> list[dict[str, Any]]:
-        script_lines = []
-        if script_text:
-            script_lines = [line.strip() for line in script_text.splitlines() if line.strip()]
-
+        script_lines = [line.strip() for line in script_text.splitlines() if line.strip()] if script_text else []
         analyzed_segments: list[dict[str, Any]] = []
         for index, segment in enumerate(transcript_segments):
             transcript_text = str(segment["text"]).strip()
@@ -176,3 +300,15 @@ class LocalPipelineRunner:
                 }
             )
         return analyzed_segments
+
+    def _load_segment_analysis_from_job(
+        self,
+        *,
+        project_id: str,
+        segment_analysis_job_id: str,
+    ) -> dict[str, Any]:
+        job = self.store.get_job(project_id=project_id, job_id=segment_analysis_job_id)
+        return self.store.get_segment_analysis(
+            project_id=project_id,
+            segment_analysis_id=job["output_ref"],
+        )

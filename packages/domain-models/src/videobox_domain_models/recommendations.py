@@ -23,10 +23,12 @@ class RecommendationRecord:
     project_id: str
     target_segment_id: str
     recommendation_type: RecommendationType
+    selected_asset_id: str | None
     reason: str
     score: float
     auto_apply_allowed: bool
     review_required: bool
+    payload: dict[str, object] | None
     created_at: datetime
 
     @classmethod
@@ -38,6 +40,8 @@ class RecommendationRecord:
         recommendation_type: RecommendationType,
         reason: str,
         score: float,
+        selected_asset_id: str | None = None,
+        payload: dict[str, object] | None = None,
         recommendation_id: str | None = None,
     ) -> "RecommendationRecord":
         review_required = recommendation_type is RecommendationType.TTS_REPLACEMENT
@@ -46,9 +50,11 @@ class RecommendationRecord:
             project_id=project_id,
             target_segment_id=target_segment_id,
             recommendation_type=recommendation_type,
+            selected_asset_id=selected_asset_id,
             reason=reason,
             score=score,
             auto_apply_allowed=not review_required,
             review_required=review_required,
+            payload=payload,
             created_at=_utc_now(),
         )

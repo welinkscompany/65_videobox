@@ -10,6 +10,7 @@ from typing import Any
 from videobox_domain_models.assets import AssetRecord, AssetType
 from videobox_domain_models.jobs import JobStatus, JobType
 from videobox_domain_models.projects import ProjectRecord
+from videobox_domain_models.recommendations import RecommendationRecord, RecommendationType
 from videobox_domain_models.transcripts import TranscriptRecord
 from videobox_storage.sqlite_schema import PROJECT_SCHEMA_STATEMENTS
 
@@ -93,7 +94,10 @@ class LocalProjectStore:
         segments: list[dict[str, Any]],
         provider_name: str = "mock_stt",
     ) -> dict[str, Any]:
-        sequence = self._next_sequence(self.project_root(project_id) / "analysis" / "transcripts", "transcript_*.json")
+        sequence = self._next_sequence(
+            self.project_root(project_id) / "analysis" / "transcripts",
+            "transcript_*.json",
+        )
         file_name = f"transcript_{sequence:03d}.json"
         transcript_path = self.project_root(project_id) / "analysis" / "transcripts" / file_name
         transcript_uri = self._path_to_uri(project_id, transcript_path)
@@ -151,7 +155,10 @@ class LocalProjectStore:
         script_asset_id: str | None,
         segments: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        sequence = self._next_sequence(self.project_root(project_id) / "analysis" / "segments", "segment_analysis_*.json")
+        sequence = self._next_sequence(
+            self.project_root(project_id) / "analysis" / "segments",
+            "segment_analysis_*.json",
+        )
         file_name = f"segment_analysis_{sequence:03d}.json"
         analysis_path = self.project_root(project_id) / "analysis" / "segments" / file_name
         analysis_id = f"segment_analysis_{sequence:03d}"
@@ -223,6 +230,90 @@ class LocalProjectStore:
                     ),
                 ),
             )
+        return payload
+
+    def save_recommendation_run(
+        self,
+        *,
+        project_id: str,
+        recommendation_type: RecommendationType,
+        source_job_id: str,
+        recommendations: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        sequence = self._next_sequence(
+            self.project_root(project_id) / "analysis" / "recommendations",
+            f"{recommendation_type.value}_*.json",
+        )
+        file_name = f"{recommendation_type.value}_{sequence:03d}.json"
+        recommendation_path = (
+            self.project_root(project_id) / "analysis" / "recommendations" / file_name
+        )
+        persisted_items: list[dict[str, Any]] = []
+        for item in recommendations:
+            record = RecommendationRecord.create(
+                project_id=project_id,
+                target_segment_id=item["target_segment_id"],
+                recommendation_type=recommendation_type,
+                selected_asset_id=item.get("selected_asset_id"),
+                reason=item["reason"],
+                score=float(item["score"]),
+                payload=item.get("payload"),
+            )
+            persisted = {
+                "recommendation_id": record.recommendation_id,
+                "target_segment_id": record.target_segment_id,
+                "selected_asset_id": record.selected_asset_id,
+                "score": record.score,
+                "reason": record.reason,
+                "auto_apply_allowed": bool(item.get("auto_apply_allowed", record.auto_apply_allowed)),
+                "review_required": bool(item.get("review_required", record.review_required)),
+                "payload": item.get("payload", record.payload or {}),
+                "created_at": record.created_at.isoformat(),
+            }
+            persisted_items.append(persisted)
+            self._execute(
+                project_id,
+                """
+                INSERT INTO recommendations (
+                    recommendation_id,
+                    project_id,
+                    target_segment_id,
+                    recommendation_type,
+                    selected_asset_id,
+                    score,
+                    reason,
+                    auto_apply_allowed,
+                    review_required,
+                    payload_json,
+                    created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    record.recommendation_id,
+                    project_id,
+                    record.target_segment_id,
+                    recommendation_type.value,
+                    record.selected_asset_id,
+                    record.score,
+                    record.reason,
+                    1 if persisted["auto_apply_allowed"] else 0,
+                    1 if persisted["review_required"] else 0,
+                    json.dumps(persisted["payload"], ensure_ascii=True),
+                    record.created_at.isoformat(),
+                ),
+            )
+        payload = {
+            "recommendation_run_id": f"{recommendation_type.value}_{sequence:03d}",
+            "project_id": project_id,
+            "source_job_id": source_job_id,
+            "recommendation_type": recommendation_type.value,
+            "file_uri": self._path_to_uri(project_id, recommendation_path),
+            "recommendations": persisted_items,
+        }
+        recommendation_path.write_text(
+            json.dumps(payload, indent=2, ensure_ascii=True),
+            encoding="utf-8",
+        )
         return payload
 
     def create_job(
@@ -342,6 +433,39 @@ class LocalProjectStore:
         payload["metadata"] = json.loads(payload.pop("metadata_json") or "{}")
         return payload
 
+    def list_assets(
+        self,
+        *,
+        project_id: str,
+        asset_type: AssetType | None = None,
+    ) -> list[dict[str, Any]]:
+        if asset_type is None:
+            query = """
+            SELECT asset_id, project_id, asset_type, storage_uri, source_kind, mime_type, duration_sec, metadata_json, created_at
+            FROM assets
+            ORDER BY created_at ASC
+            """
+            params: tuple[Any, ...] = ()
+        else:
+            query = """
+            SELECT asset_id, project_id, asset_type, storage_uri, source_kind, mime_type, duration_sec, metadata_json, created_at
+            FROM assets
+            WHERE asset_type = ?
+            ORDER BY created_at ASC
+            """
+            params = (asset_type.value,)
+        connection = self._connection(project_id)
+        try:
+            rows = connection.execute(query, params).fetchall()
+        finally:
+            connection.close()
+        items: list[dict[str, Any]] = []
+        for row in rows:
+            payload = dict(row)
+            payload["metadata"] = json.loads(payload.pop("metadata_json") or "{}")
+            items.append(payload)
+        return items
+
     def get_transcript(self, *, project_id: str, transcript_id: str) -> dict[str, Any]:
         row = self._fetchone(
             project_id,
@@ -372,6 +496,26 @@ class LocalProjectStore:
             raise KeyError(f"Segment analysis not found: {segment_analysis_id}")
         payload = dict(row)
         payload["segments"] = json.loads(payload.pop("segments_json"))
+        return payload
+
+    def get_recommendation_run(
+        self,
+        *,
+        project_id: str,
+        recommendation_run_id: str,
+        recommendation_type: RecommendationType,
+    ) -> dict[str, Any]:
+        file_path = (
+            self.project_root(project_id)
+            / "analysis"
+            / "recommendations"
+            / f"{recommendation_run_id}.json"
+        )
+        if not file_path.exists():
+            raise KeyError(f"Recommendation run not found: {recommendation_run_id}")
+        payload = json.loads(file_path.read_text(encoding="utf-8"))
+        if payload["recommendation_type"] != recommendation_type.value:
+            raise KeyError(f"Recommendation run type mismatch: {recommendation_run_id}")
         return payload
 
     def resolve_storage_uri(self, *, project_id: str, storage_uri: str) -> Path:
@@ -436,6 +580,7 @@ class LocalProjectStore:
             AssetType.SCRIPT_DOCUMENT: Path("inputs") / "scripts",
             AssetType.VOICE_SAMPLE_AUDIO: Path("inputs") / "voice_samples",
             AssetType.RAW_VIDEO: Path("inputs") / "raw_video",
+            AssetType.BROLL_VIDEO: Path("assets") / "imported",
         }
         return mapping.get(asset_type, Path("assets") / "imported")
 
