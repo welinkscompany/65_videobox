@@ -58,6 +58,11 @@ class StartRecommendationRequest(BaseModel):
     segment_analysis_job_id: str = Field(min_length=1)
 
 
+class BuildTimelineRequest(BaseModel):
+    segment_analysis_job_id: str = Field(min_length=1)
+    recommendation_job_ids: list[str] = Field(default_factory=list)
+
+
 class SegmentAnalysisRecord(BaseModel):
     segment_id: str | None = None
     text: str
@@ -87,6 +92,53 @@ class SegmentAnalysisJobResponse(StartJobResponse):
 class RecommendationJobResponse(StartJobResponse):
     recommendation_type: str
     recommendations: list[RecommendationItemResponse]
+
+
+class TimelineClipResponse(BaseModel):
+    clip_id: str
+    segment_id: str
+    asset_uri: str
+    start_sec: float
+    end_sec: float
+    clip_type: str
+    recommendation_id: str | None = None
+
+
+class TimelineTrackResponse(BaseModel):
+    track_id: str
+    track_type: str
+    clips: list[TimelineClipResponse]
+
+
+class ReviewFlagResponse(BaseModel):
+    code: str
+    segment_id: str
+    message: str
+
+
+class TimelinePayloadResponse(BaseModel):
+    timeline_id: str
+    project_id: str
+    version: str
+    output_mode: str
+    tracks: list[TimelineTrackResponse]
+    review_flags: list[ReviewFlagResponse]
+    applied_recommendations: list[RecommendationItemResponse] = Field(default_factory=list)
+    pending_recommendations: list[RecommendationItemResponse] = Field(default_factory=list)
+    created_at: str | None = None
+
+
+class TimelineJobResponse(StartJobResponse):
+    timeline: TimelinePayloadResponse
+
+
+class ReviewSnapshotResponse(BaseModel):
+    project_id: str
+    timeline_id: str
+    segments: list[SegmentAnalysisRecord]
+    applied_recommendations: list[RecommendationItemResponse]
+    pending_recommendations: list[RecommendationItemResponse]
+    review_flags: list[ReviewFlagResponse]
 
 
 def create_app(*, projects_root: Path | None = None) -> FastAPI:
@@ -253,6 +305,45 @@ def create_app(*, projects_root: Path | None = None) -> FastAPI:
             status=result["status"],
             recommendation_type=result["recommendation_type"],
             recommendations=[RecommendationItemResponse(**item) for item in result["recommendations"]],
+        )
+
+    @app.post("/api/projects/{project_id}/jobs/build-timeline", status_code=status.HTTP_202_ACCEPTED)
+    def build_timeline(project_id: str, payload: BuildTimelineRequest) -> StartJobResponse:
+        try:
+            result = orchestrator.build_timeline(
+                project_id=project_id,
+                segment_analysis_job_id=payload.segment_analysis_job_id,
+                recommendation_job_ids=payload.recommendation_job_ids,
+            )
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return StartJobResponse(**result)
+
+    @app.get("/api/projects/{project_id}/timelines/{job_id}")
+    def get_timeline(project_id: str, job_id: str) -> TimelineJobResponse:
+        try:
+            result = orchestrator.get_timeline_job(project_id=project_id, job_id=job_id)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return TimelineJobResponse(
+            job_id=result["job_id"],
+            status=result["status"],
+            timeline=TimelinePayloadResponse(**result["timeline"]),
+        )
+
+    @app.get("/api/projects/{project_id}/review-snapshots/{job_id}")
+    def get_review_snapshot(project_id: str, job_id: str) -> ReviewSnapshotResponse:
+        try:
+            result = orchestrator.get_review_snapshot(project_id=project_id, job_id=job_id)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return ReviewSnapshotResponse(
+            project_id=result["project_id"],
+            timeline_id=result["timeline_id"],
+            segments=[SegmentAnalysisRecord(**item) for item in result["segments"]],
+            applied_recommendations=[RecommendationItemResponse(**item) for item in result["applied_recommendations"]],
+            pending_recommendations=[RecommendationItemResponse(**item) for item in result["pending_recommendations"]],
+            review_flags=[ReviewFlagResponse(**item) for item in result["review_flags"]],
         )
 
     return app

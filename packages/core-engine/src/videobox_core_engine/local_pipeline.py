@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from videobox_core_engine.recommenders import KeywordBrollRecommender, RuleBasedMusicRecommender
+from videobox_core_engine.timeline_builder import TimelineBuilder
 from videobox_domain_models.assets import AssetType
 from videobox_domain_models.jobs import JobStatus, JobType
 from videobox_domain_models.recommendations import RecommendationType
@@ -20,11 +21,13 @@ class LocalPipelineRunner:
         stt_provider: STTProvider | None = None,
         broll_recommender: RecommendationProvider | None = None,
         music_recommender: RecommendationProvider | None = None,
+        timeline_builder: TimelineBuilder | None = None,
     ) -> None:
         self.store = store
         self.stt_provider = stt_provider or MockSTTProvider()
         self.broll_recommender = broll_recommender or KeywordBrollRecommender()
         self.music_recommender = music_recommender or RuleBasedMusicRecommender()
+        self.timeline_builder = timeline_builder or TimelineBuilder()
 
     def register_narration_asset(self, *, project_id: str, source_path: Path) -> dict[str, Any]:
         asset = self.store.register_asset(
@@ -245,6 +248,127 @@ class LocalPipelineRunner:
             recommendation_type=RecommendationType.BGM,
         )
         return {"job_id": job["job_id"], "status": job["status"], "recommendations": run["recommendations"]}
+
+    def build_timeline(
+        self,
+        *,
+        project_id: str,
+        segment_analysis_job_id: str,
+        recommendation_job_ids: list[str],
+    ) -> dict[str, Any]:
+        analysis = self._load_segment_analysis_from_job(
+            project_id=project_id,
+            segment_analysis_job_id=segment_analysis_job_id,
+        )
+        recommendations: list[dict[str, Any]] = []
+        for recommendation_job_id in recommendation_job_ids:
+            job = self.store.get_job(project_id=project_id, job_id=recommendation_job_id)
+            job_type = str(job["job_type"])
+            recommendation_type = (
+                RecommendationType.BROLL
+                if job_type == JobType.BROLL_RECOMMENDATION.value
+                else RecommendationType.BGM
+            )
+            run = self.store.get_recommendation_run(
+                project_id=project_id,
+                recommendation_run_id=job["output_ref"],
+                recommendation_type=recommendation_type,
+            )
+            recommendations.extend(
+                [
+                    {
+                        **item,
+                        "recommendation_type": recommendation_type.value,
+                    }
+                    for item in run["recommendations"]
+                ]
+            )
+        timeline = self.timeline_builder.build(
+            project_id=project_id,
+            segments=analysis["segments"],
+            recommendations=recommendations,
+        )
+        timeline_payload = {
+            "project_id": timeline.project_id,
+            "tracks": [
+                {
+                    "track_id": track.track_id,
+                    "track_type": track.track_type,
+                    "clips": [
+                        {
+                            "clip_id": clip.clip_id,
+                            "segment_id": clip.segment_id,
+                            "asset_uri": clip.asset_uri,
+                            "start_sec": clip.start_sec,
+                            "end_sec": clip.end_sec,
+                            "clip_type": clip.clip_type,
+                            "recommendation_id": clip.recommendation_id,
+                        }
+                        for clip in track.clips
+                    ],
+                }
+                for track in timeline.tracks
+            ],
+            "review_flags": [
+                {
+                    "code": flag.code,
+                    "segment_id": flag.segment_id,
+                    "message": flag.message,
+                }
+                for flag in timeline.review_flags
+            ],
+            "applied_recommendations": timeline.applied_recommendations,
+            "pending_recommendations": timeline.pending_recommendations,
+        }
+        persisted = self.store.save_timeline_run(
+            project_id=project_id,
+            output_mode=timeline.output_mode,
+            timeline_payload=timeline_payload,
+        )
+        job = self.store.create_job(
+            project_id=project_id,
+            job_type=JobType.TIMELINE_BUILD,
+            input_ref=segment_analysis_job_id,
+            status=JobStatus.RUNNING,
+        )
+        self.store.update_job(
+            project_id=project_id,
+            job_id=job["job_id"],
+            status=JobStatus.SUCCEEDED,
+            output_ref=persisted["timeline_id"],
+        )
+        return {"job_id": job["job_id"], "status": JobStatus.SUCCEEDED.value}
+
+    def start_timeline_build(
+        self,
+        *,
+        project_id: str,
+        segment_analysis_job_id: str,
+        recommendation_job_ids: list[str],
+    ) -> dict[str, Any]:
+        return self.build_timeline(
+            project_id=project_id,
+            segment_analysis_job_id=segment_analysis_job_id,
+            recommendation_job_ids=recommendation_job_ids,
+        )
+
+    def get_timeline_result(self, *, project_id: str, job_id: str) -> dict[str, Any]:
+        job = self.store.get_job(project_id=project_id, job_id=job_id)
+        timeline = self.store.get_timeline_run(project_id=project_id, timeline_id=job["output_ref"])
+        return {"job_id": job["job_id"], "status": job["status"], "timeline": timeline}
+
+    def get_review_snapshot(self, *, project_id: str, job_id: str) -> dict[str, Any]:
+        timeline = self.get_timeline_result(project_id=project_id, job_id=job_id)["timeline"]
+        return self.store.build_review_snapshot(
+            project_id=project_id,
+            timeline_id=str(timeline.get("timeline_id") or ""),
+            segments=self.store.list_segments(project_id=project_id),
+            recommendations=self.store.list_recommendation_rows(project_id=project_id),
+            timeline_review_flags=timeline.get("review_flags", []),
+        )
+
+    def get_review_snapshot_result(self, *, project_id: str, job_id: str) -> dict[str, Any]:
+        return self.get_review_snapshot(project_id=project_id, job_id=job_id)
 
     def _asset_payload(self, asset: Any) -> dict[str, Any]:
         return {

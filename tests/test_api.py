@@ -200,3 +200,96 @@ def test_recommendation_flow_persists_broll_and_music_results(tmp_path: Path) ->
     ]
     recommendation_types = {payload["recommendation_type"] for payload in payloads}
     assert {"broll", "bgm"}.issubset(recommendation_types)
+
+
+def test_timeline_and_review_snapshot_flow(tmp_path: Path) -> None:
+    source_audio = tmp_path / "source-narration.wav"
+    source_script = tmp_path / "source-script.txt"
+    broll_city = tmp_path / "city-office.mp4"
+    source_audio.write_bytes(b"fake wav data")
+    source_script.write_text("Office overview.\n\nTeam meeting restart.\n", encoding="utf-8")
+    broll_city.write_bytes(b"video bytes 1")
+
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "Timeline Draft"}).json()["project_id"]
+
+    narration_asset_id = client.post(
+        f"/api/projects/{project_id}/assets/narration-audio",
+        json={"source_path": str(source_audio)},
+    ).json()["asset_id"]
+    script_asset_id = client.post(
+        f"/api/projects/{project_id}/assets/script-document",
+        json={"source_path": str(source_script)},
+    ).json()["asset_id"]
+    client.post(
+        f"/api/projects/{project_id}/assets/broll-video",
+        json={
+            "source_path": str(broll_city),
+            "title": "Office skyline",
+            "tags": ["office", "city", "overview"],
+        },
+    )
+
+    transcription_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/transcription",
+        json={"narration_asset_id": narration_asset_id},
+    ).json()["job_id"]
+    segment_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/segment-analysis",
+        json={
+            "transcription_job_id": transcription_job_id,
+            "script_asset_id": script_asset_id,
+        },
+    ).json()["job_id"]
+    broll_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/broll-recommendation",
+        json={"segment_analysis_job_id": segment_job_id},
+    ).json()["job_id"]
+    music_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/music-recommendation",
+        json={"segment_analysis_job_id": segment_job_id},
+    ).json()["job_id"]
+
+    timeline_response = client.post(
+        f"/api/projects/{project_id}/jobs/build-timeline",
+        json={
+            "segment_analysis_job_id": segment_job_id,
+            "recommendation_job_ids": [broll_job_id, music_job_id],
+        },
+    )
+    assert timeline_response.status_code == 202
+    timeline_job_id = timeline_response.json()["job_id"]
+
+    timeline_result = client.get(
+        f"/api/projects/{project_id}/timelines/{timeline_job_id}"
+    )
+    review_snapshot = client.get(
+        f"/api/projects/{project_id}/review-snapshots/{timeline_job_id}"
+    )
+    assert timeline_result.status_code == 200
+    assert review_snapshot.status_code == 200
+
+    timeline_payload = timeline_result.json()
+    review_payload = review_snapshot.json()
+    assert timeline_payload["status"] == "succeeded"
+    assert timeline_payload["job_id"].startswith("timeline_build_job_")
+    assert timeline_payload["timeline"]["project_id"] == project_id
+    assert len(timeline_payload["timeline"]["tracks"]) >= 1
+    assert {"narration", "broll", "bgm"}.issubset(
+        {track["track_type"] for track in timeline_payload["timeline"]["tracks"]}
+    )
+    assert len(review_payload["segments"]) >= 2
+    assert len(review_payload["applied_recommendations"]) >= 2
+    assert len(review_payload["pending_recommendations"]) == 0
+    assert any(flag["code"] == "segment_review_required" for flag in review_payload["review_flags"])
+    assert review_payload["timeline_id"] == timeline_payload["timeline"]["timeline_id"]
+
+    project_root = tmp_path / "projects" / project_id
+    timeline_files = list((project_root / "timelines").glob("timeline_*.json"))
+    assert timeline_files
+    timeline_json = json.loads(timeline_files[0].read_text(encoding="utf-8"))
+    assert timeline_json["project_id"] == project_id
+    assert {"narration", "broll", "bgm"}.issubset(
+        {track["track_type"] for track in timeline_json["tracks"]}
+    )

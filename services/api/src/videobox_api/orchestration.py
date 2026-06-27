@@ -143,3 +143,22 @@ class ApiOrchestrator:
             "recommendation_type": "bgm",
             "recommendations": result["recommendations"],
         }
+
+    def build_timeline(
+        self,
+        *,
+        project_id: str,
+        segment_analysis_job_id: str,
+        recommendation_job_ids: list[str],
+    ) -> dict[str, Any]:
+        return self.pipeline.build_timeline(
+            project_id=project_id,
+            segment_analysis_job_id=segment_analysis_job_id,
+            recommendation_job_ids=recommendation_job_ids,
+        )
+
+    def get_timeline_job(self, *, project_id: str, job_id: str) -> dict[str, Any]:
+        return self.pipeline.get_timeline_result(project_id=project_id, job_id=job_id)
+
+    def get_review_snapshot(self, *, project_id: str, job_id: str) -> dict[str, Any]:
+        return self.pipeline.get_review_snapshot(project_id=project_id, job_id=job_id)

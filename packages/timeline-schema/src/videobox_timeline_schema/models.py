@@ -15,6 +15,8 @@ class TimelineClip:
     asset_uri: str
     start_sec: float
     end_sec: float
+    clip_type: str = "narration"
+    recommendation_id: str | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -39,4 +41,6 @@ class TimelineRecord:
     output_mode: str
     tracks: list[TimelineTrack]
     review_flags: list[TimelineReviewFlag]
+    applied_recommendations: list[dict[str, object]] = field(default_factory=list)
+    pending_recommendations: list[dict[str, object]] = field(default_factory=list)
     created_at: datetime = field(default_factory=_utc_now)

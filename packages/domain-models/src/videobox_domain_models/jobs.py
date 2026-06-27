@@ -16,6 +16,7 @@ class JobType(StrEnum):
     SEGMENT_ANALYSIS = "segment_analysis"
     BROLL_RECOMMENDATION = "broll_recommendation"
     MUSIC_RECOMMENDATION = "music_recommendation"
+    TIMELINE_BUILD = "timeline_build"
 
 
 class JobStatus(StrEnum):

@@ -244,9 +244,9 @@ class LocalProjectStore:
             self.project_root(project_id) / "analysis" / "recommendations",
             f"{recommendation_type.value}_*.json",
         )
-        file_name = f"{recommendation_type.value}_{sequence:03d}.json"
+        run_id = f"{recommendation_type.value}_{sequence:03d}"
         recommendation_path = (
-            self.project_root(project_id) / "analysis" / "recommendations" / file_name
+            self.project_root(project_id) / "analysis" / "recommendations" / f"{run_id}.json"
         )
         persisted_items: list[dict[str, Any]] = []
         for item in recommendations:
@@ -261,7 +261,9 @@ class LocalProjectStore:
             )
             persisted = {
                 "recommendation_id": record.recommendation_id,
+                "project_id": project_id,
                 "target_segment_id": record.target_segment_id,
+                "recommendation_type": recommendation_type.value,
                 "selected_asset_id": record.selected_asset_id,
                 "score": record.score,
                 "reason": record.reason,
@@ -303,7 +305,7 @@ class LocalProjectStore:
                 ),
             )
         payload = {
-            "recommendation_run_id": f"{recommendation_type.value}_{sequence:03d}",
+            "recommendation_run_id": run_id,
             "project_id": project_id,
             "source_job_id": source_job_id,
             "recommendation_type": recommendation_type.value,
@@ -315,6 +317,64 @@ class LocalProjectStore:
             encoding="utf-8",
         )
         return payload
+
+    def save_timeline_run(
+        self,
+        *,
+        project_id: str,
+        output_mode: str,
+        timeline_payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        sequence = self._next_sequence(
+            self.project_root(project_id) / "timelines",
+            "timeline_*.json",
+        )
+        timeline_id = f"timeline_{sequence:03d}"
+        timeline_path = self.project_root(project_id) / "timelines" / f"{timeline_id}.json"
+        file_uri = self._path_to_uri(project_id, timeline_path)
+        payload = {
+            "timeline_id": timeline_id,
+            "project_id": project_id,
+            "version": str(timeline_payload.get("version", "v001")),
+            "output_mode": output_mode,
+            "file_uri": file_uri,
+            "created_at": self._now_iso(),
+            **timeline_payload,
+        }
+        timeline_path.write_text(json.dumps(payload, indent=2, ensure_ascii=True), encoding="utf-8")
+        summary_json = json.dumps(
+            {
+                "track_count": len(payload.get("tracks", [])),
+                "review_flag_count": len(payload.get("review_flags", [])),
+                "applied_recommendation_count": len(payload.get("applied_recommendations", [])),
+                "pending_recommendation_count": len(payload.get("pending_recommendations", [])),
+            },
+            ensure_ascii=True,
+        )
+        self._execute(
+            project_id,
+            """
+            INSERT INTO timelines (
+                timeline_id,
+                project_id,
+                version,
+                output_mode,
+                file_uri,
+                summary_json,
+                created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                timeline_id,
+                project_id,
+                payload["version"],
+                output_mode,
+                file_uri,
+                summary_json,
+                payload["created_at"],
+            ),
+        )
+        return {"timeline_id": timeline_id, "file_uri": file_uri, "timeline": payload}
 
     def create_job(
         self,
@@ -466,6 +526,50 @@ class LocalProjectStore:
             items.append(payload)
         return items
 
+    def list_segments(self, *, project_id: str) -> list[dict[str, Any]]:
+        connection = self._connection(project_id)
+        try:
+            rows = connection.execute(
+                """
+                SELECT segment_id, project_id, start_sec, end_sec, text, source_asset_id,
+                       confidence, cleanup_decision, review_required, metadata_json
+                FROM segments
+                ORDER BY start_sec ASC, segment_id ASC
+                """
+            ).fetchall()
+        finally:
+            connection.close()
+        items: list[dict[str, Any]] = []
+        for row in rows:
+            payload = dict(row)
+            payload["review_required"] = bool(payload["review_required"])
+            payload["metadata"] = json.loads(payload.pop("metadata_json") or "{}")
+            items.append(payload)
+        return items
+
+    def list_recommendation_rows(self, *, project_id: str) -> list[dict[str, Any]]:
+        connection = self._connection(project_id)
+        try:
+            rows = connection.execute(
+                """
+                SELECT recommendation_id, project_id, target_segment_id, recommendation_type,
+                       selected_asset_id, score, reason, auto_apply_allowed,
+                       review_required, payload_json, created_at
+                FROM recommendations
+                ORDER BY created_at ASC
+                """
+            ).fetchall()
+        finally:
+            connection.close()
+        items: list[dict[str, Any]] = []
+        for row in rows:
+            payload = dict(row)
+            payload["auto_apply_allowed"] = bool(payload["auto_apply_allowed"])
+            payload["review_required"] = bool(payload["review_required"])
+            payload["payload"] = json.loads(payload.pop("payload_json") or "{}")
+            items.append(payload)
+        return items
+
     def get_transcript(self, *, project_id: str, transcript_id: str) -> dict[str, Any]:
         row = self._fetchone(
             project_id,
@@ -517,6 +621,51 @@ class LocalProjectStore:
         if payload["recommendation_type"] != recommendation_type.value:
             raise KeyError(f"Recommendation run type mismatch: {recommendation_run_id}")
         return payload
+
+    def get_timeline_run(self, *, project_id: str, timeline_id: str) -> dict[str, Any]:
+        row = self._fetchone(
+            project_id,
+            """
+            SELECT timeline_id, project_id, version, output_mode, file_uri, summary_json, created_at
+            FROM timelines
+            WHERE timeline_id = ?
+            """,
+            (timeline_id,),
+        )
+        if row is None:
+            raise KeyError(f"Timeline not found: {timeline_id}")
+        file_path = self.resolve_storage_uri(project_id=project_id, storage_uri=str(row["file_uri"]))
+        if not file_path.exists():
+            raise KeyError(f"Timeline JSON missing: {timeline_id}")
+        payload = json.loads(file_path.read_text(encoding="utf-8"))
+        payload["summary"] = json.loads(row["summary_json"] or "{}")
+        return payload
+
+    def build_review_snapshot(
+        self,
+        *,
+        project_id: str,
+        timeline_id: str | None = None,
+        segments: list[dict[str, Any]],
+        recommendations: list[dict[str, Any]],
+        timeline_review_flags: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        applied = [
+            item for item in recommendations
+            if bool(item.get("auto_apply_allowed")) and not bool(item.get("review_required"))
+        ]
+        pending = [
+            item for item in recommendations
+            if not (bool(item.get("auto_apply_allowed")) and not bool(item.get("review_required")))
+        ]
+        return {
+            "project_id": project_id,
+            "timeline_id": timeline_id,
+            "segments": segments,
+            "applied_recommendations": applied,
+            "pending_recommendations": pending,
+            "review_flags": timeline_review_flags,
+        }
 
     def resolve_storage_uri(self, *, project_id: str, storage_uri: str) -> Path:
         prefix = f"local://projects/{project_id}/"
