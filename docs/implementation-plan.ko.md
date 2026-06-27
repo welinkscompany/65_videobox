@@ -30,11 +30,13 @@
 - 녹음 파일
 - 참고 문서 또는 스크립트
 - 사용자 B-roll 자산
+- 사용자 본인 목소리 샘플
 
 출력:
 
 - 세그먼트 분석 결과
 - 자동 자막
+- 본인 목소리 기반 TTS 대체 오디오
 - B-roll 추천
 - 음악 추천
 - 설명형 비주얼 계획
@@ -51,6 +53,7 @@
 - STT
 - 세그먼트/장면 분리
 - 반복 take / 무음 / 재시작 탐지
+- 본인 목소리 기반 제한적 TTS 대체 생성
 - B-roll 자산 메타데이터 기반 검색
 - 문장/장면별 B-roll 추천
 - 기본 음악 추천
@@ -108,6 +111,7 @@
 - 녹음 파일 STT
 - 세그먼트/장면 분리
 - 반복 take / 무음 / 재시작 탐지
+- TTS 입력 샘플 관리
 
 완료 기준:
 
@@ -121,6 +125,7 @@
 - 문장/장면별 B-roll 추천
 - 기본 음악 추천
 - 설명형 비주얼 계획
+- TTS 대체 가능 구간 추천
 
 완료 기준:
 
@@ -173,15 +178,17 @@
 7. 음악 추천 구현
 8. 설명형 비주얼 계획 구현
 9. timeline builder 구현
-10. preview renderer 구현
-11. CapCut export adapter 구현
-12. review UI 구현
+10. TTS provider 연결
+11. preview renderer 구현
+12. CapCut export adapter 구현
+13. review UI 구현
 
 ## 7. 기술 선택 초안
 
 - 언어: Python 우선
 - 영상 처리: FFmpeg
 - 전사: WhisperX 또는 대체 STT provider
+- TTS: 사용자 본인 목소리 기반 TTS provider
 - 비전/자산 분석: OpenCV + 자산 메타데이터 인덱싱
 - 데이터 저장: 로컬 DB 우선
 - UI: 로컬 우선 앱 또는 얇은 review UI
@@ -203,6 +210,7 @@
 - execution 로직만 선별 이식
 - Google Sheets/Drive 구조는 버림
 - provider 하드코딩 제거
+- TTS는 별도 provider로 제한 범위 구현
 
 ## 9. 리스크
 
@@ -221,10 +229,12 @@
 위험:
 
 - 발음이 안 좋거나 재녹음이 섞인 경우 정렬이 흔들릴 수 있음
+- 본인 목소리 TTS 품질이 문장 길이와 억양에 따라 흔들릴 수 있음
 
 대응:
 
 - ambiguous 구간을 자동 삭제하지 않고 review 대상으로 보냄
+- TTS도 자동 전면 대체하지 않고 review 기반 후보로만 적용
 
 ### 9.3 CapCut export 의존
 
@@ -263,6 +273,7 @@
 
 - STT
 - 세그먼트 분석
+- 제한적 TTS 실험
 - B-roll 추천 기본형
 - timeline JSON
 - preview 또는 export 일부
@@ -298,6 +309,7 @@
 - 첫 장르 확정
 - provider 전략 확정
 - 로컬 파일/프로젝트 저장 전략 확정
+- 본인 목소리 TTS 허용 범위 확정
 
 ## 12. 다음 실제 작업
 

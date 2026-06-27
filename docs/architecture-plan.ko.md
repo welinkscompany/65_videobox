@@ -80,6 +80,7 @@ Input Sources
 - 원본 영상
 - 참고 문서 / 스크립트
 - 사용자 B-roll
+- 사용자 본인 목소리 샘플
 - 시스템 기본 자산
 
 ### 4.2 Ingest Layer
@@ -112,6 +113,7 @@ Input Sources
 - B-roll 추천
 - 음악 추천
 - 설명형 비주얼 추천
+- TTS 대체 추천
 - shortform 후보 scoring
 - confidence 및 review flag 생성
 
@@ -247,6 +249,7 @@ packages/
 
 - `raw_video`
 - `narration_audio`
+- `voice_sample_audio`
 - `broll_video`
 - `image`
 - `bgm`
@@ -301,6 +304,13 @@ packages/
 - `auto_apply_allowed`
 - `review_required`
 
+추천 타입 예시:
+
+- `broll`
+- `bgm`
+- `overlay`
+- `tts_replacement`
+
 ### 6.6 Timeline
 
 필드 예시:
@@ -336,8 +346,9 @@ packages/
 
 역할:
 
-- 미래 확장용
-- 설명형 영상 음성 생성 가능성 대비
+- 사용자 본인 목소리 기반 나레이션 생성
+- 잘못 발음한 구간의 제한적 대체
+- 설명형 영상 음성 생성 확장 대비
 
 ### Vision Provider
 
@@ -437,6 +448,7 @@ CapCut은 export 대상이다.
 4. 로컬 경로를 주 식별자로 쓰지 않는다
 5. 추천과 적용 결과를 분리 저장한다
 6. CapCut export를 코어에 섞지 않는다
+7. TTS는 자동 전면 대체가 아니라 review 기반으로만 적용한다
 
 ## 14. 결론
 
