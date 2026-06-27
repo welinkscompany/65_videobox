@@ -156,6 +156,8 @@ button {
 .hero-actions {
   display: flex;
   justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
 .meta-copy {
@@ -222,6 +224,7 @@ button {
 }
 
 .status-card,
+.artifact-card,
 .track-card,
 .clip-card,
 .segment-card,
@@ -236,6 +239,10 @@ button {
   padding: 16px;
   display: grid;
   gap: 8px;
+}
+
+.artifact-card {
+  padding: 16px;
 }
 
 .status-card strong {

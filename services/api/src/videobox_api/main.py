@@ -83,6 +83,10 @@ class BuildTimelineRequest(BaseModel):
     recommendation_job_ids: list[str] = Field(default_factory=list)
 
 
+class OutputJobRequest(BaseModel):
+    timeline_job_id: str = Field(min_length=1)
+
+
 class SegmentAnalysisRecord(BaseModel):
     segment_id: str | None = None
     text: str
@@ -159,6 +163,37 @@ class ReviewSnapshotResponse(BaseModel):
     applied_recommendations: list[RecommendationItemResponse]
     pending_recommendations: list[RecommendationItemResponse]
     review_flags: list[ReviewFlagResponse]
+
+
+class PreviewArtifactResponse(BaseModel):
+    preview_id: str
+    project_id: str
+    timeline_id: str
+    file_uri: str
+    status: str
+    artifact_kind: str
+    notes: list[str] = Field(default_factory=list)
+    created_at: str | None = None
+
+
+class PreviewJobResponse(StartJobResponse):
+    preview: PreviewArtifactResponse
+
+
+class ExportArtifactResponse(BaseModel):
+    export_id: str
+    project_id: str
+    timeline_id: str
+    export_type: str
+    file_uri: str
+    status: str
+    adapter: str | None = None
+    notes: list[str] = Field(default_factory=list)
+    created_at: str | None = None
+
+
+class ExportJobResponse(StartJobResponse):
+    export: ExportArtifactResponse
 
 
 def create_app(*, projects_root: Path | None = None) -> FastAPI:
@@ -400,6 +435,52 @@ def create_app(*, projects_root: Path | None = None) -> FastAPI:
             applied_recommendations=[RecommendationItemResponse(**item) for item in result["applied_recommendations"]],
             pending_recommendations=[RecommendationItemResponse(**item) for item in result["pending_recommendations"]],
             review_flags=[ReviewFlagResponse(**item) for item in result["review_flags"]],
+        )
+
+    @app.post("/api/projects/{project_id}/jobs/preview-render", status_code=status.HTTP_202_ACCEPTED)
+    def start_preview_render(project_id: str, payload: OutputJobRequest) -> StartJobResponse:
+        try:
+            result = orchestrator.start_preview_render(
+                project_id=project_id,
+                timeline_job_id=payload.timeline_job_id,
+            )
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return StartJobResponse(**result)
+
+    @app.get("/api/projects/{project_id}/previews/{job_id}")
+    def get_preview_result(project_id: str, job_id: str) -> PreviewJobResponse:
+        try:
+            result = orchestrator.get_preview_result(project_id=project_id, job_id=job_id)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return PreviewJobResponse(
+            job_id=result["job_id"],
+            status=result["status"],
+            preview=PreviewArtifactResponse(**result["preview"]),
+        )
+
+    @app.post("/api/projects/{project_id}/jobs/capcut-export", status_code=status.HTTP_202_ACCEPTED)
+    def start_capcut_export(project_id: str, payload: OutputJobRequest) -> StartJobResponse:
+        try:
+            result = orchestrator.start_capcut_export(
+                project_id=project_id,
+                timeline_job_id=payload.timeline_job_id,
+            )
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return StartJobResponse(**result)
+
+    @app.get("/api/projects/{project_id}/exports/{job_id}")
+    def get_export_result(project_id: str, job_id: str) -> ExportJobResponse:
+        try:
+            result = orchestrator.get_capcut_export_result(project_id=project_id, job_id=job_id)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return ExportJobResponse(
+            job_id=result["job_id"],
+            status=result["status"],
+            export=ExportArtifactResponse(**result["export"]),
         )
 
     return app

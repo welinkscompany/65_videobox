@@ -12,6 +12,7 @@ SRC_PATHS = [
     ROOT / "packages" / "provider-interfaces" / "src",
     ROOT / "packages" / "timeline-schema" / "src",
     ROOT / "packages" / "core-engine" / "src",
+    ROOT / "packages" / "capcut-export" / "src",
 ]
 
 for src_path in SRC_PATHS:

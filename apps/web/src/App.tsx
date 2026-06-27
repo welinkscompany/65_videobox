@@ -2,7 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 
 import {
   api,
+  type ExportJob,
   type JobRecord,
+  type PreviewJob,
   type Project,
   type ReviewSnapshot,
   type TimelineJob,
@@ -31,6 +33,16 @@ function findLatestTimelineJob(jobs: JobRecord[]) {
   return candidates.length > 0 ? candidates[candidates.length - 1] : null;
 }
 
+function findLatestSucceededJob(jobs: JobRecord[], jobType: string, inputRef?: string | null) {
+  const candidates = jobs.filter(
+    (job) =>
+      job.job_type === jobType &&
+      job.status === "succeeded" &&
+      (inputRef == null || job.input_ref === inputRef),
+  );
+  return candidates.length > 0 ? candidates[candidates.length - 1] : null;
+}
+
 export function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
@@ -41,9 +53,13 @@ export function App() {
   const [jobs, setJobs] = useState<JobRecord[]>([]);
   const [timelineJob, setTimelineJob] = useState<TimelineJob | null>(null);
   const [reviewSnapshot, setReviewSnapshot] = useState<ReviewSnapshot | null>(null);
+  const [previewJob, setPreviewJob] = useState<PreviewJob | null>(null);
+  const [exportJob, setExportJob] = useState<ExportJob | null>(null);
   const [loadState, setLoadState] = useState<LoadState>("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isRebuildingTimeline, setIsRebuildingTimeline] = useState(false);
+  const [isRenderingPreview, setIsRenderingPreview] = useState(false);
+  const [isExportingCapcut, setIsExportingCapcut] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -80,6 +96,8 @@ export function App() {
       setJobs([]);
       setTimelineJob(null);
       setReviewSnapshot(null);
+      setPreviewJob(null);
+      setExportJob(null);
       return;
     }
 
@@ -99,6 +117,18 @@ export function App() {
               api.getReviewSnapshot(projectId, latestTimelineJob.job_id),
             ])
           : [null, null];
+        const latestPreviewJob = latestTimelineJob
+          ? findLatestSucceededJob(jobItems, "preview_render", latestTimelineJob.job_id)
+          : null;
+        const latestExportJob = latestTimelineJob
+          ? findLatestSucceededJob(jobItems, "capcut_export", latestTimelineJob.job_id)
+          : null;
+        const preview = latestPreviewJob
+          ? await api.getPreview(projectId, latestPreviewJob.job_id)
+          : null;
+        const capcutExport = latestExportJob
+          ? await api.getExport(projectId, latestExportJob.job_id)
+          : null;
         if (cancelled) {
           return;
         }
@@ -106,6 +136,8 @@ export function App() {
         setJobs(jobItems);
         setTimelineJob(timeline);
         setReviewSnapshot(review);
+        setPreviewJob(preview);
+        setExportJob(capcutExport);
         setLoadState("ready");
       } catch (error) {
         if (cancelled) {
@@ -129,6 +161,8 @@ export function App() {
       { label: "B-roll recommendation", jobType: "broll_recommendation" },
       { label: "Music recommendation", jobType: "music_recommendation" },
       { label: "Timeline build", jobType: "timeline_build" },
+      { label: "Preview render", jobType: "preview_render" },
+      { label: "CapCut export", jobType: "capcut_export" },
     ],
     [],
   );
@@ -166,6 +200,20 @@ export function App() {
     };
   }, [jobs]);
 
+  const latestTimelineBuildJob = useMemo(
+    () => findLatestTimelineJob(jobs),
+    [jobs],
+  );
+  const hasReviewBlockers = useMemo(() => {
+    if (!timelineJob || !reviewSnapshot) {
+      return true;
+    }
+    return (
+      timelineJob.timeline.review_flags.length > 0 ||
+      reviewSnapshot.pending_recommendations.length > 0
+    );
+  }, [reviewSnapshot, timelineJob]);
+
   async function handleRebuildTimeline() {
     if (!selectedProjectId || !rebuildInputs) {
       return;
@@ -185,11 +233,59 @@ export function App() {
       setJobs(jobItems);
       setTimelineJob(timeline);
       setReviewSnapshot(review);
+      setPreviewJob(null);
+      setExportJob(null);
       setSelectedSection("timeline");
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Unknown error");
     } finally {
       setIsRebuildingTimeline(false);
+    }
+  }
+
+  async function handleRenderPreview() {
+    if (!selectedProjectId || !latestTimelineBuildJob || hasReviewBlockers) {
+      return;
+    }
+    setIsRenderingPreview(true);
+    setErrorMessage(null);
+    try {
+      const renderResult = await api.renderPreview(selectedProjectId, {
+        timeline_job_id: latestTimelineBuildJob.job_id,
+      });
+      const [jobItems, preview] = await Promise.all([
+        api.listJobs(selectedProjectId),
+        api.getPreview(selectedProjectId, renderResult.job_id),
+      ]);
+      setJobs(jobItems);
+      setPreviewJob(preview);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Unknown error");
+    } finally {
+      setIsRenderingPreview(false);
+    }
+  }
+
+  async function handleExportCapcut() {
+    if (!selectedProjectId || !latestTimelineBuildJob || hasReviewBlockers) {
+      return;
+    }
+    setIsExportingCapcut(true);
+    setErrorMessage(null);
+    try {
+      const exportResult = await api.exportCapcut(selectedProjectId, {
+        timeline_job_id: latestTimelineBuildJob.job_id,
+      });
+      const [jobItems, capcutExport] = await Promise.all([
+        api.listJobs(selectedProjectId),
+        api.getExport(selectedProjectId, exportResult.job_id),
+      ]);
+      setJobs(jobItems);
+      setExportJob(capcutExport);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Unknown error");
+    } finally {
+      setIsExportingCapcut(false);
     }
   }
 
@@ -265,6 +361,22 @@ export function App() {
               type="button"
             >
               {isRebuildingTimeline ? "Rebuilding timeline..." : "Rebuild timeline draft"}
+            </button>
+            <button
+              className="action-button"
+              disabled={!latestTimelineBuildJob || hasReviewBlockers || isRenderingPreview}
+              onClick={() => void handleRenderPreview()}
+              type="button"
+            >
+              {isRenderingPreview ? "Rendering preview..." : "Render preview artifact"}
+            </button>
+            <button
+              className="action-button"
+              disabled={!latestTimelineBuildJob || hasReviewBlockers || isExportingCapcut}
+              onClick={() => void handleExportCapcut()}
+              type="button"
+            >
+              {isExportingCapcut ? "Exporting CapCut..." : "Export CapCut payload"}
             </button>
           </div>
         </section>
@@ -353,6 +465,33 @@ export function App() {
                 <p className="empty-state">Build a timeline to unlock review snapshot data.</p>
               )}
             </article>
+
+            <article className="panel">
+              <div className="panel-header">
+                <div>
+                  <p className="section-kicker">Output artifacts</p>
+                  <h2>Preview and export</h2>
+                </div>
+              </div>
+              <dl className="summary-list">
+                <div>
+                  <dt>Preview job</dt>
+                  <dd>{previewJob?.job_id ?? "not-started"}</dd>
+                </div>
+                <div>
+                  <dt>Preview artifact</dt>
+                  <dd>{previewJob?.preview.artifact_kind ?? "pending"}</dd>
+                </div>
+                <div>
+                  <dt>Export job</dt>
+                  <dd>{exportJob?.job_id ?? "not-started"}</dd>
+                </div>
+                <div>
+                  <dt>Export target</dt>
+                  <dd>{exportJob?.export.export_type ?? "pending"}</dd>
+                </div>
+              </dl>
+            </article>
           </section>
         ) : null}
 
@@ -366,6 +505,19 @@ export function App() {
             </div>
             {timelineJob ? (
               <div className="track-stack">
+                {previewJob ? (
+                  <article className="artifact-card">
+                    <h3>{previewJob.preview.artifact_kind}</h3>
+                    <p>{previewJob.preview.file_uri}</p>
+                  </article>
+                ) : null}
+                {exportJob ? (
+                  <article className="artifact-card">
+                    <h3>{exportJob.export.export_type}</h3>
+                    <p>{exportJob.export.file_uri}</p>
+                    <p>{exportJob.export.notes[0]}</p>
+                  </article>
+                ) : null}
                 {timelineJob.timeline.tracks.map((track) => (
                   <article className="track-card" key={track.track_id}>
                     <header className="track-header">

@@ -72,6 +72,26 @@ const jobsResponse = {
       started_at: "2026-06-28T00:00:08Z",
       finished_at: "2026-06-28T00:00:09Z",
     },
+    {
+      job_id: "preview_render_job_006",
+      job_type: "preview_render",
+      status: "succeeded",
+      input_ref: "timeline_build_job_005",
+      output_ref: "preview_001",
+      error_message: null,
+      started_at: "2026-06-28T00:00:10Z",
+      finished_at: "2026-06-28T00:00:11Z",
+    },
+    {
+      job_id: "capcut_export_job_007",
+      job_type: "capcut_export",
+      status: "succeeded",
+      input_ref: "timeline_build_job_005",
+      output_ref: "export_001",
+      error_message: null,
+      started_at: "2026-06-28T00:00:12Z",
+      finished_at: "2026-06-28T00:00:13Z",
+    },
   ],
 };
 
@@ -132,11 +152,6 @@ const timelineResponse = {
       },
     ],
     review_flags: [
-      {
-        code: "segment_review_required",
-        segment_id: "seg_002",
-        message: "Segment requires operator review before export.",
-      },
     ],
     applied_recommendations: [
       {
@@ -153,18 +168,6 @@ const timelineResponse = {
       },
     ],
     pending_recommendations: [
-      {
-        recommendation_id: "rec_011",
-        target_segment_id: "seg_002",
-        recommendation_type: "tts_replacement",
-        selected_asset_id: null,
-        score: 0.74,
-        reason: "Pronunciation restart detected",
-        auto_apply_allowed: false,
-        review_required: true,
-        payload: { provider: "voicebox" },
-        created_at: "2026-06-28T00:00:06Z",
-      },
     ],
   },
 };
@@ -184,17 +187,43 @@ const reviewSnapshotResponse = {
     },
     {
       segment_id: "seg_002",
-      text: "Team meeting restart",
+      text: "Team meeting overview",
       start_sec: 3.5,
       end_sec: 7.8,
-      confidence: 0.78,
-      review_required: true,
-      cleanup_decision: "review",
+      confidence: 0.96,
+      review_required: false,
+      cleanup_decision: "keep",
     },
   ],
   applied_recommendations: timelineResponse.timeline.applied_recommendations,
   pending_recommendations: timelineResponse.timeline.pending_recommendations,
   review_flags: timelineResponse.timeline.review_flags,
+};
+
+const previewResponse = {
+  job_id: "preview_render_job_006",
+  status: "succeeded",
+  preview: {
+    preview_id: "preview_001",
+    timeline_id: "timeline_001",
+    file_uri: "local://projects/project_001/previews/preview_001.json",
+    artifact_kind: "mock_preview_bundle",
+    created_at: "2026-06-28T00:00:11Z",
+    notes: ["Preview render is a structured local artifact in this phase."],
+  },
+};
+
+const exportResponse = {
+  job_id: "capcut_export_job_007",
+  status: "succeeded",
+  export: {
+    export_id: "export_001",
+    timeline_id: "timeline_001",
+    export_type: "capcut",
+    file_uri: "local://projects/project_001/exports/capcut/export_001/capcut_payload.json",
+    created_at: "2026-06-28T00:00:13Z",
+    notes: ["Mock CapCut payload written for local post-editing handoff."],
+  },
 };
 
 describe("App", () => {
@@ -223,11 +252,43 @@ describe("App", () => {
           ),
         );
       }
+      if (
+        url.endsWith("/api/projects/project_001/jobs/preview-render") &&
+        init?.method === "POST"
+      ) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              job_id: "preview_render_job_006",
+              status: "succeeded",
+            }),
+          ),
+        );
+      }
+      if (
+        url.endsWith("/api/projects/project_001/jobs/capcut-export") &&
+        init?.method === "POST"
+      ) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              job_id: "capcut_export_job_007",
+              status: "succeeded",
+            }),
+          ),
+        );
+      }
       if (url.endsWith("/api/projects/project_001/timelines/timeline_build_job_005")) {
         return Promise.resolve(new Response(JSON.stringify(timelineResponse)));
       }
       if (url.endsWith("/api/projects/project_001/review-snapshots/timeline_build_job_005")) {
         return Promise.resolve(new Response(JSON.stringify(reviewSnapshotResponse)));
+      }
+      if (url.endsWith("/api/projects/project_001/previews/preview_render_job_006")) {
+        return Promise.resolve(new Response(JSON.stringify(previewResponse)));
+      }
+      if (url.endsWith("/api/projects/project_001/exports/capcut_export_job_007")) {
+        return Promise.resolve(new Response(JSON.stringify(exportResponse)));
       }
       return Promise.reject(new Error(`Unhandled fetch: ${url}`));
     });
@@ -242,11 +303,12 @@ describe("App", () => {
     expect(await screen.findByText(/operator review demo/i)).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /timeline summary/i })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /review snapshot/i })).toBeInTheDocument();
+    expect((await screen.findAllByText(/preview_render_job_006/i)).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText(/capcut_export_job_007/i)).length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByRole("button", { name: /review snapshot/i }));
 
-    expect(await screen.findByText(/segment review required/i)).toBeInTheDocument();
-    expect(screen.getByText(/tts replacement/i)).toBeInTheDocument();
+    expect(await screen.findByText(/applied and pending recommendations/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /approve recommendation/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /reject recommendation/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /mark for manual edit/i })).toBeInTheDocument();
@@ -262,8 +324,96 @@ describe("App", () => {
       );
     });
 
+    fireEvent.click(await screen.findByRole("button", { name: /render preview artifact/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /export capcut payload/i }));
+
+    expect(await screen.findByText(/mock_preview_bundle/i)).toBeInTheDocument();
+    expect(await screen.findByText(/mock capcut payload written/i)).toBeInTheDocument();
+
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith("/api/projects", undefined);
     });
+  });
+
+  it("disables preview and export controls until review blockers are cleared", async () => {
+    const blockedTimelineResponse = {
+      ...timelineResponse,
+      timeline: {
+        ...timelineResponse.timeline,
+        review_flags: [
+          {
+            code: "segment_review_required",
+            segment_id: "seg_002",
+            message: "Segment requires operator review before export.",
+          },
+        ],
+        pending_recommendations: [
+          {
+            recommendation_id: "rec_011",
+            target_segment_id: "seg_002",
+            recommendation_type: "tts_replacement",
+            selected_asset_id: null,
+            score: 0.74,
+            reason: "Pronunciation restart detected",
+            auto_apply_allowed: false,
+            review_required: true,
+            payload: { provider: "voicebox" },
+            created_at: "2026-06-28T00:00:06Z",
+          },
+        ],
+      },
+    };
+    const blockedReviewSnapshotResponse = {
+      ...reviewSnapshotResponse,
+      segments: reviewSnapshotResponse.segments.map((segment) =>
+        segment.segment_id === "seg_002"
+          ? {
+              ...segment,
+              text: "Team meeting restart",
+              confidence: 0.78,
+              review_required: true,
+              cleanup_decision: "review",
+            }
+          : segment,
+      ),
+      pending_recommendations: blockedTimelineResponse.timeline.pending_recommendations,
+      review_flags: blockedTimelineResponse.timeline.review_flags,
+    };
+    const blockedJobsResponse = {
+      jobs: jobsResponse.jobs.filter(
+        (job) => job.job_type !== "preview_render" && job.job_type !== "capcut_export",
+      ),
+    };
+
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/api/projects")) {
+        return Promise.resolve(new Response(JSON.stringify(projectsResponse)));
+      }
+      if (url.endsWith("/api/projects/project_001")) {
+        return Promise.resolve(new Response(JSON.stringify(projectResponse)));
+      }
+      if (url.endsWith("/api/projects/project_001/jobs")) {
+        return Promise.resolve(new Response(JSON.stringify(blockedJobsResponse)));
+      }
+      if (url.endsWith("/api/projects/project_001/timelines/timeline_build_job_005")) {
+        return Promise.resolve(new Response(JSON.stringify(blockedTimelineResponse)));
+      }
+      if (url.endsWith("/api/projects/project_001/review-snapshots/timeline_build_job_005")) {
+        return Promise.resolve(new Response(JSON.stringify(blockedReviewSnapshotResponse)));
+      }
+      return Promise.reject(new Error(`Unhandled fetch: ${url}`));
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("button", { name: /render preview artifact/i }),
+    ).toBeDisabled();
+    expect(
+      await screen.findByRole("button", { name: /export capcut payload/i }),
+    ).toBeDisabled();
   });
 });

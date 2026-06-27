@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from videobox_capcut_export import CapCutExportAdapter
+from videobox_core_engine.preview_renderer import PreviewRenderer
 from videobox_core_engine.recommenders import KeywordBrollRecommender, RuleBasedMusicRecommender
 from videobox_core_engine.timeline_builder import TimelineBuilder
 from videobox_domain_models.assets import AssetType
@@ -22,12 +24,16 @@ class LocalPipelineRunner:
         broll_recommender: RecommendationProvider | None = None,
         music_recommender: RecommendationProvider | None = None,
         timeline_builder: TimelineBuilder | None = None,
+        preview_renderer: PreviewRenderer | None = None,
+        capcut_exporter: CapCutExportAdapter | None = None,
     ) -> None:
         self.store = store
         self.stt_provider = stt_provider or MockSTTProvider()
         self.broll_recommender = broll_recommender or KeywordBrollRecommender()
         self.music_recommender = music_recommender or RuleBasedMusicRecommender()
         self.timeline_builder = timeline_builder or TimelineBuilder()
+        self.preview_renderer = preview_renderer or PreviewRenderer()
+        self.capcut_exporter = capcut_exporter or CapCutExportAdapter()
 
     def register_narration_asset(self, *, project_id: str, source_path: Path) -> dict[str, Any]:
         asset = self.store.register_asset(
@@ -370,6 +376,86 @@ class LocalPipelineRunner:
     def get_review_snapshot_result(self, *, project_id: str, job_id: str) -> dict[str, Any]:
         return self.get_review_snapshot(project_id=project_id, job_id=job_id)
 
+    def start_preview_render(self, *, project_id: str, timeline_job_id: str) -> dict[str, Any]:
+        job = self.store.create_job(
+            project_id=project_id,
+            job_type=JobType.PREVIEW_RENDER,
+            input_ref=timeline_job_id,
+            status=JobStatus.RUNNING,
+        )
+        try:
+            timeline = self.get_timeline_result(project_id=project_id, job_id=timeline_job_id)["timeline"]
+            self._ensure_timeline_ready_for_output(timeline)
+            preview_payload = self.preview_renderer.build_preview_payload(
+                project_id=project_id,
+                timeline=timeline,
+            )
+            persisted = self.store.save_preview_run(
+                project_id=project_id,
+                timeline_id=str(timeline["timeline_id"]),
+                preview_payload=preview_payload,
+            )
+            self.store.update_job(
+                project_id=project_id,
+                job_id=job["job_id"],
+                status=JobStatus.SUCCEEDED,
+                output_ref=persisted["preview_id"],
+            )
+        except Exception as exc:
+            self.store.update_job(
+                project_id=project_id,
+                job_id=job["job_id"],
+                status=JobStatus.FAILED,
+                error_message=str(exc),
+            )
+            raise
+        return {"job_id": job["job_id"], "status": JobStatus.SUCCEEDED.value}
+
+    def get_preview_result(self, *, project_id: str, job_id: str) -> dict[str, Any]:
+        job = self.store.get_job(project_id=project_id, job_id=job_id)
+        preview = self.store.get_preview_run(project_id=project_id, preview_id=job["output_ref"])
+        return {"job_id": job["job_id"], "status": job["status"], "preview": preview}
+
+    def start_capcut_export(self, *, project_id: str, timeline_job_id: str) -> dict[str, Any]:
+        job = self.store.create_job(
+            project_id=project_id,
+            job_type=JobType.CAPCUT_EXPORT,
+            input_ref=timeline_job_id,
+            status=JobStatus.RUNNING,
+        )
+        try:
+            timeline = self.get_timeline_result(project_id=project_id, job_id=timeline_job_id)["timeline"]
+            self._ensure_timeline_ready_for_output(timeline)
+            export_payload = self.capcut_exporter.build_payload(
+                project_id=project_id,
+                timeline=timeline,
+            )
+            persisted = self.store.save_capcut_export(
+                project_id=project_id,
+                timeline_id=str(timeline["timeline_id"]),
+                export_payload=export_payload,
+            )
+            self.store.update_job(
+                project_id=project_id,
+                job_id=job["job_id"],
+                status=JobStatus.SUCCEEDED,
+                output_ref=persisted["export_id"],
+            )
+        except Exception as exc:
+            self.store.update_job(
+                project_id=project_id,
+                job_id=job["job_id"],
+                status=JobStatus.FAILED,
+                error_message=str(exc),
+            )
+            raise
+        return {"job_id": job["job_id"], "status": JobStatus.SUCCEEDED.value}
+
+    def get_capcut_export_result(self, *, project_id: str, job_id: str) -> dict[str, Any]:
+        job = self.store.get_job(project_id=project_id, job_id=job_id)
+        export = self.store.get_export_run(project_id=project_id, export_id=job["output_ref"])
+        return {"job_id": job["job_id"], "status": job["status"], "export": export}
+
     def _asset_payload(self, asset: Any) -> dict[str, Any]:
         return {
             "asset_id": asset.asset_id,
@@ -436,3 +522,11 @@ class LocalPipelineRunner:
             project_id=project_id,
             segment_analysis_id=job["output_ref"],
         )
+
+    def _ensure_timeline_ready_for_output(self, timeline: dict[str, Any]) -> None:
+        review_flags = timeline.get("review_flags", [])
+        pending_recommendations = timeline.get("pending_recommendations", [])
+        if review_flags or pending_recommendations:
+            raise ValueError(
+                "Timeline still has review blockers. Clear review flags and pending recommendations before preview or export."
+            )

@@ -6,6 +6,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from videobox_api.main import create_app
+from videobox_provider_interfaces.stt import STTResult, STTSegment
 
 
 def test_health_endpoint_reports_ok() -> None:
@@ -368,3 +369,202 @@ def test_project_listing_and_job_feed_support_dashboard(tmp_path: Path) -> None:
     assert project_payload["name"] == "Dashboard Draft"
     assert any(job["job_id"] == timeline_job_id for job in jobs_payload["jobs"])
     assert any(job["job_type"] == "timeline_build" for job in jobs_payload["jobs"])
+
+
+def test_preview_and_capcut_export_flow_persist_outputs_and_statuses(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    def clean_transcribe(self, request):  # noqa: ANN001
+        return STTResult(
+            text="Office overview. Team meeting overview.",
+            segments=[
+                STTSegment(start_sec=0.0, end_sec=1.0, text="Office overview.", confidence=0.99),
+                STTSegment(
+                    start_sec=1.0,
+                    end_sec=2.2,
+                    text="Team meeting overview.",
+                    confidence=0.98,
+                ),
+            ],
+            provider_name="mock_stt",
+        )
+
+    monkeypatch.setattr(
+        "videobox_provider_interfaces.stt.MockSTTProvider.transcribe",
+        clean_transcribe,
+    )
+
+    source_audio = tmp_path / "source-narration.wav"
+    source_script = tmp_path / "source-script.txt"
+    broll_city = tmp_path / "city-office.mp4"
+    source_audio.write_bytes(b"fake wav data")
+    source_script.write_text("Office overview.\n\nTeam meeting overview.\n", encoding="utf-8")
+    broll_city.write_bytes(b"video bytes 1")
+
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "Output Draft"}).json()["project_id"]
+
+    narration_asset_id = client.post(
+        f"/api/projects/{project_id}/assets/narration-audio",
+        json={"source_path": str(source_audio)},
+    ).json()["asset_id"]
+    script_asset_id = client.post(
+        f"/api/projects/{project_id}/assets/script-document",
+        json={"source_path": str(source_script)},
+    ).json()["asset_id"]
+    client.post(
+        f"/api/projects/{project_id}/assets/broll-video",
+        json={
+            "source_path": str(broll_city),
+            "title": "Office skyline",
+            "tags": ["office", "city", "overview"],
+        },
+    )
+
+    transcription_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/transcription",
+        json={"narration_asset_id": narration_asset_id},
+    ).json()["job_id"]
+    segment_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/segment-analysis",
+        json={
+            "transcription_job_id": transcription_job_id,
+            "script_asset_id": script_asset_id,
+        },
+    ).json()["job_id"]
+    broll_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/broll-recommendation",
+        json={"segment_analysis_job_id": segment_job_id},
+    ).json()["job_id"]
+    music_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/music-recommendation",
+        json={"segment_analysis_job_id": segment_job_id},
+    ).json()["job_id"]
+    timeline_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/build-timeline",
+        json={
+            "segment_analysis_job_id": segment_job_id,
+            "recommendation_job_ids": [broll_job_id, music_job_id],
+        },
+    ).json()["job_id"]
+
+    preview_response = client.post(
+        f"/api/projects/{project_id}/jobs/preview-render",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    export_response = client.post(
+        f"/api/projects/{project_id}/jobs/capcut-export",
+        json={"timeline_job_id": timeline_job_id},
+    )
+
+    assert preview_response.status_code == 202
+    assert export_response.status_code == 202
+
+    preview_job_id = preview_response.json()["job_id"]
+    export_job_id = export_response.json()["job_id"]
+
+    preview_result = client.get(f"/api/projects/{project_id}/previews/{preview_job_id}")
+    export_result = client.get(f"/api/projects/{project_id}/exports/{export_job_id}")
+
+    assert preview_result.status_code == 200
+    assert export_result.status_code == 200
+
+    preview_payload = preview_result.json()
+    export_payload = export_result.json()
+    assert preview_payload["status"] == "succeeded"
+    assert preview_payload["preview"]["timeline_id"] == "timeline_001"
+    assert preview_payload["preview"]["artifact_kind"] == "mock_preview_bundle"
+    assert export_payload["status"] == "succeeded"
+    assert export_payload["export"]["timeline_id"] == "timeline_001"
+    assert export_payload["export"]["export_type"] == "capcut"
+    assert export_payload["export"]["notes"][0].lower().startswith("mock capcut")
+
+    project_root = tmp_path / "projects" / project_id
+    assert (project_root / "previews" / "preview_001.json").exists()
+    assert (
+        project_root / "exports" / "capcut" / "export_001" / "capcut_payload.json"
+    ).exists()
+
+
+def test_preview_and_capcut_export_require_review_clearance(tmp_path: Path) -> None:
+    source_audio = tmp_path / "source-narration.wav"
+    source_script = tmp_path / "source-script.txt"
+    broll_city = tmp_path / "city-office.mp4"
+    source_audio.write_bytes(b"fake wav data")
+    source_script.write_text("Office overview.\n\nTeam meeting restart.\n", encoding="utf-8")
+    broll_city.write_bytes(b"video bytes 1")
+
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "Review Gate Draft"}).json()["project_id"]
+
+    narration_asset_id = client.post(
+        f"/api/projects/{project_id}/assets/narration-audio",
+        json={"source_path": str(source_audio)},
+    ).json()["asset_id"]
+    script_asset_id = client.post(
+        f"/api/projects/{project_id}/assets/script-document",
+        json={"source_path": str(source_script)},
+    ).json()["asset_id"]
+    client.post(
+        f"/api/projects/{project_id}/assets/broll-video",
+        json={
+            "source_path": str(broll_city),
+            "title": "Office skyline",
+            "tags": ["office", "city", "overview"],
+        },
+    )
+
+    transcription_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/transcription",
+        json={"narration_asset_id": narration_asset_id},
+    ).json()["job_id"]
+    segment_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/segment-analysis",
+        json={
+            "transcription_job_id": transcription_job_id,
+            "script_asset_id": script_asset_id,
+        },
+    ).json()["job_id"]
+    broll_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/broll-recommendation",
+        json={"segment_analysis_job_id": segment_job_id},
+    ).json()["job_id"]
+    music_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/music-recommendation",
+        json={"segment_analysis_job_id": segment_job_id},
+    ).json()["job_id"]
+    timeline_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/build-timeline",
+        json={
+            "segment_analysis_job_id": segment_job_id,
+            "recommendation_job_ids": [broll_job_id, music_job_id],
+        },
+    ).json()["job_id"]
+
+    preview_response = client.post(
+        f"/api/projects/{project_id}/jobs/preview-render",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    export_response = client.post(
+        f"/api/projects/{project_id}/jobs/capcut-export",
+        json={"timeline_job_id": timeline_job_id},
+    )
+
+    assert preview_response.status_code == 400
+    assert export_response.status_code == 400
+    assert "review" in preview_response.json()["detail"].lower()
+    assert "review" in export_response.json()["detail"].lower()
+
+    jobs_response = client.get(f"/api/projects/{project_id}/jobs")
+    jobs_payload = jobs_response.json()["jobs"]
+    preview_job = next(job for job in jobs_payload if job["job_type"] == "preview_render")
+    export_job = next(job for job in jobs_payload if job["job_type"] == "capcut_export")
+    assert preview_job["status"] == "failed"
+    assert export_job["status"] == "failed"
+
+    project_root = tmp_path / "projects" / project_id
+    assert not list((project_root / "previews").glob("preview_*.json"))
+    assert not list((project_root / "exports" / "capcut").glob("export_*"))

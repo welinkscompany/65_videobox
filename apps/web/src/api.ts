@@ -94,6 +94,45 @@ export type BuildTimelineRequest = {
   recommendation_job_ids: string[];
 };
 
+export type OutputJobRequest = {
+  timeline_job_id: string;
+};
+
+export type PreviewArtifact = {
+  preview_id: string;
+  project_id: string;
+  timeline_id: string;
+  file_uri: string;
+  status: string;
+  artifact_kind: string;
+  notes: string[];
+  created_at?: string | null;
+};
+
+export type PreviewJob = {
+  job_id: string;
+  status: string;
+  preview: PreviewArtifact;
+};
+
+export type ExportArtifact = {
+  export_id: string;
+  project_id: string;
+  timeline_id: string;
+  export_type: string;
+  file_uri: string;
+  status: string;
+  adapter?: string | null;
+  notes: string[];
+  created_at?: string | null;
+};
+
+export type ExportJob = {
+  job_id: string;
+  status: string;
+  export: ExportArtifact;
+};
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, init);
   if (!response.ok) {
@@ -120,8 +159,28 @@ export const api = {
       },
       body: JSON.stringify(payload),
     }),
+  renderPreview: (projectId: string, payload: OutputJobRequest) =>
+    request<{ job_id: string; status: string }>(`/api/projects/${projectId}/jobs/preview-render`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    }),
+  exportCapcut: (projectId: string, payload: OutputJobRequest) =>
+    request<{ job_id: string; status: string }>(`/api/projects/${projectId}/jobs/capcut-export`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    }),
   getTimeline: (projectId: string, jobId: string) =>
     request<TimelineJob>(`/api/projects/${projectId}/timelines/${jobId}`),
   getReviewSnapshot: (projectId: string, jobId: string) =>
     request<ReviewSnapshot>(`/api/projects/${projectId}/review-snapshots/${jobId}`),
+  getPreview: (projectId: string, jobId: string) =>
+    request<PreviewJob>(`/api/projects/${projectId}/previews/${jobId}`),
+  getExport: (projectId: string, jobId: string) =>
+    request<ExportJob>(`/api/projects/${projectId}/exports/${jobId}`),
 };

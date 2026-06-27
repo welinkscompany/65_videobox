@@ -417,6 +417,146 @@ class LocalProjectStore:
         )
         return {"timeline_id": timeline_id, "file_uri": file_uri, "timeline": payload}
 
+    def save_preview_run(
+        self,
+        *,
+        project_id: str,
+        timeline_id: str,
+        preview_payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        sequence = self._next_sequence(
+            self.project_root(project_id) / "previews",
+            "preview_*.json",
+        )
+        preview_id = f"preview_{sequence:03d}"
+        preview_path = self.project_root(project_id) / "previews" / f"{preview_id}.json"
+        file_uri = self._path_to_uri(project_id, preview_path)
+        payload = {
+            "preview_id": preview_id,
+            "project_id": project_id,
+            "timeline_id": timeline_id,
+            "file_uri": file_uri,
+            "status": "succeeded",
+            "created_at": self._now_iso(),
+            **preview_payload,
+        }
+        preview_path.write_text(json.dumps(payload, indent=2, ensure_ascii=True), encoding="utf-8")
+        summary_json = json.dumps(
+            {
+                "artifact_kind": payload.get("artifact_kind"),
+                "clip_group_count": len(payload.get("clips", [])),
+            },
+            ensure_ascii=True,
+        )
+        try:
+            self._execute(
+                project_id,
+                """
+                INSERT INTO preview_renders (
+                    preview_id,
+                    project_id,
+                    timeline_id,
+                    file_uri,
+                    status,
+                    summary_json,
+                    created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    preview_id,
+                    project_id,
+                    timeline_id,
+                    file_uri,
+                    payload["status"],
+                    summary_json,
+                    payload["created_at"],
+                ),
+            )
+        except Exception:
+            preview_path.unlink(missing_ok=True)
+            raise
+        return {"preview_id": preview_id, "file_uri": file_uri, "preview": payload}
+
+    def save_capcut_export(
+        self,
+        *,
+        project_id: str,
+        timeline_id: str,
+        export_payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        sequence = self._next_sequence(
+            self.project_root(project_id) / "exports" / "capcut",
+            "export_*",
+        )
+        export_id = f"export_{sequence:03d}"
+        export_directory = self.project_root(project_id) / "exports" / "capcut" / export_id
+        export_directory.mkdir(parents=True, exist_ok=True)
+        payload_path = export_directory / "capcut_payload.json"
+        notes_path = export_directory / "README.txt"
+        file_uri = self._path_to_uri(project_id, payload_path)
+        payload = {
+            "export_id": export_id,
+            "project_id": project_id,
+            "timeline_id": timeline_id,
+            "export_type": "capcut",
+            "file_uri": file_uri,
+            "status": "succeeded",
+            "created_at": self._now_iso(),
+            **export_payload,
+        }
+        existing_notes = [str(note) for note in payload.get("notes", [])]
+        if not existing_notes or not existing_notes[0].lower().startswith("mock capcut"):
+            payload["notes"] = [
+                "Mock CapCut payload for local post-editing handoff.",
+                *existing_notes,
+            ]
+        else:
+            payload["notes"] = existing_notes
+        payload_path.write_text(json.dumps(payload, indent=2, ensure_ascii=True), encoding="utf-8")
+        notes_path.write_text(
+            "Mock CapCut export payload generated from timeline JSON.\n"
+            "This is a local handoff artifact for post-editing.\n",
+            encoding="utf-8",
+        )
+        metadata_json = json.dumps(
+            {
+                "timeline_id": timeline_id,
+                "adapter": payload.get("adapter"),
+                "track_count": len(payload.get("tracks", [])),
+            },
+            ensure_ascii=True,
+        )
+        try:
+            self._execute(
+                project_id,
+                """
+                INSERT INTO exports (
+                    export_id,
+                    project_id,
+                    timeline_id,
+                    export_type,
+                    file_uri,
+                    status,
+                    metadata_json,
+                    created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    export_id,
+                    project_id,
+                    timeline_id,
+                    "capcut",
+                    file_uri,
+                    payload["status"],
+                    metadata_json,
+                    payload["created_at"],
+                ),
+            )
+        except Exception:
+            shutil.rmtree(export_directory, ignore_errors=True)
+            raise
+        return {"export_id": export_id, "file_uri": file_uri, "export": payload}
+
     def create_job(
         self,
         *,
@@ -703,6 +843,44 @@ class LocalProjectStore:
             raise KeyError(f"Timeline JSON missing: {timeline_id}")
         payload = json.loads(file_path.read_text(encoding="utf-8"))
         payload["summary"] = json.loads(row["summary_json"] or "{}")
+        return payload
+
+    def get_preview_run(self, *, project_id: str, preview_id: str) -> dict[str, Any]:
+        row = self._fetchone(
+            project_id,
+            """
+            SELECT preview_id, project_id, timeline_id, file_uri, status, summary_json, created_at
+            FROM preview_renders
+            WHERE preview_id = ?
+            """,
+            (preview_id,),
+        )
+        if row is None:
+            raise KeyError(f"Preview not found: {preview_id}")
+        file_path = self.resolve_storage_uri(project_id=project_id, storage_uri=str(row["file_uri"]))
+        if not file_path.exists():
+            raise KeyError(f"Preview artifact missing: {preview_id}")
+        payload = json.loads(file_path.read_text(encoding="utf-8"))
+        payload["summary"] = json.loads(row["summary_json"] or "{}")
+        return payload
+
+    def get_export_run(self, *, project_id: str, export_id: str) -> dict[str, Any]:
+        row = self._fetchone(
+            project_id,
+            """
+            SELECT export_id, project_id, timeline_id, export_type, file_uri, status, metadata_json, created_at
+            FROM exports
+            WHERE export_id = ?
+            """,
+            (export_id,),
+        )
+        if row is None:
+            raise KeyError(f"Export not found: {export_id}")
+        file_path = self.resolve_storage_uri(project_id=project_id, storage_uri=str(row["file_uri"]))
+        if not file_path.exists():
+            raise KeyError(f"Export artifact missing: {export_id}")
+        payload = json.loads(file_path.read_text(encoding="utf-8"))
+        payload["metadata"] = json.loads(row["metadata_json"] or "{}")
         return payload
 
     def build_review_snapshot(

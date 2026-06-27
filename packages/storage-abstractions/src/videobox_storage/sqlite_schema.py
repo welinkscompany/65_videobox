@@ -99,9 +99,21 @@ PROJECT_SCHEMA_STATEMENTS = (
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS preview_renders (
+        preview_id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        timeline_id TEXT NOT NULL,
+        file_uri TEXT NOT NULL,
+        status TEXT NOT NULL,
+        summary_json TEXT,
+        created_at TEXT NOT NULL
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS exports (
         export_id TEXT PRIMARY KEY,
         project_id TEXT NOT NULL,
+        timeline_id TEXT NOT NULL,
         export_type TEXT NOT NULL,
         file_uri TEXT NOT NULL,
         status TEXT NOT NULL,

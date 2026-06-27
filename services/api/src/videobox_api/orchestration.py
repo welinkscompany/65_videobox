@@ -162,3 +162,15 @@ class ApiOrchestrator:
 
     def get_review_snapshot(self, *, project_id: str, job_id: str) -> dict[str, Any]:
         return self.pipeline.get_review_snapshot(project_id=project_id, job_id=job_id)
+
+    def start_preview_render(self, *, project_id: str, timeline_job_id: str) -> dict[str, Any]:
+        return self.pipeline.start_preview_render(project_id=project_id, timeline_job_id=timeline_job_id)
+
+    def get_preview_result(self, *, project_id: str, job_id: str) -> dict[str, Any]:
+        return self.pipeline.get_preview_result(project_id=project_id, job_id=job_id)
+
+    def start_capcut_export(self, *, project_id: str, timeline_job_id: str) -> dict[str, Any]:
+        return self.pipeline.start_capcut_export(project_id=project_id, timeline_job_id=timeline_job_id)
+
+    def get_capcut_export_result(self, *, project_id: str, job_id: str) -> dict[str, Any]:
+        return self.pipeline.get_capcut_export_result(project_id=project_id, job_id=job_id)
