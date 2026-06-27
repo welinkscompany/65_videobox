@@ -37,6 +37,29 @@ PROJECT_SCHEMA_STATEMENTS = (
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS transcripts (
+        transcript_id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        source_asset_id TEXT NOT NULL,
+        transcript_uri TEXT NOT NULL,
+        transcript_text TEXT NOT NULL,
+        provider_name TEXT NOT NULL,
+        segments_json TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS segment_analysis_runs (
+        segment_analysis_id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        transcript_id TEXT NOT NULL,
+        script_asset_id TEXT,
+        file_uri TEXT NOT NULL,
+        segments_json TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS recommendations (
         recommendation_id TEXT PRIMARY KEY,
         project_id TEXT NOT NULL,

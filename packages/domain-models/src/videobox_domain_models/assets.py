@@ -17,6 +17,7 @@ class AssetType(StrEnum):
     IMAGE = "image"
     BGM = "bgm"
     SFX = "sfx"
+    SCRIPT_DOCUMENT = "script_document"
     VOICE_SAMPLE_AUDIO = "voice_sample_audio"
     GENERATED_TTS_AUDIO = "generated_tts_audio"
 
