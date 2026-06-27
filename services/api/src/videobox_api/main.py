@@ -21,6 +21,10 @@ class ProjectResponse(BaseModel):
     root_storage_uri: str
 
 
+class ProjectListResponse(BaseModel):
+    projects: list[ProjectResponse]
+
+
 class AssetRegistrationRequest(BaseModel):
     source_path: str = Field(min_length=1)
 
@@ -43,6 +47,22 @@ class StartTranscriptionRequest(BaseModel):
 class StartJobResponse(BaseModel):
     job_id: str
     status: str
+
+
+class JobRecordResponse(BaseModel):
+    job_id: str
+    project_id: str
+    job_type: str
+    status: str
+    input_ref: str | None = None
+    output_ref: str | None = None
+    error_message: str | None = None
+    started_at: str | None = None
+    finished_at: str | None = None
+
+
+class JobListResponse(BaseModel):
+    jobs: list[JobRecordResponse]
 
 
 class TranscriptionJobResponse(StartJobResponse):
@@ -168,6 +188,42 @@ def create_app(*, projects_root: Path | None = None) -> FastAPI:
             status=project.status.value,
             root_storage_uri=project.root_storage_uri,
         )
+
+    @app.get("/api/projects")
+    def list_projects() -> ProjectListResponse:
+        projects = store.list_projects()
+        return ProjectListResponse(
+            projects=[
+                ProjectResponse(
+                    project_id=project["project_id"],
+                    name=project["name"],
+                    status=project["status"],
+                    root_storage_uri=project["root_storage_uri"],
+                )
+                for project in projects
+            ]
+        )
+
+    @app.get("/api/projects/{project_id}")
+    def get_project(project_id: str) -> ProjectResponse:
+        try:
+            project = store.get_project(project_id=project_id)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return ProjectResponse(
+            project_id=project["project_id"],
+            name=project["name"],
+            status=project["status"],
+            root_storage_uri=project["root_storage_uri"],
+        )
+
+    @app.get("/api/projects/{project_id}/jobs")
+    def list_project_jobs(project_id: str) -> JobListResponse:
+        try:
+            jobs = store.list_jobs(project_id=project_id)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return JobListResponse(jobs=[JobRecordResponse(**job) for job in jobs])
 
     @app.post("/api/projects/{project_id}/assets/narration-audio", status_code=status.HTTP_201_CREATED)
     def register_narration_audio(project_id: str, payload: AssetRegistrationRequest) -> AssetResponse:

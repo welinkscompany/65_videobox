@@ -293,3 +293,78 @@ def test_timeline_and_review_snapshot_flow(tmp_path: Path) -> None:
     assert {"narration", "broll", "bgm"}.issubset(
         {track["track_type"] for track in timeline_json["tracks"]}
     )
+
+
+def test_project_listing_and_job_feed_support_dashboard(tmp_path: Path) -> None:
+    source_audio = tmp_path / "source-narration.wav"
+    source_script = tmp_path / "source-script.txt"
+    broll_city = tmp_path / "city-office.mp4"
+    source_audio.write_bytes(b"fake wav data")
+    source_script.write_text("Office overview.\n\nTeam meeting restart.\n", encoding="utf-8")
+    broll_city.write_bytes(b"video bytes 1")
+
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "Dashboard Draft"}).json()["project_id"]
+
+    narration_asset_id = client.post(
+        f"/api/projects/{project_id}/assets/narration-audio",
+        json={"source_path": str(source_audio)},
+    ).json()["asset_id"]
+    script_asset_id = client.post(
+        f"/api/projects/{project_id}/assets/script-document",
+        json={"source_path": str(source_script)},
+    ).json()["asset_id"]
+    client.post(
+        f"/api/projects/{project_id}/assets/broll-video",
+        json={
+            "source_path": str(broll_city),
+            "title": "Office skyline",
+            "tags": ["office", "city", "overview"],
+        },
+    )
+
+    transcription_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/transcription",
+        json={"narration_asset_id": narration_asset_id},
+    ).json()["job_id"]
+    segment_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/segment-analysis",
+        json={
+            "transcription_job_id": transcription_job_id,
+            "script_asset_id": script_asset_id,
+        },
+    ).json()["job_id"]
+    broll_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/broll-recommendation",
+        json={"segment_analysis_job_id": segment_job_id},
+    ).json()["job_id"]
+    music_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/music-recommendation",
+        json={"segment_analysis_job_id": segment_job_id},
+    ).json()["job_id"]
+    timeline_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/build-timeline",
+        json={
+            "segment_analysis_job_id": segment_job_id,
+            "recommendation_job_ids": [broll_job_id, music_job_id],
+        },
+    ).json()["job_id"]
+
+    projects_response = client.get("/api/projects")
+    project_response = client.get(f"/api/projects/{project_id}")
+    jobs_response = client.get(f"/api/projects/{project_id}/jobs")
+
+    assert projects_response.status_code == 200
+    assert project_response.status_code == 200
+    assert jobs_response.status_code == 200
+
+    projects_payload = projects_response.json()
+    project_payload = project_response.json()
+    jobs_payload = jobs_response.json()
+
+    assert any(project["project_id"] == project_id for project in projects_payload["projects"])
+    assert project_payload["project_id"] == project_id
+    assert project_payload["name"] == "Dashboard Draft"
+    assert any(job["job_id"] == timeline_job_id for job in jobs_payload["jobs"])
+    assert any(job["job_type"] == "timeline_build" for job in jobs_payload["jobs"])

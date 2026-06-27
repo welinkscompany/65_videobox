@@ -26,11 +26,52 @@ class LocalProjectStore:
         self._bootstrap_database(project_root / "db" / "project.sqlite", project)
         return project
 
+    def list_projects(self) -> list[dict[str, Any]]:
+        projects_directory = self.projects_root / "projects"
+        if not projects_directory.exists():
+            return []
+        items: list[dict[str, Any]] = []
+        for project_directory in sorted(projects_directory.iterdir()):
+            if not project_directory.is_dir():
+                continue
+            database_path = project_directory / "db" / "project.sqlite"
+            if not database_path.exists():
+                continue
+            connection = sqlite3.connect(database_path)
+            connection.row_factory = sqlite3.Row
+            try:
+                row = connection.execute(
+                    """
+                    SELECT project_id, name, status, root_storage_uri, created_at, updated_at
+                    FROM projects
+                    LIMIT 1
+                    """
+                ).fetchone()
+            finally:
+                connection.close()
+            if row is not None:
+                items.append(dict(row))
+        return items
+
     def project_root(self, project_id: str) -> Path:
         return self.projects_root / "projects" / project_id
 
     def database_path(self, project_id: str) -> Path:
         return self.project_root(project_id) / "db" / "project.sqlite"
+
+    def get_project(self, *, project_id: str) -> dict[str, Any]:
+        row = self._fetchone(
+            project_id,
+            """
+            SELECT project_id, name, status, root_storage_uri, created_at, updated_at
+            FROM projects
+            WHERE project_id = ?
+            """,
+            (project_id,),
+        )
+        if row is None:
+            raise KeyError(f"Project not found: {project_id}")
+        return dict(row)
 
     def register_asset(
         self,
@@ -476,6 +517,29 @@ class LocalProjectStore:
         if row is None:
             raise KeyError(f"Job not found: {job_id}")
         return dict(row)
+
+    def list_jobs(self, *, project_id: str) -> list[dict[str, Any]]:
+        connection = self._connection(project_id)
+        try:
+            rows = connection.execute(
+                """
+                SELECT
+                    job_id,
+                    project_id,
+                    job_type,
+                    status,
+                    input_ref,
+                    output_ref,
+                    error_message,
+                    started_at,
+                    finished_at
+                FROM jobs
+                ORDER BY rowid ASC
+                """
+            ).fetchall()
+        finally:
+            connection.close()
+        return [dict(row) for row in rows]
 
     def get_asset(self, *, project_id: str, asset_id: str) -> dict[str, Any]:
         row = self._fetchone(
