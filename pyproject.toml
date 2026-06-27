@@ -1,0 +1,8 @@
+[project]
+name = "videobox"
+version = "0.1.0"
+description = "Local-first AI video editing engine skeleton for VideoBox"
+requires-python = ">=3.12"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

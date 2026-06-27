@@ -1,0 +1,152 @@
+:root {
+  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  color: #e5eef7;
+  background:
+    radial-gradient(circle at top, rgba(90, 138, 198, 0.28), transparent 40%),
+    linear-gradient(180deg, #0f1722 0%, #172333 100%);
+  line-height: 1.5;
+  font-weight: 400;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background: transparent;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+.app-shell {
+  width: min(1120px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 48px 0 64px;
+}
+
+.hero {
+  padding: 32px;
+  border: 1px solid rgba(178, 206, 232, 0.18);
+  border-radius: 24px;
+  background: rgba(12, 20, 31, 0.76);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.3);
+}
+
+.eyebrow,
+.section-label,
+.status-name {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.78rem;
+  color: #90aeca;
+}
+
+.hero h1,
+.section-heading h2,
+.status-panel h2,
+.review-card h3 {
+  margin: 0;
+}
+
+.hero h1 {
+  margin-top: 8px;
+  font-size: clamp(2rem, 5vw, 3.4rem);
+}
+
+.hero-copy {
+  max-width: 64ch;
+  margin: 16px 0 0;
+  color: #bed0e0;
+}
+
+.dashboard {
+  display: grid;
+  gap: 24px;
+  margin-top: 24px;
+}
+
+.status-panel,
+.review-card {
+  border: 1px solid rgba(178, 206, 232, 0.14);
+  border-radius: 20px;
+  background: rgba(11, 18, 27, 0.82);
+}
+
+.status-panel {
+  padding: 28px;
+}
+
+.status-grid,
+.card-grid {
+  display: grid;
+  gap: 16px;
+  margin-top: 20px;
+}
+
+.status-grid {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.status-item {
+  padding: 18px;
+  border-radius: 16px;
+  background: rgba(34, 55, 79, 0.65);
+}
+
+.status-item strong {
+  display: block;
+  margin-top: 10px;
+  color: #f5fbff;
+}
+
+.card-grid {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.review-card {
+  padding: 24px;
+}
+
+.review-card p,
+.review-card ul,
+.section-label {
+  margin-bottom: 0;
+}
+
+.review-card p {
+  color: #bed0e0;
+}
+
+.review-card ul {
+  padding-left: 18px;
+  color: #d9e7f4;
+}
+
+.review-card li + li {
+  margin-top: 8px;
+}
+
+@media (max-width: 640px) {
+  .app-shell {
+    width: min(100% - 24px, 1120px);
+    padding: 24px 0 40px;
+  }
+
+  .hero,
+  .status-panel,
+  .review-card {
+    padding: 20px;
+  }
+}
