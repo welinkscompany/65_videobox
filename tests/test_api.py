@@ -797,3 +797,88 @@ def test_approved_timeline_can_generate_subtitles_preview_and_export(
     assert preview_result.json()["preview"]["artifact_kind"] == "playable_html_preview"
     assert export_result.status_code == 200
     assert export_result.json()["export"]["subtitle_file_uri"].endswith(".srt")
+
+
+def test_gemini_key_management_api_masks_secrets_and_supports_state_changes(tmp_path: Path) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "Gemini API Project"}).json()["project_id"]
+
+    create_response = client.post(
+        f"/api/projects/{project_id}/providers/gemini/keys",
+        json={
+            "label": "Primary Gemini",
+            "api_key": "AIza-sample-secret-1234",
+            "primary_model": "gemini-2.5-flash",
+            "cheap_model": "gemini-2.5-flash-lite",
+            "high_quality_model": "gemini-2.5-pro",
+        },
+    )
+    assert create_response.status_code == 201
+    created = create_response.json()
+    assert created["label"] == "Primary Gemini"
+    assert created["status"] == "active"
+    assert created["masked_api_key"].startswith("AIza")
+    assert "secret" not in json.dumps(created).lower()
+
+    list_response = client.get(f"/api/projects/{project_id}/providers/gemini/keys")
+    assert list_response.status_code == 200
+    listed = list_response.json()["keys"]
+    assert len(listed) == 1
+    assert listed[0]["key_id"] == created["key_id"]
+    assert "api_key" not in listed[0]
+    assert "api_key_secret" not in listed[0]
+
+    update_response = client.patch(
+        f"/api/projects/{project_id}/providers/gemini/keys/{created['key_id']}",
+        json={
+            "label": "Primary Gemini Updated",
+            "cheap_model": "gemini-2.5-flash",
+        },
+    )
+    assert update_response.status_code == 200
+    assert update_response.json()["label"] == "Primary Gemini Updated"
+    assert update_response.json()["cheap_model"] == "gemini-2.5-flash"
+
+    disable_response = client.post(
+        f"/api/projects/{project_id}/providers/gemini/keys/{created['key_id']}/disable"
+    )
+    enable_response = client.post(
+        f"/api/projects/{project_id}/providers/gemini/keys/{created['key_id']}/enable"
+    )
+    assert disable_response.status_code == 200
+    assert disable_response.json()["status"] == "disabled"
+    assert enable_response.status_code == 200
+    assert enable_response.json()["status"] == "active"
+
+
+def test_gemini_key_api_enforces_max_ten_keys(tmp_path: Path) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "Gemini Limit Project"}).json()["project_id"]
+
+    for index in range(10):
+        response = client.post(
+            f"/api/projects/{project_id}/providers/gemini/keys",
+            json={
+                "label": f"Gemini {index}",
+                "api_key": f"AIza-sample-secret-{index}",
+                "primary_model": "gemini-2.5-flash",
+                "cheap_model": "gemini-2.5-flash-lite",
+                "high_quality_model": "gemini-2.5-pro",
+            },
+        )
+        assert response.status_code == 201
+
+    overflow = client.post(
+        f"/api/projects/{project_id}/providers/gemini/keys",
+        json={
+            "label": "Gemini overflow",
+            "api_key": "AIza-over-limit",
+            "primary_model": "gemini-2.5-flash",
+            "cheap_model": "gemini-2.5-flash-lite",
+            "high_quality_model": "gemini-2.5-pro",
+        },
+    )
+    assert overflow.status_code == 400
+    assert "10" in overflow.json()["detail"]

@@ -223,6 +223,42 @@ class SubtitleJobResponse(StartJobResponse):
     subtitle: SubtitleArtifactResponse
 
 
+class GeminiProviderKeyCreateRequest(BaseModel):
+    label: str = Field(min_length=1)
+    api_key: str = Field(min_length=1)
+    primary_model: str = Field(min_length=1)
+    cheap_model: str = Field(min_length=1)
+    high_quality_model: str = Field(min_length=1)
+
+
+class GeminiProviderKeyUpdateRequest(BaseModel):
+    label: str | None = None
+    primary_model: str | None = None
+    cheap_model: str | None = None
+    high_quality_model: str | None = None
+
+
+class GeminiProviderKeyResponse(BaseModel):
+    key_id: str
+    project_id: str
+    label: str
+    masked_api_key: str
+    primary_model: str
+    cheap_model: str
+    high_quality_model: str
+    status: str
+    cooldown_until: str | None = None
+    consecutive_failures: int
+    last_error: str | None = None
+    last_used_at: str | None = None
+    created_at: str
+    updated_at: str
+
+
+class GeminiProviderKeyListResponse(BaseModel):
+    keys: list[GeminiProviderKeyResponse]
+
+
 def create_app(*, projects_root: Path | None = None) -> FastAPI:
     app = FastAPI(title="VideoBox API", version="0.1.0")
     store = LocalProjectStore(projects_root or DEFAULT_PROJECTS_ROOT)
@@ -561,5 +597,76 @@ def create_app(*, projects_root: Path | None = None) -> FastAPI:
             status=result["status"],
             export=ExportArtifactResponse(**result["export"]),
         )
+
+    @app.get("/api/projects/{project_id}/providers/gemini/keys")
+    def list_gemini_provider_keys(project_id: str) -> GeminiProviderKeyListResponse:
+        try:
+            keys = orchestrator.list_gemini_provider_keys(project_id=project_id)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return GeminiProviderKeyListResponse(
+            keys=[GeminiProviderKeyResponse(**item) for item in keys]
+        )
+
+    @app.post("/api/projects/{project_id}/providers/gemini/keys", status_code=status.HTTP_201_CREATED)
+    def create_gemini_provider_key(
+        project_id: str,
+        payload: GeminiProviderKeyCreateRequest,
+    ) -> GeminiProviderKeyResponse:
+        try:
+            result = orchestrator.save_gemini_provider_key(
+                project_id=project_id,
+                label=payload.label,
+                api_key_secret=payload.api_key,
+                primary_model=payload.primary_model,
+                cheap_model=payload.cheap_model,
+                high_quality_model=payload.high_quality_model,
+            )
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return GeminiProviderKeyResponse(**result)
+
+    @app.patch("/api/projects/{project_id}/providers/gemini/keys/{key_id}")
+    def update_gemini_provider_key(
+        project_id: str,
+        key_id: str,
+        payload: GeminiProviderKeyUpdateRequest,
+    ) -> GeminiProviderKeyResponse:
+        try:
+            result = orchestrator.update_gemini_provider_key(
+                project_id=project_id,
+                key_id=key_id,
+                label=payload.label,
+                primary_model=payload.primary_model,
+                cheap_model=payload.cheap_model,
+                high_quality_model=payload.high_quality_model,
+            )
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return GeminiProviderKeyResponse(**result)
+
+    @app.post("/api/projects/{project_id}/providers/gemini/keys/{key_id}/disable")
+    def disable_gemini_provider_key(project_id: str, key_id: str) -> GeminiProviderKeyResponse:
+        try:
+            result = orchestrator.set_gemini_provider_key_status(
+                project_id=project_id,
+                key_id=key_id,
+                status="disabled",
+            )
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return GeminiProviderKeyResponse(**result)
+
+    @app.post("/api/projects/{project_id}/providers/gemini/keys/{key_id}/enable")
+    def enable_gemini_provider_key(project_id: str, key_id: str) -> GeminiProviderKeyResponse:
+        try:
+            result = orchestrator.set_gemini_provider_key_status(
+                project_id=project_id,
+                key_id=key_id,
+                status="active",
+            )
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return GeminiProviderKeyResponse(**result)
 
     return app

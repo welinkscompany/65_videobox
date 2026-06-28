@@ -186,3 +186,57 @@ class ApiOrchestrator:
 
     def get_capcut_export_result(self, *, project_id: str, job_id: str) -> dict[str, Any]:
         return self.pipeline.get_capcut_export_result(project_id=project_id, job_id=job_id)
+
+    def list_gemini_provider_keys(self, *, project_id: str) -> list[dict[str, Any]]:
+        return self.pipeline.store.list_gemini_provider_keys(project_id=project_id)
+
+    def save_gemini_provider_key(
+        self,
+        *,
+        project_id: str,
+        label: str,
+        api_key_secret: str,
+        primary_model: str,
+        cheap_model: str,
+        high_quality_model: str,
+    ) -> dict[str, Any]:
+        return self.pipeline.store.save_gemini_provider_key(
+            project_id=project_id,
+            label=label,
+            api_key_secret=api_key_secret,
+            primary_model=primary_model,
+            cheap_model=cheap_model,
+            high_quality_model=high_quality_model,
+        )
+
+    def update_gemini_provider_key(
+        self,
+        *,
+        project_id: str,
+        key_id: str,
+        label: str | None = None,
+        primary_model: str | None = None,
+        cheap_model: str | None = None,
+        high_quality_model: str | None = None,
+    ) -> dict[str, Any]:
+        return self.pipeline.store.update_gemini_provider_key(
+            project_id=project_id,
+            key_id=key_id,
+            label=label,
+            primary_model=primary_model,
+            cheap_model=cheap_model,
+            high_quality_model=high_quality_model,
+        )
+
+    def set_gemini_provider_key_status(
+        self,
+        *,
+        project_id: str,
+        key_id: str,
+        status: str,
+    ) -> dict[str, Any]:
+        return self.pipeline.store.set_gemini_provider_key_status(
+            project_id=project_id,
+            key_id=key_id,
+            status=status,
+        )

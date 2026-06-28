@@ -155,4 +155,22 @@ PROJECT_SCHEMA_STATEMENTS = (
         created_at TEXT NOT NULL
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS gemini_provider_keys (
+        key_id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        label TEXT NOT NULL,
+        api_key_secret TEXT NOT NULL,
+        primary_model TEXT NOT NULL,
+        cheap_model TEXT NOT NULL,
+        high_quality_model TEXT NOT NULL,
+        status TEXT NOT NULL,
+        cooldown_until TEXT,
+        consecutive_failures INTEGER NOT NULL,
+        last_error TEXT,
+        last_used_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )
+    """,
 )
