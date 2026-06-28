@@ -233,6 +233,32 @@ class ExportJobResponse(StartJobResponse):
     export: ExportArtifactResponse
 
 
+class ProviderTraceAuditSummaryResponse(BaseModel):
+    total_entries: int
+    provider_counts: dict[str, int] = Field(default_factory=dict)
+    fallback_entry_count: int
+    fallback_reason_counts: dict[str, int] = Field(default_factory=dict)
+    artifact_type_counts: dict[str, int] = Field(default_factory=dict)
+
+
+class ProviderTraceAuditEntryResponse(BaseModel):
+    artifact_type: str
+    artifact_id: str
+    job_id: str | None = None
+    source_job_id: str | None = None
+    timeline_id: str | None = None
+    status: str
+    finished_at: str | None = None
+    created_at: str | None = None
+    error_message: str | None = None
+    provider_trace: ProviderTraceResponse
+
+
+class ProviderTraceAuditResponse(BaseModel):
+    summary: ProviderTraceAuditSummaryResponse
+    entries: list[ProviderTraceAuditEntryResponse]
+
+
 class SubtitleArtifactResponse(BaseModel):
     subtitle_id: str
     project_id: str
@@ -652,6 +678,17 @@ def create_app(
             job_id=result["job_id"],
             status=result["status"],
             export=ExportArtifactResponse(**result["export"]),
+        )
+
+    @app.get("/api/projects/{project_id}/provider-traces")
+    def get_provider_trace_audit(project_id: str) -> ProviderTraceAuditResponse:
+        try:
+            result = orchestrator.get_provider_trace_audit(project_id=project_id)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return ProviderTraceAuditResponse(
+            summary=ProviderTraceAuditSummaryResponse(**result["summary"]),
+            entries=[ProviderTraceAuditEntryResponse(**item) for item in result["entries"]],
         )
 
     @app.get("/api/projects/{project_id}/providers/gemini/keys")

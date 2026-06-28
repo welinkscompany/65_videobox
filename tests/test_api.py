@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import json
+import sqlite3
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -9,6 +10,8 @@ from fastapi.testclient import TestClient
 from videobox_api.main import create_app
 from videobox_api.orchestration import LocalFirstRuntimeService
 from videobox_core_engine.settings import LocalOpenAICompatibleRuntimeConfig
+from videobox_domain_models.jobs import JobStatus, JobType
+from videobox_domain_models.recommendations import RecommendationType
 from videobox_provider_interfaces.llm import (
     LLMProviderConfig,
     LLMProviderError,
@@ -3394,3 +3397,517 @@ def test_gemini_key_api_enforces_max_ten_keys(tmp_path: Path) -> None:
     )
     assert overflow.status_code == 400
     assert "10" in overflow.json()["detail"]
+
+
+def test_provider_trace_audit_endpoint_summarizes_project_fallback_usage(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "videobox_provider_interfaces.stt.MockSTTProvider.transcribe",
+        _single_segment_transcribe,
+    )
+    local_provider = FakeStructuredProvider(
+        errors=[
+            LLMProviderError(
+                provider_name="local_qwen",
+                message="local unavailable",
+                retryable=True,
+                error_code="LOCAL_UNAVAILABLE",
+            )
+            for _ in range(6)
+        ]
+    )
+    gemini_provider = FakeStructuredProvider(
+        responses=[
+            StructuredLLMResponse(
+                provider_name="gemini",
+                model_name="gemini-2.5-flash",
+                output_data={"review_required": False, "cleanup_decision": "keep"},
+                raw_text='{"review_required":false,"cleanup_decision":"keep"}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="gemini",
+                model_name="gemini-2.5-flash-lite",
+                output_data={"keywords": ["office"]},
+                raw_text='{"keywords":["office"]}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="gemini",
+                model_name="gemini-2.5-flash",
+                output_data={"music_mood": "steady documentary", "score": 0.78},
+                raw_text='{"music_mood":"steady documentary","score":0.78}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="gemini",
+                model_name="gemini-2.5-flash",
+                output_data={
+                    "summary": "Gemini review summary.",
+                    "action_items": ["Approve the timeline now."],
+                },
+                raw_text='{"summary":"Gemini review summary.","action_items":["Approve the timeline now."]}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="gemini",
+                model_name="gemini-2.5-flash",
+                output_data={
+                    "summary": "Gemini preview operator copy.",
+                    "action_items": ["Check the preview before handoff."],
+                },
+                raw_text='{"summary":"Gemini preview operator copy.","action_items":["Check the preview before handoff."]}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="gemini",
+                model_name="gemini-2.5-flash",
+                output_data={
+                    "summary": "Gemini export operator copy.",
+                    "action_items": ["Validate the export package."],
+                },
+                raw_text='{"summary":"Gemini export operator copy.","action_items":["Validate the export package."]}',
+                metadata={},
+            ),
+        ]
+    )
+    app = create_app(
+        projects_root=tmp_path,
+        local_first_runtime_service_factory=_local_first_service_factory(
+            local_provider=local_provider,
+            gemini_provider=gemini_provider,
+            local_enabled=True,
+        ),
+    )
+    client = TestClient(app)
+    gemini_key_payload = {
+        "label": "Trace Audit Gemini",
+        "api_key": "AIza-trace-audit",
+        "primary_model": "gemini-2.5-flash",
+        "cheap_model": "gemini-2.5-flash-lite",
+        "high_quality_model": "gemini-2.5-pro",
+    }
+    project_id, timeline_job_id = _create_timeline_review_project(
+        client,
+        tmp_path,
+        gemini_key_payload=gemini_key_payload,
+    )
+    review_snapshot = client.get(f"/api/projects/{project_id}/review-snapshots/{timeline_job_id}")
+    approve_response = client.post(f"/api/projects/{project_id}/review-approvals/{timeline_job_id}/approve")
+    preview_response = client.post(
+        f"/api/projects/{project_id}/jobs/preview-render",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    export_response = client.post(
+        f"/api/projects/{project_id}/jobs/capcut-export",
+        json={"timeline_job_id": timeline_job_id},
+    )
+
+    assert review_snapshot.status_code == 200
+    assert approve_response.status_code == 202
+    assert preview_response.status_code == 202
+    assert export_response.status_code == 202
+
+    audit_response = client.get(f"/api/projects/{project_id}/provider-traces")
+
+    assert audit_response.status_code == 200
+    payload = audit_response.json()
+    assert payload["summary"]["total_entries"] == 6
+    assert payload["summary"]["provider_counts"]["gemini"] == 6
+    assert payload["summary"]["fallback_entry_count"] == 6
+    assert payload["summary"]["fallback_reason_counts"]["local_provider_error"] == 6
+    assert payload["summary"]["artifact_type_counts"] == {
+        "segment_analysis": 1,
+        "broll_recommendation": 1,
+        "music_recommendation": 1,
+        "review_guidance": 1,
+        "preview_render": 1,
+        "capcut_export": 1,
+    }
+
+
+def test_provider_trace_audit_endpoint_exposes_artifact_level_entries(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "videobox_provider_interfaces.stt.MockSTTProvider.transcribe",
+        _single_segment_transcribe,
+    )
+    local_provider = FakeStructuredProvider(
+        responses=[
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"review_required": False, "cleanup_decision": "keep"},
+                raw_text='{"review_required":false,"cleanup_decision":"keep"}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"keywords": ["office"]},
+                raw_text='{"keywords":["office"]}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"music_mood": "cinematic pulse", "score": 0.91},
+                raw_text='{"music_mood":"cinematic pulse","score":0.91}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={
+                    "summary": "Local review summary.",
+                    "action_items": ["Approve the timeline now."],
+                },
+                raw_text='{"summary":"Local review summary.","action_items":["Approve the timeline now."]}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={
+                    "summary": "Local preview operator copy.",
+                    "action_items": ["Check the preview before handoff."],
+                },
+                raw_text='{"summary":"Local preview operator copy.","action_items":["Check the preview before handoff."]}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={
+                    "summary": "Local export operator copy.",
+                    "action_items": ["Validate the export package."],
+                },
+                raw_text='{"summary":"Local export operator copy.","action_items":["Validate the export package."]}',
+                metadata={},
+            ),
+        ]
+    )
+    app = create_app(
+        projects_root=tmp_path,
+        local_first_runtime_service_factory=_local_first_service_factory(
+            local_provider=local_provider,
+            gemini_provider=FakeStructuredProvider(),
+            local_enabled=True,
+        ),
+    )
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+    review_snapshot = client.get(f"/api/projects/{project_id}/review-snapshots/{timeline_job_id}")
+    approve_response = client.post(f"/api/projects/{project_id}/review-approvals/{timeline_job_id}/approve")
+    preview_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/preview-render",
+        json={"timeline_job_id": timeline_job_id},
+    ).json()["job_id"]
+    export_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/capcut-export",
+        json={"timeline_job_id": timeline_job_id},
+    ).json()["job_id"]
+
+    assert review_snapshot.status_code == 200
+    assert approve_response.status_code == 202
+
+    audit_response = client.get(f"/api/projects/{project_id}/provider-traces")
+
+    assert audit_response.status_code == 200
+    entries = audit_response.json()["entries"]
+    assert [entry["artifact_type"] for entry in entries] == [
+        "segment_analysis",
+        "broll_recommendation",
+        "music_recommendation",
+        "review_guidance",
+        "preview_render",
+        "capcut_export",
+    ]
+    review_entry = next(entry for entry in entries if entry["artifact_type"] == "review_guidance")
+    preview_entry = next(entry for entry in entries if entry["artifact_type"] == "preview_render")
+    export_entry = next(entry for entry in entries if entry["artifact_type"] == "capcut_export")
+    assert review_entry["timeline_id"].startswith("timeline_")
+    assert review_entry["job_id"] == timeline_job_id
+    assert review_entry["status"] == "available"
+    assert review_entry["provider_trace"]["final_provider"] == "local_qwen"
+    assert preview_entry["job_id"] == preview_job_id
+    assert preview_entry["artifact_id"].startswith("preview_")
+    assert preview_entry["status"] == "succeeded"
+    assert preview_entry["source_job_id"] == timeline_job_id
+    assert preview_entry["provider_trace"]["final_provider"] == "local_qwen"
+    assert export_entry["job_id"] == export_job_id
+    assert export_entry["artifact_id"].startswith("export_")
+    assert export_entry["status"] == "succeeded"
+    assert export_entry["source_job_id"] == timeline_job_id
+    assert export_entry["provider_trace"]["final_provider"] == "local_qwen"
+
+
+def test_provider_trace_audit_endpoint_backfills_legacy_records_without_complete_trace_data(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Legacy Trace Audit Project")
+    store.save_segment_analysis(
+        project_id=project.project_id,
+        transcript_id="transcript_001",
+        script_asset_id=None,
+        segments=[
+            {
+                "segment_id": "seg_001",
+                "text": "Office overview.",
+                "start_sec": 0.0,
+                "end_sec": 1.0,
+                "confidence": 0.99,
+                "review_required": False,
+                "cleanup_decision": "keep",
+            }
+        ],
+    )
+    segment_job = store.create_job(
+        project_id=project.project_id,
+        job_type=JobType.SEGMENT_ANALYSIS,
+        input_ref="transcription_job_001",
+        status=JobStatus.SUCCEEDED,
+    )
+    store.update_job(
+        project_id=project.project_id,
+        job_id=segment_job["job_id"],
+        status=JobStatus.SUCCEEDED,
+        output_ref="segment_analysis_001",
+    )
+    store.save_recommendation_run(
+        project_id=project.project_id,
+        recommendation_type=RecommendationType.BROLL,
+        source_job_id=segment_job["job_id"],
+        recommendations=[
+            {
+                "target_segment_id": "seg_001",
+                "selected_asset_id": "asset_001",
+                "score": 0.8,
+                "reason": "Matched keywords: office",
+                "auto_apply_allowed": True,
+                "review_required": False,
+                "payload": {"matched_tags": ["office"]},
+            }
+        ],
+    )
+    recommendation_job = store.create_job(
+        project_id=project.project_id,
+        job_type=JobType.BROLL_RECOMMENDATION,
+        input_ref=segment_job["job_id"],
+        status=JobStatus.SUCCEEDED,
+    )
+    store.update_job(
+        project_id=project.project_id,
+        job_id=recommendation_job["job_id"],
+        status=JobStatus.SUCCEEDED,
+        output_ref="broll_001",
+    )
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+        },
+    )
+    timeline_path = tmp_path / "projects" / project.project_id / "timelines" / "timeline_001.json"
+    timeline_payload = json.loads(timeline_path.read_text(encoding="utf-8"))
+    timeline_payload["operator_guidance"] = {
+        "summary": "Legacy review guidance.",
+        "action_items": ["Approve the timeline now."],
+        "provider_trace": {
+            "routing_mode": "local_first",
+            "final_provider": "heuristic_fallback",
+            "fallback_reasons": [],
+        },
+    }
+    timeline_payload["operator_guidance_history"] = [
+        {
+            "artifact_id": "timeline_001:review_guidance:001",
+            "created_at": timeline_payload["created_at"],
+            "provider_trace": {
+                "routing_mode": "local_first",
+                "final_provider": "heuristic_fallback",
+                "fallback_reasons": [],
+            },
+        }
+    ]
+    timeline_path.write_text(json.dumps(timeline_payload, indent=2, ensure_ascii=True), encoding="utf-8")
+    preview = store.save_preview_run(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        preview_payload={
+            "timeline_id": timeline["timeline_id"],
+            "artifact_kind": "playable_html_preview",
+            "clips": [],
+            "notes": ["Legacy preview."],
+        },
+    )
+    preview_job = store.create_job(
+        project_id=project.project_id,
+        job_type=JobType.PREVIEW_RENDER,
+        input_ref="timeline_build_job_001",
+        status=JobStatus.SUCCEEDED,
+    )
+    store.update_job(
+        project_id=project.project_id,
+        job_id=preview_job["job_id"],
+        status=JobStatus.SUCCEEDED,
+        output_ref=preview["preview_id"],
+    )
+    export = store.save_capcut_export(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        export_payload={
+            "timeline_id": timeline["timeline_id"],
+            "adapter": "capcut_v1",
+            "tracks": [],
+            "notes": ["Legacy export."],
+        },
+    )
+    export_job = store.create_job(
+        project_id=project.project_id,
+        job_type=JobType.CAPCUT_EXPORT,
+        input_ref="timeline_build_job_001",
+        status=JobStatus.SUCCEEDED,
+    )
+    store.update_job(
+        project_id=project.project_id,
+        job_id=export_job["job_id"],
+        status=JobStatus.SUCCEEDED,
+        output_ref=export["export_id"],
+    )
+    database_path = tmp_path / "projects" / project.project_id / "db" / "project.sqlite"
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute("UPDATE segments SET metadata_json = '[]'")
+        connection.execute("UPDATE recommendations SET payload_json = 'null'")
+        connection.commit()
+    finally:
+        connection.close()
+    preview_path = tmp_path / "projects" / project.project_id / "previews" / "preview_001.json"
+    preview_payload = json.loads(preview_path.read_text(encoding="utf-8"))
+    preview_payload.pop("provider_trace", None)
+    preview_path.write_text(json.dumps(preview_payload, indent=2, ensure_ascii=True), encoding="utf-8")
+    export_path = (
+        tmp_path
+        / "projects"
+        / project.project_id
+        / "exports"
+        / "capcut"
+        / "export_001"
+        / "capcut_payload.json"
+    )
+    export_payload = json.loads(export_path.read_text(encoding="utf-8"))
+    export_payload.pop("provider_trace", None)
+    export_path.write_text(json.dumps(export_payload, indent=2, ensure_ascii=True), encoding="utf-8")
+
+    client = TestClient(create_app(projects_root=tmp_path))
+    audit_response = client.get(f"/api/projects/{project.project_id}/provider-traces")
+
+    assert audit_response.status_code == 200
+    entries = {entry["artifact_type"]: entry for entry in audit_response.json()["entries"]}
+    assert entries["segment_analysis"]["provider_trace"]["final_provider"] == "heuristic_fallback"
+    assert entries["broll_recommendation"]["provider_trace"]["final_provider"] == "heuristic_fallback"
+    assert entries["review_guidance"]["provider_trace"]["final_provider"] == "heuristic_fallback"
+    assert entries["preview_render"]["provider_trace"]["final_provider"] == "static_fallback"
+    assert entries["capcut_export"]["provider_trace"]["final_provider"] == "static_fallback"
+
+
+def test_provider_trace_audit_endpoint_tolerates_partial_artifact_and_log_corruption(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Corrupt Trace Audit Project")
+    store.save_segment_analysis(
+        project_id=project.project_id,
+        transcript_id="transcript_001",
+        script_asset_id=None,
+        segments=[
+            {
+                "segment_id": "seg_001",
+                "text": "Office overview.",
+                "start_sec": 0.0,
+                "end_sec": 1.0,
+                "confidence": 0.99,
+                "review_required": False,
+                "cleanup_decision": "keep",
+                "provider_trace": {
+                    "routing_mode": "local_first",
+                    "final_provider": "local_qwen",
+                    "fallback_reasons": [],
+                },
+            }
+        ],
+    )
+    segment_job = store.create_job(
+        project_id=project.project_id,
+        job_type=JobType.SEGMENT_ANALYSIS,
+        input_ref="transcription_job_001",
+        status=JobStatus.SUCCEEDED,
+    )
+    store.update_job(
+        project_id=project.project_id,
+        job_id=segment_job["job_id"],
+        status=JobStatus.SUCCEEDED,
+        output_ref="segment_analysis_001",
+    )
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+        },
+    )
+    preview = store.save_preview_run(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        preview_payload={
+            "timeline_id": timeline["timeline_id"],
+            "artifact_kind": "playable_html_preview",
+            "clips": [],
+            "notes": ["Corrupt preview."],
+            "provider_trace": {
+                "routing_mode": "local_first",
+                "final_provider": "gemini",
+                "fallback_reasons": ["local_provider_error"],
+            },
+        },
+    )
+    preview_job = store.create_job(
+        project_id=project.project_id,
+        job_type=JobType.PREVIEW_RENDER,
+        input_ref="timeline_build_job_001",
+        status=JobStatus.SUCCEEDED,
+    )
+    store.update_job(
+        project_id=project.project_id,
+        job_id=preview_job["job_id"],
+        status=JobStatus.SUCCEEDED,
+        output_ref=preview["preview_id"],
+    )
+    preview_path = tmp_path / "projects" / project.project_id / "previews" / "preview_001.json"
+    preview_path.unlink()
+    audit_log_path = tmp_path / "projects" / project.project_id / "logs" / "provider_trace_audit.jsonl"
+    audit_log_path.write_text("{bad json}\n", encoding="utf-8")
+
+    client = TestClient(create_app(projects_root=tmp_path))
+    audit_response = client.get(f"/api/projects/{project.project_id}/provider-traces")
+
+    assert audit_response.status_code == 200
+    entries = audit_response.json()["entries"]
+    assert len(entries) == 1
+    assert entries[0]["artifact_type"] == "segment_analysis"
+    assert entries[0]["provider_trace"]["final_provider"] == "local_qwen"

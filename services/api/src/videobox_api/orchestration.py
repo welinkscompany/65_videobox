@@ -316,6 +316,9 @@ class ApiOrchestrator:
     def get_capcut_export_result(self, *, project_id: str, job_id: str) -> dict[str, Any]:
         return self.pipeline.get_capcut_export_result(project_id=project_id, job_id=job_id)
 
+    def get_provider_trace_audit(self, *, project_id: str) -> dict[str, Any]:
+        return self.pipeline.store.get_provider_trace_audit(project_id=project_id)
+
     def list_gemini_provider_keys(self, *, project_id: str) -> list[dict[str, Any]]:
         return self.pipeline.store.list_gemini_provider_keys(project_id=project_id)
 

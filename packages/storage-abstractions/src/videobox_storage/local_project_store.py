@@ -1224,6 +1224,17 @@ class LocalProjectStore:
         payload = json.loads(file_path.read_text(encoding="utf-8"))
         payload["operator_guidance"] = operator_guidance
         file_path.write_text(json.dumps(payload, indent=2, ensure_ascii=True), encoding="utf-8")
+        self._append_provider_trace_audit_event(
+            project_id=project_id,
+            event={
+                "artifact_type": "review_guidance",
+                "artifact_id": f"{timeline_id}:review_guidance:{self._next_provider_trace_event_sequence(project_id=project_id):03d}",
+                "timeline_id": timeline_id,
+                "created_at": self._now_iso(),
+                "provider_trace": operator_guidance.get("provider_trace")
+                or build_provider_trace(final_provider="heuristic_fallback"),
+            },
+        )
         return operator_guidance
 
     def clear_operator_guidance(self, *, project_id: str, timeline_id: str) -> None:
@@ -1327,6 +1338,179 @@ class LocalProjectStore:
             "applied_recommendations": applied,
             "pending_recommendations": pending,
             "review_flags": timeline_review_flags,
+        }
+
+    def get_provider_trace_audit(self, *, project_id: str) -> dict[str, Any]:
+        jobs = self.list_jobs(project_id=project_id)
+        entries: list[dict[str, Any]] = []
+        timeline_jobs_by_timeline_id = {
+            str(job.get("output_ref") or ""): job
+            for job in jobs
+            if job["job_type"] == JobType.TIMELINE_BUILD.value and job.get("output_ref")
+        }
+
+        for job in jobs:
+            job_type = str(job["job_type"])
+            if job_type == JobType.SEGMENT_ANALYSIS.value and job.get("output_ref"):
+                try:
+                    analysis = self.get_segment_analysis(
+                        project_id=project_id,
+                        segment_analysis_id=str(job["output_ref"]),
+                    )
+                except Exception:
+                    continue
+                entries.append(
+                    self._provider_trace_entry(
+                        artifact_type="segment_analysis",
+                        artifact_id=str(analysis["segment_analysis_id"]),
+                        job=job,
+                        source_job_id=str(job.get("input_ref") or ""),
+                        trace=self._merged_provider_trace(analysis.get("segments", [])),
+                        timeline_id=None,
+                    )
+                )
+            elif job_type == JobType.BROLL_RECOMMENDATION.value and job.get("output_ref"):
+                try:
+                    run = self.get_recommendation_run(
+                        project_id=project_id,
+                        recommendation_run_id=str(job["output_ref"]),
+                        recommendation_type=RecommendationType.BROLL,
+                    )
+                except Exception:
+                    continue
+                entries.append(
+                    self._provider_trace_entry(
+                        artifact_type="broll_recommendation",
+                        artifact_id=str(run["recommendation_run_id"]),
+                        job=job,
+                        source_job_id=str(run.get("source_job_id") or job.get("input_ref") or ""),
+                        trace=self._merged_provider_trace(run.get("recommendations", [])),
+                        timeline_id=None,
+                    )
+                )
+            elif job_type == JobType.MUSIC_RECOMMENDATION.value and job.get("output_ref"):
+                try:
+                    run = self.get_recommendation_run(
+                        project_id=project_id,
+                        recommendation_run_id=str(job["output_ref"]),
+                        recommendation_type=RecommendationType.BGM,
+                    )
+                except Exception:
+                    continue
+                entries.append(
+                    self._provider_trace_entry(
+                        artifact_type="music_recommendation",
+                        artifact_id=str(run["recommendation_run_id"]),
+                        job=job,
+                        source_job_id=str(run.get("source_job_id") or job.get("input_ref") or ""),
+                        trace=self._merged_provider_trace(run.get("recommendations", [])),
+                        timeline_id=None,
+                    )
+                )
+            elif job_type == JobType.PREVIEW_RENDER.value and job.get("output_ref"):
+                try:
+                    preview = self.get_preview_run(project_id=project_id, preview_id=str(job["output_ref"]))
+                except Exception:
+                    continue
+                entries.append(
+                    self._provider_trace_entry(
+                        artifact_type="preview_render",
+                        artifact_id=str(preview["preview_id"]),
+                        job=job,
+                        source_job_id=str(job.get("input_ref") or ""),
+                        trace=preview["provider_trace"],
+                        timeline_id=str(preview.get("timeline_id") or ""),
+                    )
+                )
+            elif job_type == JobType.CAPCUT_EXPORT.value and job.get("output_ref"):
+                try:
+                    export = self.get_export_run(project_id=project_id, export_id=str(job["output_ref"]))
+                except Exception:
+                    continue
+                entries.append(
+                    self._provider_trace_entry(
+                        artifact_type="capcut_export",
+                        artifact_id=str(export["export_id"]),
+                        job=job,
+                        source_job_id=str(job.get("input_ref") or ""),
+                        trace=export["provider_trace"],
+                        timeline_id=str(export.get("timeline_id") or ""),
+                    )
+                )
+
+        audit_events = self._list_provider_trace_audit_events(project_id=project_id)
+        guidance_timeline_ids_with_events: set[str] = set()
+        for item in audit_events:
+            if str(item.get("artifact_type") or "") != "review_guidance":
+                continue
+            timeline_id = str(item.get("timeline_id") or "")
+            if timeline_id:
+                guidance_timeline_ids_with_events.add(timeline_id)
+            timeline_job = timeline_jobs_by_timeline_id.get(timeline_id)
+            trace = item.get("provider_trace")
+            if not isinstance(trace, dict):
+                trace = build_provider_trace(final_provider="heuristic_fallback")
+            entries.append(
+                self._provider_trace_entry(
+                    artifact_type="review_guidance",
+                    artifact_id=str(item.get("artifact_id") or timeline_id),
+                    job=None,
+                    source_job_id=timeline_job["job_id"] if timeline_job else None,
+                    trace=trace,
+                    timeline_id=timeline_id or None,
+                    status="available",
+                    finished_at=str(timeline_job.get("finished_at") or "") if timeline_job else None,
+                    created_at=str(item.get("created_at") or ""),
+                    error_message=None,
+                    job_id=timeline_job["job_id"] if timeline_job else None,
+                    )
+                )
+
+        for timeline_id in self._list_timeline_ids(project_id=project_id):
+            if timeline_id in guidance_timeline_ids_with_events:
+                continue
+            try:
+                timeline_payload = self.get_timeline_run(project_id=project_id, timeline_id=timeline_id)
+            except Exception:
+                continue
+            legacy_history = timeline_payload.get("operator_guidance_history")
+            legacy_entries: list[dict[str, Any]] = []
+            if isinstance(legacy_history, list):
+                legacy_entries = [item for item in legacy_history if isinstance(item, dict)]
+            elif isinstance(timeline_payload.get("operator_guidance"), dict):
+                legacy_entries = [
+                    {
+                        "artifact_id": f"{timeline_id}:review_guidance:001",
+                        "created_at": str(timeline_payload.get("created_at") or ""),
+                        "provider_trace": timeline_payload["operator_guidance"].get("provider_trace")
+                        or build_provider_trace(final_provider="heuristic_fallback"),
+                    }
+                ]
+            timeline_job = timeline_jobs_by_timeline_id.get(timeline_id)
+            for item in legacy_entries:
+                trace = item.get("provider_trace")
+                if not isinstance(trace, dict):
+                    trace = build_provider_trace(final_provider="heuristic_fallback")
+                entries.append(
+                    self._provider_trace_entry(
+                        artifact_type="review_guidance",
+                        artifact_id=str(item.get("artifact_id") or timeline_id),
+                        job=None,
+                        source_job_id=timeline_job["job_id"] if timeline_job else None,
+                        trace=trace,
+                        timeline_id=timeline_id,
+                        status="available",
+                        finished_at=str(timeline_job.get("finished_at") or "") if timeline_job else None,
+                        created_at=str(item.get("created_at") or ""),
+                        error_message=None,
+                        job_id=timeline_job["job_id"] if timeline_job else None,
+                    )
+                )
+
+        entries.sort(key=lambda item: (item["finished_at"] or item["created_at"] or "", item["artifact_type"]))
+        return {
+            "summary": self._provider_trace_summary(entries),
+            "entries": entries,
         }
 
     def resolve_storage_uri(self, *, project_id: str, storage_uri: str) -> Path:
@@ -1509,3 +1693,136 @@ class LocalProjectStore:
         if not file_path.exists():
             raise KeyError(f"Timeline JSON missing: {timeline_id}")
         return file_path
+
+    def _provider_trace_audit_log_path(self, *, project_id: str) -> Path:
+        return self.project_root(project_id) / "logs" / "provider_trace_audit.jsonl"
+
+    def _append_provider_trace_audit_event(self, *, project_id: str, event: dict[str, Any]) -> None:
+        log_path = self._provider_trace_audit_log_path(project_id=project_id)
+        with log_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(event, ensure_ascii=True) + "\n")
+
+    def _list_provider_trace_audit_events(self, *, project_id: str) -> list[dict[str, Any]]:
+        log_path = self._provider_trace_audit_log_path(project_id=project_id)
+        if not log_path.exists():
+            return []
+        events: list[dict[str, Any]] = []
+        for line in log_path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                decoded = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(decoded, dict):
+                events.append(decoded)
+        return events
+
+    def _next_provider_trace_event_sequence(self, *, project_id: str) -> int:
+        return len(self._list_provider_trace_audit_events(project_id=project_id)) + 1
+
+    def _list_timeline_ids(self, *, project_id: str) -> list[str]:
+        connection = self._connection(project_id)
+        try:
+            rows = connection.execute(
+                """
+                SELECT timeline_id
+                FROM timelines
+                ORDER BY created_at ASC, timeline_id ASC
+                """
+            ).fetchall()
+        finally:
+            connection.close()
+        return [str(row["timeline_id"]) for row in rows]
+
+    def _merged_provider_trace(self, items: list[dict[str, Any]]) -> dict[str, Any]:
+        traces = [
+            item.get("provider_trace")
+            for item in items
+            if isinstance(item.get("provider_trace"), dict)
+        ]
+        if not traces:
+            return build_provider_trace(final_provider="heuristic_fallback")
+        final_providers = {str(trace.get("final_provider") or "unknown") for trace in traces}
+        fallback_reasons: list[str] = []
+        for trace in traces:
+            for reason in trace.get("fallback_reasons", []):
+                text = str(reason).strip()
+                if text and text not in fallback_reasons:
+                    fallback_reasons.append(text)
+        if len(final_providers) == 1:
+            final_provider = next(iter(final_providers))
+        else:
+            final_provider = "mixed"
+        return build_provider_trace(
+            final_provider=final_provider,
+            fallback_reasons=fallback_reasons,
+            routing_mode=str(traces[0].get("routing_mode") or "local_first"),
+        )
+
+    def _provider_trace_entry(
+        self,
+        *,
+        artifact_type: str,
+        artifact_id: str,
+        trace: dict[str, Any],
+        job: dict[str, Any] | None = None,
+        source_job_id: str | None = None,
+        timeline_id: str | None = None,
+        status: str | None = None,
+        finished_at: str | None = None,
+        created_at: str | None = None,
+        error_message: str | None = None,
+        job_id: str | None = None,
+    ) -> dict[str, Any]:
+        resolved_job_id = job_id
+        if resolved_job_id is None and job is not None:
+            resolved_job_id = str(job.get("job_id") or "")
+        resolved_source_job_id = source_job_id
+        if resolved_source_job_id is None and job is not None:
+            resolved_source_job_id = str(job.get("input_ref") or "")
+        resolved_status = status
+        if resolved_status is None and job is not None:
+            resolved_status = str(job.get("status") or "")
+        resolved_finished_at = finished_at
+        if resolved_finished_at is None and job is not None:
+            resolved_finished_at = str(job.get("finished_at") or "")
+        resolved_error_message = error_message
+        if resolved_error_message is None and job is not None:
+            resolved_error_message = str(job.get("error_message") or "")
+        return {
+            "artifact_type": artifact_type,
+            "artifact_id": artifact_id,
+            "job_id": resolved_job_id,
+            "source_job_id": resolved_source_job_id,
+            "timeline_id": timeline_id or None,
+            "status": resolved_status or "available",
+            "finished_at": resolved_finished_at,
+            "created_at": created_at,
+            "error_message": resolved_error_message,
+            "provider_trace": trace,
+        }
+
+    def _provider_trace_summary(self, entries: list[dict[str, Any]]) -> dict[str, Any]:
+        provider_counts: dict[str, int] = {}
+        fallback_reason_counts: dict[str, int] = {}
+        artifact_type_counts: dict[str, int] = {}
+        fallback_entry_count = 0
+        for entry in entries:
+            artifact_type = str(entry["artifact_type"])
+            artifact_type_counts[artifact_type] = artifact_type_counts.get(artifact_type, 0) + 1
+            trace = entry["provider_trace"]
+            final_provider = str(trace.get("final_provider") or "unknown")
+            provider_counts[final_provider] = provider_counts.get(final_provider, 0) + 1
+            reasons = [str(reason).strip() for reason in trace.get("fallback_reasons", []) if str(reason).strip()]
+            if reasons:
+                fallback_entry_count += 1
+            for reason in reasons:
+                fallback_reason_counts[reason] = fallback_reason_counts.get(reason, 0) + 1
+        return {
+            "total_entries": len(entries),
+            "provider_counts": provider_counts,
+            "fallback_entry_count": fallback_entry_count,
+            "fallback_reason_counts": fallback_reason_counts,
+            "artifact_type_counts": artifact_type_counts,
+        }
