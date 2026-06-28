@@ -333,6 +333,13 @@ packages/
 - B-roll 키워드 추출
 - shortform 후보 reasoning
 
+기본 원칙:
+
+- `LLMTaskRouter` 뒤에서만 호출
+- 기본 provider는 로컬 LLM 우선
+- 클라우드 provider는 fallback
+- 특정 모델명 하드코딩 금지
+
 ### STT Provider
 
 역할:

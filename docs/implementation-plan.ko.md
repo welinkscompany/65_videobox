@@ -188,6 +188,7 @@
 - 언어: Python 우선
 - 영상 처리: FFmpeg
 - 전사: WhisperX 또는 대체 STT provider
+- LLM: 로컬 Qwen 우선 + Gemini multi-key fallback + 선택적 OpenAI provider
 - TTS: 사용자 본인 목소리 기반 TTS provider
 - 비전/자산 분석: OpenCV + 자산 메타데이터 인덱싱
 - 데이터 저장: 로컬 DB 우선
