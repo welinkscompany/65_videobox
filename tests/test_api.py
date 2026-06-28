@@ -3823,7 +3823,11 @@ def test_provider_trace_audit_endpoint_supports_timeline_job_and_artifact_filter
     assert job_type_filtered.status_code == 200
     assert artifact_type_filtered.status_code == 200
     assert len(unfiltered.json()["entries"]) == 6
+    assert unfiltered.json()["direct_entries"] == unfiltered.json()["entries"]
+    assert unfiltered.json()["upstream_entries"] == []
     assert len(blank_filtered.json()["entries"]) == len(unfiltered.json()["entries"])
+    assert blank_filtered.json()["direct_entries"] == blank_filtered.json()["entries"]
+    assert blank_filtered.json()["upstream_entries"] == []
     assert {entry["artifact_type"] for entry in timeline_filtered.json()["entries"]} == {
         "review_guidance",
         "preview_render",
@@ -4205,6 +4209,12 @@ def test_provider_trace_audit_timeline_filter_include_upstream_adds_segment_brol
         "preview_render",
         "capcut_export",
     }
+    assert {entry["artifact_type"] for entry in direct_filtered.json()["direct_entries"]} == {
+        "review_guidance",
+        "preview_render",
+        "capcut_export",
+    }
+    assert direct_filtered.json()["upstream_entries"] == []
     assert {entry["artifact_type"] for entry in upstream_filtered.json()["entries"]} == {
         "segment_analysis",
         "broll_recommendation",
@@ -4213,6 +4223,19 @@ def test_provider_trace_audit_timeline_filter_include_upstream_adds_segment_brol
         "preview_render",
         "capcut_export",
     }
+    assert {entry["artifact_type"] for entry in upstream_filtered.json()["direct_entries"]} == {
+        "review_guidance",
+        "preview_render",
+        "capcut_export",
+    }
+    assert {entry["artifact_type"] for entry in upstream_filtered.json()["upstream_entries"]} == {
+        "segment_analysis",
+        "broll_recommendation",
+        "music_recommendation",
+    }
+    assert len(upstream_filtered.json()["entries"]) == (
+        len(upstream_filtered.json()["direct_entries"]) + len(upstream_filtered.json()["upstream_entries"])
+    )
     assert next(
         entry
         for entry in upstream_filtered.json()["entries"]
@@ -4519,6 +4542,10 @@ def test_provider_trace_audit_include_upstream_uses_exact_persisted_recommendati
     assert {entry["job_id"] for entry in upstream_filtered.json()["entries"] if entry["artifact_type"] == "broll_recommendation"} == {
         original_broll_job_id,
     }
+    assert {entry["job_id"] for entry in upstream_filtered.json()["upstream_entries"] if entry["artifact_type"] == "broll_recommendation"} == {
+        original_broll_job_id,
+    }
+    assert {entry["job_id"] for entry in upstream_filtered.json()["direct_entries"] if entry["artifact_type"] == "broll_recommendation"} == set()
 
 
 def test_provider_trace_audit_include_upstream_falls_back_to_shared_segment_for_legacy_timelines_without_lineage(
@@ -4606,6 +4633,11 @@ def test_provider_trace_audit_include_upstream_falls_back_to_shared_segment_for_
         original_broll_job_id,
         sibling_broll_job_id,
     }
+    assert {entry["job_id"] for entry in upstream_filtered.json()["upstream_entries"] if entry["artifact_type"] == "broll_recommendation"} == {
+        original_broll_job_id,
+        sibling_broll_job_id,
+    }
+    assert {entry["job_id"] for entry in upstream_filtered.json()["direct_entries"] if entry["artifact_type"] == "broll_recommendation"} == set()
 
 
 def test_provider_trace_audit_include_upstream_excludes_failed_recommendation_not_in_exact_lineage(

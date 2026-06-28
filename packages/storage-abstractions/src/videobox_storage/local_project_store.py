@@ -1692,9 +1692,19 @@ class LocalProjectStore:
                 )
         ]
         entries.sort(key=lambda item: (item["finished_at"] or item["created_at"] or "", item["artifact_type"]))
+        direct_entries, upstream_entries = self._group_provider_trace_entries(
+            entries,
+            timeline_id=filter_timeline_id,
+            include_upstream=include_upstream,
+            upstream_segment_job_ids=upstream_segment_job_ids,
+            upstream_recommendation_job_ids=upstream_recommendation_job_ids,
+            use_exact_recommendation_lineage=use_exact_recommendation_lineage,
+        )
         return {
             "summary": self._provider_trace_summary(entries),
             "entries": entries,
+            "direct_entries": direct_entries,
+            "upstream_entries": upstream_entries,
         }
 
     def resolve_storage_uri(self, *, project_id: str, storage_uri: str) -> Path:
@@ -2108,6 +2118,37 @@ class LocalProjectStore:
             "fallback_reason_counts": fallback_reason_counts,
             "artifact_type_counts": artifact_type_counts,
         }
+
+    def _group_provider_trace_entries(
+        self,
+        entries: list[dict[str, Any]],
+        *,
+        timeline_id: str | None,
+        include_upstream: bool,
+        upstream_segment_job_ids: set[str],
+        upstream_recommendation_job_ids: set[str],
+        use_exact_recommendation_lineage: bool,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        if timeline_id is None or not include_upstream:
+            return entries, []
+
+        direct_entries: list[dict[str, Any]] = []
+        upstream_entries: list[dict[str, Any]] = []
+        for entry in entries:
+            entry_timeline_id = str(entry.get("timeline_id") or "")
+            if entry_timeline_id == timeline_id:
+                direct_entries.append(entry)
+                continue
+            if self._is_upstream_provider_trace_entry(
+                entry,
+                upstream_segment_job_ids=upstream_segment_job_ids,
+                upstream_recommendation_job_ids=upstream_recommendation_job_ids,
+                use_exact_recommendation_lineage=use_exact_recommendation_lineage,
+            ):
+                upstream_entries.append(entry)
+                continue
+            direct_entries.append(entry)
+        return direct_entries, upstream_entries
 
     def _provider_trace_entry_matches_filters(
         self,

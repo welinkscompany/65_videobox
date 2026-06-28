@@ -258,6 +258,8 @@ class ProviderTraceAuditEntryResponse(BaseModel):
 class ProviderTraceAuditResponse(BaseModel):
     summary: ProviderTraceAuditSummaryResponse
     entries: list[ProviderTraceAuditEntryResponse]
+    direct_entries: list[ProviderTraceAuditEntryResponse] = Field(default_factory=list)
+    upstream_entries: list[ProviderTraceAuditEntryResponse] = Field(default_factory=list)
 
 
 class SubtitleArtifactResponse(BaseModel):
@@ -706,6 +708,12 @@ def create_app(
         return ProviderTraceAuditResponse(
             summary=ProviderTraceAuditSummaryResponse(**result["summary"]),
             entries=[ProviderTraceAuditEntryResponse(**item) for item in result["entries"]],
+            direct_entries=[
+                ProviderTraceAuditEntryResponse(**item) for item in result.get("direct_entries", [])
+            ],
+            upstream_entries=[
+                ProviderTraceAuditEntryResponse(**item) for item in result.get("upstream_entries", [])
+            ],
         )
 
     @app.get("/api/projects/{project_id}/providers/gemini/keys")
