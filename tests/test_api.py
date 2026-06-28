@@ -4305,3 +4305,309 @@ def test_start_segment_analysis_marks_job_failed_without_provider_trace_for_miss
         for entry in audit_response.json()["entries"]
         if entry["job_type"] == "segment_analysis" and entry["status"] == "failed"
     ]
+
+
+def test_provider_trace_audit_endpoint_uses_authoritative_failed_run_when_audit_log_append_fails(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Failed Log Append Project")
+    transcript = store.save_transcript(
+        project_id=project.project_id,
+        source_asset_id="asset_001",
+        transcript_text="Office overview.",
+        segments=[
+            {
+                "start_sec": 0.0,
+                "end_sec": 1.0,
+                "text": "Office overview.",
+                "confidence": 0.99,
+            }
+        ],
+    )
+    transcription_job = store.create_job(
+        project_id=project.project_id,
+        job_type=JobType.TRANSCRIPTION,
+        input_ref="asset_001",
+        status=JobStatus.SUCCEEDED,
+    )
+    store.update_job(
+        project_id=project.project_id,
+        job_id=transcription_job["job_id"],
+        status=JobStatus.SUCCEEDED,
+        output_ref=transcript["transcript_id"],
+    )
+
+    def fail_append(*, project_id: str, event: dict[str, object]) -> None:
+        del project_id, event
+        raise OSError("provider trace audit log offline")
+
+    monkeypatch.setattr(store, "_append_provider_trace_audit_event", fail_append)
+    runner = LocalPipelineRunner(store, segment_analyzer=FailingSegmentAnalyzer())
+
+    with pytest.raises(LocalFirstStructuredGenerationError, match="segment provider failed"):
+        runner.start_segment_analysis(
+            project_id=project.project_id,
+            transcription_job_id=transcription_job["job_id"],
+            script_asset_id=None,
+        )
+
+    client = TestClient(create_app(projects_root=tmp_path))
+    audit_response = client.get(f"/api/projects/{project.project_id}/provider-traces")
+
+    assert audit_response.status_code == 200
+    failed_entry = next(
+        entry
+        for entry in audit_response.json()["entries"]
+        if entry["status"] == "failed" and entry["job_type"] == "segment_analysis"
+    )
+    assert failed_entry["error_message"] == "local_first_router: segment provider failed"
+    assert failed_entry["provider_trace"] == {
+        "routing_mode": "local_first",
+        "final_provider": "local_qwen",
+        "fallback_reasons": ["local_provider_error"],
+    }
+
+
+def test_provider_trace_audit_endpoint_backfills_partial_authoritative_failed_run_without_trace(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Partial Failed Persistence Project")
+    failed_job = store.create_job(
+        project_id=project.project_id,
+        job_type=JobType.MUSIC_RECOMMENDATION,
+        input_ref="segment_analysis_job_001",
+        status=JobStatus.RUNNING,
+    )
+    failed_job = store.update_job(
+        project_id=project.project_id,
+        job_id=failed_job["job_id"],
+        status=JobStatus.FAILED,
+        error_message="music provider exploded without trace",
+    )
+
+    database_path = tmp_path / "projects" / project.project_id / "db" / "project.sqlite"
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS provider_trace_failed_runs (
+                job_id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL,
+                job_type TEXT NOT NULL,
+                source_job_id TEXT,
+                artifact_id TEXT,
+                timeline_id TEXT,
+                error_message TEXT,
+                provider_trace_json TEXT,
+                created_at TEXT NOT NULL,
+                finished_at TEXT
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT OR REPLACE INTO provider_trace_failed_runs (
+                job_id,
+                project_id,
+                job_type,
+                source_job_id,
+                artifact_id,
+                timeline_id,
+                error_message,
+                provider_trace_json,
+                created_at,
+                finished_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                failed_job["job_id"],
+                project.project_id,
+                "music_recommendation",
+                "segment_analysis_job_001",
+                failed_job["job_id"],
+                None,
+                "music provider exploded without trace",
+                None,
+                "2026-06-29T00:00:00+00:00",
+                failed_job["finished_at"],
+            ),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    client = TestClient(create_app(projects_root=tmp_path))
+    audit_response = client.get(f"/api/projects/{project.project_id}/provider-traces")
+
+    assert audit_response.status_code == 200
+    failed_entry = next(
+        entry
+        for entry in audit_response.json()["entries"]
+        if entry["status"] == "failed" and entry["job_type"] == "music_recommendation"
+    )
+    assert failed_entry["artifact_id"] == failed_job["job_id"]
+    assert failed_entry["error_message"] == "music provider exploded without trace"
+    assert failed_entry["provider_trace"] == {
+        "routing_mode": "local_first",
+        "final_provider": "unknown_failure",
+        "fallback_reasons": ["missing_provider_trace"],
+    }
+
+
+def test_provider_trace_audit_endpoint_deduplicates_failed_run_between_authoritative_store_and_log(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Deduplicated Failed Run Project")
+    failed_job = store.create_job(
+        project_id=project.project_id,
+        job_type=JobType.BROLL_RECOMMENDATION,
+        input_ref="segment_analysis_job_001",
+        status=JobStatus.RUNNING,
+    )
+    failed_job = store.update_job(
+        project_id=project.project_id,
+        job_id=failed_job["job_id"],
+        status=JobStatus.FAILED,
+        error_message="local_first_router: broll Gemini fallback failed",
+    )
+    store.save_provider_trace_audit_event(
+        project_id=project.project_id,
+        event={
+            "artifact_type": "broll_recommendation",
+            "artifact_id": failed_job["job_id"],
+            "job_type": "broll_recommendation",
+            "job_id": failed_job["job_id"],
+            "source_job_id": "segment_analysis_job_001",
+            "status": "failed",
+            "finished_at": failed_job["finished_at"],
+            "error_message": "local_first_router: broll Gemini fallback failed",
+            "provider_trace": build_provider_trace(
+                final_provider="gemini",
+                fallback_reasons=["local_provider_error", "gemini_unavailable"],
+            ),
+        },
+    )
+
+    client = TestClient(create_app(projects_root=tmp_path))
+    audit_response = client.get(f"/api/projects/{project.project_id}/provider-traces")
+
+    assert audit_response.status_code == 200
+    failed_entries = [
+        entry
+        for entry in audit_response.json()["entries"]
+        if entry["status"] == "failed" and entry["job_id"] == failed_job["job_id"]
+    ]
+    assert len(failed_entries) == 1
+    assert failed_entries[0]["provider_trace"]["final_provider"] == "gemini"
+
+
+def test_provider_trace_audit_endpoint_falls_back_to_log_when_authoritative_failed_run_persist_fails(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Failed SQLite Persist Project")
+    transcript = store.save_transcript(
+        project_id=project.project_id,
+        source_asset_id="asset_001",
+        transcript_text="Office overview.",
+        segments=[
+            {
+                "start_sec": 0.0,
+                "end_sec": 1.0,
+                "text": "Office overview.",
+                "confidence": 0.99,
+            }
+        ],
+    )
+    transcription_job = store.create_job(
+        project_id=project.project_id,
+        job_type=JobType.TRANSCRIPTION,
+        input_ref="asset_001",
+        status=JobStatus.SUCCEEDED,
+    )
+    store.update_job(
+        project_id=project.project_id,
+        job_id=transcription_job["job_id"],
+        status=JobStatus.SUCCEEDED,
+        output_ref=transcript["transcript_id"],
+    )
+
+    def fail_authoritative_persist(*, project_id: str, event: dict[str, object]) -> None:
+        del project_id, event
+        raise sqlite3.OperationalError("failed runs table locked")
+
+    monkeypatch.setattr(store, "_save_failed_provider_trace_run", fail_authoritative_persist)
+    runner = LocalPipelineRunner(store, segment_analyzer=FailingSegmentAnalyzer())
+
+    with pytest.raises(LocalFirstStructuredGenerationError, match="segment provider failed"):
+        runner.start_segment_analysis(
+            project_id=project.project_id,
+            transcription_job_id=transcription_job["job_id"],
+            script_asset_id=None,
+        )
+
+    client = TestClient(create_app(projects_root=tmp_path))
+    audit_response = client.get(f"/api/projects/{project.project_id}/provider-traces")
+
+    assert audit_response.status_code == 200
+    failed_entry = next(
+        entry
+        for entry in audit_response.json()["entries"]
+        if entry["status"] == "failed" and entry["job_type"] == "segment_analysis"
+    )
+    assert failed_entry["provider_trace"]["final_provider"] == "local_qwen"
+
+
+def test_provider_trace_audit_read_path_does_not_require_failed_run_schema_mutation(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Read Only Audit Project")
+    store.save_segment_analysis(
+        project_id=project.project_id,
+        transcript_id="transcript_001",
+        script_asset_id=None,
+        segments=[
+            {
+                "segment_id": "seg_001",
+                "text": "Office overview.",
+                "start_sec": 0.0,
+                "end_sec": 1.0,
+                "confidence": 0.99,
+                "review_required": False,
+                "cleanup_decision": "keep",
+                "provider_trace": build_provider_trace(final_provider="local_qwen"),
+            }
+        ],
+    )
+    segment_job = store.create_job(
+        project_id=project.project_id,
+        job_type=JobType.SEGMENT_ANALYSIS,
+        input_ref="transcription_job_001",
+        status=JobStatus.SUCCEEDED,
+    )
+    store.update_job(
+        project_id=project.project_id,
+        job_id=segment_job["job_id"],
+        status=JobStatus.SUCCEEDED,
+        output_ref="segment_analysis_001",
+    )
+
+    def fail_schema_mutation(self, *, project_id: str) -> None:  # noqa: ANN001
+        del self, project_id
+        raise AssertionError("read path must not mutate failed-run schema")
+
+    monkeypatch.setattr(LocalProjectStore, "_ensure_provider_trace_failed_runs_table", fail_schema_mutation)
+    client = TestClient(create_app(projects_root=tmp_path))
+    audit_response = client.get(f"/api/projects/{project.project_id}/provider-traces")
+
+    assert audit_response.status_code == 200
+    entries = audit_response.json()["entries"]
+    assert len(entries) == 1
+    assert entries[0]["artifact_type"] == "segment_analysis"

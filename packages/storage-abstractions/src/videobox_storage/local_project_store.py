@@ -1240,7 +1240,21 @@ class LocalProjectStore:
     def save_provider_trace_audit_event(self, *, project_id: str, event: dict[str, Any]) -> dict[str, Any]:
         payload = dict(event)
         payload.setdefault("created_at", self._now_iso())
-        self._append_provider_trace_audit_event(project_id=project_id, event=payload)
+        authoritative_error: Exception | None = None
+        if str(payload.get("status") or "") == JobStatus.FAILED.value:
+            try:
+                self._save_failed_provider_trace_run(project_id=project_id, event=payload)
+            except Exception as exc:
+                authoritative_error = exc
+        try:
+            self._append_provider_trace_audit_event(project_id=project_id, event=payload)
+        except OSError:
+            if authoritative_error is not None:
+                raise authoritative_error
+        else:
+            authoritative_error = None
+        if authoritative_error is not None:
+            raise authoritative_error
         return payload
 
     def clear_operator_guidance(self, *, project_id: str, timeline_id: str) -> None:
@@ -1449,6 +1463,35 @@ class LocalProjectStore:
                     )
                 )
 
+        failed_entries_by_job_id: dict[str, dict[str, Any]] = {}
+        for item in self._list_provider_trace_failed_runs(project_id=project_id):
+            trace = item.get("provider_trace")
+            if not isinstance(trace, dict):
+                trace = build_provider_trace(
+                    final_provider="unknown_failure",
+                    fallback_reasons=["missing_provider_trace"],
+                )
+            job_id = str(item.get("job_id") or "")
+            artifact_type = str(item.get("artifact_type") or item.get("job_type") or "unknown_failure")
+            entry = self._provider_trace_entry(
+                artifact_type=artifact_type,
+                artifact_id=str(item.get("artifact_id") or job_id),
+                job_type=str(item.get("job_type") or artifact_type),
+                job=None,
+                source_job_id=str(item.get("source_job_id") or "") or None,
+                trace=trace,
+                timeline_id=str(item.get("timeline_id") or "") or None,
+                status=JobStatus.FAILED.value,
+                finished_at=str(item.get("finished_at") or ""),
+                created_at=str(item.get("created_at") or ""),
+                error_message=str(item.get("error_message") or ""),
+                job_id=job_id or None,
+            )
+            if job_id:
+                failed_entries_by_job_id[job_id] = entry
+            else:
+                entries.append(entry)
+
         audit_events = self._list_provider_trace_audit_events(project_id=project_id)
         guidance_timeline_ids_with_events: set[str] = set()
         for item in audit_events:
@@ -1462,22 +1505,29 @@ class LocalProjectStore:
                 job_id = str(item.get("job_id") or "")
                 source_job_id = str(item.get("source_job_id") or "")
                 artifact_type = str(item.get("artifact_type") or item.get("job_type") or "unknown_failure")
-                entries.append(
-                    self._provider_trace_entry(
-                        artifact_type=artifact_type,
-                        artifact_id=str(item.get("artifact_id") or job_id),
-                        job_type=str(item.get("job_type") or artifact_type),
-                        job=None,
-                        source_job_id=source_job_id or None,
-                        trace=trace,
-                        timeline_id=str(item.get("timeline_id") or "") or None,
-                        status=JobStatus.FAILED.value,
-                        finished_at=str(item.get("finished_at") or ""),
-                        created_at=str(item.get("created_at") or ""),
-                        error_message=str(item.get("error_message") or ""),
-                        job_id=job_id or None,
-                    )
+                entry = self._provider_trace_entry(
+                    artifact_type=artifact_type,
+                    artifact_id=str(item.get("artifact_id") or job_id),
+                    job_type=str(item.get("job_type") or artifact_type),
+                    job=None,
+                    source_job_id=source_job_id or None,
+                    trace=trace,
+                    timeline_id=str(item.get("timeline_id") or "") or None,
+                    status=JobStatus.FAILED.value,
+                    finished_at=str(item.get("finished_at") or ""),
+                    created_at=str(item.get("created_at") or ""),
+                    error_message=str(item.get("error_message") or ""),
+                    job_id=job_id or None,
                 )
+                if job_id and job_id in failed_entries_by_job_id:
+                    failed_entries_by_job_id[job_id] = self._merge_provider_trace_failed_entries(
+                        failed_entries_by_job_id[job_id],
+                        entry,
+                    )
+                elif job_id:
+                    failed_entries_by_job_id[job_id] = entry
+                else:
+                    entries.append(entry)
                 continue
             if str(item.get("artifact_type") or "") != "review_guidance":
                 continue
@@ -1547,6 +1597,7 @@ class LocalProjectStore:
                     )
                 )
 
+        entries.extend(failed_entries_by_job_id.values())
         entries.sort(key=lambda item: (item["finished_at"] or item["created_at"] or "", item["artifact_type"]))
         return {
             "summary": self._provider_trace_summary(entries),
@@ -1737,6 +1788,99 @@ class LocalProjectStore:
     def _provider_trace_audit_log_path(self, *, project_id: str) -> Path:
         return self.project_root(project_id) / "logs" / "provider_trace_audit.jsonl"
 
+    def _ensure_provider_trace_failed_runs_table(self, *, project_id: str) -> None:
+        self._execute(
+            project_id,
+            """
+            CREATE TABLE IF NOT EXISTS provider_trace_failed_runs (
+                job_id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL,
+                job_type TEXT NOT NULL,
+                source_job_id TEXT,
+                artifact_id TEXT,
+                timeline_id TEXT,
+                error_message TEXT,
+                provider_trace_json TEXT,
+                created_at TEXT NOT NULL,
+                finished_at TEXT
+            )
+            """,
+            (),
+        )
+
+    def _save_failed_provider_trace_run(self, *, project_id: str, event: dict[str, Any]) -> None:
+        self._ensure_provider_trace_failed_runs_table(project_id=project_id)
+        provider_trace = event.get("provider_trace")
+        self._execute(
+            project_id,
+            """
+            INSERT OR REPLACE INTO provider_trace_failed_runs (
+                job_id,
+                project_id,
+                job_type,
+                source_job_id,
+                artifact_id,
+                timeline_id,
+                error_message,
+                provider_trace_json,
+                created_at,
+                finished_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                str(event.get("job_id") or ""),
+                project_id,
+                str(event.get("job_type") or event.get("artifact_type") or ""),
+                str(event.get("source_job_id") or "") or None,
+                str(event.get("artifact_id") or event.get("job_id") or ""),
+                str(event.get("timeline_id") or "") or None,
+                str(event.get("error_message") or ""),
+                json.dumps(provider_trace, ensure_ascii=True) if isinstance(provider_trace, dict) else None,
+                str(event.get("created_at") or self._now_iso()),
+                str(event.get("finished_at") or ""),
+            ),
+        )
+
+    def _list_provider_trace_failed_runs(self, *, project_id: str) -> list[dict[str, Any]]:
+        connection = self._connection(project_id)
+        try:
+            try:
+                rows = connection.execute(
+                    """
+                    SELECT
+                        job_id,
+                        project_id,
+                        job_type,
+                        source_job_id,
+                        artifact_id,
+                        timeline_id,
+                        error_message,
+                        provider_trace_json,
+                        created_at,
+                        finished_at
+                    FROM provider_trace_failed_runs
+                    ORDER BY created_at ASC, job_id ASC
+                    """
+                ).fetchall()
+            except sqlite3.OperationalError as exc:
+                if "no such table" in str(exc).lower():
+                    return []
+                raise
+        finally:
+            connection.close()
+        items: list[dict[str, Any]] = []
+        for row in rows:
+            payload = dict(row)
+            raw_trace = payload.pop("provider_trace_json", None)
+            try:
+                decoded_trace = json.loads(raw_trace) if raw_trace else None
+            except json.JSONDecodeError:
+                decoded_trace = None
+            payload["provider_trace"] = decoded_trace if isinstance(decoded_trace, dict) else None
+            payload["artifact_type"] = str(payload.get("job_type") or "")
+            items.append(payload)
+        return items
+
     def _append_provider_trace_audit_event(self, *, project_id: str, event: dict[str, Any]) -> None:
         log_path = self._provider_trace_audit_log_path(project_id=project_id)
         with log_path.open("a", encoding="utf-8") as handle:
@@ -1871,3 +2015,24 @@ class LocalProjectStore:
             "fallback_reason_counts": fallback_reason_counts,
             "artifact_type_counts": artifact_type_counts,
         }
+
+    def _merge_provider_trace_failed_entries(
+        self,
+        primary: dict[str, Any],
+        secondary: dict[str, Any],
+    ) -> dict[str, Any]:
+        merged = dict(primary)
+        for key in ("artifact_id", "job_type", "job_id", "source_job_id", "timeline_id", "status", "finished_at", "created_at", "error_message"):
+            if not merged.get(key) and secondary.get(key):
+                merged[key] = secondary[key]
+        primary_trace = primary.get("provider_trace")
+        secondary_trace = secondary.get("provider_trace")
+        if self._is_missing_provider_trace(primary_trace) and isinstance(secondary_trace, dict):
+            merged["provider_trace"] = secondary_trace
+        return merged
+
+    def _is_missing_provider_trace(self, trace: Any) -> bool:
+        return isinstance(trace, dict) and trace == build_provider_trace(
+            final_provider="unknown_failure",
+            fallback_reasons=["missing_provider_trace"],
+        )

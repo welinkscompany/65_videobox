@@ -88,6 +88,20 @@ PROJECT_SCHEMA_STATEMENTS = (
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS provider_trace_failed_runs (
+        job_id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        job_type TEXT NOT NULL,
+        source_job_id TEXT,
+        artifact_id TEXT,
+        timeline_id TEXT,
+        error_message TEXT,
+        provider_trace_json TEXT,
+        created_at TEXT NOT NULL,
+        finished_at TEXT
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS timelines (
         timeline_id TEXT PRIMARY KEY,
         project_id TEXT NOT NULL,
