@@ -49,6 +49,7 @@ class GeminiStructuredRuntime:
                 message="Gemini runtime is disabled.",
                 error_code="provider_disabled",
             )
+        self._validate_request(prompt=prompt, response_schema=response_schema)
         timestamp = now or datetime.now(UTC)
         key_pool = self._load_key_pool(project_id=project_id)
         available_keys = key_pool.available_keys(now=timestamp)
@@ -193,6 +194,35 @@ class GeminiStructuredRuntime:
             message=sanitized_message,
             error_code=error.error_code,
         )
+
+    def _validate_request(self, *, prompt: str, response_schema: dict[str, Any]) -> None:
+        if not isinstance(prompt, str) or not prompt.strip():
+            raise GeminiStructuredGenerationError(
+                message="Invalid request: prompt must be a non-empty string.",
+                error_code="invalid_request",
+            )
+        if not isinstance(response_schema, dict):
+            raise GeminiStructuredGenerationError(
+                message="Invalid request: response schema must be an object schema.",
+                error_code="invalid_request",
+            )
+        if response_schema.get("type") != "object":
+            raise GeminiStructuredGenerationError(
+                message="Invalid request: response schema must declare type 'object'.",
+                error_code="invalid_request",
+            )
+        properties = response_schema.get("properties")
+        if not isinstance(properties, dict) or not properties:
+            raise GeminiStructuredGenerationError(
+                message="Invalid request: response schema must define object properties.",
+                error_code="invalid_request",
+            )
+        required_fields = response_schema.get("required", [])
+        if not isinstance(required_fields, list):
+            raise GeminiStructuredGenerationError(
+                message="Invalid request: response schema required fields must be a list.",
+                error_code="invalid_request",
+            )
 
     def _validate_response_schema(self, output_data: dict[str, Any], response_schema: dict[str, Any]) -> None:
         if response_schema.get("type") != "object" or not isinstance(output_data, dict):

@@ -1,16 +1,20 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from io import BytesIO
 from pathlib import Path
 from typing import Any
+from urllib.error import HTTPError
+from urllib.request import Request
 
 from videobox_core_engine.gemini_runtime import (
     GeminiStructuredGenerationError,
     GeminiStructuredRuntime,
 )
 from videobox_api.orchestration import GeminiRuntimeService
-from videobox_provider_interfaces.gemini import GeminiRESTStructuredProvider
+from videobox_provider_interfaces.gemini import GeminiHTTPTransport, GeminiRESTStructuredProvider
 from videobox_provider_interfaces.llm import (
     LLMProviderConfig,
     LLMProviderError,
@@ -49,6 +53,35 @@ class FakeStructuredProvider:
         if self.responses_by_key.get(key_id):
             return self.responses_by_key[key_id].pop(0)
         raise AssertionError(f"No fake structured response configured for {key_id}")
+
+
+@dataclass
+class FakeHTTPResponse:
+    status: int
+    payload: dict[str, Any]
+
+    def read(self) -> bytes:
+        return json.dumps(self.payload).encode("utf-8")
+
+    def __enter__(self) -> FakeHTTPResponse:
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, tb: object) -> bool:
+        return False
+
+
+@dataclass
+class RecordingHTTPClient:
+    response: FakeHTTPResponse | None = None
+    error: HTTPError | None = None
+    calls: list[Request] = field(default_factory=list)
+
+    def __call__(self, request: Request, timeout: int) -> FakeHTTPResponse:
+        self.calls.append(request)
+        if self.error is not None:
+            raise self.error
+        assert self.response is not None
+        return self.response
 
 
 def _create_store(tmp_path: Path) -> tuple[LocalProjectStore, str]:
@@ -379,3 +412,190 @@ def test_gemini_runtime_service_exposes_project_scoped_backend_entrypoint(tmp_pa
 
     assert response.output_data == {"summary": "segment ready"}
     assert provider.calls[0].provider_context["gemini_key_id"] == key["key_id"]
+
+
+def test_gemini_http_transport_posts_generate_content_request() -> None:
+    client = RecordingHTTPClient(
+        response=FakeHTTPResponse(
+            status=200,
+            payload={"candidates": [{"content": {"parts": [{"text": "{\"ok\":true}"}]}}]},
+        )
+    )
+    transport = GeminiHTTPTransport(http_client=client, timeout_seconds=12)
+
+    payload = {
+        "contents": [{"role": "user", "parts": [{"text": "hello"}]}],
+        "generationConfig": {"responseMimeType": "application/json"},
+    }
+    response = transport.generate_content(
+        model_name="gemini-2.5-flash",
+        api_key="AIzaHTTPSECRET0001",
+        payload=payload,
+    )
+
+    assert response["candidates"][0]["content"]["parts"][0]["text"] == "{\"ok\":true}"
+    assert len(client.calls) == 1
+    request = client.calls[0]
+    assert request.full_url.endswith(
+        "/models/gemini-2.5-flash:generateContent?key=AIzaHTTPSECRET0001"
+    )
+    assert request.get_method() == "POST"
+    assert request.headers["Content-type"] == "application/json"
+    assert json.loads(request.data.decode("utf-8")) == payload
+
+
+def test_gemini_http_transport_maps_http_errors_to_safe_provider_errors() -> None:
+    error_body = {
+        "error": {
+            "code": 429,
+            "message": "Quota exhausted for key AIzaERRORSECRET0002",
+            "status": "RESOURCE_EXHAUSTED",
+        }
+    }
+    client = RecordingHTTPClient(
+        error=HTTPError(
+            url="https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+            code=429,
+            msg="Too Many Requests",
+            hdrs=None,
+            fp=BytesIO(json.dumps(error_body).encode("utf-8")),
+        )
+    )
+    transport = GeminiHTTPTransport(http_client=client, timeout_seconds=30)
+
+    try:
+        transport.generate_content(
+            model_name="gemini-2.5-flash",
+            api_key="AIzaERRORSECRET0002",
+            payload={"contents": [{"role": "user", "parts": [{"text": "hello"}]}]},
+        )
+    except LLMProviderError as exc:
+        assert exc.provider_name == "gemini"
+        assert exc.error_code == "RESOURCE_EXHAUSTED"
+        assert exc.retryable is True
+        assert "AIzaERRORSECRET0002" not in str(exc)
+        assert "Quota exhausted" in str(exc)
+    else:
+        raise AssertionError("Expected GeminiHTTPTransport to normalize the HTTP error.")
+
+
+def test_gemini_runtime_validates_input_prompt_and_schema_before_execution(tmp_path: Path) -> None:
+    now = datetime(2026, 6, 28, 19, 0, tzinfo=UTC)
+    store, project_id = _create_store(tmp_path)
+    store.save_gemini_provider_key(
+        project_id=project_id,
+        label="Validation Gemini",
+        api_key_secret="AIzaVALIDATE0003",
+        primary_model="gemini-2.5-flash",
+        cheap_model="gemini-2.5-flash-lite",
+        high_quality_model="gemini-2.5-pro",
+    )
+    provider = FakeStructuredProvider()
+    runtime = GeminiStructuredRuntime(
+        store=store,
+        provider=provider,
+        provider_config=LLMProviderConfig(provider_name="gemini", enabled=True),
+    )
+
+    try:
+        runtime.generate(
+            project_id=project_id,
+            task_type=LLMTaskType.OPERATOR_COPY,
+            prompt="   ",
+            response_schema={
+                "type": "object",
+                "required": ["summary"],
+                "properties": {"summary": {"type": "string"}},
+            },
+            now=now,
+        )
+    except GeminiStructuredGenerationError as exc:
+        assert exc.error_code == "invalid_request"
+        assert "prompt" in str(exc).lower()
+    else:
+        raise AssertionError("Expected blank prompts to be rejected before provider execution.")
+
+    try:
+        runtime.generate(
+            project_id=project_id,
+            task_type=LLMTaskType.OPERATOR_COPY,
+            prompt="Summarize this segment.",
+            response_schema={"type": "array"},
+            now=now,
+        )
+    except GeminiStructuredGenerationError as exc:
+        assert exc.error_code == "invalid_request"
+        assert "schema" in str(exc).lower()
+    else:
+        raise AssertionError("Expected invalid response schemas to be rejected before provider execution.")
+
+    assert provider.calls == []
+
+
+def test_gemini_http_transport_maps_auth_and_transient_errors() -> None:
+    auth_client = RecordingHTTPClient(
+        error=HTTPError(
+            url="https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+            code=403,
+            msg="Forbidden",
+            hdrs=None,
+            fp=BytesIO(
+                json.dumps(
+                    {
+                        "error": {
+                            "code": 403,
+                            "message": "API key AIzaAUTHSECRET0004 is not valid.",
+                            "status": "PERMISSION_DENIED",
+                        }
+                    }
+                ).encode("utf-8")
+            ),
+        )
+    )
+    auth_transport = GeminiHTTPTransport(http_client=auth_client, timeout_seconds=30)
+
+    try:
+        auth_transport.generate_content(
+            model_name="gemini-2.5-flash",
+            api_key="AIzaAUTHSECRET0004",
+            payload={"contents": [{"role": "user", "parts": [{"text": "hello"}]}]},
+        )
+    except LLMProviderError as exc:
+        assert exc.error_code == "PERMISSION_DENIED"
+        assert exc.retryable is False
+        assert "AIzaAUTHSECRET0004" not in str(exc)
+    else:
+        raise AssertionError("Expected auth errors to be normalized.")
+
+    transient_client = RecordingHTTPClient(
+        error=HTTPError(
+            url="https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+            code=503,
+            msg="Service Unavailable",
+            hdrs=None,
+            fp=BytesIO(
+                json.dumps(
+                    {
+                        "error": {
+                            "code": 503,
+                            "message": "Service temporarily unavailable.",
+                            "status": "UNAVAILABLE",
+                        }
+                    }
+                ).encode("utf-8")
+            ),
+        )
+    )
+    transient_transport = GeminiHTTPTransport(http_client=transient_client, timeout_seconds=30)
+
+    try:
+        transient_transport.generate_content(
+            model_name="gemini-2.5-flash",
+            api_key="AIzaTRANSIENT0005",
+            payload={"contents": [{"role": "user", "parts": [{"text": "hello"}]}]},
+        )
+    except LLMProviderError as exc:
+        assert exc.error_code == "UNAVAILABLE"
+        assert exc.retryable is True
+    else:
+        raise AssertionError("Expected transient Gemini errors to be retryable.")
