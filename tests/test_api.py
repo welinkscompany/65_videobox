@@ -1,13 +1,138 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 import json
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
 from videobox_api.main import create_app
+from videobox_api.orchestration import LocalFirstRuntimeService
 from videobox_core_engine.settings import LocalOpenAICompatibleRuntimeConfig
+from videobox_provider_interfaces.llm import (
+    LLMProviderConfig,
+    LLMProviderError,
+    LLMTaskType,
+    StructuredLLMRequest,
+    StructuredLLMResponse,
+)
 from videobox_provider_interfaces.stt import STTResult, STTSegment
+from videobox_storage.local_project_store import LocalProjectStore
+
+
+@dataclass
+class FakeStructuredProvider:
+    responses: list[StructuredLLMResponse] = field(default_factory=list)
+    errors: list[Exception] = field(default_factory=list)
+    calls: list[StructuredLLMRequest] = field(default_factory=list)
+
+    def complete_structured(self, request: StructuredLLMRequest) -> StructuredLLMResponse:
+        self.calls.append(request)
+        if self.errors:
+            raise self.errors.pop(0)
+        if self.responses:
+            return self.responses.pop(0)
+        raise AssertionError("No fake structured response configured.")
+
+
+def _single_segment_transcribe(self, request):  # noqa: ANN001
+    return STTResult(
+        text="Office overview.",
+        segments=[
+            STTSegment(
+                start_sec=0.0,
+                end_sec=1.0,
+                text="Office overview.",
+                confidence=0.99,
+            )
+        ],
+        provider_name="mock_stt",
+    )
+
+
+def _create_segment_analysis_project(client: TestClient, tmp_path: Path) -> tuple[str, str]:
+    source_audio = tmp_path / "segment-runtime.wav"
+    source_script = tmp_path / "segment-runtime.txt"
+    source_audio.write_bytes(b"fake wav data")
+    source_script.write_text("Office overview.\n", encoding="utf-8")
+
+    project_id = client.post("/api/projects", json={"name": "AI Segment Draft"}).json()["project_id"]
+    narration_asset_id = client.post(
+        f"/api/projects/{project_id}/assets/narration-audio",
+        json={"source_path": str(source_audio)},
+    ).json()["asset_id"]
+    script_asset_id = client.post(
+        f"/api/projects/{project_id}/assets/script-document",
+        json={"source_path": str(source_script)},
+    ).json()["asset_id"]
+    transcription_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/transcription",
+        json={"narration_asset_id": narration_asset_id},
+    ).json()["job_id"]
+    return project_id, script_asset_id, transcription_job_id
+
+
+def _local_first_service_factory(
+    *,
+    local_provider: FakeStructuredProvider,
+    gemini_provider: FakeStructuredProvider,
+    local_enabled: bool = True,
+):
+    def factory(store: LocalProjectStore) -> LocalFirstRuntimeService:
+        return LocalFirstRuntimeService(
+            store=store,
+            local_provider=local_provider,
+            gemini_provider=gemini_provider,
+            local_config=LLMProviderConfig(provider_name="local_qwen", enabled=local_enabled),
+            gemini_config=LLMProviderConfig(provider_name="gemini", enabled=True),
+            local_runtime_config=LocalOpenAICompatibleRuntimeConfig(
+                enabled=local_enabled,
+                base_url="http://127.0.0.1:11434/v1",
+                model_name="Qwen3-32B",
+                timeout_seconds=42,
+            ),
+        )
+
+    return factory
+
+
+def _create_broll_recommendation_project(client: TestClient, tmp_path: Path) -> tuple[str, str]:
+    source_audio = tmp_path / "broll-runtime.wav"
+    source_script = tmp_path / "broll-runtime.txt"
+    broll_asset = tmp_path / "skyline.mp4"
+    source_audio.write_bytes(b"fake wav data")
+    source_script.write_text("Office overview.\n", encoding="utf-8")
+    broll_asset.write_bytes(b"video bytes")
+
+    project_id = client.post("/api/projects", json={"name": "AI Broll Draft"}).json()["project_id"]
+    narration_asset_id = client.post(
+        f"/api/projects/{project_id}/assets/narration-audio",
+        json={"source_path": str(source_audio)},
+    ).json()["asset_id"]
+    script_asset_id = client.post(
+        f"/api/projects/{project_id}/assets/script-document",
+        json={"source_path": str(source_script)},
+    ).json()["asset_id"]
+    client.post(
+        f"/api/projects/{project_id}/assets/broll-video",
+        json={
+            "source_path": str(broll_asset),
+            "title": "Office Skyline",
+            "tags": ["office", "skyline"],
+        },
+    )
+    transcription_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/transcription",
+        json={"narration_asset_id": narration_asset_id},
+    ).json()["job_id"]
+    segment_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/segment-analysis",
+        json={
+            "transcription_job_id": transcription_job_id,
+            "script_asset_id": script_asset_id,
+        },
+    ).json()["job_id"]
+    return project_id, segment_job_id
 
 
 def test_health_endpoint_reports_ok() -> None:
@@ -217,6 +342,210 @@ def test_recommendation_flow_persists_broll_and_music_results(tmp_path: Path) ->
     ]
     recommendation_types = {payload["recommendation_type"] for payload in payloads}
     assert {"broll", "bgm"}.issubset(recommendation_types)
+
+
+def test_broll_recommendation_endpoint_uses_local_first_runtime_before_gemini(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "videobox_provider_interfaces.stt.MockSTTProvider.transcribe",
+        _single_segment_transcribe,
+    )
+    local_provider = FakeStructuredProvider(
+        responses=[
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"keywords": ["office"]},
+                raw_text='{"keywords":["office"]}',
+                metadata={},
+            )
+        ]
+    )
+    gemini_provider = FakeStructuredProvider()
+    app = create_app(
+        projects_root=tmp_path,
+        local_first_runtime_service_factory=_local_first_service_factory(
+            local_provider=local_provider,
+            gemini_provider=gemini_provider,
+            local_enabled=True,
+        ),
+    )
+    client = TestClient(app)
+    project_id, segment_job_id = _create_broll_recommendation_project(client, tmp_path)
+
+    response = client.post(
+        f"/api/projects/{project_id}/jobs/broll-recommendation",
+        json={"segment_analysis_job_id": segment_job_id},
+    )
+
+    assert response.status_code == 202
+    result = client.get(f"/api/projects/{project_id}/jobs/broll-recommendation/{response.json()['job_id']}")
+    assert result.status_code == 200
+    payload = result.json()
+    assert payload["recommendations"][0]["reason"].lower().startswith("matched keywords: office")
+    assert len(local_provider.calls) == 1
+    assert gemini_provider.calls == []
+
+
+def test_broll_recommendation_endpoint_falls_back_to_gemini_when_local_fails(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "videobox_provider_interfaces.stt.MockSTTProvider.transcribe",
+        _single_segment_transcribe,
+    )
+    local_provider = FakeStructuredProvider(
+        errors=[
+            LLMProviderError(
+                provider_name="local_qwen",
+                message="local unavailable",
+                retryable=True,
+                error_code="LOCAL_UNAVAILABLE",
+            )
+        ]
+    )
+    gemini_provider = FakeStructuredProvider(
+        responses=[
+            StructuredLLMResponse(
+                provider_name="gemini",
+                model_name="gemini-2.5-flash-lite",
+                output_data={"keywords": ["office"]},
+                raw_text='{"keywords":["office"]}',
+                metadata={},
+            )
+        ]
+    )
+    app = create_app(
+        projects_root=tmp_path,
+        local_first_runtime_service_factory=_local_first_service_factory(
+            local_provider=local_provider,
+            gemini_provider=gemini_provider,
+            local_enabled=True,
+        ),
+    )
+    client = TestClient(app)
+    project_id, segment_job_id = _create_broll_recommendation_project(client, tmp_path)
+    key_response = client.post(
+        f"/api/projects/{project_id}/providers/gemini/keys",
+        json={
+            "label": "Fallback Gemini",
+            "api_key": "AIza-test-fallback",
+            "primary_model": "gemini-2.5-flash",
+            "cheap_model": "gemini-2.5-flash-lite",
+            "high_quality_model": "gemini-2.5-pro",
+        },
+    )
+    assert key_response.status_code == 201
+
+    response = client.post(
+        f"/api/projects/{project_id}/jobs/broll-recommendation",
+        json={"segment_analysis_job_id": segment_job_id},
+    )
+
+    assert response.status_code == 202
+    result = client.get(f"/api/projects/{project_id}/jobs/broll-recommendation/{response.json()['job_id']}")
+    assert result.status_code == 200
+    assert result.json()["recommendations"][0]["reason"].lower().startswith("matched keywords: office")
+    assert len(local_provider.calls) == 1
+    assert len(gemini_provider.calls) == 1
+
+
+def test_broll_recommendation_endpoint_skips_local_when_disabled(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "videobox_provider_interfaces.stt.MockSTTProvider.transcribe",
+        _single_segment_transcribe,
+    )
+    local_provider = FakeStructuredProvider()
+    gemini_provider = FakeStructuredProvider(
+        responses=[
+            StructuredLLMResponse(
+                provider_name="gemini",
+                model_name="gemini-2.5-flash-lite",
+                output_data={"keywords": ["office"]},
+                raw_text='{"keywords":["office"]}',
+                metadata={},
+            )
+        ]
+    )
+    app = create_app(
+        projects_root=tmp_path,
+        local_first_runtime_service_factory=_local_first_service_factory(
+            local_provider=local_provider,
+            gemini_provider=gemini_provider,
+            local_enabled=False,
+        ),
+    )
+    client = TestClient(app)
+    project_id, segment_job_id = _create_broll_recommendation_project(client, tmp_path)
+    key_response = client.post(
+        f"/api/projects/{project_id}/providers/gemini/keys",
+        json={
+            "label": "Fallback Gemini",
+            "api_key": "AIza-test-disabled",
+            "primary_model": "gemini-2.5-flash",
+            "cheap_model": "gemini-2.5-flash-lite",
+            "high_quality_model": "gemini-2.5-pro",
+        },
+    )
+    assert key_response.status_code == 201
+
+    response = client.post(
+        f"/api/projects/{project_id}/jobs/broll-recommendation",
+        json={"segment_analysis_job_id": segment_job_id},
+    )
+
+    assert response.status_code == 202
+    result = client.get(f"/api/projects/{project_id}/jobs/broll-recommendation/{response.json()['job_id']}")
+    assert result.status_code == 200
+    assert result.json()["recommendations"][0]["reason"].lower().startswith("matched keywords: office")
+    assert local_provider.calls == []
+    assert len(gemini_provider.calls) == 1
+
+
+def test_broll_recommendation_endpoint_preserves_heuristic_path_after_runtime_failure(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "videobox_provider_interfaces.stt.MockSTTProvider.transcribe",
+        _single_segment_transcribe,
+    )
+    local_provider = FakeStructuredProvider(
+        errors=[
+            LLMProviderError(
+                provider_name="local_qwen",
+                message="local unavailable",
+                retryable=True,
+                error_code="LOCAL_UNAVAILABLE",
+            )
+        ]
+    )
+    app = create_app(
+        projects_root=tmp_path,
+        local_first_runtime_service_factory=_local_first_service_factory(
+            local_provider=local_provider,
+            gemini_provider=FakeStructuredProvider(),
+            local_enabled=True,
+        ),
+    )
+    client = TestClient(app)
+    project_id, segment_job_id = _create_broll_recommendation_project(client, tmp_path)
+
+    response = client.post(
+        f"/api/projects/{project_id}/jobs/broll-recommendation",
+        json={"segment_analysis_job_id": segment_job_id},
+    )
+
+    assert response.status_code == 202
+    result = client.get(f"/api/projects/{project_id}/jobs/broll-recommendation/{response.json()['job_id']}")
+    assert result.status_code == 200
+    assert result.json()["recommendations"][0]["reason"].lower().startswith("matched keywords: office")
 
 
 def test_timeline_and_review_snapshot_flow(tmp_path: Path) -> None:

@@ -144,9 +144,9 @@ def build_local_first_runtime_service(
 
 
 class ApiOrchestrator:
-    def __init__(self, store: LocalProjectStore) -> None:
+    def __init__(self, store: LocalProjectStore, *, pipeline: LocalPipelineRunner | None = None) -> None:
         self.store = store
-        self.pipeline = LocalPipelineRunner(store)
+        self.pipeline = pipeline or LocalPipelineRunner(store)
 
     def register_narration_audio(self, *, project_id: str, source_path: Path) -> RegisteredAsset:
         asset = self.pipeline.register_narration_asset(

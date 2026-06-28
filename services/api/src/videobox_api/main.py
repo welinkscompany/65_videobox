@@ -7,7 +7,11 @@ from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel, Field
 
 from videobox_api.orchestration import ApiOrchestrator, build_local_first_runtime_service
+from videobox_core_engine.local_pipeline import LocalPipelineRunner
+from videobox_core_engine.recommenders import LocalFirstKeywordBrollRecommender
 from videobox_core_engine.settings import DEFAULT_PROJECTS_ROOT, LocalOpenAICompatibleRuntimeConfig
+from videobox_provider_interfaces.gemini import GeminiHTTPTransport, GeminiRESTStructuredProvider
+from videobox_provider_interfaces.llm import LLMProviderConfig
 from videobox_storage.local_project_store import LocalProjectStore
 
 
@@ -264,12 +268,31 @@ def create_app(
     *,
     projects_root: Path | None = None,
     local_runtime_config: LocalOpenAICompatibleRuntimeConfig | None = None,
+    local_first_runtime_service_factory=None,
 ) -> FastAPI:
     app = FastAPI(title="VideoBox API", version="0.1.0")
     store = LocalProjectStore(projects_root or DEFAULT_PROJECTS_ROOT)
-    orchestrator = ApiOrchestrator(store)
-    app.state.local_runtime_config = local_runtime_config or LocalOpenAICompatibleRuntimeConfig()
+    resolved_local_runtime_config = local_runtime_config or LocalOpenAICompatibleRuntimeConfig()
+    runtime_service_factory = local_first_runtime_service_factory or (
+        lambda project_store: build_local_first_runtime_service(
+            store=project_store,
+            gemini_provider=GeminiRESTStructuredProvider(
+                transport=GeminiHTTPTransport(http_client=urlopen)
+            ),
+            gemini_config=LLMProviderConfig(provider_name="gemini", enabled=True),
+            local_runtime_config=resolved_local_runtime_config,
+            local_http_client=urlopen,
+        )
+    )
+    runtime_service = runtime_service_factory(store)
+    pipeline = LocalPipelineRunner(
+        store,
+        broll_recommender=LocalFirstKeywordBrollRecommender(runtime_service=runtime_service),
+    )
+    orchestrator = ApiOrchestrator(store, pipeline=pipeline)
+    app.state.local_runtime_config = resolved_local_runtime_config
     app.state.build_local_first_runtime_service = build_local_first_runtime_service
+    app.state.local_first_runtime_service_factory = runtime_service_factory
     app.state.local_http_client = urlopen
 
     def _http_error(exc: Exception) -> HTTPException:

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-from typing import Any
+from dataclasses import dataclass, field
+from typing import Any, Protocol
 
+from videobox_core_engine.local_first_runtime import LocalFirstStructuredGenerationError
 from videobox_domain_models.recommendations import RecommendationType
+from videobox_provider_interfaces.llm import LLMProviderError, LLMTaskType
 from videobox_provider_interfaces.recommendation_policies import get_recommendation_guardrail
 from videobox_provider_interfaces.recommenders import (
     RecommendationCandidate,
@@ -13,6 +16,19 @@ from videobox_provider_interfaces.recommenders import (
 
 def _tokenize(text: str) -> set[str]:
     return {token.strip(".,!?").lower() for token in text.split() if token.strip(".,!?")}
+
+
+class StructuredRecommendationRuntime(Protocol):
+    def generate_structured(
+        self,
+        *,
+        project_id: str,
+        task_type: LLMTaskType,
+        prompt: str,
+        response_schema: dict[str, Any],
+        now: Any | None = None,
+    ) -> Any:
+        """Generate structured recommendation assistance."""
 
 
 class KeywordBrollRecommender(RecommendationProvider):
@@ -57,6 +73,74 @@ class KeywordBrollRecommender(RecommendationProvider):
                 )
             )
         return results
+
+
+@dataclass(slots=True)
+class LocalFirstKeywordBrollRecommender(RecommendationProvider):
+    runtime_service: StructuredRecommendationRuntime
+    fallback_recommender: RecommendationProvider = field(default_factory=KeywordBrollRecommender)
+    provider_name: str = "local-first-keyword-broll"
+
+    def recommend(self, request: RecommendationRequest) -> list[RecommendationCandidate]:
+        enriched_segments = [
+            self._enrich_segment(
+                project_id=request.project_id,
+                segment=segment,
+                assets=request.assets,
+            )
+            for segment in request.segments
+        ]
+        return self.fallback_recommender.recommend(
+            RecommendationRequest(
+                project_id=request.project_id,
+                recommendation_type=request.recommendation_type,
+                segments=enriched_segments,
+                assets=request.assets,
+            )
+        )
+
+    def _enrich_segment(
+        self,
+        *,
+        project_id: str,
+        segment: dict[str, Any],
+        assets: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        try:
+            response = self.runtime_service.generate_structured(
+                project_id=project_id,
+                task_type=LLMTaskType.KEYWORD_EXPANSION,
+                prompt=self._build_prompt(segment=segment),
+                response_schema={
+                    "type": "object",
+                    "required": ["keywords"],
+                    "properties": {
+                        "keywords": {"type": "array", "items": {"type": "string"}},
+                    },
+                },
+            )
+        except (LLMProviderError, LocalFirstStructuredGenerationError):
+            # Recommendation generation must degrade to the existing heuristic path.
+            return dict(segment)
+
+        keywords = [
+            str(item).strip().lower()
+            for item in response.output_data.get("keywords", [])
+            if isinstance(item, str) and item.strip()
+        ]
+        if not keywords:
+            return dict(segment)
+        enriched = dict(segment)
+        enriched["text"] = f"{segment.get('text', '')} {' '.join(keywords)}".strip()
+        enriched["expanded_keywords"] = keywords
+        return enriched
+
+    def _build_prompt(self, *, segment: dict[str, Any]) -> str:
+        return (
+            "Expand concise B-roll search keywords for this transcript segment.\n"
+            f"Segment: {segment.get('text', '')}\n"
+            "Return only short transcript-derived keywords that improve B-roll search."
+        )
 
 
 class RuleBasedMusicRecommender(RecommendationProvider):
