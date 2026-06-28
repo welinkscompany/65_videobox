@@ -6,6 +6,7 @@ from typing import Any
 from videobox_capcut_export import CapCutExportAdapter
 from videobox_core_engine.preview_renderer import PreviewRenderer
 from videobox_core_engine.recommenders import KeywordBrollRecommender, RuleBasedMusicRecommender
+from videobox_core_engine.script_scene_planner import HeuristicSegmentAnalyzer, SegmentAnalyzer
 from videobox_core_engine.timeline_builder import TimelineBuilder
 from videobox_domain_models.assets import AssetType
 from videobox_domain_models.jobs import JobStatus, JobType
@@ -21,6 +22,7 @@ class LocalPipelineRunner:
         store: LocalProjectStore,
         *,
         stt_provider: STTProvider | None = None,
+        segment_analyzer: SegmentAnalyzer | None = None,
         broll_recommender: RecommendationProvider | None = None,
         music_recommender: RecommendationProvider | None = None,
         timeline_builder: TimelineBuilder | None = None,
@@ -29,6 +31,7 @@ class LocalPipelineRunner:
     ) -> None:
         self.store = store
         self.stt_provider = stt_provider or MockSTTProvider()
+        self.segment_analyzer = segment_analyzer or HeuristicSegmentAnalyzer()
         self.broll_recommender = broll_recommender or KeywordBrollRecommender()
         self.music_recommender = music_recommender or RuleBasedMusicRecommender()
         self.timeline_builder = timeline_builder or TimelineBuilder()
@@ -125,7 +128,11 @@ class LocalPipelineRunner:
             transcript_id=transcription_job["output_ref"],
         )
         script_text = self._load_script_text(project_id=project_id, script_asset_id=script_asset_id)
-        segments = self._analyze_segments(transcript["segments"], script_text=script_text)
+        segments = self.segment_analyzer.analyze(
+            project_id=project_id,
+            transcript_segments=transcript["segments"],
+            script_text=script_text,
+        )
         job = self.store.create_job(
             project_id=project_id,
             job_type=JobType.SEGMENT_ANALYSIS,
@@ -559,35 +566,6 @@ class LocalPipelineRunner:
         asset = self.store.get_asset(project_id=project_id, asset_id=script_asset_id)
         script_path = self.store.resolve_storage_uri(project_id=project_id, storage_uri=asset["storage_uri"])
         return script_path.read_text(encoding="utf-8")
-
-    def _analyze_segments(
-        self,
-        transcript_segments: list[dict[str, Any]],
-        *,
-        script_text: str | None,
-    ) -> list[dict[str, Any]]:
-        script_lines = [line.strip() for line in script_text.splitlines() if line.strip()] if script_text else []
-        analyzed_segments: list[dict[str, Any]] = []
-        for index, segment in enumerate(transcript_segments):
-            transcript_text = str(segment["text"]).strip()
-            script_reference = script_lines[index] if index < len(script_lines) else None
-            review_required = (
-                "restart" in transcript_text.lower()
-                or float(segment.get("confidence", 1.0)) < 0.85
-                or (script_reference is not None and transcript_text.rstrip(".") != script_reference.rstrip("."))
-            )
-            analyzed_segments.append(
-                {
-                    "segment_id": f"seg_{index + 1:03d}",
-                    "text": transcript_text,
-                    "start_sec": float(segment["start_sec"]),
-                    "end_sec": float(segment["end_sec"]),
-                    "confidence": float(segment.get("confidence", 1.0)),
-                    "review_required": review_required,
-                    "cleanup_decision": "review" if review_required else "keep",
-                }
-            )
-        return analyzed_segments
 
     def _load_segment_analysis_from_job(
         self,

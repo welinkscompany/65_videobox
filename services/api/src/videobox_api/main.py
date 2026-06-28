@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from videobox_api.orchestration import ApiOrchestrator, build_local_first_runtime_service
 from videobox_core_engine.local_pipeline import LocalPipelineRunner
 from videobox_core_engine.recommenders import LocalFirstKeywordBrollRecommender
+from videobox_core_engine.script_scene_planner import LocalFirstSegmentAnalyzer
 from videobox_core_engine.settings import DEFAULT_PROJECTS_ROOT, LocalOpenAICompatibleRuntimeConfig
 from videobox_provider_interfaces.gemini import GeminiHTTPTransport, GeminiRESTStructuredProvider
 from videobox_provider_interfaces.llm import LLMProviderConfig
@@ -287,6 +288,7 @@ def create_app(
     runtime_service = runtime_service_factory(store)
     pipeline = LocalPipelineRunner(
         store,
+        segment_analyzer=LocalFirstSegmentAnalyzer(runtime_service=runtime_service),
         broll_recommender=LocalFirstKeywordBrollRecommender(runtime_service=runtime_service),
     )
     orchestrator = ApiOrchestrator(store, pipeline=pipeline)
