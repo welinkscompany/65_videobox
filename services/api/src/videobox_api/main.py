@@ -103,6 +103,13 @@ class SegmentAnalysisRecord(BaseModel):
     confidence: float
     review_required: bool
     cleanup_decision: str
+    provider_trace: "ProviderTraceResponse"
+
+
+class ProviderTraceResponse(BaseModel):
+    routing_mode: str
+    final_provider: str
+    fallback_reasons: list[str] = Field(default_factory=list)
 
 
 class RecommendationItemResponse(BaseModel):
@@ -115,6 +122,7 @@ class RecommendationItemResponse(BaseModel):
     review_required: bool
     payload: dict[str, object]
     created_at: str
+    provider_trace: ProviderTraceResponse
 
 
 class SegmentAnalysisJobResponse(StartJobResponse):
@@ -179,6 +187,7 @@ class ReviewSnapshotResponse(BaseModel):
 class OperatorGuidanceResponse(BaseModel):
     summary: str
     action_items: list[str]
+    provider_trace: ProviderTraceResponse
 
 
 class ReviewApprovalResponse(BaseModel):
@@ -198,6 +207,7 @@ class PreviewArtifactResponse(BaseModel):
     status: str
     artifact_kind: str
     notes: list[str] = Field(default_factory=list)
+    provider_trace: ProviderTraceResponse
     created_at: str | None = None
 
 
@@ -215,6 +225,7 @@ class ExportArtifactResponse(BaseModel):
     status: str
     adapter: str | None = None
     notes: list[str] = Field(default_factory=list)
+    provider_trace: ProviderTraceResponse
     created_at: str | None = None
 
 

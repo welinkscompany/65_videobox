@@ -469,6 +469,11 @@ def test_segment_analysis_endpoint_uses_local_first_runtime_before_gemini(
     segment = result.json()["segments"][0]
     assert segment["review_required"] is True
     assert segment["cleanup_decision"] == "review"
+    assert segment["provider_trace"] == {
+        "routing_mode": "local_first",
+        "final_provider": "local_qwen",
+        "fallback_reasons": [],
+    }
     assert len(local_provider.calls) == 1
     assert gemini_provider.calls == []
 
@@ -538,6 +543,11 @@ def test_segment_analysis_endpoint_falls_back_to_gemini_when_local_fails(
     segment = result.json()["segments"][0]
     assert segment["review_required"] is True
     assert segment["cleanup_decision"] == "review"
+    assert segment["provider_trace"] == {
+        "routing_mode": "local_first",
+        "final_provider": "gemini",
+        "fallback_reasons": ["local_provider_error"],
+    }
     assert len(local_provider.calls) == 1
     assert len(gemini_provider.calls) == 1
 
@@ -598,6 +608,11 @@ def test_segment_analysis_endpoint_skips_local_when_disabled(
     segment = result.json()["segments"][0]
     assert segment["review_required"] is False
     assert segment["cleanup_decision"] == "keep"
+    assert segment["provider_trace"] == {
+        "routing_mode": "local_first",
+        "final_provider": "gemini",
+        "fallback_reasons": ["local_disabled"],
+    }
     assert local_provider.calls == []
     assert len(gemini_provider.calls) == 1
 
@@ -959,6 +974,11 @@ def test_music_recommendation_endpoint_uses_local_first_runtime_before_gemini(
     assert recommendation["payload"]["music_mood"] == "cinematic pulse"
     assert recommendation["reason"] == "Suggested music mood for this segment: cinematic pulse."
     assert recommendation["score"] == 0.91
+    assert recommendation["provider_trace"] == {
+        "routing_mode": "local_first",
+        "final_provider": "local_qwen",
+        "fallback_reasons": [],
+    }
     assert len(local_provider.calls) == 2
     assert local_provider.calls[1].task_type is LLMTaskType.MUSIC_RECOMMENDATION
     assert gemini_provider.calls == []
@@ -1039,6 +1059,11 @@ def test_music_recommendation_endpoint_falls_back_to_gemini_when_local_fails(
     recommendation = result.json()["recommendations"][0]
     assert recommendation["payload"]["music_mood"] == "warm ambient"
     assert recommendation["score"] == 0.83
+    assert recommendation["provider_trace"] == {
+        "routing_mode": "local_first",
+        "final_provider": "gemini",
+        "fallback_reasons": ["local_provider_error"],
+    }
     assert len(local_provider.calls) == 2
     assert len(gemini_provider.calls) == 2
     assert gemini_provider.calls[1].task_type is LLMTaskType.MUSIC_RECOMMENDATION
@@ -1110,6 +1135,11 @@ def test_music_recommendation_endpoint_skips_local_when_disabled(
     recommendation = result.json()["recommendations"][0]
     assert recommendation["payload"]["music_mood"] == "steady documentary"
     assert recommendation["score"] == 0.78
+    assert recommendation["provider_trace"] == {
+        "routing_mode": "local_first",
+        "final_provider": "gemini",
+        "fallback_reasons": ["local_disabled"],
+    }
     assert local_provider.calls == []
     assert len(gemini_provider.calls) == 2
     assert gemini_provider.calls[1].task_type is LLMTaskType.MUSIC_RECOMMENDATION
@@ -1155,6 +1185,11 @@ def test_music_recommendation_endpoint_preserves_rule_based_fallback_when_local_
     recommendation = result.json()["recommendations"][0]
     assert recommendation["payload"]["music_mood"] == "clean documentary pulse"
     assert recommendation["reason"] == "Suggested music mood for this segment: clean documentary pulse."
+    assert recommendation["provider_trace"] == {
+        "routing_mode": "local_first",
+        "final_provider": "rule_based_fallback",
+        "fallback_reasons": ["local_provider_error", "gemini_unavailable"],
+    }
 
 
 def test_music_recommendation_endpoint_preserves_rule_based_path_after_runtime_failure(
@@ -1341,6 +1376,11 @@ def test_broll_recommendation_endpoint_uses_local_first_runtime_before_gemini(
     assert result.status_code == 200
     payload = result.json()
     assert payload["recommendations"][0]["reason"].lower().startswith("matched keywords: office")
+    assert payload["recommendations"][0]["provider_trace"] == {
+        "routing_mode": "local_first",
+        "final_provider": "local_qwen",
+        "fallback_reasons": [],
+    }
     assert len(local_provider.calls) == 2
     assert gemini_provider.calls == []
 
@@ -1418,6 +1458,11 @@ def test_broll_recommendation_endpoint_falls_back_to_gemini_when_local_fails(
     result = client.get(f"/api/projects/{project_id}/jobs/broll-recommendation/{response.json()['job_id']}")
     assert result.status_code == 200
     assert result.json()["recommendations"][0]["reason"].lower().startswith("matched keywords: office")
+    assert result.json()["recommendations"][0]["provider_trace"] == {
+        "routing_mode": "local_first",
+        "final_provider": "gemini",
+        "fallback_reasons": ["local_provider_error"],
+    }
     assert len(local_provider.calls) == 2
     assert len(gemini_provider.calls) == 2
 
@@ -1480,6 +1525,11 @@ def test_broll_recommendation_endpoint_skips_local_when_disabled(
     result = client.get(f"/api/projects/{project_id}/jobs/broll-recommendation/{response.json()['job_id']}")
     assert result.status_code == 200
     assert result.json()["recommendations"][0]["reason"].lower().startswith("matched keywords: office")
+    assert result.json()["recommendations"][0]["provider_trace"] == {
+        "routing_mode": "local_first",
+        "final_provider": "gemini",
+        "fallback_reasons": ["local_disabled"],
+    }
     assert local_provider.calls == []
     assert len(gemini_provider.calls) == 2
 
@@ -1528,6 +1578,11 @@ def test_broll_recommendation_endpoint_preserves_heuristic_path_after_runtime_fa
     result = client.get(f"/api/projects/{project_id}/jobs/broll-recommendation/{response.json()['job_id']}")
     assert result.status_code == 200
     assert result.json()["recommendations"][0]["reason"].lower().startswith("matched keywords: office")
+    assert result.json()["recommendations"][0]["provider_trace"] == {
+        "routing_mode": "local_first",
+        "final_provider": "heuristic_fallback",
+        "fallback_reasons": ["local_provider_error", "gemini_unavailable"],
+    }
 
 
 def test_timeline_and_review_snapshot_flow(tmp_path: Path) -> None:
@@ -1701,9 +1756,153 @@ def test_review_snapshot_uses_local_first_runtime_before_gemini(
     payload = review_snapshot.json()
     assert payload["operator_guidance"]["summary"] == "Review the flagged narration segment before export."
     assert payload["operator_guidance"]["action_items"] == ["Check seg_001 narration alignment"]
+    assert payload["operator_guidance"]["provider_trace"] == {
+        "routing_mode": "local_first",
+        "final_provider": "local_qwen",
+        "fallback_reasons": [],
+    }
     assert len(local_provider.calls) == 4
     assert local_provider.calls[3].task_type is LLMTaskType.OPERATOR_COPY
     assert gemini_provider.calls == []
+
+
+def test_review_snapshot_persists_operator_guidance_for_repeated_reads(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "videobox_provider_interfaces.stt.MockSTTProvider.transcribe",
+        _single_segment_transcribe,
+    )
+    local_provider = FakeStructuredProvider(
+        responses=[
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"review_required": True, "cleanup_decision": "review"},
+                raw_text='{"review_required":true,"cleanup_decision":"review"}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"keywords": ["office"]},
+                raw_text='{"keywords":["office"]}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"music_mood": "cinematic pulse", "score": 0.91},
+                raw_text='{"music_mood":"cinematic pulse","score":0.91}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={
+                    "summary": "Persisted local review summary.",
+                    "action_items": ["Check seg_001 narration alignment"],
+                },
+                raw_text='{"summary":"Persisted local review summary.","action_items":["Check seg_001 narration alignment"]}',
+                metadata={},
+            ),
+        ]
+    )
+    app = create_app(
+        projects_root=tmp_path,
+        local_first_runtime_service_factory=_local_first_service_factory(
+            local_provider=local_provider,
+            gemini_provider=FakeStructuredProvider(),
+            local_enabled=True,
+        ),
+    )
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    first_review_snapshot = client.get(f"/api/projects/{project_id}/review-snapshots/{timeline_job_id}")
+    second_review_snapshot = client.get(f"/api/projects/{project_id}/review-snapshots/{timeline_job_id}")
+
+    assert first_review_snapshot.status_code == 200
+    assert second_review_snapshot.status_code == 200
+    first_payload = first_review_snapshot.json()
+    second_payload = second_review_snapshot.json()
+    assert first_payload["operator_guidance"]["summary"] == "Persisted local review summary."
+    assert second_payload["operator_guidance"] == first_payload["operator_guidance"]
+    assert len(local_provider.calls) == 4
+
+
+def test_review_snapshot_invalidates_persisted_guidance_when_review_status_changes(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "videobox_provider_interfaces.stt.MockSTTProvider.transcribe",
+        _single_segment_transcribe,
+    )
+    local_provider = FakeStructuredProvider(
+        responses=[
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"review_required": False, "cleanup_decision": "keep"},
+                raw_text='{"review_required":false,"cleanup_decision":"keep"}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"keywords": ["office"]},
+                raw_text='{"keywords":["office"]}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"music_mood": "cinematic pulse", "score": 0.91},
+                raw_text='{"music_mood":"cinematic pulse","score":0.91}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={
+                    "summary": "Draft review summary.",
+                    "action_items": ["Approve the timeline now."],
+                },
+                raw_text='{"summary":"Draft review summary.","action_items":["Approve the timeline now."]}',
+                metadata={},
+            ),
+        ]
+    )
+    app = create_app(
+        projects_root=tmp_path,
+        local_first_runtime_service_factory=_local_first_service_factory(
+            local_provider=local_provider,
+            gemini_provider=FakeStructuredProvider(),
+            local_enabled=True,
+        ),
+    )
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    first_review_snapshot = client.get(f"/api/projects/{project_id}/review-snapshots/{timeline_job_id}")
+    approve_response = client.post(f"/api/projects/{project_id}/review-approvals/{timeline_job_id}/approve")
+    second_review_snapshot = client.get(f"/api/projects/{project_id}/review-snapshots/{timeline_job_id}")
+
+    assert first_review_snapshot.status_code == 200
+    assert approve_response.status_code == 202
+    assert second_review_snapshot.status_code == 200
+    assert first_review_snapshot.json()["operator_guidance"]["summary"] == "Draft review summary."
+    assert second_review_snapshot.json()["review_status"] == "approved"
+    assert second_review_snapshot.json()["operator_guidance"]["summary"] == (
+        "Timeline review is approved and outputs can be generated."
+    )
+    assert second_review_snapshot.json()["operator_guidance"]["provider_trace"] == {
+        "routing_mode": "local_first",
+        "final_provider": "heuristic_fallback",
+        "fallback_reasons": ["unexpected_runtime_failure"],
+    }
 
 
 def test_review_snapshot_falls_back_to_gemini_when_local_fails(
@@ -1805,6 +2004,11 @@ def test_review_snapshot_falls_back_to_gemini_when_local_fails(
     payload = review_snapshot.json()
     assert payload["operator_guidance"]["summary"] == "Gemini fallback review summary."
     assert payload["operator_guidance"]["action_items"] == ["Resolve flagged review items"]
+    assert payload["operator_guidance"]["provider_trace"] == {
+        "routing_mode": "local_first",
+        "final_provider": "gemini",
+        "fallback_reasons": ["local_provider_error"],
+    }
     assert len(local_provider.calls) == 4
     assert len(gemini_provider.calls) == 4
     assert gemini_provider.calls[3].task_type is LLMTaskType.OPERATOR_COPY
@@ -1887,6 +2091,11 @@ def test_review_snapshot_skips_local_when_disabled(
     assert review_snapshot.status_code == 200
     payload = review_snapshot.json()
     assert payload["operator_guidance"]["summary"] == "Disabled local review summary."
+    assert payload["operator_guidance"]["provider_trace"] == {
+        "routing_mode": "local_first",
+        "final_provider": "gemini",
+        "fallback_reasons": ["local_disabled"],
+    }
     assert local_provider.calls == []
     assert len(gemini_provider.calls) == 4
     assert gemini_provider.calls[3].task_type is LLMTaskType.OPERATOR_COPY
@@ -2002,6 +2211,11 @@ def test_review_snapshot_falls_back_to_heuristic_guidance_on_unexpected_runtime_
     payload = review_snapshot.json()
     assert payload["operator_guidance"]["summary"].lower().startswith("review is blocked")
     assert payload["operator_guidance"]["action_items"] == ["Segment requires operator review before export."]
+    assert payload["operator_guidance"]["provider_trace"] == {
+        "routing_mode": "local_first",
+        "final_provider": "heuristic_fallback",
+        "fallback_reasons": ["unexpected_runtime_failure"],
+    }
 
 
 def test_preview_and_export_use_operator_copy_runtime_in_production_flow(
@@ -2171,11 +2385,21 @@ def test_preview_and_export_return_ai_backed_operator_copy_on_local_success(
         "Preview operator copy from local runtime.",
         "Check caption timing in the playable preview.",
     ]
+    assert preview_result.json()["preview"]["provider_trace"] == {
+        "routing_mode": "local_first",
+        "final_provider": "local_qwen",
+        "fallback_reasons": [],
+    }
     assert export_result.json()["export"]["notes"] == [
         "Export operator copy from local runtime.",
         "Open the CapCut payload and confirm subtitle attachment.",
         "CapCut remains an export target, not the internal source of truth.",
     ]
+    assert export_result.json()["export"]["provider_trace"] == {
+        "routing_mode": "local_first",
+        "final_provider": "local_qwen",
+        "fallback_reasons": [],
+    }
 
 
 def test_preview_and_export_fall_back_to_gemini_operator_copy_when_local_fails(
@@ -2306,11 +2530,21 @@ def test_preview_and_export_fall_back_to_gemini_operator_copy_when_local_fails(
         "Gemini preview operator copy.",
         "Review the playable preview before handoff.",
     ]
+    assert preview_result.json()["preview"]["provider_trace"] == {
+        "routing_mode": "local_first",
+        "final_provider": "gemini",
+        "fallback_reasons": ["local_provider_error"],
+    }
     assert export_result.json()["export"]["notes"] == [
         "Gemini export operator copy.",
         "Validate the CapCut export package before delivery.",
         "CapCut remains an export target, not the internal source of truth.",
     ]
+    assert export_result.json()["export"]["provider_trace"] == {
+        "routing_mode": "local_first",
+        "final_provider": "gemini",
+        "fallback_reasons": ["local_provider_error"],
+    }
     assert len(local_provider.calls) == 5
     assert len(gemini_provider.calls) == 5
     assert gemini_provider.calls[3].task_type is LLMTaskType.OPERATOR_COPY
@@ -2416,6 +2650,16 @@ def test_preview_and_export_skip_local_operator_copy_when_local_runtime_is_disab
     assert preview_result.json()["preview"]["notes"][0] == "Disabled local preview operator copy."
     assert export_result.json()["export"]["notes"][0] == "Disabled local export operator copy."
     assert export_result.json()["export"]["notes"][-1] == "CapCut remains an export target, not the internal source of truth."
+    assert preview_result.json()["preview"]["provider_trace"] == {
+        "routing_mode": "local_first",
+        "final_provider": "gemini",
+        "fallback_reasons": ["local_disabled"],
+    }
+    assert export_result.json()["export"]["provider_trace"] == {
+        "routing_mode": "local_first",
+        "final_provider": "gemini",
+        "fallback_reasons": ["local_disabled"],
+    }
     assert len(gemini_provider.calls) == 5
     assert gemini_provider.calls[3].task_type is LLMTaskType.OPERATOR_COPY
     assert gemini_provider.calls[4].task_type is LLMTaskType.OPERATOR_COPY

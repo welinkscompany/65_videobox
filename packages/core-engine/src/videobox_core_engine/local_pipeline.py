@@ -9,6 +9,7 @@ from videobox_core_engine.output_operator_copy import (
     StaticOutputOperatorCopyBuilder,
 )
 from videobox_core_engine.preview_renderer import PreviewRenderer
+from videobox_core_engine.provider_trace import build_provider_trace
 from videobox_core_engine.recommenders import KeywordBrollRecommender, RuleBasedMusicRecommender
 from videobox_core_engine.review_guidance import HeuristicReviewGuidanceBuilder, ReviewGuidanceBuilder
 from videobox_core_engine.script_scene_planner import HeuristicSegmentAnalyzer, SegmentAnalyzer
@@ -393,9 +394,21 @@ class LocalPipelineRunner:
             recommendations=self.store.list_recommendation_rows(project_id=project_id),
             timeline_review_flags=timeline.get("review_flags", []),
         )
+        persisted_operator_guidance = self.store.get_persisted_operator_guidance(
+            project_id=project_id,
+            timeline_id=str(timeline["timeline_id"]),
+        )
+        if persisted_operator_guidance is not None:
+            snapshot["operator_guidance"] = persisted_operator_guidance
+            return snapshot
         snapshot["operator_guidance"] = self.review_guidance_builder.build(
             project_id=project_id,
             review_snapshot=snapshot,
+        )
+        self.store.save_operator_guidance(
+            project_id=project_id,
+            timeline_id=str(timeline["timeline_id"]),
+            operator_guidance=snapshot["operator_guidance"],
         )
         return snapshot
 
@@ -484,11 +497,14 @@ class LocalPipelineRunner:
                 project_id=project_id,
                 timeline=timeline,
             )
-            preview_payload["notes"] = self.output_operator_copy_builder.build(
+            output_copy = self.output_operator_copy_builder.build(
                 project_id=project_id,
                 timeline=timeline,
                 output_target=JobType.PREVIEW_RENDER.value,
             )
+            output_copy = self._normalize_output_copy(output_copy)
+            preview_payload["notes"] = output_copy["notes"]
+            preview_payload["provider_trace"] = output_copy["provider_trace"]
             persisted = self.store.save_preview_run(
                 project_id=project_id,
                 timeline_id=str(timeline["timeline_id"]),
@@ -534,12 +550,15 @@ class LocalPipelineRunner:
                 timeline=timeline,
                 subtitle_file_uri=latest_subtitle["file_uri"] if latest_subtitle else None,
             )
-            export_payload["notes"] = self.output_operator_copy_builder.build(
+            output_copy = self.output_operator_copy_builder.build(
                 project_id=project_id,
                 timeline=timeline,
                 output_target=JobType.CAPCUT_EXPORT.value,
                 subtitle_file_uri=latest_subtitle["file_uri"] if latest_subtitle else None,
             )
+            output_copy = self._normalize_output_copy(output_copy)
+            export_payload["notes"] = output_copy["notes"]
+            export_payload["provider_trace"] = output_copy["provider_trace"]
             persisted = self.store.save_capcut_export(
                 project_id=project_id,
                 timeline_id=str(timeline["timeline_id"]),
@@ -583,6 +602,28 @@ class LocalPipelineRunner:
             "auto_apply_allowed": candidate.auto_apply_allowed,
             "review_required": candidate.review_required,
             "payload": candidate.payload,
+            "provider_trace": candidate.payload.get("provider_trace"),
+        }
+
+    def _normalize_output_copy(
+        self,
+        output_copy: dict[str, Any] | list[str],
+    ) -> dict[str, Any]:
+        if isinstance(output_copy, dict):
+            notes = output_copy.get("notes")
+            provider_trace = output_copy.get("provider_trace")
+            return {
+                "notes": [str(item) for item in notes if isinstance(item, str) and item.strip()]
+                if isinstance(notes, list)
+                else [],
+                "provider_trace": provider_trace
+                if isinstance(provider_trace, dict)
+                else build_provider_trace(final_provider="static_fallback"),
+            }
+
+        return {
+            "notes": [str(item) for item in output_copy if isinstance(item, str) and item.strip()],
+            "provider_trace": build_provider_trace(final_provider="static_fallback"),
         }
 
     def _load_script_text(self, *, project_id: str, script_asset_id: str | None) -> str | None:

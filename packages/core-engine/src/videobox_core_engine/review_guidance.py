@@ -5,6 +5,7 @@ from typing import Any, Protocol
 
 from videobox_core_engine.gemini_runtime import GeminiStructuredGenerationError
 from videobox_core_engine.local_first_runtime import LocalFirstStructuredGenerationError
+from videobox_core_engine.provider_trace import build_provider_trace, response_provider_trace, with_final_provider
 from videobox_provider_interfaces.llm import LLMProviderError, LLMTaskType
 
 
@@ -60,17 +61,20 @@ class HeuristicReviewGuidanceBuilder(ReviewGuidanceBuilder):
             return {
                 "summary": "Review is blocked until the flagged items are resolved.",
                 "action_items": action_items[:5],
+                "provider_trace": build_provider_trace(final_provider="heuristic_fallback"),
             }
 
         if review_status == "approved":
             return {
                 "summary": "Timeline review is approved and outputs can be generated.",
                 "action_items": ["Generate subtitles, preview, or export from the approved timeline."],
+                "provider_trace": build_provider_trace(final_provider="heuristic_fallback"),
             }
 
         return {
             "summary": "Timeline is ready for approval before output generation.",
             "action_items": ["Approve the timeline review to unlock subtitles, preview, and export."],
+            "provider_trace": build_provider_trace(final_provider="heuristic_fallback"),
         }
 
 
@@ -106,8 +110,18 @@ class LocalFirstReviewGuidanceBuilder(ReviewGuidanceBuilder):
             summary = response.output_data.get("summary")
             action_items = response.output_data.get("action_items")
             if not isinstance(summary, str) or not summary.strip():
+                fallback_guidance["provider_trace"] = with_final_provider(
+                    response_provider_trace(response),
+                    final_provider="heuristic_fallback",
+                    additional_reason="unexpected_runtime_failure",
+                )
                 return fallback_guidance
             if not isinstance(action_items, list):
+                fallback_guidance["provider_trace"] = with_final_provider(
+                    response_provider_trace(response),
+                    final_provider="heuristic_fallback",
+                    additional_reason="unexpected_runtime_failure",
+                )
                 return fallback_guidance
 
             cleaned_action_items = [
@@ -116,18 +130,27 @@ class LocalFirstReviewGuidanceBuilder(ReviewGuidanceBuilder):
                 if isinstance(item, str) and item.strip()
             ]
             if not cleaned_action_items:
+                fallback_guidance["provider_trace"] = with_final_provider(
+                    response_provider_trace(response),
+                    final_provider="heuristic_fallback",
+                    additional_reason="unexpected_runtime_failure",
+                )
                 return fallback_guidance
 
             return {
                 "summary": summary.strip(),
                 "action_items": cleaned_action_items[:5],
+                "provider_trace": response_provider_trace(response),
             }
-        except (
-            GeminiStructuredGenerationError,
-            LLMProviderError,
-            LocalFirstStructuredGenerationError,
-            Exception,
-        ):
+        except Exception as exc:
+            fallback_guidance["provider_trace"] = with_final_provider(
+                getattr(exc, "provider_trace", build_provider_trace(final_provider="heuristic_fallback")),
+                final_provider="heuristic_fallback",
+                additional_reason="unexpected_runtime_failure" if not isinstance(
+                    exc,
+                    (GeminiStructuredGenerationError, LLMProviderError, LocalFirstStructuredGenerationError),
+                ) else None,
+            )
             return fallback_guidance
 
     def _build_prompt(self, *, review_snapshot: dict[str, Any]) -> str:

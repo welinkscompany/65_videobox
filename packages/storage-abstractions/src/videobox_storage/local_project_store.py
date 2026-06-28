@@ -13,6 +13,7 @@ from videobox_domain_models.jobs import JobStatus, JobType
 from videobox_domain_models.projects import ProjectRecord
 from videobox_domain_models.recommendations import RecommendationRecord, RecommendationType
 from videobox_domain_models.transcripts import TranscriptRecord
+from videobox_core_engine.provider_trace import build_provider_trace
 from videobox_storage.sqlite_schema import PROJECT_SCHEMA_STATEMENTS
 
 
@@ -237,6 +238,12 @@ class LocalProjectStore:
             ),
         )
         for index, segment in enumerate(segments, start=1):
+            segment_metadata = {
+                "transcript_id": transcript_id,
+                "script_asset_id": script_asset_id,
+            }
+            if "provider_trace" in segment:
+                segment_metadata["provider_trace"] = segment["provider_trace"]
             self._execute(
                 project_id,
                 """
@@ -263,13 +270,7 @@ class LocalProjectStore:
                     segment.get("confidence"),
                     segment.get("cleanup_decision"),
                     1 if segment.get("review_required") else 0,
-                    json.dumps(
-                        {
-                            "transcript_id": transcript_id,
-                            "script_asset_id": script_asset_id,
-                        },
-                        ensure_ascii=True,
-                    ),
+                    json.dumps(segment_metadata, ensure_ascii=True),
                 ),
             )
         return payload
@@ -456,6 +457,7 @@ class LocalProjectStore:
             """,
             (timeline_id, project_id, status, approved_at, updated_at),
         )
+        self.clear_operator_guidance(project_id=project_id, timeline_id=timeline_id)
         return self.get_review_state(project_id=project_id, timeline_id=timeline_id)
 
     def save_gemini_provider_key(
@@ -1073,7 +1075,10 @@ class LocalProjectStore:
         for row in rows:
             payload = dict(row)
             payload["review_required"] = bool(payload["review_required"])
-            payload["metadata"] = json.loads(payload.pop("metadata_json") or "{}")
+            payload["metadata"] = self._json_object(payload.pop("metadata_json"))
+            payload["provider_trace"] = payload["metadata"].get("provider_trace") or build_provider_trace(
+                final_provider="heuristic_fallback"
+            )
             items.append(payload)
         return items
 
@@ -1096,7 +1101,12 @@ class LocalProjectStore:
             payload = dict(row)
             payload["auto_apply_allowed"] = bool(payload["auto_apply_allowed"])
             payload["review_required"] = bool(payload["review_required"])
-            payload["payload"] = json.loads(payload.pop("payload_json") or "{}")
+            payload["payload"] = self._json_object(payload.pop("payload_json"))
+            payload["provider_trace"] = payload["payload"].get("provider_trace") or build_provider_trace(
+                final_provider="heuristic_fallback"
+                if payload["recommendation_type"] == RecommendationType.BROLL.value
+                else "rule_based_fallback"
+            )
             items.append(payload)
         return items
 
@@ -1130,6 +1140,15 @@ class LocalProjectStore:
             raise KeyError(f"Segment analysis not found: {segment_analysis_id}")
         payload = dict(row)
         payload["segments"] = json.loads(payload.pop("segments_json"))
+        for segment in payload["segments"]:
+            if "provider_trace" not in segment:
+                metadata = segment.get("metadata")
+                if not isinstance(metadata, dict):
+                    metadata = {}
+                    segment["metadata"] = metadata
+                segment["provider_trace"] = metadata.get("provider_trace") or build_provider_trace(
+                    final_provider="heuristic_fallback"
+                )
         return payload
 
     def get_recommendation_run(
@@ -1150,6 +1169,19 @@ class LocalProjectStore:
         payload = json.loads(file_path.read_text(encoding="utf-8"))
         if payload["recommendation_type"] != recommendation_type.value:
             raise KeyError(f"Recommendation run type mismatch: {recommendation_run_id}")
+        fallback_provider = (
+            "heuristic_fallback"
+            if recommendation_type == RecommendationType.BROLL
+            else "rule_based_fallback"
+        )
+        for item in payload.get("recommendations", []):
+            item_payload = item.get("payload")
+            if not isinstance(item_payload, dict):
+                item_payload = {}
+                item["payload"] = item_payload
+            item["provider_trace"] = item.get("provider_trace") or item_payload.get("provider_trace") or build_provider_trace(
+                final_provider=fallback_provider
+            )
         return payload
 
     def get_timeline_run(self, *, project_id: str, timeline_id: str) -> dict[str, Any]:
@@ -1171,6 +1203,37 @@ class LocalProjectStore:
         payload["summary"] = json.loads(row["summary_json"] or "{}")
         return payload
 
+    def get_persisted_operator_guidance(
+        self,
+        *,
+        project_id: str,
+        timeline_id: str,
+    ) -> dict[str, Any] | None:
+        timeline_payload = self.get_timeline_run(project_id=project_id, timeline_id=timeline_id)
+        operator_guidance = timeline_payload.get("operator_guidance")
+        return operator_guidance if isinstance(operator_guidance, dict) else None
+
+    def save_operator_guidance(
+        self,
+        *,
+        project_id: str,
+        timeline_id: str,
+        operator_guidance: dict[str, Any],
+    ) -> dict[str, Any]:
+        file_path = self._timeline_file_path(project_id=project_id, timeline_id=timeline_id)
+        payload = json.loads(file_path.read_text(encoding="utf-8"))
+        payload["operator_guidance"] = operator_guidance
+        file_path.write_text(json.dumps(payload, indent=2, ensure_ascii=True), encoding="utf-8")
+        return operator_guidance
+
+    def clear_operator_guidance(self, *, project_id: str, timeline_id: str) -> None:
+        file_path = self._timeline_file_path(project_id=project_id, timeline_id=timeline_id)
+        payload = json.loads(file_path.read_text(encoding="utf-8"))
+        if "operator_guidance" not in payload:
+            return
+        payload.pop("operator_guidance", None)
+        file_path.write_text(json.dumps(payload, indent=2, ensure_ascii=True), encoding="utf-8")
+
     def get_preview_run(self, *, project_id: str, preview_id: str) -> dict[str, Any]:
         row = self._fetchone(
             project_id,
@@ -1187,6 +1250,7 @@ class LocalProjectStore:
         if not file_path.exists():
             raise KeyError(f"Preview artifact missing: {preview_id}")
         payload = json.loads(file_path.read_text(encoding="utf-8"))
+        payload["provider_trace"] = payload.get("provider_trace") or build_provider_trace(final_provider="static_fallback")
         payload["summary"] = json.loads(row["summary_json"] or "{}")
         return payload
 
@@ -1224,6 +1288,7 @@ class LocalProjectStore:
         if not file_path.exists():
             raise KeyError(f"Export artifact missing: {export_id}")
         payload = json.loads(file_path.read_text(encoding="utf-8"))
+        payload["provider_trace"] = payload.get("provider_trace") or build_provider_trace(final_provider="static_fallback")
         payload["metadata"] = json.loads(row["metadata_json"] or "{}")
         return payload
 
@@ -1423,3 +1488,24 @@ class LocalProjectStore:
         if len(api_key_secret) <= 8:
             return "*" * len(api_key_secret)
         return f"{api_key_secret[:4]}***{api_key_secret[-4:]}"
+
+    def _json_object(self, raw_value: str | None) -> dict[str, Any]:
+        decoded = json.loads(raw_value or "{}")
+        return decoded if isinstance(decoded, dict) else {}
+
+    def _timeline_file_path(self, *, project_id: str, timeline_id: str) -> Path:
+        row = self._fetchone(
+            project_id,
+            """
+            SELECT file_uri
+            FROM timelines
+            WHERE timeline_id = ?
+            """,
+            (timeline_id,),
+        )
+        if row is None:
+            raise KeyError(f"Timeline not found: {timeline_id}")
+        file_path = self.resolve_storage_uri(project_id=project_id, storage_uri=str(row["file_uri"]))
+        if not file_path.exists():
+            raise KeyError(f"Timeline JSON missing: {timeline_id}")
+        return file_path

@@ -5,6 +5,7 @@ from typing import Any, Protocol
 
 from videobox_core_engine.gemini_runtime import GeminiStructuredGenerationError
 from videobox_core_engine.local_first_runtime import LocalFirstStructuredGenerationError
+from videobox_core_engine.provider_trace import build_provider_trace, response_provider_trace, with_final_provider
 from videobox_domain_models.recommendations import RecommendationType
 from videobox_provider_interfaces.llm import LLMProviderError, LLMTaskType
 from videobox_provider_interfaces.recommendation_policies import get_recommendation_guardrail
@@ -70,7 +71,10 @@ class KeywordBrollRecommender(RecommendationProvider):
                     ),
                     auto_apply_allowed=guardrail.auto_apply_allowed,
                     review_required=guardrail.review_required,
-                    payload={"matched_tags": best_overlap},
+                    payload={
+                        "matched_tags": best_overlap,
+                        "provider_trace": segment.get("provider_trace", build_provider_trace(final_provider="heuristic_fallback")),
+                    },
                 )
             )
         return results
@@ -120,9 +124,14 @@ class LocalFirstKeywordBrollRecommender(RecommendationProvider):
                     },
                 },
             )
-        except (LLMProviderError, LocalFirstStructuredGenerationError):
+        except (LLMProviderError, LocalFirstStructuredGenerationError) as exc:
             # Recommendation generation must degrade to the existing heuristic path.
-            return dict(segment)
+            enriched = dict(segment)
+            enriched["provider_trace"] = with_final_provider(
+                getattr(exc, "provider_trace", build_provider_trace(final_provider="heuristic_fallback")),
+                final_provider="heuristic_fallback",
+            )
+            return enriched
 
         keywords = [
             str(item).strip().lower()
@@ -130,10 +139,17 @@ class LocalFirstKeywordBrollRecommender(RecommendationProvider):
             if isinstance(item, str) and item.strip()
         ]
         if not keywords:
-            return dict(segment)
+            enriched = dict(segment)
+            enriched["provider_trace"] = with_final_provider(
+                response_provider_trace(response),
+                final_provider="heuristic_fallback",
+                additional_reason="unexpected_runtime_failure",
+            )
+            return enriched
         enriched = dict(segment)
         enriched["text"] = f"{segment.get('text', '')} {' '.join(keywords)}".strip()
         enriched["expanded_keywords"] = keywords
+        enriched["provider_trace"] = response_provider_trace(response)
         return enriched
 
     def _build_prompt(self, *, segment: dict[str, Any]) -> str:
@@ -205,17 +221,35 @@ class LocalFirstMusicRecommender(RecommendationProvider):
                 GeminiStructuredGenerationError,
                 LLMProviderError,
                 LocalFirstStructuredGenerationError,
-            ):
-                candidates.append(fallback_candidate)
+            ) as exc:
+                candidates.append(self._fallback_candidate(fallback_candidate, exc=exc))
                 continue
 
             music_mood = response.output_data.get("music_mood")
             score = response.output_data.get("score")
             if not isinstance(music_mood, str) or not music_mood.strip():
-                candidates.append(fallback_candidate)
+                candidates.append(
+                    self._fallback_candidate(
+                        fallback_candidate,
+                        trace=with_final_provider(
+                            response_provider_trace(response),
+                            final_provider="rule_based_fallback",
+                            additional_reason="unexpected_runtime_failure",
+                        ),
+                    )
+                )
                 continue
             if not isinstance(score, (int, float)) or isinstance(score, bool):
-                candidates.append(fallback_candidate)
+                candidates.append(
+                    self._fallback_candidate(
+                        fallback_candidate,
+                        trace=with_final_provider(
+                            response_provider_trace(response),
+                            final_provider="rule_based_fallback",
+                            additional_reason="unexpected_runtime_failure",
+                        ),
+                    )
+                )
                 continue
 
             candidates.append(
@@ -226,10 +260,37 @@ class LocalFirstMusicRecommender(RecommendationProvider):
                     reason=f"Suggested music mood for this segment: {music_mood.strip()}.",
                     auto_apply_allowed=fallback_candidate.auto_apply_allowed,
                     review_required=fallback_candidate.review_required,
-                    payload={"music_mood": music_mood.strip()},
+                    payload={
+                        "music_mood": music_mood.strip(),
+                        "provider_trace": response_provider_trace(response),
+                    },
                 )
             )
         return candidates
+
+    def _fallback_candidate(
+        self,
+        fallback_candidate: RecommendationCandidate,
+        *,
+        exc: Exception | None = None,
+        trace: dict[str, Any] | None = None,
+    ) -> RecommendationCandidate:
+        fallback_trace = trace or with_final_provider(
+            getattr(exc, "provider_trace", build_provider_trace(final_provider="rule_based_fallback")),
+            final_provider="rule_based_fallback",
+        )
+        return RecommendationCandidate(
+            target_segment_id=fallback_candidate.target_segment_id,
+            selected_asset_id=fallback_candidate.selected_asset_id,
+            score=fallback_candidate.score,
+            reason=fallback_candidate.reason,
+            auto_apply_allowed=fallback_candidate.auto_apply_allowed,
+            review_required=fallback_candidate.review_required,
+            payload={
+                **fallback_candidate.payload,
+                "provider_trace": fallback_trace,
+            },
+        )
 
     def _build_prompt(self, *, segment: dict[str, Any]) -> str:
         return (

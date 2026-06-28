@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from videobox_core_engine.gemini_runtime import GeminiStructuredGenerationError, GeminiStructuredRuntime
+from videobox_core_engine.provider_trace import build_provider_trace
 from videobox_core_engine.settings import LocalOpenAICompatibleRuntimeConfig
 from videobox_provider_interfaces.llm import (
     LLMProviderConfig,
@@ -22,6 +23,7 @@ class LocalFirstStructuredGenerationError(Exception):
     message: str
     error_code: str
     provider_name: str = "local_first_router"
+    provider_trace: dict[str, Any] = field(default_factory=dict)
 
     def __str__(self) -> str:
         return f"{self.provider_name}: {self.message}"
@@ -64,13 +66,21 @@ class LocalFirstStructuredRuntime:
             cooldown_seconds=self.cooldown_seconds,
         )
         local_enabled = self.local_config.enabled and self.local_runtime_config.enabled
+        fallback_reasons: list[str] = []
         if not local_enabled or task_type not in self.local_preferred_tasks:
-            return gemini_runtime.generate(
-                project_id=project_id,
-                task_type=task_type,
-                prompt=prompt,
-                response_schema=response_schema,
-                now=timestamp,
+            if not local_enabled:
+                fallback_reasons.append("local_disabled")
+            else:
+                fallback_reasons.append("task_not_local_preferred")
+            return self._with_provider_trace(
+                gemini_runtime.generate(
+                    project_id=project_id,
+                    task_type=task_type,
+                    prompt=prompt,
+                    response_schema=response_schema,
+                    now=timestamp,
+                ),
+                fallback_reasons=fallback_reasons,
             )
 
         try:
@@ -88,24 +98,59 @@ class LocalFirstStructuredRuntime:
                 )
             )
             self._validate_response_schema(response.output_data, response_schema)
-            return response
-        except (LLMProviderError, LocalFirstStructuredGenerationError):
-            pass
+            return self._with_provider_trace(response, fallback_reasons=fallback_reasons)
+        except LLMProviderError:
+            fallback_reasons.append("local_provider_error")
+        except LocalFirstStructuredGenerationError as exc:
+            fallback_reasons.append(self._local_failure_reason(exc.error_code))
 
         try:
-            return gemini_runtime.generate(
-                project_id=project_id,
-                task_type=task_type,
-                prompt=prompt,
-                response_schema=response_schema,
-                now=timestamp,
+            return self._with_provider_trace(
+                gemini_runtime.generate(
+                    project_id=project_id,
+                    task_type=task_type,
+                    prompt=prompt,
+                    response_schema=response_schema,
+                    now=timestamp,
+                ),
+                fallback_reasons=fallback_reasons,
             )
         except GeminiStructuredGenerationError as exc:
             raise LocalFirstStructuredGenerationError(
                 message=exc.message,
                 error_code=exc.error_code,
                 provider_name=exc.provider_name,
+                provider_trace=build_provider_trace(
+                    final_provider=exc.provider_name,
+                    fallback_reasons=[*fallback_reasons, "gemini_unavailable"],
+                ),
             ) from exc
+
+    def _with_provider_trace(
+        self,
+        response: StructuredLLMResponse,
+        *,
+        fallback_reasons: list[str],
+    ) -> StructuredLLMResponse:
+        metadata = dict(response.metadata)
+        metadata["provider_trace"] = build_provider_trace(
+            final_provider=response.provider_name,
+            fallback_reasons=fallback_reasons,
+        )
+        return StructuredLLMResponse(
+            provider_name=response.provider_name,
+            model_name=response.model_name,
+            output_data=response.output_data,
+            raw_text=response.raw_text,
+            metadata=metadata,
+        )
+
+    def _local_failure_reason(self, error_code: str) -> str:
+        if error_code == "structured_output_invalid":
+            return "local_response_invalid"
+        if error_code == "invalid_request":
+            return "local_request_invalid"
+        return "local_provider_error"
 
     def _validate_request(self, *, prompt: str, response_schema: dict[str, Any]) -> None:
         if not isinstance(prompt, str) or not prompt.strip():

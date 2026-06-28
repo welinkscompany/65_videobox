@@ -5,6 +5,7 @@ from typing import Any, Protocol
 
 from videobox_core_engine.gemini_runtime import GeminiStructuredGenerationError
 from videobox_core_engine.local_first_runtime import LocalFirstStructuredGenerationError
+from videobox_core_engine.provider_trace import build_provider_trace, response_provider_trace, with_final_provider
 from videobox_provider_interfaces.llm import LLMProviderError, LLMTaskType
 
 
@@ -61,6 +62,7 @@ class HeuristicSegmentAnalyzer(SegmentAnalyzer):
                     "confidence": float(segment.get("confidence", 1.0)),
                     "review_required": review_required,
                     "cleanup_decision": "review" if review_required else "keep",
+                    "provider_trace": build_provider_trace(final_provider="heuristic_fallback"),
                 }
             )
         return analyzed_segments
@@ -110,17 +112,43 @@ class LocalFirstSegmentAnalyzer(SegmentAnalyzer):
                 GeminiStructuredGenerationError,
                 LLMProviderError,
                 LocalFirstStructuredGenerationError,
-            ):
-                analyzed_segments.append(fallback_segment)
+            ) as exc:
+                analyzed_segments.append(
+                    {
+                        **fallback_segment,
+                        "provider_trace": with_final_provider(
+                            getattr(exc, "provider_trace", build_provider_trace(final_provider="heuristic_fallback")),
+                            final_provider="heuristic_fallback",
+                        ),
+                    }
+                )
                 continue
 
             review_required = response.output_data.get("review_required")
             cleanup_decision = response.output_data.get("cleanup_decision")
             if not isinstance(review_required, bool):
-                analyzed_segments.append(fallback_segment)
+                analyzed_segments.append(
+                    {
+                        **fallback_segment,
+                        "provider_trace": with_final_provider(
+                            response_provider_trace(response),
+                            final_provider="heuristic_fallback",
+                            additional_reason="unexpected_runtime_failure",
+                        ),
+                    }
+                )
                 continue
             if cleanup_decision not in {"keep", "review"}:
-                analyzed_segments.append(fallback_segment)
+                analyzed_segments.append(
+                    {
+                        **fallback_segment,
+                        "provider_trace": with_final_provider(
+                            response_provider_trace(response),
+                            final_provider="heuristic_fallback",
+                            additional_reason="unexpected_runtime_failure",
+                        ),
+                    }
+                )
                 continue
 
             fallback_review_required = bool(fallback_segment.get("review_required"))
@@ -131,6 +159,7 @@ class LocalFirstSegmentAnalyzer(SegmentAnalyzer):
                     **fallback_segment,
                     "review_required": final_review_required,
                     "cleanup_decision": "review" if final_review_required else "keep",
+                    "provider_trace": response_provider_trace(response),
                 }
             )
         return analyzed_segments

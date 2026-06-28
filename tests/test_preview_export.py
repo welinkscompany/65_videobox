@@ -8,6 +8,7 @@ import pytest
 
 from videobox_core_engine.local_pipeline import LocalPipelineRunner
 from videobox_domain_models.jobs import JobStatus, JobType
+from videobox_domain_models.recommendations import RecommendationType
 from videobox_storage.local_project_store import LocalProjectStore
 
 
@@ -101,6 +102,21 @@ class FailingPreviewRenderer:
         raise RuntimeError("preview renderer exploded")
 
 
+class LegacyOutputOperatorCopyBuilder:
+    def build(
+        self,
+        *,
+        project_id: str,
+        timeline: dict[str, object],
+        output_target: str,
+        subtitle_file_uri: str | None = None,
+    ) -> list[str]:
+        del project_id, timeline, subtitle_file_uri
+        if output_target == "capcut_export":
+            return ["Legacy export copy."]
+        return ["Legacy preview copy."]
+
+
 def test_start_preview_render_marks_job_failed_when_renderer_errors(tmp_path: Path) -> None:
     store = LocalProjectStore(tmp_path)
     project = store.bootstrap_project(name="Preview Failure Project")
@@ -145,6 +161,52 @@ def test_start_preview_render_marks_job_failed_when_renderer_errors(tmp_path: Pa
     assert preview_job["job_type"] == JobType.PREVIEW_RENDER.value
     assert preview_job["status"] == JobStatus.FAILED.value
     assert preview_job["error_message"] == "preview renderer exploded"
+
+
+def test_start_preview_render_accepts_legacy_list_only_output_copy_builder(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Legacy Output Copy Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+        },
+    )
+    timeline_job = store.create_job(
+        project_id=project.project_id,
+        job_type=JobType.TIMELINE_BUILD,
+        input_ref="segment_analysis_job_001",
+        status=JobStatus.SUCCEEDED,
+    )
+    store.update_job(
+        project_id=project.project_id,
+        job_id=timeline_job["job_id"],
+        status=JobStatus.SUCCEEDED,
+        output_ref=timeline["timeline_id"],
+    )
+    store.save_review_state(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        status="approved",
+    )
+    runner = LocalPipelineRunner(
+        store,
+        output_operator_copy_builder=LegacyOutputOperatorCopyBuilder(),
+    )
+
+    result = runner.start_preview_render(
+        project_id=project.project_id,
+        timeline_job_id=timeline_job["job_id"],
+    )
+    preview = runner.get_preview_result(project_id=project.project_id, job_id=result["job_id"])
+
+    assert preview["preview"]["notes"] == ["Legacy preview copy."]
+    assert preview["preview"]["provider_trace"]["final_provider"] == "static_fallback"
 
 
 def test_save_review_state_and_subtitle_run_persist_records(tmp_path: Path) -> None:
@@ -329,3 +391,100 @@ def test_start_subtitle_render_uses_only_segments_from_the_approved_timeline(tmp
 
     assert "Timeline line one." in subtitle_text
     assert "Stale line that should not ship." not in subtitle_text
+
+
+def test_provider_trace_backfill_tolerates_non_object_json_shapes(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Provider Trace Backfill Project")
+    store.save_segment_analysis(
+        project_id=project.project_id,
+        transcript_id="transcript_001",
+        script_asset_id=None,
+        segments=[
+            {
+                "segment_id": "seg_001",
+                "text": "Office overview.",
+                "start_sec": 0.0,
+                "end_sec": 1.0,
+                "confidence": 0.99,
+                "review_required": False,
+                "cleanup_decision": "keep",
+            }
+        ],
+    )
+    store.save_recommendation_run(
+        project_id=project.project_id,
+        recommendation_type=RecommendationType.BROLL,
+        source_job_id="segment_analysis_job_001",
+        recommendations=[
+            {
+                "target_segment_id": "seg_001",
+                "selected_asset_id": "asset_001",
+                "score": 0.8,
+                "reason": "Matched keywords: office",
+                "auto_apply_allowed": True,
+                "review_required": False,
+                "payload": {"matched_tags": ["office"]},
+            }
+        ],
+    )
+    database_path = tmp_path / "projects" / project.project_id / "db" / "project.sqlite"
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute("UPDATE segments SET metadata_json = '[]'")
+        connection.execute("UPDATE recommendations SET payload_json = 'null'")
+        connection.execute(
+            "UPDATE segment_analysis_runs SET segments_json = ?",
+            (json.dumps([{"segment_id": "seg_001", "text": "Office overview.", "start_sec": 0.0, "end_sec": 1.0, "confidence": 0.99, "review_required": False, "cleanup_decision": "keep", "metadata": []}], ensure_ascii=True),),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    segments = store.list_segments(project_id=project.project_id)
+    recommendations = store.list_recommendation_rows(project_id=project.project_id)
+    analysis = store.get_segment_analysis(project_id=project.project_id, segment_analysis_id="segment_analysis_001")
+
+    assert segments[0]["provider_trace"]["final_provider"] == "heuristic_fallback"
+    assert recommendations[0]["provider_trace"]["final_provider"] == "heuristic_fallback"
+    assert analysis["segments"][0]["provider_trace"]["final_provider"] == "heuristic_fallback"
+
+
+def test_recommendation_run_provider_trace_backfill_tolerates_non_object_payload(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Recommendation Trace Backfill Project")
+    run = store.save_recommendation_run(
+        project_id=project.project_id,
+        recommendation_type=RecommendationType.BROLL,
+        source_job_id="segment_analysis_job_001",
+        recommendations=[
+            {
+                "target_segment_id": "seg_001",
+                "selected_asset_id": "asset_001",
+                "score": 0.8,
+                "reason": "Matched keywords: office",
+                "auto_apply_allowed": True,
+                "review_required": False,
+                "payload": {"matched_tags": ["office"]},
+            }
+        ],
+    )
+    run_path = (
+        tmp_path
+        / "projects"
+        / project.project_id
+        / "analysis"
+        / "recommendations"
+        / f"{run['recommendation_run_id']}.json"
+    )
+    payload = json.loads(run_path.read_text(encoding="utf-8"))
+    payload["recommendations"][0]["payload"] = None
+    run_path.write_text(json.dumps(payload, indent=2, ensure_ascii=True), encoding="utf-8")
+
+    loaded_run = store.get_recommendation_run(
+        project_id=project.project_id,
+        recommendation_run_id=run["recommendation_run_id"],
+        recommendation_type=RecommendationType.BROLL,
+    )
+
+    assert loaded_run["recommendations"][0]["provider_trace"]["final_provider"] == "heuristic_fallback"
