@@ -3711,6 +3711,333 @@ def test_provider_trace_audit_endpoint_exposes_artifact_level_entries(
     assert export_entry["provider_trace"]["final_provider"] == "local_qwen"
 
 
+def test_provider_trace_audit_endpoint_supports_timeline_job_and_artifact_filters(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "videobox_provider_interfaces.stt.MockSTTProvider.transcribe",
+        _single_segment_transcribe,
+    )
+    local_provider = FakeStructuredProvider(
+        responses=[
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"review_required": False, "cleanup_decision": "keep"},
+                raw_text='{"review_required":false,"cleanup_decision":"keep"}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"keywords": ["office"]},
+                raw_text='{"keywords":["office"]}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"music_mood": "cinematic pulse", "score": 0.91},
+                raw_text='{"music_mood":"cinematic pulse","score":0.91}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={
+                    "summary": "Local review summary.",
+                    "action_items": ["Approve the timeline now."],
+                },
+                raw_text='{"summary":"Local review summary.","action_items":["Approve the timeline now."]}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={
+                    "summary": "Local preview operator copy.",
+                    "action_items": ["Check the preview before handoff."],
+                },
+                raw_text='{"summary":"Local preview operator copy.","action_items":["Check the preview before handoff."]}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={
+                    "summary": "Local export operator copy.",
+                    "action_items": ["Validate the export package."],
+                },
+                raw_text='{"summary":"Local export operator copy.","action_items":["Validate the export package."]}',
+                metadata={},
+            ),
+        ]
+    )
+    app = create_app(
+        projects_root=tmp_path,
+        local_first_runtime_service_factory=_local_first_service_factory(
+            local_provider=local_provider,
+            gemini_provider=FakeStructuredProvider(),
+            local_enabled=True,
+        ),
+    )
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+    review_snapshot = client.get(f"/api/projects/{project_id}/review-snapshots/{timeline_job_id}")
+    timeline_result = client.get(f"/api/projects/{project_id}/timelines/{timeline_job_id}")
+    approve_response = client.post(f"/api/projects/{project_id}/review-approvals/{timeline_job_id}/approve")
+    preview_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/preview-render",
+        json={"timeline_job_id": timeline_job_id},
+    ).json()["job_id"]
+    export_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/capcut-export",
+        json={"timeline_job_id": timeline_job_id},
+    ).json()["job_id"]
+
+    assert review_snapshot.status_code == 200
+    assert approve_response.status_code == 202
+
+    unfiltered = client.get(f"/api/projects/{project_id}/provider-traces")
+    timeline_filtered = client.get(
+        f"/api/projects/{project_id}/provider-traces",
+        params={"timeline_id": timeline_result.json()["timeline"]["timeline_id"]},
+    )
+    blank_filtered = client.get(
+        f"/api/projects/{project_id}/provider-traces",
+        params={"timeline_id": "   ", "final_provider": ""},
+    )
+    job_type_filtered = client.get(
+        f"/api/projects/{project_id}/provider-traces",
+        params={"job_type": "preview_render"},
+    )
+    artifact_type_filtered = client.get(
+        f"/api/projects/{project_id}/provider-traces",
+        params={"artifact_type": "review_guidance"},
+    )
+
+    assert unfiltered.status_code == 200
+    assert timeline_filtered.status_code == 200
+    assert blank_filtered.status_code == 200
+    assert job_type_filtered.status_code == 200
+    assert artifact_type_filtered.status_code == 200
+    assert len(unfiltered.json()["entries"]) == 6
+    assert len(blank_filtered.json()["entries"]) == len(unfiltered.json()["entries"])
+    assert {entry["artifact_type"] for entry in timeline_filtered.json()["entries"]} == {
+        "review_guidance",
+        "preview_render",
+        "capcut_export",
+    }
+    assert [entry["job_id"] for entry in job_type_filtered.json()["entries"]] == [preview_job_id]
+    assert [entry["artifact_type"] for entry in artifact_type_filtered.json()["entries"]] == ["review_guidance"]
+    assert export_job_id not in [entry["job_id"] for entry in job_type_filtered.json()["entries"]]
+
+
+def test_provider_trace_audit_endpoint_supports_provider_and_fallback_reason_filters(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "videobox_provider_interfaces.stt.MockSTTProvider.transcribe",
+        _single_segment_transcribe,
+    )
+    local_provider = FakeStructuredProvider(
+        errors=[
+            LLMProviderError(
+                provider_name="local_qwen",
+                message="local unavailable",
+                retryable=True,
+                error_code="LOCAL_UNAVAILABLE",
+            )
+            for _ in range(6)
+        ]
+    )
+    gemini_provider = FakeStructuredProvider(
+        responses=[
+            StructuredLLMResponse(
+                provider_name="gemini",
+                model_name="gemini-2.5-flash",
+                output_data={"review_required": False, "cleanup_decision": "keep"},
+                raw_text='{"review_required":false,"cleanup_decision":"keep"}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="gemini",
+                model_name="gemini-2.5-flash-lite",
+                output_data={"keywords": ["office"]},
+                raw_text='{"keywords":["office"]}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="gemini",
+                model_name="gemini-2.5-flash",
+                output_data={"music_mood": "steady documentary", "score": 0.78},
+                raw_text='{"music_mood":"steady documentary","score":0.78}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="gemini",
+                model_name="gemini-2.5-flash",
+                output_data={
+                    "summary": "Gemini review summary.",
+                    "action_items": ["Approve the timeline now."],
+                },
+                raw_text='{"summary":"Gemini review summary.","action_items":["Approve the timeline now."]}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="gemini",
+                model_name="gemini-2.5-flash",
+                output_data={
+                    "summary": "Gemini preview operator copy.",
+                    "action_items": ["Check the preview before handoff."],
+                },
+                raw_text='{"summary":"Gemini preview operator copy.","action_items":["Check the preview before handoff."]}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="gemini",
+                model_name="gemini-2.5-flash",
+                output_data={
+                    "summary": "Gemini export operator copy.",
+                    "action_items": ["Validate the export package."],
+                },
+                raw_text='{"summary":"Gemini export operator copy.","action_items":["Validate the export package."]}',
+                metadata={},
+            ),
+        ]
+    )
+    app = create_app(
+        projects_root=tmp_path,
+        local_first_runtime_service_factory=_local_first_service_factory(
+            local_provider=local_provider,
+            gemini_provider=gemini_provider,
+            local_enabled=True,
+        ),
+    )
+    client = TestClient(app)
+    gemini_key_payload = {
+        "label": "Trace Audit Gemini",
+        "api_key": "AIza-trace-audit",
+        "primary_model": "gemini-2.5-flash",
+        "cheap_model": "gemini-2.5-flash-lite",
+        "high_quality_model": "gemini-2.5-pro",
+    }
+    project_id, timeline_job_id = _create_timeline_review_project(
+        client,
+        tmp_path,
+        gemini_key_payload=gemini_key_payload,
+    )
+    review_snapshot = client.get(f"/api/projects/{project_id}/review-snapshots/{timeline_job_id}")
+    approve_response = client.post(f"/api/projects/{project_id}/review-approvals/{timeline_job_id}/approve")
+    preview_response = client.post(
+        f"/api/projects/{project_id}/jobs/preview-render",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    export_response = client.post(
+        f"/api/projects/{project_id}/jobs/capcut-export",
+        json={"timeline_job_id": timeline_job_id},
+    )
+
+    assert review_snapshot.status_code == 200
+    assert approve_response.status_code == 202
+    assert preview_response.status_code == 202
+    assert export_response.status_code == 202
+
+    provider_filtered = client.get(
+        f"/api/projects/{project_id}/provider-traces",
+        params={"final_provider": "gemini"},
+    )
+    provider_excluded = client.get(
+        f"/api/projects/{project_id}/provider-traces",
+        params={"final_provider": "local_qwen"},
+    )
+    fallback_filtered = client.get(
+        f"/api/projects/{project_id}/provider-traces",
+        params={"fallback_reason": "local_provider_error"},
+    )
+    fallback_excluded = client.get(
+        f"/api/projects/{project_id}/provider-traces",
+        params={"fallback_reason": "unexpected_runtime_failure"},
+    )
+
+    assert provider_filtered.status_code == 200
+    assert provider_excluded.status_code == 200
+    assert fallback_filtered.status_code == 200
+    assert fallback_excluded.status_code == 200
+    assert len(provider_filtered.json()["entries"]) == 6
+    assert provider_excluded.json()["entries"] == []
+    assert len(fallback_filtered.json()["entries"]) == 6
+    assert fallback_excluded.json()["entries"] == []
+    assert {entry["provider_trace"]["final_provider"] for entry in provider_filtered.json()["entries"]} == {"gemini"}
+    assert all(
+        "local_provider_error" in entry["provider_trace"]["fallback_reasons"]
+        for entry in fallback_filtered.json()["entries"]
+    )
+
+
+def test_provider_trace_audit_timeline_filter_includes_failed_preview_render_for_the_same_timeline(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Filtered Failed Preview Audit Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+        },
+    )
+    timeline_job = store.create_job(
+        project_id=project.project_id,
+        job_type=JobType.TIMELINE_BUILD,
+        input_ref="segment_analysis_job_001",
+        status=JobStatus.SUCCEEDED,
+    )
+    store.update_job(
+        project_id=project.project_id,
+        job_id=timeline_job["job_id"],
+        status=JobStatus.SUCCEEDED,
+        output_ref=timeline["timeline_id"],
+    )
+    store.save_review_state(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        status="approved",
+    )
+    runner = LocalPipelineRunner(
+        store,
+        output_operator_copy_builder=FailingOutputOperatorCopyBuilder(),
+    )
+
+    with pytest.raises(LocalFirstStructuredGenerationError, match="preview_render provider failed"):
+        runner.start_preview_render(
+            project_id=project.project_id,
+            timeline_job_id=timeline_job["job_id"],
+        )
+
+    client = TestClient(create_app(projects_root=tmp_path))
+    filtered_response = client.get(
+        f"/api/projects/{project.project_id}/provider-traces",
+        params={"timeline_id": timeline["timeline_id"]},
+    )
+
+    assert filtered_response.status_code == 200
+    filtered_entries = filtered_response.json()["entries"]
+    failed_entry = next(
+        entry
+        for entry in filtered_entries
+        if entry["status"] == "failed" and entry["job_type"] == "preview_render"
+    )
+    assert failed_entry["source_job_id"] == timeline_job["job_id"]
+    assert failed_entry["timeline_id"] == timeline["timeline_id"]
+
+
 def test_provider_trace_audit_endpoint_backfills_legacy_records_without_complete_trace_data(
     tmp_path: Path,
 ) -> None:

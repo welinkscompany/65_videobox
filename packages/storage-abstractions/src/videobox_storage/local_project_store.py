@@ -1363,11 +1363,30 @@ class LocalProjectStore:
             "review_flags": timeline_review_flags,
         }
 
-    def get_provider_trace_audit(self, *, project_id: str) -> dict[str, Any]:
+    def get_provider_trace_audit(
+        self,
+        *,
+        project_id: str,
+        timeline_id: str | None = None,
+        job_type: str | None = None,
+        artifact_type: str | None = None,
+        final_provider: str | None = None,
+        fallback_reason: str | None = None,
+    ) -> dict[str, Any]:
         jobs = self.list_jobs(project_id=project_id)
         entries: list[dict[str, Any]] = []
+        filter_timeline_id = self._normalized_provider_trace_filter_value(timeline_id)
+        filter_job_type = self._normalized_provider_trace_filter_value(job_type)
+        filter_artifact_type = self._normalized_provider_trace_filter_value(artifact_type)
+        filter_final_provider = self._normalized_provider_trace_filter_value(final_provider)
+        filter_fallback_reason = self._normalized_provider_trace_filter_value(fallback_reason)
         timeline_jobs_by_timeline_id = {
             str(job.get("output_ref") or ""): job
+            for job in jobs
+            if job["job_type"] == JobType.TIMELINE_BUILD.value and job.get("output_ref")
+        }
+        timeline_ids_by_timeline_job_id = {
+            str(job.get("job_id") or ""): str(job.get("output_ref") or "")
             for job in jobs
             if job["job_type"] == JobType.TIMELINE_BUILD.value and job.get("output_ref")
         }
@@ -1475,15 +1494,17 @@ class LocalProjectStore:
                     fallback_reasons=["missing_provider_trace"],
                 )
             job_id = str(item.get("job_id") or "")
+            source_job_id = str(item.get("source_job_id") or "")
+            resolved_timeline_id = str(item.get("timeline_id") or "") or timeline_ids_by_timeline_job_id.get(source_job_id, "")
             artifact_type = str(item.get("artifact_type") or item.get("job_type") or "unknown_failure")
             entry = self._provider_trace_entry(
                 artifact_type=artifact_type,
                 artifact_id=str(item.get("artifact_id") or job_id),
                 job_type=str(item.get("job_type") or artifact_type),
                 job=None,
-                source_job_id=str(item.get("source_job_id") or "") or None,
+                source_job_id=source_job_id or None,
                 trace=trace,
-                timeline_id=str(item.get("timeline_id") or "") or None,
+                timeline_id=resolved_timeline_id or None,
                 status=JobStatus.FAILED.value,
                 finished_at=str(item.get("finished_at") or ""),
                 created_at=str(item.get("created_at") or ""),
@@ -1508,6 +1529,7 @@ class LocalProjectStore:
                     )
                 job_id = str(item.get("job_id") or "")
                 source_job_id = str(item.get("source_job_id") or "")
+                resolved_timeline_id = str(item.get("timeline_id") or "") or timeline_ids_by_timeline_job_id.get(source_job_id, "")
                 artifact_type = str(item.get("artifact_type") or item.get("job_type") or "unknown_failure")
                 entry = self._provider_trace_entry(
                     artifact_type=artifact_type,
@@ -1516,7 +1538,7 @@ class LocalProjectStore:
                     job=None,
                     source_job_id=source_job_id or None,
                     trace=trace,
-                    timeline_id=str(item.get("timeline_id") or "") or None,
+                    timeline_id=resolved_timeline_id or None,
                     status=JobStatus.FAILED.value,
                     finished_at=str(item.get("finished_at") or ""),
                     created_at=str(item.get("created_at") or ""),
@@ -1628,6 +1650,18 @@ class LocalProjectStore:
 
         entries.extend(failed_entries_by_job_id.values())
         entries.extend(review_guidance_attempt_entries_by_key.values())
+        entries = [
+            entry
+            for entry in entries
+            if self._provider_trace_entry_matches_filters(
+                entry,
+                timeline_id=filter_timeline_id,
+                job_type=filter_job_type,
+                artifact_type=filter_artifact_type,
+                final_provider=filter_final_provider,
+                fallback_reason=filter_fallback_reason,
+            )
+        ]
         entries.sort(key=lambda item: (item["finished_at"] or item["created_at"] or "", item["artifact_type"]))
         return {
             "summary": self._provider_trace_summary(entries),
@@ -2045,6 +2079,39 @@ class LocalProjectStore:
             "fallback_reason_counts": fallback_reason_counts,
             "artifact_type_counts": artifact_type_counts,
         }
+
+    def _provider_trace_entry_matches_filters(
+        self,
+        entry: dict[str, Any],
+        *,
+        timeline_id: str | None = None,
+        job_type: str | None = None,
+        artifact_type: str | None = None,
+        final_provider: str | None = None,
+        fallback_reason: str | None = None,
+    ) -> bool:
+        if timeline_id is not None and str(entry.get("timeline_id") or "") != timeline_id:
+            return False
+        if job_type is not None and str(entry.get("job_type") or "") != job_type:
+            return False
+        if artifact_type is not None and str(entry.get("artifact_type") or "") != artifact_type:
+            return False
+        trace = entry.get("provider_trace")
+        if not isinstance(trace, dict):
+            return False
+        if final_provider is not None and str(trace.get("final_provider") or "") != final_provider:
+            return False
+        if fallback_reason is not None:
+            reasons = [str(reason).strip() for reason in trace.get("fallback_reasons", []) if str(reason).strip()]
+            if fallback_reason not in reasons:
+                return False
+        return True
+
+    def _normalized_provider_trace_filter_value(self, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
 
     def _merge_provider_trace_failed_entries(
         self,

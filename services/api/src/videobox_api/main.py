@@ -682,9 +682,23 @@ def create_app(
         )
 
     @app.get("/api/projects/{project_id}/provider-traces")
-    def get_provider_trace_audit(project_id: str) -> ProviderTraceAuditResponse:
+    def get_provider_trace_audit(
+        project_id: str,
+        timeline_id: str | None = None,
+        job_type: str | None = None,
+        artifact_type: str | None = None,
+        final_provider: str | None = None,
+        fallback_reason: str | None = None,
+    ) -> ProviderTraceAuditResponse:
         try:
-            result = orchestrator.get_provider_trace_audit(project_id=project_id)
+            result = orchestrator.get_provider_trace_audit(
+                project_id=project_id,
+                timeline_id=timeline_id,
+                job_type=job_type,
+                artifact_type=artifact_type,
+                final_provider=final_provider,
+                fallback_reason=fallback_reason,
+            )
         except Exception as exc:
             raise _http_error(exc) from exc
         return ProviderTraceAuditResponse(
