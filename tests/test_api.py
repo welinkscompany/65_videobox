@@ -4363,6 +4363,352 @@ def test_provider_trace_audit_timeline_filter_include_upstream_includes_failed_u
     assert failed_upstream["provider_trace"]["final_provider"] == "gemini"
 
 
+def test_timeline_build_persists_exact_recommendation_job_lineage(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "videobox_provider_interfaces.stt.MockSTTProvider.transcribe",
+        _single_segment_transcribe,
+    )
+    local_provider = FakeStructuredProvider(
+        responses=[
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"review_required": False, "cleanup_decision": "keep"},
+                raw_text='{"review_required":false,"cleanup_decision":"keep"}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"keywords": ["office"]},
+                raw_text='{"keywords":["office"]}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"music_mood": "cinematic pulse", "score": 0.91},
+                raw_text='{"music_mood":"cinematic pulse","score":0.91}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={
+                    "summary": "Local review summary.",
+                    "action_items": ["Approve the timeline now."],
+                },
+                raw_text='{"summary":"Local review summary.","action_items":["Approve the timeline now."]}',
+                metadata={},
+            ),
+        ]
+    )
+    app = create_app(
+        projects_root=tmp_path,
+        local_first_runtime_service_factory=_local_first_service_factory(
+            local_provider=local_provider,
+            gemini_provider=FakeStructuredProvider(),
+            local_enabled=True,
+        ),
+    )
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+    jobs_payload = client.get(f"/api/projects/{project_id}/jobs").json()["jobs"]
+    timeline_payload = client.get(f"/api/projects/{project_id}/timelines/{timeline_job_id}").json()["timeline"]
+
+    segment_job_id = next(job["job_id"] for job in jobs_payload if job["job_type"] == "segment_analysis")
+    broll_job_id = next(job["job_id"] for job in jobs_payload if job["job_type"] == "broll_recommendation")
+    music_job_id = next(job["job_id"] for job in jobs_payload if job["job_type"] == "music_recommendation")
+
+    timeline_path = tmp_path / "projects" / project_id / "timelines" / f'{timeline_payload["timeline_id"]}.json'
+    persisted_payload = json.loads(timeline_path.read_text(encoding="utf-8"))
+
+    assert persisted_payload["lineage"] == {
+        "segment_analysis_job_id": segment_job_id,
+        "recommendation_job_ids": [broll_job_id, music_job_id],
+    }
+
+
+def test_provider_trace_audit_include_upstream_uses_exact_persisted_recommendation_lineage_when_available(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "videobox_provider_interfaces.stt.MockSTTProvider.transcribe",
+        _single_segment_transcribe,
+    )
+    local_provider = FakeStructuredProvider(
+        responses=[
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"review_required": False, "cleanup_decision": "keep"},
+                raw_text='{"review_required":false,"cleanup_decision":"keep"}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"keywords": ["office"]},
+                raw_text='{"keywords":["office"]}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"music_mood": "cinematic pulse", "score": 0.91},
+                raw_text='{"music_mood":"cinematic pulse","score":0.91}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={
+                    "summary": "Local review summary.",
+                    "action_items": ["Approve the timeline now."],
+                },
+                raw_text='{"summary":"Local review summary.","action_items":["Approve the timeline now."]}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"keywords": ["office", "desk"]},
+                raw_text='{"keywords":["office","desk"]}',
+                metadata={},
+            ),
+        ]
+    )
+    app = create_app(
+        projects_root=tmp_path,
+        local_first_runtime_service_factory=_local_first_service_factory(
+            local_provider=local_provider,
+            gemini_provider=FakeStructuredProvider(),
+            local_enabled=True,
+        ),
+    )
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+    jobs_payload = client.get(f"/api/projects/{project_id}/jobs").json()["jobs"]
+    timeline_payload = client.get(f"/api/projects/{project_id}/timelines/{timeline_job_id}").json()["timeline"]
+
+    segment_job_id = next(job["job_id"] for job in jobs_payload if job["job_type"] == "segment_analysis")
+    original_broll_job_id = next(job["job_id"] for job in jobs_payload if job["job_type"] == "broll_recommendation")
+    sibling_broll_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/broll-recommendation",
+        json={"segment_analysis_job_id": segment_job_id},
+    ).json()["job_id"]
+
+    assert sibling_broll_job_id != original_broll_job_id
+
+    direct_filtered = client.get(
+        f"/api/projects/{project_id}/provider-traces",
+        params={"timeline_id": timeline_payload["timeline_id"]},
+    )
+    upstream_filtered = client.get(
+        f"/api/projects/{project_id}/provider-traces",
+        params={"timeline_id": timeline_payload["timeline_id"], "include_upstream": "true"},
+    )
+
+    assert direct_filtered.status_code == 200
+    assert upstream_filtered.status_code == 200
+    assert {entry["job_id"] for entry in direct_filtered.json()["entries"] if entry["artifact_type"] == "broll_recommendation"} == set()
+    assert {entry["job_id"] for entry in upstream_filtered.json()["entries"] if entry["artifact_type"] == "broll_recommendation"} == {
+        original_broll_job_id,
+    }
+
+
+def test_provider_trace_audit_include_upstream_falls_back_to_shared_segment_for_legacy_timelines_without_lineage(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "videobox_provider_interfaces.stt.MockSTTProvider.transcribe",
+        _single_segment_transcribe,
+    )
+    local_provider = FakeStructuredProvider(
+        responses=[
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"review_required": False, "cleanup_decision": "keep"},
+                raw_text='{"review_required":false,"cleanup_decision":"keep"}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"keywords": ["office"]},
+                raw_text='{"keywords":["office"]}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"music_mood": "cinematic pulse", "score": 0.91},
+                raw_text='{"music_mood":"cinematic pulse","score":0.91}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={
+                    "summary": "Local review summary.",
+                    "action_items": ["Approve the timeline now."],
+                },
+                raw_text='{"summary":"Local review summary.","action_items":["Approve the timeline now."]}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"keywords": ["office", "desk"]},
+                raw_text='{"keywords":["office","desk"]}',
+                metadata={},
+            ),
+        ]
+    )
+    app = create_app(
+        projects_root=tmp_path,
+        local_first_runtime_service_factory=_local_first_service_factory(
+            local_provider=local_provider,
+            gemini_provider=FakeStructuredProvider(),
+            local_enabled=True,
+        ),
+    )
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+    jobs_payload = client.get(f"/api/projects/{project_id}/jobs").json()["jobs"]
+    timeline_payload = client.get(f"/api/projects/{project_id}/timelines/{timeline_job_id}").json()["timeline"]
+
+    segment_job_id = next(job["job_id"] for job in jobs_payload if job["job_type"] == "segment_analysis")
+    original_broll_job_id = next(job["job_id"] for job in jobs_payload if job["job_type"] == "broll_recommendation")
+    sibling_broll_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/broll-recommendation",
+        json={"segment_analysis_job_id": segment_job_id},
+    ).json()["job_id"]
+
+    timeline_path = tmp_path / "projects" / project_id / "timelines" / f'{timeline_payload["timeline_id"]}.json'
+    persisted_payload = json.loads(timeline_path.read_text(encoding="utf-8"))
+    persisted_payload.pop("lineage", None)
+    timeline_path.write_text(json.dumps(persisted_payload, indent=2, ensure_ascii=True), encoding="utf-8")
+
+    upstream_filtered = client.get(
+        f"/api/projects/{project_id}/provider-traces",
+        params={"timeline_id": timeline_payload["timeline_id"], "include_upstream": "true"},
+    )
+
+    assert upstream_filtered.status_code == 200
+    assert {entry["job_id"] for entry in upstream_filtered.json()["entries"] if entry["artifact_type"] == "broll_recommendation"} == {
+        original_broll_job_id,
+        sibling_broll_job_id,
+    }
+
+
+def test_provider_trace_audit_include_upstream_excludes_failed_recommendation_not_in_exact_lineage(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "videobox_provider_interfaces.stt.MockSTTProvider.transcribe",
+        _single_segment_transcribe,
+    )
+    local_provider = FakeStructuredProvider(
+        responses=[
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"review_required": False, "cleanup_decision": "keep"},
+                raw_text='{"review_required":false,"cleanup_decision":"keep"}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"keywords": ["office"]},
+                raw_text='{"keywords":["office"]}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"music_mood": "cinematic pulse", "score": 0.91},
+                raw_text='{"music_mood":"cinematic pulse","score":0.91}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={
+                    "summary": "Local review summary.",
+                    "action_items": ["Approve the timeline now."],
+                },
+                raw_text='{"summary":"Local review summary.","action_items":["Approve the timeline now."]}',
+                metadata={},
+            ),
+        ]
+    )
+    app = create_app(
+        projects_root=tmp_path,
+        local_first_runtime_service_factory=_local_first_service_factory(
+            local_provider=local_provider,
+            gemini_provider=FakeStructuredProvider(),
+            local_enabled=True,
+        ),
+    )
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+    jobs_payload = client.get(f"/api/projects/{project_id}/jobs").json()["jobs"]
+    timeline_payload = client.get(f"/api/projects/{project_id}/timelines/{timeline_job_id}").json()["timeline"]
+    segment_job_id = next(job["job_id"] for job in jobs_payload if job["job_type"] == "segment_analysis")
+
+    store = LocalProjectStore(tmp_path)
+    failed_broll_job = store.create_job(
+        project_id=project_id,
+        job_type=JobType.BROLL_RECOMMENDATION,
+        input_ref=segment_job_id,
+        status=JobStatus.RUNNING,
+    )
+    failed_broll_job = store.update_job(
+        project_id=project_id,
+        job_id=failed_broll_job["job_id"],
+        status=JobStatus.FAILED,
+        error_message="sibling broll failed",
+    )
+    store.save_provider_trace_audit_event(
+        project_id=project_id,
+        event={
+            "artifact_type": "broll_recommendation",
+            "artifact_id": failed_broll_job["job_id"],
+            "job_type": "broll_recommendation",
+            "job_id": failed_broll_job["job_id"],
+            "source_job_id": segment_job_id,
+            "status": "failed",
+            "finished_at": failed_broll_job["finished_at"],
+            "error_message": "sibling broll failed",
+            "provider_trace": build_provider_trace(
+                final_provider="gemini",
+                fallback_reasons=["local_provider_error"],
+            ),
+        },
+    )
+
+    upstream_filtered = client.get(
+        f"/api/projects/{project_id}/provider-traces",
+        params={"timeline_id": timeline_payload["timeline_id"], "include_upstream": "true"},
+    )
+
+    assert upstream_filtered.status_code == 200
+    assert failed_broll_job["job_id"] not in {
+        entry["job_id"]
+        for entry in upstream_filtered.json()["entries"]
+        if entry["artifact_type"] == "broll_recommendation"
+    }
+
+
 def test_provider_trace_audit_timeline_filter_keeps_review_guidance_attempt_entry(
     tmp_path: Path,
     monkeypatch,

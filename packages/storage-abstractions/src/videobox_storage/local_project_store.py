@@ -1382,6 +1382,8 @@ class LocalProjectStore:
         filter_final_provider = self._normalized_provider_trace_filter_value(final_provider)
         filter_fallback_reason = self._normalized_provider_trace_filter_value(fallback_reason)
         upstream_segment_job_ids: set[str] = set()
+        upstream_recommendation_job_ids: set[str] = set()
+        use_exact_recommendation_lineage = False
         timeline_jobs_by_timeline_id = {
             str(job.get("output_ref") or ""): job
             for job in jobs
@@ -1396,6 +1398,21 @@ class LocalProjectStore:
             timeline_job = timeline_jobs_by_timeline_id.get(filter_timeline_id)
             if timeline_job is not None:
                 segment_job_id = str(timeline_job.get("input_ref") or "")
+                try:
+                    timeline_payload = self.get_timeline_run(project_id=project_id, timeline_id=filter_timeline_id)
+                except Exception:
+                    timeline_payload = {}
+                lineage = timeline_payload.get("lineage")
+                if isinstance(lineage, dict):
+                    segment_job_id = str(lineage.get("segment_analysis_job_id") or segment_job_id)
+                    recommendation_job_ids = lineage.get("recommendation_job_ids")
+                    if isinstance(recommendation_job_ids, list):
+                        upstream_recommendation_job_ids = {
+                            str(job_id).strip()
+                            for job_id in recommendation_job_ids
+                            if str(job_id).strip()
+                        }
+                        use_exact_recommendation_lineage = True
                 if segment_job_id:
                     upstream_segment_job_ids.add(segment_job_id)
 
@@ -1666,6 +1683,8 @@ class LocalProjectStore:
                     timeline_id=filter_timeline_id,
                     include_upstream=include_upstream,
                     upstream_segment_job_ids=upstream_segment_job_ids,
+                    upstream_recommendation_job_ids=upstream_recommendation_job_ids,
+                    use_exact_recommendation_lineage=use_exact_recommendation_lineage,
                     job_type=filter_job_type,
                     artifact_type=filter_artifact_type,
                     final_provider=filter_final_provider,
@@ -2097,6 +2116,8 @@ class LocalProjectStore:
         timeline_id: str | None = None,
         include_upstream: bool = False,
         upstream_segment_job_ids: set[str] | None = None,
+        upstream_recommendation_job_ids: set[str] | None = None,
+        use_exact_recommendation_lineage: bool = False,
         job_type: str | None = None,
         artifact_type: str | None = None,
         final_provider: str | None = None,
@@ -2108,6 +2129,8 @@ class LocalProjectStore:
                 if not include_upstream or not self._is_upstream_provider_trace_entry(
                     entry,
                     upstream_segment_job_ids=upstream_segment_job_ids or set(),
+                    upstream_recommendation_job_ids=upstream_recommendation_job_ids or set(),
+                    use_exact_recommendation_lineage=use_exact_recommendation_lineage,
                 ):
                     return False
         if job_type is not None and str(entry.get("job_type") or "") != job_type:
@@ -2136,12 +2159,18 @@ class LocalProjectStore:
         entry: dict[str, Any],
         *,
         upstream_segment_job_ids: set[str],
+        upstream_recommendation_job_ids: set[str],
+        use_exact_recommendation_lineage: bool,
     ) -> bool:
         if not upstream_segment_job_ids:
             return False
         entry_job_id = str(entry.get("job_id") or "")
         entry_source_job_id = str(entry.get("source_job_id") or "")
-        return entry_job_id in upstream_segment_job_ids or entry_source_job_id in upstream_segment_job_ids
+        if entry_job_id in upstream_segment_job_ids:
+            return True
+        if use_exact_recommendation_lineage:
+            return entry_job_id in upstream_recommendation_job_ids
+        return entry_source_job_id in upstream_segment_job_ids
 
     def _merge_provider_trace_failed_entries(
         self,

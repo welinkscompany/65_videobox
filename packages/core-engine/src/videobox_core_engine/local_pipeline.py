@@ -441,6 +441,10 @@ class LocalPipelineRunner:
             ],
             "applied_recommendations": timeline.applied_recommendations,
             "pending_recommendations": timeline.pending_recommendations,
+            "lineage": {
+                "segment_analysis_job_id": segment_analysis_job_id,
+                "recommendation_job_ids": recommendation_job_ids,
+            },
         }
         persisted = self.store.save_timeline_run(
             project_id=project_id,
