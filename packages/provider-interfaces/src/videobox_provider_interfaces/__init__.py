@@ -5,7 +5,11 @@ from videobox_provider_interfaces.llm import (
     LLMRequest,
     LLMResponse,
     LLMTaskType,
+    StructuredLLMProvider,
+    StructuredLLMRequest,
+    StructuredLLMResponse,
 )
+from videobox_provider_interfaces.gemini import GeminiRESTStructuredProvider
 from videobox_provider_interfaces.recommenders import (
     RecommendationCandidate,
     RecommendationProvider,
@@ -36,6 +40,10 @@ __all__ = [
     "LLMRequest",
     "LLMResponse",
     "LLMTaskType",
+    "StructuredLLMProvider",
+    "StructuredLLMRequest",
+    "StructuredLLMResponse",
+    "GeminiRESTStructuredProvider",
     "MockSTTProvider",
     "RecommendationCandidate",
     "RecommendationGuardrail",

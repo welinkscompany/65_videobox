@@ -107,7 +107,9 @@ class GeminiApiKeyPool:
                 key,
                 status=GeminiKeyStatus.COOLDOWN,
                 cooldown_until=now + timedelta(seconds=cooldown_seconds),
+                consecutive_failures=key.consecutive_failures + 1,
                 last_error="rate_limited",
+                last_used_at=now,
             ),
         )
 

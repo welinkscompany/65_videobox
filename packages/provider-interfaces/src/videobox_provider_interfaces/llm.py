@@ -37,6 +37,23 @@ class LLMResponse:
 
 
 @dataclass(slots=True, frozen=True)
+class StructuredLLMRequest:
+    task_type: LLMTaskType
+    prompt: str
+    response_schema: dict[str, Any]
+    provider_context: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True, frozen=True)
+class StructuredLLMResponse:
+    provider_name: str
+    model_name: str
+    output_data: dict[str, Any]
+    raw_text: str
+    metadata: dict[str, Any]
+
+
+@dataclass(slots=True, frozen=True)
 class LLMProviderError(Exception):
     provider_name: str
     message: str
@@ -54,3 +71,11 @@ class LLMProvider(Protocol):
 
     def complete(self, request: LLMRequest) -> LLMResponse:
         """Return a text response for a routing task."""
+
+
+class StructuredLLMProvider(Protocol):
+    provider_name: str
+    supported_tasks: set[LLMTaskType]
+
+    def complete_structured(self, request: StructuredLLMRequest) -> StructuredLLMResponse:
+        """Return a structured response for a routing task."""

@@ -528,6 +528,22 @@ class LocalProjectStore:
             connection.close()
         return [self._serialize_gemini_provider_key(dict(row)) for row in rows]
 
+    def list_gemini_provider_keys_with_secrets(self, *, project_id: str) -> list[dict[str, Any]]:
+        connection = self._connection(project_id)
+        try:
+            rows = connection.execute(
+                """
+                SELECT key_id, project_id, label, primary_model, cheap_model, high_quality_model,
+                       status, cooldown_until, consecutive_failures, last_error, last_used_at,
+                       created_at, updated_at, api_key_secret
+                FROM gemini_provider_keys
+                ORDER BY created_at ASC, key_id ASC
+                """
+            ).fetchall()
+        finally:
+            connection.close()
+        return [self._serialize_gemini_provider_key(dict(row), include_secret=True) for row in rows]
+
     def get_gemini_provider_key(
         self,
         *,
@@ -607,6 +623,43 @@ class LocalProjectStore:
             WHERE key_id = ?
             """,
             (status, cooldown_until, self._now_iso(), key_id),
+        )
+        return self.get_gemini_provider_key(project_id=project_id, key_id=key_id)
+
+    def update_gemini_provider_key_runtime_state(
+        self,
+        *,
+        project_id: str,
+        key_id: str,
+        status: str,
+        cooldown_until: str | None,
+        consecutive_failures: int,
+        last_error: str | None,
+        last_used_at: str | None,
+    ) -> dict[str, Any]:
+        if status not in {item.value for item in GeminiKeyStatus}:
+            raise ValueError(f"Unsupported Gemini key status: {status}")
+        self._execute(
+            project_id,
+            """
+            UPDATE gemini_provider_keys
+            SET status = ?,
+                cooldown_until = ?,
+                consecutive_failures = ?,
+                last_error = ?,
+                last_used_at = ?,
+                updated_at = ?
+            WHERE key_id = ?
+            """,
+            (
+                status,
+                cooldown_until,
+                consecutive_failures,
+                last_error,
+                last_used_at,
+                self._now_iso(),
+                key_id,
+            ),
         )
         return self.get_gemini_provider_key(project_id=project_id, key_id=key_id)
 

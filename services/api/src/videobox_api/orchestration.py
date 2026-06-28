@@ -1,9 +1,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from videobox_core_engine.gemini_runtime import GeminiStructuredRuntime
+from videobox_provider_interfaces.llm import (
+    LLMProviderConfig,
+    LLMTaskType,
+    StructuredLLMProvider,
+    StructuredLLMResponse,
+)
 from videobox_core_engine.local_pipeline import LocalPipelineRunner
 from videobox_storage.local_project_store import LocalProjectStore
 
@@ -15,8 +23,40 @@ class RegisteredAsset:
     storage_uri: str
 
 
+@dataclass(slots=True)
+class GeminiRuntimeService:
+    store: LocalProjectStore
+    provider: StructuredLLMProvider
+    provider_config: LLMProviderConfig
+    cooldown_seconds: int = 180
+
+    def generate_structured(
+        self,
+        *,
+        project_id: str,
+        task_type: LLMTaskType,
+        prompt: str,
+        response_schema: dict[str, Any],
+        now: datetime | None = None,
+    ) -> StructuredLLMResponse:
+        runtime = GeminiStructuredRuntime(
+            store=self.store,
+            provider=self.provider,
+            provider_config=self.provider_config,
+            cooldown_seconds=self.cooldown_seconds,
+        )
+        return runtime.generate(
+            project_id=project_id,
+            task_type=task_type,
+            prompt=prompt,
+            response_schema=response_schema,
+            now=now,
+        )
+
+
 class ApiOrchestrator:
     def __init__(self, store: LocalProjectStore) -> None:
+        self.store = store
         self.pipeline = LocalPipelineRunner(store)
 
     def register_narration_audio(self, *, project_id: str, source_path: Path) -> RegisteredAsset:
