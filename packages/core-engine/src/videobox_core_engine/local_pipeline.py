@@ -504,11 +504,21 @@ class LocalPipelineRunner:
             project_id=project_id,
             review_snapshot=snapshot,
         )
-        self.store.save_operator_guidance(
-            project_id=project_id,
-            timeline_id=str(timeline["timeline_id"]),
-            operator_guidance=snapshot["operator_guidance"],
-        )
+        try:
+            self.store.save_operator_guidance(
+                project_id=project_id,
+                timeline_id=str(timeline["timeline_id"]),
+                operator_guidance=snapshot["operator_guidance"],
+            )
+        except Exception as exc:
+            self._save_review_guidance_attempt_audit_event(
+                project_id=project_id,
+                timeline_job_id=job_id,
+                timeline_id=str(timeline["timeline_id"]),
+                operator_guidance=snapshot["operator_guidance"],
+                error_message=str(exc),
+            )
+            raise
         return snapshot
 
     def get_review_snapshot_result(self, *, project_id: str, job_id: str) -> dict[str, Any]:
@@ -783,6 +793,35 @@ class LocalPipelineRunner:
             )
         except Exception:
             # Provider audit logging should not hide the original generation failure.
+            return
+
+    def _save_review_guidance_attempt_audit_event(
+        self,
+        *,
+        project_id: str,
+        timeline_job_id: str,
+        timeline_id: str,
+        operator_guidance: dict[str, Any],
+        error_message: str | None = None,
+    ) -> None:
+        try:
+            self.store.save_provider_trace_audit_event(
+                project_id=project_id,
+                event={
+                    "artifact_type": "review_guidance_attempt",
+                    "artifact_id": f"{timeline_id}:review_guidance_attempt:{self.store._next_provider_trace_event_sequence(project_id=project_id):03d}",
+                    "job_type": JobType.TIMELINE_BUILD.value,
+                    "job_id": timeline_job_id,
+                    "source_job_id": timeline_job_id,
+                    "timeline_id": timeline_id,
+                    "status": "unpersisted",
+                    "error_message": error_message,
+                    "provider_trace": operator_guidance.get("provider_trace")
+                    or build_provider_trace(final_provider="heuristic_fallback"),
+                },
+            )
+        except Exception:
+            # Attempt-level audit should not break review guidance delivery or persistence.
             return
 
     def _normalize_output_copy(

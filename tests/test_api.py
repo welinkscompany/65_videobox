@@ -4611,3 +4611,447 @@ def test_provider_trace_audit_read_path_does_not_require_failed_run_schema_mutat
     entries = audit_response.json()["entries"]
     assert len(entries) == 1
     assert entries[0]["artifact_type"] == "segment_analysis"
+
+
+def test_provider_trace_audit_endpoint_includes_review_guidance_attempt_entry(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "videobox_provider_interfaces.stt.MockSTTProvider.transcribe",
+        _single_segment_transcribe,
+    )
+    def fail_save_operator_guidance(
+        self,
+        *,
+        project_id: str,
+        timeline_id: str,
+        operator_guidance: dict[str, object],
+    ) -> dict[str, object]:
+        del self, project_id, timeline_id, operator_guidance
+        raise OSError("review guidance persistence offline")
+
+    monkeypatch.setattr(LocalProjectStore, "save_operator_guidance", fail_save_operator_guidance)
+    local_provider = FakeStructuredProvider(
+        responses=[
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"review_required": True, "cleanup_decision": "review"},
+                raw_text='{"review_required":true,"cleanup_decision":"review"}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"keywords": ["office"]},
+                raw_text='{"keywords":["office"]}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"music_mood": "cinematic pulse", "score": 0.91},
+                raw_text='{"music_mood":"cinematic pulse","score":0.91}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={
+                    "summary": "Audit local review summary.",
+                    "action_items": ["Check seg_001 narration alignment"],
+                },
+                raw_text='{"summary":"Audit local review summary.","action_items":["Check seg_001 narration alignment"]}',
+                metadata={},
+            ),
+        ]
+    )
+    app = create_app(
+        projects_root=tmp_path,
+        local_first_runtime_service_factory=_local_first_service_factory(
+            local_provider=local_provider,
+            gemini_provider=FakeStructuredProvider(),
+            local_enabled=True,
+        ),
+    )
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    review_snapshot = client.get(f"/api/projects/{project_id}/review-snapshots/{timeline_job_id}")
+    audit_response = client.get(f"/api/projects/{project_id}/provider-traces")
+
+    assert review_snapshot.status_code == 500
+    assert audit_response.status_code == 200
+    attempt_entry = next(
+        entry
+        for entry in audit_response.json()["entries"]
+        if entry["artifact_type"] == "review_guidance_attempt"
+    )
+    assert attempt_entry["job_id"] == timeline_job_id
+    assert attempt_entry["source_job_id"] == timeline_job_id
+    assert attempt_entry["timeline_id"]
+    assert attempt_entry["status"] == "unpersisted"
+    assert attempt_entry["error_message"] == "review guidance persistence offline"
+    assert attempt_entry["provider_trace"] == {
+        "routing_mode": "local_first",
+        "final_provider": "local_qwen",
+        "fallback_reasons": [],
+    }
+
+
+def test_provider_trace_audit_endpoint_reflects_heuristic_review_guidance_fallback_attempt(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "videobox_provider_interfaces.stt.MockSTTProvider.transcribe",
+        _single_segment_transcribe,
+    )
+    def fail_save_operator_guidance(
+        self,
+        *,
+        project_id: str,
+        timeline_id: str,
+        operator_guidance: dict[str, object],
+    ) -> dict[str, object]:
+        del self, project_id, timeline_id, operator_guidance
+        raise OSError("review guidance persistence offline")
+
+    monkeypatch.setattr(LocalProjectStore, "save_operator_guidance", fail_save_operator_guidance)
+    local_provider = FakeStructuredProvider(
+        responses=[
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"review_required": True, "cleanup_decision": "review"},
+                raw_text='{"review_required":true,"cleanup_decision":"review"}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"keywords": ["office"]},
+                raw_text='{"keywords":["office"]}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"music_mood": "cinematic pulse", "score": 0.91},
+                raw_text='{"music_mood":"cinematic pulse","score":0.91}',
+                metadata={},
+            ),
+        ]
+    )
+    app = create_app(
+        projects_root=tmp_path,
+        local_first_runtime_service_factory=_local_first_service_factory(
+            local_provider=local_provider,
+            gemini_provider=FakeStructuredProvider(),
+            local_enabled=True,
+        ),
+    )
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    review_snapshot = client.get(f"/api/projects/{project_id}/review-snapshots/{timeline_job_id}")
+    audit_response = client.get(f"/api/projects/{project_id}/provider-traces")
+
+    assert review_snapshot.status_code == 500
+    assert audit_response.status_code == 200
+    attempt_entry = next(
+        entry
+        for entry in audit_response.json()["entries"]
+        if entry["artifact_type"] == "review_guidance_attempt"
+    )
+    assert attempt_entry["provider_trace"] == {
+        "routing_mode": "local_first",
+        "final_provider": "heuristic_fallback",
+        "fallback_reasons": ["unexpected_runtime_failure"],
+    }
+
+
+def test_provider_trace_audit_endpoint_keeps_gemini_review_guidance_attempt_when_guidance_is_not_persisted(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "videobox_provider_interfaces.stt.MockSTTProvider.transcribe",
+        _single_segment_transcribe,
+    )
+
+    def fail_save_operator_guidance(
+        self,
+        *,
+        project_id: str,
+        timeline_id: str,
+        operator_guidance: dict[str, object],
+    ) -> dict[str, object]:
+        del self, project_id, timeline_id, operator_guidance
+        raise OSError("review guidance persistence offline")
+
+    monkeypatch.setattr(LocalProjectStore, "save_operator_guidance", fail_save_operator_guidance)
+    local_provider = FakeStructuredProvider(
+        errors=[
+            LLMProviderError(
+                provider_name="local_qwen",
+                message="local unavailable",
+                retryable=True,
+                error_code="LOCAL_UNAVAILABLE",
+            ),
+            LLMProviderError(
+                provider_name="local_qwen",
+                message="local unavailable",
+                retryable=True,
+                error_code="LOCAL_UNAVAILABLE",
+            ),
+            LLMProviderError(
+                provider_name="local_qwen",
+                message="local unavailable",
+                retryable=True,
+                error_code="LOCAL_UNAVAILABLE",
+            ),
+            LLMProviderError(
+                provider_name="local_qwen",
+                message="local unavailable",
+                retryable=True,
+                error_code="LOCAL_UNAVAILABLE",
+            ),
+        ]
+    )
+    gemini_provider = FakeStructuredProvider(
+        responses=[
+            StructuredLLMResponse(
+                provider_name="gemini",
+                model_name="gemini-2.5-flash",
+                output_data={"review_required": True, "cleanup_decision": "review"},
+                raw_text='{"review_required":true,"cleanup_decision":"review"}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="gemini",
+                model_name="gemini-2.5-flash-lite",
+                output_data={"keywords": ["office"]},
+                raw_text='{"keywords":["office"]}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="gemini",
+                model_name="gemini-2.5-flash",
+                output_data={"music_mood": "cinematic pulse", "score": 0.91},
+                raw_text='{"music_mood":"cinematic pulse","score":0.91}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="gemini",
+                model_name="gemini-2.5-flash",
+                output_data={
+                    "summary": "Unpersisted Gemini review summary.",
+                    "action_items": ["Resolve flagged review items"],
+                },
+                raw_text='{"summary":"Unpersisted Gemini review summary.","action_items":["Resolve flagged review items"]}',
+                metadata={},
+            ),
+        ]
+    )
+    app = create_app(
+        projects_root=tmp_path,
+        local_first_runtime_service_factory=_local_first_service_factory(
+            local_provider=local_provider,
+            gemini_provider=gemini_provider,
+            local_enabled=True,
+        ),
+    )
+    client = TestClient(app)
+    gemini_key_payload = {
+        "label": "Unpersisted Review Gemini",
+        "api_key": "AIza-unpersisted-review",
+        "primary_model": "gemini-2.5-flash",
+        "cheap_model": "gemini-2.5-flash-lite",
+        "high_quality_model": "gemini-2.5-pro",
+    }
+    project_id, timeline_job_id = _create_timeline_review_project(
+        client,
+        tmp_path,
+        gemini_key_payload=gemini_key_payload,
+    )
+
+    review_snapshot = client.get(f"/api/projects/{project_id}/review-snapshots/{timeline_job_id}")
+    audit_response = client.get(f"/api/projects/{project_id}/provider-traces")
+
+    assert review_snapshot.status_code == 500
+    assert audit_response.status_code == 200
+    attempt_entry = next(
+        entry
+        for entry in audit_response.json()["entries"]
+        if entry["artifact_type"] == "review_guidance_attempt"
+    )
+    assert attempt_entry["job_id"] == timeline_job_id
+    assert attempt_entry["provider_trace"] == {
+        "routing_mode": "local_first",
+        "final_provider": "gemini",
+        "fallback_reasons": ["local_provider_error"],
+    }
+
+
+def test_review_snapshot_tolerates_review_guidance_audit_append_failure_without_unpersisted_attempt(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "videobox_provider_interfaces.stt.MockSTTProvider.transcribe",
+        _single_segment_transcribe,
+    )
+
+    def fail_append(self, *, project_id: str, event: dict[str, object]) -> None:  # noqa: ANN001
+        del self, project_id
+        if str(event.get("artifact_type") or "") == "review_guidance":
+            raise OSError("review guidance audit log offline")
+
+    monkeypatch.setattr(LocalProjectStore, "_append_provider_trace_audit_event", fail_append)
+    local_provider = FakeStructuredProvider(
+        responses=[
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"review_required": True, "cleanup_decision": "review"},
+                raw_text='{"review_required":true,"cleanup_decision":"review"}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"keywords": ["office"]},
+                raw_text='{"keywords":["office"]}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"music_mood": "cinematic pulse", "score": 0.91},
+                raw_text='{"music_mood":"cinematic pulse","score":0.91}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={
+                    "summary": "Append failure local review summary.",
+                    "action_items": ["Check seg_001 narration alignment"],
+                },
+                raw_text='{"summary":"Append failure local review summary.","action_items":["Check seg_001 narration alignment"]}',
+                metadata={},
+            ),
+        ]
+    )
+    app = create_app(
+        projects_root=tmp_path,
+        local_first_runtime_service_factory=_local_first_service_factory(
+            local_provider=local_provider,
+            gemini_provider=FakeStructuredProvider(),
+            local_enabled=True,
+        ),
+    )
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    review_snapshot = client.get(f"/api/projects/{project_id}/review-snapshots/{timeline_job_id}")
+    audit_response = client.get(f"/api/projects/{project_id}/provider-traces")
+
+    assert review_snapshot.status_code == 200
+    assert audit_response.status_code == 200
+    artifact_types = [entry["artifact_type"] for entry in audit_response.json()["entries"]]
+    assert "review_guidance" in artifact_types
+    assert "review_guidance_attempt" not in artifact_types
+
+
+def test_provider_trace_audit_endpoint_deduplicates_repeated_unpersisted_review_guidance_attempts(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "videobox_provider_interfaces.stt.MockSTTProvider.transcribe",
+        _single_segment_transcribe,
+    )
+
+    def fail_save_operator_guidance(
+        self,
+        *,
+        project_id: str,
+        timeline_id: str,
+        operator_guidance: dict[str, object],
+    ) -> dict[str, object]:
+        del self, project_id, timeline_id, operator_guidance
+        raise OSError("review guidance persistence offline")
+
+    monkeypatch.setattr(LocalProjectStore, "save_operator_guidance", fail_save_operator_guidance)
+    local_provider = FakeStructuredProvider(
+        responses=[
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"review_required": True, "cleanup_decision": "review"},
+                raw_text='{"review_required":true,"cleanup_decision":"review"}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"keywords": ["office"]},
+                raw_text='{"keywords":["office"]}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"music_mood": "cinematic pulse", "score": 0.91},
+                raw_text='{"music_mood":"cinematic pulse","score":0.91}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={
+                    "summary": "Retry one review summary.",
+                    "action_items": ["Check seg_001 narration alignment"],
+                },
+                raw_text='{"summary":"Retry one review summary.","action_items":["Check seg_001 narration alignment"]}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={
+                    "summary": "Retry two review summary.",
+                    "action_items": ["Check seg_001 narration alignment again"],
+                },
+                raw_text='{"summary":"Retry two review summary.","action_items":["Check seg_001 narration alignment again"]}',
+                metadata={},
+            ),
+        ]
+    )
+    app = create_app(
+        projects_root=tmp_path,
+        local_first_runtime_service_factory=_local_first_service_factory(
+            local_provider=local_provider,
+            gemini_provider=FakeStructuredProvider(),
+            local_enabled=True,
+        ),
+    )
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    first_snapshot = client.get(f"/api/projects/{project_id}/review-snapshots/{timeline_job_id}")
+    second_snapshot = client.get(f"/api/projects/{project_id}/review-snapshots/{timeline_job_id}")
+    audit_response = client.get(f"/api/projects/{project_id}/provider-traces")
+
+    assert first_snapshot.status_code == 500
+    assert second_snapshot.status_code == 500
+    assert audit_response.status_code == 200
+    attempt_entries = [
+        entry
+        for entry in audit_response.json()["entries"]
+        if entry["artifact_type"] == "review_guidance_attempt"
+    ]
+    assert len(attempt_entries) == 1

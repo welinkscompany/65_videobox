@@ -1224,17 +1224,20 @@ class LocalProjectStore:
         payload = json.loads(file_path.read_text(encoding="utf-8"))
         payload["operator_guidance"] = operator_guidance
         file_path.write_text(json.dumps(payload, indent=2, ensure_ascii=True), encoding="utf-8")
-        self._append_provider_trace_audit_event(
-            project_id=project_id,
-            event={
-                "artifact_type": "review_guidance",
-                "artifact_id": f"{timeline_id}:review_guidance:{self._next_provider_trace_event_sequence(project_id=project_id):03d}",
-                "timeline_id": timeline_id,
-                "created_at": self._now_iso(),
-                "provider_trace": operator_guidance.get("provider_trace")
-                or build_provider_trace(final_provider="heuristic_fallback"),
-            },
-        )
+        try:
+            self._append_provider_trace_audit_event(
+                project_id=project_id,
+                event={
+                    "artifact_type": "review_guidance",
+                    "artifact_id": f"{timeline_id}:review_guidance:{self._next_provider_trace_event_sequence(project_id=project_id):03d}",
+                    "timeline_id": timeline_id,
+                    "created_at": self._now_iso(),
+                    "provider_trace": operator_guidance.get("provider_trace")
+                    or build_provider_trace(final_provider="heuristic_fallback"),
+                },
+            )
+        except OSError:
+            pass
         return operator_guidance
 
     def save_provider_trace_audit_event(self, *, project_id: str, event: dict[str, Any]) -> dict[str, Any]:
@@ -1493,6 +1496,7 @@ class LocalProjectStore:
                 entries.append(entry)
 
         audit_events = self._list_provider_trace_audit_events(project_id=project_id)
+        review_guidance_attempt_entries_by_key: dict[str, dict[str, Any]] = {}
         guidance_timeline_ids_with_events: set[str] = set()
         for item in audit_events:
             if str(item.get("status") or "") == JobStatus.FAILED.value:
@@ -1528,6 +1532,31 @@ class LocalProjectStore:
                     failed_entries_by_job_id[job_id] = entry
                 else:
                     entries.append(entry)
+                continue
+            if str(item.get("artifact_type") or "") == "review_guidance_attempt":
+                timeline_id = str(item.get("timeline_id") or "")
+                timeline_job = timeline_jobs_by_timeline_id.get(timeline_id)
+                trace = item.get("provider_trace")
+                if not isinstance(trace, dict):
+                    trace = build_provider_trace(final_provider="heuristic_fallback")
+                timeline_job_id = timeline_job["job_id"] if timeline_job else ""
+                job_id = str(item.get("job_id") or timeline_job_id or "") or None
+                review_guidance_attempt_entries_by_key[f"{job_id or ''}|{timeline_id}|review_guidance_attempt"] = (
+                    self._provider_trace_entry(
+                        artifact_type="review_guidance_attempt",
+                        artifact_id=str(item.get("artifact_id") or timeline_id),
+                        job_type=JobType.TIMELINE_BUILD.value,
+                        job=None,
+                        source_job_id=str(item.get("source_job_id") or timeline_job_id or "") or None,
+                        trace=trace,
+                        timeline_id=timeline_id or None,
+                        status=str(item.get("status") or "available"),
+                        finished_at=str(item.get("finished_at") or timeline_job.get("finished_at") or "") if timeline_job else str(item.get("finished_at") or ""),
+                        created_at=str(item.get("created_at") or ""),
+                        error_message=str(item.get("error_message") or "") or None,
+                        job_id=job_id,
+                    )
+                )
                 continue
             if str(item.get("artifact_type") or "") != "review_guidance":
                 continue
@@ -1598,6 +1627,7 @@ class LocalProjectStore:
                 )
 
         entries.extend(failed_entries_by_job_id.values())
+        entries.extend(review_guidance_attempt_entries_by_key.values())
         entries.sort(key=lambda item: (item["finished_at"] or item["created_at"] or "", item["artifact_type"]))
         return {
             "summary": self._provider_trace_summary(entries),
