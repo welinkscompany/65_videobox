@@ -1368,6 +1368,7 @@ class LocalProjectStore:
         *,
         project_id: str,
         timeline_id: str | None = None,
+        include_upstream: bool = False,
         job_type: str | None = None,
         artifact_type: str | None = None,
         final_provider: str | None = None,
@@ -1380,6 +1381,7 @@ class LocalProjectStore:
         filter_artifact_type = self._normalized_provider_trace_filter_value(artifact_type)
         filter_final_provider = self._normalized_provider_trace_filter_value(final_provider)
         filter_fallback_reason = self._normalized_provider_trace_filter_value(fallback_reason)
+        upstream_segment_job_ids: set[str] = set()
         timeline_jobs_by_timeline_id = {
             str(job.get("output_ref") or ""): job
             for job in jobs
@@ -1390,6 +1392,12 @@ class LocalProjectStore:
             for job in jobs
             if job["job_type"] == JobType.TIMELINE_BUILD.value and job.get("output_ref")
         }
+        if include_upstream and filter_timeline_id is not None:
+            timeline_job = timeline_jobs_by_timeline_id.get(filter_timeline_id)
+            if timeline_job is not None:
+                segment_job_id = str(timeline_job.get("input_ref") or "")
+                if segment_job_id:
+                    upstream_segment_job_ids.add(segment_job_id)
 
         for job in jobs:
             job_type = str(job["job_type"])
@@ -1651,16 +1659,18 @@ class LocalProjectStore:
         entries.extend(failed_entries_by_job_id.values())
         entries.extend(review_guidance_attempt_entries_by_key.values())
         entries = [
-            entry
-            for entry in entries
-            if self._provider_trace_entry_matches_filters(
-                entry,
-                timeline_id=filter_timeline_id,
-                job_type=filter_job_type,
-                artifact_type=filter_artifact_type,
-                final_provider=filter_final_provider,
-                fallback_reason=filter_fallback_reason,
-            )
+                entry
+                for entry in entries
+                if self._provider_trace_entry_matches_filters(
+                    entry,
+                    timeline_id=filter_timeline_id,
+                    include_upstream=include_upstream,
+                    upstream_segment_job_ids=upstream_segment_job_ids,
+                    job_type=filter_job_type,
+                    artifact_type=filter_artifact_type,
+                    final_provider=filter_final_provider,
+                    fallback_reason=filter_fallback_reason,
+                )
         ]
         entries.sort(key=lambda item: (item["finished_at"] or item["created_at"] or "", item["artifact_type"]))
         return {
@@ -2085,13 +2095,21 @@ class LocalProjectStore:
         entry: dict[str, Any],
         *,
         timeline_id: str | None = None,
+        include_upstream: bool = False,
+        upstream_segment_job_ids: set[str] | None = None,
         job_type: str | None = None,
         artifact_type: str | None = None,
         final_provider: str | None = None,
         fallback_reason: str | None = None,
     ) -> bool:
-        if timeline_id is not None and str(entry.get("timeline_id") or "") != timeline_id:
-            return False
+        if timeline_id is not None:
+            entry_timeline_id = str(entry.get("timeline_id") or "")
+            if entry_timeline_id != timeline_id:
+                if not include_upstream or not self._is_upstream_provider_trace_entry(
+                    entry,
+                    upstream_segment_job_ids=upstream_segment_job_ids or set(),
+                ):
+                    return False
         if job_type is not None and str(entry.get("job_type") or "") != job_type:
             return False
         if artifact_type is not None and str(entry.get("artifact_type") or "") != artifact_type:
@@ -2112,6 +2130,18 @@ class LocalProjectStore:
             return None
         normalized = value.strip()
         return normalized or None
+
+    def _is_upstream_provider_trace_entry(
+        self,
+        entry: dict[str, Any],
+        *,
+        upstream_segment_job_ids: set[str],
+    ) -> bool:
+        if not upstream_segment_job_ids:
+            return False
+        entry_job_id = str(entry.get("job_id") or "")
+        entry_source_job_id = str(entry.get("source_job_id") or "")
+        return entry_job_id in upstream_segment_job_ids or entry_source_job_id in upstream_segment_job_ids
 
     def _merge_provider_trace_failed_entries(
         self,

@@ -321,6 +321,7 @@ class ApiOrchestrator:
         *,
         project_id: str,
         timeline_id: str | None = None,
+        include_upstream: bool = False,
         job_type: str | None = None,
         artifact_type: str | None = None,
         final_provider: str | None = None,
@@ -329,6 +330,7 @@ class ApiOrchestrator:
         return self.pipeline.store.get_provider_trace_audit(
             project_id=project_id,
             timeline_id=timeline_id,
+            include_upstream=include_upstream,
             job_type=job_type,
             artifact_type=artifact_type,
             final_provider=final_provider,
