@@ -4,6 +4,10 @@ from pathlib import Path
 from typing import Any
 
 from videobox_capcut_export import CapCutExportAdapter
+from videobox_core_engine.output_operator_copy import (
+    OutputOperatorCopyBuilder,
+    StaticOutputOperatorCopyBuilder,
+)
 from videobox_core_engine.preview_renderer import PreviewRenderer
 from videobox_core_engine.recommenders import KeywordBrollRecommender, RuleBasedMusicRecommender
 from videobox_core_engine.review_guidance import HeuristicReviewGuidanceBuilder, ReviewGuidanceBuilder
@@ -27,6 +31,7 @@ class LocalPipelineRunner:
         broll_recommender: RecommendationProvider | None = None,
         music_recommender: RecommendationProvider | None = None,
         review_guidance_builder: ReviewGuidanceBuilder | None = None,
+        output_operator_copy_builder: OutputOperatorCopyBuilder | None = None,
         timeline_builder: TimelineBuilder | None = None,
         preview_renderer: PreviewRenderer | None = None,
         capcut_exporter: CapCutExportAdapter | None = None,
@@ -37,6 +42,7 @@ class LocalPipelineRunner:
         self.broll_recommender = broll_recommender or KeywordBrollRecommender()
         self.music_recommender = music_recommender or RuleBasedMusicRecommender()
         self.review_guidance_builder = review_guidance_builder or HeuristicReviewGuidanceBuilder()
+        self.output_operator_copy_builder = output_operator_copy_builder or StaticOutputOperatorCopyBuilder()
         self.timeline_builder = timeline_builder or TimelineBuilder()
         self.preview_renderer = preview_renderer or PreviewRenderer()
         self.capcut_exporter = capcut_exporter or CapCutExportAdapter()
@@ -424,7 +430,7 @@ class LocalPipelineRunner:
         try:
             timeline = self.get_timeline_result(project_id=project_id, job_id=timeline_job_id)["timeline"]
             self._ensure_timeline_ready_for_output(timeline)
-            segments = self.store.list_segments(project_id=project_id)
+            segments = self._segments_for_timeline(project_id=project_id, timeline=timeline)
             subtitle_payload = {
                 "format": "srt",
                 "entries": [
@@ -478,6 +484,11 @@ class LocalPipelineRunner:
                 project_id=project_id,
                 timeline=timeline,
             )
+            preview_payload["notes"] = self.output_operator_copy_builder.build(
+                project_id=project_id,
+                timeline=timeline,
+                output_target=JobType.PREVIEW_RENDER.value,
+            )
             persisted = self.store.save_preview_run(
                 project_id=project_id,
                 timeline_id=str(timeline["timeline_id"]),
@@ -521,6 +532,12 @@ class LocalPipelineRunner:
             export_payload = self.capcut_exporter.build_payload(
                 project_id=project_id,
                 timeline=timeline,
+                subtitle_file_uri=latest_subtitle["file_uri"] if latest_subtitle else None,
+            )
+            export_payload["notes"] = self.output_operator_copy_builder.build(
+                project_id=project_id,
+                timeline=timeline,
+                output_target=JobType.CAPCUT_EXPORT.value,
                 subtitle_file_uri=latest_subtitle["file_uri"] if latest_subtitle else None,
             )
             persisted = self.store.save_capcut_export(
@@ -603,3 +620,21 @@ class LocalPipelineRunner:
             raise ValueError(
                 "Timeline still has review blockers. Clear review flags and pending recommendations before approval or output."
             )
+
+    def _segments_for_timeline(
+        self,
+        *,
+        project_id: str,
+        timeline: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        all_segments = self.store.list_segments(project_id=project_id)
+        segment_lookup = {str(segment.get("segment_id")): segment for segment in all_segments}
+        ordered_segment_ids: list[str] = []
+        for track in timeline.get("tracks", []):
+            for clip in track.get("clips", []):
+                segment_id = str(clip.get("segment_id") or "").strip()
+                if segment_id and segment_id not in ordered_segment_ids:
+                    ordered_segment_ids.append(segment_id)
+        if not ordered_segment_ids:
+            return all_segments
+        return [segment_lookup[segment_id] for segment_id in ordered_segment_ids if segment_id in segment_lookup]

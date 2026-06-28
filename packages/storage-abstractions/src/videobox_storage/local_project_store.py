@@ -707,7 +707,10 @@ class LocalProjectStore:
             "notes": subtitle_payload.get("notes", []),
         }
         summary_json = json.dumps(
-            {"entry_count": len(entries)},
+            {
+                "entry_count": len(entries),
+                "notes": payload["notes"],
+            },
             ensure_ascii=True,
         )
         self._execute(
@@ -810,6 +813,7 @@ class LocalProjectStore:
         timeline_id: str,
         export_payload: dict[str, Any],
     ) -> dict[str, Any]:
+        invariant_note = "CapCut remains an export target, not the internal source of truth."
         sequence = self._next_sequence(
             self.project_root(project_id) / "exports" / "capcut",
             "export_*",
@@ -831,19 +835,15 @@ class LocalProjectStore:
             **export_payload,
         }
         existing_notes = [str(note) for note in payload.get("notes", [])]
-        if not existing_notes or not existing_notes[0].lower().startswith("mock capcut"):
-            payload["notes"] = [
-                "Mock CapCut payload for local post-editing handoff.",
-                *existing_notes,
-            ]
-        else:
+        if existing_notes:
             payload["notes"] = existing_notes
+        else:
+            payload["notes"] = ["Mock CapCut payload for local post-editing handoff."]
+        if invariant_note not in payload["notes"]:
+            payload["notes"].append(invariant_note)
         payload_path.write_text(json.dumps(payload, indent=2, ensure_ascii=True), encoding="utf-8")
-        notes_path.write_text(
-            "Mock CapCut export payload generated from timeline JSON.\n"
-            "This is a local handoff artifact for post-editing.\n",
-            encoding="utf-8",
-        )
+        readme_lines = payload["notes"] or ["Mock CapCut export payload generated from timeline JSON."]
+        notes_path.write_text("\n".join(readme_lines) + "\n", encoding="utf-8")
         metadata_json = json.dumps(
             {
                 "timeline_id": timeline_id,
@@ -1203,8 +1203,9 @@ class LocalProjectStore:
         if row is None:
             raise KeyError(f"Subtitle not found: {subtitle_id}")
         payload = dict(row)
-        payload["notes"] = ["Subtitle file generated from approved review timeline."]
-        payload["summary"] = json.loads(payload.pop("summary_json") or "{}")
+        summary = json.loads(payload.pop("summary_json") or "{}")
+        payload["notes"] = summary.get("notes") or ["Subtitle file generated from approved review timeline."]
+        payload["summary"] = summary
         return payload
 
     def get_export_run(self, *, project_id: str, export_id: str) -> dict[str, Any]:

@@ -301,7 +301,24 @@ def test_create_app_exposes_local_runtime_builder_on_app_state(tmp_path: Path) -
 
 
 def test_project_creation_endpoint_returns_local_storage_metadata(tmp_path) -> None:
-    app = create_app(projects_root=tmp_path)
+    app = create_app(
+        projects_root=tmp_path,
+        local_first_runtime_service_factory=_local_first_service_factory(
+            local_provider=FakeStructuredProvider(
+                errors=[
+                    LLMProviderError(
+                        provider_name="local_qwen",
+                        message="offline test local unavailable",
+                        retryable=True,
+                        error_code="LOCAL_UNAVAILABLE",
+                    )
+                    for _ in range(8)
+                ]
+            ),
+            gemini_provider=FakeStructuredProvider(),
+            local_enabled=True,
+        ),
+    )
     client = TestClient(app)
 
     response = client.post("/api/projects", json={"name": "Narration Draft"})
@@ -318,7 +335,24 @@ def test_ingest_and_analysis_flow_persists_files_and_records(tmp_path: Path) -> 
     source_audio.write_bytes(b"fake wav data")
     source_script.write_text("Line one.\n\nLine two with restart.\n", encoding="utf-8")
 
-    app = create_app(projects_root=tmp_path)
+    app = create_app(
+        projects_root=tmp_path,
+        local_first_runtime_service_factory=_local_first_service_factory(
+            local_provider=FakeStructuredProvider(
+                errors=[
+                    LLMProviderError(
+                        provider_name="local_qwen",
+                        message="offline test local unavailable",
+                        retryable=True,
+                        error_code="LOCAL_UNAVAILABLE",
+                    )
+                    for _ in range(8)
+                ]
+            ),
+            gemini_provider=FakeStructuredProvider(),
+            local_enabled=True,
+        ),
+    )
     client = TestClient(app)
     project_response = client.post("/api/projects", json={"name": "Narration Draft"})
     project_id = project_response.json()["project_id"]
@@ -579,9 +613,19 @@ def test_segment_analysis_endpoint_preserves_heuristic_fallback_when_local_disab
     app = create_app(
         projects_root=tmp_path,
         local_first_runtime_service_factory=_local_first_service_factory(
-            local_provider=FakeStructuredProvider(),
+            local_provider=FakeStructuredProvider(
+                errors=[
+                    LLMProviderError(
+                        provider_name="local_qwen",
+                        message="offline test local unavailable",
+                        retryable=True,
+                        error_code="LOCAL_UNAVAILABLE",
+                    )
+                    for _ in range(8)
+                ]
+            ),
             gemini_provider=FakeStructuredProvider(),
-            local_enabled=False,
+            local_enabled=True,
         ),
     )
     client = TestClient(app)
@@ -763,7 +807,24 @@ def test_recommendation_flow_persists_broll_and_music_results(tmp_path: Path) ->
     broll_city.write_bytes(b"video bytes 1")
     broll_team.write_bytes(b"video bytes 2")
 
-    app = create_app(projects_root=tmp_path)
+    app = create_app(
+        projects_root=tmp_path,
+        local_first_runtime_service_factory=_local_first_service_factory(
+            local_provider=FakeStructuredProvider(
+                errors=[
+                    LLMProviderError(
+                        provider_name="local_qwen",
+                        message="offline test local unavailable",
+                        retryable=True,
+                        error_code="LOCAL_UNAVAILABLE",
+                    )
+                    for _ in range(8)
+                ]
+            ),
+            gemini_provider=FakeStructuredProvider(),
+            local_enabled=True,
+        ),
+    )
     client = TestClient(app)
     project_id = client.post("/api/projects", json={"name": "Recommendation Draft"}).json()["project_id"]
 
@@ -1065,9 +1126,19 @@ def test_music_recommendation_endpoint_preserves_rule_based_fallback_when_local_
     app = create_app(
         projects_root=tmp_path,
         local_first_runtime_service_factory=_local_first_service_factory(
-            local_provider=FakeStructuredProvider(),
+            local_provider=FakeStructuredProvider(
+                errors=[
+                    LLMProviderError(
+                        provider_name="local_qwen",
+                        message="offline test local unavailable",
+                        retryable=True,
+                        error_code="LOCAL_UNAVAILABLE",
+                    )
+                    for _ in range(8)
+                ]
+            ),
             gemini_provider=FakeStructuredProvider(),
-            local_enabled=False,
+            local_enabled=True,
         ),
     )
     client = TestClient(app)
@@ -1467,7 +1538,24 @@ def test_timeline_and_review_snapshot_flow(tmp_path: Path) -> None:
     source_script.write_text("Office overview.\n\nTeam meeting restart.\n", encoding="utf-8")
     broll_city.write_bytes(b"video bytes 1")
 
-    app = create_app(projects_root=tmp_path)
+    app = create_app(
+        projects_root=tmp_path,
+        local_first_runtime_service_factory=_local_first_service_factory(
+            local_provider=FakeStructuredProvider(
+                errors=[
+                    LLMProviderError(
+                        provider_name="local_qwen",
+                        message="offline test local unavailable",
+                        retryable=True,
+                        error_code="LOCAL_UNAVAILABLE",
+                    )
+                    for _ in range(8)
+                ]
+            ),
+            gemini_provider=FakeStructuredProvider(),
+            local_enabled=True,
+        ),
+    )
     client = TestClient(app)
     project_id = client.post("/api/projects", json={"name": "Timeline Draft"}).json()["project_id"]
 
@@ -1916,6 +2004,481 @@ def test_review_snapshot_falls_back_to_heuristic_guidance_on_unexpected_runtime_
     assert payload["operator_guidance"]["action_items"] == ["Segment requires operator review before export."]
 
 
+def test_preview_and_export_use_operator_copy_runtime_in_production_flow(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "videobox_provider_interfaces.stt.MockSTTProvider.transcribe",
+        _single_segment_transcribe,
+    )
+    local_provider = FakeStructuredProvider(
+        responses=[
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"review_required": False, "cleanup_decision": "keep"},
+                raw_text='{"review_required":false,"cleanup_decision":"keep"}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"keywords": ["office"]},
+                raw_text='{"keywords":["office"]}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"music_mood": "focused", "score": 0.88},
+                raw_text='{"music_mood":"focused","score":0.88}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={
+                    "summary": "Preview operator copy from local runtime.",
+                    "action_items": ["Check caption timing in the playable preview."],
+                },
+                raw_text='{"summary":"Preview operator copy from local runtime.","action_items":["Check caption timing in the playable preview."]}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={
+                    "summary": "Export operator copy from local runtime.",
+                    "action_items": ["Open the CapCut payload and confirm subtitle attachment."],
+                },
+                raw_text='{"summary":"Export operator copy from local runtime.","action_items":["Open the CapCut payload and confirm subtitle attachment."]}',
+                metadata={},
+            ),
+        ]
+    )
+    app = create_app(
+        projects_root=tmp_path,
+        local_first_runtime_service_factory=_local_first_service_factory(
+            local_provider=local_provider,
+            gemini_provider=FakeStructuredProvider(),
+            local_enabled=True,
+        ),
+    )
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    approve_response = client.post(f"/api/projects/{project_id}/review-approvals/{timeline_job_id}/approve")
+    preview_response = client.post(
+        f"/api/projects/{project_id}/jobs/preview-render",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    export_response = client.post(
+        f"/api/projects/{project_id}/jobs/capcut-export",
+        json={"timeline_job_id": timeline_job_id},
+    )
+
+    assert approve_response.status_code == 202
+    assert preview_response.status_code == 202
+    assert export_response.status_code == 202
+    assert len(local_provider.calls) == 5
+    assert local_provider.calls[3].task_type is LLMTaskType.OPERATOR_COPY
+    assert local_provider.calls[4].task_type is LLMTaskType.OPERATOR_COPY
+    assert "preview" in local_provider.calls[3].prompt.lower()
+    assert "capcut" in local_provider.calls[4].prompt.lower()
+
+
+def test_preview_and_export_return_ai_backed_operator_copy_on_local_success(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "videobox_provider_interfaces.stt.MockSTTProvider.transcribe",
+        _single_segment_transcribe,
+    )
+    local_provider = FakeStructuredProvider(
+        responses=[
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"review_required": False, "cleanup_decision": "keep"},
+                raw_text='{"review_required":false,"cleanup_decision":"keep"}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"keywords": ["office"]},
+                raw_text='{"keywords":["office"]}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"music_mood": "focused", "score": 0.88},
+                raw_text='{"music_mood":"focused","score":0.88}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={
+                    "summary": "Preview operator copy from local runtime.",
+                    "action_items": ["Check caption timing in the playable preview."],
+                },
+                raw_text='{"summary":"Preview operator copy from local runtime.","action_items":["Check caption timing in the playable preview."]}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={
+                    "summary": "Export operator copy from local runtime.",
+                    "action_items": ["Open the CapCut payload and confirm subtitle attachment."],
+                },
+                raw_text='{"summary":"Export operator copy from local runtime.","action_items":["Open the CapCut payload and confirm subtitle attachment."]}',
+                metadata={},
+            ),
+        ]
+    )
+    app = create_app(
+        projects_root=tmp_path,
+        local_first_runtime_service_factory=_local_first_service_factory(
+            local_provider=local_provider,
+            gemini_provider=FakeStructuredProvider(),
+            local_enabled=True,
+        ),
+    )
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    assert client.post(f"/api/projects/{project_id}/review-approvals/{timeline_job_id}/approve").status_code == 202
+    preview_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/preview-render",
+        json={"timeline_job_id": timeline_job_id},
+    ).json()["job_id"]
+    export_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/capcut-export",
+        json={"timeline_job_id": timeline_job_id},
+    ).json()["job_id"]
+
+    preview_result = client.get(f"/api/projects/{project_id}/previews/{preview_job_id}")
+    export_result = client.get(f"/api/projects/{project_id}/exports/{export_job_id}")
+
+    assert preview_result.status_code == 200
+    assert export_result.status_code == 200
+    assert preview_result.json()["preview"]["notes"] == [
+        "Preview operator copy from local runtime.",
+        "Check caption timing in the playable preview.",
+    ]
+    assert export_result.json()["export"]["notes"] == [
+        "Export operator copy from local runtime.",
+        "Open the CapCut payload and confirm subtitle attachment.",
+        "CapCut remains an export target, not the internal source of truth.",
+    ]
+
+
+def test_preview_and_export_fall_back_to_gemini_operator_copy_when_local_fails(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "videobox_provider_interfaces.stt.MockSTTProvider.transcribe",
+        _single_segment_transcribe,
+    )
+    local_provider = FakeStructuredProvider(
+        errors=[
+            LLMProviderError(
+                provider_name="local_qwen",
+                message="preview/export local unavailable",
+                retryable=True,
+                error_code="LOCAL_UNAVAILABLE",
+            ),
+            LLMProviderError(
+                provider_name="local_qwen",
+                message="preview/export local unavailable",
+                retryable=True,
+                error_code="LOCAL_UNAVAILABLE",
+            ),
+            LLMProviderError(
+                provider_name="local_qwen",
+                message="preview/export local unavailable",
+                retryable=True,
+                error_code="LOCAL_UNAVAILABLE",
+            ),
+            LLMProviderError(
+                provider_name="local_qwen",
+                message="preview/export local unavailable",
+                retryable=True,
+                error_code="LOCAL_UNAVAILABLE",
+            ),
+            LLMProviderError(
+                provider_name="local_qwen",
+                message="preview/export local unavailable",
+                retryable=True,
+                error_code="LOCAL_UNAVAILABLE",
+            ),
+        ]
+    )
+    gemini_provider = FakeStructuredProvider(
+        responses=[
+            StructuredLLMResponse(
+                provider_name="gemini",
+                model_name="gemini-2.5-flash",
+                output_data={"review_required": False, "cleanup_decision": "keep"},
+                raw_text='{"review_required":false,"cleanup_decision":"keep"}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="gemini",
+                model_name="gemini-2.5-flash-lite",
+                output_data={"keywords": ["office"]},
+                raw_text='{"keywords":["office"]}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="gemini",
+                model_name="gemini-2.5-flash",
+                output_data={"music_mood": "focused", "score": 0.88},
+                raw_text='{"music_mood":"focused","score":0.88}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="gemini",
+                model_name="gemini-2.5-flash",
+                output_data={
+                    "summary": "Gemini preview operator copy.",
+                    "action_items": ["Review the playable preview before handoff."],
+                },
+                raw_text='{"summary":"Gemini preview operator copy.","action_items":["Review the playable preview before handoff."]}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="gemini",
+                model_name="gemini-2.5-flash",
+                output_data={
+                    "summary": "Gemini export operator copy.",
+                    "action_items": ["Validate the CapCut export package before delivery."],
+                },
+                raw_text='{"summary":"Gemini export operator copy.","action_items":["Validate the CapCut export package before delivery."]}',
+                metadata={},
+            ),
+        ]
+    )
+    app = create_app(
+        projects_root=tmp_path,
+        local_first_runtime_service_factory=_local_first_service_factory(
+            local_provider=local_provider,
+            gemini_provider=gemini_provider,
+            local_enabled=True,
+        ),
+    )
+    client = TestClient(app)
+    gemini_key_payload = {
+        "label": "Output Fallback Gemini",
+        "api_key": "AIza-output-fallback",
+        "primary_model": "gemini-2.5-flash",
+        "cheap_model": "gemini-2.5-flash-lite",
+        "high_quality_model": "gemini-2.5-pro",
+    }
+    project_id, timeline_job_id = _create_timeline_review_project(
+        client,
+        tmp_path,
+        gemini_key_payload=gemini_key_payload,
+    )
+
+    assert client.post(f"/api/projects/{project_id}/review-approvals/{timeline_job_id}/approve").status_code == 202
+    preview_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/preview-render",
+        json={"timeline_job_id": timeline_job_id},
+    ).json()["job_id"]
+    export_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/capcut-export",
+        json={"timeline_job_id": timeline_job_id},
+    ).json()["job_id"]
+
+    preview_result = client.get(f"/api/projects/{project_id}/previews/{preview_job_id}")
+    export_result = client.get(f"/api/projects/{project_id}/exports/{export_job_id}")
+
+    assert preview_result.status_code == 200
+    assert export_result.status_code == 200
+    assert preview_result.json()["preview"]["notes"] == [
+        "Gemini preview operator copy.",
+        "Review the playable preview before handoff.",
+    ]
+    assert export_result.json()["export"]["notes"] == [
+        "Gemini export operator copy.",
+        "Validate the CapCut export package before delivery.",
+        "CapCut remains an export target, not the internal source of truth.",
+    ]
+    assert len(local_provider.calls) == 5
+    assert len(gemini_provider.calls) == 5
+    assert gemini_provider.calls[3].task_type is LLMTaskType.OPERATOR_COPY
+    assert gemini_provider.calls[4].task_type is LLMTaskType.OPERATOR_COPY
+    keys_response = client.get(f"/api/projects/{project_id}/providers/gemini/keys")
+    assert keys_response.status_code == 200
+    key_state = keys_response.json()["keys"][0]
+    assert key_state["consecutive_failures"] == 0
+    assert key_state["last_error"] is None
+    assert key_state["last_used_at"] is not None
+
+
+def test_preview_and_export_skip_local_operator_copy_when_local_runtime_is_disabled(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "videobox_provider_interfaces.stt.MockSTTProvider.transcribe",
+        _single_segment_transcribe,
+    )
+    gemini_provider = FakeStructuredProvider(
+        responses=[
+            StructuredLLMResponse(
+                provider_name="gemini",
+                model_name="gemini-2.5-flash",
+                output_data={"review_required": False, "cleanup_decision": "keep"},
+                raw_text='{"review_required":false,"cleanup_decision":"keep"}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="gemini",
+                model_name="gemini-2.5-flash-lite",
+                output_data={"keywords": ["office"]},
+                raw_text='{"keywords":["office"]}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="gemini",
+                model_name="gemini-2.5-flash",
+                output_data={"music_mood": "focused", "score": 0.88},
+                raw_text='{"music_mood":"focused","score":0.88}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="gemini",
+                model_name="gemini-2.5-flash",
+                output_data={
+                    "summary": "Disabled local preview operator copy.",
+                    "action_items": ["Review the preview in Gemini fallback mode."],
+                },
+                raw_text='{"summary":"Disabled local preview operator copy.","action_items":["Review the preview in Gemini fallback mode."]}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="gemini",
+                model_name="gemini-2.5-flash",
+                output_data={
+                    "summary": "Disabled local export operator copy.",
+                    "action_items": ["Review the export in Gemini fallback mode."],
+                },
+                raw_text='{"summary":"Disabled local export operator copy.","action_items":["Review the export in Gemini fallback mode."]}',
+                metadata={},
+            ),
+        ]
+    )
+    app = create_app(
+        projects_root=tmp_path,
+        local_first_runtime_service_factory=_local_first_service_factory(
+            local_provider=FakeStructuredProvider(),
+            gemini_provider=gemini_provider,
+            local_enabled=False,
+        ),
+    )
+    client = TestClient(app)
+    gemini_key_payload = {
+        "label": "Output Disabled Gemini",
+        "api_key": "AIza-output-disabled",
+        "primary_model": "gemini-2.5-flash",
+        "cheap_model": "gemini-2.5-flash-lite",
+        "high_quality_model": "gemini-2.5-pro",
+    }
+    project_id, timeline_job_id = _create_timeline_review_project(
+        client,
+        tmp_path,
+        gemini_key_payload=gemini_key_payload,
+    )
+
+    assert client.post(f"/api/projects/{project_id}/review-approvals/{timeline_job_id}/approve").status_code == 202
+    preview_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/preview-render",
+        json={"timeline_job_id": timeline_job_id},
+    ).json()["job_id"]
+    export_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/capcut-export",
+        json={"timeline_job_id": timeline_job_id},
+    ).json()["job_id"]
+
+    preview_result = client.get(f"/api/projects/{project_id}/previews/{preview_job_id}")
+    export_result = client.get(f"/api/projects/{project_id}/exports/{export_job_id}")
+
+    assert preview_result.status_code == 200
+    assert export_result.status_code == 200
+    assert preview_result.json()["preview"]["notes"][0] == "Disabled local preview operator copy."
+    assert export_result.json()["export"]["notes"][0] == "Disabled local export operator copy."
+    assert export_result.json()["export"]["notes"][-1] == "CapCut remains an export target, not the internal source of truth."
+    assert len(gemini_provider.calls) == 5
+    assert gemini_provider.calls[3].task_type is LLMTaskType.OPERATOR_COPY
+    assert gemini_provider.calls[4].task_type is LLMTaskType.OPERATOR_COPY
+
+
+def test_preview_and_export_gating_blocks_before_operator_copy_runtime_runs(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "videobox_provider_interfaces.stt.MockSTTProvider.transcribe",
+        _single_segment_transcribe,
+    )
+    local_provider = FakeStructuredProvider(
+        responses=[
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"review_required": False, "cleanup_decision": "keep"},
+                raw_text='{"review_required":false,"cleanup_decision":"keep"}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"keywords": ["office"]},
+                raw_text='{"keywords":["office"]}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"music_mood": "focused", "score": 0.88},
+                raw_text='{"music_mood":"focused","score":0.88}',
+                metadata={},
+            ),
+        ]
+    )
+    app = create_app(
+        projects_root=tmp_path,
+        local_first_runtime_service_factory=_local_first_service_factory(
+            local_provider=local_provider,
+            gemini_provider=FakeStructuredProvider(),
+            local_enabled=True,
+        ),
+    )
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    preview_response = client.post(
+        f"/api/projects/{project_id}/jobs/preview-render",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    export_response = client.post(
+        f"/api/projects/{project_id}/jobs/capcut-export",
+        json={"timeline_job_id": timeline_job_id},
+    )
+
+    assert preview_response.status_code == 400
+    assert export_response.status_code == 400
+    assert len(local_provider.calls) == 3
+
+
 def test_project_listing_and_job_feed_support_dashboard(tmp_path: Path) -> None:
     source_audio = tmp_path / "source-narration.wav"
     source_script = tmp_path / "source-script.txt"
@@ -1924,7 +2487,24 @@ def test_project_listing_and_job_feed_support_dashboard(tmp_path: Path) -> None:
     source_script.write_text("Office overview.\n\nTeam meeting restart.\n", encoding="utf-8")
     broll_city.write_bytes(b"video bytes 1")
 
-    app = create_app(projects_root=tmp_path)
+    app = create_app(
+        projects_root=tmp_path,
+        local_first_runtime_service_factory=_local_first_service_factory(
+            local_provider=FakeStructuredProvider(
+                errors=[
+                    LLMProviderError(
+                        provider_name="local_qwen",
+                        message="offline test local unavailable",
+                        retryable=True,
+                        error_code="LOCAL_UNAVAILABLE",
+                    )
+                    for _ in range(8)
+                ]
+            ),
+            gemini_provider=FakeStructuredProvider(),
+            local_enabled=True,
+        ),
+    )
     client = TestClient(app)
     project_id = client.post("/api/projects", json={"name": "Dashboard Draft"}).json()["project_id"]
 
@@ -2022,7 +2602,24 @@ def test_preview_and_capcut_export_flow_persist_outputs_and_statuses(
     source_script.write_text("Office overview.\n\nTeam meeting overview.\n", encoding="utf-8")
     broll_city.write_bytes(b"video bytes 1")
 
-    app = create_app(projects_root=tmp_path)
+    app = create_app(
+        projects_root=tmp_path,
+        local_first_runtime_service_factory=_local_first_service_factory(
+            local_provider=FakeStructuredProvider(
+                errors=[
+                    LLMProviderError(
+                        provider_name="local_qwen",
+                        message="offline test local unavailable",
+                        retryable=True,
+                        error_code="LOCAL_UNAVAILABLE",
+                    )
+                    for _ in range(8)
+                ]
+            ),
+            gemini_provider=FakeStructuredProvider(),
+            local_enabled=True,
+        ),
+    )
     client = TestClient(app)
     project_id = client.post("/api/projects", json={"name": "Output Draft"}).json()["project_id"]
 
@@ -2121,7 +2718,24 @@ def test_preview_and_capcut_export_require_review_clearance(tmp_path: Path) -> N
     source_script.write_text("Office overview.\n\nTeam meeting restart.\n", encoding="utf-8")
     broll_city.write_bytes(b"video bytes 1")
 
-    app = create_app(projects_root=tmp_path)
+    app = create_app(
+        projects_root=tmp_path,
+        local_first_runtime_service_factory=_local_first_service_factory(
+            local_provider=FakeStructuredProvider(
+                errors=[
+                    LLMProviderError(
+                        provider_name="local_qwen",
+                        message="offline test local unavailable",
+                        retryable=True,
+                        error_code="LOCAL_UNAVAILABLE",
+                    )
+                    for _ in range(8)
+                ]
+            ),
+            gemini_provider=FakeStructuredProvider(),
+            local_enabled=True,
+        ),
+    )
     client = TestClient(app)
     project_id = client.post("/api/projects", json={"name": "Review Gate Draft"}).json()["project_id"]
 
@@ -2226,7 +2840,24 @@ def test_preview_export_and_subtitles_require_explicit_approval_even_without_blo
     source_script.write_text("Office overview.\n\nTeam meeting overview.\n", encoding="utf-8")
     broll_city.write_bytes(b"video bytes 1")
 
-    app = create_app(projects_root=tmp_path)
+    app = create_app(
+        projects_root=tmp_path,
+        local_first_runtime_service_factory=_local_first_service_factory(
+            local_provider=FakeStructuredProvider(
+                errors=[
+                    LLMProviderError(
+                        provider_name="local_qwen",
+                        message="offline test local unavailable",
+                        retryable=True,
+                        error_code="LOCAL_UNAVAILABLE",
+                    )
+                    for _ in range(8)
+                ]
+            ),
+            gemini_provider=FakeStructuredProvider(),
+            local_enabled=True,
+        ),
+    )
     client = TestClient(app)
     project_id = client.post("/api/projects", json={"name": "Approval Draft"}).json()["project_id"]
 
@@ -2329,7 +2960,24 @@ def test_approved_timeline_can_generate_subtitles_preview_and_export(
     source_script.write_text("Office overview.\n\nTeam meeting overview.\n", encoding="utf-8")
     broll_city.write_bytes(b"video bytes 1")
 
-    app = create_app(projects_root=tmp_path)
+    app = create_app(
+        projects_root=tmp_path,
+        local_first_runtime_service_factory=_local_first_service_factory(
+            local_provider=FakeStructuredProvider(
+                errors=[
+                    LLMProviderError(
+                        provider_name="local_qwen",
+                        message="offline test local unavailable",
+                        retryable=True,
+                        error_code="LOCAL_UNAVAILABLE",
+                    )
+                    for _ in range(8)
+                ]
+            ),
+            gemini_provider=FakeStructuredProvider(),
+            local_enabled=True,
+        ),
+    )
     client = TestClient(app)
     project_id = client.post("/api/projects", json={"name": "Approved Output Draft"}).json()["project_id"]
 

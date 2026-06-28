@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from videobox_api.orchestration import ApiOrchestrator, build_local_first_runtime_service
 from videobox_core_engine.local_pipeline import LocalPipelineRunner
+from videobox_core_engine.output_operator_copy import LocalFirstOutputOperatorCopyBuilder
 from videobox_core_engine.recommenders import LocalFirstKeywordBrollRecommender, LocalFirstMusicRecommender
 from videobox_core_engine.review_guidance import LocalFirstReviewGuidanceBuilder
 from videobox_core_engine.script_scene_planner import LocalFirstSegmentAnalyzer
@@ -299,6 +300,7 @@ def create_app(
         broll_recommender=LocalFirstKeywordBrollRecommender(runtime_service=runtime_service),
         music_recommender=LocalFirstMusicRecommender(runtime_service=runtime_service),
         review_guidance_builder=LocalFirstReviewGuidanceBuilder(runtime_service=runtime_service),
+        output_operator_copy_builder=LocalFirstOutputOperatorCopyBuilder(runtime_service=runtime_service),
     )
     orchestrator = ApiOrchestrator(store, pipeline=pipeline)
     app.state.local_runtime_config = resolved_local_runtime_config
