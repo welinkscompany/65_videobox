@@ -9,6 +9,7 @@ from typing import Any, Protocol
 class LLMTaskType(str, Enum):
     SCENE_PLANNING = "scene_planning"
     KEYWORD_EXPANSION = "keyword_expansion"
+    MUSIC_RECOMMENDATION = "music_recommendation"
     ALIGNMENT_REVIEW = "alignment_review"
     OPERATOR_COPY = "operator_copy"
 

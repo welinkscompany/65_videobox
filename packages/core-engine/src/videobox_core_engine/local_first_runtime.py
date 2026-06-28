@@ -42,6 +42,7 @@ class LocalFirstStructuredRuntime:
         default_factory=lambda: {
             LLMTaskType.SCENE_PLANNING,
             LLMTaskType.KEYWORD_EXPANSION,
+            LLMTaskType.MUSIC_RECOMMENDATION,
             LLMTaskType.OPERATOR_COPY,
         }
     )

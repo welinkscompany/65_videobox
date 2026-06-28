@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from videobox_core_engine.gemini_runtime import GeminiStructuredGenerationError
 from videobox_core_engine.local_first_runtime import LocalFirstStructuredGenerationError
 from videobox_domain_models.recommendations import RecommendationType
 from videobox_provider_interfaces.llm import LLMProviderError, LLMTaskType
@@ -174,3 +175,66 @@ class RuleBasedMusicRecommender(RecommendationProvider):
                 )
             )
         return results
+
+
+@dataclass(slots=True)
+class LocalFirstMusicRecommender(RecommendationProvider):
+    runtime_service: StructuredRecommendationRuntime
+    fallback_recommender: RecommendationProvider = field(default_factory=RuleBasedMusicRecommender)
+    provider_name: str = "local-first-music"
+
+    def recommend(self, request: RecommendationRequest) -> list[RecommendationCandidate]:
+        fallback_candidates = self.fallback_recommender.recommend(request)
+        candidates: list[RecommendationCandidate] = []
+        for segment, fallback_candidate in zip(request.segments, fallback_candidates, strict=False):
+            try:
+                response = self.runtime_service.generate_structured(
+                    project_id=request.project_id,
+                    task_type=LLMTaskType.MUSIC_RECOMMENDATION,
+                    prompt=self._build_prompt(segment=segment),
+                    response_schema={
+                        "type": "object",
+                        "required": ["music_mood", "score"],
+                        "properties": {
+                            "music_mood": {"type": "string"},
+                            "score": {"type": "number"},
+                        },
+                    },
+                )
+            except (
+                GeminiStructuredGenerationError,
+                LLMProviderError,
+                LocalFirstStructuredGenerationError,
+            ):
+                candidates.append(fallback_candidate)
+                continue
+
+            music_mood = response.output_data.get("music_mood")
+            score = response.output_data.get("score")
+            if not isinstance(music_mood, str) or not music_mood.strip():
+                candidates.append(fallback_candidate)
+                continue
+            if not isinstance(score, (int, float)) or isinstance(score, bool):
+                candidates.append(fallback_candidate)
+                continue
+
+            candidates.append(
+                RecommendationCandidate(
+                    target_segment_id=fallback_candidate.target_segment_id,
+                    selected_asset_id=fallback_candidate.selected_asset_id,
+                    score=round(float(score), 2),
+                    reason=f"Suggested music mood for this segment: {music_mood.strip()}.",
+                    auto_apply_allowed=fallback_candidate.auto_apply_allowed,
+                    review_required=fallback_candidate.review_required,
+                    payload={"music_mood": music_mood.strip()},
+                )
+            )
+        return candidates
+
+    def _build_prompt(self, *, segment: dict[str, Any]) -> str:
+        return (
+            "Suggest a concise background music mood for this video segment.\n"
+            f"Segment: {segment.get('text', '')}\n"
+            f"Review required: {bool(segment.get('review_required'))}\n"
+            "Return music_mood as a short phrase and score as a 0-1 confidence value."
+        )
