@@ -16,6 +16,7 @@ from videobox_core_engine.gemini_runtime import (
 from videobox_core_engine.local_first_runtime import LocalFirstStructuredGenerationError, LocalFirstStructuredRuntime
 from videobox_api.orchestration import GeminiRuntimeService, LocalFirstRuntimeService
 from videobox_provider_interfaces.gemini import GeminiHTTPTransport, GeminiRESTStructuredProvider
+from videobox_provider_interfaces.local_qwen import LocalQwenHTTPTransport, LocalQwenStructuredProvider
 from videobox_provider_interfaces.llm import (
     LLMProviderConfig,
     LLMProviderError,
@@ -844,3 +845,153 @@ def test_local_first_runtime_service_exposes_local_then_gemini_backend_entrypoin
 
     assert response.provider_name == "gemini"
     assert response.output_data == {"decision": "use_broll"}
+
+
+def test_local_qwen_http_transport_posts_openai_compatible_request() -> None:
+    client = RecordingHTTPClient(
+        response=FakeHTTPResponse(
+            status=200,
+            payload={
+                "choices": [
+                    {
+                        "message": {
+                            "content": '{"keywords":["local","qwen"]}'
+                        }
+                    }
+                ]
+            },
+        )
+    )
+    transport = LocalQwenHTTPTransport(
+        base_url="http://127.0.0.1:1234/v1",
+        http_client=client,
+        timeout_seconds=15,
+    )
+
+    response = transport.complete_chat(
+        model_name="qwen3-35b",
+        prompt="Expand keywords.",
+        response_schema={
+            "type": "object",
+            "required": ["keywords"],
+            "properties": {"keywords": {"type": "array", "items": {"type": "string"}}},
+        },
+    )
+
+    assert response["choices"][0]["message"]["content"] == '{"keywords":["local","qwen"]}'
+    assert len(client.calls) == 1
+    request = client.calls[0]
+    assert request.full_url == "http://127.0.0.1:1234/v1/chat/completions"
+    assert request.get_method() == "POST"
+    payload = json.loads(request.data.decode("utf-8"))
+    assert payload["model"] == "qwen3-35b"
+    assert payload["response_format"]["type"] == "json_schema"
+    assert payload["messages"][0]["content"] == "Expand keywords."
+
+
+def test_local_qwen_structured_provider_parses_json_and_normalizes_timeout() -> None:
+    success_client = RecordingHTTPClient(
+        response=FakeHTTPResponse(
+            status=200,
+            payload={
+                "choices": [
+                    {
+                        "message": {
+                            "content": '{"summary":"local summary"}'
+                        }
+                    }
+                ]
+            },
+        )
+    )
+    provider = LocalQwenStructuredProvider(
+        transport=LocalQwenHTTPTransport(
+            base_url="http://127.0.0.1:1234/v1",
+            http_client=success_client,
+            timeout_seconds=20,
+        )
+    )
+
+    response = provider.complete_structured(
+        StructuredLLMRequest(
+            task_type=LLMTaskType.OPERATOR_COPY,
+            prompt="Summarize this segment.",
+            response_schema={
+                "type": "object",
+                "required": ["summary"],
+                "properties": {"summary": {"type": "string"}},
+            },
+            provider_context={"model_name": "qwen3-35b"},
+        )
+    )
+
+    assert response.provider_name == "local_qwen"
+    assert response.output_data == {"summary": "local summary"}
+
+    class TimeoutHTTPClient:
+        def __call__(self, request: Request, timeout: int) -> FakeHTTPResponse:
+            raise TimeoutError("local timed out")
+
+    timeout_provider = LocalQwenStructuredProvider(
+        transport=LocalQwenHTTPTransport(
+            base_url="http://127.0.0.1:1234/v1",
+            http_client=TimeoutHTTPClient(),
+            timeout_seconds=20,
+        )
+    )
+
+    try:
+        timeout_provider.complete_structured(
+            StructuredLLMRequest(
+                task_type=LLMTaskType.OPERATOR_COPY,
+                prompt="Summarize this segment.",
+                response_schema={
+                    "type": "object",
+                    "required": ["summary"],
+                    "properties": {"summary": {"type": "string"}},
+                },
+                provider_context={"model_name": "qwen3-35b"},
+            )
+        )
+    except LLMProviderError as exc:
+        assert exc.provider_name == "local_qwen"
+        assert exc.error_code == "LOCAL_TIMEOUT"
+        assert exc.retryable is True
+    else:
+        raise AssertionError("Expected local timeout to normalize into LLMProviderError.")
+
+
+def test_local_qwen_structured_provider_rejects_malformed_json() -> None:
+    client = RecordingHTTPClient(
+        response=FakeHTTPResponse(
+            status=200,
+            payload={"choices": [{"message": {"content": "not-json"}}]},
+        )
+    )
+    provider = LocalQwenStructuredProvider(
+        transport=LocalQwenHTTPTransport(
+            base_url="http://127.0.0.1:1234/v1",
+            http_client=client,
+            timeout_seconds=20,
+        )
+    )
+
+    try:
+        provider.complete_structured(
+            StructuredLLMRequest(
+                task_type=LLMTaskType.KEYWORD_EXPANSION,
+                prompt="Expand keywords.",
+                response_schema={
+                    "type": "object",
+                    "required": ["keywords"],
+                    "properties": {"keywords": {"type": "array", "items": {"type": "string"}}},
+                },
+                provider_context={"model_name": "qwen3-35b"},
+            )
+        )
+    except LLMProviderError as exc:
+        assert exc.provider_name == "local_qwen"
+        assert exc.error_code == "invalid_json"
+        assert exc.retryable is False
+    else:
+        raise AssertionError("Expected malformed local JSON to be rejected.")
