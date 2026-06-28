@@ -1,3 +1,11 @@
+from videobox_provider_interfaces.llm import (
+    LLMProvider,
+    LLMProviderConfig,
+    LLMProviderError,
+    LLMRequest,
+    LLMResponse,
+    LLMTaskType,
+)
 from videobox_provider_interfaces.recommenders import (
     RecommendationCandidate,
     RecommendationProvider,
@@ -15,8 +23,19 @@ from videobox_provider_interfaces.stt import (
     STTResult,
 )
 from videobox_provider_interfaces.tts import TTSProvider, TTSRequest, TTSResult
+from videobox_provider_interfaces.visual_generation import (
+    VisualGenerationProvider,
+    VisualGenerationRequest,
+    VisualGenerationResponse,
+)
 
 __all__ = [
+    "LLMProvider",
+    "LLMProviderConfig",
+    "LLMProviderError",
+    "LLMRequest",
+    "LLMResponse",
+    "LLMTaskType",
     "MockSTTProvider",
     "RecommendationCandidate",
     "RecommendationGuardrail",
@@ -29,5 +48,8 @@ __all__ = [
     "TTSProvider",
     "TTSRequest",
     "TTSResult",
+    "VisualGenerationProvider",
+    "VisualGenerationRequest",
+    "VisualGenerationResponse",
     "get_recommendation_guardrail",
 ]
