@@ -251,117 +251,236 @@ const subtitleResponse = {
   },
 };
 
+const geminiKeysResponse = {
+  keys: [
+    {
+      key_id: "gemini_key_001",
+      project_id: "project_001",
+      label: "Primary routing key",
+      masked_api_key: "AIza...1234",
+      primary_model: "gemini-2.5-pro",
+      cheap_model: "gemini-2.5-flash-lite",
+      high_quality_model: "gemini-2.5-pro",
+      status: "active",
+      cooldown_until: null,
+      consecutive_failures: 0,
+      last_error: null,
+      last_used_at: "2026-06-28T00:00:20Z",
+      created_at: "2026-06-28T00:00:15Z",
+      updated_at: "2026-06-28T00:00:20Z",
+    },
+    {
+      key_id: "gemini_key_002",
+      project_id: "project_001",
+      label: "Fallback cooldown key",
+      masked_api_key: "AIza...5678",
+      primary_model: "gemini-2.5-flash",
+      cheap_model: "gemini-2.5-flash-lite",
+      high_quality_model: "gemini-2.5-pro",
+      status: "cooldown",
+      cooldown_until: "2026-06-28T00:05:00Z",
+      consecutive_failures: 3,
+      last_error: "429 quota exceeded",
+      last_used_at: "2026-06-28T00:00:18Z",
+      created_at: "2026-06-28T00:00:16Z",
+      updated_at: "2026-06-28T00:00:21Z",
+    },
+  ],
+};
+
+function createFetchMock({
+  geminiKeys = geminiKeysResponse,
+}: {
+  geminiKeys?: { keys: Array<Record<string, unknown>> };
+} = {}) {
+  const state = {
+    geminiKeys: structuredClone(geminiKeys),
+  };
+
+  return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/api/projects")) {
+      return new Response(JSON.stringify(projectsResponse));
+    }
+    if (url.endsWith("/api/projects/project_001")) {
+      return new Response(JSON.stringify(projectResponse));
+    }
+    if (url.endsWith("/api/projects/project_001/jobs")) {
+      return new Response(JSON.stringify(jobsResponse));
+    }
+    if (
+      url.endsWith("/api/projects/project_001/jobs/build-timeline") &&
+      init?.method === "POST"
+    ) {
+      return new Response(
+        JSON.stringify({
+          job_id: "timeline_build_job_005",
+          status: "succeeded",
+        }),
+      );
+    }
+    if (
+      url.endsWith("/api/projects/project_001/jobs/preview-render") &&
+      init?.method === "POST"
+    ) {
+      return new Response(
+        JSON.stringify({
+          job_id: "preview_render_job_006",
+          status: "succeeded",
+        }),
+      );
+    }
+    if (
+      url.endsWith("/api/projects/project_001/jobs/capcut-export") &&
+      init?.method === "POST"
+    ) {
+      return new Response(
+        JSON.stringify({
+          job_id: "capcut_export_job_007",
+          status: "succeeded",
+        }),
+      );
+    }
+    if (
+      url.endsWith("/api/projects/project_001/jobs/subtitle-render") &&
+      init?.method === "POST"
+    ) {
+      return new Response(
+        JSON.stringify({
+          job_id: "subtitle_render_job_008",
+          status: "succeeded",
+        }),
+      );
+    }
+    if (url.endsWith("/api/projects/project_001/timelines/timeline_build_job_005")) {
+      return new Response(JSON.stringify(timelineResponse));
+    }
+    if (url.endsWith("/api/projects/project_001/review-snapshots/timeline_build_job_005")) {
+      return new Response(JSON.stringify(reviewSnapshotResponse));
+    }
+    if (
+      url.endsWith("/api/projects/project_001/review-approvals/timeline_build_job_005/approve") &&
+      init?.method === "POST"
+    ) {
+      return new Response(
+        JSON.stringify({
+          timeline_id: "timeline_001",
+          review_status: "approved",
+          approved_at: "2026-06-28T00:00:10Z",
+        }),
+      );
+    }
+    if (
+      url.endsWith("/api/projects/project_001/review-approvals/timeline_build_job_005/reopen") &&
+      init?.method === "POST"
+    ) {
+      return new Response(
+        JSON.stringify({
+          timeline_id: "timeline_001",
+          review_status: "draft",
+          approved_at: null,
+        }),
+      );
+    }
+    if (url.endsWith("/api/projects/project_001/previews/preview_render_job_006")) {
+      return new Response(JSON.stringify(previewResponse));
+    }
+    if (url.endsWith("/api/projects/project_001/subtitles/subtitle_render_job_008")) {
+      return new Response(JSON.stringify(subtitleResponse));
+    }
+    if (url.endsWith("/api/projects/project_001/exports/capcut_export_job_007")) {
+      return new Response(JSON.stringify(exportResponse));
+    }
+    if (url.endsWith("/api/projects/project_001/providers/gemini/keys")) {
+      if (init?.method === "POST") {
+        const payload = JSON.parse(String(init.body)) as {
+          label: string;
+          primary_model: string;
+          cheap_model: string;
+          high_quality_model: string;
+        };
+        state.geminiKeys.keys = [
+          ...state.geminiKeys.keys,
+          {
+            key_id: "gemini_key_003",
+            project_id: "project_001",
+            label: payload.label,
+            masked_api_key: "AIza...9999",
+            primary_model: payload.primary_model,
+            cheap_model: payload.cheap_model,
+            high_quality_model: payload.high_quality_model,
+            status: "active",
+            cooldown_until: null,
+            consecutive_failures: 0,
+            last_error: null,
+            last_used_at: null,
+            created_at: "2026-06-28T00:00:30Z",
+            updated_at: "2026-06-28T00:00:30Z",
+          },
+        ];
+        return new Response(JSON.stringify(state.geminiKeys.keys[state.geminiKeys.keys.length - 1]));
+      }
+      return new Response(JSON.stringify(state.geminiKeys));
+    }
+    if (
+      url.endsWith("/api/projects/project_001/providers/gemini/keys/gemini_key_001") &&
+      init?.method === "PATCH"
+    ) {
+      const payload = JSON.parse(String(init.body)) as Record<string, string>;
+      state.geminiKeys.keys = state.geminiKeys.keys.map((item) =>
+        item.key_id === "gemini_key_001"
+          ? {
+              ...item,
+              ...payload,
+              updated_at: "2026-06-28T00:01:00Z",
+            }
+          : item,
+      );
+      return new Response(
+        JSON.stringify(state.geminiKeys.keys.find((item) => item.key_id === "gemini_key_001")),
+      );
+    }
+    if (
+      url.endsWith("/api/projects/project_001/providers/gemini/keys/gemini_key_001/disable") &&
+      init?.method === "POST"
+    ) {
+      state.geminiKeys.keys = state.geminiKeys.keys.map((item) =>
+        item.key_id === "gemini_key_001"
+          ? {
+              ...item,
+              status: "disabled",
+              updated_at: "2026-06-28T00:01:10Z",
+            }
+          : item,
+      );
+      return new Response(
+        JSON.stringify(state.geminiKeys.keys.find((item) => item.key_id === "gemini_key_001")),
+      );
+    }
+    if (
+      url.endsWith("/api/projects/project_001/providers/gemini/keys/gemini_key_001/enable") &&
+      init?.method === "POST"
+    ) {
+      state.geminiKeys.keys = state.geminiKeys.keys.map((item) =>
+        item.key_id === "gemini_key_001"
+          ? {
+              ...item,
+              status: "active",
+              updated_at: "2026-06-28T00:01:20Z",
+            }
+          : item,
+      );
+      return new Response(
+        JSON.stringify(state.geminiKeys.keys.find((item) => item.key_id === "gemini_key_001")),
+      );
+    }
+    return Promise.reject(new Error(`Unhandled fetch: ${url}`));
+  });
+}
+
 describe("App", () => {
   it("renders a local-first operator dashboard from API data", async () => {
-    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      if (url.endsWith("/api/projects")) {
-        return Promise.resolve(new Response(JSON.stringify(projectsResponse)));
-      }
-      if (url.endsWith("/api/projects/project_001")) {
-        return Promise.resolve(new Response(JSON.stringify(projectResponse)));
-      }
-      if (url.endsWith("/api/projects/project_001/jobs")) {
-        return Promise.resolve(new Response(JSON.stringify(jobsResponse)));
-      }
-      if (
-        url.endsWith("/api/projects/project_001/jobs/build-timeline") &&
-        init?.method === "POST"
-      ) {
-        return Promise.resolve(
-          new Response(
-            JSON.stringify({
-              job_id: "timeline_build_job_005",
-              status: "succeeded",
-            }),
-          ),
-        );
-      }
-      if (
-        url.endsWith("/api/projects/project_001/jobs/preview-render") &&
-        init?.method === "POST"
-      ) {
-        return Promise.resolve(
-          new Response(
-            JSON.stringify({
-              job_id: "preview_render_job_006",
-              status: "succeeded",
-            }),
-          ),
-        );
-      }
-      if (
-        url.endsWith("/api/projects/project_001/jobs/capcut-export") &&
-        init?.method === "POST"
-      ) {
-        return Promise.resolve(
-          new Response(
-            JSON.stringify({
-              job_id: "capcut_export_job_007",
-              status: "succeeded",
-            }),
-          ),
-        );
-      }
-      if (
-        url.endsWith("/api/projects/project_001/jobs/subtitle-render") &&
-        init?.method === "POST"
-      ) {
-        return Promise.resolve(
-          new Response(
-            JSON.stringify({
-              job_id: "subtitle_render_job_008",
-              status: "succeeded",
-            }),
-          ),
-        );
-      }
-      if (url.endsWith("/api/projects/project_001/timelines/timeline_build_job_005")) {
-        return Promise.resolve(new Response(JSON.stringify(timelineResponse)));
-      }
-      if (url.endsWith("/api/projects/project_001/review-snapshots/timeline_build_job_005")) {
-        return Promise.resolve(new Response(JSON.stringify(reviewSnapshotResponse)));
-      }
-      if (
-        url.endsWith("/api/projects/project_001/review-approvals/timeline_build_job_005/approve") &&
-        init?.method === "POST"
-      ) {
-        return Promise.resolve(
-          new Response(
-            JSON.stringify({
-              timeline_id: "timeline_001",
-              review_status: "approved",
-              approved_at: "2026-06-28T00:00:10Z",
-            }),
-          ),
-        );
-      }
-      if (
-        url.endsWith("/api/projects/project_001/review-approvals/timeline_build_job_005/reopen") &&
-        init?.method === "POST"
-      ) {
-        return Promise.resolve(
-          new Response(
-            JSON.stringify({
-              timeline_id: "timeline_001",
-              review_status: "draft",
-              approved_at: null,
-            }),
-          ),
-        );
-      }
-      if (url.endsWith("/api/projects/project_001/previews/preview_render_job_006")) {
-        return Promise.resolve(new Response(JSON.stringify(previewResponse)));
-      }
-      if (url.endsWith("/api/projects/project_001/subtitles/subtitle_render_job_008")) {
-        return Promise.resolve(new Response(JSON.stringify(subtitleResponse)));
-      }
-      if (url.endsWith("/api/projects/project_001/exports/capcut_export_job_007")) {
-        return Promise.resolve(new Response(JSON.stringify(exportResponse)));
-      }
-      return Promise.reject(new Error(`Unhandled fetch: ${url}`));
-    });
-
+    const fetchMock = createFetchMock();
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
@@ -475,6 +594,9 @@ describe("App", () => {
       if (url.endsWith("/api/projects/project_001/review-snapshots/timeline_build_job_005")) {
         return Promise.resolve(new Response(JSON.stringify(blockedReviewSnapshotResponse)));
       }
+      if (url.endsWith("/api/projects/project_001/providers/gemini/keys")) {
+        return Promise.resolve(new Response(JSON.stringify(geminiKeysResponse)));
+      }
       return Promise.reject(new Error(`Unhandled fetch: ${url}`));
     });
 
@@ -533,6 +655,9 @@ describe("App", () => {
       }
       if (url.endsWith("/api/projects/project_001/review-snapshots/timeline_build_job_005")) {
         return Promise.resolve(new Response(JSON.stringify(draftReviewSnapshotResponse)));
+      }
+      if (url.endsWith("/api/projects/project_001/providers/gemini/keys")) {
+        return Promise.resolve(new Response(JSON.stringify(geminiKeysResponse)));
       }
       return Promise.reject(new Error(`Unhandled fetch: ${url}`));
     });
@@ -598,6 +723,9 @@ describe("App", () => {
       if (url.endsWith("/api/projects/project_001/review-snapshots/timeline_build_job_005")) {
         return Promise.resolve(new Response(JSON.stringify(reviewSnapshotResponse)));
       }
+      if (url.endsWith("/api/projects/project_001/providers/gemini/keys")) {
+        return Promise.resolve(new Response(JSON.stringify(geminiKeysResponse)));
+      }
       return Promise.reject(new Error(`Unhandled fetch: ${url}`));
     });
 
@@ -619,5 +747,127 @@ describe("App", () => {
     expect(within(previewCard!).getByText("not-started")).toBeInTheDocument();
     expect(within(exportCard!).getByText("pending")).toBeInTheDocument();
     expect(within(exportCard!).getByText("not-started")).toBeInTheDocument();
+  });
+
+  it("keeps the baseline dashboard usable when Gemini key loading fails", async () => {
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/api/projects")) {
+        return Promise.resolve(new Response(JSON.stringify(projectsResponse)));
+      }
+      if (url.endsWith("/api/projects/project_001")) {
+        return Promise.resolve(new Response(JSON.stringify(projectResponse)));
+      }
+      if (url.endsWith("/api/projects/project_001/jobs")) {
+        return Promise.resolve(new Response(JSON.stringify(jobsResponse)));
+      }
+      if (url.endsWith("/api/projects/project_001/timelines/timeline_build_job_005")) {
+        return Promise.resolve(new Response(JSON.stringify(timelineResponse)));
+      }
+      if (url.endsWith("/api/projects/project_001/review-snapshots/timeline_build_job_005")) {
+        return Promise.resolve(new Response(JSON.stringify(reviewSnapshotResponse)));
+      }
+      if (url.endsWith("/api/projects/project_001/previews/preview_render_job_006")) {
+        return Promise.resolve(new Response(JSON.stringify(previewResponse)));
+      }
+      if (url.endsWith("/api/projects/project_001/subtitles/subtitle_render_job_008")) {
+        return Promise.resolve(new Response(JSON.stringify(subtitleResponse)));
+      }
+      if (url.endsWith("/api/projects/project_001/exports/capcut_export_job_007")) {
+        return Promise.resolve(new Response(JSON.stringify(exportResponse)));
+      }
+      if (url.endsWith("/api/projects/project_001/providers/gemini/keys")) {
+        return Promise.resolve(new Response("provider unavailable", { status: 503 }));
+      }
+      return Promise.reject(new Error(`Unhandled fetch: ${url}`));
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    expect(await screen.findByText(/operator review demo/i)).toBeInTheDocument();
+    expect(await screen.findByText(/timeline_001/i)).toBeInTheDocument();
+    expect(await screen.findByText(/gemini routing state unavailable/i)).toBeInTheDocument();
+    expect(screen.queryByText(/request failed: \/api\/projects\/project_001\/providers\/gemini\/keys/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/no gemini routing keys configured for this project/i)).not.toBeInTheDocument();
+  });
+
+  it("renders masked Gemini keys with routing state visibility and never leaks raw secrets", async () => {
+    const fetchMock = createFetchMock();
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: /gemini provider keys/i })).toBeInTheDocument();
+    expect(await screen.findByText(/primary routing key/i)).toBeInTheDocument();
+    expect(await screen.findByText("AIza...1234")).toBeInTheDocument();
+    expect(await screen.findByText(/fallback cooldown key/i)).toBeInTheDocument();
+    expect(await screen.findByText(/429 quota exceeded/i)).toBeInTheDocument();
+    expect(await screen.findByText(/2026-06-28T00:05:00Z/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/consecutive failures/i).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/AIzaSyDANGER_SECRET/i)).not.toBeInTheDocument();
+    expect(screen.queryByDisplayValue(/AIzaSyDANGER_SECRET/i)).not.toBeInTheDocument();
+  });
+
+  it("creates, updates, disables, and re-enables Gemini keys while refreshing the dashboard state", async () => {
+    const fetchMock = createFetchMock();
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: /gemini provider keys/i })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /add gemini key/i }));
+    fireEvent.change(screen.getByLabelText(/label/i), {
+      target: { value: "Burst quota key" },
+    });
+    fireEvent.change(screen.getByLabelText(/api key/i), {
+      target: { value: "AIzaSyDANGER_SECRET" },
+    });
+    fireEvent.change(screen.getByLabelText(/primary model/i), {
+      target: { value: "gemini-2.5-flash" },
+    });
+    fireEvent.change(screen.getByLabelText(/cheap model/i), {
+      target: { value: "gemini-2.5-flash-lite" },
+    });
+    fireEvent.change(screen.getByLabelText(/high quality model/i), {
+      target: { value: "gemini-2.5-pro" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /save gemini key/i }));
+
+    expect(await screen.findByText(/burst quota key/i)).toBeInTheDocument();
+    expect(screen.getByText("AIza...9999")).toBeInTheDocument();
+    expect(screen.queryByText(/AIzaSyDANGER_SECRET/i)).not.toBeInTheDocument();
+    expect(screen.queryByDisplayValue(/AIzaSyDANGER_SECRET/i)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /edit primary routing key/i }));
+    fireEvent.change(screen.getByLabelText(/label/i), {
+      target: { value: "Primary routing key v2" },
+    });
+    fireEvent.change(screen.getByLabelText(/cheap model/i), {
+      target: { value: "gemini-2.5-flash" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+
+    expect(await screen.findByText(/primary routing key v2/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/gemini-2.5-flash/i).length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole("button", { name: /disable primary routing key v2/i }));
+    await waitFor(() => {
+      expect(screen.getAllByText(/^disabled$/i).length).toBeGreaterThan(0);
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /enable primary routing key v2/i }));
+    await waitFor(() => {
+      expect(screen.getAllByText(/^active$/i).length).toBeGreaterThan(1);
+    });
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/projects/project_001/providers/gemini/keys",
+        expect.anything(),
+      );
+    });
   });
 });

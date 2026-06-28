@@ -214,7 +214,9 @@ button {
 
 .status-grid,
 .workspace-grid,
-.recommendation-groups {
+.recommendation-groups,
+.provider-key-list,
+.provider-key-details {
   display: grid;
   gap: 16px;
 }
@@ -279,7 +281,8 @@ button {
 .track-stack,
 .clip-list,
 .segment-list,
-.flag-list {
+.flag-list,
+.provider-form {
   display: grid;
   gap: 14px;
 }
@@ -342,6 +345,84 @@ button {
   border-color: rgba(237, 169, 105, 0.34);
 }
 
+.provider-form {
+  margin-bottom: 18px;
+  padding: 16px;
+  border: 1px solid rgba(246, 219, 188, 0.12);
+  border-radius: 18px;
+  background: rgba(42, 31, 25, 0.72);
+}
+
+.field {
+  display: grid;
+  gap: 8px;
+}
+
+.field input {
+  padding: 12px 14px;
+  border: 1px solid rgba(246, 219, 188, 0.16);
+  border-radius: 14px;
+  background: rgba(24, 19, 16, 0.86);
+  color: #fff8ed;
+}
+
+.provider-key-card {
+  padding: 16px;
+  border: 1px solid rgba(246, 219, 188, 0.12);
+  border-radius: 18px;
+  background: rgba(42, 31, 25, 0.72);
+}
+
+.provider-key-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: start;
+}
+
+.provider-key-details {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 14px 0 0;
+}
+
+.provider-key-details div {
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(24, 19, 16, 0.72);
+}
+
+.provider-key-details dt {
+  color: #d0c2b2;
+  font-size: 0.82rem;
+}
+
+.provider-key-details dd {
+  margin: 8px 0 0;
+}
+
+.provider-status.status-active,
+.provider-status.status-disabled,
+.provider-status.status-cooldown,
+.provider-status.status-invalid {
+  text-transform: capitalize;
+}
+
+.provider-status.status-active {
+  background: rgba(55, 95, 72, 0.9);
+}
+
+.provider-status.status-disabled {
+  background: rgba(99, 78, 66, 0.9);
+}
+
+.provider-status.status-cooldown {
+  background: rgba(136, 74, 39, 0.88);
+}
+
+.provider-status.status-invalid {
+  background: rgba(126, 44, 44, 0.88);
+}
+
 .action-row {
   display: flex;
   flex-wrap: wrap;
@@ -389,6 +470,10 @@ button {
   }
 
   .summary-list {
+    grid-template-columns: 1fr;
+  }
+
+  .provider-key-details {
     grid-template-columns: 1fr;
   }
 

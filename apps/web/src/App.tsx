@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   api,
   type ExportJob,
+  type GeminiProviderKey,
   type JobRecord,
   type PreviewJob,
   type Project,
@@ -44,6 +45,28 @@ function findLatestSucceededJob(jobs: JobRecord[], jobType: string, inputRef?: s
   return candidates.length > 0 ? candidates[candidates.length - 1] : null;
 }
 
+type GeminiKeyFormState = {
+  label: string;
+  apiKey: string;
+  primaryModel: string;
+  cheapModel: string;
+  highQualityModel: string;
+};
+
+function createEmptyGeminiKeyForm(): GeminiKeyFormState {
+  return {
+    label: "",
+    apiKey: "",
+    primaryModel: "",
+    cheapModel: "",
+    highQualityModel: "",
+  };
+}
+
+function formatNullableValue(value: string | null) {
+  return value ?? "not available";
+}
+
 export function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
@@ -57,6 +80,8 @@ export function App() {
   const [subtitleJob, setSubtitleJob] = useState<SubtitleJob | null>(null);
   const [previewJob, setPreviewJob] = useState<PreviewJob | null>(null);
   const [exportJob, setExportJob] = useState<ExportJob | null>(null);
+  const [geminiKeys, setGeminiKeys] = useState<GeminiProviderKey[]>([]);
+  const [geminiLoadError, setGeminiLoadError] = useState<string | null>(null);
   const [loadState, setLoadState] = useState<LoadState>("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isRebuildingTimeline, setIsRebuildingTimeline] = useState(false);
@@ -65,6 +90,11 @@ export function App() {
   const [isRenderingSubtitle, setIsRenderingSubtitle] = useState(false);
   const [isRenderingPreview, setIsRenderingPreview] = useState(false);
   const [isExportingCapcut, setIsExportingCapcut] = useState(false);
+  const [isGeminiFormOpen, setIsGeminiFormOpen] = useState(false);
+  const [editingGeminiKeyId, setEditingGeminiKeyId] = useState<string | null>(null);
+  const [geminiForm, setGeminiForm] = useState<GeminiKeyFormState>(createEmptyGeminiKeyForm);
+  const [isSavingGeminiKey, setIsSavingGeminiKey] = useState(false);
+  const [togglingGeminiKeyId, setTogglingGeminiKeyId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -104,6 +134,11 @@ export function App() {
       setSubtitleJob(null);
       setPreviewJob(null);
       setExportJob(null);
+      setGeminiKeys([]);
+      setGeminiLoadError(null);
+      setIsGeminiFormOpen(false);
+      setEditingGeminiKeyId(null);
+      setGeminiForm(createEmptyGeminiKeyForm());
       return;
     }
 
@@ -113,6 +148,7 @@ export function App() {
     async function loadProjectWorkspace() {
       setLoadState("loading");
       setErrorMessage(null);
+      setGeminiLoadError(null);
       try {
         const project = await api.getProject(projectId);
         const jobItems = await api.listJobs(projectId);
@@ -152,6 +188,20 @@ export function App() {
         setPreviewJob(preview);
         setExportJob(capcutExport);
         setLoadState("ready");
+        try {
+          const providerKeys = await api.listGeminiProviderKeys(projectId);
+          if (cancelled) {
+            return;
+          }
+          setGeminiKeys(providerKeys);
+          setGeminiLoadError(null);
+        } catch {
+          if (cancelled) {
+            return;
+          }
+          setGeminiKeys([]);
+          setGeminiLoadError("Gemini routing state unavailable.");
+        }
       } catch (error) {
         if (cancelled) {
           return;
@@ -389,6 +439,88 @@ export function App() {
       setErrorMessage(error instanceof Error ? error.message : "Unknown error");
     } finally {
       setIsRenderingSubtitle(false);
+    }
+  }
+
+  async function refreshGeminiKeys(projectId: string) {
+    const providerKeys = await api.listGeminiProviderKeys(projectId);
+    setGeminiKeys(providerKeys);
+    setGeminiLoadError(null);
+  }
+
+  function openCreateGeminiForm() {
+    setEditingGeminiKeyId(null);
+    setGeminiForm(createEmptyGeminiKeyForm());
+    setIsGeminiFormOpen(true);
+  }
+
+  function openEditGeminiForm(key: GeminiProviderKey) {
+    setEditingGeminiKeyId(key.key_id);
+    setGeminiForm({
+      label: key.label,
+      apiKey: "",
+      primaryModel: key.primary_model,
+      cheapModel: key.cheap_model,
+      highQualityModel: key.high_quality_model,
+    });
+    setIsGeminiFormOpen(true);
+  }
+
+  function closeGeminiForm() {
+    setIsGeminiFormOpen(false);
+    setEditingGeminiKeyId(null);
+    setGeminiForm(createEmptyGeminiKeyForm());
+  }
+
+  async function handleSaveGeminiKey() {
+    if (!selectedProjectId) {
+      return;
+    }
+    setIsSavingGeminiKey(true);
+    setErrorMessage(null);
+    try {
+      if (editingGeminiKeyId) {
+        await api.updateGeminiProviderKey(selectedProjectId, editingGeminiKeyId, {
+          label: geminiForm.label,
+          primary_model: geminiForm.primaryModel,
+          cheap_model: geminiForm.cheapModel,
+          high_quality_model: geminiForm.highQualityModel,
+        });
+      } else {
+        await api.createGeminiProviderKey(selectedProjectId, {
+          label: geminiForm.label,
+          api_key: geminiForm.apiKey,
+          primary_model: geminiForm.primaryModel,
+          cheap_model: geminiForm.cheapModel,
+          high_quality_model: geminiForm.highQualityModel,
+        });
+      }
+      await refreshGeminiKeys(selectedProjectId);
+      closeGeminiForm();
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Unknown error");
+    } finally {
+      setIsSavingGeminiKey(false);
+    }
+  }
+
+  async function handleToggleGeminiKey(key: GeminiProviderKey) {
+    if (!selectedProjectId) {
+      return;
+    }
+    setTogglingGeminiKeyId(key.key_id);
+    setErrorMessage(null);
+    try {
+      if (key.status === "disabled") {
+        await api.enableGeminiProviderKey(selectedProjectId, key.key_id);
+      } else {
+        await api.disableGeminiProviderKey(selectedProjectId, key.key_id);
+      }
+      await refreshGeminiKeys(selectedProjectId);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Unknown error");
+    } finally {
+      setTogglingGeminiKeyId(null);
     }
   }
 
@@ -634,6 +766,175 @@ export function App() {
                   <dd>{exportJob?.export.export_type ?? "pending"}</dd>
                 </div>
               </dl>
+            </article>
+
+            <article className="panel">
+              <div className="panel-header">
+                <div>
+                  <p className="section-kicker">Provider routing</p>
+                  <h2>Gemini provider keys</h2>
+                </div>
+                <button
+                  className="action-button"
+                  onClick={openCreateGeminiForm}
+                  type="button"
+                >
+                  Add Gemini key
+                </button>
+              </div>
+              {isGeminiFormOpen ? (
+                <div className="provider-form">
+                  <label className="field">
+                    <span>Label</span>
+                    <input
+                      onChange={(event) =>
+                        setGeminiForm((current) => ({
+                          ...current,
+                          label: event.target.value,
+                        }))
+                      }
+                      value={geminiForm.label}
+                    />
+                  </label>
+                  {!editingGeminiKeyId ? (
+                    <label className="field">
+                      <span>API key</span>
+                      <input
+                        onChange={(event) =>
+                          setGeminiForm((current) => ({
+                            ...current,
+                            apiKey: event.target.value,
+                          }))
+                        }
+                        type="password"
+                        value={geminiForm.apiKey}
+                      />
+                    </label>
+                  ) : null}
+                  <label className="field">
+                    <span>Primary model</span>
+                    <input
+                      onChange={(event) =>
+                        setGeminiForm((current) => ({
+                          ...current,
+                          primaryModel: event.target.value,
+                        }))
+                      }
+                      value={geminiForm.primaryModel}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Cheap model</span>
+                    <input
+                      onChange={(event) =>
+                        setGeminiForm((current) => ({
+                          ...current,
+                          cheapModel: event.target.value,
+                        }))
+                      }
+                      value={geminiForm.cheapModel}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>High quality model</span>
+                    <input
+                      onChange={(event) =>
+                        setGeminiForm((current) => ({
+                          ...current,
+                          highQualityModel: event.target.value,
+                        }))
+                      }
+                      value={geminiForm.highQualityModel}
+                    />
+                  </label>
+                  <div className="action-row">
+                    <button
+                      className="action-button primary"
+                      disabled={
+                        isSavingGeminiKey ||
+                        !geminiForm.label ||
+                        !geminiForm.primaryModel ||
+                        !geminiForm.cheapModel ||
+                        !geminiForm.highQualityModel ||
+                        (!editingGeminiKeyId && !geminiForm.apiKey)
+                      }
+                      onClick={() => void handleSaveGeminiKey()}
+                      type="button"
+                    >
+                      {editingGeminiKeyId ? "Save changes" : "Save Gemini key"}
+                    </button>
+                    <button className="action-button" onClick={closeGeminiForm} type="button">
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+              {geminiLoadError ? <p className="empty-state">{geminiLoadError}</p> : null}
+              <div className="provider-key-list">
+                {geminiKeys.map((key) => (
+                  <article className="provider-key-card" key={key.key_id}>
+                    <div className="provider-key-header">
+                      <div>
+                        <h3>{key.label}</h3>
+                        <p className="meta-copy">{key.masked_api_key}</p>
+                      </div>
+                      <span className={`pill provider-status status-${key.status}`}>{key.status}</span>
+                    </div>
+                    <dl className="provider-key-details">
+                      <div>
+                        <dt>Primary model</dt>
+                        <dd>{key.primary_model}</dd>
+                      </div>
+                      <div>
+                        <dt>Cheap model</dt>
+                        <dd>{key.cheap_model}</dd>
+                      </div>
+                      <div>
+                        <dt>High quality model</dt>
+                        <dd>{key.high_quality_model}</dd>
+                      </div>
+                      <div>
+                        <dt>Consecutive failures</dt>
+                        <dd>{key.consecutive_failures}</dd>
+                      </div>
+                      <div>
+                        <dt>Cooldown until</dt>
+                        <dd>{formatNullableValue(key.cooldown_until)}</dd>
+                      </div>
+                      <div>
+                        <dt>Last used at</dt>
+                        <dd>{formatNullableValue(key.last_used_at)}</dd>
+                      </div>
+                      <div>
+                        <dt>Last error</dt>
+                        <dd>{formatNullableValue(key.last_error)}</dd>
+                      </div>
+                    </dl>
+                    <div className="action-row">
+                      <button
+                        aria-label={`Edit ${key.label}`}
+                        className="action-button"
+                        onClick={() => openEditGeminiForm(key)}
+                        type="button"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        aria-label={`${key.status === "disabled" ? "Enable" : "Disable"} ${key.label}`}
+                        className="action-button"
+                        disabled={togglingGeminiKeyId === key.key_id}
+                        onClick={() => void handleToggleGeminiKey(key)}
+                        type="button"
+                      >
+                        {key.status === "disabled" ? "Enable" : "Disable"}
+                      </button>
+                    </div>
+                  </article>
+                ))}
+                {geminiKeys.length === 0 && !geminiLoadError ? (
+                  <p className="empty-state">No Gemini routing keys configured for this project.</p>
+                ) : null}
+              </div>
             </article>
           </section>
         ) : null}
