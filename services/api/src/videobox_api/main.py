@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+from urllib.request import urlopen
 
 from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel, Field
 
-from videobox_api.orchestration import ApiOrchestrator
-from videobox_core_engine.settings import DEFAULT_PROJECTS_ROOT
+from videobox_api.orchestration import ApiOrchestrator, build_local_first_runtime_service
+from videobox_core_engine.settings import DEFAULT_PROJECTS_ROOT, LocalOpenAICompatibleRuntimeConfig
 from videobox_storage.local_project_store import LocalProjectStore
 
 
@@ -259,10 +260,17 @@ class GeminiProviderKeyListResponse(BaseModel):
     keys: list[GeminiProviderKeyResponse]
 
 
-def create_app(*, projects_root: Path | None = None) -> FastAPI:
+def create_app(
+    *,
+    projects_root: Path | None = None,
+    local_runtime_config: LocalOpenAICompatibleRuntimeConfig | None = None,
+) -> FastAPI:
     app = FastAPI(title="VideoBox API", version="0.1.0")
     store = LocalProjectStore(projects_root or DEFAULT_PROJECTS_ROOT)
     orchestrator = ApiOrchestrator(store)
+    app.state.local_runtime_config = local_runtime_config or LocalOpenAICompatibleRuntimeConfig()
+    app.state.build_local_first_runtime_service = build_local_first_runtime_service
+    app.state.local_http_client = urlopen
 
     def _http_error(exc: Exception) -> HTTPException:
         if isinstance(exc, FileNotFoundError):

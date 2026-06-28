@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 from io import BytesIO
 from pathlib import Path
 from typing import Any
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request
 
 from videobox_core_engine.gemini_runtime import (
@@ -14,7 +14,9 @@ from videobox_core_engine.gemini_runtime import (
     GeminiStructuredRuntime,
 )
 from videobox_core_engine.local_first_runtime import LocalFirstStructuredGenerationError, LocalFirstStructuredRuntime
+from videobox_api import orchestration as orchestration_module
 from videobox_api.orchestration import GeminiRuntimeService, LocalFirstRuntimeService
+from videobox_core_engine import settings as settings_module
 from videobox_provider_interfaces.gemini import GeminiHTTPTransport, GeminiRESTStructuredProvider
 from videobox_provider_interfaces.local_qwen import LocalQwenHTTPTransport, LocalQwenStructuredProvider
 from videobox_provider_interfaces.llm import (
@@ -105,6 +107,21 @@ def _create_store(tmp_path: Path) -> tuple[LocalProjectStore, str]:
     store = LocalProjectStore(tmp_path)
     project = store.bootstrap_project(name="Gemini Runtime Project")
     return store, project.project_id
+
+
+def _local_runtime_config(
+    *,
+    enabled: bool = True,
+    base_url: str = "http://127.0.0.1:1234/v1",
+    model_name: str = "qwen3-35b",
+    timeout_seconds: int = 30,
+) -> Any:
+    return settings_module.LocalOpenAICompatibleRuntimeConfig(
+        enabled=enabled,
+        base_url=base_url,
+        model_name=model_name,
+        timeout_seconds=timeout_seconds,
+    )
 
 
 def test_gemini_rest_structured_provider_builds_generate_content_payload_and_parses_json() -> None:
@@ -664,7 +681,59 @@ def test_local_first_runtime_returns_local_result_without_hitting_gemini(tmp_pat
     assert response.provider_name == "local_qwen"
     assert response.output_data == {"keywords": ["office", "desk"]}
     assert len(local_provider.calls) == 1
+    assert local_provider.calls[0].provider_context["model_name"] == "qwen3-35b"
     assert gemini_provider.calls == []
+
+
+def test_local_first_runtime_uses_configured_local_model_name(tmp_path: Path) -> None:
+    now = datetime(2026, 6, 28, 20, 5, tzinfo=UTC)
+    store, project_id = _create_store(tmp_path)
+    store.save_gemini_provider_key(
+        project_id=project_id,
+        label="Fallback Gemini",
+        api_key_secret="AIzaMODEL1001",
+        primary_model="gemini-2.5-flash",
+        cheap_model="gemini-2.5-flash-lite",
+        high_quality_model="gemini-2.5-pro",
+    )
+    local_provider = FakeLocalStructuredProvider(
+        responses=[
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B-GGUF",
+                output_data={"keywords": ["office", "desk"]},
+                raw_text='{"keywords":["office","desk"]}',
+                metadata={},
+            )
+        ]
+    )
+    runtime = LocalFirstStructuredRuntime(
+        store=store,
+        local_provider=local_provider,
+        gemini_provider=FakeStructuredProvider(),
+        local_config=LLMProviderConfig(provider_name="local_qwen", enabled=True),
+        gemini_config=LLMProviderConfig(provider_name="gemini", enabled=True),
+        local_runtime_config=_local_runtime_config(
+            base_url="http://127.0.0.1:11434/v1",
+            model_name="Qwen3-32B-GGUF",
+            timeout_seconds=45,
+        ),
+    )
+
+    response = runtime.generate(
+        project_id=project_id,
+        task_type=LLMTaskType.KEYWORD_EXPANSION,
+        prompt="Expand keywords.",
+        response_schema={
+            "type": "object",
+            "required": ["keywords"],
+            "properties": {"keywords": {"type": "array", "items": {"type": "string"}}},
+        },
+        now=now,
+    )
+
+    assert response.provider_name == "local_qwen"
+    assert local_provider.calls[0].provider_context["model_name"] == "Qwen3-32B-GGUF"
 
 
 def test_local_first_runtime_falls_back_to_gemini_after_local_retryable_failure(tmp_path: Path) -> None:
@@ -724,6 +793,57 @@ def test_local_first_runtime_falls_back_to_gemini_after_local_retryable_failure(
 
     assert response.provider_name == "gemini"
     assert len(local_provider.calls) == 1
+    assert [call.provider_context["gemini_key_id"] for call in gemini_provider.calls] == [gemini_key["key_id"]]
+
+
+def test_local_first_runtime_skips_disabled_local_provider_and_uses_gemini(tmp_path: Path) -> None:
+    now = datetime(2026, 6, 28, 20, 20, tzinfo=UTC)
+    store, project_id = _create_store(tmp_path)
+    gemini_key = store.save_gemini_provider_key(
+        project_id=project_id,
+        label="Fallback Gemini",
+        api_key_secret="AIzaDISABLED2002",
+        primary_model="gemini-2.5-flash",
+        cheap_model="gemini-2.5-flash-lite",
+        high_quality_model="gemini-2.5-pro",
+    )
+    local_provider = FakeLocalStructuredProvider()
+    gemini_provider = FakeStructuredProvider(
+        responses_by_key={
+            gemini_key["key_id"]: [
+                StructuredLLMResponse(
+                    provider_name="gemini",
+                    model_name="gemini-2.5-flash-lite",
+                    output_data={"keywords": ["fallback", "gemini"]},
+                    raw_text='{"keywords":["fallback","gemini"]}',
+                    metadata={},
+                )
+            ]
+        }
+    )
+    runtime = LocalFirstStructuredRuntime(
+        store=store,
+        local_provider=local_provider,
+        gemini_provider=gemini_provider,
+        local_config=LLMProviderConfig(provider_name="local_qwen", enabled=False),
+        gemini_config=LLMProviderConfig(provider_name="gemini", enabled=True),
+        local_runtime_config=_local_runtime_config(enabled=False),
+    )
+
+    response = runtime.generate(
+        project_id=project_id,
+        task_type=LLMTaskType.KEYWORD_EXPANSION,
+        prompt="Expand keywords.",
+        response_schema={
+            "type": "object",
+            "required": ["keywords"],
+            "properties": {"keywords": {"type": "array", "items": {"type": "string"}}},
+        },
+        now=now,
+    )
+
+    assert response.provider_name == "gemini"
+    assert local_provider.calls == []
     assert [call.provider_context["gemini_key_id"] for call in gemini_provider.calls] == [gemini_key["key_id"]]
 
 
@@ -845,6 +965,129 @@ def test_local_first_runtime_service_exposes_local_then_gemini_backend_entrypoin
 
     assert response.provider_name == "gemini"
     assert response.output_data == {"decision": "use_broll"}
+
+
+def test_build_local_first_runtime_service_wires_configured_local_endpoint() -> None:
+    service = orchestration_module.build_local_first_runtime_service(
+        store=LocalProjectStore(Path("D:/tmp/videobox-runtime-builder")),
+        gemini_provider=FakeStructuredProvider(),
+        gemini_config=LLMProviderConfig(provider_name="gemini", enabled=True),
+        local_runtime_config=_local_runtime_config(
+            base_url="http://127.0.0.1:11434/v1",
+            model_name="Qwen3-32B",
+            timeout_seconds=42,
+        ),
+        local_http_client=RecordingHTTPClient(
+            response=FakeHTTPResponse(
+                status=200,
+                payload={"choices": [{"message": {"content": '{"ok":true}'}}]},
+            )
+        ),
+    )
+
+    assert isinstance(service.local_provider, LocalQwenStructuredProvider)
+    assert service.local_runtime_config.base_url == "http://127.0.0.1:11434/v1"
+    assert service.local_runtime_config.model_name == "Qwen3-32B"
+    assert service.local_runtime_config.timeout_seconds == 42
+    assert service.local_config.enabled is True
+
+
+def test_local_runtime_config_rejects_invalid_values() -> None:
+    try:
+        settings_module.LocalOpenAICompatibleRuntimeConfig(
+            enabled=True,
+            base_url=" ",
+            model_name="qwen3-35b",
+            timeout_seconds=30,
+        )
+    except ValueError as exc:
+        assert "base_url" in str(exc)
+    else:
+        raise AssertionError("Expected blank local base_url to be rejected.")
+
+    try:
+        settings_module.LocalOpenAICompatibleRuntimeConfig(
+            enabled=True,
+            base_url="http://127.0.0.1:1234/v1",
+            model_name="   ",
+            timeout_seconds=30,
+        )
+    except ValueError as exc:
+        assert "model_name" in str(exc)
+    else:
+        raise AssertionError("Expected blank local model_name to be rejected.")
+
+    try:
+        settings_module.LocalOpenAICompatibleRuntimeConfig(
+            enabled=True,
+            base_url="http://127.0.0.1:1234/v1",
+            model_name="qwen3-35b",
+            timeout_seconds=0,
+        )
+    except ValueError as exc:
+        assert "timeout" in str(exc).lower()
+    else:
+        raise AssertionError("Expected non-positive local timeout to be rejected.")
+
+
+def test_build_local_first_runtime_service_rejects_conflicting_local_config() -> None:
+    try:
+        orchestration_module.build_local_first_runtime_service(
+            store=LocalProjectStore(Path("D:/tmp/videobox-runtime-builder-conflict")),
+            gemini_provider=FakeStructuredProvider(),
+            gemini_config=LLMProviderConfig(provider_name="gemini", enabled=True),
+            local_runtime_config=_local_runtime_config(
+                enabled=True,
+                base_url="http://127.0.0.1:11434/v1",
+                model_name="Qwen3-32B",
+                timeout_seconds=42,
+            ),
+            local_config=LLMProviderConfig(
+                provider_name="local_qwen",
+                enabled=False,
+                timeout_seconds=30,
+            ),
+            local_http_client=RecordingHTTPClient(
+                response=FakeHTTPResponse(
+                    status=200,
+                    payload={"choices": [{"message": {"content": '{"ok":true}'}}]},
+                )
+            ),
+        )
+    except ValueError as exc:
+        assert "local_config" in str(exc)
+    else:
+        raise AssertionError("Expected conflicting local provider configuration to be rejected.")
+
+
+def test_local_qwen_http_transport_normalizes_network_failures_for_invalid_endpoint() -> None:
+    class FailingHTTPClient:
+        def __call__(self, request: Request, timeout: int) -> FakeHTTPResponse:
+            raise URLError("[Errno 111] Connection refused")
+
+    transport = LocalQwenHTTPTransport(
+        base_url="http://127.0.0.1:9999/v1",
+        http_client=FailingHTTPClient(),
+        timeout_seconds=10,
+    )
+
+    try:
+        transport.complete_chat(
+            model_name="qwen3-35b",
+            prompt="Expand keywords.",
+            response_schema={
+                "type": "object",
+                "required": ["keywords"],
+                "properties": {"keywords": {"type": "array", "items": {"type": "string"}}},
+            },
+        )
+    except LLMProviderError as exc:
+        assert exc.provider_name == "local_qwen"
+        assert exc.error_code == "LOCAL_NETWORK_ERROR"
+        assert exc.retryable is True
+        assert "network error" in str(exc).lower()
+    else:
+        raise AssertionError("Expected invalid local endpoint failures to normalize into LLMProviderError.")
 
 
 def test_local_qwen_http_transport_posts_openai_compatible_request() -> None:

@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from videobox_core_engine.gemini_runtime import GeminiStructuredGenerationError, GeminiStructuredRuntime
+from videobox_core_engine.settings import LocalOpenAICompatibleRuntimeConfig
 from videobox_provider_interfaces.llm import (
     LLMProviderConfig,
     LLMProviderError,
@@ -33,6 +34,9 @@ class LocalFirstStructuredRuntime:
     gemini_provider: StructuredLLMProvider
     local_config: LLMProviderConfig
     gemini_config: LLMProviderConfig
+    local_runtime_config: LocalOpenAICompatibleRuntimeConfig = field(
+        default_factory=LocalOpenAICompatibleRuntimeConfig
+    )
     cooldown_seconds: int = 180
     local_preferred_tasks: set[LLMTaskType] = field(
         default_factory=lambda: {
@@ -58,7 +62,8 @@ class LocalFirstStructuredRuntime:
             provider_config=self.gemini_config,
             cooldown_seconds=self.cooldown_seconds,
         )
-        if not self.local_config.enabled or task_type not in self.local_preferred_tasks:
+        local_enabled = self.local_config.enabled and self.local_runtime_config.enabled
+        if not local_enabled or task_type not in self.local_preferred_tasks:
             return gemini_runtime.generate(
                 project_id=project_id,
                 task_type=task_type,
@@ -75,7 +80,7 @@ class LocalFirstStructuredRuntime:
                     prompt=prompt,
                     response_schema=response_schema,
                     provider_context={
-                        "model_name": self.local_config.provider_name,
+                        "model_name": self.local_runtime_config.model_name,
                         "routing_policy": "local_first",
                         "task_type": task_type.value,
                     },

@@ -6,6 +6,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from videobox_api.main import create_app
+from videobox_core_engine.settings import LocalOpenAICompatibleRuntimeConfig
 from videobox_provider_interfaces.stt import STTResult, STTSegment
 
 
@@ -16,6 +17,21 @@ def test_health_endpoint_reports_ok() -> None:
 
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
+
+
+def test_create_app_exposes_local_runtime_builder_on_app_state(tmp_path: Path) -> None:
+    config = LocalOpenAICompatibleRuntimeConfig(
+        enabled=True,
+        base_url="http://127.0.0.1:11434/v1/",
+        model_name="Qwen3-32B",
+        timeout_seconds=42,
+    )
+
+    app = create_app(projects_root=tmp_path, local_runtime_config=config)
+
+    assert app.state.local_runtime_config.base_url == "http://127.0.0.1:11434/v1"
+    assert app.state.local_runtime_config.model_name == "Qwen3-32B"
+    assert callable(app.state.build_local_first_runtime_service)
 
 
 def test_project_creation_endpoint_returns_local_storage_metadata(tmp_path) -> None:

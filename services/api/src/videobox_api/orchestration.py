@@ -1,12 +1,15 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
+from urllib.request import urlopen
 
 from videobox_core_engine.gemini_runtime import GeminiStructuredRuntime
 from videobox_core_engine.local_first_runtime import LocalFirstStructuredRuntime
+from videobox_core_engine.settings import LocalOpenAICompatibleRuntimeConfig
+from videobox_provider_interfaces.local_qwen import LocalQwenHTTPTransport, LocalQwenStructuredProvider
 from videobox_provider_interfaces.llm import (
     LLMProviderConfig,
     LLMTaskType,
@@ -62,6 +65,9 @@ class LocalFirstRuntimeService:
     gemini_provider: StructuredLLMProvider
     local_config: LLMProviderConfig
     gemini_config: LLMProviderConfig
+    local_runtime_config: LocalOpenAICompatibleRuntimeConfig = field(
+        default_factory=LocalOpenAICompatibleRuntimeConfig
+    )
     cooldown_seconds: int = 180
 
     def generate_structured(
@@ -79,6 +85,7 @@ class LocalFirstRuntimeService:
             gemini_provider=self.gemini_provider,
             local_config=self.local_config,
             gemini_config=self.gemini_config,
+            local_runtime_config=self.local_runtime_config,
             cooldown_seconds=self.cooldown_seconds,
         )
         return runtime.generate(
@@ -88,6 +95,52 @@ class LocalFirstRuntimeService:
             response_schema=response_schema,
             now=now,
         )
+
+
+def build_local_qwen_structured_provider(
+    *,
+    local_runtime_config: LocalOpenAICompatibleRuntimeConfig,
+    local_http_client: Callable[..., Any],
+) -> LocalQwenStructuredProvider:
+    transport = LocalQwenHTTPTransport(
+        base_url=local_runtime_config.base_url,
+        timeout_seconds=local_runtime_config.timeout_seconds,
+        http_client=local_http_client,
+    )
+    return LocalQwenStructuredProvider(transport=transport)
+
+
+def build_local_first_runtime_service(
+    *,
+    store: LocalProjectStore,
+    gemini_provider: StructuredLLMProvider,
+    gemini_config: LLMProviderConfig,
+    local_runtime_config: LocalOpenAICompatibleRuntimeConfig,
+    local_http_client: Callable[..., Any] = urlopen,
+    local_config: LLMProviderConfig | None = None,
+    cooldown_seconds: int = 180,
+) -> LocalFirstRuntimeService:
+    resolved_local_config = local_config or LLMProviderConfig(
+        provider_name="local_qwen",
+        enabled=local_runtime_config.enabled,
+        timeout_seconds=local_runtime_config.timeout_seconds,
+    )
+    if resolved_local_config.enabled != local_runtime_config.enabled:
+        raise ValueError("local_config.enabled must match local_runtime_config.enabled.")
+    if resolved_local_config.timeout_seconds != local_runtime_config.timeout_seconds:
+        raise ValueError("local_config.timeout_seconds must match local_runtime_config.timeout_seconds.")
+    return LocalFirstRuntimeService(
+        store=store,
+        local_provider=build_local_qwen_structured_provider(
+            local_runtime_config=local_runtime_config,
+            local_http_client=local_http_client,
+        ),
+        gemini_provider=gemini_provider,
+        local_config=resolved_local_config,
+        gemini_config=gemini_config,
+        local_runtime_config=local_runtime_config,
+        cooldown_seconds=cooldown_seconds,
+    )
 
 
 class ApiOrchestrator:
