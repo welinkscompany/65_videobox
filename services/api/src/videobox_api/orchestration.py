@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from videobox_core_engine.gemini_runtime import GeminiStructuredRuntime
+from videobox_core_engine.local_first_runtime import LocalFirstStructuredRuntime
 from videobox_provider_interfaces.llm import (
     LLMProviderConfig,
     LLMTaskType,
@@ -43,6 +44,41 @@ class GeminiRuntimeService:
             store=self.store,
             provider=self.provider,
             provider_config=self.provider_config,
+            cooldown_seconds=self.cooldown_seconds,
+        )
+        return runtime.generate(
+            project_id=project_id,
+            task_type=task_type,
+            prompt=prompt,
+            response_schema=response_schema,
+            now=now,
+        )
+
+
+@dataclass(slots=True)
+class LocalFirstRuntimeService:
+    store: LocalProjectStore
+    local_provider: StructuredLLMProvider
+    gemini_provider: StructuredLLMProvider
+    local_config: LLMProviderConfig
+    gemini_config: LLMProviderConfig
+    cooldown_seconds: int = 180
+
+    def generate_structured(
+        self,
+        *,
+        project_id: str,
+        task_type: LLMTaskType,
+        prompt: str,
+        response_schema: dict[str, Any],
+        now: datetime | None = None,
+    ) -> StructuredLLMResponse:
+        runtime = LocalFirstStructuredRuntime(
+            store=self.store,
+            local_provider=self.local_provider,
+            gemini_provider=self.gemini_provider,
+            local_config=self.local_config,
+            gemini_config=self.gemini_config,
             cooldown_seconds=self.cooldown_seconds,
         )
         return runtime.generate(

@@ -13,7 +13,8 @@ from videobox_core_engine.gemini_runtime import (
     GeminiStructuredGenerationError,
     GeminiStructuredRuntime,
 )
-from videobox_api.orchestration import GeminiRuntimeService
+from videobox_core_engine.local_first_runtime import LocalFirstStructuredGenerationError, LocalFirstStructuredRuntime
+from videobox_api.orchestration import GeminiRuntimeService, LocalFirstRuntimeService
 from videobox_provider_interfaces.gemini import GeminiHTTPTransport, GeminiRESTStructuredProvider
 from videobox_provider_interfaces.llm import (
     LLMProviderConfig,
@@ -53,6 +54,21 @@ class FakeStructuredProvider:
         if self.responses_by_key.get(key_id):
             return self.responses_by_key[key_id].pop(0)
         raise AssertionError(f"No fake structured response configured for {key_id}")
+
+
+@dataclass
+class FakeLocalStructuredProvider:
+    responses: list[StructuredLLMResponse] = field(default_factory=list)
+    errors: list[Exception] = field(default_factory=list)
+    calls: list[StructuredLLMRequest] = field(default_factory=list)
+
+    def complete_structured(self, request: StructuredLLMRequest) -> StructuredLLMResponse:
+        self.calls.append(request)
+        if self.errors:
+            raise self.errors.pop(0)
+        if self.responses:
+            return self.responses.pop(0)
+        raise AssertionError("No fake local structured response configured.")
 
 
 @dataclass
@@ -599,3 +615,232 @@ def test_gemini_http_transport_maps_auth_and_transient_errors() -> None:
         assert exc.retryable is True
     else:
         raise AssertionError("Expected transient Gemini errors to be retryable.")
+
+
+def test_local_first_runtime_returns_local_result_without_hitting_gemini(tmp_path: Path) -> None:
+    now = datetime(2026, 6, 28, 20, 0, tzinfo=UTC)
+    store, project_id = _create_store(tmp_path)
+    store.save_gemini_provider_key(
+        project_id=project_id,
+        label="Fallback Gemini",
+        api_key_secret="AIzaFALLBACK1001",
+        primary_model="gemini-2.5-flash",
+        cheap_model="gemini-2.5-flash-lite",
+        high_quality_model="gemini-2.5-pro",
+    )
+    local_provider = FakeLocalStructuredProvider(
+        responses=[
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="qwen3-35b",
+                output_data={"keywords": ["office", "desk"]},
+                raw_text='{"keywords":["office","desk"]}',
+                metadata={},
+            )
+        ]
+    )
+    gemini_provider = FakeStructuredProvider()
+    runtime = LocalFirstStructuredRuntime(
+        store=store,
+        local_provider=local_provider,
+        gemini_provider=gemini_provider,
+        local_config=LLMProviderConfig(provider_name="local_qwen", enabled=True),
+        gemini_config=LLMProviderConfig(provider_name="gemini", enabled=True),
+    )
+
+    response = runtime.generate(
+        project_id=project_id,
+        task_type=LLMTaskType.KEYWORD_EXPANSION,
+        prompt="Expand keywords.",
+        response_schema={
+            "type": "object",
+            "required": ["keywords"],
+            "properties": {"keywords": {"type": "array", "items": {"type": "string"}}},
+        },
+        now=now,
+    )
+
+    assert response.provider_name == "local_qwen"
+    assert response.output_data == {"keywords": ["office", "desk"]}
+    assert len(local_provider.calls) == 1
+    assert gemini_provider.calls == []
+
+
+def test_local_first_runtime_falls_back_to_gemini_after_local_retryable_failure(tmp_path: Path) -> None:
+    now = datetime(2026, 6, 28, 20, 15, tzinfo=UTC)
+    store, project_id = _create_store(tmp_path)
+    gemini_key = store.save_gemini_provider_key(
+        project_id=project_id,
+        label="Fallback Gemini",
+        api_key_secret="AIzaFALLBACK2002",
+        primary_model="gemini-2.5-flash",
+        cheap_model="gemini-2.5-flash-lite",
+        high_quality_model="gemini-2.5-pro",
+    )
+    local_provider = FakeLocalStructuredProvider(
+        errors=[
+            LLMProviderError(
+                provider_name="local_qwen",
+                message="local model timed out",
+                retryable=True,
+                error_code="LOCAL_TIMEOUT",
+                occurred_at=now,
+            )
+        ]
+    )
+    gemini_provider = FakeStructuredProvider(
+        responses_by_key={
+            gemini_key["key_id"]: [
+                StructuredLLMResponse(
+                    provider_name="gemini",
+                    model_name="gemini-2.5-flash-lite",
+                    output_data={"keywords": ["fallback", "broll"]},
+                    raw_text='{"keywords":["fallback","broll"]}',
+                    metadata={},
+                )
+            ]
+        }
+    )
+    runtime = LocalFirstStructuredRuntime(
+        store=store,
+        local_provider=local_provider,
+        gemini_provider=gemini_provider,
+        local_config=LLMProviderConfig(provider_name="local_qwen", enabled=True),
+        gemini_config=LLMProviderConfig(provider_name="gemini", enabled=True),
+    )
+
+    response = runtime.generate(
+        project_id=project_id,
+        task_type=LLMTaskType.KEYWORD_EXPANSION,
+        prompt="Expand keywords.",
+        response_schema={
+            "type": "object",
+            "required": ["keywords"],
+            "properties": {"keywords": {"type": "array", "items": {"type": "string"}}},
+        },
+        now=now,
+    )
+
+    assert response.provider_name == "gemini"
+    assert len(local_provider.calls) == 1
+    assert [call.provider_context["gemini_key_id"] for call in gemini_provider.calls] == [gemini_key["key_id"]]
+
+
+def test_local_first_runtime_falls_back_to_gemini_when_local_returns_invalid_structure(tmp_path: Path) -> None:
+    now = datetime(2026, 6, 28, 20, 30, tzinfo=UTC)
+    store, project_id = _create_store(tmp_path)
+    gemini_key = store.save_gemini_provider_key(
+        project_id=project_id,
+        label="Fallback Gemini",
+        api_key_secret="AIzaFALLBACK3003",
+        primary_model="gemini-2.5-flash",
+        cheap_model="gemini-2.5-flash-lite",
+        high_quality_model="gemini-2.5-pro",
+    )
+    local_provider = FakeLocalStructuredProvider(
+        responses=[
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="qwen3-35b",
+                output_data={"wrong_field": True},
+                raw_text='{"wrong_field":true}',
+                metadata={},
+            )
+        ]
+    )
+    gemini_provider = FakeStructuredProvider(
+        responses_by_key={
+            gemini_key["key_id"]: [
+                StructuredLLMResponse(
+                    provider_name="gemini",
+                    model_name="gemini-2.5-flash",
+                    output_data={"summary": "fallback summary"},
+                    raw_text='{"summary":"fallback summary"}',
+                    metadata={},
+                )
+            ]
+        }
+    )
+    runtime = LocalFirstStructuredRuntime(
+        store=store,
+        local_provider=local_provider,
+        gemini_provider=gemini_provider,
+        local_config=LLMProviderConfig(provider_name="local_qwen", enabled=True),
+        gemini_config=LLMProviderConfig(provider_name="gemini", enabled=True),
+    )
+
+    response = runtime.generate(
+        project_id=project_id,
+        task_type=LLMTaskType.OPERATOR_COPY,
+        prompt="Summarize this segment.",
+        response_schema={
+            "type": "object",
+            "required": ["summary"],
+            "properties": {"summary": {"type": "string"}},
+        },
+        now=now,
+    )
+
+    assert response.provider_name == "gemini"
+    assert response.output_data == {"summary": "fallback summary"}
+    assert len(local_provider.calls) == 1
+    assert len(gemini_provider.calls) == 1
+
+
+def test_local_first_runtime_service_exposes_local_then_gemini_backend_entrypoint(tmp_path: Path) -> None:
+    now = datetime(2026, 6, 28, 20, 45, tzinfo=UTC)
+    store, project_id = _create_store(tmp_path)
+    gemini_key = store.save_gemini_provider_key(
+        project_id=project_id,
+        label="Service Fallback Gemini",
+        api_key_secret="AIzaFALLBACK4004",
+        primary_model="gemini-2.5-flash",
+        cheap_model="gemini-2.5-flash-lite",
+        high_quality_model="gemini-2.5-pro",
+    )
+    local_provider = FakeLocalStructuredProvider(
+        errors=[
+            LLMProviderError(
+                provider_name="local_qwen",
+                message="local unavailable",
+                retryable=True,
+                error_code="LOCAL_UNAVAILABLE",
+                occurred_at=now,
+            )
+        ]
+    )
+    gemini_provider = FakeStructuredProvider(
+        responses_by_key={
+            gemini_key["key_id"]: [
+                StructuredLLMResponse(
+                    provider_name="gemini",
+                    model_name="gemini-2.5-flash",
+                    output_data={"decision": "use_broll"},
+                    raw_text='{"decision":"use_broll"}',
+                    metadata={},
+                )
+            ]
+        }
+    )
+    service = LocalFirstRuntimeService(
+        store=store,
+        local_provider=local_provider,
+        gemini_provider=gemini_provider,
+        local_config=LLMProviderConfig(provider_name="local_qwen", enabled=True),
+        gemini_config=LLMProviderConfig(provider_name="gemini", enabled=True),
+    )
+
+    response = service.generate_structured(
+        project_id=project_id,
+        task_type=LLMTaskType.SCENE_PLANNING,
+        prompt="Classify this segment.",
+        response_schema={
+            "type": "object",
+            "required": ["decision"],
+            "properties": {"decision": {"type": "string"}},
+        },
+        now=now,
+    )
+
+    assert response.provider_name == "gemini"
+    assert response.output_data == {"decision": "use_broll"}
