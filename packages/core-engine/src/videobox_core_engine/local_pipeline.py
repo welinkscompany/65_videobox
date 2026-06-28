@@ -6,6 +6,7 @@ from typing import Any
 from videobox_capcut_export import CapCutExportAdapter
 from videobox_core_engine.preview_renderer import PreviewRenderer
 from videobox_core_engine.recommenders import KeywordBrollRecommender, RuleBasedMusicRecommender
+from videobox_core_engine.review_guidance import HeuristicReviewGuidanceBuilder, ReviewGuidanceBuilder
 from videobox_core_engine.script_scene_planner import HeuristicSegmentAnalyzer, SegmentAnalyzer
 from videobox_core_engine.timeline_builder import TimelineBuilder
 from videobox_domain_models.assets import AssetType
@@ -25,6 +26,7 @@ class LocalPipelineRunner:
         segment_analyzer: SegmentAnalyzer | None = None,
         broll_recommender: RecommendationProvider | None = None,
         music_recommender: RecommendationProvider | None = None,
+        review_guidance_builder: ReviewGuidanceBuilder | None = None,
         timeline_builder: TimelineBuilder | None = None,
         preview_renderer: PreviewRenderer | None = None,
         capcut_exporter: CapCutExportAdapter | None = None,
@@ -34,6 +36,7 @@ class LocalPipelineRunner:
         self.segment_analyzer = segment_analyzer or HeuristicSegmentAnalyzer()
         self.broll_recommender = broll_recommender or KeywordBrollRecommender()
         self.music_recommender = music_recommender or RuleBasedMusicRecommender()
+        self.review_guidance_builder = review_guidance_builder or HeuristicReviewGuidanceBuilder()
         self.timeline_builder = timeline_builder or TimelineBuilder()
         self.preview_renderer = preview_renderer or PreviewRenderer()
         self.capcut_exporter = capcut_exporter or CapCutExportAdapter()
@@ -377,13 +380,18 @@ class LocalPipelineRunner:
 
     def get_review_snapshot(self, *, project_id: str, job_id: str) -> dict[str, Any]:
         timeline = self.get_timeline_result(project_id=project_id, job_id=job_id)["timeline"]
-        return self.store.build_review_snapshot(
+        snapshot = self.store.build_review_snapshot(
             project_id=project_id,
             timeline_id=str(timeline.get("timeline_id") or ""),
             segments=self.store.list_segments(project_id=project_id),
             recommendations=self.store.list_recommendation_rows(project_id=project_id),
             timeline_review_flags=timeline.get("review_flags", []),
         )
+        snapshot["operator_guidance"] = self.review_guidance_builder.build(
+            project_id=project_id,
+            review_snapshot=snapshot,
+        )
+        return snapshot
 
     def get_review_snapshot_result(self, *, project_id: str, job_id: str) -> dict[str, Any]:
         return self.get_review_snapshot(project_id=project_id, job_id=job_id)

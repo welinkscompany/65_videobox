@@ -1,0 +1,154 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any, Protocol
+
+from videobox_core_engine.gemini_runtime import GeminiStructuredGenerationError
+from videobox_core_engine.local_first_runtime import LocalFirstStructuredGenerationError
+from videobox_provider_interfaces.llm import LLMProviderError, LLMTaskType
+
+
+class StructuredReviewGuidanceRuntime(Protocol):
+    def generate_structured(
+        self,
+        *,
+        project_id: str,
+        task_type: LLMTaskType,
+        prompt: str,
+        response_schema: dict[str, Any],
+        now: Any | None = None,
+    ) -> Any:
+        """Generate structured operator guidance."""
+
+
+class ReviewGuidanceBuilder(Protocol):
+    def build(
+        self,
+        *,
+        project_id: str,
+        review_snapshot: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Return operator-facing review guidance for a snapshot."""
+
+
+@dataclass(slots=True)
+class HeuristicReviewGuidanceBuilder(ReviewGuidanceBuilder):
+    def build(
+        self,
+        *,
+        project_id: str,
+        review_snapshot: dict[str, Any],
+    ) -> dict[str, Any]:
+        del project_id
+        review_flags = review_snapshot.get("review_flags", [])
+        pending_recommendations = review_snapshot.get("pending_recommendations", [])
+        review_status = str(review_snapshot.get("review_status") or "draft")
+
+        if review_flags or pending_recommendations:
+            action_items = [
+                str(flag.get("message", "")).strip()
+                for flag in review_flags
+                if str(flag.get("message", "")).strip()
+            ]
+            action_items.extend(
+                str(item.get("reason", "")).strip()
+                for item in pending_recommendations
+                if str(item.get("reason", "")).strip()
+            )
+            if not action_items:
+                action_items.append("Resolve review blockers before approval.")
+            return {
+                "summary": "Review is blocked until the flagged items are resolved.",
+                "action_items": action_items[:5],
+            }
+
+        if review_status == "approved":
+            return {
+                "summary": "Timeline review is approved and outputs can be generated.",
+                "action_items": ["Generate subtitles, preview, or export from the approved timeline."],
+            }
+
+        return {
+            "summary": "Timeline is ready for approval before output generation.",
+            "action_items": ["Approve the timeline review to unlock subtitles, preview, and export."],
+        }
+
+
+@dataclass(slots=True)
+class LocalFirstReviewGuidanceBuilder(ReviewGuidanceBuilder):
+    runtime_service: StructuredReviewGuidanceRuntime
+    fallback_builder: ReviewGuidanceBuilder = field(default_factory=HeuristicReviewGuidanceBuilder)
+
+    def build(
+        self,
+        *,
+        project_id: str,
+        review_snapshot: dict[str, Any],
+    ) -> dict[str, Any]:
+        fallback_guidance = self.fallback_builder.build(
+            project_id=project_id,
+            review_snapshot=review_snapshot,
+        )
+        try:
+            response = self.runtime_service.generate_structured(
+                project_id=project_id,
+                task_type=LLMTaskType.OPERATOR_COPY,
+                prompt=self._build_prompt(review_snapshot=review_snapshot),
+                response_schema={
+                    "type": "object",
+                    "required": ["summary", "action_items"],
+                    "properties": {
+                        "summary": {"type": "string"},
+                        "action_items": {"type": "array", "items": {"type": "string"}},
+                    },
+                },
+            )
+            summary = response.output_data.get("summary")
+            action_items = response.output_data.get("action_items")
+            if not isinstance(summary, str) or not summary.strip():
+                return fallback_guidance
+            if not isinstance(action_items, list):
+                return fallback_guidance
+
+            cleaned_action_items = [
+                str(item).strip()
+                for item in action_items
+                if isinstance(item, str) and item.strip()
+            ]
+            if not cleaned_action_items:
+                return fallback_guidance
+
+            return {
+                "summary": summary.strip(),
+                "action_items": cleaned_action_items[:5],
+            }
+        except (
+            GeminiStructuredGenerationError,
+            LLMProviderError,
+            LocalFirstStructuredGenerationError,
+            Exception,
+        ):
+            return fallback_guidance
+
+    def _build_prompt(self, *, review_snapshot: dict[str, Any]) -> str:
+        review_status = str(review_snapshot.get("review_status") or "draft")
+        review_flags = review_snapshot.get("review_flags", [])
+        pending_recommendations = review_snapshot.get("pending_recommendations", [])
+        segments = review_snapshot.get("segments", [])
+        return (
+            "Write concise operator-facing review guidance for this video timeline.\n"
+            f"Review status: {review_status}\n"
+            f"Flag count: {len(review_flags)}\n"
+            f"Pending recommendation count: {len(pending_recommendations)}\n"
+            f"Segments needing attention: {self._segments_needing_attention(segments)}\n"
+            f"Review flags: {review_flags}\n"
+            f"Pending recommendations: {pending_recommendations}\n"
+            "Return a short summary and a list of concrete next action items."
+        )
+
+    def _segments_needing_attention(self, segments: list[dict[str, Any]]) -> list[str]:
+        return [
+            str(segment.get("segment_id") or "")
+            for segment in segments
+            if bool(segment.get("review_required"))
+        ]

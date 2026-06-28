@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from videobox_api.orchestration import ApiOrchestrator, build_local_first_runtime_service
 from videobox_core_engine.local_pipeline import LocalPipelineRunner
 from videobox_core_engine.recommenders import LocalFirstKeywordBrollRecommender, LocalFirstMusicRecommender
+from videobox_core_engine.review_guidance import LocalFirstReviewGuidanceBuilder
 from videobox_core_engine.script_scene_planner import LocalFirstSegmentAnalyzer
 from videobox_core_engine.settings import DEFAULT_PROJECTS_ROOT, LocalOpenAICompatibleRuntimeConfig
 from videobox_provider_interfaces.gemini import GeminiHTTPTransport, GeminiRESTStructuredProvider
@@ -171,6 +172,12 @@ class ReviewSnapshotResponse(BaseModel):
     applied_recommendations: list[RecommendationItemResponse]
     pending_recommendations: list[RecommendationItemResponse]
     review_flags: list[ReviewFlagResponse]
+    operator_guidance: "OperatorGuidanceResponse"
+
+
+class OperatorGuidanceResponse(BaseModel):
+    summary: str
+    action_items: list[str]
 
 
 class ReviewApprovalResponse(BaseModel):
@@ -291,6 +298,7 @@ def create_app(
         segment_analyzer=LocalFirstSegmentAnalyzer(runtime_service=runtime_service),
         broll_recommender=LocalFirstKeywordBrollRecommender(runtime_service=runtime_service),
         music_recommender=LocalFirstMusicRecommender(runtime_service=runtime_service),
+        review_guidance_builder=LocalFirstReviewGuidanceBuilder(runtime_service=runtime_service),
     )
     orchestrator = ApiOrchestrator(store, pipeline=pipeline)
     app.state.local_runtime_config = resolved_local_runtime_config
@@ -533,6 +541,7 @@ def create_app(
             applied_recommendations=[RecommendationItemResponse(**item) for item in result["applied_recommendations"]],
             pending_recommendations=[RecommendationItemResponse(**item) for item in result["pending_recommendations"]],
             review_flags=[ReviewFlagResponse(**item) for item in result["review_flags"]],
+            operator_guidance=OperatorGuidanceResponse(**result["operator_guidance"]),
         )
 
     @app.post("/api/projects/{project_id}/review-approvals/{job_id}/approve", status_code=status.HTTP_202_ACCEPTED)

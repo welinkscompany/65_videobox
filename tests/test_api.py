@@ -211,6 +211,71 @@ def _create_music_recommendation_project(
     return project_id, segment_job_id
 
 
+def _create_timeline_review_project(
+    client: TestClient,
+    tmp_path: Path,
+    *,
+    gemini_key_payload: dict[str, str] | None = None,
+) -> tuple[str, str]:
+    source_audio = tmp_path / "review-runtime.wav"
+    source_script = tmp_path / "review-runtime.txt"
+    broll_asset = tmp_path / "review-runtime.mp4"
+    source_audio.write_bytes(b"fake wav data")
+    source_script.write_text("Office overview.\n", encoding="utf-8")
+    broll_asset.write_bytes(b"video bytes")
+
+    project_id = client.post("/api/projects", json={"name": "AI Review Draft"}).json()["project_id"]
+    narration_asset_id = client.post(
+        f"/api/projects/{project_id}/assets/narration-audio",
+        json={"source_path": str(source_audio)},
+    ).json()["asset_id"]
+    script_asset_id = client.post(
+        f"/api/projects/{project_id}/assets/script-document",
+        json={"source_path": str(source_script)},
+    ).json()["asset_id"]
+    client.post(
+        f"/api/projects/{project_id}/assets/broll-video",
+        json={
+            "source_path": str(broll_asset),
+            "title": "Office Skyline",
+            "tags": ["office", "skyline"],
+        },
+    )
+    if gemini_key_payload is not None:
+        key_response = client.post(
+            f"/api/projects/{project_id}/providers/gemini/keys",
+            json=gemini_key_payload,
+        )
+        assert key_response.status_code == 201
+    transcription_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/transcription",
+        json={"narration_asset_id": narration_asset_id},
+    ).json()["job_id"]
+    segment_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/segment-analysis",
+        json={
+            "transcription_job_id": transcription_job_id,
+            "script_asset_id": script_asset_id,
+        },
+    ).json()["job_id"]
+    broll_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/broll-recommendation",
+        json={"segment_analysis_job_id": segment_job_id},
+    ).json()["job_id"]
+    music_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/music-recommendation",
+        json={"segment_analysis_job_id": segment_job_id},
+    ).json()["job_id"]
+    timeline_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/build-timeline",
+        json={
+            "segment_analysis_job_id": segment_job_id,
+            "recommendation_job_ids": [broll_job_id, music_job_id],
+        },
+    ).json()["job_id"]
+    return project_id, timeline_job_id
+
+
 def test_health_endpoint_reports_ok() -> None:
     client = TestClient(create_app())
 
@@ -622,6 +687,16 @@ def test_segment_analysis_local_first_path_preserves_downstream_timeline_review_
                 model_name="Qwen3-32B",
                 output_data={"music_mood": "cinematic pulse", "score": 0.91},
                 raw_text='{"music_mood":"cinematic pulse","score":0.91}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={
+                    "summary": "Review the flagged narration segment before export.",
+                    "action_items": ["Check seg_001 narration alignment"],
+                },
+                raw_text='{"summary":"Review the flagged narration segment before export.","action_items":["Check seg_001 narration alignment"]}',
                 metadata={},
             ),
         ]
@@ -1475,6 +1550,370 @@ def test_timeline_and_review_snapshot_flow(tmp_path: Path) -> None:
     assert {"narration", "broll", "bgm"}.issubset(
         {track["track_type"] for track in timeline_json["tracks"]}
     )
+
+
+def test_review_snapshot_uses_local_first_runtime_before_gemini(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "videobox_provider_interfaces.stt.MockSTTProvider.transcribe",
+        _single_segment_transcribe,
+    )
+    local_provider = FakeStructuredProvider(
+        responses=[
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"review_required": True, "cleanup_decision": "review"},
+                raw_text='{"review_required":true,"cleanup_decision":"review"}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"keywords": ["office"]},
+                raw_text='{"keywords":["office"]}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"music_mood": "cinematic pulse", "score": 0.91},
+                raw_text='{"music_mood":"cinematic pulse","score":0.91}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={
+                    "summary": "Review the flagged narration segment before export.",
+                    "action_items": ["Check seg_001 narration alignment"],
+                },
+                raw_text='{"summary":"Review the flagged narration segment before export.","action_items":["Check seg_001 narration alignment"]}',
+                metadata={},
+            ),
+        ]
+    )
+    gemini_provider = FakeStructuredProvider()
+    app = create_app(
+        projects_root=tmp_path,
+        local_first_runtime_service_factory=_local_first_service_factory(
+            local_provider=local_provider,
+            gemini_provider=gemini_provider,
+            local_enabled=True,
+        ),
+    )
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    review_snapshot = client.get(f"/api/projects/{project_id}/review-snapshots/{timeline_job_id}")
+
+    assert review_snapshot.status_code == 200
+    payload = review_snapshot.json()
+    assert payload["operator_guidance"]["summary"] == "Review the flagged narration segment before export."
+    assert payload["operator_guidance"]["action_items"] == ["Check seg_001 narration alignment"]
+    assert len(local_provider.calls) == 4
+    assert local_provider.calls[3].task_type is LLMTaskType.OPERATOR_COPY
+    assert gemini_provider.calls == []
+
+
+def test_review_snapshot_falls_back_to_gemini_when_local_fails(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "videobox_provider_interfaces.stt.MockSTTProvider.transcribe",
+        _single_segment_transcribe,
+    )
+    local_provider = FakeStructuredProvider(
+        errors=[
+            LLMProviderError(
+                provider_name="local_qwen",
+                message="local unavailable",
+                retryable=True,
+                error_code="LOCAL_UNAVAILABLE",
+            ),
+            LLMProviderError(
+                provider_name="local_qwen",
+                message="local unavailable",
+                retryable=True,
+                error_code="LOCAL_UNAVAILABLE",
+            ),
+            LLMProviderError(
+                provider_name="local_qwen",
+                message="local unavailable",
+                retryable=True,
+                error_code="LOCAL_UNAVAILABLE",
+            ),
+            LLMProviderError(
+                provider_name="local_qwen",
+                message="local unavailable",
+                retryable=True,
+                error_code="LOCAL_UNAVAILABLE",
+            ),
+        ]
+    )
+    gemini_provider = FakeStructuredProvider(
+        responses=[
+            StructuredLLMResponse(
+                provider_name="gemini",
+                model_name="gemini-2.5-flash",
+                output_data={"review_required": True, "cleanup_decision": "review"},
+                raw_text='{"review_required":true,"cleanup_decision":"review"}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="gemini",
+                model_name="gemini-2.5-flash-lite",
+                output_data={"keywords": ["office"]},
+                raw_text='{"keywords":["office"]}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="gemini",
+                model_name="gemini-2.5-flash",
+                output_data={"music_mood": "cinematic pulse", "score": 0.91},
+                raw_text='{"music_mood":"cinematic pulse","score":0.91}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="gemini",
+                model_name="gemini-2.5-flash",
+                output_data={
+                    "summary": "Gemini fallback review summary.",
+                    "action_items": ["Resolve flagged review items"],
+                },
+                raw_text='{"summary":"Gemini fallback review summary.","action_items":["Resolve flagged review items"]}',
+                metadata={},
+            ),
+        ]
+    )
+    app = create_app(
+        projects_root=tmp_path,
+        local_first_runtime_service_factory=_local_first_service_factory(
+            local_provider=local_provider,
+            gemini_provider=gemini_provider,
+            local_enabled=True,
+        ),
+    )
+    client = TestClient(app)
+    gemini_key_payload = {
+        "label": "Fallback Gemini",
+        "api_key": "AIza-review-fallback",
+        "primary_model": "gemini-2.5-flash",
+        "cheap_model": "gemini-2.5-flash-lite",
+        "high_quality_model": "gemini-2.5-pro",
+    }
+    project_id, timeline_job_id = _create_timeline_review_project(
+        client,
+        tmp_path,
+        gemini_key_payload=gemini_key_payload,
+    )
+
+    review_snapshot = client.get(f"/api/projects/{project_id}/review-snapshots/{timeline_job_id}")
+
+    assert review_snapshot.status_code == 200
+    payload = review_snapshot.json()
+    assert payload["operator_guidance"]["summary"] == "Gemini fallback review summary."
+    assert payload["operator_guidance"]["action_items"] == ["Resolve flagged review items"]
+    assert len(local_provider.calls) == 4
+    assert len(gemini_provider.calls) == 4
+    assert gemini_provider.calls[3].task_type is LLMTaskType.OPERATOR_COPY
+    keys_response = client.get(f"/api/projects/{project_id}/providers/gemini/keys")
+    assert keys_response.status_code == 200
+    key_state = keys_response.json()["keys"][0]
+    assert key_state["consecutive_failures"] == 0
+    assert key_state["last_error"] is None
+    assert key_state["last_used_at"] is not None
+
+
+def test_review_snapshot_skips_local_when_disabled(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "videobox_provider_interfaces.stt.MockSTTProvider.transcribe",
+        _single_segment_transcribe,
+    )
+    local_provider = FakeStructuredProvider()
+    gemini_provider = FakeStructuredProvider(
+        responses=[
+            StructuredLLMResponse(
+                provider_name="gemini",
+                model_name="gemini-2.5-flash",
+                output_data={"review_required": True, "cleanup_decision": "review"},
+                raw_text='{"review_required":true,"cleanup_decision":"review"}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="gemini",
+                model_name="gemini-2.5-flash-lite",
+                output_data={"keywords": ["office"]},
+                raw_text='{"keywords":["office"]}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="gemini",
+                model_name="gemini-2.5-flash",
+                output_data={"music_mood": "cinematic pulse", "score": 0.91},
+                raw_text='{"music_mood":"cinematic pulse","score":0.91}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="gemini",
+                model_name="gemini-2.5-flash",
+                output_data={
+                    "summary": "Disabled local review summary.",
+                    "action_items": ["Resolve flagged review items"],
+                },
+                raw_text='{"summary":"Disabled local review summary.","action_items":["Resolve flagged review items"]}',
+                metadata={},
+            ),
+        ]
+    )
+    app = create_app(
+        projects_root=tmp_path,
+        local_first_runtime_service_factory=_local_first_service_factory(
+            local_provider=local_provider,
+            gemini_provider=gemini_provider,
+            local_enabled=False,
+        ),
+    )
+    client = TestClient(app)
+    gemini_key_payload = {
+        "label": "Disabled Local Gemini",
+        "api_key": "AIza-review-disabled",
+        "primary_model": "gemini-2.5-flash",
+        "cheap_model": "gemini-2.5-flash-lite",
+        "high_quality_model": "gemini-2.5-pro",
+    }
+    project_id, timeline_job_id = _create_timeline_review_project(
+        client,
+        tmp_path,
+        gemini_key_payload=gemini_key_payload,
+    )
+
+    review_snapshot = client.get(f"/api/projects/{project_id}/review-snapshots/{timeline_job_id}")
+
+    assert review_snapshot.status_code == 200
+    payload = review_snapshot.json()
+    assert payload["operator_guidance"]["summary"] == "Disabled local review summary."
+    assert local_provider.calls == []
+    assert len(gemini_provider.calls) == 4
+    assert gemini_provider.calls[3].task_type is LLMTaskType.OPERATOR_COPY
+
+
+def test_review_snapshot_preserves_blocking_behavior_when_ai_is_unavailable(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "videobox_provider_interfaces.stt.MockSTTProvider.transcribe",
+        _single_segment_transcribe,
+    )
+    app = create_app(
+        projects_root=tmp_path,
+        local_first_runtime_service_factory=_local_first_service_factory(
+            local_provider=FakeStructuredProvider(
+                errors=[
+                    LLMProviderError(
+                        provider_name="local_qwen",
+                        message="local unavailable",
+                        retryable=True,
+                        error_code="LOCAL_UNAVAILABLE",
+                    ),
+                    LLMProviderError(
+                        provider_name="local_qwen",
+                        message="local unavailable",
+                        retryable=True,
+                        error_code="LOCAL_UNAVAILABLE",
+                    ),
+                    LLMProviderError(
+                        provider_name="local_qwen",
+                        message="local unavailable",
+                        retryable=True,
+                        error_code="LOCAL_UNAVAILABLE",
+                    ),
+                    LLMProviderError(
+                        provider_name="local_qwen",
+                        message="local unavailable",
+                        retryable=True,
+                        error_code="LOCAL_UNAVAILABLE",
+                    ),
+                ]
+            ),
+            gemini_provider=FakeStructuredProvider(),
+            local_enabled=True,
+        ),
+    )
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    review_snapshot = client.get(f"/api/projects/{project_id}/review-snapshots/{timeline_job_id}")
+    preview_response = client.post(
+        f"/api/projects/{project_id}/jobs/preview-render",
+        json={"timeline_job_id": timeline_job_id},
+    )
+
+    assert review_snapshot.status_code == 200
+    payload = review_snapshot.json()
+    assert payload["review_status"] == "draft"
+    assert payload["operator_guidance"]["summary"].lower().startswith("timeline is ready for approval")
+    assert preview_response.status_code == 400
+    assert "approval" in preview_response.json()["detail"].lower()
+
+
+def test_review_snapshot_falls_back_to_heuristic_guidance_on_unexpected_runtime_failure(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "videobox_provider_interfaces.stt.MockSTTProvider.transcribe",
+        _single_segment_transcribe,
+    )
+    local_provider = FakeStructuredProvider(
+        responses=[
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"review_required": True, "cleanup_decision": "review"},
+                raw_text='{"review_required":true,"cleanup_decision":"review"}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"keywords": ["office"]},
+                raw_text='{"keywords":["office"]}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"music_mood": "cinematic pulse", "score": 0.91},
+                raw_text='{"music_mood":"cinematic pulse","score":0.91}',
+                metadata={},
+            ),
+        ]
+    )
+    app = create_app(
+        projects_root=tmp_path,
+        local_first_runtime_service_factory=_local_first_service_factory(
+            local_provider=local_provider,
+            gemini_provider=FakeStructuredProvider(),
+            local_enabled=True,
+        ),
+    )
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    review_snapshot = client.get(f"/api/projects/{project_id}/review-snapshots/{timeline_job_id}")
+
+    assert review_snapshot.status_code == 200
+    payload = review_snapshot.json()
+    assert payload["operator_guidance"]["summary"].lower().startswith("review is blocked")
+    assert payload["operator_guidance"]["action_items"] == ["Segment requires operator review before export."]
 
 
 def test_project_listing_and_job_feed_support_dashboard(tmp_path: Path) -> None:
