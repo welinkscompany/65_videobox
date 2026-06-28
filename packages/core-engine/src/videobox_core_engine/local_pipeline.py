@@ -132,35 +132,68 @@ class LocalPipelineRunner:
         transcription_job_id: str,
         script_asset_id: str | None,
     ) -> dict[str, Any]:
-        transcription_job = self.store.get_job(project_id=project_id, job_id=transcription_job_id)
-        transcript = self.store.get_transcript(
-            project_id=project_id,
-            transcript_id=transcription_job["output_ref"],
-        )
-        script_text = self._load_script_text(project_id=project_id, script_asset_id=script_asset_id)
-        segments = self.segment_analyzer.analyze(
-            project_id=project_id,
-            transcript_segments=transcript["segments"],
-            script_text=script_text,
-        )
         job = self.store.create_job(
             project_id=project_id,
             job_type=JobType.SEGMENT_ANALYSIS,
             input_ref=transcription_job_id,
             status=JobStatus.RUNNING,
         )
-        analysis = self.store.save_segment_analysis(
-            project_id=project_id,
-            transcript_id=transcript["transcript_id"],
-            script_asset_id=script_asset_id,
-            segments=segments,
-        )
-        self.store.update_job(
-            project_id=project_id,
-            job_id=job["job_id"],
-            status=JobStatus.SUCCEEDED,
-            output_ref=analysis["segment_analysis_id"],
-        )
+        try:
+            transcription_job = self.store.get_job(project_id=project_id, job_id=transcription_job_id)
+            transcript = self.store.get_transcript(
+                project_id=project_id,
+                transcript_id=transcription_job["output_ref"],
+            )
+            script_text = self._load_script_text(project_id=project_id, script_asset_id=script_asset_id)
+        except Exception as exc:
+            self.store.update_job(
+                project_id=project_id,
+                job_id=job["job_id"],
+                status=JobStatus.FAILED,
+                error_message=str(exc),
+            )
+            raise
+        try:
+            segments = self.segment_analyzer.analyze(
+                project_id=project_id,
+                transcript_segments=transcript["segments"],
+                script_text=script_text,
+            )
+        except Exception as exc:
+            failed_job = self.store.update_job(
+                project_id=project_id,
+                job_id=job["job_id"],
+                status=JobStatus.FAILED,
+                error_message=str(exc),
+            )
+            self._save_failed_provider_trace_audit_event(
+                project_id=project_id,
+                job=failed_job,
+                source_job_id=transcription_job_id,
+                exc=exc,
+            )
+            raise
+        try:
+            analysis = self.store.save_segment_analysis(
+                project_id=project_id,
+                transcript_id=transcript["transcript_id"],
+                script_asset_id=script_asset_id,
+                segments=segments,
+            )
+            self.store.update_job(
+                project_id=project_id,
+                job_id=job["job_id"],
+                status=JobStatus.SUCCEEDED,
+                output_ref=analysis["segment_analysis_id"],
+            )
+        except Exception as exc:
+            self.store.update_job(
+                project_id=project_id,
+                job_id=job["job_id"],
+                status=JobStatus.FAILED,
+                error_message=str(exc),
+            )
+            raise
         return {"job_id": job["job_id"], "status": JobStatus.SUCCEEDED.value}
 
     def get_segment_analysis_result(self, *, project_id: str, job_id: str) -> dict[str, Any]:
@@ -183,37 +216,70 @@ class LocalPipelineRunner:
         project_id: str,
         segment_analysis_job_id: str,
     ) -> dict[str, Any]:
-        analysis = self._load_segment_analysis_from_job(
-            project_id=project_id,
-            segment_analysis_job_id=segment_analysis_job_id,
-        )
-        assets = self.store.list_assets(project_id=project_id, asset_type=AssetType.BROLL_VIDEO)
-        candidates = self.broll_recommender.recommend(
-            RecommendationRequest(
-                project_id=project_id,
-                recommendation_type=RecommendationType.BROLL,
-                segments=analysis["segments"],
-                assets=assets,
-            )
-        )
-        run = self.store.save_recommendation_run(
-            project_id=project_id,
-            recommendation_type=RecommendationType.BROLL,
-            source_job_id=segment_analysis_job_id,
-            recommendations=[self._candidate_payload(candidate) for candidate in candidates],
-        )
         job = self.store.create_job(
             project_id=project_id,
             job_type=JobType.BROLL_RECOMMENDATION,
             input_ref=segment_analysis_job_id,
             status=JobStatus.RUNNING,
         )
-        self.store.update_job(
-            project_id=project_id,
-            job_id=job["job_id"],
-            status=JobStatus.SUCCEEDED,
-            output_ref=run["recommendation_run_id"],
-        )
+        try:
+            analysis = self._load_segment_analysis_from_job(
+                project_id=project_id,
+                segment_analysis_job_id=segment_analysis_job_id,
+            )
+            assets = self.store.list_assets(project_id=project_id, asset_type=AssetType.BROLL_VIDEO)
+        except Exception as exc:
+            self.store.update_job(
+                project_id=project_id,
+                job_id=job["job_id"],
+                status=JobStatus.FAILED,
+                error_message=str(exc),
+            )
+            raise
+        try:
+            candidates = self.broll_recommender.recommend(
+                RecommendationRequest(
+                    project_id=project_id,
+                    recommendation_type=RecommendationType.BROLL,
+                    segments=analysis["segments"],
+                    assets=assets,
+                )
+            )
+        except Exception as exc:
+            failed_job = self.store.update_job(
+                project_id=project_id,
+                job_id=job["job_id"],
+                status=JobStatus.FAILED,
+                error_message=str(exc),
+            )
+            self._save_failed_provider_trace_audit_event(
+                project_id=project_id,
+                job=failed_job,
+                source_job_id=segment_analysis_job_id,
+                exc=exc,
+            )
+            raise
+        try:
+            run = self.store.save_recommendation_run(
+                project_id=project_id,
+                recommendation_type=RecommendationType.BROLL,
+                source_job_id=segment_analysis_job_id,
+                recommendations=[self._candidate_payload(candidate) for candidate in candidates],
+            )
+            self.store.update_job(
+                project_id=project_id,
+                job_id=job["job_id"],
+                status=JobStatus.SUCCEEDED,
+                output_ref=run["recommendation_run_id"],
+            )
+        except Exception as exc:
+            self.store.update_job(
+                project_id=project_id,
+                job_id=job["job_id"],
+                status=JobStatus.FAILED,
+                error_message=str(exc),
+            )
+            raise
         return {"job_id": job["job_id"], "status": JobStatus.SUCCEEDED.value}
 
     def get_broll_recommendation_result(self, *, project_id: str, job_id: str) -> dict[str, Any]:
@@ -231,36 +297,69 @@ class LocalPipelineRunner:
         project_id: str,
         segment_analysis_job_id: str,
     ) -> dict[str, Any]:
-        analysis = self._load_segment_analysis_from_job(
-            project_id=project_id,
-            segment_analysis_job_id=segment_analysis_job_id,
-        )
-        candidates = self.music_recommender.recommend(
-            RecommendationRequest(
-                project_id=project_id,
-                recommendation_type=RecommendationType.BGM,
-                segments=analysis["segments"],
-                assets=[],
-            )
-        )
-        run = self.store.save_recommendation_run(
-            project_id=project_id,
-            recommendation_type=RecommendationType.BGM,
-            source_job_id=segment_analysis_job_id,
-            recommendations=[self._candidate_payload(candidate) for candidate in candidates],
-        )
         job = self.store.create_job(
             project_id=project_id,
             job_type=JobType.MUSIC_RECOMMENDATION,
             input_ref=segment_analysis_job_id,
             status=JobStatus.RUNNING,
         )
-        self.store.update_job(
-            project_id=project_id,
-            job_id=job["job_id"],
-            status=JobStatus.SUCCEEDED,
-            output_ref=run["recommendation_run_id"],
-        )
+        try:
+            analysis = self._load_segment_analysis_from_job(
+                project_id=project_id,
+                segment_analysis_job_id=segment_analysis_job_id,
+            )
+        except Exception as exc:
+            self.store.update_job(
+                project_id=project_id,
+                job_id=job["job_id"],
+                status=JobStatus.FAILED,
+                error_message=str(exc),
+            )
+            raise
+        try:
+            candidates = self.music_recommender.recommend(
+                RecommendationRequest(
+                    project_id=project_id,
+                    recommendation_type=RecommendationType.BGM,
+                    segments=analysis["segments"],
+                    assets=[],
+                )
+            )
+        except Exception as exc:
+            failed_job = self.store.update_job(
+                project_id=project_id,
+                job_id=job["job_id"],
+                status=JobStatus.FAILED,
+                error_message=str(exc),
+            )
+            self._save_failed_provider_trace_audit_event(
+                project_id=project_id,
+                job=failed_job,
+                source_job_id=segment_analysis_job_id,
+                exc=exc,
+            )
+            raise
+        try:
+            run = self.store.save_recommendation_run(
+                project_id=project_id,
+                recommendation_type=RecommendationType.BGM,
+                source_job_id=segment_analysis_job_id,
+                recommendations=[self._candidate_payload(candidate) for candidate in candidates],
+            )
+            self.store.update_job(
+                project_id=project_id,
+                job_id=job["job_id"],
+                status=JobStatus.SUCCEEDED,
+                output_ref=run["recommendation_run_id"],
+            )
+        except Exception as exc:
+            self.store.update_job(
+                project_id=project_id,
+                job_id=job["job_id"],
+                status=JobStatus.FAILED,
+                error_message=str(exc),
+            )
+            raise
         return {"job_id": job["job_id"], "status": JobStatus.SUCCEEDED.value}
 
     def get_music_recommendation_result(self, *, project_id: str, job_id: str) -> dict[str, Any]:
@@ -497,11 +596,35 @@ class LocalPipelineRunner:
                 project_id=project_id,
                 timeline=timeline,
             )
+        except Exception as exc:
+            self.store.update_job(
+                project_id=project_id,
+                job_id=job["job_id"],
+                status=JobStatus.FAILED,
+                error_message=str(exc),
+            )
+            raise
+        try:
             output_copy = self.output_operator_copy_builder.build(
                 project_id=project_id,
                 timeline=timeline,
                 output_target=JobType.PREVIEW_RENDER.value,
             )
+        except Exception as exc:
+            failed_job = self.store.update_job(
+                project_id=project_id,
+                job_id=job["job_id"],
+                status=JobStatus.FAILED,
+                error_message=str(exc),
+            )
+            self._save_failed_provider_trace_audit_event(
+                project_id=project_id,
+                job=failed_job,
+                source_job_id=timeline_job_id,
+                exc=exc,
+            )
+            raise
+        try:
             output_copy = self._normalize_output_copy(output_copy)
             preview_payload["notes"] = output_copy["notes"]
             preview_payload["provider_trace"] = output_copy["provider_trace"]
@@ -550,12 +673,36 @@ class LocalPipelineRunner:
                 timeline=timeline,
                 subtitle_file_uri=latest_subtitle["file_uri"] if latest_subtitle else None,
             )
+        except Exception as exc:
+            self.store.update_job(
+                project_id=project_id,
+                job_id=job["job_id"],
+                status=JobStatus.FAILED,
+                error_message=str(exc),
+            )
+            raise
+        try:
             output_copy = self.output_operator_copy_builder.build(
                 project_id=project_id,
                 timeline=timeline,
                 output_target=JobType.CAPCUT_EXPORT.value,
                 subtitle_file_uri=latest_subtitle["file_uri"] if latest_subtitle else None,
             )
+        except Exception as exc:
+            failed_job = self.store.update_job(
+                project_id=project_id,
+                job_id=job["job_id"],
+                status=JobStatus.FAILED,
+                error_message=str(exc),
+            )
+            self._save_failed_provider_trace_audit_event(
+                project_id=project_id,
+                job=failed_job,
+                source_job_id=timeline_job_id,
+                exc=exc,
+            )
+            raise
+        try:
             output_copy = self._normalize_output_copy(output_copy)
             export_payload["notes"] = output_copy["notes"]
             export_payload["provider_trace"] = output_copy["provider_trace"]
@@ -604,6 +751,39 @@ class LocalPipelineRunner:
             "payload": candidate.payload,
             "provider_trace": candidate.payload.get("provider_trace"),
         }
+
+    def _save_failed_provider_trace_audit_event(
+        self,
+        *,
+        project_id: str,
+        job: dict[str, Any],
+        source_job_id: str,
+        exc: Exception,
+    ) -> None:
+        provider_trace = getattr(exc, "provider_trace", None)
+        if not isinstance(provider_trace, dict):
+            provider_trace = build_provider_trace(
+                final_provider="unknown_failure",
+                fallback_reasons=["missing_provider_trace"],
+            )
+        try:
+            self.store.save_provider_trace_audit_event(
+                project_id=project_id,
+                event={
+                    "artifact_type": str(job.get("job_type") or ""),
+                    "artifact_id": str(job.get("job_id") or ""),
+                    "job_type": str(job.get("job_type") or ""),
+                    "job_id": str(job.get("job_id") or ""),
+                    "source_job_id": source_job_id,
+                    "status": JobStatus.FAILED.value,
+                    "finished_at": str(job.get("finished_at") or ""),
+                    "error_message": str(exc),
+                    "provider_trace": provider_trace,
+                },
+            )
+        except Exception:
+            # Provider audit logging should not hide the original generation failure.
+            return
 
     def _normalize_output_copy(
         self,

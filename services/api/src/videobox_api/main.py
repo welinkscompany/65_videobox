@@ -244,6 +244,7 @@ class ProviderTraceAuditSummaryResponse(BaseModel):
 class ProviderTraceAuditEntryResponse(BaseModel):
     artifact_type: str
     artifact_id: str
+    job_type: str | None = None
     job_id: str | None = None
     source_job_id: str | None = None
     timeline_id: str | None = None

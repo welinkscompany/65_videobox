@@ -1237,6 +1237,12 @@ class LocalProjectStore:
         )
         return operator_guidance
 
+    def save_provider_trace_audit_event(self, *, project_id: str, event: dict[str, Any]) -> dict[str, Any]:
+        payload = dict(event)
+        payload.setdefault("created_at", self._now_iso())
+        self._append_provider_trace_audit_event(project_id=project_id, event=payload)
+        return payload
+
     def clear_operator_guidance(self, *, project_id: str, timeline_id: str) -> None:
         file_path = self._timeline_file_path(project_id=project_id, timeline_id=timeline_id)
         payload = json.loads(file_path.read_text(encoding="utf-8"))
@@ -1363,6 +1369,7 @@ class LocalProjectStore:
                     self._provider_trace_entry(
                         artifact_type="segment_analysis",
                         artifact_id=str(analysis["segment_analysis_id"]),
+                        job_type=job_type,
                         job=job,
                         source_job_id=str(job.get("input_ref") or ""),
                         trace=self._merged_provider_trace(analysis.get("segments", [])),
@@ -1382,6 +1389,7 @@ class LocalProjectStore:
                     self._provider_trace_entry(
                         artifact_type="broll_recommendation",
                         artifact_id=str(run["recommendation_run_id"]),
+                        job_type=job_type,
                         job=job,
                         source_job_id=str(run.get("source_job_id") or job.get("input_ref") or ""),
                         trace=self._merged_provider_trace(run.get("recommendations", [])),
@@ -1401,6 +1409,7 @@ class LocalProjectStore:
                     self._provider_trace_entry(
                         artifact_type="music_recommendation",
                         artifact_id=str(run["recommendation_run_id"]),
+                        job_type=job_type,
                         job=job,
                         source_job_id=str(run.get("source_job_id") or job.get("input_ref") or ""),
                         trace=self._merged_provider_trace(run.get("recommendations", [])),
@@ -1416,6 +1425,7 @@ class LocalProjectStore:
                     self._provider_trace_entry(
                         artifact_type="preview_render",
                         artifact_id=str(preview["preview_id"]),
+                        job_type=job_type,
                         job=job,
                         source_job_id=str(job.get("input_ref") or ""),
                         trace=preview["provider_trace"],
@@ -1431,6 +1441,7 @@ class LocalProjectStore:
                     self._provider_trace_entry(
                         artifact_type="capcut_export",
                         artifact_id=str(export["export_id"]),
+                        job_type=job_type,
                         job=job,
                         source_job_id=str(job.get("input_ref") or ""),
                         trace=export["provider_trace"],
@@ -1441,6 +1452,33 @@ class LocalProjectStore:
         audit_events = self._list_provider_trace_audit_events(project_id=project_id)
         guidance_timeline_ids_with_events: set[str] = set()
         for item in audit_events:
+            if str(item.get("status") or "") == JobStatus.FAILED.value:
+                trace = item.get("provider_trace")
+                if not isinstance(trace, dict):
+                    trace = build_provider_trace(
+                        final_provider="unknown_failure",
+                        fallback_reasons=["missing_provider_trace"],
+                    )
+                job_id = str(item.get("job_id") or "")
+                source_job_id = str(item.get("source_job_id") or "")
+                artifact_type = str(item.get("artifact_type") or item.get("job_type") or "unknown_failure")
+                entries.append(
+                    self._provider_trace_entry(
+                        artifact_type=artifact_type,
+                        artifact_id=str(item.get("artifact_id") or job_id),
+                        job_type=str(item.get("job_type") or artifact_type),
+                        job=None,
+                        source_job_id=source_job_id or None,
+                        trace=trace,
+                        timeline_id=str(item.get("timeline_id") or "") or None,
+                        status=JobStatus.FAILED.value,
+                        finished_at=str(item.get("finished_at") or ""),
+                        created_at=str(item.get("created_at") or ""),
+                        error_message=str(item.get("error_message") or ""),
+                        job_id=job_id or None,
+                    )
+                )
+                continue
             if str(item.get("artifact_type") or "") != "review_guidance":
                 continue
             timeline_id = str(item.get("timeline_id") or "")
@@ -1454,6 +1492,7 @@ class LocalProjectStore:
                 self._provider_trace_entry(
                     artifact_type="review_guidance",
                     artifact_id=str(item.get("artifact_id") or timeline_id),
+                    job_type=JobType.TIMELINE_BUILD.value,
                     job=None,
                     source_job_id=timeline_job["job_id"] if timeline_job else None,
                     trace=trace,
@@ -1495,6 +1534,7 @@ class LocalProjectStore:
                     self._provider_trace_entry(
                         artifact_type="review_guidance",
                         artifact_id=str(item.get("artifact_id") or timeline_id),
+                        job_type=JobType.TIMELINE_BUILD.value,
                         job=None,
                         source_job_id=timeline_job["job_id"] if timeline_job else None,
                         trace=trace,
@@ -1765,6 +1805,7 @@ class LocalProjectStore:
         *,
         artifact_type: str,
         artifact_id: str,
+        job_type: str | None,
         trace: dict[str, Any],
         job: dict[str, Any] | None = None,
         source_job_id: str | None = None,
@@ -1778,6 +1819,9 @@ class LocalProjectStore:
         resolved_job_id = job_id
         if resolved_job_id is None and job is not None:
             resolved_job_id = str(job.get("job_id") or "")
+        resolved_job_type = job_type
+        if resolved_job_type is None and job is not None:
+            resolved_job_type = str(job.get("job_type") or "")
         resolved_source_job_id = source_job_id
         if resolved_source_job_id is None and job is not None:
             resolved_source_job_id = str(job.get("input_ref") or "")
@@ -1793,6 +1837,7 @@ class LocalProjectStore:
         return {
             "artifact_type": artifact_type,
             "artifact_id": artifact_id,
+            "job_type": resolved_job_type,
             "job_id": resolved_job_id,
             "source_job_id": resolved_source_job_id,
             "timeline_id": timeline_id or None,

@@ -5,10 +5,14 @@ import json
 import sqlite3
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from videobox_api.main import create_app
 from videobox_api.orchestration import LocalFirstRuntimeService
+from videobox_core_engine.local_first_runtime import LocalFirstStructuredGenerationError
+from videobox_core_engine.local_pipeline import LocalPipelineRunner
+from videobox_core_engine.provider_trace import build_provider_trace
 from videobox_core_engine.settings import LocalOpenAICompatibleRuntimeConfig
 from videobox_domain_models.jobs import JobStatus, JobType
 from videobox_domain_models.recommendations import RecommendationType
@@ -36,6 +40,67 @@ class FakeStructuredProvider:
         if self.responses:
             return self.responses.pop(0)
         raise AssertionError("No fake structured response configured.")
+
+
+class FailingSegmentAnalyzer:
+    def analyze(
+        self,
+        *,
+        project_id: str,
+        transcript_segments: list[dict[str, object]],
+        script_text: str | None,
+    ) -> list[dict[str, object]]:
+        del project_id, transcript_segments, script_text
+        raise LocalFirstStructuredGenerationError(
+            message="segment provider failed",
+            error_code="SEGMENT_PROVIDER_FAILED",
+            provider_name="local_first_router",
+            provider_trace=build_provider_trace(
+                final_provider="local_qwen",
+                fallback_reasons=["local_provider_error"],
+            ),
+        )
+
+
+class FailingBrollRecommender:
+    def recommend(self, request):  # noqa: ANN001
+        del request
+        raise LocalFirstStructuredGenerationError(
+            message="broll Gemini fallback failed",
+            error_code="BROLL_PROVIDER_FAILED",
+            provider_name="local_first_router",
+            provider_trace=build_provider_trace(
+                final_provider="gemini",
+                fallback_reasons=["local_provider_error", "gemini_unavailable"],
+            ),
+        )
+
+
+class FailingMusicRecommenderWithoutTrace:
+    def recommend(self, request):  # noqa: ANN001
+        del request
+        raise RuntimeError("music provider exploded without trace")
+
+
+class FailingOutputOperatorCopyBuilder:
+    def build(
+        self,
+        *,
+        project_id: str,
+        timeline: dict[str, object],
+        output_target: str,
+        subtitle_file_uri: str | None = None,
+    ) -> dict[str, object]:
+        del project_id, timeline, subtitle_file_uri
+        raise LocalFirstStructuredGenerationError(
+            message=f"{output_target} provider failed",
+            error_code="OUTPUT_PROVIDER_FAILED",
+            provider_name="local_first_router",
+            provider_trace=build_provider_trace(
+                final_provider="gemini",
+                fallback_reasons=["local_provider_error", "gemini_unavailable"],
+            ),
+        )
 
 
 def _single_segment_transcribe(self, request):  # noqa: ANN001
@@ -3911,3 +3976,332 @@ def test_provider_trace_audit_endpoint_tolerates_partial_artifact_and_log_corrup
     assert len(entries) == 1
     assert entries[0]["artifact_type"] == "segment_analysis"
     assert entries[0]["provider_trace"]["final_provider"] == "local_qwen"
+
+
+def test_provider_trace_audit_endpoint_includes_failed_segment_analysis_without_output_ref(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Failed Segment Audit Project")
+    transcript = store.save_transcript(
+        project_id=project.project_id,
+        source_asset_id="asset_001",
+        transcript_text="Office overview.",
+        segments=[
+            {
+                "start_sec": 0.0,
+                "end_sec": 1.0,
+                "text": "Office overview.",
+                "confidence": 0.99,
+            }
+        ],
+    )
+    transcription_job = store.create_job(
+        project_id=project.project_id,
+        job_type=JobType.TRANSCRIPTION,
+        input_ref="asset_001",
+        status=JobStatus.SUCCEEDED,
+    )
+    store.update_job(
+        project_id=project.project_id,
+        job_id=transcription_job["job_id"],
+        status=JobStatus.SUCCEEDED,
+        output_ref=transcript["transcript_id"],
+    )
+    runner = LocalPipelineRunner(store, segment_analyzer=FailingSegmentAnalyzer())
+
+    with pytest.raises(LocalFirstStructuredGenerationError, match="segment provider failed"):
+        runner.start_segment_analysis(
+            project_id=project.project_id,
+            transcription_job_id=transcription_job["job_id"],
+            script_asset_id=None,
+        )
+
+    client = TestClient(create_app(projects_root=tmp_path))
+    audit_response = client.get(f"/api/projects/{project.project_id}/provider-traces")
+
+    assert audit_response.status_code == 200
+    failed_entry = next(
+        entry
+        for entry in audit_response.json()["entries"]
+        if entry["status"] == "failed" and entry["job_type"] == "segment_analysis"
+    )
+    assert failed_entry["job_id"].startswith("segment_analysis_job_")
+    assert failed_entry["artifact_id"] == failed_entry["job_id"]
+    assert failed_entry["error_message"] == "local_first_router: segment provider failed"
+    assert failed_entry["provider_trace"] == {
+        "routing_mode": "local_first",
+        "final_provider": "local_qwen",
+        "fallback_reasons": ["local_provider_error"],
+    }
+
+
+def test_provider_trace_audit_endpoint_includes_failed_gemini_fallback_recommendation_run(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Failed Broll Audit Project")
+    store.save_segment_analysis(
+        project_id=project.project_id,
+        transcript_id="transcript_001",
+        script_asset_id=None,
+        segments=[
+            {
+                "segment_id": "seg_001",
+                "text": "Office overview.",
+                "start_sec": 0.0,
+                "end_sec": 1.0,
+                "confidence": 0.99,
+                "review_required": False,
+                "cleanup_decision": "keep",
+                "provider_trace": build_provider_trace(final_provider="local_qwen"),
+            }
+        ],
+    )
+    segment_job = store.create_job(
+        project_id=project.project_id,
+        job_type=JobType.SEGMENT_ANALYSIS,
+        input_ref="transcription_job_001",
+        status=JobStatus.SUCCEEDED,
+    )
+    store.update_job(
+        project_id=project.project_id,
+        job_id=segment_job["job_id"],
+        status=JobStatus.SUCCEEDED,
+        output_ref="segment_analysis_001",
+    )
+    runner = LocalPipelineRunner(store, broll_recommender=FailingBrollRecommender())
+
+    with pytest.raises(LocalFirstStructuredGenerationError, match="broll Gemini fallback failed"):
+        runner.start_broll_recommendation(
+            project_id=project.project_id,
+            segment_analysis_job_id=segment_job["job_id"],
+        )
+
+    client = TestClient(create_app(projects_root=tmp_path))
+    audit_response = client.get(f"/api/projects/{project.project_id}/provider-traces")
+
+    assert audit_response.status_code == 200
+    failed_entry = next(
+        entry
+        for entry in audit_response.json()["entries"]
+        if entry["status"] == "failed" and entry["job_type"] == "broll_recommendation"
+    )
+    assert failed_entry["provider_trace"] == {
+        "routing_mode": "local_first",
+        "final_provider": "gemini",
+        "fallback_reasons": ["local_provider_error", "gemini_unavailable"],
+    }
+    assert failed_entry["source_job_id"] == segment_job["job_id"]
+    assert failed_entry["artifact_id"] == failed_entry["job_id"]
+
+
+def test_provider_trace_audit_endpoint_uses_default_trace_for_failed_provider_job_without_trace(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Failed Music Audit Project")
+    store.save_segment_analysis(
+        project_id=project.project_id,
+        transcript_id="transcript_001",
+        script_asset_id=None,
+        segments=[
+            {
+                "segment_id": "seg_001",
+                "text": "Office overview.",
+                "start_sec": 0.0,
+                "end_sec": 1.0,
+                "confidence": 0.99,
+                "review_required": False,
+                "cleanup_decision": "keep",
+                "provider_trace": build_provider_trace(final_provider="local_qwen"),
+            }
+        ],
+    )
+    segment_job = store.create_job(
+        project_id=project.project_id,
+        job_type=JobType.SEGMENT_ANALYSIS,
+        input_ref="transcription_job_001",
+        status=JobStatus.SUCCEEDED,
+    )
+    store.update_job(
+        project_id=project.project_id,
+        job_id=segment_job["job_id"],
+        status=JobStatus.SUCCEEDED,
+        output_ref="segment_analysis_001",
+    )
+    runner = LocalPipelineRunner(store, music_recommender=FailingMusicRecommenderWithoutTrace())
+
+    with pytest.raises(RuntimeError, match="music provider exploded without trace"):
+        runner.start_music_recommendation(
+            project_id=project.project_id,
+            segment_analysis_job_id=segment_job["job_id"],
+        )
+
+    client = TestClient(create_app(projects_root=tmp_path))
+    audit_response = client.get(f"/api/projects/{project.project_id}/provider-traces")
+
+    assert audit_response.status_code == 200
+    failed_entry = next(
+        entry
+        for entry in audit_response.json()["entries"]
+        if entry["status"] == "failed" and entry["job_type"] == "music_recommendation"
+    )
+    success_entry = next(
+        entry
+        for entry in audit_response.json()["entries"]
+        if entry["status"] == "succeeded" and entry["job_type"] == "segment_analysis"
+    )
+    assert failed_entry["provider_trace"] == {
+        "routing_mode": "local_first",
+        "final_provider": "unknown_failure",
+        "fallback_reasons": ["missing_provider_trace"],
+    }
+    assert failed_entry["error_message"] == "music provider exploded without trace"
+    assert success_entry["provider_trace"]["final_provider"] == "local_qwen"
+
+
+def test_provider_trace_audit_endpoint_includes_failed_preview_render_without_output_ref(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Failed Preview Audit Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+        },
+    )
+    timeline_job = store.create_job(
+        project_id=project.project_id,
+        job_type=JobType.TIMELINE_BUILD,
+        input_ref="segment_analysis_job_001",
+        status=JobStatus.SUCCEEDED,
+    )
+    store.update_job(
+        project_id=project.project_id,
+        job_id=timeline_job["job_id"],
+        status=JobStatus.SUCCEEDED,
+        output_ref=timeline["timeline_id"],
+    )
+    store.save_review_state(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        status="approved",
+    )
+    runner = LocalPipelineRunner(
+        store,
+        output_operator_copy_builder=FailingOutputOperatorCopyBuilder(),
+    )
+
+    with pytest.raises(LocalFirstStructuredGenerationError, match="preview_render provider failed"):
+        runner.start_preview_render(
+            project_id=project.project_id,
+            timeline_job_id=timeline_job["job_id"],
+        )
+
+    client = TestClient(create_app(projects_root=tmp_path))
+    audit_response = client.get(f"/api/projects/{project.project_id}/provider-traces")
+
+    assert audit_response.status_code == 200
+    failed_entry = next(
+        entry
+        for entry in audit_response.json()["entries"]
+        if entry["status"] == "failed" and entry["job_type"] == "preview_render"
+    )
+    assert failed_entry["artifact_id"] == failed_entry["job_id"]
+    assert failed_entry["source_job_id"] == timeline_job["job_id"]
+    assert failed_entry["provider_trace"]["final_provider"] == "gemini"
+
+
+def test_provider_trace_audit_endpoint_includes_failed_capcut_export_without_output_ref(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Failed Export Audit Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+        },
+    )
+    timeline_job = store.create_job(
+        project_id=project.project_id,
+        job_type=JobType.TIMELINE_BUILD,
+        input_ref="segment_analysis_job_001",
+        status=JobStatus.SUCCEEDED,
+    )
+    store.update_job(
+        project_id=project.project_id,
+        job_id=timeline_job["job_id"],
+        status=JobStatus.SUCCEEDED,
+        output_ref=timeline["timeline_id"],
+    )
+    store.save_review_state(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        status="approved",
+    )
+    runner = LocalPipelineRunner(
+        store,
+        output_operator_copy_builder=FailingOutputOperatorCopyBuilder(),
+    )
+
+    with pytest.raises(LocalFirstStructuredGenerationError, match="capcut_export provider failed"):
+        runner.start_capcut_export(
+            project_id=project.project_id,
+            timeline_job_id=timeline_job["job_id"],
+        )
+
+    client = TestClient(create_app(projects_root=tmp_path))
+    audit_response = client.get(f"/api/projects/{project.project_id}/provider-traces")
+
+    assert audit_response.status_code == 200
+    failed_entry = next(
+        entry
+        for entry in audit_response.json()["entries"]
+        if entry["status"] == "failed" and entry["job_type"] == "capcut_export"
+    )
+    assert failed_entry["artifact_id"] == failed_entry["job_id"]
+    assert failed_entry["source_job_id"] == timeline_job["job_id"]
+    assert failed_entry["provider_trace"]["final_provider"] == "gemini"
+
+
+def test_start_segment_analysis_marks_job_failed_without_provider_trace_for_missing_source_job(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Missing Source Segment Project")
+    runner = LocalPipelineRunner(store, segment_analyzer=FailingSegmentAnalyzer())
+
+    with pytest.raises(KeyError, match="missing_transcription_job"):
+        runner.start_segment_analysis(
+            project_id=project.project_id,
+            transcription_job_id="missing_transcription_job",
+            script_asset_id=None,
+        )
+
+    jobs = store.list_jobs(project_id=project.project_id)
+    assert len(jobs) == 1
+    assert jobs[0]["job_type"] == "segment_analysis"
+    assert jobs[0]["status"] == "failed"
+
+    client = TestClient(create_app(projects_root=tmp_path))
+    audit_response = client.get(f"/api/projects/{project.project_id}/provider-traces")
+
+    assert audit_response.status_code == 200
+    assert not [
+        entry
+        for entry in audit_response.json()["entries"]
+        if entry["job_type"] == "segment_analysis" and entry["status"] == "failed"
+    ]
