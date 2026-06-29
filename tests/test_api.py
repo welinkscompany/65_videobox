@@ -3013,7 +3013,9 @@ def test_preview_and_capcut_export_flow_persist_outputs_and_statuses(
     assert export_payload["status"] == "succeeded"
     assert export_payload["export"]["timeline_id"] == "timeline_001"
     assert export_payload["export"]["export_type"] == "capcut"
-    assert export_payload["export"]["notes"][0].lower().startswith("mock capcut")
+    assert export_payload["export"]["adapter"] == "capcut_v1_port"
+    assert export_payload["export"]["notes"][0].lower().startswith("capcut export manifest")
+    assert export_payload["export"]["capcut_tracks"][0]["segments"][0]["source_uri"].endswith("/inputs/narration/source-narration.wav")
 
     project_root = tmp_path / "projects" / project_id
     assert (project_root / "previews" / "preview_001.json").exists()
@@ -3377,6 +3379,13 @@ def test_approved_timeline_can_generate_subtitles_preview_and_export(
     assert preview_result.json()["preview"]["artifact_kind"] == "playable_html_preview"
     assert export_result.status_code == 200
     assert export_result.json()["export"]["subtitle_file_uri"].endswith(".srt")
+    assert export_result.json()["export"]["adapter"] == "capcut_v1_port"
+    assert [track["track_name"] for track in export_result.json()["export"]["capcut_tracks"]] == [
+        "voiceover",
+        "broll",
+        "subtitle",
+        "bgm",
+    ]
 
 
 def test_gemini_key_management_api_masks_secrets_and_supports_state_changes(tmp_path: Path) -> None:

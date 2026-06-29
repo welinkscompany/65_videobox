@@ -840,11 +840,11 @@ class LocalProjectStore:
         if existing_notes:
             payload["notes"] = existing_notes
         else:
-            payload["notes"] = ["Mock CapCut payload for local post-editing handoff."]
+            payload["notes"] = ["CapCut export manifest generated for local post-editing handoff."]
         if invariant_note not in payload["notes"]:
             payload["notes"].append(invariant_note)
         payload_path.write_text(json.dumps(payload, indent=2, ensure_ascii=True), encoding="utf-8")
-        readme_lines = payload["notes"] or ["Mock CapCut export payload generated from timeline JSON."]
+        readme_lines = payload["notes"] or ["CapCut export payload generated from timeline JSON."]
         notes_path.write_text("\n".join(readme_lines) + "\n", encoding="utf-8")
         metadata_json = json.dumps(
             {

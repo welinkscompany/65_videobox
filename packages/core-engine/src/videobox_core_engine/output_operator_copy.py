@@ -48,7 +48,7 @@ class StaticOutputOperatorCopyBuilder(OutputOperatorCopyBuilder):
         if output_target == "capcut_export":
             return {
                 "notes": [
-                    "Mock CapCut payload for local post-editing handoff.",
+                    "CapCut export manifest generated for local post-editing handoff.",
                     "CapCut remains an export target, not the internal source of truth.",
                 ],
                 "provider_trace": build_provider_trace(final_provider="static_fallback"),

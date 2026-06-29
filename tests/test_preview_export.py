@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from videobox_capcut_export import CapCutExportAdapter
 from videobox_core_engine.local_pipeline import LocalPipelineRunner
 from videobox_domain_models.jobs import JobStatus, JobType
 from videobox_domain_models.recommendations import RecommendationType
@@ -95,6 +96,227 @@ def test_save_capcut_export_persists_payload_and_index(tmp_path: Path) -> None:
     ]
     readme_path = export_manifest.parent / "README.txt"
     assert readme_path.read_text(encoding="utf-8").strip() == payload["notes"][0]
+
+
+def test_capcut_export_adapter_builds_structured_track_manifest_from_timeline_schema() -> None:
+    adapter = CapCutExportAdapter()
+
+    payload = adapter.build_payload(
+        project_id="project_123",
+        timeline={
+            "timeline_id": "timeline_001",
+            "narration_source_uri": "local://projects/project_123/inputs/narration/source.wav",
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": "local://projects/project_123/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 1.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                },
+                {
+                    "track_id": "broll_overlay",
+                    "track_type": "broll",
+                    "clips": [
+                        {
+                            "clip_id": "clip_broll_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": "local://projects/project_123/assets/asset_001",
+                            "start_sec": 0.0,
+                            "end_sec": 1.0,
+                            "clip_type": "broll",
+                            "recommendation_id": "broll_rec_001",
+                        }
+                    ],
+                },
+                {
+                    "track_id": "music_bed",
+                    "track_type": "bgm",
+                    "clips": [
+                        {
+                            "clip_id": "clip_bgm_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": "local://projects/project_123/music/music_001",
+                            "start_sec": 0.0,
+                            "end_sec": 1.0,
+                            "clip_type": "bgm",
+                            "recommendation_id": "bgm_rec_001",
+                        }
+                    ],
+                },
+            ],
+            "review_flags": [],
+        },
+        subtitle_file_uri="local://projects/project_123/subtitles/subtitle_001.srt",
+    )
+
+    assert payload["adapter"] == "capcut_v1_port"
+    assert "spreadsheet_id" not in payload
+    assert "draft_path" not in payload
+    assert payload["tracks"][0]["track_id"] == "narration_primary"
+    assert [track["track_name"] for track in payload["capcut_tracks"]] == [
+        "voiceover",
+        "broll",
+        "subtitle",
+        "bgm",
+    ]
+    assert payload["capcut_tracks"][0]["track_role"] == "audio"
+    assert payload["capcut_tracks"][0]["segments"][0]["source_uri"].endswith("/inputs/narration/source.wav")
+    assert payload["capcut_tracks"][1]["track_role"] == "video"
+    assert payload["capcut_tracks"][1]["segments"][0]["recommendation_id"] == "broll_rec_001"
+    assert payload["capcut_tracks"][2]["track_role"] == "text"
+    assert payload["capcut_tracks"][2]["source_uri"].endswith(".srt")
+    assert payload["capcut_tracks"][3]["track_role"] == "audio"
+
+
+def test_capcut_export_adapter_maps_hook_title_overlay_metadata() -> None:
+    adapter = CapCutExportAdapter()
+
+    payload = adapter.build_payload(
+        project_id="project_123",
+        timeline={
+            "timeline_id": "timeline_001",
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": "local://projects/project_123/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "export_overlays": [
+                {
+                    "overlay_type": "hook_title",
+                    "text": "Start strong",
+                    "start_sec": 0.0,
+                    "end_sec": 1.5,
+                }
+            ],
+            "review_flags": [],
+        },
+    )
+
+    hook_track = next(track for track in payload["capcut_tracks"] if track["track_name"] == "hook_title")
+
+    assert hook_track["track_role"] == "text"
+    assert hook_track["segments"] == [
+        {
+            "overlay_type": "hook_title",
+            "text": "Start strong",
+            "start_sec": 0.0,
+            "end_sec": 1.5,
+        }
+    ]
+
+
+def test_capcut_export_adapter_sequentially_fills_broll_segment_windows() -> None:
+    adapter = CapCutExportAdapter()
+
+    payload = adapter.build_payload(
+        project_id="project_123",
+        timeline={
+            "timeline_id": "timeline_001",
+            "tracks": [
+                {
+                    "track_id": "broll_overlay",
+                    "track_type": "broll",
+                    "clips": [
+                        {
+                            "clip_id": "clip_broll_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": "local://projects/project_123/assets/asset_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "broll",
+                            "recommendation_id": "broll_rec_001",
+                            "source_duration_sec": 0.75,
+                        },
+                        {
+                            "clip_id": "clip_broll_002",
+                            "segment_id": "seg_001",
+                            "asset_uri": "local://projects/project_123/assets/asset_002",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "broll",
+                            "recommendation_id": "broll_rec_002",
+                            "source_duration_sec": 1.5,
+                        },
+                    ],
+                }
+            ],
+            "review_flags": [],
+        },
+    )
+
+    broll_segments = payload["capcut_tracks"][0]["segments"]
+
+    assert payload["capcut_tracks"][0]["placement_mode"] == "sequential_fill"
+    assert payload["capcut_tracks"][0]["allow_empty_gaps"] is True
+    assert broll_segments[0]["planned_start_sec"] == 0.0
+    assert broll_segments[0]["planned_end_sec"] == 0.75
+    assert broll_segments[1]["planned_start_sec"] == 0.75
+    assert broll_segments[1]["planned_end_sec"] == 2.0
+
+
+def test_capcut_export_adapter_keeps_multiple_broll_clips_when_source_duration_metadata_is_missing() -> None:
+    adapter = CapCutExportAdapter()
+
+    payload = adapter.build_payload(
+        project_id="project_123",
+        timeline={
+            "timeline_id": "timeline_001",
+            "tracks": [
+                {
+                    "track_id": "broll_overlay",
+                    "track_type": "broll",
+                    "clips": [
+                        {
+                            "clip_id": "clip_broll_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": "local://projects/project_123/assets/asset_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "broll",
+                            "recommendation_id": "broll_rec_001",
+                        },
+                        {
+                            "clip_id": "clip_broll_002",
+                            "segment_id": "seg_001",
+                            "asset_uri": "local://projects/project_123/assets/asset_002",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "broll",
+                            "recommendation_id": "broll_rec_002",
+                        },
+                    ],
+                }
+            ],
+            "review_flags": [],
+        },
+    )
+
+    broll_segments = payload["capcut_tracks"][0]["segments"]
+
+    assert len(broll_segments) == 2
+    assert broll_segments[0]["planned_start_sec"] == 0.0
+    assert broll_segments[0]["planned_end_sec"] == 1.0
+    assert broll_segments[1]["planned_start_sec"] == 1.0
+    assert broll_segments[1]["planned_end_sec"] == 2.0
 
 
 class FailingPreviewRenderer:

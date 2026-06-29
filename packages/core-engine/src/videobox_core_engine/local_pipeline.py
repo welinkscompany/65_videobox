@@ -405,13 +405,23 @@ class LocalPipelineRunner:
                     for item in run["recommendations"]
                 ]
             )
+        transcript = self.store.get_transcript(
+            project_id=project_id,
+            transcript_id=str(analysis["transcript_id"]),
+        )
+        narration_asset = self.store.get_asset(
+            project_id=project_id,
+            asset_id=str(transcript["source_asset_id"]),
+        )
         timeline = self.timeline_builder.build(
             project_id=project_id,
             segments=analysis["segments"],
             recommendations=recommendations,
+            narration_source_uri=str(narration_asset["storage_uri"]),
         )
         timeline_payload = {
             "project_id": timeline.project_id,
+            "narration_source_uri": timeline.narration_source_uri,
             "tracks": [
                 {
                     "track_id": track.track_id,
@@ -441,6 +451,7 @@ class LocalPipelineRunner:
             ],
             "applied_recommendations": timeline.applied_recommendations,
             "pending_recommendations": timeline.pending_recommendations,
+            "export_overlays": timeline.export_overlays,
             "lineage": {
                 "segment_analysis_job_id": segment_analysis_job_id,
                 "recommendation_job_ids": recommendation_job_ids,

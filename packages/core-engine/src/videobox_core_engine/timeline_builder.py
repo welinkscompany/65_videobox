@@ -20,6 +20,8 @@ class TimelineBuilder:
         project_id: str,
         segments: list[dict[str, object] | SegmentRecord],
         recommendations: list[dict[str, object] | RecommendationRecord],
+        narration_source_uri: str | None = None,
+        export_overlays: list[dict[str, object]] | None = None,
     ) -> TimelineRecord:
         normalized_segments = [self._segment_payload(segment) for segment in segments]
         normalized_recommendations = [
@@ -114,6 +116,8 @@ class TimelineBuilder:
             output_mode="review",
             tracks=tracks,
             review_flags=review_flags,
+            narration_source_uri=narration_source_uri,
+            export_overlays=export_overlays or [],
             applied_recommendations=applied_recommendations,
             pending_recommendations=pending_recommendations,
         )

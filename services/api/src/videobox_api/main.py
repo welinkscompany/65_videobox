@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 from urllib.request import urlopen
 
 from fastapi import FastAPI, HTTPException, status
@@ -224,6 +225,7 @@ class ExportArtifactResponse(BaseModel):
     subtitle_file_uri: str | None = None
     status: str
     adapter: str | None = None
+    capcut_tracks: list[dict[str, Any]] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
     provider_trace: ProviderTraceResponse
     created_at: str | None = None

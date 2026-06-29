@@ -41,6 +41,8 @@ class TimelineRecord:
     output_mode: str
     tracks: list[TimelineTrack]
     review_flags: list[TimelineReviewFlag]
+    narration_source_uri: str | None = None
+    export_overlays: list[dict[str, object]] = field(default_factory=list)
     review_status: str = "draft"
     applied_recommendations: list[dict[str, object]] = field(default_factory=list)
     pending_recommendations: list[dict[str, object]] = field(default_factory=list)
