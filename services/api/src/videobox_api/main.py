@@ -5,15 +5,20 @@ from typing import Any
 from urllib.request import urlopen
 
 from fastapi import FastAPI, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from videobox_api.orchestration import ApiOrchestrator, build_local_first_runtime_service
+from videobox_core_engine.auto_cut import AutoCutPlanner
 from videobox_core_engine.local_pipeline import LocalPipelineRunner
 from videobox_core_engine.output_operator_copy import LocalFirstOutputOperatorCopyBuilder
 from videobox_core_engine.recommenders import LocalFirstKeywordBrollRecommender, LocalFirstMusicRecommender
 from videobox_core_engine.review_guidance import LocalFirstReviewGuidanceBuilder
 from videobox_core_engine.script_scene_planner import LocalFirstSegmentAnalyzer
-from videobox_core_engine.settings import DEFAULT_PROJECTS_ROOT, LocalOpenAICompatibleRuntimeConfig
+from videobox_core_engine.settings import (
+    DEFAULT_PROJECTS_ROOT,
+    AutoCutConfig,
+    LocalOpenAICompatibleRuntimeConfig,
+)
 from videobox_provider_interfaces.gemini import GeminiHTTPTransport, GeminiRESTStructuredProvider
 from videobox_provider_interfaces.llm import LLMProviderConfig
 from videobox_storage.local_project_store import LocalProjectStore
@@ -47,6 +52,60 @@ class AssetResponse(BaseModel):
     asset_id: str
     asset_type: str
     storage_uri: str
+
+
+class AutoCutBlackRegionRequest(BaseModel):
+    start: float = Field(ge=0)
+    end: float = Field(ge=0)
+
+    @model_validator(mode="after")
+    def validate_bounds(self) -> "AutoCutBlackRegionRequest":
+        if self.end <= self.start:
+            raise ValueError("black_regions end must be greater than start.")
+        return self
+
+
+class AutoCutSegmentSampleRequest(BaseModel):
+    start_sec: float = Field(ge=0)
+    end_sec: float = Field(ge=0)
+    avg_brightness: float | None = Field(default=None, ge=0)
+    scene_change_count: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def validate_bounds(self) -> "AutoCutSegmentSampleRequest":
+        if self.end_sec <= self.start_sec:
+            raise ValueError("segment_samples end_sec must be greater than start_sec.")
+        return self
+
+
+class AutoCutPlanRequest(BaseModel):
+    raw_video_asset_id: str = Field(min_length=1)
+    total_duration: float = Field(gt=0)
+    scene_timestamps: list[float] = Field(default_factory=list)
+    black_regions: list[AutoCutBlackRegionRequest] = Field(default_factory=list)
+    segment_samples: list[AutoCutSegmentSampleRequest] = Field(default_factory=list)
+
+
+class AutoCutPlannedSegmentResponse(BaseModel):
+    start_sec: float
+    end_sec: float
+
+
+class AutoCutKeptSegmentResponse(AutoCutPlannedSegmentResponse):
+    duration_sec: float
+    avg_brightness: float | None = None
+    scene_change_count: int | None = None
+    reasons: list[str] = Field(default_factory=list)
+
+
+class AutoCutPlanResponse(BaseModel):
+    asset_id: str
+    storage_uri: str
+    should_auto_cut: bool
+    scene_detection_filter: str
+    blackdetect_filter: str
+    planned_segments: list[AutoCutPlannedSegmentResponse] = Field(default_factory=list)
+    kept_segments: list[AutoCutKeptSegmentResponse] = Field(default_factory=list)
 
 
 class StartTranscriptionRequest(BaseModel):
@@ -319,6 +378,7 @@ def create_app(
     *,
     projects_root: Path | None = None,
     local_runtime_config: LocalOpenAICompatibleRuntimeConfig | None = None,
+    auto_cut_config: AutoCutConfig | None = None,
     local_first_runtime_service_factory=None,
 ) -> FastAPI:
     app = FastAPI(title="VideoBox API", version="0.1.0")
@@ -336,6 +396,7 @@ def create_app(
         )
     )
     runtime_service = runtime_service_factory(store)
+    resolved_auto_cut_config = auto_cut_config or AutoCutConfig()
     pipeline = LocalPipelineRunner(
         store,
         segment_analyzer=LocalFirstSegmentAnalyzer(runtime_service=runtime_service),
@@ -343,9 +404,11 @@ def create_app(
         music_recommender=LocalFirstMusicRecommender(runtime_service=runtime_service),
         review_guidance_builder=LocalFirstReviewGuidanceBuilder(runtime_service=runtime_service),
         output_operator_copy_builder=LocalFirstOutputOperatorCopyBuilder(runtime_service=runtime_service),
+        auto_cut_planner=AutoCutPlanner(config=resolved_auto_cut_config),
     )
     orchestrator = ApiOrchestrator(store, pipeline=pipeline)
     app.state.local_runtime_config = resolved_local_runtime_config
+    app.state.auto_cut_config = resolved_auto_cut_config
     app.state.build_local_first_runtime_service = build_local_first_runtime_service
     app.state.local_first_runtime_service_factory = runtime_service_factory
     app.state.local_http_client = urlopen
@@ -455,6 +518,36 @@ def create_app(
             asset_type=asset.asset_type,
             storage_uri=asset.storage_uri,
         )
+
+    @app.post("/api/projects/{project_id}/assets/raw-video", status_code=status.HTTP_201_CREATED)
+    def register_raw_video(project_id: str, payload: AssetRegistrationRequest) -> AssetResponse:
+        try:
+            asset = orchestrator.register_raw_video_asset(
+                project_id=project_id,
+                source_path=Path(payload.source_path),
+            )
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return AssetResponse(
+            asset_id=asset.asset_id,
+            asset_type=asset.asset_type,
+            storage_uri=asset.storage_uri,
+        )
+
+    @app.post("/api/projects/{project_id}/jobs/auto-cut-plan")
+    def plan_auto_cut(project_id: str, payload: AutoCutPlanRequest) -> AutoCutPlanResponse:
+        try:
+            result = orchestrator.plan_auto_cut_segments(
+                project_id=project_id,
+                raw_video_asset_id=payload.raw_video_asset_id,
+                total_duration=payload.total_duration,
+                scene_timestamps=payload.scene_timestamps,
+                black_regions=[region.model_dump() for region in payload.black_regions],
+                segment_samples=[segment.model_dump() for segment in payload.segment_samples],
+            )
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return AutoCutPlanResponse(**result)
 
     @app.post("/api/projects/{project_id}/jobs/transcription", status_code=status.HTTP_202_ACCEPTED)
     def start_transcription(project_id: str, payload: StartTranscriptionRequest) -> TranscriptionJobResponse:

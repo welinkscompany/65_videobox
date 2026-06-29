@@ -88,6 +88,30 @@ def test_auto_cut_planner_evenly_splits_segments_that_exceed_max_length() -> Non
     ]
 
 
+def test_auto_cut_planner_preserves_max_clip_duration_after_short_segment_merge() -> None:
+    planner = AutoCutPlanner(
+        config=AutoCutConfig(
+            min_clip_duration=5.0,
+            max_clip_duration=90.0,
+            merge_threshold=10.0,
+        )
+    )
+
+    segments = planner.plan_segments(
+        total_duration=270.0,
+        scene_timestamps=[88.0, 92.0, 180.0],
+        black_regions=[],
+    )
+
+    assert [(segment.start_sec, segment.end_sec) for segment in segments] == [
+        (0.0, 46.0),
+        (46.0, 92.0),
+        (92.0, 180.0),
+        (180.0, 270.0),
+    ]
+    assert all(segment.duration_sec <= 90.0 for segment in segments)
+
+
 def test_auto_cut_planner_rejects_too_short_dark_and_static_segments() -> None:
     planner = AutoCutPlanner(
         config=AutoCutConfig(

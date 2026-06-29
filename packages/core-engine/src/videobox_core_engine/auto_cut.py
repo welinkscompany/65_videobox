@@ -128,27 +128,24 @@ class AutoCutPlanner:
             if 0.0 < end_sec < total_duration:
                 cut_points.add(round(end_sec, 2))
 
-        sorted_points = sorted([0.0, *cut_points, total_duration])
-        extra_cuts: list[float] = []
-        for index in range(len(sorted_points) - 1):
-            segment_start = sorted_points[index]
-            segment_end = sorted_points[index + 1]
-            segment_length = segment_end - segment_start
-            if segment_length > self.config.max_clip_duration:
-                part_count = int(segment_length // self.config.max_clip_duration) + 1
-                for part_index in range(1, part_count):
-                    extra_cuts.append(round(segment_start + segment_length * part_index / part_count, 2))
-        cut_points.update(extra_cuts)
+        cut_points = self._enforce_max_clip_duration(
+            cut_points=sorted(cut_points),
+            total_duration=total_duration,
+        )
 
         proximity_merged: list[float] = []
-        for timestamp in sorted(cut_points):
+        for timestamp in cut_points:
             if (
                 not proximity_merged
                 or timestamp - proximity_merged[-1] >= self.config.cut_point_min_spacing
             ):
                 proximity_merged.append(timestamp)
-        return self._merge_short_adjacent_segments(
+        merged_points = self._merge_short_adjacent_segments(
             cut_points=proximity_merged,
+            total_duration=total_duration,
+        )
+        return self._enforce_max_clip_duration(
+            cut_points=merged_points,
             total_duration=total_duration,
         )
 
@@ -189,6 +186,24 @@ class AutoCutPlanner:
             final_points.pop(cut_index_to_remove)
 
         return final_points
+
+    def _enforce_max_clip_duration(
+        self,
+        *,
+        cut_points: list[float],
+        total_duration: float,
+    ) -> list[float]:
+        boundaries = [0.0, *cut_points, total_duration]
+        final_points = list(cut_points)
+        for index in range(len(boundaries) - 1):
+            segment_start = boundaries[index]
+            segment_end = boundaries[index + 1]
+            segment_length = segment_end - segment_start
+            if segment_length > self.config.max_clip_duration:
+                part_count = int(segment_length // self.config.max_clip_duration) + 1
+                for part_index in range(1, part_count):
+                    final_points.append(round(segment_start + segment_length * part_index / part_count, 2))
+        return sorted(set(final_points))
 
 
 __all__ = ["AutoCutConfig", "AutoCutPlanner", "AutoCutSegment"]

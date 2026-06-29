@@ -190,6 +190,36 @@ class ApiOrchestrator:
             storage_uri=asset["storage_uri"],
         )
 
+    def register_raw_video_asset(self, *, project_id: str, source_path: Path) -> RegisteredAsset:
+        asset = self.pipeline.register_raw_video_asset(
+            project_id=project_id,
+            source_path=source_path,
+        )
+        return RegisteredAsset(
+            asset_id=asset["asset_id"],
+            asset_type=asset["asset_type"],
+            storage_uri=asset["storage_uri"],
+        )
+
+    def plan_auto_cut_segments(
+        self,
+        *,
+        project_id: str,
+        raw_video_asset_id: str,
+        total_duration: float,
+        scene_timestamps: list[float],
+        black_regions: list[dict[str, float]],
+        segment_samples: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        return self.pipeline.plan_auto_cut_segments(
+            project_id=project_id,
+            raw_video_asset_id=raw_video_asset_id,
+            total_duration=total_duration,
+            scene_timestamps=scene_timestamps,
+            black_regions=black_regions,
+            segment_samples=segment_samples,
+        )
+
     def start_transcription(self, *, project_id: str, narration_asset_id: str) -> dict[str, Any]:
         result = self.pipeline.start_transcription(
             project_id=project_id,

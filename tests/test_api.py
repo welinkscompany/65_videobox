@@ -13,7 +13,7 @@ from videobox_api.orchestration import LocalFirstRuntimeService
 from videobox_core_engine.local_first_runtime import LocalFirstStructuredGenerationError
 from videobox_core_engine.local_pipeline import LocalPipelineRunner
 from videobox_core_engine.provider_trace import build_provider_trace
-from videobox_core_engine.settings import LocalOpenAICompatibleRuntimeConfig
+from videobox_core_engine.settings import AutoCutConfig, LocalOpenAICompatibleRuntimeConfig
 from videobox_domain_models.jobs import JobStatus, JobType
 from videobox_domain_models.recommendations import RecommendationType
 from videobox_provider_interfaces.llm import (
@@ -3497,6 +3497,237 @@ def test_auto_cut_module_introduction_does_not_break_approved_output_flow(
     assert export_result.status_code == 200
     assert export_result.json()["status"] == "succeeded"
     assert export_result.json()["export"]["export_type"] == "capcut"
+
+
+def test_auto_cut_api_registers_raw_video_and_returns_planning_payload(tmp_path: Path) -> None:
+    raw_video = tmp_path / "raw-footage.mp4"
+    raw_video.write_bytes(b"video bytes")
+
+    app = create_app(
+        projects_root=tmp_path,
+        auto_cut_config=AutoCutConfig(
+            scene_threshold=0.275,
+            blackdetect_min_duration=0.8,
+            blackdetect_picture_threshold=0.91,
+        ),
+    )
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "AutoCut API Draft"}).json()["project_id"]
+
+    raw_asset_response = client.post(
+        f"/api/projects/{project_id}/assets/raw-video",
+        json={"source_path": str(raw_video)},
+    )
+
+    assert raw_asset_response.status_code == 201
+    assert raw_asset_response.json()["asset_type"] == "raw_video"
+
+    plan_response = client.post(
+        f"/api/projects/{project_id}/jobs/auto-cut-plan",
+        json={
+            "raw_video_asset_id": raw_asset_response.json()["asset_id"],
+            "total_duration": 120.0,
+            "scene_timestamps": [30.0, 75.0],
+            "black_regions": [],
+            "segment_samples": [
+                {"start_sec": 0.0, "end_sec": 30.0, "avg_brightness": 90.0, "scene_change_count": 3},
+                {"start_sec": 30.0, "end_sec": 75.0, "avg_brightness": 80.0, "scene_change_count": 2},
+                {"start_sec": 75.0, "end_sec": 120.0, "avg_brightness": 85.0, "scene_change_count": 4},
+            ],
+        },
+    )
+
+    assert plan_response.status_code == 200
+    assert plan_response.json() == {
+        "asset_id": raw_asset_response.json()["asset_id"],
+        "storage_uri": raw_asset_response.json()["storage_uri"],
+        "should_auto_cut": True,
+        "scene_detection_filter": "select='gt(scene,0.275)',showinfo",
+        "blackdetect_filter": "blackdetect=d=0.8:pic_th=0.91",
+        "planned_segments": [
+            {"start_sec": 0.0, "end_sec": 30.0},
+            {"start_sec": 30.0, "end_sec": 75.0},
+            {"start_sec": 75.0, "end_sec": 120.0},
+        ],
+        "kept_segments": [
+            {
+                "start_sec": 0.0,
+                "end_sec": 30.0,
+                "duration_sec": 30.0,
+                "avg_brightness": 90.0,
+                "scene_change_count": 3,
+                "reasons": [],
+            },
+            {
+                "start_sec": 30.0,
+                "end_sec": 75.0,
+                "duration_sec": 45.0,
+                "avg_brightness": 80.0,
+                "scene_change_count": 2,
+                "reasons": [],
+            },
+            {
+                "start_sec": 75.0,
+                "end_sec": 120.0,
+                "duration_sec": 45.0,
+                "avg_brightness": 85.0,
+                "scene_change_count": 4,
+                "reasons": [],
+            },
+        ],
+    }
+
+
+def test_auto_cut_api_rejects_non_raw_video_assets(tmp_path: Path) -> None:
+    narration_audio = tmp_path / "narration.wav"
+    narration_audio.write_bytes(b"audio bytes")
+
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "AutoCut Invalid Asset Draft"}).json()["project_id"]
+    narration_asset_response = client.post(
+        f"/api/projects/{project_id}/assets/narration-audio",
+        json={"source_path": str(narration_audio)},
+    )
+
+    plan_response = client.post(
+        f"/api/projects/{project_id}/jobs/auto-cut-plan",
+        json={
+            "raw_video_asset_id": narration_asset_response.json()["asset_id"],
+            "total_duration": 120.0,
+            "scene_timestamps": [30.0, 75.0],
+            "black_regions": [],
+            "segment_samples": [
+                {"start_sec": 0.0, "end_sec": 30.0, "avg_brightness": 90.0, "scene_change_count": 3},
+                {"start_sec": 30.0, "end_sec": 75.0, "avg_brightness": 80.0, "scene_change_count": 2},
+                {"start_sec": 75.0, "end_sec": 120.0, "avg_brightness": 85.0, "scene_change_count": 4},
+            ],
+        },
+    )
+
+    assert plan_response.status_code == 400
+    assert plan_response.json()["detail"] == "auto_cut planning requires a raw_video asset."
+
+
+def test_auto_cut_api_rejects_segment_sample_boundary_mismatches(tmp_path: Path) -> None:
+    raw_video = tmp_path / "raw-footage.mp4"
+    raw_video.write_bytes(b"video bytes")
+
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "AutoCut Boundary Draft"}).json()["project_id"]
+    raw_asset_response = client.post(
+        f"/api/projects/{project_id}/assets/raw-video",
+        json={"source_path": str(raw_video)},
+    )
+
+    plan_response = client.post(
+        f"/api/projects/{project_id}/jobs/auto-cut-plan",
+        json={
+            "raw_video_asset_id": raw_asset_response.json()["asset_id"],
+            "total_duration": 120.0,
+            "scene_timestamps": [30.0, 75.0],
+            "black_regions": [],
+            "segment_samples": [
+                {"start_sec": 5.0, "end_sec": 35.0, "avg_brightness": 90.0, "scene_change_count": 3},
+                {"start_sec": 35.0, "end_sec": 80.0, "avg_brightness": 80.0, "scene_change_count": 2},
+            ],
+        },
+    )
+
+    assert plan_response.status_code == 400
+    assert plan_response.json()["detail"] == "auto_cut segment_samples must match planned segment boundaries."
+
+
+def test_auto_cut_api_skips_planning_for_short_inputs(tmp_path: Path) -> None:
+    raw_video = tmp_path / "raw-footage.mp4"
+    raw_video.write_bytes(b"video bytes")
+
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "AutoCut Short Draft"}).json()["project_id"]
+    raw_asset_response = client.post(
+        f"/api/projects/{project_id}/assets/raw-video",
+        json={"source_path": str(raw_video)},
+    )
+
+    plan_response = client.post(
+        f"/api/projects/{project_id}/jobs/auto-cut-plan",
+        json={
+            "raw_video_asset_id": raw_asset_response.json()["asset_id"],
+            "total_duration": 60.0,
+            "scene_timestamps": [30.0],
+            "black_regions": [],
+            "segment_samples": [
+                {"start_sec": 0.0, "end_sec": 60.0, "avg_brightness": 90.0, "scene_change_count": 3},
+            ],
+        },
+    )
+
+    assert plan_response.status_code == 200
+    assert plan_response.json()["should_auto_cut"] is False
+    assert plan_response.json()["planned_segments"] == []
+    assert plan_response.json()["kept_segments"] == []
+
+
+def test_auto_cut_api_rejects_malformed_black_regions(tmp_path: Path) -> None:
+    raw_video = tmp_path / "raw-footage.mp4"
+    raw_video.write_bytes(b"video bytes")
+
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "AutoCut Black Region Draft"}).json()["project_id"]
+    raw_asset_response = client.post(
+        f"/api/projects/{project_id}/assets/raw-video",
+        json={"source_path": str(raw_video)},
+    )
+
+    plan_response = client.post(
+        f"/api/projects/{project_id}/jobs/auto-cut-plan",
+        json={
+            "raw_video_asset_id": raw_asset_response.json()["asset_id"],
+            "total_duration": 120.0,
+            "scene_timestamps": [30.0, 75.0],
+            "black_regions": [{"start": 40.0, "end": 5.0}],
+            "segment_samples": [
+                {"start_sec": 0.0, "end_sec": 30.0, "avg_brightness": 90.0, "scene_change_count": 3},
+                {"start_sec": 30.0, "end_sec": 75.0, "avg_brightness": 80.0, "scene_change_count": 2},
+                {"start_sec": 75.0, "end_sec": 120.0, "avg_brightness": 85.0, "scene_change_count": 4},
+            ],
+        },
+    )
+
+    assert plan_response.status_code == 422
+
+
+def test_auto_cut_api_rejects_invalid_segment_sample_metrics(tmp_path: Path) -> None:
+    raw_video = tmp_path / "raw-footage.mp4"
+    raw_video.write_bytes(b"video bytes")
+
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "AutoCut Invalid Metrics Draft"}).json()["project_id"]
+    raw_asset_response = client.post(
+        f"/api/projects/{project_id}/assets/raw-video",
+        json={"source_path": str(raw_video)},
+    )
+
+    plan_response = client.post(
+        f"/api/projects/{project_id}/jobs/auto-cut-plan",
+        json={
+            "raw_video_asset_id": raw_asset_response.json()["asset_id"],
+            "total_duration": 120.0,
+            "scene_timestamps": [30.0, 75.0],
+            "black_regions": [],
+            "segment_samples": [
+                {"start_sec": 0.0, "end_sec": 30.0, "avg_brightness": -1.0, "scene_change_count": -1},
+                {"start_sec": 30.0, "end_sec": 75.0, "avg_brightness": 80.0, "scene_change_count": 2},
+                {"start_sec": 75.0, "end_sec": 120.0, "avg_brightness": 85.0, "scene_change_count": 4},
+            ],
+        },
+    )
+
+    assert plan_response.status_code == 422
 
 
 def test_gemini_key_management_api_masks_secrets_and_supports_state_changes(tmp_path: Path) -> None:
