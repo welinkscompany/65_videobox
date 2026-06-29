@@ -15,6 +15,7 @@ from videobox_core_engine.recommenders import KeywordBrollRecommender, RuleBased
 from videobox_core_engine.review_guidance import HeuristicReviewGuidanceBuilder, ReviewGuidanceBuilder
 from videobox_core_engine.script_scene_planner import HeuristicSegmentAnalyzer, SegmentAnalyzer
 from videobox_core_engine.timeline_builder import TimelineBuilder
+from videobox_core_engine.transcript_alignment import HeuristicTranscriptAligner, TranscriptAligner
 from videobox_domain_models.assets import AssetType
 from videobox_domain_models.jobs import JobStatus, JobType
 from videobox_domain_models.recommendations import RecommendationType
@@ -38,6 +39,7 @@ class LocalPipelineRunner:
         preview_renderer: PreviewRenderer | None = None,
         capcut_exporter: CapCutExportAdapter | None = None,
         auto_cut_planner: AutoCutPlanner | None = None,
+        transcript_aligner: TranscriptAligner | None = None,
     ) -> None:
         self.store = store
         self.stt_provider = stt_provider or MockSTTProvider()
@@ -50,6 +52,7 @@ class LocalPipelineRunner:
         self.preview_renderer = preview_renderer or PreviewRenderer()
         self.capcut_exporter = capcut_exporter or CapCutExportAdapter()
         self.auto_cut_planner = auto_cut_planner or AutoCutPlanner()
+        self.transcript_aligner = transcript_aligner or HeuristicTranscriptAligner()
 
     def register_narration_asset(self, *, project_id: str, source_path: Path) -> dict[str, Any]:
         asset = self.store.register_asset(
@@ -225,6 +228,10 @@ class LocalPipelineRunner:
                 transcript_id=transcription_job["output_ref"],
             )
             script_text = self._load_script_text(project_id=project_id, script_asset_id=script_asset_id)
+            aligned_transcript_segments = self.transcript_aligner.align(
+                transcript_segments=transcript["segments"],
+                script_text=script_text,
+            )
         except Exception as exc:
             self.store.update_job(
                 project_id=project_id,
@@ -236,7 +243,7 @@ class LocalPipelineRunner:
         try:
             segments = self.segment_analyzer.analyze(
                 project_id=project_id,
-                transcript_segments=transcript["segments"],
+                transcript_segments=aligned_transcript_segments,
                 script_text=script_text,
             )
         except Exception as exc:

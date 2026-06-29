@@ -3,9 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
-from videobox_core_engine.gemini_runtime import GeminiStructuredGenerationError
 from videobox_core_engine.local_first_runtime import LocalFirstStructuredGenerationError
 from videobox_core_engine.provider_trace import build_provider_trace, response_provider_trace, with_final_provider
+from videobox_core_engine.transcript_alignment import split_script_units
 from videobox_provider_interfaces.llm import LLMProviderError, LLMTaskType
 
 
@@ -43,7 +43,7 @@ class HeuristicSegmentAnalyzer(SegmentAnalyzer):
         script_text: str | None,
     ) -> list[dict[str, Any]]:
         del project_id
-        script_lines = [line.strip() for line in script_text.splitlines() if line.strip()] if script_text else []
+        script_lines = split_script_units(script_text) if script_text else []
         analyzed_segments: list[dict[str, Any]] = []
         for index, segment in enumerate(transcript_segments):
             transcript_text = str(segment["text"]).strip()
@@ -85,7 +85,7 @@ class LocalFirstSegmentAnalyzer(SegmentAnalyzer):
             transcript_segments=transcript_segments,
             script_text=script_text,
         )
-        script_lines = [line.strip() for line in script_text.splitlines() if line.strip()] if script_text else []
+        script_lines = split_script_units(script_text) if script_text else []
         analyzed_segments: list[dict[str, Any]] = []
 
         for index, fallback_segment in enumerate(fallback_segments):
@@ -108,11 +108,7 @@ class LocalFirstSegmentAnalyzer(SegmentAnalyzer):
                         },
                     },
                 )
-            except (
-                GeminiStructuredGenerationError,
-                LLMProviderError,
-                LocalFirstStructuredGenerationError,
-            ) as exc:
+            except (LLMProviderError, LocalFirstStructuredGenerationError) as exc:
                 analyzed_segments.append(
                     {
                         **fallback_segment,

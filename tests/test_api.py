@@ -139,6 +139,78 @@ def _risky_multi_segment_transcribe(self, request):  # noqa: ANN001
     )
 
 
+def _split_script_line_transcribe(self, request):  # noqa: ANN001
+    return STTResult(
+        text="Office overview intro. Team update starts.",
+        segments=[
+            STTSegment(
+                start_sec=0.0,
+                end_sec=0.8,
+                text="Office over",
+                confidence=0.98,
+            ),
+            STTSegment(
+                start_sec=0.8,
+                end_sec=1.6,
+                text="view intro",
+                confidence=0.97,
+            ),
+            STTSegment(
+                start_sec=1.6,
+                end_sec=3.0,
+                text="Team update starts.",
+                confidence=0.96,
+            ),
+        ],
+        provider_name="mock_stt",
+    )
+
+
+def _coarse_multi_sentence_transcribe(self, request):  # noqa: ANN001
+    return STTResult(
+        text="Office overview intro. Team update starts.",
+        segments=[
+            STTSegment(
+                start_sec=0.0,
+                end_sec=3.0,
+                text="Office overview intro. Team update starts.",
+                confidence=0.98,
+            ),
+        ],
+        provider_name="mock_stt",
+    )
+
+
+def _direction_mismatch_transcribe(self, request):  # noqa: ANN001
+    return STTResult(
+        text="Turn left now.",
+        segments=[
+            STTSegment(
+                start_sec=0.0,
+                end_sec=1.0,
+                text="Turn left now.",
+                confidence=0.99,
+            ),
+        ],
+        provider_name="mock_stt",
+    )
+
+
+def _high_similarity_word_substitution_transcribe(self, request):  # noqa: ANN001
+    return STTResult(
+        text="Send the file today.",
+        segments=[
+            STTSegment(
+                start_sec=0.0,
+                end_sec=1.0,
+                text="Send the file today.",
+                confidence=0.99,
+            ),
+        ],
+        provider_name="mock_stt",
+    )
+
+
 def _create_segment_analysis_project(client: TestClient, tmp_path: Path) -> tuple[str, str]:
     source_audio = tmp_path / "segment-runtime.wav"
     source_script = tmp_path / "segment-runtime.txt"
@@ -728,6 +800,561 @@ def test_segment_analysis_endpoint_preserves_heuristic_fallback_when_local_disab
     segment = result.json()["segments"][0]
     assert segment["review_required"] is False
     assert segment["cleanup_decision"] == "keep"
+
+
+def test_segment_analysis_endpoint_marks_job_failed_on_unexpected_runtime_failure(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "videobox_provider_interfaces.stt.MockSTTProvider.transcribe",
+        _single_segment_transcribe,
+    )
+    local_provider = FakeStructuredProvider(errors=[RuntimeError("segment analyzer exploded")])
+    gemini_provider = FakeStructuredProvider()
+    app = create_app(
+        projects_root=tmp_path,
+        local_first_runtime_service_factory=_local_first_service_factory(
+            local_provider=local_provider,
+            gemini_provider=gemini_provider,
+            local_enabled=True,
+        ),
+    )
+    client = TestClient(app, raise_server_exceptions=False)
+    project_id, script_asset_id, transcription_job_id = _create_segment_analysis_project(client, tmp_path)
+
+    response = client.post(
+        f"/api/projects/{project_id}/jobs/segment-analysis",
+        json={
+            "transcription_job_id": transcription_job_id,
+            "script_asset_id": script_asset_id,
+        },
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "segment analyzer exploded"
+    jobs_response = client.get(f"/api/projects/{project_id}/jobs")
+    assert jobs_response.status_code == 200
+    segment_jobs = [
+        job for job in jobs_response.json()["jobs"]
+        if job["job_type"] == "segment_analysis"
+    ]
+    assert len(segment_jobs) == 1
+    assert segment_jobs[0]["status"] == "failed"
+    assert segment_jobs[0]["error_message"] == "segment analyzer exploded"
+    assert len(local_provider.calls) == 1
+    assert gemini_provider.calls == []
+
+
+def test_segment_analysis_endpoint_uses_transcript_alignment_before_heuristic_review(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "videobox_provider_interfaces.stt.MockSTTProvider.transcribe",
+        _split_script_line_transcribe,
+    )
+    source_audio = tmp_path / "aligned-runtime.wav"
+    source_script = tmp_path / "aligned-runtime.txt"
+    source_audio.write_bytes(b"fake wav data")
+    source_script.write_text("Office overview intro.\n\nTeam update starts.\n", encoding="utf-8")
+
+    app = create_app(
+        projects_root=tmp_path,
+        local_first_runtime_service_factory=_local_first_service_factory(
+            local_provider=FakeStructuredProvider(
+                errors=[
+                    LLMProviderError(
+                        provider_name="local_qwen",
+                        message="offline test local unavailable",
+                        retryable=True,
+                        error_code="LOCAL_UNAVAILABLE",
+                    )
+                    for _ in range(8)
+                ]
+            ),
+            gemini_provider=FakeStructuredProvider(),
+            local_enabled=True,
+        ),
+    )
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "Aligned Segment Draft"}).json()["project_id"]
+    narration_asset_id = client.post(
+        f"/api/projects/{project_id}/assets/narration-audio",
+        json={"source_path": str(source_audio)},
+    ).json()["asset_id"]
+    script_asset_id = client.post(
+        f"/api/projects/{project_id}/assets/script-document",
+        json={"source_path": str(source_script)},
+    ).json()["asset_id"]
+    transcription_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/transcription",
+        json={"narration_asset_id": narration_asset_id},
+    ).json()["job_id"]
+
+    response = client.post(
+        f"/api/projects/{project_id}/jobs/segment-analysis",
+        json={
+            "transcription_job_id": transcription_job_id,
+            "script_asset_id": script_asset_id,
+        },
+    )
+
+    assert response.status_code == 202
+    result = client.get(f"/api/projects/{project_id}/jobs/segment-analysis/{response.json()['job_id']}")
+    assert result.status_code == 200
+    segments = result.json()["segments"]
+    assert [segment["text"] for segment in segments] == [
+        "Office overview intro.",
+        "Team update starts.",
+    ]
+    assert all(segment["review_required"] is False for segment in segments)
+    assert all(segment["cleanup_decision"] == "keep" for segment in segments)
+
+
+def test_segment_analysis_endpoint_flags_review_when_script_meaning_differs(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "videobox_provider_interfaces.stt.MockSTTProvider.transcribe",
+        _direction_mismatch_transcribe,
+    )
+    source_audio = tmp_path / "mismatch-runtime.wav"
+    source_script = tmp_path / "mismatch-runtime.txt"
+    source_audio.write_bytes(b"fake wav data")
+    source_script.write_text("Turn right now.", encoding="utf-8")
+
+    app = create_app(
+        projects_root=tmp_path,
+        local_first_runtime_service_factory=_local_first_service_factory(
+            local_provider=FakeStructuredProvider(
+                errors=[
+                    LLMProviderError(
+                        provider_name="local_qwen",
+                        message="offline test local unavailable",
+                        retryable=True,
+                        error_code="LOCAL_UNAVAILABLE",
+                    )
+                    for _ in range(8)
+                ]
+            ),
+            gemini_provider=FakeStructuredProvider(),
+            local_enabled=True,
+        ),
+    )
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "Mismatch Segment Draft"}).json()["project_id"]
+    narration_asset_id = client.post(
+        f"/api/projects/{project_id}/assets/narration-audio",
+        json={"source_path": str(source_audio)},
+    ).json()["asset_id"]
+    script_asset_id = client.post(
+        f"/api/projects/{project_id}/assets/script-document",
+        json={"source_path": str(source_script)},
+    ).json()["asset_id"]
+    transcription_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/transcription",
+        json={"narration_asset_id": narration_asset_id},
+    ).json()["job_id"]
+
+    response = client.post(
+        f"/api/projects/{project_id}/jobs/segment-analysis",
+        json={
+            "transcription_job_id": transcription_job_id,
+            "script_asset_id": script_asset_id,
+        },
+    )
+
+    assert response.status_code == 202
+    result = client.get(f"/api/projects/{project_id}/jobs/segment-analysis/{response.json()['job_id']}")
+    assert result.status_code == 200
+    segment = result.json()["segments"][0]
+    assert segment["text"] == "Turn left now."
+    assert segment["review_required"] is True
+    assert segment["cleanup_decision"] == "review"
+
+
+def test_segment_analysis_endpoint_flags_review_for_high_similarity_word_substitution(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "videobox_provider_interfaces.stt.MockSTTProvider.transcribe",
+        _high_similarity_word_substitution_transcribe,
+    )
+    source_audio = tmp_path / "near-match-runtime.wav"
+    source_script = tmp_path / "near-match-runtime.txt"
+    source_audio.write_bytes(b"fake wav data")
+    source_script.write_text("Send the final today.", encoding="utf-8")
+
+    app = create_app(
+        projects_root=tmp_path,
+        local_first_runtime_service_factory=_local_first_service_factory(
+            local_provider=FakeStructuredProvider(
+                errors=[
+                    LLMProviderError(
+                        provider_name="local_qwen",
+                        message="offline test local unavailable",
+                        retryable=True,
+                        error_code="LOCAL_UNAVAILABLE",
+                    )
+                    for _ in range(8)
+                ]
+            ),
+            gemini_provider=FakeStructuredProvider(),
+            local_enabled=True,
+        ),
+    )
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "Near Match Segment Draft"}).json()["project_id"]
+    narration_asset_id = client.post(
+        f"/api/projects/{project_id}/assets/narration-audio",
+        json={"source_path": str(source_audio)},
+    ).json()["asset_id"]
+    script_asset_id = client.post(
+        f"/api/projects/{project_id}/assets/script-document",
+        json={"source_path": str(source_script)},
+    ).json()["asset_id"]
+    transcription_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/transcription",
+        json={"narration_asset_id": narration_asset_id},
+    ).json()["job_id"]
+
+    response = client.post(
+        f"/api/projects/{project_id}/jobs/segment-analysis",
+        json={
+            "transcription_job_id": transcription_job_id,
+            "script_asset_id": script_asset_id,
+        },
+    )
+
+    assert response.status_code == 202
+    result = client.get(f"/api/projects/{project_id}/jobs/segment-analysis/{response.json()['job_id']}")
+    assert result.status_code == 200
+    segment = result.json()["segments"][0]
+    assert segment["text"] == "Send the file today."
+    assert segment["review_required"] is True
+    assert segment["cleanup_decision"] == "review"
+
+
+def test_segment_analysis_endpoint_aligns_single_line_multi_sentence_script_without_false_review_flags(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "videobox_provider_interfaces.stt.MockSTTProvider.transcribe",
+        _split_script_line_transcribe,
+    )
+    source_audio = tmp_path / "aligned-runtime-single-line.wav"
+    source_script = tmp_path / "aligned-runtime-single-line.txt"
+    source_audio.write_bytes(b"fake wav data")
+    source_script.write_text("Office overview intro. Team update starts.", encoding="utf-8")
+
+    app = create_app(
+        projects_root=tmp_path,
+        local_first_runtime_service_factory=_local_first_service_factory(
+            local_provider=FakeStructuredProvider(
+                errors=[
+                    LLMProviderError(
+                        provider_name="local_qwen",
+                        message="offline test local unavailable",
+                        retryable=True,
+                        error_code="LOCAL_UNAVAILABLE",
+                    )
+                    for _ in range(8)
+                ]
+            ),
+            gemini_provider=FakeStructuredProvider(),
+            local_enabled=True,
+        ),
+    )
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "Aligned Single Line Segment Draft"}).json()["project_id"]
+    narration_asset_id = client.post(
+        f"/api/projects/{project_id}/assets/narration-audio",
+        json={"source_path": str(source_audio)},
+    ).json()["asset_id"]
+    script_asset_id = client.post(
+        f"/api/projects/{project_id}/assets/script-document",
+        json={"source_path": str(source_script)},
+    ).json()["asset_id"]
+    transcription_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/transcription",
+        json={"narration_asset_id": narration_asset_id},
+    ).json()["job_id"]
+
+    response = client.post(
+        f"/api/projects/{project_id}/jobs/segment-analysis",
+        json={
+            "transcription_job_id": transcription_job_id,
+            "script_asset_id": script_asset_id,
+        },
+    )
+
+    assert response.status_code == 202
+    result = client.get(f"/api/projects/{project_id}/jobs/segment-analysis/{response.json()['job_id']}")
+    assert result.status_code == 200
+    segments = result.json()["segments"]
+    assert [segment["text"] for segment in segments] == [
+        "Office overview intro.",
+        "Team update starts.",
+    ]
+    assert all(segment["review_required"] is False for segment in segments)
+    assert all(segment["cleanup_decision"] == "keep" for segment in segments)
+
+
+def test_segment_analysis_endpoint_preserves_transcript_when_script_is_missing(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "videobox_provider_interfaces.stt.MockSTTProvider.transcribe",
+        _split_script_line_transcribe,
+    )
+    source_audio = tmp_path / "aligned-runtime-no-script.wav"
+    source_audio.write_bytes(b"fake wav data")
+
+    app = create_app(
+        projects_root=tmp_path,
+        local_first_runtime_service_factory=_local_first_service_factory(
+            local_provider=FakeStructuredProvider(
+                errors=[
+                    LLMProviderError(
+                        provider_name="local_qwen",
+                        message="offline test local unavailable",
+                        retryable=True,
+                        error_code="LOCAL_UNAVAILABLE",
+                    )
+                    for _ in range(8)
+                ]
+            ),
+            gemini_provider=FakeStructuredProvider(),
+            local_enabled=True,
+        ),
+    )
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "Missing Script Segment Draft"}).json()["project_id"]
+    narration_asset_id = client.post(
+        f"/api/projects/{project_id}/assets/narration-audio",
+        json={"source_path": str(source_audio)},
+    ).json()["asset_id"]
+    transcription_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/transcription",
+        json={"narration_asset_id": narration_asset_id},
+    ).json()["job_id"]
+
+    response = client.post(
+        f"/api/projects/{project_id}/jobs/segment-analysis",
+        json={
+            "transcription_job_id": transcription_job_id,
+            "script_asset_id": None,
+        },
+    )
+
+    assert response.status_code == 202
+    result = client.get(f"/api/projects/{project_id}/jobs/segment-analysis/{response.json()['job_id']}")
+    assert result.status_code == 200
+    segments = result.json()["segments"]
+    assert [segment["text"] for segment in segments] == [
+        "Office over",
+        "view intro",
+        "Team update starts.",
+    ]
+
+
+def test_segment_analysis_endpoint_keeps_spoken_words_when_script_is_only_partial_match(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "videobox_provider_interfaces.stt.MockSTTProvider.transcribe",
+        _split_script_line_transcribe,
+    )
+    source_audio = tmp_path / "aligned-runtime-partial-script.wav"
+    source_script = tmp_path / "aligned-runtime-partial-script.txt"
+    source_audio.write_bytes(b"fake wav data")
+    source_script.write_text("Office overview.", encoding="utf-8")
+
+    app = create_app(
+        projects_root=tmp_path,
+        local_first_runtime_service_factory=_local_first_service_factory(
+            local_provider=FakeStructuredProvider(
+                errors=[
+                    LLMProviderError(
+                        provider_name="local_qwen",
+                        message="offline test local unavailable",
+                        retryable=True,
+                        error_code="LOCAL_UNAVAILABLE",
+                    )
+                    for _ in range(8)
+                ]
+            ),
+            gemini_provider=FakeStructuredProvider(),
+            local_enabled=True,
+        ),
+    )
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "Partial Script Segment Draft"}).json()["project_id"]
+    narration_asset_id = client.post(
+        f"/api/projects/{project_id}/assets/narration-audio",
+        json={"source_path": str(source_audio)},
+    ).json()["asset_id"]
+    script_asset_id = client.post(
+        f"/api/projects/{project_id}/assets/script-document",
+        json={"source_path": str(source_script)},
+    ).json()["asset_id"]
+    transcription_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/transcription",
+        json={"narration_asset_id": narration_asset_id},
+    ).json()["job_id"]
+
+    response = client.post(
+        f"/api/projects/{project_id}/jobs/segment-analysis",
+        json={
+            "transcription_job_id": transcription_job_id,
+            "script_asset_id": script_asset_id,
+        },
+    )
+
+    assert response.status_code == 202
+    result = client.get(f"/api/projects/{project_id}/jobs/segment-analysis/{response.json()['job_id']}")
+    assert result.status_code == 200
+    segments = result.json()["segments"]
+    assert [segment["text"] for segment in segments] == [
+        "Office over view intro",
+        "Team update starts.",
+    ]
+
+
+def test_segment_analysis_endpoint_splits_coarse_transcript_segment_for_multi_sentence_script(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "videobox_provider_interfaces.stt.MockSTTProvider.transcribe",
+        _coarse_multi_sentence_transcribe,
+    )
+    source_audio = tmp_path / "coarse-runtime.wav"
+    source_script = tmp_path / "coarse-runtime.txt"
+    source_audio.write_bytes(b"fake wav data")
+    source_script.write_text("Office overview intro. Team update starts.", encoding="utf-8")
+
+    app = create_app(
+        projects_root=tmp_path,
+        local_first_runtime_service_factory=_local_first_service_factory(
+            local_provider=FakeStructuredProvider(
+                errors=[
+                    LLMProviderError(
+                        provider_name="local_qwen",
+                        message="offline test local unavailable",
+                        retryable=True,
+                        error_code="LOCAL_UNAVAILABLE",
+                    )
+                    for _ in range(8)
+                ]
+            ),
+            gemini_provider=FakeStructuredProvider(),
+            local_enabled=True,
+        ),
+    )
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "Coarse Segment Draft"}).json()["project_id"]
+    narration_asset_id = client.post(
+        f"/api/projects/{project_id}/assets/narration-audio",
+        json={"source_path": str(source_audio)},
+    ).json()["asset_id"]
+    script_asset_id = client.post(
+        f"/api/projects/{project_id}/assets/script-document",
+        json={"source_path": str(source_script)},
+    ).json()["asset_id"]
+    transcription_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/transcription",
+        json={"narration_asset_id": narration_asset_id},
+    ).json()["job_id"]
+
+    response = client.post(
+        f"/api/projects/{project_id}/jobs/segment-analysis",
+        json={
+            "transcription_job_id": transcription_job_id,
+            "script_asset_id": script_asset_id,
+        },
+    )
+
+    assert response.status_code == 202
+    result = client.get(f"/api/projects/{project_id}/jobs/segment-analysis/{response.json()['job_id']}")
+    assert result.status_code == 200
+    segments = result.json()["segments"]
+    assert [segment["text"] for segment in segments] == [
+        "Office overview intro.",
+        "Team update starts.",
+    ]
+    assert all(segment["review_required"] is False for segment in segments)
+
+
+def test_segment_analysis_endpoint_splits_coarse_transcript_segment_when_script_is_partial(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "videobox_provider_interfaces.stt.MockSTTProvider.transcribe",
+        _coarse_multi_sentence_transcribe,
+    )
+    source_audio = tmp_path / "coarse-runtime-partial.wav"
+    source_script = tmp_path / "coarse-runtime-partial.txt"
+    source_audio.write_bytes(b"fake wav data")
+    source_script.write_text("Office overview intro.", encoding="utf-8")
+
+    app = create_app(
+        projects_root=tmp_path,
+        local_first_runtime_service_factory=_local_first_service_factory(
+            local_provider=FakeStructuredProvider(
+                errors=[
+                    LLMProviderError(
+                        provider_name="local_qwen",
+                        message="offline test local unavailable",
+                        retryable=True,
+                        error_code="LOCAL_UNAVAILABLE",
+                    )
+                    for _ in range(8)
+                ]
+            ),
+            gemini_provider=FakeStructuredProvider(),
+            local_enabled=True,
+        ),
+    )
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "Coarse Partial Segment Draft"}).json()["project_id"]
+    narration_asset_id = client.post(
+        f"/api/projects/{project_id}/assets/narration-audio",
+        json={"source_path": str(source_audio)},
+    ).json()["asset_id"]
+    script_asset_id = client.post(
+        f"/api/projects/{project_id}/assets/script-document",
+        json={"source_path": str(source_script)},
+    ).json()["asset_id"]
+    transcription_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/transcription",
+        json={"narration_asset_id": narration_asset_id},
+    ).json()["job_id"]
+
+    response = client.post(
+        f"/api/projects/{project_id}/jobs/segment-analysis",
+        json={
+            "transcription_job_id": transcription_job_id,
+            "script_asset_id": script_asset_id,
+        },
+    )
+
+    assert response.status_code == 202
+    result = client.get(f"/api/projects/{project_id}/jobs/segment-analysis/{response.json()['job_id']}")
+    assert result.status_code == 200
+    segments = result.json()["segments"]
+    assert [segment["text"] for segment in segments] == [
+        "Office overview intro.",
+        "Team update starts.",
+    ]
+    assert all(segment["review_required"] is False for segment in segments)
 
 
 def test_segment_analysis_keeps_heuristic_review_flags_when_ai_downplays_risky_segment(
