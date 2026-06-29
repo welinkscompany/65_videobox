@@ -3870,6 +3870,50 @@ def test_preview_export_and_subtitles_require_explicit_approval_even_without_blo
     assert "approval" in preview_response.json()["detail"].lower()
 
 
+def test_editing_session_api_can_create_and_patch_caption_override(tmp_path: Path) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    create_response = client.post(
+        f"/api/projects/{project_id}/editing-sessions",
+        json={"timeline_job_id": timeline_job_id},
+    )
+
+    assert create_response.status_code == 201
+    session_id = create_response.json()["session_id"]
+
+    patch_response = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/caption",
+        json={"caption_text": "Manual caption fix"},
+    )
+
+    assert patch_response.status_code == 200
+    payload = patch_response.json()
+    assert payload["session_id"] == session_id
+    assert payload["segments"][0]["caption_text"] == "Manual caption fix"
+    assert payload["history"][-1]["mutation_type"] == "caption_update"
+
+
+def test_editing_session_api_rejects_blank_caption_override(tmp_path: Path) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    create_response = client.post(
+        f"/api/projects/{project_id}/editing-sessions",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    session_id = create_response.json()["session_id"]
+
+    patch_response = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/caption",
+        json={"caption_text": "   "},
+    )
+
+    assert patch_response.status_code == 422
+
+
 def test_approved_timeline_can_generate_subtitles_preview_and_export(
     tmp_path: Path,
     monkeypatch,

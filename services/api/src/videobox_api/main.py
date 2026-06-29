@@ -155,6 +155,50 @@ class OutputJobRequest(BaseModel):
     timeline_job_id: str = Field(min_length=1)
 
 
+class CreateEditingSessionRequest(BaseModel):
+    timeline_job_id: str = Field(min_length=1)
+
+
+class CaptionOverrideRequest(BaseModel):
+    caption_text: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_caption_text(self) -> "CaptionOverrideRequest":
+        caption_text = self.caption_text.strip()
+        if not caption_text:
+            raise ValueError("caption_text must not be blank.")
+        self.caption_text = caption_text
+        return self
+
+
+class EditingSessionSegmentResponse(BaseModel):
+    segment_id: str
+    caption_text: str
+    start_sec: float
+    end_sec: float
+    cut_action: str
+    review_required: bool
+    broll_override: dict[str, object] | None = None
+    visual_overlays: list[dict[str, object]] = Field(default_factory=list)
+    music_override: dict[str, object] | None = None
+
+
+class EditingSessionHistoryEntryResponse(BaseModel):
+    mutation_type: str
+    segment_id: str
+    caption_text: str | None = None
+
+
+class EditingSessionResponse(BaseModel):
+    session_id: str
+    project_id: str
+    timeline_id: str
+    segments: list[EditingSessionSegmentResponse]
+    history: list[EditingSessionHistoryEntryResponse] = Field(default_factory=list)
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
 class SegmentAnalysisRecord(BaseModel):
     segment_id: str | None = None
     text: str
@@ -663,6 +707,35 @@ def create_app(
             status=result["status"],
             timeline=TimelinePayloadResponse(**result["timeline"]),
         )
+
+    @app.post("/api/projects/{project_id}/editing-sessions", status_code=status.HTTP_201_CREATED)
+    def create_editing_session(project_id: str, payload: CreateEditingSessionRequest) -> EditingSessionResponse:
+        try:
+            result = orchestrator.create_editing_session(
+                project_id=project_id,
+                timeline_job_id=payload.timeline_job_id,
+            )
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return EditingSessionResponse(**result)
+
+    @app.patch("/api/projects/{project_id}/editing-sessions/{session_id}/segments/{segment_id}/caption")
+    def patch_editing_session_caption(
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+        payload: CaptionOverrideRequest,
+    ) -> EditingSessionResponse:
+        try:
+            result = orchestrator.update_segment_caption(
+                project_id=project_id,
+                session_id=session_id,
+                segment_id=segment_id,
+                caption_text=payload.caption_text,
+            )
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return EditingSessionResponse(**result)
 
     @app.get("/api/projects/{project_id}/review-snapshots/{job_id}")
     def get_review_snapshot(project_id: str, job_id: str) -> ReviewSnapshotResponse:

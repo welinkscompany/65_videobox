@@ -319,6 +319,24 @@ class ApiOrchestrator:
     def get_timeline_job(self, *, project_id: str, job_id: str) -> dict[str, Any]:
         return self.pipeline.get_timeline_result(project_id=project_id, job_id=job_id)
 
+    def create_editing_session(self, *, project_id: str, timeline_job_id: str) -> dict[str, Any]:
+        return self.pipeline.create_editing_session(project_id=project_id, timeline_job_id=timeline_job_id)
+
+    def update_segment_caption(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+        caption_text: str,
+    ) -> dict[str, Any]:
+        return self.pipeline.update_editing_session_segment_caption(
+            project_id=project_id,
+            session_id=session_id,
+            segment_id=segment_id,
+            caption_text=caption_text,
+        )
+
     def get_review_snapshot(self, *, project_id: str, job_id: str) -> dict[str, Any]:
         return self.pipeline.get_review_snapshot(project_id=project_id, job_id=job_id)
 

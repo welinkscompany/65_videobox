@@ -429,6 +429,44 @@ class LocalProjectStore:
         )
         return {"timeline_id": timeline_id, "file_uri": file_uri, "timeline": payload}
 
+    def save_editing_session(
+        self,
+        *,
+        project_id: str,
+        timeline_id: str,
+        session_payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        sequence = self._next_sequence(
+            self.project_root(project_id) / "editing_sessions",
+            "editing_session_*.json",
+        )
+        session_id = f"editing_session_{sequence:03d}"
+        return self._write_editing_session(
+            project_id=project_id,
+            timeline_id=timeline_id,
+            session_id=session_id,
+            session_payload=session_payload,
+            is_new=True,
+        )
+
+    def update_editing_session(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        session_payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        existing = self.get_editing_session(project_id=project_id, session_id=session_id)
+        created_at = str(existing.get("created_at") or self._now_iso())
+        return self._write_editing_session(
+            project_id=project_id,
+            timeline_id=str(existing["timeline_id"]),
+            session_id=session_id,
+            session_payload=session_payload,
+            is_new=False,
+            created_at=created_at,
+        )
+
     def save_review_state(
         self,
         *,
@@ -1326,6 +1364,27 @@ class LocalProjectStore:
         payload["metadata"] = json.loads(row["metadata_json"] or "{}")
         return payload
 
+    def get_editing_session(self, *, project_id: str, session_id: str) -> dict[str, Any]:
+        row = self._fetchone(
+            project_id,
+            """
+            SELECT session_id, project_id, timeline_id, file_uri, summary_json, created_at, updated_at
+            FROM editing_sessions
+            WHERE session_id = ?
+            """,
+            (session_id,),
+        )
+        if row is None:
+            raise KeyError(f"Editing session not found: {session_id}")
+        file_path = self.resolve_storage_uri(project_id=project_id, storage_uri=str(row["file_uri"]))
+        if not file_path.exists():
+            raise KeyError(f"Editing session JSON missing: {session_id}")
+        payload = json.loads(file_path.read_text(encoding="utf-8"))
+        payload["summary"] = json.loads(row["summary_json"] or "{}")
+        payload["created_at"] = row["created_at"]
+        payload["updated_at"] = row["updated_at"]
+        return payload
+
     def build_review_snapshot(
         self,
         *,
@@ -1726,6 +1785,7 @@ class LocalProjectStore:
             project_root / "analysis" / "transcripts",
             project_root / "analysis" / "segments",
             project_root / "analysis" / "recommendations",
+            project_root / "editing_sessions",
             project_root / "timelines",
             project_root / "previews",
             project_root / "subtitles",
@@ -1783,6 +1843,9 @@ class LocalProjectStore:
 
     def _connection(self, project_id: str) -> sqlite3.Connection:
         connection = sqlite3.connect(self.database_path(project_id))
+        for statement in PROJECT_SCHEMA_STATEMENTS:
+            connection.execute(statement)
+        connection.commit()
         connection.row_factory = sqlite3.Row
         return connection
 
@@ -1870,6 +1933,77 @@ class LocalProjectStore:
     def _json_object(self, raw_value: str | None) -> dict[str, Any]:
         decoded = json.loads(raw_value or "{}")
         return decoded if isinstance(decoded, dict) else {}
+
+    def _write_editing_session(
+        self,
+        *,
+        project_id: str,
+        timeline_id: str,
+        session_id: str,
+        session_payload: dict[str, Any],
+        is_new: bool,
+        created_at: str | None = None,
+    ) -> dict[str, Any]:
+        session_path = self.project_root(project_id) / "editing_sessions" / f"{session_id}.json"
+        file_uri = self._path_to_uri(project_id, session_path)
+        created_value = created_at or self._now_iso()
+        updated_at = self._now_iso()
+        payload = {
+            "session_id": session_id,
+            "project_id": project_id,
+            "timeline_id": timeline_id,
+            "segments": session_payload.get("segments", []),
+            "history": session_payload.get("history", []),
+            "created_at": created_value,
+            "updated_at": updated_at,
+        }
+        session_path.write_text(json.dumps(payload, indent=2, ensure_ascii=True), encoding="utf-8")
+        summary_json = json.dumps(
+            {
+                "segment_count": len(payload["segments"]),
+                "history_count": len(payload["history"]),
+            },
+            ensure_ascii=True,
+        )
+        if is_new:
+            self._execute(
+                project_id,
+                """
+                INSERT INTO editing_sessions (
+                    session_id,
+                    project_id,
+                    timeline_id,
+                    file_uri,
+                    summary_json,
+                    created_at,
+                    updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    session_id,
+                    project_id,
+                    timeline_id,
+                    file_uri,
+                    summary_json,
+                    created_value,
+                    updated_at,
+                ),
+            )
+        else:
+            self._execute(
+                project_id,
+                """
+                UPDATE editing_sessions
+                SET summary_json = ?, updated_at = ?
+                WHERE session_id = ?
+                """,
+                (
+                    summary_json,
+                    updated_at,
+                    session_id,
+                ),
+            )
+        return self.get_editing_session(project_id=project_id, session_id=session_id)
 
     def _timeline_file_path(self, *, project_id: str, timeline_id: str) -> Path:
         row = self._fetchone(

@@ -5,6 +5,7 @@ from typing import Any
 
 from videobox_capcut_export import CapCutExportAdapter
 from videobox_core_engine.auto_cut import AutoCutPlanner
+from videobox_core_engine.editing_session import build_editing_session, update_segment_caption
 from videobox_core_engine.output_operator_copy import (
     OutputOperatorCopyBuilder,
     StaticOutputOperatorCopyBuilder,
@@ -562,6 +563,40 @@ class LocalPipelineRunner:
             output_ref=persisted["timeline_id"],
         )
         return {"job_id": job["job_id"], "status": JobStatus.SUCCEEDED.value}
+
+    def create_editing_session(self, *, project_id: str, timeline_job_id: str) -> dict[str, Any]:
+        timeline = self.get_timeline_result(project_id=project_id, job_id=timeline_job_id)["timeline"]
+        segments = self._segments_for_timeline(project_id=project_id, timeline=timeline)
+        session_payload = build_editing_session(
+            project_id=project_id,
+            timeline=timeline,
+            segments=segments,
+        )
+        return self.store.save_editing_session(
+            project_id=project_id,
+            timeline_id=str(timeline["timeline_id"]),
+            session_payload=session_payload,
+        )
+
+    def update_editing_session_segment_caption(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+        caption_text: str,
+    ) -> dict[str, Any]:
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        updated_session = update_segment_caption(
+            session=session,
+            segment_id=segment_id,
+            caption_text=caption_text,
+        )
+        return self.store.update_editing_session(
+            project_id=project_id,
+            session_id=session_id,
+            session_payload=updated_session,
+        )
 
     def start_timeline_build(
         self,
