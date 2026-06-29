@@ -1385,8 +1385,25 @@ class LocalPipelineRunner:
         review_flags = timeline.get("review_flags", [])
         pending_recommendations = timeline.get("pending_recommendations", [])
         if review_flags or pending_recommendations:
+            review_flag_codes = [
+                f"{str(flag.get('code') or '')}@{str(flag.get('segment_id') or '')}"
+                for flag in review_flags
+                if isinstance(flag, dict)
+            ]
+            pending_codes = [
+                (
+                    f"{str(item.get('recommendation_type') or '')}:"
+                    f"{str(item.get('recommendation_id') or '')}@"
+                    f"{str(item.get('target_segment_id') or '')}"
+                )
+                for item in pending_recommendations
+                if isinstance(item, dict)
+            ]
             raise ValueError(
-                "Timeline still has review blockers. Clear review flags and pending recommendations before approval or output."
+                "Timeline still has review blockers. "
+                f"review_flags={review_flag_codes}; "
+                f"pending_recommendations={pending_codes}. "
+                "Clear review flags and pending recommendations before approval or output."
             )
 
     def _segments_for_timeline(
@@ -1483,6 +1500,7 @@ class LocalPipelineRunner:
                 continue
             if step == "tts_refresh":
                 self._execute_partial_regeneration_tts_refresh_step(
+                    project_id=project_id,
                     state=state,
                     session_segments=session_segments,
                     target_segment_ids=target_segment_ids,
@@ -1783,6 +1801,7 @@ class LocalPipelineRunner:
     def _execute_partial_regeneration_tts_refresh_step(
         self,
         *,
+        project_id: str,
         state: dict[str, Any],
         session_segments: dict[str, dict[str, Any]],
         target_segment_ids: set[str],
@@ -1806,6 +1825,12 @@ class LocalPipelineRunner:
             asset_id = str(selection.get("asset_id") or "").strip()
             if not recommendation_id or not asset_id:
                 continue
+            asset = self.store.get_asset(project_id=project_id, asset_id=asset_id)
+            if str(asset.get("asset_type") or "") not in {
+                AssetType.GENERATED_TTS_AUDIO.value,
+                AssetType.NARRATION_AUDIO.value,
+            }:
+                raise ValueError("TTS replacement must reference a generated_tts_audio or narration_audio asset.")
             provider_trace = build_provider_trace(
                 final_provider="editing_session_manual",
                 routing_mode="single_provider",
@@ -1818,10 +1843,11 @@ class LocalPipelineRunner:
                     "selected_asset_id": asset_id,
                     "score": 1.0,
                     "reason": "Manual TTS replacement selection from editing session.",
-                    "auto_apply_allowed": False,
-                    "review_required": True,
+                    "auto_apply_allowed": True,
+                    "review_required": False,
                     "payload": {
                         "selection_source": "editing_session",
+                        "selected_asset_uri": str(asset["storage_uri"]),
                         "provider_trace": provider_trace,
                     },
                     "created_at": self.store._now_iso(),

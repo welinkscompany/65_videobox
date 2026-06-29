@@ -25,6 +25,14 @@ class CapCutExportAdapter:
                 narration_source_uri=str(timeline.get("narration_source_uri") or ""),
                 subtitle_file_uri=subtitle_file_uri,
                 export_overlays=timeline.get("export_overlays", []),
+                narration_override_segments={
+                    str(item.get("target_segment_id") or "")
+                    for item in timeline.get("applied_recommendations", [])
+                    if isinstance(item, dict)
+                    and str(item.get("recommendation_type") or "") == "tts_replacement"
+                    and bool(item.get("auto_apply_allowed"))
+                    and not bool(item.get("review_required"))
+                },
             ),
             "notes": [
                 "CapCut export manifest generated for local post-editing handoff.",
@@ -38,6 +46,7 @@ class CapCutExportAdapter:
         narration_source_uri: str,
         subtitle_file_uri: str | None,
         export_overlays: Any,
+        narration_override_segments: set[str],
     ) -> list[dict[str, Any]]:
         capcut_tracks: list[dict[str, Any]] = []
         deferred_audio_tracks: list[dict[str, Any]] = []
@@ -50,12 +59,25 @@ class CapCutExportAdapter:
                         {**track, "source_uri": narration_source_uri},
                         track_name="voiceover",
                         track_role="audio",
+                        override_segment_ids=narration_override_segments,
                     )
                 )
             elif track_type == "broll":
-                capcut_tracks.append(self._build_clip_track(track, track_name="broll", track_role="video"))
+                capcut_tracks.append(
+                    self._build_clip_track(
+                        track,
+                        track_name="broll",
+                        track_role="video",
+                    )
+                )
             elif track_type == "bgm":
-                deferred_audio_tracks.append(self._build_clip_track(track, track_name="bgm", track_role="audio"))
+                deferred_audio_tracks.append(
+                    self._build_clip_track(
+                        track,
+                        track_name="bgm",
+                        track_role="audio",
+                    )
+                )
 
         if subtitle_file_uri:
             capcut_tracks.append(
@@ -106,20 +128,25 @@ class CapCutExportAdapter:
         *,
         track_name: str,
         track_role: str,
+        override_segment_ids: set[str] | None = None,
     ) -> dict[str, Any]:
         if track_name == "broll":
             return self._build_broll_track(track, track_name=track_name, track_role=track_role)
 
         segments = []
         track_source_uri = str(track.get("source_uri") or "")
+        effective_override_segment_ids = override_segment_ids or set()
         for clip in track.get("clips", []):
             start_sec = float(clip.get("start_sec") or 0.0)
             end_sec = float(clip.get("end_sec") or 0.0)
+            source_uri = track_source_uri or str(clip.get("asset_uri") or "")
+            if str(clip.get("segment_id") or "") in effective_override_segment_ids:
+                source_uri = str(clip.get("asset_uri") or source_uri)
             segments.append(
                 {
                     "clip_id": str(clip.get("clip_id") or ""),
                     "segment_id": str(clip.get("segment_id") or ""),
-                    "source_uri": track_source_uri or str(clip.get("asset_uri") or ""),
+                    "source_uri": source_uri,
                     "start_sec": start_sec,
                     "end_sec": end_sec,
                     "duration_sec": max(0.0, end_sec - start_sec),

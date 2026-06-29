@@ -3750,6 +3750,85 @@ def test_preview_and_capcut_export_require_review_clearance(tmp_path: Path) -> N
     assert not list((project_root / "exports" / "capcut").glob("export_*"))
 
 
+def test_preview_and_export_surface_pending_tts_replacement_blocker_before_approval(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Pending TTS Blocker Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 1.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [
+                {
+                    "code": "tts_replacement_review_required",
+                    "segment_id": "seg_001",
+                    "message": "Approved TTS replacement is still required before output.",
+                }
+            ],
+            "applied_recommendations": [],
+            "pending_recommendations": [
+                {
+                    "recommendation_id": "rec_tts_seg_001",
+                    "target_segment_id": "seg_001",
+                    "recommendation_type": "tts_replacement",
+                    "selected_asset_id": "asset_tts_001",
+                    "score": 1.0,
+                    "reason": "Manual TTS replacement selection from editing session.",
+                    "auto_apply_allowed": False,
+                    "review_required": True,
+                    "payload": {},
+                    "created_at": "2026-06-29T00:00:00+00:00",
+                }
+            ],
+        },
+    )
+    timeline_job = store.create_job(
+        project_id=project.project_id,
+        job_type=JobType.TIMELINE_BUILD,
+        input_ref="segment_analysis_job_001",
+        status=JobStatus.SUCCEEDED,
+    )
+    store.update_job(
+        project_id=project.project_id,
+        job_id=timeline_job["job_id"],
+        status=JobStatus.SUCCEEDED,
+        output_ref=timeline["timeline_id"],
+    )
+
+    client = TestClient(create_app(projects_root=tmp_path))
+    preview_response = client.post(
+        f"/api/projects/{project.project_id}/jobs/preview-render",
+        json={"timeline_job_id": timeline_job["job_id"]},
+    )
+    export_response = client.post(
+        f"/api/projects/{project.project_id}/jobs/capcut-export",
+        json={"timeline_job_id": timeline_job["job_id"]},
+    )
+
+    assert preview_response.status_code == 400
+    assert export_response.status_code == 400
+    assert "tts_replacement" in preview_response.json()["detail"]
+    assert "rec_tts_seg_001" in preview_response.json()["detail"]
+    assert "tts_replacement" in export_response.json()["detail"]
+    assert "rec_tts_seg_001" in export_response.json()["detail"]
+
+
 def test_preview_export_and_subtitles_require_explicit_approval_even_without_blockers(
     tmp_path: Path,
     monkeypatch,
@@ -3868,6 +3947,114 @@ def test_preview_export_and_subtitles_require_explicit_approval_even_without_blo
     assert export_response.status_code == 400
     assert subtitle_response.status_code == 400
     assert "approval" in preview_response.json()["detail"].lower()
+
+
+def test_approved_tts_replacement_flows_through_preview_and_export_outputs(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Approved TTS Output Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "narration_source_uri": f"local://projects/{project.project_id}/inputs/narration/source.wav",
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": (
+                                f"local://projects/{project.project_id}/assets/generated/"
+                                "asset_tts_approved_001.wav"
+                            ),
+                            "start_sec": 0.0,
+                            "end_sec": 1.0,
+                            "clip_type": "narration",
+                        },
+                        {
+                            "clip_id": "clip_narration_002",
+                            "segment_id": "seg_002",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_002",
+                            "start_sec": 1.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        },
+                    ],
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [
+                {
+                    "recommendation_id": "rec_tts_seg_001",
+                    "target_segment_id": "seg_001",
+                    "recommendation_type": "tts_replacement",
+                    "selected_asset_id": "asset_tts_approved_001",
+                    "score": 1.0,
+                    "reason": "Approved narration replacement.",
+                    "auto_apply_allowed": True,
+                    "review_required": False,
+                    "payload": {
+                        "selected_asset_uri": f"local://projects/{project.project_id}/assets/generated/asset_tts_approved_001.wav"
+                    },
+                    "created_at": "2026-06-29T00:00:00+00:00",
+                }
+            ],
+            "pending_recommendations": [],
+        },
+    )
+    timeline_job = store.create_job(
+        project_id=project.project_id,
+        job_type=JobType.TIMELINE_BUILD,
+        input_ref="segment_analysis_job_001",
+        status=JobStatus.SUCCEEDED,
+    )
+    store.update_job(
+        project_id=project.project_id,
+        job_id=timeline_job["job_id"],
+        status=JobStatus.SUCCEEDED,
+        output_ref=timeline["timeline_id"],
+    )
+    store.save_review_state(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        status="approved",
+    )
+
+    client = TestClient(create_app(projects_root=tmp_path))
+    preview_response = client.post(
+        f"/api/projects/{project.project_id}/jobs/preview-render",
+        json={"timeline_job_id": timeline_job["job_id"]},
+    )
+    export_response = client.post(
+        f"/api/projects/{project.project_id}/jobs/capcut-export",
+        json={"timeline_job_id": timeline_job["job_id"]},
+    )
+
+    assert preview_response.status_code == 202
+    assert export_response.status_code == 202
+
+    preview_payload = client.get(
+        f"/api/projects/{project.project_id}/previews/{preview_response.json()['job_id']}"
+    ).json()
+    export_payload = client.get(
+        f"/api/projects/{project.project_id}/exports/{export_response.json()['job_id']}"
+    ).json()
+
+    preview_html_path = store.resolve_storage_uri(
+        project_id=project.project_id,
+        storage_uri=preview_payload["preview"]["player_uri"],
+    )
+    assert "asset_tts_approved_001" in preview_html_path.read_text(encoding="utf-8")
+    voiceover_track = next(
+        track for track in export_payload["export"]["capcut_tracks"] if track["track_name"] == "voiceover"
+    )
+    assert [segment["source_uri"] for segment in voiceover_track["segments"]] == [
+        f"local://projects/{project.project_id}/assets/generated/asset_tts_approved_001.wav",
+        f"local://projects/{project.project_id}/inputs/narration/source.wav",
+    ]
 
 
 def test_editing_session_api_can_create_and_patch_caption_override(tmp_path: Path) -> None:
@@ -4283,6 +4470,12 @@ def test_editing_session_api_can_start_partial_regeneration_for_explanation_and_
     app = create_app(projects_root=tmp_path)
     client = TestClient(app)
     project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+    tts_audio = tmp_path / "editing-session-tts.wav"
+    tts_audio.write_bytes(b"tts wav data")
+    tts_asset_id = client.post(
+        f"/api/projects/{project_id}/assets/narration-audio",
+        json={"source_path": str(tts_audio)},
+    ).json()["asset_id"]
 
     create_response = client.post(
         f"/api/projects/{project_id}/editing-sessions",
@@ -4300,7 +4493,7 @@ def test_editing_session_api_can_start_partial_regeneration_for_explanation_and_
     )
     client.patch(
         f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/tts-replacement",
-        json={"recommendation_id": "rec_tts_seg_001", "asset_id": "asset_tts_001"},
+        json={"recommendation_id": "rec_tts_seg_001", "asset_id": tts_asset_id},
     )
 
     response = client.post(

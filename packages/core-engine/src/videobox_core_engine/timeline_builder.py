@@ -54,11 +54,25 @@ class TimelineBuilder:
 
         for index, segment in enumerate(normalized_segments, start=1):
             segment_id = str(segment["segment_id"])
+            narration_asset_uri = f"local://projects/{project_id}/segments/{segment_id}"
+            for recommendation in by_segment.get(segment_id, []):
+                if (
+                    str(recommendation.get("recommendation_type") or "") == "tts_replacement"
+                    and bool(recommendation.get("auto_apply_allowed"))
+                    and not bool(recommendation.get("review_required"))
+                ):
+                    payload = recommendation.get("payload")
+                    if not isinstance(payload, dict):
+                        payload = {}
+                    selected_asset_uri = str(payload.get("selected_asset_uri") or "").strip()
+                    if selected_asset_uri:
+                        narration_asset_uri = selected_asset_uri
+                    break
             narration_clips.append(
                 TimelineClip(
                     clip_id=f"clip_narration_{index:03d}",
                     segment_id=segment_id,
-                    asset_uri=f"local://projects/{project_id}/segments/{segment_id}",
+                    asset_uri=narration_asset_uri,
                     start_sec=float(segment["start_sec"]),
                     end_sec=float(segment["end_sec"]),
                     clip_type="narration",

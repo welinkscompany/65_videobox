@@ -5,6 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from videobox_core_engine.local_pipeline import LocalPipelineRunner as _LocalPipelineRunner
+from videobox_domain_models.assets import AssetType
 from videobox_storage.local_project_store import LocalProjectStore
 
 
@@ -1575,10 +1576,19 @@ def test_partial_regeneration_pipeline_preserves_image_and_table_overlay_shapes(
     ]
 
 
-def test_partial_regeneration_pipeline_adds_pending_tts_replacement_recommendation(tmp_path: Path) -> None:
+def test_partial_regeneration_pipeline_applies_tts_replacement_as_review_blocked_narration_change(
+    tmp_path: Path,
+) -> None:
     store = LocalProjectStore(tmp_path)
     project = store.bootstrap_project(name="Partial Regeneration TTS Project")
     runner = _LocalPipelineRunner(store)
+    tts_audio = tmp_path / "tts-approved-001.wav"
+    tts_audio.write_bytes(b"tts wav data")
+    tts_asset = store.register_asset(
+        project_id=project.project_id,
+        asset_type=AssetType.GENERATED_TTS_AUDIO,
+        source_path=tts_audio,
+    )
 
     store.save_timeline_run(
         project_id=project.project_id,
@@ -1636,7 +1646,7 @@ def test_partial_regeneration_pipeline_adds_pending_tts_replacement_recommendati
                     "music_override": None,
                     "tts_replacement": {
                         "recommendation_id": "rec_tts_seg_001",
-                        "asset_id": "asset_tts_001",
+                        "asset_id": tts_asset.asset_id,
                     },
                 },
                 {
@@ -1665,18 +1675,151 @@ def test_partial_regeneration_pipeline_adds_pending_tts_replacement_recommendati
     result = runner.get_partial_regeneration_result(project_id=project.project_id, job_id=started["job_id"])
 
     assert result["downstream_steps"] == ["tts_refresh", "timeline_build"]
-    assert result["timeline"]["pending_recommendations"] == [
+    assert result["timeline"]["pending_recommendations"] == []
+    assert result["timeline"]["applied_recommendations"] == [
         {
             "recommendation_id": "rec_tts_seg_001",
             "target_segment_id": "seg_001",
             "recommendation_type": "tts_replacement",
-            "selected_asset_id": "asset_tts_001",
+            "selected_asset_id": tts_asset.asset_id,
             "score": 1.0,
             "reason": "Manual TTS replacement selection from editing session.",
-            "auto_apply_allowed": False,
-            "review_required": True,
+            "auto_apply_allowed": True,
+            "review_required": False,
+                "payload": {
+                    "selection_source": "editing_session",
+                    "selected_asset_uri": tts_asset.storage_uri,
+                    "provider_trace": {
+                        "routing_mode": "single_provider",
+                        "final_provider": "editing_session_manual",
+                    "fallback_reasons": [],
+                },
+            },
+            "provider_trace": {
+                "routing_mode": "single_provider",
+                "final_provider": "editing_session_manual",
+                "fallback_reasons": [],
+            },
+            "created_at": result["timeline"]["applied_recommendations"][0]["created_at"],
+        }
+    ]
+    assert result["timeline"]["tracks"][0]["track_type"] == "narration"
+    assert result["timeline"]["tracks"][0]["clips"][0]["asset_uri"] == tts_asset.storage_uri
+
+
+def test_partial_regeneration_pipeline_applies_approved_tts_replacement_to_target_narration_only(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Partial Regeneration Approved TTS Project")
+    runner = _LocalPipelineRunner(store)
+    tts_audio = tmp_path / "tts-approved-002.wav"
+    tts_audio.write_bytes(b"tts wav data 2")
+    tts_asset = store.register_asset(
+        project_id=project.project_id,
+        asset_type=AssetType.GENERATED_TTS_AUDIO,
+        source_path=tts_audio,
+    )
+
+    store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "narration_source_uri": f"local://projects/{project.project_id}/inputs/narration/source.wav",
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        },
+                        {
+                            "clip_id": "clip_narration_002",
+                            "segment_id": "seg_002",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_002",
+                            "start_sec": 2.0,
+                            "end_sec": 4.0,
+                            "clip_type": "narration",
+                        },
+                    ],
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+            "export_overlays": [],
+            "lineage": {
+                "segment_analysis_job_id": "segment_analysis_job_001",
+                "recommendation_job_ids": [],
+            },
+        },
+    )
+    saved_session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id="timeline_001",
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Caption one",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [],
+                    "music_override": None,
+                    "tts_replacement": {
+                        "recommendation_id": "rec_tts_seg_001",
+                        "asset_id": tts_asset.asset_id,
+                    },
+                },
+                {
+                    "segment_id": "seg_002",
+                    "caption_text": "Caption two",
+                    "start_sec": 2.0,
+                    "end_sec": 4.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [],
+                    "music_override": None,
+                    "tts_replacement": None,
+                },
+            ],
+            "history": [],
+        },
+    )
+
+    started = runner.start_editing_session_partial_regeneration(
+        project_id=project.project_id,
+        session_id=saved_session["session_id"],
+        segment_ids=["seg_001"],
+        fields=["tts_replacement"],
+    )
+    result = runner.get_partial_regeneration_result(project_id=project.project_id, job_id=started["job_id"])
+
+    assert result["timeline"]["pending_recommendations"] == []
+    assert result["timeline"]["applied_recommendations"] == [
+        {
+            "recommendation_id": "rec_tts_seg_001",
+            "target_segment_id": "seg_001",
+            "recommendation_type": "tts_replacement",
+            "selected_asset_id": tts_asset.asset_id,
+            "score": 1.0,
+            "reason": "Manual TTS replacement selection from editing session.",
+            "auto_apply_allowed": True,
+            "review_required": False,
             "payload": {
                 "selection_source": "editing_session",
+                "selected_asset_uri": tts_asset.storage_uri,
                 "provider_trace": {
                     "routing_mode": "single_provider",
                     "final_provider": "editing_session_manual",
@@ -1688,7 +1831,10 @@ def test_partial_regeneration_pipeline_adds_pending_tts_replacement_recommendati
                 "final_provider": "editing_session_manual",
                 "fallback_reasons": [],
             },
-            "created_at": result["timeline"]["pending_recommendations"][0]["created_at"],
+            "created_at": result["timeline"]["applied_recommendations"][0]["created_at"],
         }
     ]
-    assert result["timeline"]["tracks"][0]["track_type"] == "narration"
+    assert [clip["asset_uri"] for clip in result["timeline"]["tracks"][0]["clips"]] == [
+        tts_asset.storage_uri,
+        f"local://projects/{project.project_id}/segments/seg_002",
+    ]

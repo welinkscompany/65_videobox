@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from html import escape
 from typing import Any
 
 
@@ -33,9 +34,28 @@ class PreviewRenderer:
     def _build_player_html(self, *, project_id: str, timeline: dict[str, Any]) -> str:
         tracks = timeline.get("tracks", [])
         review_status = timeline.get("review_status", "approved")
+        tts_segments = {
+            str(item.get("target_segment_id") or "")
+            for item in timeline.get("applied_recommendations", [])
+            if isinstance(item, dict)
+            and str(item.get("recommendation_type") or "") == "tts_replacement"
+            and bool(item.get("auto_apply_allowed"))
+            and not bool(item.get("review_required"))
+        }
         track_items = "".join(
-            f"<li><strong>{track['track_type']}</strong>: {len(track.get('clips', []))} clips</li>"
+            f"<li><strong>{escape(str(track['track_type']))}</strong>: {len(track.get('clips', []))} clips</li>"
             for track in tracks
+        )
+        narration_source_items = "".join(
+            (
+                "<li>"
+                f"{escape(str(clip.get('segment_id', '')))}: "
+                f"{escape(self._effective_narration_source_uri(timeline=timeline, clip=clip, tts_segments=tts_segments))}"
+                "</li>"
+            )
+            for track in tracks
+            if track.get("track_type") == "narration"
+            for clip in track.get("clips", [])
         )
         return f"""<!doctype html>
 <html lang="en">
@@ -51,9 +71,9 @@ class PreviewRenderer:
   <body>
     <div class="frame">
       <h1>VideoBox Local Preview</h1>
-      <p>Project: {project_id}</p>
-      <p>Timeline: {timeline['timeline_id']}</p>
-      <p>Review status: {review_status}</p>
+      <p>Project: {escape(str(project_id))}</p>
+      <p>Timeline: {escape(str(timeline['timeline_id']))}</p>
+      <p>Review status: {escape(str(review_status))}</p>
       <div class="stage">
         <div>
           <h2>Playable placeholder preview</h2>
@@ -62,6 +82,20 @@ class PreviewRenderer:
       </div>
       <h3>Track summary</h3>
       <ul>{track_items}</ul>
+      <h3>Narration sources</h3>
+      <ul>{narration_source_items}</ul>
     </div>
   </body>
 </html>"""
+
+    def _effective_narration_source_uri(
+        self,
+        *,
+        timeline: dict[str, Any],
+        clip: dict[str, Any],
+        tts_segments: set[str],
+    ) -> str:
+        segment_id = str(clip.get("segment_id") or "")
+        if segment_id in tts_segments:
+            return str(clip.get("asset_uri") or "")
+        return str(timeline.get("narration_source_uri") or clip.get("asset_uri") or "")
