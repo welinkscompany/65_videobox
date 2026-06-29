@@ -324,19 +324,18 @@
 - 로컬 프로젝트, 자산 등록, job 저장, timeline 저장, review 상태 저장 구조는 이미 코드와 테스트로 검증되어 있다
 - transcript alignment, segment analysis, B-roll 추천, 음악 추천, timeline 생성, review approval, subtitle render, preview render, CapCut export 흐름이 이미 연결돼 있다
 - 로컬 우선 LLM runtime은 `Local Qwen -> Gemini fallback` 구조로 이미 들어가 있다
-- 전체 백엔드 테스트는 2026-06-29 기준 `179 passed` 상태다
+- editing session 생성/조회/수정 API와 partial regeneration request contract가 이미 들어가 있다
+- 전체 백엔드 테스트는 현재 기준 `194 passed` 상태다
 
 현재 기준으로 아직 비어 있는 핵심 범위:
 
-- 경량 후편집기용 `editing session` 도메인 모델
-- 편집 수정 내역 저장 구조
-- 편집 mutation API
-- 부분 재생성 contract와 적용 규칙
-- 설명 카드/이미지/표 삽입을 timeline 수정으로 다루는 규칙
+- partial regeneration의 실제 job 실행 연결
+- 편집 세션 수정 결과를 timeline 재작성 또는 후속 생성 단계에 반영하는 규칙
+- 설명 카드/이미지/표 삽입을 지금보다 세분화한 수정 규칙
 - TTS 대체를 편집 세션에서 다루는 planner/provider 연결
 
 정리하면, 지금 단계에서 바로 해야 할 일은 `편집기 UI 반입`이 아니다.
-먼저 `편집 상태 모델 + 저장 + 수정 API + 부분 재생성 규칙`을 고정해야 한다.
+먼저 `편집 상태 모델 + 저장 + 수정 API + 부분 재생성 규칙`을 기반으로 실제 재생성 실행과 timeline 반영 규칙을 고정해야 한다.
 
 ## 9. 리스크
 
@@ -445,10 +444,11 @@
 
 1. `editing session` 데이터 모델 작성
 2. 편집 세션 저장/조회 구조 작성
-3. 컷/자막/B-roll/설명 자산 수정 API 작성
+3. 컷/자막/B-roll/설명 자산/음악 수정 API 작성
 4. 부분 재생성 요청 contract와 적용 범위 규칙 작성
-5. 얇은 내부 편집 UI로 수정 흐름 검증
-6. 그 다음 오픈소스 편집기 셸 선별 반입 여부 평가
+5. 실제 partial regeneration job 연결
+6. 얇은 내부 편집 UI로 수정 흐름 검증
+7. 그 다음 오픈소스 편집기 셸 선별 반입 여부 평가
 
 중요:
 

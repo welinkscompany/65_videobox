@@ -3,9 +3,9 @@
 ## 1. 결론
 
 현재 개발은 계획서에서 크게 새지 않았다.
-다만 이제부터는 `경량 후편집기 UI`가 아니라 `편집 세션 기반`으로 개발 축을 옮겨야 한다.
+그리고 `경량 후편집기 UI`가 아니라 `편집 세션 기반`으로 먼저 가야 한다는 방향도 실제 코드로 반영됐다.
 
-즉, 다음 구현은 아래가 맞다.
+현재까지 반영된 핵심은 아래다.
 
 - `editing session` 모델
 - 수정 저장 구조
@@ -14,7 +14,7 @@
 
 ## 2. 확인된 사실
 
-2026-06-29 기준 아래는 코드와 테스트로 확인됐다.
+현재 기준 아래는 코드와 테스트로 확인됐다.
 
 - 로컬 프로젝트/자산/job 저장 구조 존재
 - segment analysis 파이프라인 존재
@@ -23,18 +23,19 @@
 - timeline 생성과 review approval 존재
 - subtitle render, preview render, CapCut export 존재
 - Local Qwen 우선 + Gemini fallback runtime 존재
-- 전체 테스트 `179 passed`
+- editing session 생성/조회 존재
+- caption / cut / B-roll / visual overlay / music override 수정 API 존재
+- partial regeneration request contract와 validation 존재
+- 전체 테스트 `194 passed`
 
 ## 3. 아직 부족한 부분
 
 아래는 다음 단계 전에 필요한 핵심 빈칸이다.
 
-- 편집 세션의 기준 데이터 구조가 없다
-- timeline을 수정 가능한 상태로 다루는 mutation 계층이 없다
-- 수정 이력 저장 규칙이 없다
-- 부분 재생성 범위가 정의되지 않았다
-- 설명 카드/이미지/표 삽입을 어떤 레벨에서 저장할지 아직 고정되지 않았다
+- partial regeneration을 실제 재실행 job으로 연결하는 단계
+- 설명 카드/이미지/표 수정 규칙을 지금보다 더 세분화하는 단계
 - TTS 대체를 추천에서 실제 편집 선택으로 넘기는 연결이 없다
+- 편집 세션 수정 결과를 timeline 재작성 또는 후속 생성 단계와 연결하는 규칙이 아직 최소 수준이다
 
 ## 4. 왜 지금 UI부터 가면 안 되는가
 
@@ -51,12 +52,11 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 
 다음 goal은 아래 범위로 묶는 것이 맞다.
 
-1. `editing_session.py` 추가
-2. 편집 세션 저장용 storage 확장
-3. API에서 편집 세션 생성/조회/수정 endpoint 추가
-4. 컷, 자막, B-roll, 설명 자산, 음악 수정 contract 추가
-5. 부분 재생성 request/response 정의
-6. 해당 범위 TDD 완료
+1. partial regeneration request를 실제 job 실행으로 연결
+2. 편집 세션 수정 결과를 timeline 반영 규칙과 연결
+3. 설명 자산 수정 범위를 더 세분화
+4. TTS 대체 선택을 편집 세션 mutation으로 연결
+5. 해당 범위 TDD 완료
 
 ## 6. 이번 단계에서 의도적으로 안 하는 것
 

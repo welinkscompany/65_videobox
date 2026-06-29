@@ -3914,6 +3914,122 @@ def test_editing_session_api_rejects_blank_caption_override(tmp_path: Path) -> N
     assert patch_response.status_code == 422
 
 
+def test_editing_session_api_can_fetch_cut_and_broll_updates(tmp_path: Path) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    create_response = client.post(
+        f"/api/projects/{project_id}/editing-sessions",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    session_id = create_response.json()["session_id"]
+
+    cut_response = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/cut-action",
+        json={"cut_action": "remove"},
+    )
+    broll_response = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/broll",
+        json={"asset_id": "asset_manual_001"},
+    )
+    get_response = client.get(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}",
+    )
+
+    assert cut_response.status_code == 200
+    assert broll_response.status_code == 200
+    assert get_response.status_code == 200
+    payload = get_response.json()
+    assert payload["segments"][0]["cut_action"] == "remove"
+    assert payload["segments"][0]["broll_override"] == {"asset_id": "asset_manual_001"}
+    assert payload["history"][-2]["mutation_type"] == "cut_action_update"
+    assert payload["history"][-1]["mutation_type"] == "broll_override_update"
+
+
+def test_editing_session_api_can_build_partial_regeneration_request(tmp_path: Path) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    create_response = client.post(
+        f"/api/projects/{project_id}/editing-sessions",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    session_id = create_response.json()["session_id"]
+
+    response = client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/partial-regeneration",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["broll", "visual_overlay"],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["session_id"] == session_id
+    assert payload["segment_ids"] == ["seg_001"]
+    assert payload["fields"] == ["broll", "visual_overlay"]
+
+
+def test_editing_session_api_rejects_invalid_partial_regeneration_request(tmp_path: Path) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    create_response = client.post(
+        f"/api/projects/{project_id}/editing-sessions",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    session_id = create_response.json()["session_id"]
+
+    response = client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/partial-regeneration",
+        json={
+            "segment_ids": ["does_not_exist"],
+            "fields": ["not_a_real_field"],
+        },
+    )
+
+    assert response.status_code == 400
+
+
+def test_editing_session_api_can_fetch_visual_overlay_and_music_updates(tmp_path: Path) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    create_response = client.post(
+        f"/api/projects/{project_id}/editing-sessions",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    session_id = create_response.json()["session_id"]
+
+    visual_response = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/visual-overlay",
+        json={"overlay_type": "image_card", "asset_id": "asset_image_001"},
+    )
+    music_response = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/music",
+        json={"asset_id": "music_manual_001"},
+    )
+    get_response = client.get(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}",
+    )
+
+    assert visual_response.status_code == 200
+    assert music_response.status_code == 200
+    assert get_response.status_code == 200
+    payload = get_response.json()
+    assert payload["segments"][0]["visual_overlays"] == [
+        {"overlay_type": "image_card", "asset_id": "asset_image_001"}
+    ]
+    assert payload["segments"][0]["music_override"] == {"asset_id": "music_manual_001"}
+    assert payload["history"][-2]["mutation_type"] == "visual_overlay_update"
+    assert payload["history"][-1]["mutation_type"] == "music_override_update"
+
+
 def test_approved_timeline_can_generate_subtitles_preview_and_export(
     tmp_path: Path,
     monkeypatch,

@@ -171,6 +171,58 @@ class CaptionOverrideRequest(BaseModel):
         return self
 
 
+class CutActionOverrideRequest(BaseModel):
+    cut_action: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_cut_action(self) -> "CutActionOverrideRequest":
+        cut_action = self.cut_action.strip()
+        if cut_action not in {"keep", "remove", "trim"}:
+            raise ValueError("cut_action must be one of: keep, remove, trim.")
+        self.cut_action = cut_action
+        return self
+
+
+class BrollOverrideRequest(BaseModel):
+    asset_id: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_asset_id(self) -> "BrollOverrideRequest":
+        asset_id = self.asset_id.strip()
+        if not asset_id:
+            raise ValueError("asset_id must not be blank.")
+        self.asset_id = asset_id
+        return self
+
+
+class VisualOverlayRequest(BaseModel):
+    overlay_type: str = Field(min_length=1)
+    asset_id: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_visual_overlay(self) -> "VisualOverlayRequest":
+        overlay_type = self.overlay_type.strip()
+        asset_id = self.asset_id.strip()
+        if not overlay_type:
+            raise ValueError("overlay_type must not be blank.")
+        if not asset_id:
+            raise ValueError("asset_id must not be blank.")
+        self.overlay_type = overlay_type
+        self.asset_id = asset_id
+        return self
+
+
+class PartialRegenerationRequest(BaseModel):
+    segment_ids: list[str] = Field(min_length=1)
+    fields: list[str] = Field(min_length=1)
+
+
+class PartialRegenerationResponse(BaseModel):
+    session_id: str | None = None
+    segment_ids: list[str] = Field(default_factory=list)
+    fields: list[str] = Field(default_factory=list)
+
+
 class EditingSessionSegmentResponse(BaseModel):
     segment_id: str
     caption_text: str
@@ -187,6 +239,9 @@ class EditingSessionHistoryEntryResponse(BaseModel):
     mutation_type: str
     segment_id: str
     caption_text: str | None = None
+    cut_action: str | None = None
+    asset_id: str | None = None
+    overlay_type: str | None = None
 
 
 class EditingSessionResponse(BaseModel):
@@ -719,6 +774,17 @@ def create_app(
             raise _http_error(exc) from exc
         return EditingSessionResponse(**result)
 
+    @app.get("/api/projects/{project_id}/editing-sessions/{session_id}")
+    def get_editing_session(project_id: str, session_id: str) -> EditingSessionResponse:
+        try:
+            result = orchestrator.get_editing_session(
+                project_id=project_id,
+                session_id=session_id,
+            )
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return EditingSessionResponse(**result)
+
     @app.patch("/api/projects/{project_id}/editing-sessions/{session_id}/segments/{segment_id}/caption")
     def patch_editing_session_caption(
         project_id: str,
@@ -732,6 +798,96 @@ def create_app(
                 session_id=session_id,
                 segment_id=segment_id,
                 caption_text=payload.caption_text,
+            )
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return EditingSessionResponse(**result)
+
+    @app.patch("/api/projects/{project_id}/editing-sessions/{session_id}/segments/{segment_id}/cut-action")
+    def patch_editing_session_cut_action(
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+        payload: CutActionOverrideRequest,
+    ) -> EditingSessionResponse:
+        try:
+            result = orchestrator.update_segment_cut_action(
+                project_id=project_id,
+                session_id=session_id,
+                segment_id=segment_id,
+                cut_action=payload.cut_action,
+            )
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return EditingSessionResponse(**result)
+
+    @app.patch("/api/projects/{project_id}/editing-sessions/{session_id}/segments/{segment_id}/broll")
+    def patch_editing_session_broll_override(
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+        payload: BrollOverrideRequest,
+    ) -> EditingSessionResponse:
+        try:
+            result = orchestrator.update_segment_broll_override(
+                project_id=project_id,
+                session_id=session_id,
+                segment_id=segment_id,
+                asset_id=payload.asset_id,
+            )
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return EditingSessionResponse(**result)
+
+    @app.post("/api/projects/{project_id}/editing-sessions/{session_id}/partial-regeneration")
+    def build_editing_session_partial_regeneration_request(
+        project_id: str,
+        session_id: str,
+        payload: PartialRegenerationRequest,
+    ) -> PartialRegenerationResponse:
+        try:
+            result = orchestrator.build_editing_session_partial_regeneration_request(
+                project_id=project_id,
+                session_id=session_id,
+                segment_ids=payload.segment_ids,
+                fields=payload.fields,
+            )
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return PartialRegenerationResponse(**result)
+
+    @app.patch("/api/projects/{project_id}/editing-sessions/{session_id}/segments/{segment_id}/visual-overlay")
+    def patch_editing_session_visual_overlay(
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+        payload: VisualOverlayRequest,
+    ) -> EditingSessionResponse:
+        try:
+            result = orchestrator.update_segment_visual_overlay(
+                project_id=project_id,
+                session_id=session_id,
+                segment_id=segment_id,
+                overlay_type=payload.overlay_type,
+                asset_id=payload.asset_id,
+            )
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return EditingSessionResponse(**result)
+
+    @app.patch("/api/projects/{project_id}/editing-sessions/{session_id}/segments/{segment_id}/music")
+    def patch_editing_session_music_override(
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+        payload: BrollOverrideRequest,
+    ) -> EditingSessionResponse:
+        try:
+            result = orchestrator.update_segment_music_override(
+                project_id=project_id,
+                session_id=session_id,
+                segment_id=segment_id,
+                asset_id=payload.asset_id,
             )
         except Exception as exc:
             raise _http_error(exc) from exc

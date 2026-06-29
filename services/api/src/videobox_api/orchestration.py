@@ -322,6 +322,9 @@ class ApiOrchestrator:
     def create_editing_session(self, *, project_id: str, timeline_job_id: str) -> dict[str, Any]:
         return self.pipeline.create_editing_session(project_id=project_id, timeline_job_id=timeline_job_id)
 
+    def get_editing_session(self, *, project_id: str, session_id: str) -> dict[str, Any]:
+        return self.pipeline.get_editing_session(project_id=project_id, session_id=session_id)
+
     def update_segment_caption(
         self,
         *,
@@ -335,6 +338,83 @@ class ApiOrchestrator:
             session_id=session_id,
             segment_id=segment_id,
             caption_text=caption_text,
+        )
+
+    def update_segment_cut_action(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+        cut_action: str,
+    ) -> dict[str, Any]:
+        return self.pipeline.update_editing_session_segment_cut_action(
+            project_id=project_id,
+            session_id=session_id,
+            segment_id=segment_id,
+            cut_action=cut_action,
+        )
+
+    def update_segment_broll_override(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+        asset_id: str,
+    ) -> dict[str, Any]:
+        return self.pipeline.update_editing_session_segment_broll_override(
+            project_id=project_id,
+            session_id=session_id,
+            segment_id=segment_id,
+            asset_id=asset_id,
+        )
+
+    def build_editing_session_partial_regeneration_request(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        segment_ids: list[str],
+        fields: list[str],
+    ) -> dict[str, Any]:
+        return self.pipeline.build_editing_session_partial_regeneration_request(
+            project_id=project_id,
+            session_id=session_id,
+            segment_ids=segment_ids,
+            fields=fields,
+        )
+
+    def update_segment_visual_overlay(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+        overlay_type: str,
+        asset_id: str,
+    ) -> dict[str, Any]:
+        return self.pipeline.update_editing_session_segment_visual_overlay(
+            project_id=project_id,
+            session_id=session_id,
+            segment_id=segment_id,
+            overlay_type=overlay_type,
+            asset_id=asset_id,
+        )
+
+    def update_segment_music_override(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+        asset_id: str,
+    ) -> dict[str, Any]:
+        return self.pipeline.update_editing_session_segment_music_override(
+            project_id=project_id,
+            session_id=session_id,
+            segment_id=segment_id,
+            asset_id=asset_id,
         )
 
     def get_review_snapshot(self, *, project_id: str, job_id: str) -> dict[str, Any]:

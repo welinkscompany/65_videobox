@@ -5,7 +5,15 @@ from typing import Any
 
 from videobox_capcut_export import CapCutExportAdapter
 from videobox_core_engine.auto_cut import AutoCutPlanner
-from videobox_core_engine.editing_session import build_editing_session, update_segment_caption
+from videobox_core_engine.editing_session import (
+    build_editing_session,
+    build_partial_regeneration_request,
+    update_segment_broll_override,
+    update_segment_caption,
+    update_segment_cut_action,
+    update_segment_music_override,
+    update_segment_visual_overlay,
+)
 from videobox_core_engine.output_operator_copy import (
     OutputOperatorCopyBuilder,
     StaticOutputOperatorCopyBuilder,
@@ -591,6 +599,106 @@ class LocalPipelineRunner:
             session=session,
             segment_id=segment_id,
             caption_text=caption_text,
+        )
+        return self.store.update_editing_session(
+            project_id=project_id,
+            session_id=session_id,
+            session_payload=updated_session,
+        )
+
+    def get_editing_session(self, *, project_id: str, session_id: str) -> dict[str, Any]:
+        return self.store.get_editing_session(project_id=project_id, session_id=session_id)
+
+    def update_editing_session_segment_cut_action(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+        cut_action: str,
+    ) -> dict[str, Any]:
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        updated_session = update_segment_cut_action(
+            session=session,
+            segment_id=segment_id,
+            cut_action=cut_action,
+        )
+        return self.store.update_editing_session(
+            project_id=project_id,
+            session_id=session_id,
+            session_payload=updated_session,
+        )
+
+    def update_editing_session_segment_broll_override(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+        asset_id: str,
+    ) -> dict[str, Any]:
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        updated_session = update_segment_broll_override(
+            session=session,
+            segment_id=segment_id,
+            asset_id=asset_id,
+        )
+        return self.store.update_editing_session(
+            project_id=project_id,
+            session_id=session_id,
+            session_payload=updated_session,
+        )
+
+    def build_editing_session_partial_regeneration_request(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        segment_ids: list[str],
+        fields: list[str],
+    ) -> dict[str, Any]:
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        return build_partial_regeneration_request(
+            session=session,
+            segment_ids=segment_ids,
+            fields=fields,
+        )
+
+    def update_editing_session_segment_visual_overlay(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+        overlay_type: str,
+        asset_id: str,
+    ) -> dict[str, Any]:
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        updated_session = update_segment_visual_overlay(
+            session=session,
+            segment_id=segment_id,
+            overlay_type=overlay_type,
+            asset_id=asset_id,
+        )
+        return self.store.update_editing_session(
+            project_id=project_id,
+            session_id=session_id,
+            session_payload=updated_session,
+        )
+
+    def update_editing_session_segment_music_override(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+        asset_id: str,
+    ) -> dict[str, Any]:
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        updated_session = update_segment_music_override(
+            session=session,
+            segment_id=segment_id,
+            asset_id=asset_id,
         )
         return self.store.update_editing_session(
             project_id=project_id,

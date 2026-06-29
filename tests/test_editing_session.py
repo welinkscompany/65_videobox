@@ -150,3 +150,151 @@ def test_partial_regeneration_request_scopes_only_targeted_segments() -> None:
     assert request["session_id"] is None
     assert request["segment_ids"] == ["seg_002"]
     assert request["fields"] == ["broll", "visual_overlay"]
+
+
+def test_update_segment_cut_action_records_history() -> None:
+    from videobox_core_engine.editing_session import build_editing_session
+    from videobox_core_engine.editing_session import update_segment_cut_action
+
+    session = build_editing_session(
+        project_id="project_001",
+        timeline={"timeline_id": "timeline_001"},
+        segments=[
+            {
+                "segment_id": "seg_001",
+                "text": "Keep this",
+                "start_sec": 0.0,
+                "end_sec": 1.0,
+                "review_required": False,
+                "cleanup_decision": "keep",
+            }
+        ],
+    )
+
+    updated = update_segment_cut_action(
+        session=session,
+        segment_id="seg_001",
+        cut_action="remove",
+    )
+
+    assert updated["segments"][0]["cut_action"] == "remove"
+    assert updated["history"][-1]["mutation_type"] == "cut_action_update"
+
+
+def test_update_segment_broll_override_records_history() -> None:
+    from videobox_core_engine.editing_session import build_editing_session
+    from videobox_core_engine.editing_session import update_segment_broll_override
+
+    session = build_editing_session(
+        project_id="project_001",
+        timeline={"timeline_id": "timeline_001"},
+        segments=[
+            {
+                "segment_id": "seg_001",
+                "text": "Keep this",
+                "start_sec": 0.0,
+                "end_sec": 1.0,
+                "review_required": False,
+                "cleanup_decision": "keep",
+            }
+        ],
+    )
+
+    updated = update_segment_broll_override(
+        session=session,
+        segment_id="seg_001",
+        asset_id="asset_manual_001",
+    )
+
+    assert updated["segments"][0]["broll_override"] == {"asset_id": "asset_manual_001"}
+    assert updated["history"][-1]["mutation_type"] == "broll_override_update"
+
+
+def test_update_segment_visual_overlay_records_history() -> None:
+    from videobox_core_engine.editing_session import build_editing_session
+    from videobox_core_engine.editing_session import update_segment_visual_overlay
+
+    session = build_editing_session(
+        project_id="project_001",
+        timeline={"timeline_id": "timeline_001"},
+        segments=[
+            {
+                "segment_id": "seg_001",
+                "text": "Keep this",
+                "start_sec": 0.0,
+                "end_sec": 1.0,
+                "review_required": False,
+                "cleanup_decision": "keep",
+            }
+        ],
+    )
+
+    updated = update_segment_visual_overlay(
+        session=session,
+        segment_id="seg_001",
+        overlay_type="image_card",
+        asset_id="asset_image_001",
+    )
+
+    assert updated["segments"][0]["visual_overlays"] == [
+        {"overlay_type": "image_card", "asset_id": "asset_image_001"}
+    ]
+    assert updated["history"][-1]["mutation_type"] == "visual_overlay_update"
+
+
+def test_update_segment_music_override_records_history() -> None:
+    from videobox_core_engine.editing_session import build_editing_session
+    from videobox_core_engine.editing_session import update_segment_music_override
+
+    session = build_editing_session(
+        project_id="project_001",
+        timeline={"timeline_id": "timeline_001"},
+        segments=[
+            {
+                "segment_id": "seg_001",
+                "text": "Keep this",
+                "start_sec": 0.0,
+                "end_sec": 1.0,
+                "review_required": False,
+                "cleanup_decision": "keep",
+            }
+        ],
+    )
+
+    updated = update_segment_music_override(
+        session=session,
+        segment_id="seg_001",
+        asset_id="music_manual_001",
+    )
+
+    assert updated["segments"][0]["music_override"] == {"asset_id": "music_manual_001"}
+    assert updated["history"][-1]["mutation_type"] == "music_override_update"
+
+
+def test_partial_regeneration_request_rejects_unknown_segment_and_field() -> None:
+    import pytest
+
+    from videobox_core_engine.editing_session import build_editing_session
+    from videobox_core_engine.editing_session import build_partial_regeneration_request
+
+    session = build_editing_session(
+        project_id="project_001",
+        timeline={"timeline_id": "timeline_001"},
+        segments=[
+            {
+                "segment_id": "seg_001",
+                "text": "Keep this",
+                "start_sec": 0.0,
+                "end_sec": 1.0,
+                "review_required": False,
+                "cleanup_decision": "keep",
+            }
+        ],
+    )
+
+    with pytest.raises(ValueError):
+        build_partial_regeneration_request(
+            session=session,
+            segment_ids=["does_not_exist"],
+            fields=["not_a_real_field"],
+        )
