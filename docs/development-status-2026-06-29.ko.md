@@ -11,6 +11,8 @@
 - 수정 저장 구조
 - 수정 API
 - 부분 재생성 규칙
+- 설명 카드 / 이미지 / 표 편집 mutation
+- TTS replacement 선택 / 해제 mutation
 
 ## 2. 확인된 사실
 
@@ -25,17 +27,19 @@
 - Local Qwen 우선 + Gemini fallback runtime 존재
 - editing session 생성/조회 존재
 - caption / cut / B-roll / visual overlay / music override 수정 API 존재
-- partial regeneration request contract와 validation 존재
-- 전체 테스트 `194 passed`
+- explanation card / image overlay / table overlay / TTS replacement 수정 API 존재
+- partial regeneration request contract와 explicit downstream rerun mapping 존재
+- partial regeneration 실제 backend job 실행 존재
+- 전체 테스트 `221 passed`
 
 ## 3. 아직 부족한 부분
 
 아래는 다음 단계 전에 필요한 핵심 빈칸이다.
 
-- partial regeneration을 실제 재실행 job으로 연결하는 단계
-- 설명 카드/이미지/표 수정 규칙을 지금보다 더 세분화하는 단계
-- TTS 대체를 추천에서 실제 편집 선택으로 넘기는 연결이 없다
-- 편집 세션 수정 결과를 timeline 재작성 또는 후속 생성 단계와 연결하는 규칙이 아직 최소 수준이다
+- TTS replacement를 실제 narration asset swap / preview/export 반영까지 연결하는 단계
+- image/table/explanation 편집을 프런트 편집기 UI에서 직접 다루는 단계
+- partial regeneration preflight를 UI나 API에서 미리 조회하는 비파괴 확인 경로
+- 실제 오디오 치환 이후 review 승인과 export 반영 규칙을 더 세분화하는 단계
 
 ## 4. 왜 지금 UI부터 가면 안 되는가
 
@@ -52,10 +56,10 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 
 다음 goal은 아래 범위로 묶는 것이 맞다.
 
-1. partial regeneration request를 실제 job 실행으로 연결
-2. 편집 세션 수정 결과를 timeline 반영 규칙과 연결
-3. 설명 자산 수정 범위를 더 세분화
-4. TTS 대체 선택을 편집 세션 mutation으로 연결
+1. TTS replacement를 실제 narration replacement runtime과 연결
+2. review-required 상태에서 preview/export가 어떤 식으로 막히거나 안내되는지 규칙 고정
+3. partial regeneration preflight contract를 API로 노출할지 결정
+4. 얇은 내부 편집 UI에서 새 mutation을 직접 검증
 5. 해당 범위 TDD 완료
 
 ## 6. 이번 단계에서 의도적으로 안 하는 것
@@ -76,16 +80,19 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 
 이번 재검증에서 아래를 다시 확인했다.
 
-- 전체 백엔드 회귀 테스트 `194 passed`
+- 전체 백엔드 회귀 테스트 `221 passed`
 - blank caption 거부 동작 정상
 - invalid partial regeneration request 거부 동작 정상
 - unknown session segment / unsupported field 거부 동작 정상
 - `editing_sessions` 저장/조회와 기존 프로젝트 self-heal 동작 유지
+- explanation/image/table/TTS mutation API 정상
+- image/table/visual overlay 삭제 경로 정상
+- legacy `visual-overlay`가 다른 overlay 타입을 덮어쓰지 않도록 정리됨
+- empty visual overlay state가 partial regeneration 결과에서 실제 clear로 반영됨
 
 이번 재검증 기준 신규 치명 버그는 다시 확인되지 않았다.
 다만 다음 구현 전 반드시 채워야 할 빈칸은 여전히 아래다.
 
-- partial regeneration 실제 job 실행 연결
-- editing session 수정 결과의 timeline 반영 규칙
-- 설명 자산 수정 범위 세분화
-- TTS 대체의 editing session mutation 연결
+- TTS replacement의 실제 narration/output 반영
+- review-required TTS 흐름의 승인 후 적용 규칙
+- 새 mutation을 직접 다루는 편집기 UI 검증
