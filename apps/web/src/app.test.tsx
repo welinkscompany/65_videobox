@@ -1609,6 +1609,11 @@ describe("App", () => {
     expect(
       screen.getByText(/this rerun is expected to create a new draft that still needs approval before output jobs run/i),
     ).toBeInTheDocument();
+    expect(screen.getByText(/resumed rerun scope/i)).toBeInTheDocument();
+    expect(screen.getByText(/1 segment in scope/i)).toBeInTheDocument();
+    expect(screen.getByText(/seg_002 included in resumed scope/i)).toBeInTheDocument();
+    expect(screen.getByText(/broll field resumed/i)).toBeInTheDocument();
+    expect(screen.getByText(/explanation card field resumed/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /approve timeline/i })).toBeEnabled();
     expect(screen.getByRole("button", { name: /generate subtitle file/i })).toBeDisabled();
   });
@@ -1749,6 +1754,13 @@ describe("App", () => {
     fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
 
     expect(await screen.findByText(/partial_regeneration_job_001/i)).toBeInTheDocument();
+    expect(screen.getByText(/resumed rerun scope/i)).toBeInTheDocument();
+    expect(screen.getByText(/2 segments in scope/i)).toBeInTheDocument();
+    expect(screen.getByText(/seg_001 included in resumed scope/i)).toBeInTheDocument();
+    expect(screen.getByText(/seg_002 included in resumed scope/i)).toBeInTheDocument();
+    expect(screen.getByText(/caption field resumed/i)).toBeInTheDocument();
+    expect(screen.getByText(/broll field resumed/i)).toBeInTheDocument();
+    expect(screen.getByText(/multi-segment resumed scope is readable here, but not mapped into single-segment editor defaults/i)).toBeInTheDocument();
     expect(
       fetchMock,
     ).not.toHaveBeenCalledWith(

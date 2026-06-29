@@ -1033,6 +1033,8 @@ export function App() {
     ],
   );
   const decisionBlockerCount = decisionBlockerSegmentIds.size;
+  const resumedScopeSegmentIds = partialRegenerationRun?.segment_ids ?? [];
+  const resumedScopeFields = partialRegenerationRun?.fields ?? [];
   const decisionCue = !partialRegenerationRun
     ? null
     : decisionBlockerCount > 0
@@ -1808,6 +1810,24 @@ export function App() {
                       <h3>{partialRegenerationRun.job_id}</h3>
                       <p>{partialRegenerationRun.status}</p>
                       <p>{partialRegenerationRun.delta?.timeline_id ?? "timeline pending"}</p>
+                      <h3>Resumed rerun scope</h3>
+                      <p>{`${resumedScopeSegmentIds.length} ${resumedScopeSegmentIds.length === 1 ? "segment" : "segments"} in scope`}</p>
+                      <div className="clip-list">
+                        {resumedScopeSegmentIds.map((segmentId) => (
+                          <span key={segmentId}>{`${segmentId} included in resumed scope`}</span>
+                        ))}
+                      </div>
+                      <div className="clip-list">
+                        {resumedScopeFields.map((field) => (
+                          <span key={field}>{`${formatFieldLabel(field)} field resumed`}</span>
+                        ))}
+                      </div>
+                      {resumedScopeSegmentIds.length > 1 ? (
+                        <p>
+                          Multi-segment resumed scope is readable here, but not mapped into
+                          single-segment editor defaults.
+                        </p>
+                      ) : null}
                       <p>{`Changed segments ${changedSegmentIds.size}`}</p>
                       <p>{`Preserved segments ${preservedEditingSegments.length}`}</p>
                       {(partialRegenerationRun.delta?.regenerated_segments ?? []).map((segment) => (
