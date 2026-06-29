@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from videobox_capcut_export import CapCutExportAdapter
+from videobox_core_engine.auto_cut import AutoCutPlanner
 from videobox_core_engine.output_operator_copy import (
     OutputOperatorCopyBuilder,
     StaticOutputOperatorCopyBuilder,
@@ -36,6 +37,7 @@ class LocalPipelineRunner:
         timeline_builder: TimelineBuilder | None = None,
         preview_renderer: PreviewRenderer | None = None,
         capcut_exporter: CapCutExportAdapter | None = None,
+        auto_cut_planner: AutoCutPlanner | None = None,
     ) -> None:
         self.store = store
         self.stt_provider = stt_provider or MockSTTProvider()
@@ -47,6 +49,7 @@ class LocalPipelineRunner:
         self.timeline_builder = timeline_builder or TimelineBuilder()
         self.preview_renderer = preview_renderer or PreviewRenderer()
         self.capcut_exporter = capcut_exporter or CapCutExportAdapter()
+        self.auto_cut_planner = auto_cut_planner or AutoCutPlanner()
 
     def register_narration_asset(self, *, project_id: str, source_path: Path) -> dict[str, Any]:
         asset = self.store.register_asset(
@@ -79,6 +82,83 @@ class LocalPipelineRunner:
             metadata={"title": title or source_path.stem, "tags": tags or []},
         )
         return self._asset_payload(asset)
+
+    def register_raw_video_asset(self, *, project_id: str, source_path: Path) -> dict[str, Any]:
+        asset = self.store.register_asset(
+            project_id=project_id,
+            asset_type=AssetType.RAW_VIDEO,
+            source_path=source_path,
+        )
+        return self._asset_payload(asset)
+
+    def plan_auto_cut_segments(
+        self,
+        *,
+        project_id: str,
+        raw_video_asset_id: str,
+        total_duration: float,
+        scene_timestamps: list[float],
+        black_regions: list[dict[str, float]],
+        segment_samples: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        asset = self.store.get_asset(project_id=project_id, asset_id=raw_video_asset_id)
+        if asset["asset_type"] != AssetType.RAW_VIDEO.value:
+            raise ValueError("auto_cut planning requires a raw_video asset.")
+
+        should_auto_cut = self.auto_cut_planner.should_auto_cut(total_duration=total_duration)
+        planned_segments = (
+            self.auto_cut_planner.plan_segments(
+                total_duration=total_duration,
+                scene_timestamps=scene_timestamps,
+                black_regions=black_regions,
+            )
+            if should_auto_cut
+            else []
+        )
+        if should_auto_cut:
+            planned_boundaries = sorted(
+                (round(segment.start_sec, 2), round(segment.end_sec, 2))
+                for segment in planned_segments
+            )
+            sample_boundaries = sorted(
+                (round(float(sample["start_sec"]), 2), round(float(sample["end_sec"]), 2))
+                for sample in segment_samples
+            )
+            if sample_boundaries != planned_boundaries:
+                raise ValueError("auto_cut segment_samples must match planned segment boundaries.")
+        kept_segments = (
+            sorted(
+                self.auto_cut_planner.filter_segments(segment_samples),
+                key=lambda segment: (segment.start_sec, segment.end_sec),
+            )
+            if should_auto_cut
+            else []
+        )
+        return {
+            "asset_id": asset["asset_id"],
+            "storage_uri": asset["storage_uri"],
+            "should_auto_cut": should_auto_cut,
+            "scene_detection_filter": self.auto_cut_planner.build_scene_detection_filter(),
+            "blackdetect_filter": self.auto_cut_planner.build_blackdetect_filter(),
+            "planned_segments": [
+                {
+                    "start_sec": segment.start_sec,
+                    "end_sec": segment.end_sec,
+                }
+                for segment in planned_segments
+            ],
+            "kept_segments": [
+                {
+                    "start_sec": segment.start_sec,
+                    "end_sec": segment.end_sec,
+                    "duration_sec": segment.duration_sec,
+                    "avg_brightness": segment.avg_brightness,
+                    "scene_change_count": segment.scene_change_count,
+                    "reasons": list(segment.reasons),
+                }
+                for segment in kept_segments
+            ],
+        }
 
     def start_transcription(self, *, project_id: str, narration_asset_id: str) -> dict[str, Any]:
         job = self.store.create_job(

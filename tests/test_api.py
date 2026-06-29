@@ -3388,6 +3388,117 @@ def test_approved_timeline_can_generate_subtitles_preview_and_export(
     ]
 
 
+def test_auto_cut_module_introduction_does_not_break_approved_output_flow(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    def clean_transcribe(self, request):  # noqa: ANN001
+        return STTResult(
+            text="Office overview. Team meeting overview.",
+            segments=[
+                STTSegment(start_sec=0.0, end_sec=1.0, text="Office overview.", confidence=0.99),
+                STTSegment(
+                    start_sec=1.0,
+                    end_sec=2.2,
+                    text="Team meeting overview.",
+                    confidence=0.98,
+                ),
+            ],
+            provider_name="mock_stt",
+        )
+
+    monkeypatch.setattr(
+        "videobox_provider_interfaces.stt.MockSTTProvider.transcribe",
+        clean_transcribe,
+    )
+
+    source_audio = tmp_path / "source-narration.wav"
+    source_script = tmp_path / "source-script.txt"
+    broll_city = tmp_path / "city-office.mp4"
+    source_audio.write_bytes(b"fake wav data")
+    source_script.write_text("Office overview.\n\nTeam meeting overview.\n", encoding="utf-8")
+    broll_city.write_bytes(b"video bytes 1")
+
+    app = create_app(
+        projects_root=tmp_path,
+        local_first_runtime_service_factory=_local_first_service_factory(
+            local_provider=FakeStructuredProvider(
+                errors=[
+                    LLMProviderError(
+                        provider_name="local_qwen",
+                        message="offline test local unavailable",
+                        retryable=True,
+                        error_code="LOCAL_UNAVAILABLE",
+                    )
+                    for _ in range(8)
+                ]
+            ),
+            gemini_provider=FakeStructuredProvider(),
+            local_enabled=True,
+        ),
+    )
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "AutoCut Regression Draft"}).json()["project_id"]
+
+    narration_asset_id = client.post(
+        f"/api/projects/{project_id}/assets/narration-audio",
+        json={"source_path": str(source_audio)},
+    ).json()["asset_id"]
+    script_asset_id = client.post(
+        f"/api/projects/{project_id}/assets/script-document",
+        json={"source_path": str(source_script)},
+    ).json()["asset_id"]
+    client.post(
+        f"/api/projects/{project_id}/assets/broll-video",
+        json={
+            "source_path": str(broll_city),
+            "title": "Office skyline",
+            "tags": ["office", "city", "overview"],
+        },
+    )
+
+    transcription_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/transcription",
+        json={"narration_asset_id": narration_asset_id},
+    ).json()["job_id"]
+    segment_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/segment-analysis",
+        json={
+            "transcription_job_id": transcription_job_id,
+            "script_asset_id": script_asset_id,
+        },
+    ).json()["job_id"]
+    broll_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/broll-recommendation",
+        json={"segment_analysis_job_id": segment_job_id},
+    ).json()["job_id"]
+    music_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/music-recommendation",
+        json={"segment_analysis_job_id": segment_job_id},
+    ).json()["job_id"]
+    timeline_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/build-timeline",
+        json={
+            "segment_analysis_job_id": segment_job_id,
+            "recommendation_job_ids": [broll_job_id, music_job_id],
+        },
+    ).json()["job_id"]
+
+    assert client.post(
+        f"/api/projects/{project_id}/review-approvals/{timeline_job_id}/approve"
+    ).status_code == 202
+    export_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/capcut-export",
+        json={"timeline_job_id": timeline_job_id},
+    ).json()["job_id"]
+
+    export_result = client.get(f"/api/projects/{project_id}/exports/{export_job_id}")
+
+    assert export_result.status_code == 200
+    assert export_result.json()["status"] == "succeeded"
+    assert export_result.json()["export"]["export_type"] == "capcut"
+
+
 def test_gemini_key_management_api_masks_secrets_and_supports_state_changes(tmp_path: Path) -> None:
     app = create_app(projects_root=tmp_path)
     client = TestClient(app)
