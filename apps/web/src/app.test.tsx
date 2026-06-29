@@ -334,6 +334,94 @@ const partialRegenerationResponse = {
   },
 };
 
+const partialRegenerationResultResponse = {
+  job_id: "partial_regeneration_job_001",
+  status: "succeeded",
+  partial_regeneration_id: "partial_regeneration_run_001",
+  session_id: "editing_session_001",
+  source_timeline_id: "timeline_001",
+  timeline_id: "timeline_002",
+  segment_ids: ["seg_002"],
+  fields: ["broll", "explanation_card"],
+  downstream_steps: ["broll_refresh", "overlay_refresh", "timeline_build"],
+  regenerated_segments: [
+    {
+      segment_id: "seg_002",
+      changed_fields: ["broll", "explanation_card"],
+      output_changes: [
+        "b-roll asset replaced with regenerated recommendation",
+        "explanation card text refreshed",
+      ],
+    },
+  ],
+  timeline: {
+    timeline_id: "timeline_002",
+    project_id: "project_001",
+    version: "v002",
+    output_mode: "review",
+    review_status: "draft",
+    tracks: [
+      {
+        track_id: "narration_primary",
+        track_type: "narration",
+        clips: [
+          {
+            clip_id: "clip_narration_001",
+            segment_id: "seg_001",
+            asset_uri: "local://projects/project_001/segments/seg_001",
+            start_sec: 0,
+            end_sec: 3.5,
+            clip_type: "narration",
+            recommendation_id: null,
+          },
+          {
+            clip_id: "clip_narration_002",
+            segment_id: "seg_002",
+            asset_uri: "local://projects/project_001/segments/seg_002",
+            start_sec: 3.5,
+            end_sec: 7.8,
+            clip_type: "narration",
+            recommendation_id: null,
+          },
+        ],
+      },
+      {
+        track_id: "broll_overlay",
+        track_type: "broll",
+        clips: [
+          {
+            clip_id: "clip_broll_002",
+            segment_id: "seg_002",
+            asset_uri: "local://projects/project_001/assets/asset_broll_regenerated_002",
+            start_sec: 3.5,
+            end_sec: 7.8,
+            clip_type: "broll",
+            recommendation_id: "rec_broll_regenerated_002",
+          },
+        ],
+      },
+      {
+        track_id: "overlay_track",
+        track_type: "overlay",
+        clips: [
+          {
+            clip_id: "clip_overlay_002",
+            segment_id: "seg_002",
+            asset_uri: "inline://overlay/explanation_card/seg_002",
+            start_sec: 3.5,
+            end_sec: 7.8,
+            clip_type: "overlay",
+            recommendation_id: "rec_overlay_regenerated_002",
+          },
+        ],
+      },
+    ],
+    review_flags: [],
+    applied_recommendations: [],
+    pending_recommendations: [],
+  },
+};
+
 const geminiKeysResponse = {
   keys: [
     {
@@ -502,6 +590,9 @@ function createFetchMock({
       return new Response(JSON.stringify(partialRegenerationResponse), {
         status: 202,
       });
+    }
+    if (url.endsWith("/api/projects/project_001/partial-regenerations/partial_regeneration_job_001")) {
+      return new Response(JSON.stringify(partialRegenerationResultResponse));
     }
     if (url.endsWith("/api/projects/project_001/providers/gemini/keys")) {
       if (init?.method === "POST") {
@@ -1008,7 +1099,7 @@ describe("App", () => {
     });
 
     expect(await screen.findByText(/editing_session_001/i)).toBeInTheDocument();
-    expect(await screen.findByText(/seg_002/i)).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /seg_002/i })).toBeInTheDocument();
     expect(await screen.findByText(/asset_manual_002/i)).toBeInTheDocument();
     expect(
       screen.getByText(/meeting context: summarize the active discussion\./i),
@@ -1030,7 +1121,7 @@ describe("App", () => {
     });
 
     expect(await screen.findByText(/expected affected output areas/i)).toBeInTheDocument();
-    expect(screen.getByText(/b-roll track/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/b-roll track/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/timeline preview/i)).toBeInTheDocument();
     expect(screen.getByText(/capcut export/i)).toBeInTheDocument();
 
@@ -1054,5 +1145,53 @@ describe("App", () => {
       screen.getByText(/b-roll asset replaced with regenerated recommendation/i),
     ).toBeInTheDocument();
     expect(screen.getByText(/timeline_002/i)).toBeInTheDocument();
+  });
+
+  it("rebases regeneration field selection when switching the target segment", async () => {
+    const fetchMock = createFetchMock();
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /start editing session/i }));
+
+    expect(await screen.findByRole("button", { name: /seg_002/i })).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: /broll/i })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /explanation card/i })).toBeChecked();
+
+    fireEvent.click(screen.getByRole("button", { name: /seg_001/i }));
+
+    expect(screen.getByRole("checkbox", { name: /caption/i })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /broll/i })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /explanation card/i })).not.toBeChecked();
+  });
+
+  it("shows a timeline-centered editing shell with changed-vs-preserved context after partial regeneration", async () => {
+    const fetchMock = createFetchMock();
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /start editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /request regeneration preflight/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /run partial regeneration/i }));
+
+    expect(await screen.findByRole("heading", { name: /timeline-centered editor shell/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /selected segment detail/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /track impact summary/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /changed segment focus/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /preserved timeline area/i })).toBeInTheDocument();
+
+    expect(screen.getByText(/seg_002 changed in current run/i)).toBeInTheDocument();
+    expect(screen.getByText(/seg_001 preserved from prior timeline/i)).toBeInTheDocument();
+    expect(screen.getByText(/changed segments 1/i)).toBeInTheDocument();
+    expect(screen.getByText(/preserved segments 1/i)).toBeInTheDocument();
+
+    expect(screen.getByText(/narration track/i)).toBeInTheDocument();
+    expect(screen.getByText(/b-roll track/i)).toBeInTheDocument();
+    expect(screen.getByText(/overlay track/i)).toBeInTheDocument();
+    expect(screen.getByText(/asset_broll_regenerated_002/i)).toBeInTheDocument();
   });
 });

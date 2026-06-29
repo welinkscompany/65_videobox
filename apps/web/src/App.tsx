@@ -129,6 +129,29 @@ function buildEditingDrafts(session: EditingSession) {
   ) as Record<string, EditingSegmentDraft>;
 }
 
+function buildDefaultRegenerationFields(segment: EditingSessionSegment | null) {
+  if (!segment) {
+    return [] as string[];
+  }
+  const defaultFields: string[] = [];
+  if (segment.broll_override) {
+    defaultFields.push("broll");
+  }
+  if (readOverlay(segment, "explanation_card")) {
+    defaultFields.push("explanation_card");
+  }
+  if (readOverlay(segment, "image_overlay")) {
+    defaultFields.push("image_overlay");
+  }
+  if (readOverlay(segment, "table_overlay")) {
+    defaultFields.push("table_overlay");
+  }
+  if (segment.tts_replacement) {
+    defaultFields.push("tts_replacement");
+  }
+  return defaultFields.length > 0 ? defaultFields : ["caption"];
+}
+
 function buildDefaultEditingSelection(session: EditingSession) {
   const selectedSegment =
     session.segments.find(
@@ -141,25 +164,9 @@ function buildDefaultEditingSelection(session: EditingSession) {
   if (!selectedSegment) {
     return { segmentId: null, fields: [] as string[] };
   }
-  const defaultFields: string[] = [];
-  if (selectedSegment.broll_override) {
-    defaultFields.push("broll");
-  }
-  if (readOverlay(selectedSegment, "explanation_card")) {
-    defaultFields.push("explanation_card");
-  }
-  if (readOverlay(selectedSegment, "image_overlay")) {
-    defaultFields.push("image_overlay");
-  }
-  if (readOverlay(selectedSegment, "table_overlay")) {
-    defaultFields.push("table_overlay");
-  }
-  if (selectedSegment.tts_replacement) {
-    defaultFields.push("tts_replacement");
-  }
   return {
     segmentId: selectedSegment.segment_id,
-    fields: defaultFields.length > 0 ? defaultFields : ["caption"],
+    fields: buildDefaultRegenerationFields(selectedSegment),
   };
 }
 
@@ -172,6 +179,13 @@ function formatAffectedOutputArea(area: string) {
     return "CapCut handoff";
   }
   return area;
+}
+
+function formatTrackLabel(trackType: string) {
+  if (trackType === "broll") {
+    return "B-roll track";
+  }
+  return `${trackType.charAt(0).toUpperCase()}${trackType.slice(1)} track`;
 }
 
 export function App() {
@@ -538,6 +552,7 @@ export function App() {
           fields: selectedRegenerationFields,
         },
       );
+      setPartialRegenerationPreflight(null);
       setPartialRegenerationRun(result);
       setSubtitleJob(null);
       setPreviewJob(null);
@@ -809,6 +824,29 @@ export function App() {
   const selectedEditingDraft = selectedEditingSegmentId
     ? editingDrafts[selectedEditingSegmentId]
     : undefined;
+  const activeEditingSessionId = editingSession?.session_id ?? null;
+  const changedSegmentIds = useMemo(
+    () =>
+      new Set(
+        (partialRegenerationRun?.delta?.regenerated_segments ?? [])
+          .map((segment) => String(segment.segment_id ?? ""))
+          .filter(Boolean),
+      ),
+    [partialRegenerationRun],
+  );
+  const preservedEditingSegments = useMemo(
+    () =>
+      (editingSession?.segments ?? []).filter((segment) => !changedSegmentIds.has(segment.segment_id)),
+    [changedSegmentIds, editingSession],
+  );
+  const handleSelectEditingSegment = (segmentId: string) => {
+    setSelectedEditingSegmentId(segmentId);
+    const nextSegment =
+      editingSession?.segments.find((segment) => segment.segment_id === segmentId) ?? null;
+    setSelectedRegenerationFields(buildDefaultRegenerationFields(nextSegment));
+    setPartialRegenerationPreflight(null);
+    setPartialRegenerationRun(null);
+  };
   const regenerationFieldOptions = [
     "caption",
     "cut_action",
@@ -1388,7 +1426,7 @@ export function App() {
               <div className="panel-header">
                 <div>
                   <p className="section-kicker">Editing session</p>
-                  <h2>Thin mutation workspace</h2>
+                  <h2>Timeline-centered editor shell</h2>
                 </div>
               </div>
               <div className="action-row">
@@ -1420,15 +1458,19 @@ export function App() {
                       <dt>Mutation history</dt>
                       <dd>{editingSession.history.length}</dd>
                     </div>
+                    <div>
+                      <dt>Changed segments</dt>
+                      <dd>{changedSegmentIds.size}</dd>
+                    </div>
+                    <div>
+                      <dt>Preserved segments</dt>
+                      <dd>{preservedEditingSegments.length}</dd>
+                    </div>
                   </dl>
                   <label className="field">
                     <span>Target segment</span>
                     <select
-                      onChange={(event) => {
-                        setSelectedEditingSegmentId(event.target.value);
-                        setPartialRegenerationPreflight(null);
-                        setPartialRegenerationRun(null);
-                      }}
+                      onChange={(event) => handleSelectEditingSegment(event.target.value)}
                       value={selectedEditingSegmentId ?? ""}
                     >
                       {editingSession.segments.map((segment) => (
@@ -1438,6 +1480,25 @@ export function App() {
                       ))}
                     </select>
                   </label>
+                  <div className="segment-list">
+                    {editingSession.segments.map((segment) => (
+                      <button
+                        className={
+                          selectedEditingSegmentId === segment.segment_id
+                            ? "project-chip is-selected"
+                            : "project-chip"
+                        }
+                        key={segment.segment_id}
+                        onClick={() => handleSelectEditingSegment(segment.segment_id)}
+                        type="button"
+                      >
+                        <strong>{segment.segment_id}</strong>
+                        <span>
+                          {changedSegmentIds.has(segment.segment_id) ? "changed" : "preserved"}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
                   <div className="action-row">
                     {regenerationFieldOptions.map((field) => (
                       <label className="pill" key={field}>
@@ -1504,23 +1565,6 @@ export function App() {
                       </div>
                     </div>
                   ) : null}
-                  {partialRegenerationRun ? (
-                    <div className="track-card">
-                      <h3>{partialRegenerationRun.job_id}</h3>
-                      <p>{partialRegenerationRun.status}</p>
-                      <p>{partialRegenerationRun.delta?.timeline_id ?? "timeline pending"}</p>
-                      {(partialRegenerationRun.delta?.regenerated_segments ?? []).map((segment) => (
-                        <div className="clip-card" key={String(segment.segment_id ?? Math.random())}>
-                          <strong>{String(segment.segment_id ?? "segment")}</strong>
-                          {Array.isArray(segment.output_changes)
-                            ? (segment.output_changes as unknown[]).map((change) => (
-                                <span key={String(change)}>{String(change)}</span>
-                              ))
-                            : null}
-                        </div>
-                      ))}
-                    </div>
-                  ) : null}
                 </>
               ) : (
                 <p className="empty-state">Start an editing session from the latest timeline draft.</p>
@@ -1530,355 +1574,42 @@ export function App() {
             <article className="panel">
               <div className="panel-header">
                 <div>
-                  <p className="section-kicker">Segment mutations</p>
-                  <h2>Current editing fields</h2>
+                  <p className="section-kicker">Run validation</p>
+                  <h2>Changed segment focus</h2>
                 </div>
               </div>
               {editingSession ? (
-                <div className="segment-list">
-                  {editingSession.segments.map((segment) => {
-                    const draft = editingDrafts[segment.segment_id];
-                    if (!draft) {
-                      return null;
-                    }
-                    return (
-                      <div className="segment-card" key={segment.segment_id}>
-                        <div className="segment-heading">
-                          <strong>{segment.segment_id}</strong>
-                          <span className={segment.review_required ? "pill warning" : "pill okay"}>
-                            {segment.review_required ? "review required" : "ready"}
-                          </span>
+                <>
+                  {partialRegenerationRun ? (
+                    <div className="track-card">
+                      <h3>{partialRegenerationRun.job_id}</h3>
+                      <p>{partialRegenerationRun.status}</p>
+                      <p>{partialRegenerationRun.delta?.timeline_id ?? "timeline pending"}</p>
+                      <p>{`Changed segments ${changedSegmentIds.size}`}</p>
+                      <p>{`Preserved segments ${preservedEditingSegments.length}`}</p>
+                      {(partialRegenerationRun.delta?.regenerated_segments ?? []).map((segment) => (
+                        <div className="clip-card" key={String(segment.segment_id ?? Math.random())}>
+                          <strong>{`${String(segment.segment_id ?? "segment")} changed in current run`}</strong>
+                          {Array.isArray(segment.output_changes)
+                            ? (segment.output_changes as unknown[]).map((change) => (
+                                <span key={String(change)}>{String(change)}</span>
+                              ))
+                            : null}
                         </div>
-                        <span>{formatSeconds(segment.start_sec, segment.end_sec)}</span>
-                        <label className="field">
-                          <span>Caption</span>
-                          <input
-                            onChange={(event) =>
-                              updateEditingDraft(segment.segment_id, {
-                                captionText: event.target.value,
-                              })
-                            }
-                            value={draft.captionText}
-                          />
-                        </label>
-                        <button
-                          className="action-button"
-                          disabled={
-                            !selectedProjectId ||
-                            !editingSession ||
-                            isSavingEditingMutation === `${segment.segment_id}-caption`
-                          }
-                          onClick={() =>
-                            void applyEditingMutation(`${segment.segment_id}-caption`, () =>
-                              api.updateEditingSessionCaption(
-                                selectedProjectId!,
-                                editingSession.session_id,
-                                segment.segment_id,
-                                { caption_text: draft.captionText },
-                              ),
-                            )
-                          }
-                          type="button"
-                        >
-                          Save caption
-                        </button>
-                        <label className="field">
-                          <span>Cut action</span>
-                          <select
-                            onChange={(event) =>
-                              updateEditingDraft(segment.segment_id, {
-                                cutAction: event.target.value,
-                              })
-                            }
-                            value={draft.cutAction}
-                          >
-                            <option value="keep">keep</option>
-                            <option value="remove">remove</option>
-                            <option value="trim">trim</option>
-                          </select>
-                        </label>
-                        <button
-                          className="action-button"
-                          disabled={
-                            !selectedProjectId ||
-                            !editingSession ||
-                            isSavingEditingMutation === `${segment.segment_id}-cut`
-                          }
-                          onClick={() =>
-                            void applyEditingMutation(`${segment.segment_id}-cut`, () =>
-                              api.updateEditingSessionCutAction(
-                                selectedProjectId!,
-                                editingSession.session_id,
-                                segment.segment_id,
-                                { cut_action: draft.cutAction },
-                              ),
-                            )
-                          }
-                          type="button"
-                        >
-                          Save cut action
-                        </button>
-                        <label className="field">
-                          <span>B-roll asset ID</span>
-                          <input
-                            onChange={(event) =>
-                              updateEditingDraft(segment.segment_id, {
-                                brollAssetId: event.target.value,
-                              })
-                            }
-                            value={draft.brollAssetId}
-                          />
-                        </label>
-                        <button
-                          className="action-button"
-                          disabled={
-                            !selectedProjectId ||
-                            !editingSession ||
-                            !draft.brollAssetId ||
-                            isSavingEditingMutation === `${segment.segment_id}-broll`
-                          }
-                          onClick={() =>
-                            void applyEditingMutation(`${segment.segment_id}-broll`, () =>
-                              api.updateEditingSessionBroll(
-                                selectedProjectId!,
-                                editingSession.session_id,
-                                segment.segment_id,
-                                { asset_id: draft.brollAssetId },
-                              ),
-                            )
-                          }
-                          type="button"
-                        >
-                          Save B-roll override
-                        </button>
-                        <label className="field">
-                          <span>Explanation title</span>
-                          <input
-                            onChange={(event) =>
-                              updateEditingDraft(segment.segment_id, {
-                                explanationTitle: event.target.value,
-                              })
-                            }
-                            value={draft.explanationTitle}
-                          />
-                        </label>
-                        <label className="field">
-                          <span>Explanation body</span>
-                          <input
-                            onChange={(event) =>
-                              updateEditingDraft(segment.segment_id, {
-                                explanationBody: event.target.value,
-                              })
-                            }
-                            value={draft.explanationBody}
-                          />
-                        </label>
-                        <label className="field">
-                          <span>Explanation text</span>
-                          <textarea
-                            onChange={(event) =>
-                              updateEditingDraft(segment.segment_id, {
-                                explanationText: event.target.value,
-                              })
-                            }
-                            value={draft.explanationText}
-                          />
-                        </label>
-                        <button
-                          className="action-button"
-                          disabled={
-                            !selectedProjectId ||
-                            !editingSession ||
-                            !draft.explanationText ||
-                            isSavingEditingMutation === `${segment.segment_id}-explanation`
-                          }
-                          onClick={() =>
-                            void applyEditingMutation(`${segment.segment_id}-explanation`, () =>
-                              api.updateEditingSessionExplanationCard(
-                                selectedProjectId!,
-                                editingSession.session_id,
-                                segment.segment_id,
-                                {
-                                  title: draft.explanationTitle,
-                                  body: draft.explanationBody,
-                                  text: draft.explanationText,
-                                },
-                              ),
-                            )
-                          }
-                          type="button"
-                        >
-                          Save explanation card
-                        </button>
-                        <label className="field">
-                          <span>Image overlay asset ID</span>
-                          <input
-                            onChange={(event) =>
-                              updateEditingDraft(segment.segment_id, {
-                                imageAssetId: event.target.value,
-                              })
-                            }
-                            value={draft.imageAssetId}
-                          />
-                        </label>
-                        <label className="field">
-                          <span>Image overlay text</span>
-                          <textarea
-                            onChange={(event) =>
-                              updateEditingDraft(segment.segment_id, {
-                                imageText: event.target.value,
-                              })
-                            }
-                            value={draft.imageText}
-                          />
-                        </label>
-                        <button
-                          className="action-button"
-                          disabled={
-                            !selectedProjectId ||
-                            !editingSession ||
-                            !draft.imageAssetId ||
-                            isSavingEditingMutation === `${segment.segment_id}-image`
-                          }
-                          onClick={() =>
-                            void applyEditingMutation(`${segment.segment_id}-image`, () =>
-                              api.updateEditingSessionImageOverlay(
-                                selectedProjectId!,
-                                editingSession.session_id,
-                                segment.segment_id,
-                                {
-                                  asset_id: draft.imageAssetId,
-                                  text: draft.imageText,
-                                },
-                              ),
-                            )
-                          }
-                          type="button"
-                        >
-                          Save image overlay
-                        </button>
-                        <label className="field">
-                          <span>Table columns</span>
-                          <input
-                            onChange={(event) =>
-                              updateEditingDraft(segment.segment_id, {
-                                tableColumns: event.target.value,
-                              })
-                            }
-                            value={draft.tableColumns}
-                          />
-                        </label>
-                        <label className="field">
-                          <span>Table rows</span>
-                          <textarea
-                            onChange={(event) =>
-                              updateEditingDraft(segment.segment_id, {
-                                tableRows: event.target.value,
-                              })
-                            }
-                            value={draft.tableRows}
-                          />
-                        </label>
-                        <label className="field">
-                          <span>Table text</span>
-                          <textarea
-                            onChange={(event) =>
-                              updateEditingDraft(segment.segment_id, {
-                                tableText: event.target.value,
-                              })
-                            }
-                            value={draft.tableText}
-                          />
-                        </label>
-                        <button
-                          className="action-button"
-                          disabled={
-                            !selectedProjectId ||
-                            !editingSession ||
-                            !draft.tableText ||
-                            isSavingEditingMutation === `${segment.segment_id}-table`
-                          }
-                          onClick={() =>
-                            void applyEditingMutation(`${segment.segment_id}-table`, () =>
-                              api.updateEditingSessionTableOverlay(
-                                selectedProjectId!,
-                                editingSession.session_id,
-                                segment.segment_id,
-                                {
-                                  columns: draft.tableColumns
-                                    .split(",")
-                                    .map((item) => item.trim())
-                                    .filter(Boolean),
-                                  rows: draft.tableRows
-                                    .split("\n")
-                                    .map((row) =>
-                                      row
-                                        .split(",")
-                                        .map((cell) => cell.trim())
-                                        .filter(Boolean),
-                                    )
-                                    .filter((row) => row.length > 0),
-                                  text: draft.tableText,
-                                },
-                              ),
-                            )
-                          }
-                          type="button"
-                        >
-                          Save table overlay
-                        </button>
-                        <label className="field">
-                          <span>TTS recommendation ID</span>
-                          <input
-                            onChange={(event) =>
-                              updateEditingDraft(segment.segment_id, {
-                                ttsRecommendationId: event.target.value,
-                              })
-                            }
-                            value={draft.ttsRecommendationId}
-                          />
-                        </label>
-                        <label className="field">
-                          <span>TTS asset ID</span>
-                          <input
-                            onChange={(event) =>
-                              updateEditingDraft(segment.segment_id, {
-                                ttsAssetId: event.target.value,
-                              })
-                            }
-                            value={draft.ttsAssetId}
-                          />
-                        </label>
-                        <button
-                          className="action-button"
-                          disabled={
-                            !selectedProjectId ||
-                            !editingSession ||
-                            !draft.ttsRecommendationId ||
-                            !draft.ttsAssetId ||
-                            isSavingEditingMutation === `${segment.segment_id}-tts`
-                          }
-                          onClick={() =>
-                            void applyEditingMutation(`${segment.segment_id}-tts`, () =>
-                              api.updateEditingSessionTtsReplacement(
-                                selectedProjectId!,
-                                editingSession.session_id,
-                                segment.segment_id,
-                                {
-                                  recommendation_id: draft.ttsRecommendationId,
-                                  asset_id: draft.ttsAssetId,
-                                },
-                              ),
-                            )
-                          }
-                          type="button"
-                        >
-                          Save TTS replacement
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="empty-state">Run partial regeneration to inspect changed outputs.</p>
+                  )}
+                  <div>
+                    <h3>Preserved timeline area</h3>
+                    <div className="clip-list">
+                      {preservedEditingSegments.map((segment) => (
+                        <span key={segment.segment_id}>{`${segment.segment_id} preserved from prior timeline`}</span>
+                      ))}
+                    </div>
+                  </div>
+                </>
               ) : (
                 <p className="empty-state">No editing session loaded yet.</p>
               )}
@@ -1888,12 +1619,20 @@ export function App() {
               <div className="panel-header">
                 <div>
                   <p className="section-kicker">Selected segment</p>
-                  <h2>Current draft preview</h2>
+                  <h2>Selected segment detail</h2>
                 </div>
               </div>
               {selectedEditingSegment && selectedEditingDraft ? (
-                <div className="track-card">
-                  <h3>Selected draft</h3>
+                <div className="segment-card">
+                  <div className="segment-heading">
+                    <strong>Selected focus</strong>
+                    <span
+                      className={selectedEditingSegment.review_required ? "pill warning" : "pill okay"}
+                    >
+                      {selectedEditingSegment.review_required ? "review required" : "ready"}
+                    </span>
+                  </div>
+                  <span>{formatSeconds(selectedEditingSegment.start_sec, selectedEditingSegment.end_sec)}</span>
                   <p>{selectedEditingDraft.captionText}</p>
                   <span>{selectedEditingDraft.brollAssetId || "No B-roll override"}</span>
                   <span>
@@ -1902,9 +1641,373 @@ export function App() {
                   <span>{selectedEditingDraft.imageAssetId || "No image overlay"}</span>
                   <span>{selectedEditingDraft.tableText || "No table overlay"}</span>
                   <span>{selectedEditingDraft.ttsAssetId || "No TTS replacement"}</span>
+                  <label className="field">
+                    <span>Caption</span>
+                    <input
+                      onChange={(event) =>
+                        updateEditingDraft(selectedEditingSegment.segment_id, {
+                          captionText: event.target.value,
+                        })
+                      }
+                      value={selectedEditingDraft.captionText}
+                    />
+                  </label>
+                  <button
+                    className="action-button"
+                    disabled={
+                      !selectedProjectId ||
+                      !activeEditingSessionId ||
+                      isSavingEditingMutation === `${selectedEditingSegment.segment_id}-caption`
+                    }
+                    onClick={() =>
+                      void applyEditingMutation(`${selectedEditingSegment.segment_id}-caption`, () =>
+                        api.updateEditingSessionCaption(
+                          selectedProjectId!,
+                          activeEditingSessionId!,
+                          selectedEditingSegment.segment_id,
+                          { caption_text: selectedEditingDraft.captionText },
+                        ),
+                      )
+                    }
+                    type="button"
+                  >
+                    Save caption
+                  </button>
+                  <label className="field">
+                    <span>Cut action</span>
+                    <select
+                      onChange={(event) =>
+                        updateEditingDraft(selectedEditingSegment.segment_id, {
+                          cutAction: event.target.value,
+                        })
+                      }
+                      value={selectedEditingDraft.cutAction}
+                    >
+                      <option value="keep">keep</option>
+                      <option value="remove">remove</option>
+                      <option value="trim">trim</option>
+                    </select>
+                  </label>
+                  <button
+                    className="action-button"
+                    disabled={
+                      !selectedProjectId ||
+                      !activeEditingSessionId ||
+                      isSavingEditingMutation === `${selectedEditingSegment.segment_id}-cut`
+                    }
+                    onClick={() =>
+                      void applyEditingMutation(`${selectedEditingSegment.segment_id}-cut`, () =>
+                        api.updateEditingSessionCutAction(
+                          selectedProjectId!,
+                          activeEditingSessionId!,
+                          selectedEditingSegment.segment_id,
+                          { cut_action: selectedEditingDraft.cutAction },
+                        ),
+                      )
+                    }
+                    type="button"
+                  >
+                    Save cut action
+                  </button>
+                  <label className="field">
+                    <span>B-roll asset ID</span>
+                    <input
+                      onChange={(event) =>
+                        updateEditingDraft(selectedEditingSegment.segment_id, {
+                          brollAssetId: event.target.value,
+                        })
+                      }
+                      value={selectedEditingDraft.brollAssetId}
+                    />
+                  </label>
+                  <button
+                    className="action-button"
+                    disabled={
+                      !selectedProjectId ||
+                      !activeEditingSessionId ||
+                      !selectedEditingDraft.brollAssetId ||
+                      isSavingEditingMutation === `${selectedEditingSegment.segment_id}-broll`
+                    }
+                    onClick={() =>
+                      void applyEditingMutation(`${selectedEditingSegment.segment_id}-broll`, () =>
+                        api.updateEditingSessionBroll(
+                          selectedProjectId!,
+                          activeEditingSessionId!,
+                          selectedEditingSegment.segment_id,
+                          { asset_id: selectedEditingDraft.brollAssetId },
+                        ),
+                      )
+                    }
+                    type="button"
+                  >
+                    Save B-roll override
+                  </button>
+                  <label className="field">
+                    <span>Explanation title</span>
+                    <input
+                      onChange={(event) =>
+                        updateEditingDraft(selectedEditingSegment.segment_id, {
+                          explanationTitle: event.target.value,
+                        })
+                      }
+                      value={selectedEditingDraft.explanationTitle}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Explanation body</span>
+                    <input
+                      onChange={(event) =>
+                        updateEditingDraft(selectedEditingSegment.segment_id, {
+                          explanationBody: event.target.value,
+                        })
+                      }
+                      value={selectedEditingDraft.explanationBody}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Explanation text</span>
+                    <textarea
+                      onChange={(event) =>
+                        updateEditingDraft(selectedEditingSegment.segment_id, {
+                          explanationText: event.target.value,
+                        })
+                      }
+                      value={selectedEditingDraft.explanationText}
+                    />
+                  </label>
+                  <button
+                    className="action-button"
+                    disabled={
+                      !selectedProjectId ||
+                      !activeEditingSessionId ||
+                      !selectedEditingDraft.explanationText ||
+                      isSavingEditingMutation === `${selectedEditingSegment.segment_id}-explanation`
+                    }
+                    onClick={() =>
+                      void applyEditingMutation(`${selectedEditingSegment.segment_id}-explanation`, () =>
+                        api.updateEditingSessionExplanationCard(
+                          selectedProjectId!,
+                          activeEditingSessionId!,
+                          selectedEditingSegment.segment_id,
+                          {
+                            title: selectedEditingDraft.explanationTitle,
+                            body: selectedEditingDraft.explanationBody,
+                            text: selectedEditingDraft.explanationText,
+                          },
+                        ),
+                      )
+                    }
+                    type="button"
+                  >
+                    Save explanation card
+                  </button>
+                  <label className="field">
+                    <span>Image overlay asset ID</span>
+                    <input
+                      onChange={(event) =>
+                        updateEditingDraft(selectedEditingSegment.segment_id, {
+                          imageAssetId: event.target.value,
+                        })
+                      }
+                      value={selectedEditingDraft.imageAssetId}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Image overlay text</span>
+                    <textarea
+                      onChange={(event) =>
+                        updateEditingDraft(selectedEditingSegment.segment_id, {
+                          imageText: event.target.value,
+                        })
+                      }
+                      value={selectedEditingDraft.imageText}
+                    />
+                  </label>
+                  <button
+                    className="action-button"
+                    disabled={
+                      !selectedProjectId ||
+                      !activeEditingSessionId ||
+                      !selectedEditingDraft.imageAssetId ||
+                      isSavingEditingMutation === `${selectedEditingSegment.segment_id}-image`
+                    }
+                    onClick={() =>
+                      void applyEditingMutation(`${selectedEditingSegment.segment_id}-image`, () =>
+                        api.updateEditingSessionImageOverlay(
+                          selectedProjectId!,
+                          activeEditingSessionId!,
+                          selectedEditingSegment.segment_id,
+                          {
+                            asset_id: selectedEditingDraft.imageAssetId,
+                            text: selectedEditingDraft.imageText,
+                          },
+                        ),
+                      )
+                    }
+                    type="button"
+                  >
+                    Save image overlay
+                  </button>
+                  <label className="field">
+                    <span>Table columns</span>
+                    <input
+                      onChange={(event) =>
+                        updateEditingDraft(selectedEditingSegment.segment_id, {
+                          tableColumns: event.target.value,
+                        })
+                      }
+                      value={selectedEditingDraft.tableColumns}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Table rows</span>
+                    <textarea
+                      onChange={(event) =>
+                        updateEditingDraft(selectedEditingSegment.segment_id, {
+                          tableRows: event.target.value,
+                        })
+                      }
+                      value={selectedEditingDraft.tableRows}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Table text</span>
+                    <textarea
+                      onChange={(event) =>
+                        updateEditingDraft(selectedEditingSegment.segment_id, {
+                          tableText: event.target.value,
+                        })
+                      }
+                      value={selectedEditingDraft.tableText}
+                    />
+                  </label>
+                  <button
+                    className="action-button"
+                    disabled={
+                      !selectedProjectId ||
+                      !activeEditingSessionId ||
+                      !selectedEditingDraft.tableText ||
+                      isSavingEditingMutation === `${selectedEditingSegment.segment_id}-table`
+                    }
+                    onClick={() =>
+                      void applyEditingMutation(`${selectedEditingSegment.segment_id}-table`, () =>
+                        api.updateEditingSessionTableOverlay(
+                          selectedProjectId!,
+                          activeEditingSessionId!,
+                          selectedEditingSegment.segment_id,
+                          {
+                            columns: selectedEditingDraft.tableColumns
+                              .split(",")
+                              .map((item) => item.trim())
+                              .filter(Boolean),
+                            rows: selectedEditingDraft.tableRows
+                              .split("\n")
+                              .map((row) =>
+                                row
+                                  .split(",")
+                                  .map((cell) => cell.trim())
+                                  .filter(Boolean),
+                              )
+                              .filter((row) => row.length > 0),
+                            text: selectedEditingDraft.tableText,
+                          },
+                        ),
+                      )
+                    }
+                    type="button"
+                  >
+                    Save table overlay
+                  </button>
+                  <label className="field">
+                    <span>TTS recommendation ID</span>
+                    <input
+                      onChange={(event) =>
+                        updateEditingDraft(selectedEditingSegment.segment_id, {
+                          ttsRecommendationId: event.target.value,
+                        })
+                      }
+                      value={selectedEditingDraft.ttsRecommendationId}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>TTS asset ID</span>
+                    <input
+                      onChange={(event) =>
+                        updateEditingDraft(selectedEditingSegment.segment_id, {
+                          ttsAssetId: event.target.value,
+                        })
+                      }
+                      value={selectedEditingDraft.ttsAssetId}
+                    />
+                  </label>
+                  <button
+                    className="action-button"
+                    disabled={
+                      !selectedProjectId ||
+                      !activeEditingSessionId ||
+                      !selectedEditingDraft.ttsRecommendationId ||
+                      !selectedEditingDraft.ttsAssetId ||
+                      isSavingEditingMutation === `${selectedEditingSegment.segment_id}-tts`
+                    }
+                    onClick={() =>
+                      void applyEditingMutation(`${selectedEditingSegment.segment_id}-tts`, () =>
+                        api.updateEditingSessionTtsReplacement(
+                          selectedProjectId!,
+                          activeEditingSessionId!,
+                          selectedEditingSegment.segment_id,
+                          {
+                            recommendation_id: selectedEditingDraft.ttsRecommendationId,
+                            asset_id: selectedEditingDraft.ttsAssetId,
+                          },
+                        ),
+                      )
+                    }
+                    type="button"
+                  >
+                    Save TTS replacement
+                  </button>
                 </div>
               ) : (
                 <p className="empty-state">Choose a session segment to inspect its draft state.</p>
+              )}
+            </article>
+
+            <article className="panel">
+              <div className="panel-header">
+                <div>
+                  <p className="section-kicker">Timeline delta</p>
+                  <h2>Track impact summary</h2>
+                </div>
+              </div>
+              {timelineJob ? (
+                <div className="track-stack">
+                  {timelineJob.timeline.tracks.map((track) => (
+                    <article className="track-card" key={track.track_id}>
+                      <header className="track-header">
+                        <div>
+                          <h3>{formatTrackLabel(track.track_type)}</h3>
+                          <p>{track.track_id}</p>
+                        </div>
+                        <span className="pill">{track.clips.length} clips</span>
+                      </header>
+                      <div className="clip-list">
+                        {track.clips.map((clip) => (
+                          <div className="clip-card" key={clip.clip_id}>
+                            <strong>{clip.segment_id}</strong>
+                            <span>
+                              {changedSegmentIds.has(clip.segment_id)
+                                ? "changed in current run"
+                                : "preserved from prior timeline"}
+                            </span>
+                            <span>{clip.asset_uri}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <p className="empty-state">No regenerated timeline available yet.</p>
               )}
             </article>
           </section>
