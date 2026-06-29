@@ -369,6 +369,8 @@ export function App() {
           : null;
         let activeTimeline = stableTimeline;
         let activeReview = stableReview;
+        let resumedSelection: { segmentId: string | null; fields: string[] } | null = null;
+        let resumedPartialRegenerationPreflight: PartialRegenerationPreflight | null = null;
         let resumedPartialRegeneration: PartialRegenerationRun | null = null;
         let activeSubtitle = subtitle;
         let activePreview = preview;
@@ -390,6 +392,21 @@ export function App() {
                   projectId,
                   latestCandidateJob.job_id,
                 );
+                const canRepresentResumedScope = candidateResult.segment_ids.length === 1;
+                if (canRepresentResumedScope) {
+                  try {
+                    resumedPartialRegenerationPreflight = await api.previewPartialRegeneration(
+                      projectId,
+                      candidateResult.session_id,
+                      {
+                        segment_ids: candidateResult.segment_ids,
+                        fields: candidateResult.fields,
+                      },
+                    );
+                  } catch {
+                    resumedPartialRegenerationPreflight = null;
+                  }
+                }
                 activeTimeline = {
                   job_id: candidateResult.job_id,
                   status: candidateResult.status,
@@ -410,6 +427,12 @@ export function App() {
                     timeline_id: candidateResult.timeline_id,
                   },
                 };
+                resumedSelection = canRepresentResumedScope
+                  ? {
+                      segmentId: candidateResult.segment_ids[0] ?? null,
+                      fields: [...candidateResult.fields],
+                    }
+                  : null;
                 activeSubtitle = null;
                 activePreview = null;
                 activeExport = null;
@@ -428,13 +451,17 @@ export function App() {
         setReviewSnapshot(activeReview);
         if (latestEditingSession) {
           applyEditingSessionState(latestEditingSession);
+          if (resumedSelection) {
+            setSelectedEditingSegmentId(resumedSelection.segmentId);
+            setSelectedRegenerationFields(resumedSelection.fields);
+          }
         } else {
           setEditingSession(null);
           setEditingDrafts({});
           setSelectedEditingSegmentId(null);
           setSelectedRegenerationFields([]);
         }
-        setPartialRegenerationPreflight(null);
+        setPartialRegenerationPreflight(resumedPartialRegenerationPreflight);
         setPartialRegenerationRun(resumedPartialRegeneration);
         setSubtitleJob(activeSubtitle);
         setPreviewJob(activePreview);
