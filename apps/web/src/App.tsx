@@ -367,6 +367,7 @@ export function App() {
     () => findLatestTimelineJob(jobs),
     [jobs],
   );
+  const activeTimelineJobId = timelineJob?.job_id ?? latestTimelineBuildJob?.job_id ?? null;
 
   const pipelineStages = useMemo(
     () => [
@@ -393,7 +394,7 @@ export function App() {
           stage.jobType === "preview_render" ||
           stage.jobType === "capcut_export"
         ) {
-          return job.input_ref === latestTimelineBuildJob?.job_id;
+          return job.input_ref === activeTimelineJobId;
         }
         return true;
       });
@@ -405,7 +406,7 @@ export function App() {
         jobId: stageJob?.job_id ?? "not-started",
       };
     });
-  }, [jobs, pipelineStages]);
+  }, [activeTimelineJobId, jobs, pipelineStages]);
 
   const rebuildInputs = useMemo(() => {
     const segmentAnalysisJob = [...jobs]
@@ -437,10 +438,10 @@ export function App() {
       reviewSnapshot.pending_recommendations.length > 0
     );
   }, [reviewSnapshot, timelineJob]);
-  const canApproveTimeline = !!latestTimelineBuildJob && !hasReviewBlockers && reviewStatus !== "approved";
-  const canReopenTimeline = !!latestTimelineBuildJob && reviewStatus === "approved";
+  const canApproveTimeline = !!activeTimelineJobId && !hasReviewBlockers && reviewStatus !== "approved";
+  const canReopenTimeline = !!activeTimelineJobId && reviewStatus === "approved";
   const canGenerateOutputs =
-    !!latestTimelineBuildJob && !hasReviewBlockers && reviewStatus === "approved";
+    !!activeTimelineJobId && !hasReviewBlockers && reviewStatus === "approved";
 
   function applyEditingSessionState(session: EditingSession) {
     setEditingSession(session);
@@ -476,6 +477,11 @@ export function App() {
       applyEditingSessionState(session);
       setPartialRegenerationPreflight(null);
       setPartialRegenerationRun(null);
+      setTimelineJob(null);
+      setReviewSnapshot(null);
+      setSubtitleJob(null);
+      setPreviewJob(null);
+      setExportJob(null);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Unknown error");
     } finally {
@@ -565,12 +571,16 @@ export function App() {
       setJobs(jobItems);
       applyEditingSessionState(refreshedSession);
       if (result.job_id) {
-        const jobResult = await api.getPartialRegenerationResult(selectedProjectId, result.job_id);
+        const [jobResult, review] = await Promise.all([
+          api.getPartialRegenerationResult(selectedProjectId, result.job_id),
+          api.getReviewSnapshot(selectedProjectId, result.job_id),
+        ]);
         setTimelineJob({
           job_id: jobResult.job_id,
           status: jobResult.status,
           timeline: jobResult.timeline,
         });
+        setReviewSnapshot(review);
       }
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Unknown error");
@@ -616,14 +626,14 @@ export function App() {
   }
 
   async function handleRenderPreview() {
-    if (!selectedProjectId || !latestTimelineBuildJob || !canGenerateOutputs) {
+    if (!selectedProjectId || !activeTimelineJobId || !canGenerateOutputs) {
       return;
     }
     setIsRenderingPreview(true);
     setErrorMessage(null);
     try {
       const renderResult = await api.renderPreview(selectedProjectId, {
-        timeline_job_id: latestTimelineBuildJob.job_id,
+        timeline_job_id: activeTimelineJobId,
       });
       const [jobItems, preview] = await Promise.all([
         api.listJobs(selectedProjectId),
@@ -639,14 +649,14 @@ export function App() {
   }
 
   async function handleExportCapcut() {
-    if (!selectedProjectId || !latestTimelineBuildJob || !canGenerateOutputs) {
+    if (!selectedProjectId || !activeTimelineJobId || !canGenerateOutputs) {
       return;
     }
     setIsExportingCapcut(true);
     setErrorMessage(null);
     try {
       const exportResult = await api.exportCapcut(selectedProjectId, {
-        timeline_job_id: latestTimelineBuildJob.job_id,
+        timeline_job_id: activeTimelineJobId,
       });
       const [jobItems, capcutExport] = await Promise.all([
         api.listJobs(selectedProjectId),
@@ -662,16 +672,16 @@ export function App() {
   }
 
   async function handleApproveTimeline() {
-    if (!selectedProjectId || !latestTimelineBuildJob || !canApproveTimeline) {
+    if (!selectedProjectId || !activeTimelineJobId || !canApproveTimeline) {
       return;
     }
     setIsApprovingTimeline(true);
     setErrorMessage(null);
     try {
-      await api.approveTimeline(selectedProjectId, latestTimelineBuildJob.job_id);
+      await api.approveTimeline(selectedProjectId, activeTimelineJobId);
       const [timeline, review] = await Promise.all([
-        api.getTimeline(selectedProjectId, latestTimelineBuildJob.job_id),
-        api.getReviewSnapshot(selectedProjectId, latestTimelineBuildJob.job_id),
+        api.getTimeline(selectedProjectId, activeTimelineJobId),
+        api.getReviewSnapshot(selectedProjectId, activeTimelineJobId),
       ]);
       setTimelineJob(timeline);
       setReviewSnapshot(review);
@@ -683,16 +693,16 @@ export function App() {
   }
 
   async function handleReopenTimeline() {
-    if (!selectedProjectId || !latestTimelineBuildJob || !canReopenTimeline) {
+    if (!selectedProjectId || !activeTimelineJobId || !canReopenTimeline) {
       return;
     }
     setIsReopeningTimeline(true);
     setErrorMessage(null);
     try {
-      await api.reopenTimeline(selectedProjectId, latestTimelineBuildJob.job_id);
+      await api.reopenTimeline(selectedProjectId, activeTimelineJobId);
       const [timeline, review, jobItems] = await Promise.all([
-        api.getTimeline(selectedProjectId, latestTimelineBuildJob.job_id),
-        api.getReviewSnapshot(selectedProjectId, latestTimelineBuildJob.job_id),
+        api.getTimeline(selectedProjectId, activeTimelineJobId),
+        api.getReviewSnapshot(selectedProjectId, activeTimelineJobId),
         api.listJobs(selectedProjectId),
       ]);
       setTimelineJob(timeline);
@@ -715,14 +725,14 @@ export function App() {
   }
 
   async function handleRenderSubtitle() {
-    if (!selectedProjectId || !latestTimelineBuildJob || !canGenerateOutputs) {
+    if (!selectedProjectId || !activeTimelineJobId || !canGenerateOutputs) {
       return;
     }
     setIsRenderingSubtitle(true);
     setErrorMessage(null);
     try {
       const subtitleResult = await api.renderSubtitle(selectedProjectId, {
-        timeline_job_id: latestTimelineBuildJob.job_id,
+        timeline_job_id: activeTimelineJobId,
       });
       const [jobItems, subtitle] = await Promise.all([
         api.listJobs(selectedProjectId),
@@ -839,6 +849,73 @@ export function App() {
       (editingSession?.segments ?? []).filter((segment) => !changedSegmentIds.has(segment.segment_id)),
     [changedSegmentIds, editingSession],
   );
+  const changedEditingSegments = useMemo(
+    () => (editingSession?.segments ?? []).filter((segment) => changedSegmentIds.has(segment.segment_id)),
+    [changedSegmentIds, editingSession],
+  );
+  const readyChangedSegments = useMemo(
+    () => changedEditingSegments.filter((segment) => !segment.review_required),
+    [changedEditingSegments],
+  );
+  const changedSegmentsNeedingReview = useMemo(
+    () => changedEditingSegments.filter((segment) => segment.review_required),
+    [changedEditingSegments],
+  );
+  const changedOutputChecklist = useMemo(
+    () =>
+      (partialRegenerationRun?.delta?.regenerated_segments ?? []).flatMap((segment) =>
+        Array.isArray(segment.output_changes)
+          ? (segment.output_changes as unknown[]).map((change) => String(change))
+          : [],
+      ),
+    [partialRegenerationRun],
+  );
+  const changedCandidateReviewFlags = useMemo(
+    () =>
+      (timelineJob?.timeline.review_flags ?? []).filter((flag) =>
+        changedSegmentIds.has(String(flag.segment_id ?? "")),
+      ),
+    [changedSegmentIds, timelineJob],
+  );
+  const changedCandidatePendingRecommendations = useMemo(
+    () =>
+      (timelineJob?.timeline.pending_recommendations ?? []).filter((item) =>
+        changedSegmentIds.has(String(item.target_segment_id ?? "")),
+      ),
+    [changedSegmentIds, timelineJob],
+  );
+  const decisionBlockerSegmentIds = useMemo(
+    () =>
+      new Set([
+        ...changedSegmentsNeedingReview.map((segment) => segment.segment_id),
+        ...changedCandidateReviewFlags.map((flag) => String(flag.segment_id ?? "")),
+        ...changedCandidatePendingRecommendations.map((item) =>
+          String(item.target_segment_id ?? ""),
+        ),
+      ].filter(Boolean)),
+    [
+      changedCandidatePendingRecommendations,
+      changedCandidateReviewFlags,
+      changedSegmentsNeedingReview,
+    ],
+  );
+  const decisionBlockerCount = decisionBlockerSegmentIds.size;
+  const decisionCue = !partialRegenerationRun
+    ? null
+    : decisionBlockerCount > 0
+      ? {
+          title: "Hold before preview/export",
+          body: "Rerun suggested if the changed output is still incorrect.",
+        }
+      : canApproveTimeline
+        ? {
+          title: "Approve updated timeline",
+          body: "All changed outputs are ready and the candidate timeline can now be approved.",
+        }
+        : {
+            title: "Hold before preview/export",
+            body: "Changed outputs look ready, but refreshed review state is still unavailable.",
+          };
   const handleSelectEditingSegment = (segmentId: string) => {
     setSelectedEditingSegmentId(segmentId);
     const nextSegment =
@@ -1610,6 +1687,74 @@ export function App() {
                     </div>
                   </div>
                 </>
+              ) : (
+                <p className="empty-state">No editing session loaded yet.</p>
+              )}
+            </article>
+
+            <article className="panel">
+              <div className="panel-header">
+                <div>
+                  <p className="section-kicker">Decision support</p>
+                  <h2>Operator review decision loop</h2>
+                </div>
+              </div>
+              {editingSession ? (
+                partialRegenerationRun ? (
+                  <>
+                    <dl className="summary-list">
+                      <div>
+                        <dt>Ready changed segments</dt>
+                        <dd>{readyChangedSegments.length}</dd>
+                      </div>
+                      <div>
+                        <dt>Review blockers</dt>
+                        <dd>{decisionBlockerCount}</dd>
+                      </div>
+                    </dl>
+                    <p>{`Ready changed segments ${readyChangedSegments.length}`}</p>
+                    <p>{`Review blockers ${decisionBlockerCount}`}</p>
+                    <div className="track-card">
+                      <h3>Changed segment readiness</h3>
+                      <div className="clip-list">
+                        {changedEditingSegments.map((segment) => (
+                          <span key={segment.segment_id}>
+                            {segment.review_required
+                              ? `${segment.segment_id} still needs operator review`
+                              : `${segment.segment_id} ready for operator sign-off`}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="track-card">
+                      <h3>Changed output checklist</h3>
+                      <div className="clip-list">
+                        {changedOutputChecklist.map((item) => (
+                          <span key={item}>{item}</span>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="track-card">
+                      <h3>Decision cue</h3>
+                      <strong>{decisionCue?.title}</strong>
+                      <p>{decisionCue?.body}</p>
+                    </div>
+                    <div className="track-card">
+                      <h3>Preserved segment stability</h3>
+                      <div className="clip-list">
+                        {preservedEditingSegments.map((segment) => (
+                          <span key={segment.segment_id}>
+                            {`${segment.segment_id} remains stable outside the current rerun`}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <p className="empty-state">
+                    Run partial regeneration to open the operator decision loop.
+                  </p>
+                )
               ) : (
                 <p className="empty-state">No editing session loaded yet.</p>
               )}

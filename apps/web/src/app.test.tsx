@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import { App } from "./App";
+import type { ReviewSnapshot } from "./api";
 
 const projectsResponse = {
   projects: [
@@ -182,7 +183,7 @@ const timelineResponse = {
   },
 };
 
-const reviewSnapshotResponse = {
+const reviewSnapshotResponse: ReviewSnapshot = {
   project_id: "project_001",
   timeline_id: "timeline_001",
   review_status: "approved",
@@ -422,6 +423,58 @@ const partialRegenerationResultResponse = {
   },
 };
 
+const reviewRequiredEditingSessionResponse = {
+  ...editingSessionResponse,
+  segments: editingSessionResponse.segments.map((segment) =>
+    segment.segment_id === "seg_002"
+      ? {
+          ...segment,
+          review_required: true,
+        }
+      : segment,
+  ),
+};
+
+const reviewRequiredSnapshotResponse: ReviewSnapshot = {
+  ...reviewSnapshotResponse,
+  review_status: "blocked",
+  pending_recommendations: [
+    {
+      recommendation_id: "rec_tts_review_002",
+      target_segment_id: "seg_002",
+      recommendation_type: "tts_replacement",
+      selected_asset_id: null,
+      score: 0.61,
+      reason: "Narration replacement still requires operator confirmation.",
+      auto_apply_allowed: false,
+      review_required: true,
+      payload: { provider: "gemini_fallback" },
+      created_at: "2026-06-28T00:00:15Z",
+    },
+  ],
+  review_flags: [
+    {
+      code: "segment_review_required",
+      segment_id: "seg_002",
+      message: "Changed narration still needs operator review before approval.",
+    },
+  ],
+};
+
+const candidateReviewSnapshotResponse: ReviewSnapshot = {
+  ...reviewSnapshotResponse,
+  timeline_id: "timeline_002",
+  review_status: "draft",
+  applied_recommendations: [],
+  pending_recommendations: [],
+  review_flags: [],
+};
+
+const candidateApprovedReviewSnapshotResponse: ReviewSnapshot = {
+  ...candidateReviewSnapshotResponse,
+  review_status: "approved",
+};
+
 const geminiKeysResponse = {
   keys: [
     {
@@ -461,11 +514,22 @@ const geminiKeysResponse = {
 
 function createFetchMock({
   geminiKeys = geminiKeysResponse,
+  editingSession = editingSessionResponse,
+  reviewSnapshot = reviewSnapshotResponse,
+  candidateReviewSnapshot = candidateReviewSnapshotResponse,
+  jobs = jobsResponse,
 }: {
   geminiKeys?: { keys: Array<Record<string, unknown>> };
+  editingSession?: typeof editingSessionResponse;
+  reviewSnapshot?: typeof reviewSnapshotResponse;
+  candidateReviewSnapshot?: ReviewSnapshot;
+  jobs?: typeof jobsResponse;
 } = {}) {
   const state = {
+    editingSession: structuredClone(editingSession),
     geminiKeys: structuredClone(geminiKeys),
+    candidateReviewSnapshot: structuredClone(candidateReviewSnapshot),
+    candidateTimelineReviewStatus: partialRegenerationResultResponse.timeline.review_status,
   };
 
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -477,7 +541,7 @@ function createFetchMock({
       return new Response(JSON.stringify(projectResponse));
     }
     if (url.endsWith("/api/projects/project_001/jobs")) {
-      return new Response(JSON.stringify(jobsResponse));
+      return new Response(JSON.stringify(jobs));
     }
     if (
       url.endsWith("/api/projects/project_001/jobs/build-timeline") &&
@@ -526,8 +590,27 @@ function createFetchMock({
     if (url.endsWith("/api/projects/project_001/timelines/timeline_build_job_005")) {
       return new Response(JSON.stringify(timelineResponse));
     }
+    if (url.endsWith("/api/projects/project_001/timelines/partial_regeneration_job_001")) {
+      return new Response(
+        JSON.stringify({
+          ...partialRegenerationResultResponse,
+          timeline: {
+            ...partialRegenerationResultResponse.timeline,
+            review_status: state.candidateTimelineReviewStatus,
+          },
+        }),
+      );
+    }
     if (url.endsWith("/api/projects/project_001/review-snapshots/timeline_build_job_005")) {
-      return new Response(JSON.stringify(reviewSnapshotResponse));
+      return new Response(JSON.stringify(reviewSnapshot));
+    }
+    if (url.endsWith("/api/projects/project_001/review-snapshots/partial_regeneration_job_001")) {
+      return new Response(
+        JSON.stringify({
+          ...state.candidateReviewSnapshot,
+          review_status: state.candidateTimelineReviewStatus,
+        }),
+      );
     }
     if (
       url.endsWith("/api/projects/project_001/review-approvals/timeline_build_job_005/approve") &&
@@ -553,6 +636,32 @@ function createFetchMock({
         }),
       );
     }
+    if (
+      url.endsWith("/api/projects/project_001/review-approvals/partial_regeneration_job_001/approve") &&
+      init?.method === "POST"
+    ) {
+      state.candidateTimelineReviewStatus = "approved";
+      return new Response(
+        JSON.stringify({
+          timeline_id: "timeline_002",
+          review_status: "approved",
+          approved_at: "2026-06-28T00:00:18Z",
+        }),
+      );
+    }
+    if (
+      url.endsWith("/api/projects/project_001/review-approvals/partial_regeneration_job_001/reopen") &&
+      init?.method === "POST"
+    ) {
+      state.candidateTimelineReviewStatus = "draft";
+      return new Response(
+        JSON.stringify({
+          timeline_id: "timeline_002",
+          review_status: "draft",
+          approved_at: null,
+        }),
+      );
+    }
     if (url.endsWith("/api/projects/project_001/previews/preview_render_job_006")) {
       return new Response(JSON.stringify(previewResponse));
     }
@@ -566,12 +675,32 @@ function createFetchMock({
       url.endsWith("/api/projects/project_001/editing-sessions") &&
       init?.method === "POST"
     ) {
-      return new Response(JSON.stringify(editingSessionResponse), {
+      return new Response(JSON.stringify(state.editingSession), {
         status: 201,
       });
     }
     if (url.endsWith("/api/projects/project_001/editing-sessions/editing_session_001")) {
-      return new Response(JSON.stringify(editingSessionResponse));
+      return new Response(JSON.stringify(state.editingSession));
+    }
+    if (
+      url.endsWith(
+        "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/caption",
+      ) &&
+      init?.method === "PATCH"
+    ) {
+      const payload = JSON.parse(String(init.body)) as { caption_text: string };
+      state.editingSession = {
+        ...state.editingSession,
+        segments: state.editingSession.segments.map((segment) =>
+          segment.segment_id === "seg_002"
+            ? {
+                ...segment,
+                caption_text: payload.caption_text,
+              }
+            : segment,
+        ),
+      };
+      return new Response(JSON.stringify(state.editingSession));
     }
     if (
       url.endsWith(
@@ -1141,9 +1270,7 @@ describe("App", () => {
     });
 
     expect(await screen.findByText(/partial_regeneration_job_001/i)).toBeInTheDocument();
-    expect(
-      screen.getByText(/b-roll asset replaced with regenerated recommendation/i),
-    ).toBeInTheDocument();
+    expect(screen.getAllByText(/b-roll asset replaced with regenerated recommendation/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/timeline_002/i)).toBeInTheDocument();
   });
 
@@ -1186,12 +1313,179 @@ describe("App", () => {
 
     expect(screen.getByText(/seg_002 changed in current run/i)).toBeInTheDocument();
     expect(screen.getByText(/seg_001 preserved from prior timeline/i)).toBeInTheDocument();
-    expect(screen.getByText(/changed segments 1/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/^changed segments 1$/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/preserved segments 1/i)).toBeInTheDocument();
 
     expect(screen.getByText(/narration track/i)).toBeInTheDocument();
     expect(screen.getByText(/b-roll track/i)).toBeInTheDocument();
     expect(screen.getByText(/overlay track/i)).toBeInTheDocument();
     expect(screen.getByText(/asset_broll_regenerated_002/i)).toBeInTheDocument();
+  });
+
+  it("shows operator review decision guidance when changed segments are ready for sign-off", async () => {
+    const fetchMock = createFetchMock();
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /start editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /request regeneration preflight/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /run partial regeneration/i }));
+
+    expect(await screen.findByRole("heading", { name: /operator review decision loop/i })).toBeInTheDocument();
+    expect(screen.getByText(/ready changed segments 1/i)).toBeInTheDocument();
+    expect(screen.getByText(/review blockers 0/i)).toBeInTheDocument();
+    expect(screen.getByText(/seg_002 ready for operator sign-off/i)).toBeInTheDocument();
+    expect(screen.getByText(/approve updated timeline/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/all changed outputs are ready and the candidate timeline can now be approved/i),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /approve timeline/i })).toBeEnabled();
+    expect(screen.getByText(/seg_001 remains stable outside the current rerun/i)).toBeInTheDocument();
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/projects/project_001/review-snapshots/partial_regeneration_job_001",
+        undefined,
+      );
+    });
+  });
+
+  it("holds the decision loop when changed segments still require operator review", async () => {
+    const fetchMock = createFetchMock({
+      editingSession: reviewRequiredEditingSessionResponse,
+      reviewSnapshot: reviewRequiredSnapshotResponse,
+      candidateReviewSnapshot: reviewRequiredSnapshotResponse,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /start editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /request regeneration preflight/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /run partial regeneration/i }));
+
+    expect(await screen.findByRole("heading", { name: /operator review decision loop/i })).toBeInTheDocument();
+    expect(screen.getByText(/ready changed segments 0/i)).toBeInTheDocument();
+    expect(screen.getByText(/review blockers 1/i)).toBeInTheDocument();
+    expect(screen.getByText(/seg_002 still needs operator review/i)).toBeInTheDocument();
+    expect(screen.getByText(/hold before preview\/export/i)).toBeInTheDocument();
+    expect(screen.getByText(/rerun suggested if the changed output is still incorrect/i)).toBeInTheDocument();
+    expect(screen.getByText(/seg_001 remains stable outside the current rerun/i)).toBeInTheDocument();
+  });
+
+  it("routes approval and output generation through the active partial-regeneration candidate", async () => {
+    const fetchMock = createFetchMock({
+      candidateReviewSnapshot: candidateReviewSnapshotResponse,
+      jobs: {
+        jobs: jobsResponse.jobs.filter(
+          (job) =>
+            job.job_type !== "preview_render" &&
+            job.job_type !== "capcut_export" &&
+            job.job_type !== "subtitle_render",
+        ),
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /start editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /request regeneration preflight/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /run partial regeneration/i }));
+
+    const approveButton = await screen.findByRole("button", { name: /approve timeline/i });
+    await waitFor(() => {
+      expect(approveButton).toBeEnabled();
+    });
+
+    fireEvent.click(approveButton);
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/projects/project_001/review-approvals/partial_regeneration_job_001/approve",
+        expect.objectContaining({
+          method: "POST",
+        }),
+      );
+    });
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /generate subtitle file/i })).toBeEnabled();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /generate subtitle file/i }));
+    fireEvent.click(screen.getByRole("button", { name: /render preview artifact/i }));
+    fireEvent.click(screen.getByRole("button", { name: /export capcut payload/i }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/projects/project_001/jobs/subtitle-render",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            timeline_job_id: "partial_regeneration_job_001",
+          }),
+        }),
+      );
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/projects/project_001/jobs/preview-render",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          timeline_job_id: "partial_regeneration_job_001",
+        }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/projects/project_001/jobs/capcut-export",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          timeline_job_id: "partial_regeneration_job_001",
+        }),
+      }),
+    );
+  });
+
+  it("invalidates the active candidate target after a new editing mutation", async () => {
+    const fetchMock = createFetchMock({
+      candidateReviewSnapshot: candidateReviewSnapshotResponse,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /start editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /request regeneration preflight/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /run partial regeneration/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /approve timeline/i })).toBeEnabled();
+    });
+
+    fireEvent.change(screen.getByDisplayValue("Team meeting overview"), {
+      target: { value: "Team meeting overview refreshed" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /save caption/i }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/caption",
+        expect.objectContaining({
+          method: "PATCH",
+          body: JSON.stringify({
+            caption_text: "Team meeting overview refreshed",
+          }),
+        }),
+      );
+    });
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /approve timeline/i })).toBeDisabled();
+    });
+    expect(screen.queryByText(/partial_regeneration_job_001/i)).not.toBeInTheDocument();
   });
 });
