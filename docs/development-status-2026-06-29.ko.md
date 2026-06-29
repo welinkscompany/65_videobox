@@ -71,3 +71,21 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 
 현재 브랜치/워킹트리 기준으로 바로 다음 goal 구현 시작 가능하다.
 테스트 베이스라인은 안정적이고, 계획서 기준 다음 빈칸도 명확하다.
+
+## 8. 2026-06-29 추가 검증 기록
+
+이번 재검증에서 아래를 다시 확인했다.
+
+- 전체 백엔드 회귀 테스트 `194 passed`
+- blank caption 거부 동작 정상
+- invalid partial regeneration request 거부 동작 정상
+- unknown session segment / unsupported field 거부 동작 정상
+- `editing_sessions` 저장/조회와 기존 프로젝트 self-heal 동작 유지
+
+이번 재검증 기준 신규 치명 버그는 다시 확인되지 않았다.
+다만 다음 구현 전 반드시 채워야 할 빈칸은 여전히 아래다.
+
+- partial regeneration 실제 job 실행 연결
+- editing session 수정 결과의 timeline 반영 규칙
+- 설명 자산 수정 범위 세분화
+- TTS 대체의 editing session mutation 연결
