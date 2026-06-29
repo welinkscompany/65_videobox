@@ -212,6 +212,26 @@ function formatTrackLabel(trackType: string) {
   return `${trackType.charAt(0).toUpperCase()}${trackType.slice(1)} track`;
 }
 
+function formatPredictedReviewStatusLabel(status: string) {
+  if (status === "blocked") {
+    return "Blocked after rerun";
+  }
+  if (status === "draft") {
+    return "Draft after rerun";
+  }
+  return "Review status unknown after rerun";
+}
+
+function formatPredictedReviewStatusDescription(status: string) {
+  if (status === "blocked") {
+    return "This rerun is expected to keep review blockers in place until they are cleared.";
+  }
+  if (status === "draft") {
+    return "This rerun is expected to create a new draft that still needs approval before output jobs run.";
+  }
+  return "The rerun scope could not be mapped to a safe post-rerun review prediction.";
+}
+
 export function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
@@ -1714,6 +1734,19 @@ export function App() {
                   </div>
                   {partialRegenerationPreflight ? (
                     <div className="track-card">
+                      <h3>{formatPredictedReviewStatusLabel(partialRegenerationPreflight.predicted_review_status_after_rerun)}</h3>
+                      <p>
+                        {formatPredictedReviewStatusDescription(
+                          partialRegenerationPreflight.predicted_review_status_after_rerun,
+                        )}
+                      </p>
+                      {partialRegenerationPreflight.prediction_reasons.length > 0 ? (
+                        <div className="clip-list">
+                          {partialRegenerationPreflight.prediction_reasons.map((reason) => (
+                            <span key={reason}>{reason}</span>
+                          ))}
+                        </div>
+                      ) : null}
                       <h3>Expected affected output areas</h3>
                       <div className="clip-list">
                         {partialRegenerationPreflight.affected_output_areas.map((area) => (

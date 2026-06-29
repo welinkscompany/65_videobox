@@ -174,6 +174,8 @@ export type PartialRegenerationPreflight = {
   downstream_steps: string[];
   targeted_segments: Record<string, unknown>[];
   affected_output_areas: string[];
+  predicted_review_status_after_rerun: string;
+  prediction_reasons: string[];
 };
 
 export type PartialRegenerationDelta = {

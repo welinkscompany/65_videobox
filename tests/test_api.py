@@ -4214,19 +4214,19 @@ def test_editing_session_api_can_preview_partial_regeneration_scope_without_crea
     session_id = create_response.json()["session_id"]
 
     client.patch(
-        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/caption",
-        json={"caption_text": "Office overview with corrected label"},
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_002/caption",
+        json={"caption_text": "Team meeting overview with corrected label"},
     )
     client.patch(
-        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/broll",
-        json={"asset_id": "asset_manual_001"},
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_002/broll",
+        json={"asset_id": "asset_manual_002"},
     )
 
     before_jobs = client.get(f"/api/projects/{project_id}/jobs").json()["jobs"]
     response = client.post(
         f"/api/projects/{project_id}/editing-sessions/{session_id}/partial-regeneration/preflight",
         json={
-            "segment_ids": ["seg_001"],
+            "segment_ids": ["seg_002"],
             "fields": ["caption", "broll", "visual_overlay"],
         },
     )
@@ -4236,7 +4236,7 @@ def test_editing_session_api_can_preview_partial_regeneration_scope_without_crea
     payload = response.json()
     assert "job_id" not in payload
     assert payload["session_id"] == session_id
-    assert payload["segment_ids"] == ["seg_001"]
+    assert payload["segment_ids"] == ["seg_002"]
     assert payload["fields"] == ["caption", "broll", "visual_overlay"]
     assert payload["downstream_steps"] == [
         "segment_refresh",
@@ -4244,12 +4244,18 @@ def test_editing_session_api_can_preview_partial_regeneration_scope_without_crea
         "overlay_refresh",
         "timeline_build",
     ]
+    assert payload["predicted_review_status_after_rerun"] == "blocked"
+    assert payload["prediction_reasons"] == [
+        "source timeline already has unresolved review blockers that rerun will preserve",
+        "selected segments already require operator review, so rerun output stays blocked",
+    ]
     assert payload["targeted_segments"] == [
         {
-            "segment_id": "seg_001",
-            "caption_text": "Office overview with corrected label",
+            "segment_id": "seg_002",
+            "caption_text": "Team meeting overview with corrected label",
             "cut_action": "keep",
-            "broll_override": {"asset_id": "asset_manual_001"},
+            "review_required": True,
+            "broll_override": {"asset_id": "asset_manual_002"},
             "visual_overlays": [],
             "music_override": None,
             "tts_replacement": None,
@@ -4264,6 +4270,194 @@ def test_editing_session_api_can_preview_partial_regeneration_scope_without_crea
         "capcut export",
     ]
     assert before_jobs == after_jobs
+
+
+def test_editing_session_api_marks_preflight_blocked_for_manual_tts_rerun_scope_on_review_required_segment(
+    tmp_path: Path,
+) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    create_response = client.post(
+        f"/api/projects/{project_id}/editing-sessions",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    session_id = create_response.json()["session_id"]
+
+    client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_002/tts-replacement",
+        json={
+            "recommendation_id": "rec_tts_review_002",
+            "asset_id": "asset_tts_review_002",
+        },
+    )
+    before_jobs = client.get(f"/api/projects/{project_id}/jobs").json()["jobs"]
+
+    response = client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/partial-regeneration/preflight",
+        json={
+            "segment_ids": ["seg_002"],
+            "fields": ["tts_replacement"],
+        },
+    )
+    after_jobs = client.get(f"/api/projects/{project_id}/jobs").json()["jobs"]
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["predicted_review_status_after_rerun"] == "blocked"
+    assert payload["prediction_reasons"] == [
+        "source timeline already has unresolved review blockers that rerun will preserve",
+        "selected segments already require operator review, so rerun output stays blocked",
+    ]
+    assert payload["targeted_segments"] == [
+        {
+            "segment_id": "seg_002",
+            "caption_text": "Line two with restart from review runtime.",
+            "cut_action": "keep",
+            "review_required": True,
+            "broll_override": None,
+            "visual_overlays": [],
+            "music_override": None,
+            "tts_replacement": {
+                "recommendation_id": "rec_tts_review_002",
+                "asset_id": "asset_tts_review_002",
+            },
+        }
+    ]
+    assert before_jobs == after_jobs
+
+
+def test_editing_session_api_marks_preflight_as_draft_for_clean_rerun_scope(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Clean Preflight Draft Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Clean caption",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration/preflight",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["caption"],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["predicted_review_status_after_rerun"] == "draft"
+    assert payload["prediction_reasons"] == []
+
+
+def test_editing_session_api_marks_preflight_blocked_when_source_timeline_still_has_review_blockers(
+    tmp_path: Path,
+) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+    timeline_result = client.get(f"/api/projects/{project_id}/timelines/{timeline_job_id}")
+    timeline_payload = timeline_result.json()["timeline"]
+    timeline_path = (
+        tmp_path
+        / "projects"
+        / project_id
+        / "timelines"
+        / f'{timeline_payload["timeline_id"]}.json'
+    )
+    persisted_timeline = json.loads(timeline_path.read_text(encoding="utf-8"))
+    persisted_timeline["review_flags"] = [
+        {
+            "code": "tts_replacement_review_required",
+            "segment_id": "seg_002",
+            "message": "Operator review still required.",
+        }
+    ]
+    persisted_timeline["pending_recommendations"] = [
+        {
+            "recommendation_id": "rec_tts_review_002",
+            "target_segment_id": "seg_002",
+            "recommendation_type": "tts_replacement",
+            "selected_asset_id": "asset_tts_review_002",
+            "score": 0.93,
+            "reason": "Awaiting operator approval.",
+            "auto_apply_allowed": False,
+            "review_required": True,
+            "payload": {},
+            "created_at": "2026-06-29T00:00:00+00:00",
+        }
+    ]
+    timeline_path.write_text(json.dumps(persisted_timeline, indent=2), encoding="utf-8")
+
+    create_response = client.post(
+        f"/api/projects/{project_id}/editing-sessions",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    session_id = create_response.json()["session_id"]
+
+    response = client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/partial-regeneration/preflight",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["caption"],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["predicted_review_status_after_rerun"] == "blocked"
+    assert payload["prediction_reasons"] == [
+        "source timeline already has unresolved review blockers that rerun will preserve",
+        "selected segments already require operator review, so rerun output stays blocked",
+    ]
 
 
 def test_editing_session_api_can_fetch_partial_regeneration_result(tmp_path: Path) -> None:

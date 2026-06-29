@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import { App } from "./App";
-import type { ReviewSnapshot } from "./api";
+import type { PartialRegenerationPreflight, ReviewSnapshot } from "./api";
 
 const projectsResponse = {
   projects: [
@@ -300,7 +300,7 @@ const editingSessionResponse = {
   ],
 };
 
-const partialRegenerationPreflightResponse = {
+const partialRegenerationPreflightResponse: PartialRegenerationPreflight = {
   session_id: "editing_session_001",
   segment_ids: ["seg_002"],
   fields: ["broll", "explanation_card"],
@@ -312,6 +312,24 @@ const partialRegenerationPreflightResponse = {
     "timeline preview",
     "subtitle render",
     "capcut export",
+  ],
+  predicted_review_status_after_rerun: "draft",
+  prediction_reasons: [],
+};
+
+const blockedPartialRegenerationPreflightResponse: PartialRegenerationPreflight = {
+  ...partialRegenerationPreflightResponse,
+  fields: ["caption"],
+  downstream_steps: ["segment_refresh", "timeline_build"],
+  affected_output_areas: [
+    "segment copy",
+    "timeline preview",
+    "subtitle render",
+    "capcut export",
+  ],
+  predicted_review_status_after_rerun: "blocked",
+  prediction_reasons: [
+    "source timeline already has unresolved review blockers that rerun will preserve",
   ],
 };
 
@@ -522,6 +540,7 @@ function createFetchMock({
   reviewSnapshot = reviewSnapshotResponse,
   candidateReviewSnapshot = candidateReviewSnapshotResponse,
   partialRegenerationResult = partialRegenerationResultResponse,
+  partialRegenerationPreflight = partialRegenerationPreflightResponse,
   jobs = jobsResponse,
 }: {
   geminiKeys?: { keys: Array<Record<string, unknown>> };
@@ -530,6 +549,7 @@ function createFetchMock({
   reviewSnapshot?: typeof reviewSnapshotResponse;
   candidateReviewSnapshot?: ReviewSnapshot;
   partialRegenerationResult?: typeof partialRegenerationResultResponse;
+  partialRegenerationPreflight?: typeof partialRegenerationPreflightResponse;
   jobs?: typeof jobsResponse;
 } = {}) {
   const state = {
@@ -721,7 +741,7 @@ function createFetchMock({
       ) &&
       init?.method === "POST"
     ) {
-      return new Response(JSON.stringify(partialRegenerationPreflightResponse));
+      return new Response(JSON.stringify(partialRegenerationPreflight));
     }
     if (
       url.endsWith(
@@ -1274,6 +1294,10 @@ describe("App", () => {
     expect(screen.getAllByText(/b-roll track/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/timeline preview/i)).toBeInTheDocument();
     expect(screen.getByText(/capcut export/i)).toBeInTheDocument();
+    expect(screen.getByText(/draft after rerun/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/this rerun is expected to create a new draft that still needs approval before output jobs run/i),
+    ).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /run partial regeneration/i }));
 
@@ -1313,6 +1337,26 @@ describe("App", () => {
     expect(screen.getByRole("checkbox", { name: /caption/i })).toBeChecked();
     expect(screen.getByRole("checkbox", { name: /broll/i })).not.toBeChecked();
     expect(screen.getByRole("checkbox", { name: /explanation card/i })).not.toBeChecked();
+  });
+
+  it("shows a blocked preflight warning before execution when the rerun preserves existing review blockers", async () => {
+    const fetchMock = createFetchMock({
+      editingSession: reviewRequiredEditingSessionResponse,
+      partialRegenerationPreflight: blockedPartialRegenerationPreflightResponse,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /start editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /request regeneration preflight/i }));
+
+    expect(await screen.findByText(/blocked after rerun/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/source timeline already has unresolved review blockers that rerun will preserve/i),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /run partial regeneration/i })).toBeEnabled();
   });
 
   it("shows a timeline-centered editing shell with changed-vs-preserved context after partial regeneration", async () => {

@@ -291,6 +291,8 @@ class PartialRegenerationResponse(BaseModel):
     downstream_steps: list[str] = Field(default_factory=list)
     targeted_segments: list[dict[str, object]] = Field(default_factory=list)
     affected_output_areas: list[str] = Field(default_factory=list)
+    predicted_review_status_after_rerun: str = "unknown"
+    prediction_reasons: list[str] = Field(default_factory=list)
     delta: dict[str, object] | None = None
 
 
@@ -578,6 +580,7 @@ def _build_targeted_segments(
                 "segment_id": segment_id,
                 "caption_text": str(segment.get("caption_text") or ""),
                 "cut_action": cut_action,
+                "review_required": bool(segment.get("review_required", False)),
                 "broll_override": segment.get("broll_override"),
                 "visual_overlays": segment.get("visual_overlays", []),
                 "music_override": segment.get("music_override"),
@@ -605,6 +608,39 @@ def _build_affected_output_areas(downstream_steps: list[str]) -> list[str]:
                 if area not in areas:
                     areas.append(area)
     return areas
+
+
+def _build_preflight_review_prediction(
+    *,
+    source_timeline: dict[str, Any],
+    targeted_segments: list[dict[str, object]],
+    fields: list[str],
+) -> tuple[str, list[str]]:
+    prediction_reasons: list[str] = []
+    if source_timeline.get("review_flags") or source_timeline.get("pending_recommendations"):
+        prediction_reasons.append(
+            "source timeline already has unresolved review blockers that rerun will preserve"
+        )
+    if any(bool(segment.get("review_required")) for segment in targeted_segments):
+        prediction_reasons.append(
+            "selected segments already require operator review, so rerun output stays blocked"
+        )
+    known_fields = {
+        "caption",
+        "cut_action",
+        "broll",
+        "music",
+        "visual_overlay",
+        "explanation_card",
+        "image_overlay",
+        "table_overlay",
+        "tts_replacement",
+    }
+    if prediction_reasons:
+        return "blocked", prediction_reasons
+    if any(field not in known_fields for field in fields):
+        return "unknown", ["rerun review status could not be predicted for the requested field set"]
+    return "draft", []
 
 
 def create_app(
@@ -998,15 +1034,27 @@ def create_app(
                 fields=payload.fields,
             )
             session = orchestrator.get_editing_session(project_id=project_id, session_id=session_id)
+            source_timeline = store.get_timeline_run(
+                project_id=project_id,
+                timeline_id=str(session["timeline_id"]),
+            )
         except Exception as exc:
             raise _http_error(exc) from exc
-        request_preview["targeted_segments"] = _build_targeted_segments(
+        targeted_segments = _build_targeted_segments(
             session=session,
             segment_ids=request_preview["segment_ids"],
         )
+        request_preview["targeted_segments"] = targeted_segments
         request_preview["affected_output_areas"] = _build_affected_output_areas(
             request_preview["downstream_steps"],
         )
+        predicted_review_status_after_rerun, prediction_reasons = _build_preflight_review_prediction(
+            source_timeline=source_timeline,
+            targeted_segments=targeted_segments,
+            fields=request_preview["fields"],
+        )
+        request_preview["predicted_review_status_after_rerun"] = predicted_review_status_after_rerun
+        request_preview["prediction_reasons"] = prediction_reasons
         return PartialRegenerationResponse(**request_preview)
 
     @app.post("/api/projects/{project_id}/editing-sessions/{session_id}/partial-regeneration", status_code=status.HTTP_202_ACCEPTED)
