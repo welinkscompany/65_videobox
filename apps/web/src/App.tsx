@@ -2,9 +2,13 @@ import { useEffect, useMemo, useState } from "react";
 
 import {
   api,
+  type EditingSession,
+  type EditingSessionSegment,
   type ExportJob,
   type GeminiProviderKey,
   type JobRecord,
+  type PartialRegenerationPreflight,
+  type PartialRegenerationRun,
   type PreviewJob,
   type Project,
   type ReviewSnapshot,
@@ -67,16 +71,127 @@ function formatNullableValue(value: string | null) {
   return value ?? "not available";
 }
 
+type EditingSegmentDraft = {
+  captionText: string;
+  cutAction: string;
+  brollAssetId: string;
+  explanationTitle: string;
+  explanationBody: string;
+  explanationText: string;
+  imageAssetId: string;
+  imageText: string;
+  tableColumns: string;
+  tableRows: string;
+  tableText: string;
+  ttsRecommendationId: string;
+  ttsAssetId: string;
+};
+
+function readOverlay(segment: EditingSessionSegment, overlayType: string) {
+  return (
+    segment.visual_overlays.find(
+      (overlay) => String(overlay.overlay_type ?? "") === overlayType,
+    ) ?? null
+  );
+}
+
+function createEditingSegmentDraft(segment: EditingSessionSegment): EditingSegmentDraft {
+  const explanationCard = readOverlay(segment, "explanation_card");
+  const imageOverlay = readOverlay(segment, "image_overlay");
+  const tableOverlay = readOverlay(segment, "table_overlay");
+  const tableRows = Array.isArray(tableOverlay?.rows)
+    ? (tableOverlay.rows as unknown[][])
+        .map((row) => row.map((cell) => String(cell ?? "")).join(", "))
+        .join("\n")
+    : "";
+  return {
+    captionText: segment.caption_text,
+    cutAction: segment.cut_action,
+    brollAssetId: String(segment.broll_override?.asset_id ?? ""),
+    explanationTitle: String(explanationCard?.title ?? ""),
+    explanationBody: String(explanationCard?.body ?? ""),
+    explanationText: String(explanationCard?.text ?? ""),
+    imageAssetId: String(imageOverlay?.asset_id ?? ""),
+    imageText: String(imageOverlay?.text ?? ""),
+    tableColumns: Array.isArray(tableOverlay?.columns)
+      ? (tableOverlay.columns as unknown[]).map((column) => String(column ?? "")).join(", ")
+      : "",
+    tableRows,
+    tableText: String(tableOverlay?.text ?? ""),
+    ttsRecommendationId: String(segment.tts_replacement?.recommendation_id ?? ""),
+    ttsAssetId: String(segment.tts_replacement?.asset_id ?? ""),
+  };
+}
+
+function buildEditingDrafts(session: EditingSession) {
+  return Object.fromEntries(
+    session.segments.map((segment) => [segment.segment_id, createEditingSegmentDraft(segment)]),
+  ) as Record<string, EditingSegmentDraft>;
+}
+
+function buildDefaultEditingSelection(session: EditingSession) {
+  const selectedSegment =
+    session.segments.find(
+      (segment) =>
+        segment.broll_override ||
+        segment.tts_replacement ||
+        segment.visual_overlays.length > 0 ||
+        segment.review_required,
+    ) ?? session.segments[0] ?? null;
+  if (!selectedSegment) {
+    return { segmentId: null, fields: [] as string[] };
+  }
+  const defaultFields: string[] = [];
+  if (selectedSegment.broll_override) {
+    defaultFields.push("broll");
+  }
+  if (readOverlay(selectedSegment, "explanation_card")) {
+    defaultFields.push("explanation_card");
+  }
+  if (readOverlay(selectedSegment, "image_overlay")) {
+    defaultFields.push("image_overlay");
+  }
+  if (readOverlay(selectedSegment, "table_overlay")) {
+    defaultFields.push("table_overlay");
+  }
+  if (selectedSegment.tts_replacement) {
+    defaultFields.push("tts_replacement");
+  }
+  return {
+    segmentId: selectedSegment.segment_id,
+    fields: defaultFields.length > 0 ? defaultFields : ["caption"],
+  };
+}
+
+function formatFieldLabel(field: string) {
+  return field.replace(/_/g, " ");
+}
+
+function formatAffectedOutputArea(area: string) {
+  if (area === "capcut export") {
+    return "CapCut handoff";
+  }
+  return area;
+}
+
 export function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [selectedSection, setSelectedSection] = useState<
-    "overview" | "timeline" | "review"
+    "overview" | "timeline" | "review" | "editing"
   >("overview");
   const [projectDetail, setProjectDetail] = useState<Project | null>(null);
   const [jobs, setJobs] = useState<JobRecord[]>([]);
   const [timelineJob, setTimelineJob] = useState<TimelineJob | null>(null);
   const [reviewSnapshot, setReviewSnapshot] = useState<ReviewSnapshot | null>(null);
+  const [editingSession, setEditingSession] = useState<EditingSession | null>(null);
+  const [editingDrafts, setEditingDrafts] = useState<Record<string, EditingSegmentDraft>>({});
+  const [selectedEditingSegmentId, setSelectedEditingSegmentId] = useState<string | null>(null);
+  const [selectedRegenerationFields, setSelectedRegenerationFields] = useState<string[]>([]);
+  const [partialRegenerationPreflight, setPartialRegenerationPreflight] =
+    useState<PartialRegenerationPreflight | null>(null);
+  const [partialRegenerationRun, setPartialRegenerationRun] =
+    useState<PartialRegenerationRun | null>(null);
   const [subtitleJob, setSubtitleJob] = useState<SubtitleJob | null>(null);
   const [previewJob, setPreviewJob] = useState<PreviewJob | null>(null);
   const [exportJob, setExportJob] = useState<ExportJob | null>(null);
@@ -90,6 +205,11 @@ export function App() {
   const [isRenderingSubtitle, setIsRenderingSubtitle] = useState(false);
   const [isRenderingPreview, setIsRenderingPreview] = useState(false);
   const [isExportingCapcut, setIsExportingCapcut] = useState(false);
+  const [isStartingEditingSession, setIsStartingEditingSession] = useState(false);
+  const [isSavingEditingMutation, setIsSavingEditingMutation] = useState<string | null>(null);
+  const [isRequestingRegenerationPreflight, setIsRequestingRegenerationPreflight] =
+    useState(false);
+  const [isRunningPartialRegeneration, setIsRunningPartialRegeneration] = useState(false);
   const [isGeminiFormOpen, setIsGeminiFormOpen] = useState(false);
   const [editingGeminiKeyId, setEditingGeminiKeyId] = useState<string | null>(null);
   const [geminiForm, setGeminiForm] = useState<GeminiKeyFormState>(createEmptyGeminiKeyForm);
@@ -131,6 +251,12 @@ export function App() {
       setJobs([]);
       setTimelineJob(null);
       setReviewSnapshot(null);
+      setEditingSession(null);
+      setEditingDrafts({});
+      setSelectedEditingSegmentId(null);
+      setSelectedRegenerationFields([]);
+      setPartialRegenerationPreflight(null);
+      setPartialRegenerationRun(null);
       setSubtitleJob(null);
       setPreviewJob(null);
       setExportJob(null);
@@ -184,6 +310,12 @@ export function App() {
         setJobs(jobItems);
         setTimelineJob(timeline);
         setReviewSnapshot(review);
+        setEditingSession(null);
+        setEditingDrafts({});
+        setSelectedEditingSegmentId(null);
+        setSelectedRegenerationFields([]);
+        setPartialRegenerationPreflight(null);
+        setPartialRegenerationRun(null);
         setSubtitleJob(subtitle);
         setPreviewJob(preview);
         setExportJob(capcutExport);
@@ -296,6 +428,142 @@ export function App() {
   const canGenerateOutputs =
     !!latestTimelineBuildJob && !hasReviewBlockers && reviewStatus === "approved";
 
+  function applyEditingSessionState(session: EditingSession) {
+    setEditingSession(session);
+    setEditingDrafts(buildEditingDrafts(session));
+    const selection = buildDefaultEditingSelection(session);
+    setSelectedEditingSegmentId((current) => current ?? selection.segmentId);
+    setSelectedRegenerationFields((current) =>
+      current.length > 0 ? current : selection.fields,
+    );
+  }
+
+  function updateEditingDraft(
+    segmentId: string,
+    patch: Partial<EditingSegmentDraft>,
+  ) {
+    setEditingDrafts((current) => ({
+      ...current,
+      [segmentId]: {
+        ...current[segmentId],
+        ...patch,
+      },
+    }));
+  }
+
+  async function applyEditingMutation(
+    mutationKey: string,
+    action: () => Promise<EditingSession>,
+  ) {
+    setIsSavingEditingMutation(mutationKey);
+    setErrorMessage(null);
+    try {
+      const session = await action();
+      applyEditingSessionState(session);
+      setPartialRegenerationPreflight(null);
+      setPartialRegenerationRun(null);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Unknown error");
+    } finally {
+      setIsSavingEditingMutation(null);
+    }
+  }
+
+  async function handleStartEditingSession() {
+    if (!selectedProjectId || !latestTimelineBuildJob) {
+      return;
+    }
+    setIsStartingEditingSession(true);
+    setErrorMessage(null);
+    try {
+      const session = await api.createEditingSession(selectedProjectId, {
+        timeline_job_id: latestTimelineBuildJob.job_id,
+      });
+      applyEditingSessionState(session);
+      setPartialRegenerationPreflight(null);
+      setPartialRegenerationRun(null);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Unknown error");
+    } finally {
+      setIsStartingEditingSession(false);
+    }
+  }
+
+  async function handleRequestRegenerationPreflight() {
+    if (
+      !selectedProjectId ||
+      !editingSession ||
+      !selectedEditingSegmentId ||
+      selectedRegenerationFields.length === 0
+    ) {
+      return;
+    }
+    setIsRequestingRegenerationPreflight(true);
+    setErrorMessage(null);
+    try {
+      const preflight = await api.previewPartialRegeneration(
+        selectedProjectId,
+        editingSession.session_id,
+        {
+          segment_ids: [selectedEditingSegmentId],
+          fields: selectedRegenerationFields,
+        },
+      );
+      setPartialRegenerationPreflight(preflight);
+      setPartialRegenerationRun(null);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Unknown error");
+    } finally {
+      setIsRequestingRegenerationPreflight(false);
+    }
+  }
+
+  async function handleRunPartialRegeneration() {
+    if (
+      !selectedProjectId ||
+      !editingSession ||
+      !selectedEditingSegmentId ||
+      selectedRegenerationFields.length === 0
+    ) {
+      return;
+    }
+    setIsRunningPartialRegeneration(true);
+    setErrorMessage(null);
+    try {
+      const result = await api.runPartialRegeneration(
+        selectedProjectId,
+        editingSession.session_id,
+        {
+          segment_ids: [selectedEditingSegmentId],
+          fields: selectedRegenerationFields,
+        },
+      );
+      setPartialRegenerationRun(result);
+      setSubtitleJob(null);
+      setPreviewJob(null);
+      setExportJob(null);
+      setReviewSnapshot(null);
+      const [jobItems, refreshedSession] = await Promise.all([
+        api.listJobs(selectedProjectId),
+        api.getEditingSession(selectedProjectId, editingSession.session_id),
+      ]);
+      setJobs(jobItems);
+      applyEditingSessionState(refreshedSession);
+      if (result.job_id) {
+        const jobResult = await api.getPartialRegenerationResult(selectedProjectId, result.job_id);
+        setTimelineJob({
+          job_id: jobResult.job_id,
+          status: jobResult.status,
+          timeline: jobResult.timeline,
+        });
+      }
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Unknown error");
+    } finally {
+      setIsRunningPartialRegeneration(false);
+    }
+  }
+
   async function handleRebuildTimeline() {
     if (!selectedProjectId || !rebuildInputs) {
       return;
@@ -315,6 +583,12 @@ export function App() {
       setJobs(jobItems);
       setTimelineJob(timeline);
       setReviewSnapshot(review);
+      setEditingSession(null);
+      setEditingDrafts({});
+      setSelectedEditingSegmentId(null);
+      setSelectedRegenerationFields([]);
+      setPartialRegenerationPreflight(null);
+      setPartialRegenerationRun(null);
       setSubtitleJob(null);
       setPreviewJob(null);
       setExportJob(null);
@@ -409,6 +683,12 @@ export function App() {
       setTimelineJob(timeline);
       setReviewSnapshot(review);
       setJobs(jobItems);
+      setEditingSession(null);
+      setEditingDrafts({});
+      setSelectedEditingSegmentId(null);
+      setSelectedRegenerationFields([]);
+      setPartialRegenerationPreflight(null);
+      setPartialRegenerationRun(null);
       setSubtitleJob(null);
       setPreviewJob(null);
       setExportJob(null);
@@ -524,6 +804,21 @@ export function App() {
     }
   }
 
+  const selectedEditingSegment =
+    editingSession?.segments.find((segment) => segment.segment_id === selectedEditingSegmentId) ?? null;
+  const selectedEditingDraft = selectedEditingSegmentId
+    ? editingDrafts[selectedEditingSegmentId]
+    : undefined;
+  const regenerationFieldOptions = [
+    "caption",
+    "cut_action",
+    "broll",
+    "explanation_card",
+    "image_overlay",
+    "table_overlay",
+    "tts_replacement",
+  ] as const;
+
   return (
     <div className="shell">
       <aside className="sidebar" aria-label="Project navigation">
@@ -577,11 +872,14 @@ export function App() {
               ["overview", "Overview"],
               ["timeline", "Timeline summary"],
               ["review", "Review snapshot"],
+              ["editing", "Editing session"],
             ].map(([value, label]) => (
               <button
                 key={value}
                 className={selectedSection === value ? "tab-button is-active" : "tab-button"}
-                onClick={() => setSelectedSection(value as "overview" | "timeline" | "review")}
+                onClick={() =>
+                  setSelectedSection(value as "overview" | "timeline" | "review" | "editing")
+                }
                 type="button"
               >
                 {label}
@@ -1080,6 +1378,534 @@ export function App() {
                   </button>
                 ))}
               </div>
+            </article>
+          </section>
+        ) : null}
+
+        {selectedSection === "editing" ? (
+          <section className="workspace-grid review-layout">
+            <article className="panel">
+              <div className="panel-header">
+                <div>
+                  <p className="section-kicker">Editing session</p>
+                  <h2>Thin mutation workspace</h2>
+                </div>
+              </div>
+              <div className="action-row">
+                <button
+                  className="action-button primary"
+                  disabled={!latestTimelineBuildJob || isStartingEditingSession}
+                  onClick={() => void handleStartEditingSession()}
+                  type="button"
+                >
+                  {isStartingEditingSession ? "Starting editing session..." : "Start editing session"}
+                </button>
+              </div>
+              {editingSession ? (
+                <>
+                  <dl className="summary-list">
+                    <div>
+                      <dt>Session ID</dt>
+                      <dd>{editingSession.session_id}</dd>
+                    </div>
+                    <div>
+                      <dt>Timeline ID</dt>
+                      <dd>{editingSession.timeline_id}</dd>
+                    </div>
+                    <div>
+                      <dt>Segments</dt>
+                      <dd>{editingSession.segments.length}</dd>
+                    </div>
+                    <div>
+                      <dt>Mutation history</dt>
+                      <dd>{editingSession.history.length}</dd>
+                    </div>
+                  </dl>
+                  <label className="field">
+                    <span>Target segment</span>
+                    <select
+                      onChange={(event) => {
+                        setSelectedEditingSegmentId(event.target.value);
+                        setPartialRegenerationPreflight(null);
+                        setPartialRegenerationRun(null);
+                      }}
+                      value={selectedEditingSegmentId ?? ""}
+                    >
+                      {editingSession.segments.map((segment) => (
+                        <option key={segment.segment_id} value={segment.segment_id}>
+                          {`Target ${formatSeconds(segment.start_sec, segment.end_sec)}`}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <div className="action-row">
+                    {regenerationFieldOptions.map((field) => (
+                      <label className="pill" key={field}>
+                        <input
+                          checked={selectedRegenerationFields.includes(field)}
+                          onChange={(event) => {
+                            setSelectedRegenerationFields((current) =>
+                              event.target.checked
+                                ? [...current, field]
+                                : current.filter((item) => item !== field),
+                            );
+                            setPartialRegenerationPreflight(null);
+                            setPartialRegenerationRun(null);
+                          }}
+                          type="checkbox"
+                        />
+                        {formatFieldLabel(field)}
+                      </label>
+                    ))}
+                  </div>
+                  <div className="action-row">
+                    <button
+                      className="action-button"
+                      disabled={
+                        !selectedEditingSegmentId ||
+                        selectedRegenerationFields.length === 0 ||
+                        isRequestingRegenerationPreflight
+                      }
+                      onClick={() => void handleRequestRegenerationPreflight()}
+                      type="button"
+                    >
+                      {isRequestingRegenerationPreflight
+                        ? "Requesting preflight..."
+                        : "Request regeneration preflight"}
+                    </button>
+                    <button
+                      className="action-button primary"
+                      disabled={
+                        !selectedEditingSegmentId ||
+                        selectedRegenerationFields.length === 0 ||
+                        isRunningPartialRegeneration
+                      }
+                      onClick={() => void handleRunPartialRegeneration()}
+                      type="button"
+                    >
+                      {isRunningPartialRegeneration
+                        ? "Running partial regeneration..."
+                        : "Run partial regeneration"}
+                    </button>
+                  </div>
+                  {partialRegenerationPreflight ? (
+                    <div className="track-card">
+                      <h3>Expected affected output areas</h3>
+                      <div className="clip-list">
+                        {partialRegenerationPreflight.affected_output_areas.map((area) => (
+                          <span key={area}>{formatAffectedOutputArea(area)}</span>
+                        ))}
+                      </div>
+                      <h3>Downstream rerun steps</h3>
+                      <div className="clip-list">
+                        {partialRegenerationPreflight.downstream_steps.map((step) => (
+                          <span key={step}>{step}</span>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                  {partialRegenerationRun ? (
+                    <div className="track-card">
+                      <h3>{partialRegenerationRun.job_id}</h3>
+                      <p>{partialRegenerationRun.status}</p>
+                      <p>{partialRegenerationRun.delta?.timeline_id ?? "timeline pending"}</p>
+                      {(partialRegenerationRun.delta?.regenerated_segments ?? []).map((segment) => (
+                        <div className="clip-card" key={String(segment.segment_id ?? Math.random())}>
+                          <strong>{String(segment.segment_id ?? "segment")}</strong>
+                          {Array.isArray(segment.output_changes)
+                            ? (segment.output_changes as unknown[]).map((change) => (
+                                <span key={String(change)}>{String(change)}</span>
+                              ))
+                            : null}
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                </>
+              ) : (
+                <p className="empty-state">Start an editing session from the latest timeline draft.</p>
+              )}
+            </article>
+
+            <article className="panel">
+              <div className="panel-header">
+                <div>
+                  <p className="section-kicker">Segment mutations</p>
+                  <h2>Current editing fields</h2>
+                </div>
+              </div>
+              {editingSession ? (
+                <div className="segment-list">
+                  {editingSession.segments.map((segment) => {
+                    const draft = editingDrafts[segment.segment_id];
+                    if (!draft) {
+                      return null;
+                    }
+                    return (
+                      <div className="segment-card" key={segment.segment_id}>
+                        <div className="segment-heading">
+                          <strong>{segment.segment_id}</strong>
+                          <span className={segment.review_required ? "pill warning" : "pill okay"}>
+                            {segment.review_required ? "review required" : "ready"}
+                          </span>
+                        </div>
+                        <span>{formatSeconds(segment.start_sec, segment.end_sec)}</span>
+                        <label className="field">
+                          <span>Caption</span>
+                          <input
+                            onChange={(event) =>
+                              updateEditingDraft(segment.segment_id, {
+                                captionText: event.target.value,
+                              })
+                            }
+                            value={draft.captionText}
+                          />
+                        </label>
+                        <button
+                          className="action-button"
+                          disabled={
+                            !selectedProjectId ||
+                            !editingSession ||
+                            isSavingEditingMutation === `${segment.segment_id}-caption`
+                          }
+                          onClick={() =>
+                            void applyEditingMutation(`${segment.segment_id}-caption`, () =>
+                              api.updateEditingSessionCaption(
+                                selectedProjectId!,
+                                editingSession.session_id,
+                                segment.segment_id,
+                                { caption_text: draft.captionText },
+                              ),
+                            )
+                          }
+                          type="button"
+                        >
+                          Save caption
+                        </button>
+                        <label className="field">
+                          <span>Cut action</span>
+                          <select
+                            onChange={(event) =>
+                              updateEditingDraft(segment.segment_id, {
+                                cutAction: event.target.value,
+                              })
+                            }
+                            value={draft.cutAction}
+                          >
+                            <option value="keep">keep</option>
+                            <option value="remove">remove</option>
+                            <option value="trim">trim</option>
+                          </select>
+                        </label>
+                        <button
+                          className="action-button"
+                          disabled={
+                            !selectedProjectId ||
+                            !editingSession ||
+                            isSavingEditingMutation === `${segment.segment_id}-cut`
+                          }
+                          onClick={() =>
+                            void applyEditingMutation(`${segment.segment_id}-cut`, () =>
+                              api.updateEditingSessionCutAction(
+                                selectedProjectId!,
+                                editingSession.session_id,
+                                segment.segment_id,
+                                { cut_action: draft.cutAction },
+                              ),
+                            )
+                          }
+                          type="button"
+                        >
+                          Save cut action
+                        </button>
+                        <label className="field">
+                          <span>B-roll asset ID</span>
+                          <input
+                            onChange={(event) =>
+                              updateEditingDraft(segment.segment_id, {
+                                brollAssetId: event.target.value,
+                              })
+                            }
+                            value={draft.brollAssetId}
+                          />
+                        </label>
+                        <button
+                          className="action-button"
+                          disabled={
+                            !selectedProjectId ||
+                            !editingSession ||
+                            !draft.brollAssetId ||
+                            isSavingEditingMutation === `${segment.segment_id}-broll`
+                          }
+                          onClick={() =>
+                            void applyEditingMutation(`${segment.segment_id}-broll`, () =>
+                              api.updateEditingSessionBroll(
+                                selectedProjectId!,
+                                editingSession.session_id,
+                                segment.segment_id,
+                                { asset_id: draft.brollAssetId },
+                              ),
+                            )
+                          }
+                          type="button"
+                        >
+                          Save B-roll override
+                        </button>
+                        <label className="field">
+                          <span>Explanation title</span>
+                          <input
+                            onChange={(event) =>
+                              updateEditingDraft(segment.segment_id, {
+                                explanationTitle: event.target.value,
+                              })
+                            }
+                            value={draft.explanationTitle}
+                          />
+                        </label>
+                        <label className="field">
+                          <span>Explanation body</span>
+                          <input
+                            onChange={(event) =>
+                              updateEditingDraft(segment.segment_id, {
+                                explanationBody: event.target.value,
+                              })
+                            }
+                            value={draft.explanationBody}
+                          />
+                        </label>
+                        <label className="field">
+                          <span>Explanation text</span>
+                          <textarea
+                            onChange={(event) =>
+                              updateEditingDraft(segment.segment_id, {
+                                explanationText: event.target.value,
+                              })
+                            }
+                            value={draft.explanationText}
+                          />
+                        </label>
+                        <button
+                          className="action-button"
+                          disabled={
+                            !selectedProjectId ||
+                            !editingSession ||
+                            !draft.explanationText ||
+                            isSavingEditingMutation === `${segment.segment_id}-explanation`
+                          }
+                          onClick={() =>
+                            void applyEditingMutation(`${segment.segment_id}-explanation`, () =>
+                              api.updateEditingSessionExplanationCard(
+                                selectedProjectId!,
+                                editingSession.session_id,
+                                segment.segment_id,
+                                {
+                                  title: draft.explanationTitle,
+                                  body: draft.explanationBody,
+                                  text: draft.explanationText,
+                                },
+                              ),
+                            )
+                          }
+                          type="button"
+                        >
+                          Save explanation card
+                        </button>
+                        <label className="field">
+                          <span>Image overlay asset ID</span>
+                          <input
+                            onChange={(event) =>
+                              updateEditingDraft(segment.segment_id, {
+                                imageAssetId: event.target.value,
+                              })
+                            }
+                            value={draft.imageAssetId}
+                          />
+                        </label>
+                        <label className="field">
+                          <span>Image overlay text</span>
+                          <textarea
+                            onChange={(event) =>
+                              updateEditingDraft(segment.segment_id, {
+                                imageText: event.target.value,
+                              })
+                            }
+                            value={draft.imageText}
+                          />
+                        </label>
+                        <button
+                          className="action-button"
+                          disabled={
+                            !selectedProjectId ||
+                            !editingSession ||
+                            !draft.imageAssetId ||
+                            isSavingEditingMutation === `${segment.segment_id}-image`
+                          }
+                          onClick={() =>
+                            void applyEditingMutation(`${segment.segment_id}-image`, () =>
+                              api.updateEditingSessionImageOverlay(
+                                selectedProjectId!,
+                                editingSession.session_id,
+                                segment.segment_id,
+                                {
+                                  asset_id: draft.imageAssetId,
+                                  text: draft.imageText,
+                                },
+                              ),
+                            )
+                          }
+                          type="button"
+                        >
+                          Save image overlay
+                        </button>
+                        <label className="field">
+                          <span>Table columns</span>
+                          <input
+                            onChange={(event) =>
+                              updateEditingDraft(segment.segment_id, {
+                                tableColumns: event.target.value,
+                              })
+                            }
+                            value={draft.tableColumns}
+                          />
+                        </label>
+                        <label className="field">
+                          <span>Table rows</span>
+                          <textarea
+                            onChange={(event) =>
+                              updateEditingDraft(segment.segment_id, {
+                                tableRows: event.target.value,
+                              })
+                            }
+                            value={draft.tableRows}
+                          />
+                        </label>
+                        <label className="field">
+                          <span>Table text</span>
+                          <textarea
+                            onChange={(event) =>
+                              updateEditingDraft(segment.segment_id, {
+                                tableText: event.target.value,
+                              })
+                            }
+                            value={draft.tableText}
+                          />
+                        </label>
+                        <button
+                          className="action-button"
+                          disabled={
+                            !selectedProjectId ||
+                            !editingSession ||
+                            !draft.tableText ||
+                            isSavingEditingMutation === `${segment.segment_id}-table`
+                          }
+                          onClick={() =>
+                            void applyEditingMutation(`${segment.segment_id}-table`, () =>
+                              api.updateEditingSessionTableOverlay(
+                                selectedProjectId!,
+                                editingSession.session_id,
+                                segment.segment_id,
+                                {
+                                  columns: draft.tableColumns
+                                    .split(",")
+                                    .map((item) => item.trim())
+                                    .filter(Boolean),
+                                  rows: draft.tableRows
+                                    .split("\n")
+                                    .map((row) =>
+                                      row
+                                        .split(",")
+                                        .map((cell) => cell.trim())
+                                        .filter(Boolean),
+                                    )
+                                    .filter((row) => row.length > 0),
+                                  text: draft.tableText,
+                                },
+                              ),
+                            )
+                          }
+                          type="button"
+                        >
+                          Save table overlay
+                        </button>
+                        <label className="field">
+                          <span>TTS recommendation ID</span>
+                          <input
+                            onChange={(event) =>
+                              updateEditingDraft(segment.segment_id, {
+                                ttsRecommendationId: event.target.value,
+                              })
+                            }
+                            value={draft.ttsRecommendationId}
+                          />
+                        </label>
+                        <label className="field">
+                          <span>TTS asset ID</span>
+                          <input
+                            onChange={(event) =>
+                              updateEditingDraft(segment.segment_id, {
+                                ttsAssetId: event.target.value,
+                              })
+                            }
+                            value={draft.ttsAssetId}
+                          />
+                        </label>
+                        <button
+                          className="action-button"
+                          disabled={
+                            !selectedProjectId ||
+                            !editingSession ||
+                            !draft.ttsRecommendationId ||
+                            !draft.ttsAssetId ||
+                            isSavingEditingMutation === `${segment.segment_id}-tts`
+                          }
+                          onClick={() =>
+                            void applyEditingMutation(`${segment.segment_id}-tts`, () =>
+                              api.updateEditingSessionTtsReplacement(
+                                selectedProjectId!,
+                                editingSession.session_id,
+                                segment.segment_id,
+                                {
+                                  recommendation_id: draft.ttsRecommendationId,
+                                  asset_id: draft.ttsAssetId,
+                                },
+                              ),
+                            )
+                          }
+                          type="button"
+                        >
+                          Save TTS replacement
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="empty-state">No editing session loaded yet.</p>
+              )}
+            </article>
+
+            <article className="panel">
+              <div className="panel-header">
+                <div>
+                  <p className="section-kicker">Selected segment</p>
+                  <h2>Current draft preview</h2>
+                </div>
+              </div>
+              {selectedEditingSegment && selectedEditingDraft ? (
+                <div className="track-card">
+                  <h3>Selected draft</h3>
+                  <p>{selectedEditingDraft.captionText}</p>
+                  <span>{selectedEditingDraft.brollAssetId || "No B-roll override"}</span>
+                  <span>
+                    {selectedEditingDraft.explanationText ? "Explanation card loaded" : "No explanation card"}
+                  </span>
+                  <span>{selectedEditingDraft.imageAssetId || "No image overlay"}</span>
+                  <span>{selectedEditingDraft.tableText || "No table overlay"}</span>
+                  <span>{selectedEditingDraft.ttsAssetId || "No TTS replacement"}</span>
+                </div>
+              ) : (
+                <p className="empty-state">Choose a session segment to inspect its draft state.</p>
+              )}
             </article>
           </section>
         ) : null}

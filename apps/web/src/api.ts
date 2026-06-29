@@ -91,6 +91,123 @@ export type ReviewSnapshot = {
   review_flags: ReviewFlag[];
 };
 
+export type EditingSessionSegment = {
+  segment_id: string;
+  caption_text: string;
+  start_sec: number;
+  end_sec: number;
+  cut_action: string;
+  review_required: boolean;
+  broll_override: Record<string, unknown> | null;
+  visual_overlays: Record<string, unknown>[];
+  music_override: Record<string, unknown> | null;
+  tts_replacement: Record<string, unknown> | null;
+};
+
+export type EditingSessionHistoryEntry = {
+  mutation_type: string;
+  segment_id: string;
+  caption_text?: string | null;
+  cut_action?: string | null;
+  asset_id?: string | null;
+  overlay_type?: string | null;
+  recommendation_id?: string | null;
+};
+
+export type EditingSession = {
+  session_id: string;
+  project_id: string;
+  timeline_id: string;
+  segments: EditingSessionSegment[];
+  history: EditingSessionHistoryEntry[];
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+export type CreateEditingSessionRequest = {
+  timeline_job_id: string;
+};
+
+export type CaptionOverrideRequest = {
+  caption_text: string;
+};
+
+export type CutActionOverrideRequest = {
+  cut_action: string;
+};
+
+export type BrollOverrideRequest = {
+  asset_id: string;
+};
+
+export type ExplanationCardRequest = {
+  title: string;
+  body: string;
+  text: string;
+};
+
+export type ImageOverlayRequest = {
+  asset_id: string;
+  text: string;
+};
+
+export type TableOverlayRequest = {
+  columns: string[];
+  rows: string[][];
+  text: string;
+};
+
+export type TtsReplacementRequest = {
+  recommendation_id: string;
+  asset_id: string;
+};
+
+export type PartialRegenerationRequest = {
+  segment_ids: string[];
+  fields: string[];
+};
+
+export type PartialRegenerationPreflight = {
+  session_id: string | null;
+  segment_ids: string[];
+  fields: string[];
+  downstream_steps: string[];
+  targeted_segments: Record<string, unknown>[];
+  affected_output_areas: string[];
+};
+
+export type PartialRegenerationDelta = {
+  regenerated_segments: Record<string, unknown>[];
+  timeline_id: string | null;
+};
+
+export type PartialRegenerationRun = {
+  job_id: string | null;
+  status: string | null;
+  session_id: string | null;
+  segment_ids: string[];
+  fields: string[];
+  downstream_steps: string[];
+  targeted_segments: Record<string, unknown>[];
+  affected_output_areas: string[];
+  delta: PartialRegenerationDelta | null;
+};
+
+export type PartialRegenerationJob = {
+  job_id: string;
+  status: string;
+  partial_regeneration_id: string;
+  session_id: string;
+  source_timeline_id: string;
+  timeline_id: string;
+  segment_ids: string[];
+  fields: string[];
+  downstream_steps: string[];
+  regenerated_segments: Record<string, unknown>[];
+  timeline: TimelinePayload;
+  created_at?: string | null;
+};
+
 export type BuildTimelineRequest = {
   segment_analysis_job_id: string;
   recommendation_job_ids: string[];
@@ -256,6 +373,160 @@ export const api = {
     request<TimelineJob>(`/api/projects/${projectId}/timelines/${jobId}`),
   getReviewSnapshot: (projectId: string, jobId: string) =>
     request<ReviewSnapshot>(`/api/projects/${projectId}/review-snapshots/${jobId}`),
+  createEditingSession: (projectId: string, payload: CreateEditingSessionRequest) =>
+    request<EditingSession>(`/api/projects/${projectId}/editing-sessions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    }),
+  getEditingSession: (projectId: string, sessionId: string) =>
+    request<EditingSession>(`/api/projects/${projectId}/editing-sessions/${sessionId}`),
+  updateEditingSessionCaption: (
+    projectId: string,
+    sessionId: string,
+    segmentId: string,
+    payload: CaptionOverrideRequest,
+  ) =>
+    request<EditingSession>(
+      `/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/caption`,
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      },
+    ),
+  updateEditingSessionCutAction: (
+    projectId: string,
+    sessionId: string,
+    segmentId: string,
+    payload: CutActionOverrideRequest,
+  ) =>
+    request<EditingSession>(
+      `/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/cut-action`,
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      },
+    ),
+  updateEditingSessionBroll: (
+    projectId: string,
+    sessionId: string,
+    segmentId: string,
+    payload: BrollOverrideRequest,
+  ) =>
+    request<EditingSession>(
+      `/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/broll`,
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      },
+    ),
+  updateEditingSessionExplanationCard: (
+    projectId: string,
+    sessionId: string,
+    segmentId: string,
+    payload: ExplanationCardRequest,
+  ) =>
+    request<EditingSession>(
+      `/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/explanation-card`,
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      },
+    ),
+  updateEditingSessionImageOverlay: (
+    projectId: string,
+    sessionId: string,
+    segmentId: string,
+    payload: ImageOverlayRequest,
+  ) =>
+    request<EditingSession>(
+      `/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/image-overlay`,
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      },
+    ),
+  updateEditingSessionTableOverlay: (
+    projectId: string,
+    sessionId: string,
+    segmentId: string,
+    payload: TableOverlayRequest,
+  ) =>
+    request<EditingSession>(
+      `/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/table-overlay`,
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      },
+    ),
+  updateEditingSessionTtsReplacement: (
+    projectId: string,
+    sessionId: string,
+    segmentId: string,
+    payload: TtsReplacementRequest,
+  ) =>
+    request<EditingSession>(
+      `/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/tts-replacement`,
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      },
+    ),
+  previewPartialRegeneration: (
+    projectId: string,
+    sessionId: string,
+    payload: PartialRegenerationRequest,
+  ) =>
+    request<PartialRegenerationPreflight>(
+      `/api/projects/${projectId}/editing-sessions/${sessionId}/partial-regeneration/preflight`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      },
+    ),
+  runPartialRegeneration: (
+    projectId: string,
+    sessionId: string,
+    payload: PartialRegenerationRequest,
+  ) =>
+    request<PartialRegenerationRun>(
+      `/api/projects/${projectId}/editing-sessions/${sessionId}/partial-regeneration`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      },
+    ),
+  getPartialRegenerationResult: (projectId: string, jobId: string) =>
+    request<PartialRegenerationJob>(`/api/projects/${projectId}/partial-regenerations/${jobId}`),
   getSubtitle: (projectId: string, jobId: string) =>
     request<SubtitleJob>(`/api/projects/${projectId}/subtitles/${jobId}`),
   getPreview: (projectId: string, jobId: string) =>

@@ -289,6 +289,9 @@ class PartialRegenerationResponse(BaseModel):
     segment_ids: list[str] = Field(default_factory=list)
     fields: list[str] = Field(default_factory=list)
     downstream_steps: list[str] = Field(default_factory=list)
+    targeted_segments: list[dict[str, object]] = Field(default_factory=list)
+    affected_output_areas: list[str] = Field(default_factory=list)
+    delta: dict[str, object] | None = None
 
 
 class PartialRegenerationJobResponse(StartJobResponse):
@@ -554,6 +557,53 @@ class GeminiProviderKeyResponse(BaseModel):
 
 class GeminiProviderKeyListResponse(BaseModel):
     keys: list[GeminiProviderKeyResponse]
+
+
+def _build_targeted_segments(
+    session: dict[str, Any],
+    segment_ids: list[str],
+) -> list[dict[str, object]]:
+    target_set = set(segment_ids)
+    targeted_segments: list[dict[str, object]] = []
+    for segment in session.get("segments", []):
+        segment_id = str(segment.get("segment_id") or "")
+        if segment_id not in target_set:
+            continue
+        cut_action = str(segment.get("cut_action") or "keep")
+        if cut_action not in {"keep", "remove", "trim"}:
+            cut_action = "keep"
+        targeted_segments.append(
+            {
+                "segment_id": segment_id,
+                "caption_text": str(segment.get("caption_text") or ""),
+                "cut_action": cut_action,
+                "broll_override": segment.get("broll_override"),
+                "visual_overlays": segment.get("visual_overlays", []),
+                "music_override": segment.get("music_override"),
+                "tts_replacement": segment.get("tts_replacement"),
+            }
+        )
+    return targeted_segments
+
+
+def _build_affected_output_areas(downstream_steps: list[str]) -> list[str]:
+    areas: list[str] = []
+    for step in downstream_steps:
+        if step == "segment_refresh" and "segment copy" not in areas:
+            areas.append("segment copy")
+        if step == "broll_refresh" and "b-roll track" not in areas:
+            areas.append("b-roll track")
+        if step == "music_refresh" and "music bed" not in areas:
+            areas.append("music bed")
+        if step == "overlay_refresh" and "visual overlays" not in areas:
+            areas.append("visual overlays")
+        if step == "tts_refresh" and "narration audio" not in areas:
+            areas.append("narration audio")
+        if step == "timeline_build":
+            for area in ["timeline preview", "subtitle render", "capcut export"]:
+                if area not in areas:
+                    areas.append(area)
+    return areas
 
 
 def create_app(
@@ -922,6 +972,34 @@ def create_app(
             raise _http_error(exc) from exc
         return EditingSessionResponse(**result)
 
+    @app.post(
+        "/api/projects/{project_id}/editing-sessions/{session_id}/partial-regeneration/preflight",
+        response_model_exclude_none=True,
+    )
+    def preview_editing_session_partial_regeneration(
+        project_id: str,
+        session_id: str,
+        payload: PartialRegenerationRequest,
+    ) -> PartialRegenerationResponse:
+        try:
+            request_preview = orchestrator.build_editing_session_partial_regeneration_request(
+                project_id=project_id,
+                session_id=session_id,
+                segment_ids=payload.segment_ids,
+                fields=payload.fields,
+            )
+            session = orchestrator.get_editing_session(project_id=project_id, session_id=session_id)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        request_preview["targeted_segments"] = _build_targeted_segments(
+            session=session,
+            segment_ids=request_preview["segment_ids"],
+        )
+        request_preview["affected_output_areas"] = _build_affected_output_areas(
+            request_preview["downstream_steps"],
+        )
+        return PartialRegenerationResponse(**request_preview)
+
     @app.post("/api/projects/{project_id}/editing-sessions/{session_id}/partial-regeneration", status_code=status.HTTP_202_ACCEPTED)
     def start_editing_session_partial_regeneration(
         project_id: str,
@@ -935,8 +1013,22 @@ def create_app(
                 segment_ids=payload.segment_ids,
                 fields=payload.fields,
             )
+            session = orchestrator.get_editing_session(project_id=project_id, session_id=session_id)
+            job_result = orchestrator.get_partial_regeneration_result(
+                project_id=project_id,
+                job_id=str(result["job_id"]),
+            )
         except Exception as exc:
             raise _http_error(exc) from exc
+        result["targeted_segments"] = _build_targeted_segments(
+            session=session,
+            segment_ids=result["segment_ids"],
+        )
+        result["affected_output_areas"] = _build_affected_output_areas(result["downstream_steps"])
+        result["delta"] = {
+            "regenerated_segments": job_result["regenerated_segments"],
+            "timeline_id": job_result["timeline_id"],
+        }
         return PartialRegenerationResponse(**result)
 
     @app.get("/api/projects/{project_id}/partial-regenerations/{job_id}")

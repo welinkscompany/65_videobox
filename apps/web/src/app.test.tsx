@@ -251,6 +251,89 @@ const subtitleResponse = {
   },
 };
 
+const editingSessionResponse = {
+  project_id: "project_001",
+  timeline_id: "timeline_001",
+  session_id: "editing_session_001",
+  segments: [
+    {
+      segment_id: "seg_001",
+      caption_text: "Office overview",
+      start_sec: 0,
+      end_sec: 3.5,
+      cut_action: "keep",
+      review_required: false,
+      broll_override: null,
+      visual_overlays: [],
+      music_override: null,
+      tts_replacement: null,
+    },
+    {
+      segment_id: "seg_002",
+      caption_text: "Team meeting overview",
+      start_sec: 3.5,
+      end_sec: 7.8,
+      cut_action: "keep",
+      review_required: false,
+      broll_override: { asset_id: "asset_manual_002" },
+      visual_overlays: [
+        {
+          overlay_type: "explanation_card",
+          title: "Meeting context",
+          body: "Summarize the active discussion.",
+          text: "Meeting context: Summarize the active discussion.",
+        },
+      ],
+      music_override: null,
+      tts_replacement: null,
+    },
+  ],
+  history: [
+    {
+      mutation_type: "broll_override_update",
+      segment_id: "seg_002",
+      asset_id: "asset_manual_002",
+    },
+  ],
+};
+
+const partialRegenerationPreflightResponse = {
+  session_id: "editing_session_001",
+  segment_ids: ["seg_002"],
+  fields: ["broll", "explanation_card"],
+  downstream_steps: ["broll_refresh", "overlay_refresh", "timeline_build"],
+  targeted_segments: [editingSessionResponse.segments[1]],
+  affected_output_areas: [
+    "b-roll track",
+    "visual overlays",
+    "timeline preview",
+    "subtitle render",
+    "capcut export",
+  ],
+};
+
+const partialRegenerationResponse = {
+  job_id: "partial_regeneration_job_001",
+  status: "succeeded",
+  session_id: "editing_session_001",
+  segment_ids: ["seg_002"],
+  fields: ["broll", "explanation_card"],
+  downstream_steps: ["broll_refresh", "overlay_refresh", "timeline_build"],
+  delta: {
+    regenerated_segments: [
+      {
+        segment_id: "seg_002",
+        changed_fields: ["broll", "explanation_card"],
+        output_changes: [
+          "b-roll asset replaced with regenerated recommendation",
+          "explanation card text refreshed",
+        ],
+      },
+    ],
+    timeline_id: "timeline_002",
+  },
+};
+
 const geminiKeysResponse = {
   keys: [
     {
@@ -390,6 +473,35 @@ function createFetchMock({
     }
     if (url.endsWith("/api/projects/project_001/exports/capcut_export_job_007")) {
       return new Response(JSON.stringify(exportResponse));
+    }
+    if (
+      url.endsWith("/api/projects/project_001/editing-sessions") &&
+      init?.method === "POST"
+    ) {
+      return new Response(JSON.stringify(editingSessionResponse), {
+        status: 201,
+      });
+    }
+    if (url.endsWith("/api/projects/project_001/editing-sessions/editing_session_001")) {
+      return new Response(JSON.stringify(editingSessionResponse));
+    }
+    if (
+      url.endsWith(
+        "/api/projects/project_001/editing-sessions/editing_session_001/partial-regeneration/preflight",
+      ) &&
+      init?.method === "POST"
+    ) {
+      return new Response(JSON.stringify(partialRegenerationPreflightResponse));
+    }
+    if (
+      url.endsWith(
+        "/api/projects/project_001/editing-sessions/editing_session_001/partial-regeneration",
+      ) &&
+      init?.method === "POST"
+    ) {
+      return new Response(JSON.stringify(partialRegenerationResponse), {
+        status: 202,
+      });
     }
     if (url.endsWith("/api/projects/project_001/providers/gemini/keys")) {
       if (init?.method === "POST") {
@@ -869,5 +981,78 @@ describe("App", () => {
         expect.anything(),
       );
     });
+  });
+
+  it("supports the thin editing flow with session load, regeneration preflight, and partial regeneration delta visibility", async () => {
+    const fetchMock = createFetchMock();
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    expect(await screen.findByText(/operator review demo/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /editing session/i }));
+
+    fireEvent.click(await screen.findByRole("button", { name: /start editing session/i }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/projects/project_001/editing-sessions",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            timeline_job_id: "timeline_build_job_005",
+          }),
+        }),
+      );
+    });
+
+    expect(await screen.findByText(/editing_session_001/i)).toBeInTheDocument();
+    expect(await screen.findByText(/seg_002/i)).toBeInTheDocument();
+    expect(await screen.findByText(/asset_manual_002/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/meeting context: summarize the active discussion\./i),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /request regeneration preflight/i }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/projects/project_001/editing-sessions/editing_session_001/partial-regeneration/preflight",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            segment_ids: ["seg_002"],
+            fields: ["broll", "explanation_card"],
+          }),
+        }),
+      );
+    });
+
+    expect(await screen.findByText(/expected affected output areas/i)).toBeInTheDocument();
+    expect(screen.getByText(/b-roll track/i)).toBeInTheDocument();
+    expect(screen.getByText(/timeline preview/i)).toBeInTheDocument();
+    expect(screen.getByText(/capcut export/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /run partial regeneration/i }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/projects/project_001/editing-sessions/editing_session_001/partial-regeneration",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            segment_ids: ["seg_002"],
+            fields: ["broll", "explanation_card"],
+          }),
+        }),
+      );
+    });
+
+    expect(await screen.findByText(/partial_regeneration_job_001/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/b-roll asset replaced with regenerated recommendation/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/timeline_002/i)).toBeInTheDocument();
   });
 });

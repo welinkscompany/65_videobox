@@ -4167,6 +4167,72 @@ def test_editing_session_api_can_start_partial_regeneration_job(tmp_path: Path) 
     ]
 
 
+def test_editing_session_api_can_preview_partial_regeneration_scope_without_creating_job(
+    tmp_path: Path,
+) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    create_response = client.post(
+        f"/api/projects/{project_id}/editing-sessions",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    session_id = create_response.json()["session_id"]
+
+    client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/caption",
+        json={"caption_text": "Office overview with corrected label"},
+    )
+    client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/broll",
+        json={"asset_id": "asset_manual_001"},
+    )
+
+    before_jobs = client.get(f"/api/projects/{project_id}/jobs").json()["jobs"]
+    response = client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/partial-regeneration/preflight",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["caption", "broll", "visual_overlay"],
+        },
+    )
+    after_jobs = client.get(f"/api/projects/{project_id}/jobs").json()["jobs"]
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert "job_id" not in payload
+    assert payload["session_id"] == session_id
+    assert payload["segment_ids"] == ["seg_001"]
+    assert payload["fields"] == ["caption", "broll", "visual_overlay"]
+    assert payload["downstream_steps"] == [
+        "segment_refresh",
+        "broll_refresh",
+        "overlay_refresh",
+        "timeline_build",
+    ]
+    assert payload["targeted_segments"] == [
+        {
+            "segment_id": "seg_001",
+            "caption_text": "Office overview with corrected label",
+            "cut_action": "keep",
+            "broll_override": {"asset_id": "asset_manual_001"},
+            "visual_overlays": [],
+            "music_override": None,
+            "tts_replacement": None,
+        }
+    ]
+    assert payload["affected_output_areas"] == [
+        "segment copy",
+        "b-roll track",
+        "visual overlays",
+        "timeline preview",
+        "subtitle render",
+        "capcut export",
+    ]
+    assert before_jobs == after_jobs
+
+
 def test_editing_session_api_can_fetch_partial_regeneration_result(tmp_path: Path) -> None:
     app = create_app(projects_root=tmp_path)
     client = TestClient(app)
