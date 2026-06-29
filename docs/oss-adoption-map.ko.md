@@ -55,10 +55,12 @@ VideoBox의 기본 반입 방식은 이 방식이다.
 | script scene planning | `packages/core-engine/src/videobox_core_engine/script_scene_planner.py` | 새 파일 생성 예정 |
 | B-roll matching/scoring | `packages/core-engine/src/videobox_core_engine/broll_matcher.py` | 새 파일 생성 예정 |
 | preview artifact renderer | `packages/core-engine/src/videobox_core_engine/preview_renderer.py` | 현재 HTML preview 기반 |
+| lightweight editor domain | `packages/core-engine/src/videobox_core_engine/editing_session.py` | 세그먼트/컷/자산 수정 상태 모델 후보 |
+| lightweight editor API | `services/api/src/videobox_api/` | 편집 세션/수정/부분 재생성 contract |
 | provider boundary | `packages/provider-interfaces/src/videobox_provider_interfaces/` | STT/TTS/recommender 경계 유지 |
 | local persistence | `packages/storage-abstractions/src/videobox_storage/` | SQLite + local file |
 | API surface | `services/api/src/videobox_api/` | dashboard/backend contract |
-| operator dashboard | `apps/web/src/` | 로컬 우선 review dashboard |
+| operator dashboard / lightweight editor | `apps/web/src/` | 로컬 우선 review + lightweight editing shell |
 
 ## 4. BrollBox 파일 반입 판단
 
@@ -92,6 +94,10 @@ VideoBox의 기본 반입 방식은 이 방식이다.
 | `mlfoundations/open_clip` | repo 전체를 dependency로만 검토 | 추후 `packages/core-engine/src/videobox_core_engine/multimodal_retrieval.py` | `reference only` | 장기적으로 B-roll 추천 품질 개선 가능성이 있으나 Phase 8 첫 반입 대상은 아니다 | repo는 오픈소스지만 pretrained model 라이선스가 checkpoint마다 다르다 | 모델 선택 실수 시 비상업/혼합 라이선스 리스크 발생 |
 | `remotion-dev/remotion` | 반입 없음 | 반입 없음 | `exclude` | 설명형 시각화 가능성은 높지만 현재 범위에 비해 무겁고 license 검토가 필요하다 | 공식 저장소 설명 기준, 특정 규모 이상의 회사는 별도 라이선스 검토 필요 | 범위 증가 + 라이선스 검토 비용 발생 |
 | `tauri-apps/tauri` | 반입 없음 | `apps/desktop/` 장기 후보 | `reference only` | 데스크톱 패키징 방향은 유효하지만 지금은 web dashboard + local API 검증이 우선이다 | 공식 생태계는 MIT/Apache-2.0 계열이나 배포 번들 dependency는 별도 확인 필요 | 패키징 문제에 시간 소모 가능 |
+| `Augani/openreel-video` | 타임라인/플레이어/UI shell만 선별 검토 | `apps/web/src/` + 필요 시 helper 분리 | `partial port` | 브라우저 기반 편집기 UI와 재생 구조는 경량 후편집기 셸 참고 가치가 높다 | 라이선스와 사용 중인 브라우저 API, 번들 크기 검토 필요 | 통째 반입 시 구조 오염과 과한 편집기 범위 유입 위험 |
+| `aqm857886159/Nomi` | 구조 참고만 | 반입 없음 | `reference only` | 로컬 우선 AI 영상 생성/편집 흐름은 참고 가치가 있으나 앱 구조 전체는 VideoBox 경계와 다르다 | 라이선스, 데스크톱 앱 구조, 빌드 체인 재검토 필요 | 생성 파이프라인 전제를 그대로 가져오면 범위가 커짐 |
+| `chatman-media/timeline-studio` | 구조 참고만 | 반입 없음 | `reference only` | AI 통합 영상 편집기 방향성은 참고 가치가 있으나 현재 범위보다 넓다 | 라이선스와 런타임/패키징 의존성 점검 필요 | 멀티트랙 편집기 범위가 그대로 유입될 위험 |
+| `palmier-io/palmier-pro` | MCP/에이전트 UX 참고만 | 반입 없음 | `reference only` | AI 편집기와 에이전트 결합 방향은 참고 가치가 있으나 생성 처리 일부가 닫혀 있고 앱 구조가 다르다 | 오픈소스 범위와 비공개 처리 영역 구분 필요 | 그대로 맞추면 제품 경계가 Palmier 쪽으로 끌려갈 수 있음 |
 
 ## 6. 명시적 반입 금지 규칙
 
@@ -104,6 +110,8 @@ VideoBox의 기본 반입 방식은 이 방식이다.
 5. open_clip 체크포인트 라이선스를 확인하지 않고 바로 추천 경로에 넣는 것
 6. Remotion을 preview 기본 경로로 교체하는 것
 7. CapCut payload 생성을 `core-engine` 안으로 다시 섞는 것
+8. 오픈소스 편집기 전체 앱 구조를 VideoBox `apps/web`에 통째로 복사하는 것
+9. 경량 후편집기 범위를 넘는 멀티트랙 NLE 기능을 오픈소스에서 한 번에 들여오는 것
 
 ## 7. Phase 8 intake set
 
@@ -126,6 +134,10 @@ VideoBox의 기본 반입 방식은 이 방식이다.
 | `jamiepine/voicebox` | local-first TTS studio 방향 참고용 |
 | `mlfoundations/open_clip` | 추후 multimodal retrieval 검증용 |
 | `tauri-apps/tauri` | 추후 desktop wrapper 검토용 |
+| `Augani/openreel-video` | 경량 후편집기 UI shell 검토용 |
+| `aqm857886159/Nomi` | 로컬 우선 AI 편집 흐름 참고용 |
+| `chatman-media/timeline-studio` | 타임라인/플레이어 구조 참고용 |
+| `palmier-io/palmier-pro` | 에이전트 편집 UX 참고용 |
 
 ### 7.3 명시적으로 막을 것
 
@@ -136,6 +148,18 @@ VideoBox의 기본 반입 방식은 이 방식이다.
 | `brollbox-master/execution/export_sheet.py` | Google Sheets 구조 유입 차단 |
 | `brollbox-master/execution/detect_drive.py` | Google Drive 결합 구조 차단 |
 | `remotion-dev/remotion` 직접 반입 | 현재 범위와 라이선스 판단 미확정 |
+| 오픈소스 편집기 전체 앱 구조 통째 반입 | 현재 제품 경계와 충돌 위험이 큼 |
+
+## 7.4 경량 후편집기 오픈소스 적용 시점
+
+오픈소스 편집기 반입은 지금 즉시가 아니라 아래 순서로 진행한다.
+
+1. `editing session` 데이터 모델 고정
+2. 수정 API와 부분 재생성 규칙 고정
+3. 얇은 자체 검수 UI로 실제 수정 흐름 검증
+4. 그 다음 `openreel-video` 같은 편집기 셸을 `partial port` 방식으로 검토
+
+즉, 현재 기준으로 오픈소스 편집기 반입 시점은 `segment alignment`, `script scene planning`, `broll/music recommendation`, `timeline`, `preview/export` 기반이 안정화된 뒤, 경량 후편집기 milestone에서 시작하는 것이 맞다.
 
 ## 8. 문서 정합성 판단
 
@@ -146,6 +170,8 @@ VideoBox의 기본 반입 방식은 이 방식이다.
 1. 구현 계획서의 `preview mp4` 표현
 2. 아키텍처 계획서의 `apps/web 비필수` 표현
 3. 아키텍처 계획서의 preview layer를 `mp4 전용`처럼 읽히는 표현
+4. 구현 계획서와 제품 계획서의 `얇은 review UI` 표현
+5. 경량 후편집기와 오픈소스 편집기 반입 시점 명시
 
 ### 그대로 유지 가능한 항목
 
