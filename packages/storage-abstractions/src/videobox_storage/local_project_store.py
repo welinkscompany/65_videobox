@@ -1429,6 +1429,21 @@ class LocalProjectStore:
         payload["updated_at"] = row["updated_at"]
         return payload
 
+    def get_latest_editing_session(self, *, project_id: str) -> dict[str, Any]:
+        row = self._fetchone(
+            project_id,
+            """
+            SELECT session_id
+            FROM editing_sessions
+            ORDER BY updated_at DESC, created_at DESC, session_id DESC
+            LIMIT 1
+            """,
+            (),
+        )
+        if row is None:
+            raise KeyError(f"Editing session not found for project: {project_id}")
+        return self.get_editing_session(project_id=project_id, session_id=str(row["session_id"]))
+
     def build_review_snapshot(
         self,
         *,

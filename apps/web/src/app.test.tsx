@@ -256,6 +256,8 @@ const editingSessionResponse = {
   project_id: "project_001",
   timeline_id: "timeline_001",
   session_id: "editing_session_001",
+  created_at: "2026-06-28T00:00:14Z",
+  updated_at: "2026-06-28T00:00:17Z",
   segments: [
     {
       segment_id: "seg_001",
@@ -340,6 +342,7 @@ const partialRegenerationResultResponse = {
   status: "succeeded",
   partial_regeneration_id: "partial_regeneration_run_001",
   session_id: "editing_session_001",
+  session_updated_at: "2026-06-28T00:00:17Z",
   source_timeline_id: "timeline_001",
   timeline_id: "timeline_002",
   segment_ids: ["seg_002"],
@@ -515,21 +518,25 @@ const geminiKeysResponse = {
 function createFetchMock({
   geminiKeys = geminiKeysResponse,
   editingSession = editingSessionResponse,
+  latestEditingSession = editingSessionResponse,
   reviewSnapshot = reviewSnapshotResponse,
   candidateReviewSnapshot = candidateReviewSnapshotResponse,
+  partialRegenerationResult = partialRegenerationResultResponse,
   jobs = jobsResponse,
 }: {
   geminiKeys?: { keys: Array<Record<string, unknown>> };
   editingSession?: typeof editingSessionResponse;
+  latestEditingSession?: typeof editingSessionResponse | null;
   reviewSnapshot?: typeof reviewSnapshotResponse;
   candidateReviewSnapshot?: ReviewSnapshot;
+  partialRegenerationResult?: typeof partialRegenerationResultResponse;
   jobs?: typeof jobsResponse;
 } = {}) {
   const state = {
     editingSession: structuredClone(editingSession),
     geminiKeys: structuredClone(geminiKeys),
     candidateReviewSnapshot: structuredClone(candidateReviewSnapshot),
-    candidateTimelineReviewStatus: partialRegenerationResultResponse.timeline.review_status,
+    candidateTimelineReviewStatus: partialRegenerationResult.timeline.review_status,
   };
 
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -682,6 +689,12 @@ function createFetchMock({
     if (url.endsWith("/api/projects/project_001/editing-sessions/editing_session_001")) {
       return new Response(JSON.stringify(state.editingSession));
     }
+    if (url.endsWith("/api/projects/project_001/editing-sessions/latest")) {
+      if (latestEditingSession == null) {
+        return new Response("not found", { status: 404 });
+      }
+      return new Response(JSON.stringify(latestEditingSession));
+    }
     if (
       url.endsWith(
         "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/caption",
@@ -721,7 +734,15 @@ function createFetchMock({
       });
     }
     if (url.endsWith("/api/projects/project_001/partial-regenerations/partial_regeneration_job_001")) {
-      return new Response(JSON.stringify(partialRegenerationResultResponse));
+      return new Response(
+        JSON.stringify({
+          ...partialRegenerationResult,
+          timeline: {
+            ...partialRegenerationResult.timeline,
+            review_status: state.candidateTimelineReviewStatus,
+          },
+        }),
+      );
     }
     if (url.endsWith("/api/projects/project_001/providers/gemini/keys")) {
       if (init?.method === "POST") {
@@ -1487,5 +1508,90 @@ describe("App", () => {
       expect(screen.getByRole("button", { name: /approve timeline/i })).toBeDisabled();
     });
     expect(screen.queryByText(/partial_regeneration_job_001/i)).not.toBeInTheDocument();
+  });
+
+  it("resumes the latest editing session candidate after refresh when freshness is provable", async () => {
+    const fetchMock = createFetchMock({
+      jobs: {
+        jobs: [
+          ...jobsResponse.jobs,
+          {
+            job_id: "partial_regeneration_job_001",
+            job_type: "partial_regeneration",
+            status: "succeeded",
+            input_ref: "editing_session_001",
+            output_ref: "partial_regeneration_run_001",
+            error_message: null,
+            started_at: "2026-06-28T00:00:16Z",
+            finished_at: "2026-06-28T00:00:17Z",
+          },
+        ],
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/projects/project_001/editing-sessions/latest",
+        undefined,
+      );
+    });
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/projects/project_001/partial-regenerations/partial_regeneration_job_001",
+        undefined,
+      );
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+
+    expect(await screen.findByText(/editing_session_001/i)).toBeInTheDocument();
+    expect(await screen.findByText(/partial_regeneration_job_001/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /approve timeline/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /generate subtitle file/i })).toBeDisabled();
+  });
+
+  it("falls back to the stable timeline when the latest candidate freshness is no longer provable", async () => {
+    const fetchMock = createFetchMock({
+      latestEditingSession: {
+        ...editingSessionResponse,
+        timeline_id: "timeline_002",
+        updated_at: "2026-06-28T00:00:20Z",
+      },
+      jobs: {
+        jobs: [
+          ...jobsResponse.jobs,
+          {
+            job_id: "partial_regeneration_job_001",
+            job_type: "partial_regeneration",
+            status: "succeeded",
+            input_ref: "editing_session_001",
+            output_ref: "partial_regeneration_run_001",
+            error_message: null,
+            started_at: "2026-06-28T00:00:16Z",
+            finished_at: "2026-06-28T00:00:17Z",
+          },
+        ],
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/projects/project_001/editing-sessions/latest",
+        undefined,
+      );
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+
+    expect(await screen.findByText(/editing_session_001/i)).toBeInTheDocument();
+    expect(screen.queryByText(/partial_regeneration_job_001/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /approve timeline/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /generate subtitle file/i })).toBeEnabled();
   });
 });

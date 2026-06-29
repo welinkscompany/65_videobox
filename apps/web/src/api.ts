@@ -198,6 +198,7 @@ export type PartialRegenerationJob = {
   status: string;
   partial_regeneration_id: string;
   session_id: string;
+  session_updated_at?: string | null;
   source_timeline_id: string;
   timeline_id: string;
   segment_ids: string[];
@@ -383,6 +384,18 @@ export const api = {
     }),
   getEditingSession: (projectId: string, sessionId: string) =>
     request<EditingSession>(`/api/projects/${projectId}/editing-sessions/${sessionId}`),
+  getLatestEditingSession: async (projectId: string): Promise<EditingSession | null> => {
+    const response = await fetch(`/api/projects/${projectId}/editing-sessions/latest`, undefined);
+    if (response.status === 404) {
+      return null;
+    }
+    if (!response.ok) {
+      throw new Error(
+        `Request failed: /api/projects/${projectId}/editing-sessions/latest (${response.status})`,
+      );
+    }
+    return (await response.json()) as EditingSession;
+  },
   updateEditingSessionCaption: (
     projectId: string,
     sessionId: string,

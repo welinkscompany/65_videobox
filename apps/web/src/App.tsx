@@ -33,20 +33,44 @@ function formatSeconds(startSec: number, endSec: number) {
 }
 
 function findLatestTimelineJob(jobs: JobRecord[]) {
-  const candidates = jobs.filter(
-    (job) => job.job_type === "timeline_build" && job.status === "succeeded",
-  );
-  return candidates.length > 0 ? candidates[candidates.length - 1] : null;
+  const candidates = jobs
+    .filter((job) => job.job_type === "timeline_build" && job.status === "succeeded")
+    .sort((left, right) =>
+      getLatestJobTimestamp(right).localeCompare(getLatestJobTimestamp(left)),
+    );
+  return candidates.length > 0 ? candidates[0] : null;
 }
 
 function findLatestSucceededJob(jobs: JobRecord[], jobType: string, inputRef?: string | null) {
-  const candidates = jobs.filter(
-    (job) =>
-      job.job_type === jobType &&
-      job.status === "succeeded" &&
-      (inputRef == null || job.input_ref === inputRef),
+  const candidates = jobs
+    .filter(
+      (job) =>
+        job.job_type === jobType &&
+        job.status === "succeeded" &&
+        (inputRef == null || job.input_ref === inputRef),
+    )
+    .sort((left, right) =>
+      getLatestJobTimestamp(right).localeCompare(getLatestJobTimestamp(left)),
+    );
+  return candidates.length > 0 ? candidates[0] : null;
+}
+
+function getLatestJobTimestamp(job: JobRecord) {
+  return job.finished_at ?? job.started_at ?? "";
+}
+
+function canResumeCandidate(
+  session: EditingSession,
+  candidate: {
+    session_id: string;
+    session_updated_at?: string | null;
+  },
+) {
+  return (
+    candidate.session_id === session.session_id &&
+    !!candidate.session_updated_at &&
+    candidate.session_updated_at === session.updated_at
   );
-  return candidates.length > 0 ? candidates[candidates.length - 1] : null;
 }
 
 type GeminiKeyFormState = {
@@ -292,8 +316,14 @@ export function App() {
       try {
         const project = await api.getProject(projectId);
         const jobItems = await api.listJobs(projectId);
+        let latestEditingSession: EditingSession | null = null;
+        try {
+          latestEditingSession = await api.getLatestEditingSession(projectId);
+        } catch {
+          latestEditingSession = null;
+        }
         const latestTimelineJob = findLatestTimelineJob(jobItems);
-        const [timeline, review] = latestTimelineJob
+        const [stableTimeline, stableReview] = latestTimelineJob
           ? await Promise.all([
               api.getTimeline(projectId, latestTimelineJob.job_id),
               api.getReviewSnapshot(projectId, latestTimelineJob.job_id),
@@ -317,22 +347,78 @@ export function App() {
         const capcutExport = latestExportJob
           ? await api.getExport(projectId, latestExportJob.job_id)
           : null;
+        let activeTimeline = stableTimeline;
+        let activeReview = stableReview;
+        let resumedPartialRegeneration: PartialRegenerationRun | null = null;
+        let activeSubtitle = subtitle;
+        let activePreview = preview;
+        let activeExport = capcutExport;
+        if (latestEditingSession) {
+          const latestCandidateJob = findLatestSucceededJob(
+            jobItems,
+            "partial_regeneration",
+            latestEditingSession.session_id,
+          );
+          if (latestCandidateJob) {
+            try {
+              const candidateResult = await api.getPartialRegenerationResult(
+                projectId,
+                latestCandidateJob.job_id,
+              );
+              if (canResumeCandidate(latestEditingSession, candidateResult)) {
+                const candidateReview = await api.getReviewSnapshot(
+                  projectId,
+                  latestCandidateJob.job_id,
+                );
+                activeTimeline = {
+                  job_id: candidateResult.job_id,
+                  status: candidateResult.status,
+                  timeline: candidateResult.timeline,
+                };
+                activeReview = candidateReview;
+                resumedPartialRegeneration = {
+                  job_id: candidateResult.job_id,
+                  status: candidateResult.status,
+                  session_id: candidateResult.session_id,
+                  segment_ids: candidateResult.segment_ids,
+                  fields: candidateResult.fields,
+                  downstream_steps: candidateResult.downstream_steps,
+                  targeted_segments: [],
+                  affected_output_areas: [],
+                  delta: {
+                    regenerated_segments: candidateResult.regenerated_segments,
+                    timeline_id: candidateResult.timeline_id,
+                  },
+                };
+                activeSubtitle = null;
+                activePreview = null;
+                activeExport = null;
+              }
+            } catch {
+              resumedPartialRegeneration = null;
+            }
+          }
+        }
         if (cancelled) {
           return;
         }
         setProjectDetail(project);
         setJobs(jobItems);
-        setTimelineJob(timeline);
-        setReviewSnapshot(review);
-        setEditingSession(null);
-        setEditingDrafts({});
-        setSelectedEditingSegmentId(null);
-        setSelectedRegenerationFields([]);
+        setTimelineJob(activeTimeline);
+        setReviewSnapshot(activeReview);
+        if (latestEditingSession) {
+          applyEditingSessionState(latestEditingSession);
+        } else {
+          setEditingSession(null);
+          setEditingDrafts({});
+          setSelectedEditingSegmentId(null);
+          setSelectedRegenerationFields([]);
+        }
         setPartialRegenerationPreflight(null);
-        setPartialRegenerationRun(null);
-        setSubtitleJob(subtitle);
-        setPreviewJob(preview);
-        setExportJob(capcutExport);
+        setPartialRegenerationRun(resumedPartialRegeneration);
+        setSubtitleJob(activeSubtitle);
+        setPreviewJob(activePreview);
+        setExportJob(activeExport);
         setLoadState("ready");
         try {
           const providerKeys = await api.listGeminiProviderKeys(projectId);

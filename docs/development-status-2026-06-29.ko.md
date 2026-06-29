@@ -96,3 +96,14 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - TTS replacement의 실제 narration/output 반영
 - review-required TTS 흐름의 승인 후 적용 규칙
 - 새 mutation을 직접 다루는 편집기 UI 검증
+
+## 9. 외부 참고 후보 기록
+
+당장 반입하지 않지만 나중에 다시 볼 가치가 있는 외부 레퍼런스는 아래처럼 기록해 둔다.
+
+- `SamurAIGPT/AI-Youtube-Shorts-Generator`
+  - 분류: `exclude for now`, `partial port candidate later`
+  - 이유: 현재 VideoBox의 설명형/나레이션 편집 중심 구조와 직접 정합성이 낮고, shorts 추출기 성격이 강하다
+  - 현재 판단: 이번 `editing session`/`partial regeneration`/`review` 마일스톤에는 반입하지 않는다
+  - 재검토 시점: shorts 파생 기능 milestone
+  - 참고 포인트: highlight scoring, vertical reframe/local crop pipeline

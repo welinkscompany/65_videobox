@@ -619,6 +619,9 @@ class LocalPipelineRunner:
     def get_editing_session(self, *, project_id: str, session_id: str) -> dict[str, Any]:
         return self.store.get_editing_session(project_id=project_id, session_id=session_id)
 
+    def get_latest_editing_session(self, *, project_id: str) -> dict[str, Any]:
+        return self.store.get_latest_editing_session(project_id=project_id)
+
     def update_editing_session_segment_cut_action(
         self,
         *,
@@ -700,21 +703,24 @@ class LocalPipelineRunner:
                 session=session,
                 request=request,
             )
+            refreshed_session = self.store.update_editing_session(
+                project_id=project_id,
+                session_id=session_id,
+                session_payload=session,
+                timeline_id=result["timeline_id"],
+            )
             persisted = self.store.save_partial_regeneration_run(
                 project_id=project_id,
-                payload=result,
+                payload={
+                    **result,
+                    "session_updated_at": refreshed_session["updated_at"],
+                },
             )
             self.store.update_job(
                 project_id=project_id,
                 job_id=job["job_id"],
                 status=JobStatus.SUCCEEDED,
                 output_ref=persisted["partial_regeneration_id"],
-            )
-            self.store.update_editing_session(
-                project_id=project_id,
-                session_id=session_id,
-                session_payload=session,
-                timeline_id=result["timeline_id"],
             )
         except Exception as exc:
             self.store.update_job(

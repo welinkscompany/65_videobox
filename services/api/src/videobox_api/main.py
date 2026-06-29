@@ -297,6 +297,7 @@ class PartialRegenerationResponse(BaseModel):
 class PartialRegenerationJobResponse(StartJobResponse):
     partial_regeneration_id: str
     session_id: str
+    session_updated_at: str | None = None
     source_timeline_id: str
     timeline_id: str
     segment_ids: list[str] = Field(default_factory=list)
@@ -907,6 +908,14 @@ def create_app(
             raise _http_error(exc) from exc
         return EditingSessionResponse(**result)
 
+    @app.get("/api/projects/{project_id}/editing-sessions/latest")
+    def get_latest_editing_session(project_id: str) -> EditingSessionResponse:
+        try:
+            result = orchestrator.get_latest_editing_session(project_id=project_id)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return EditingSessionResponse(**result)
+
     @app.get("/api/projects/{project_id}/editing-sessions/{session_id}")
     def get_editing_session(project_id: str, session_id: str) -> EditingSessionResponse:
         try:
@@ -1042,6 +1051,7 @@ def create_app(
             status=result["status"],
             partial_regeneration_id=result["partial_regeneration_id"],
             session_id=result["session_id"],
+            session_updated_at=result.get("session_updated_at"),
             source_timeline_id=result["source_timeline_id"],
             timeline_id=result["timeline_id"],
             segment_ids=result["segment_ids"],

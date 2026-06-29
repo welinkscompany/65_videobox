@@ -4134,6 +4134,39 @@ def test_editing_session_api_can_fetch_cut_and_broll_updates(tmp_path: Path) -> 
     assert payload["history"][-1]["mutation_type"] == "broll_override_update"
 
 
+def test_editing_session_api_can_fetch_latest_session_by_updated_at(tmp_path: Path) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    first_session = client.post(
+        f"/api/projects/{project_id}/editing-sessions",
+        json={"timeline_job_id": timeline_job_id},
+    ).json()
+    second_session = client.post(
+        f"/api/projects/{project_id}/editing-sessions",
+        json={"timeline_job_id": timeline_job_id},
+    ).json()
+
+    client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{first_session['session_id']}/segments/seg_001/caption",
+        json={"caption_text": "Older session touched first"},
+    )
+    latest_update_response = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{second_session['session_id']}/segments/seg_001/caption",
+        json={"caption_text": "Latest session should win"},
+    )
+
+    response = client.get(f"/api/projects/{project_id}/editing-sessions/latest")
+
+    assert latest_update_response.status_code == 200
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["session_id"] == second_session["session_id"]
+    assert payload["segments"][0]["caption_text"] == "Latest session should win"
+    assert payload["updated_at"] == latest_update_response.json()["updated_at"]
+
+
 def test_editing_session_api_can_start_partial_regeneration_job(tmp_path: Path) -> None:
     app = create_app(projects_root=tmp_path)
     client = TestClient(app)
@@ -4269,7 +4302,10 @@ def test_editing_session_api_can_fetch_partial_regeneration_result(tmp_path: Pat
     assert payload["segment_ids"] == ["seg_001"]
     assert payload["fields"] == ["broll"]
     assert payload["downstream_steps"] == ["broll_refresh", "timeline_build"]
+    assert payload["session_updated_at"]
     assert payload["timeline"]["timeline_id"].startswith("timeline_")
+    latest_session = client.get(f"/api/projects/{project_id}/editing-sessions/{session_id}").json()
+    assert payload["session_updated_at"] == latest_session["updated_at"]
 
 
 def test_editing_session_api_rejects_invalid_partial_regeneration_request(tmp_path: Path) -> None:
