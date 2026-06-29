@@ -212,6 +212,71 @@ class VisualOverlayRequest(BaseModel):
         return self
 
 
+class ExplanationCardRequest(BaseModel):
+    title: str = ""
+    body: str = ""
+    text: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_explanation_card(self) -> "ExplanationCardRequest":
+        title = self.title.strip()
+        body = self.body.strip()
+        text = self.text.strip()
+        if not text:
+            raise ValueError("text must not be blank.")
+        self.title = title
+        self.body = body
+        self.text = text
+        return self
+
+
+class ImageOverlayRequest(BaseModel):
+    asset_id: str = Field(min_length=1)
+    text: str = ""
+
+    @model_validator(mode="after")
+    def validate_image_overlay(self) -> "ImageOverlayRequest":
+        asset_id = self.asset_id.strip()
+        if not asset_id:
+            raise ValueError("asset_id must not be blank.")
+        self.asset_id = asset_id
+        self.text = self.text.strip()
+        return self
+
+
+class TableOverlayRequest(BaseModel):
+    columns: list[str] = Field(default_factory=list)
+    rows: list[list[str]] = Field(default_factory=list)
+    text: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_table_overlay(self) -> "TableOverlayRequest":
+        text = self.text.strip()
+        if not text:
+            raise ValueError("text must not be blank.")
+        self.columns = [str(item).strip() for item in self.columns]
+        self.rows = [[str(cell).strip() for cell in row] for row in self.rows]
+        self.text = text
+        return self
+
+
+class TTSReplacementRequest(BaseModel):
+    recommendation_id: str = Field(min_length=1)
+    asset_id: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_tts_replacement(self) -> "TTSReplacementRequest":
+        recommendation_id = self.recommendation_id.strip()
+        asset_id = self.asset_id.strip()
+        if not recommendation_id:
+            raise ValueError("recommendation_id must not be blank.")
+        if not asset_id:
+            raise ValueError("asset_id must not be blank.")
+        self.recommendation_id = recommendation_id
+        self.asset_id = asset_id
+        return self
+
+
 class PartialRegenerationRequest(BaseModel):
     segment_ids: list[str] = Field(min_length=1)
     fields: list[str] = Field(min_length=1)
@@ -249,6 +314,7 @@ class EditingSessionSegmentResponse(BaseModel):
     broll_override: dict[str, object] | None = None
     visual_overlays: list[dict[str, object]] = Field(default_factory=list)
     music_override: dict[str, object] | None = None
+    tts_replacement: dict[str, object] | None = None
 
 
 class EditingSessionHistoryEntryResponse(BaseModel):
@@ -258,6 +324,7 @@ class EditingSessionHistoryEntryResponse(BaseModel):
     cut_action: str | None = None
     asset_id: str | None = None
     overlay_type: str | None = None
+    recommendation_id: str | None = None
 
 
 class EditingSessionResponse(BaseModel):
@@ -912,6 +979,129 @@ def create_app(
             raise _http_error(exc) from exc
         return EditingSessionResponse(**result)
 
+    @app.delete("/api/projects/{project_id}/editing-sessions/{session_id}/segments/{segment_id}/visual-overlay")
+    def delete_editing_session_visual_overlay(
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+    ) -> EditingSessionResponse:
+        try:
+            result = orchestrator.clear_segment_visual_overlays(
+                project_id=project_id,
+                session_id=session_id,
+                segment_id=segment_id,
+            )
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return EditingSessionResponse(**result)
+
+    @app.patch("/api/projects/{project_id}/editing-sessions/{session_id}/segments/{segment_id}/explanation-card")
+    def patch_editing_session_explanation_card(
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+        payload: ExplanationCardRequest,
+    ) -> EditingSessionResponse:
+        try:
+            result = orchestrator.update_segment_explanation_card(
+                project_id=project_id,
+                session_id=session_id,
+                segment_id=segment_id,
+                title=payload.title,
+                body=payload.body,
+                text=payload.text,
+            )
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return EditingSessionResponse(**result)
+
+    @app.delete("/api/projects/{project_id}/editing-sessions/{session_id}/segments/{segment_id}/explanation-card")
+    def delete_editing_session_explanation_card(
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+    ) -> EditingSessionResponse:
+        try:
+            result = orchestrator.remove_segment_explanation_card(
+                project_id=project_id,
+                session_id=session_id,
+                segment_id=segment_id,
+            )
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return EditingSessionResponse(**result)
+
+    @app.patch("/api/projects/{project_id}/editing-sessions/{session_id}/segments/{segment_id}/image-overlay")
+    def patch_editing_session_image_overlay(
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+        payload: ImageOverlayRequest,
+    ) -> EditingSessionResponse:
+        try:
+            result = orchestrator.update_segment_image_overlay(
+                project_id=project_id,
+                session_id=session_id,
+                segment_id=segment_id,
+                asset_id=payload.asset_id,
+                text=payload.text,
+            )
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return EditingSessionResponse(**result)
+
+    @app.delete("/api/projects/{project_id}/editing-sessions/{session_id}/segments/{segment_id}/image-overlay")
+    def delete_editing_session_image_overlay(
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+    ) -> EditingSessionResponse:
+        try:
+            result = orchestrator.remove_segment_image_overlay(
+                project_id=project_id,
+                session_id=session_id,
+                segment_id=segment_id,
+            )
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return EditingSessionResponse(**result)
+
+    @app.patch("/api/projects/{project_id}/editing-sessions/{session_id}/segments/{segment_id}/table-overlay")
+    def patch_editing_session_table_overlay(
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+        payload: TableOverlayRequest,
+    ) -> EditingSessionResponse:
+        try:
+            result = orchestrator.update_segment_table_overlay(
+                project_id=project_id,
+                session_id=session_id,
+                segment_id=segment_id,
+                columns=payload.columns,
+                rows=payload.rows,
+                text=payload.text,
+            )
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return EditingSessionResponse(**result)
+
+    @app.delete("/api/projects/{project_id}/editing-sessions/{session_id}/segments/{segment_id}/table-overlay")
+    def delete_editing_session_table_overlay(
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+    ) -> EditingSessionResponse:
+        try:
+            result = orchestrator.remove_segment_table_overlay(
+                project_id=project_id,
+                session_id=session_id,
+                segment_id=segment_id,
+            )
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return EditingSessionResponse(**result)
+
     @app.patch("/api/projects/{project_id}/editing-sessions/{session_id}/segments/{segment_id}/music")
     def patch_editing_session_music_override(
         project_id: str,
@@ -925,6 +1115,41 @@ def create_app(
                 session_id=session_id,
                 segment_id=segment_id,
                 asset_id=payload.asset_id,
+            )
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return EditingSessionResponse(**result)
+
+    @app.patch("/api/projects/{project_id}/editing-sessions/{session_id}/segments/{segment_id}/tts-replacement")
+    def patch_editing_session_tts_replacement(
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+        payload: TTSReplacementRequest,
+    ) -> EditingSessionResponse:
+        try:
+            result = orchestrator.select_segment_tts_replacement(
+                project_id=project_id,
+                session_id=session_id,
+                segment_id=segment_id,
+                recommendation_id=payload.recommendation_id,
+                asset_id=payload.asset_id,
+            )
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return EditingSessionResponse(**result)
+
+    @app.delete("/api/projects/{project_id}/editing-sessions/{session_id}/segments/{segment_id}/tts-replacement")
+    def delete_editing_session_tts_replacement(
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+    ) -> EditingSessionResponse:
+        try:
+            result = orchestrator.clear_segment_tts_replacement(
+                project_id=project_id,
+                session_id=session_id,
+                segment_id=segment_id,
             )
         except Exception as exc:
             raise _http_error(exc) from exc

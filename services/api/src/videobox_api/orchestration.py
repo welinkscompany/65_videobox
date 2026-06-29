@@ -420,6 +420,113 @@ class ApiOrchestrator:
             asset_id=asset_id,
         )
 
+    def clear_segment_visual_overlays(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+    ) -> dict[str, Any]:
+        return self.pipeline.clear_editing_session_segment_visual_overlays(
+            project_id=project_id,
+            session_id=session_id,
+            segment_id=segment_id,
+        )
+
+    def update_segment_explanation_card(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+        title: str,
+        body: str,
+        text: str,
+    ) -> dict[str, Any]:
+        return self.pipeline.update_editing_session_segment_explanation_card(
+            project_id=project_id,
+            session_id=session_id,
+            segment_id=segment_id,
+            title=title,
+            body=body,
+            text=text,
+        )
+
+    def remove_segment_explanation_card(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+    ) -> dict[str, Any]:
+        return self.pipeline.remove_editing_session_segment_explanation_card(
+            project_id=project_id,
+            session_id=session_id,
+            segment_id=segment_id,
+        )
+
+    def update_segment_image_overlay(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+        asset_id: str,
+        text: str,
+    ) -> dict[str, Any]:
+        return self.pipeline.update_editing_session_segment_image_overlay(
+            project_id=project_id,
+            session_id=session_id,
+            segment_id=segment_id,
+            asset_id=asset_id,
+            text=text,
+        )
+
+    def update_segment_table_overlay(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+        columns: list[str],
+        rows: list[list[str]],
+        text: str,
+    ) -> dict[str, Any]:
+        return self.pipeline.update_editing_session_segment_table_overlay(
+            project_id=project_id,
+            session_id=session_id,
+            segment_id=segment_id,
+            columns=columns,
+            rows=rows,
+            text=text,
+        )
+
+    def remove_segment_image_overlay(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+    ) -> dict[str, Any]:
+        return self.pipeline.remove_editing_session_segment_image_overlay(
+            project_id=project_id,
+            session_id=session_id,
+            segment_id=segment_id,
+        )
+
+    def remove_segment_table_overlay(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+    ) -> dict[str, Any]:
+        return self.pipeline.remove_editing_session_segment_table_overlay(
+            project_id=project_id,
+            session_id=session_id,
+            segment_id=segment_id,
+        )
+
     def update_segment_music_override(
         self,
         *,
@@ -433,6 +540,36 @@ class ApiOrchestrator:
             session_id=session_id,
             segment_id=segment_id,
             asset_id=asset_id,
+        )
+
+    def select_segment_tts_replacement(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+        recommendation_id: str,
+        asset_id: str,
+    ) -> dict[str, Any]:
+        return self.pipeline.select_editing_session_segment_tts_replacement(
+            project_id=project_id,
+            session_id=session_id,
+            segment_id=segment_id,
+            recommendation_id=recommendation_id,
+            asset_id=asset_id,
+        )
+
+    def clear_segment_tts_replacement(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+    ) -> dict[str, Any]:
+        return self.pipeline.clear_editing_session_segment_tts_replacement(
+            project_id=project_id,
+            session_id=session_id,
+            segment_id=segment_id,
         )
 
     def get_review_snapshot(self, *, project_id: str, job_id: str) -> dict[str, Any]:

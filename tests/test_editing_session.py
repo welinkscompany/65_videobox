@@ -277,6 +277,287 @@ def test_update_segment_music_override_records_history() -> None:
     assert updated["history"][-1]["mutation_type"] == "music_override_update"
 
 
+def test_update_segment_explanation_card_records_history() -> None:
+    from videobox_core_engine.editing_session import build_editing_session
+    from videobox_core_engine.editing_session import update_segment_explanation_card
+
+    session = build_editing_session(
+        project_id="project_001",
+        timeline={"timeline_id": "timeline_001"},
+        segments=[
+            {
+                "segment_id": "seg_001",
+                "text": "Keep this",
+                "start_sec": 0.0,
+                "end_sec": 1.0,
+                "review_required": False,
+                "cleanup_decision": "keep",
+            }
+        ],
+    )
+
+    updated = update_segment_explanation_card(
+        session=session,
+        segment_id="seg_001",
+        title="Key takeaway",
+        body="Show the main explanation point.",
+        text="Key takeaway: Show the main explanation point.",
+    )
+
+    assert updated["segments"][0]["visual_overlays"] == [
+        {
+            "overlay_type": "explanation_card",
+            "title": "Key takeaway",
+            "body": "Show the main explanation point.",
+            "text": "Key takeaway: Show the main explanation point.",
+        }
+    ]
+    assert updated["history"][-1]["mutation_type"] == "explanation_card_update"
+
+
+def test_remove_segment_explanation_card_clears_overlay_and_records_history() -> None:
+    from videobox_core_engine.editing_session import build_editing_session
+    from videobox_core_engine.editing_session import remove_segment_explanation_card
+    from videobox_core_engine.editing_session import update_segment_explanation_card
+
+    session = build_editing_session(
+        project_id="project_001",
+        timeline={"timeline_id": "timeline_001"},
+        segments=[
+            {
+                "segment_id": "seg_001",
+                "text": "Keep this",
+                "start_sec": 0.0,
+                "end_sec": 1.0,
+                "review_required": False,
+                "cleanup_decision": "keep",
+            }
+        ],
+    )
+    with_card = update_segment_explanation_card(
+        session=session,
+        segment_id="seg_001",
+        title="Key takeaway",
+        body="Show the main explanation point.",
+        text="Key takeaway: Show the main explanation point.",
+    )
+
+    updated = remove_segment_explanation_card(session=with_card, segment_id="seg_001")
+
+    assert updated["segments"][0]["visual_overlays"] == []
+    assert updated["history"][-1]["mutation_type"] == "explanation_card_remove"
+
+
+def test_update_segment_image_overlay_records_history() -> None:
+    from videobox_core_engine.editing_session import build_editing_session
+    from videobox_core_engine.editing_session import update_segment_image_overlay
+
+    session = build_editing_session(
+        project_id="project_001",
+        timeline={"timeline_id": "timeline_001"},
+        segments=[
+            {
+                "segment_id": "seg_001",
+                "text": "Keep this",
+                "start_sec": 0.0,
+                "end_sec": 1.0,
+                "review_required": False,
+                "cleanup_decision": "keep",
+            }
+        ],
+    )
+
+    updated = update_segment_image_overlay(
+        session=session,
+        segment_id="seg_001",
+        asset_id="asset_image_001",
+        text="Exterior reference image",
+    )
+
+    assert updated["segments"][0]["visual_overlays"] == [
+        {
+            "overlay_type": "image_card",
+            "asset_id": "asset_image_001",
+            "text": "Exterior reference image",
+        }
+    ]
+    assert updated["history"][-1]["mutation_type"] == "image_overlay_update"
+
+
+def test_update_segment_table_overlay_records_history() -> None:
+    from videobox_core_engine.editing_session import build_editing_session
+    from videobox_core_engine.editing_session import update_segment_table_overlay
+
+    session = build_editing_session(
+        project_id="project_001",
+        timeline={"timeline_id": "timeline_001"},
+        segments=[
+            {
+                "segment_id": "seg_001",
+                "text": "Keep this",
+                "start_sec": 0.0,
+                "end_sec": 1.0,
+                "review_required": False,
+                "cleanup_decision": "keep",
+            }
+        ],
+    )
+
+    updated = update_segment_table_overlay(
+        session=session,
+        segment_id="seg_001",
+        columns=["Metric", "Value"],
+        rows=[["CTR", "4.2%"]],
+        text="Metric | Value\nCTR | 4.2%",
+    )
+
+    assert updated["segments"][0]["visual_overlays"] == [
+        {
+            "overlay_type": "table_card",
+            "columns": ["Metric", "Value"],
+            "rows": [["CTR", "4.2%"]],
+            "text": "Metric | Value\nCTR | 4.2%",
+        }
+    ]
+    assert updated["history"][-1]["mutation_type"] == "table_overlay_update"
+
+
+def test_remove_segment_image_and_table_overlays_record_history() -> None:
+    from videobox_core_engine.editing_session import build_editing_session
+    from videobox_core_engine.editing_session import remove_segment_image_overlay
+    from videobox_core_engine.editing_session import remove_segment_table_overlay
+    from videobox_core_engine.editing_session import update_segment_image_overlay
+    from videobox_core_engine.editing_session import update_segment_table_overlay
+
+    session = build_editing_session(
+        project_id="project_001",
+        timeline={"timeline_id": "timeline_001"},
+        segments=[
+            {
+                "segment_id": "seg_001",
+                "text": "Keep this",
+                "start_sec": 0.0,
+                "end_sec": 1.0,
+                "review_required": False,
+                "cleanup_decision": "keep",
+            }
+        ],
+    )
+    with_image = update_segment_image_overlay(
+        session=session,
+        segment_id="seg_001",
+        asset_id="asset_image_001",
+        text="Exterior reference image",
+    )
+    with_table = update_segment_table_overlay(
+        session=with_image,
+        segment_id="seg_001",
+        columns=["Metric", "Value"],
+        rows=[["CTR", "4.2%"]],
+        text="Metric | Value\nCTR | 4.2%",
+    )
+
+    removed_image = remove_segment_image_overlay(session=with_table, segment_id="seg_001")
+    removed_table = remove_segment_table_overlay(session=removed_image, segment_id="seg_001")
+
+    assert removed_image["segments"][0]["visual_overlays"] == [
+        {
+            "overlay_type": "table_card",
+            "columns": ["Metric", "Value"],
+            "rows": [["CTR", "4.2%"]],
+            "text": "Metric | Value\nCTR | 4.2%",
+        }
+    ]
+    assert removed_image["history"][-1]["mutation_type"] == "image_overlay_remove"
+    assert removed_table["segments"][0]["visual_overlays"] == []
+    assert removed_table["history"][-1]["mutation_type"] == "table_overlay_remove"
+
+
+def test_select_and_clear_segment_tts_replacement_records_history() -> None:
+    from videobox_core_engine.editing_session import build_editing_session
+    from videobox_core_engine.editing_session import clear_segment_tts_replacement
+    from videobox_core_engine.editing_session import select_segment_tts_replacement
+
+    session = build_editing_session(
+        project_id="project_001",
+        timeline={"timeline_id": "timeline_001"},
+        segments=[
+            {
+                "segment_id": "seg_001",
+                "text": "Keep this",
+                "start_sec": 0.0,
+                "end_sec": 1.0,
+                "review_required": False,
+                "cleanup_decision": "keep",
+            }
+        ],
+    )
+
+    selected = select_segment_tts_replacement(
+        session=session,
+        segment_id="seg_001",
+        recommendation_id="rec_tts_seg_001",
+        asset_id="asset_tts_001",
+    )
+    cleared = clear_segment_tts_replacement(session=selected, segment_id="seg_001")
+
+    assert selected["segments"][0]["tts_replacement"] == {
+        "recommendation_id": "rec_tts_seg_001",
+        "asset_id": "asset_tts_001",
+    }
+    assert selected["history"][-1]["mutation_type"] == "tts_replacement_select"
+    assert cleared["segments"][0]["tts_replacement"] is None
+    assert cleared["history"][-1]["mutation_type"] == "tts_replacement_clear"
+
+
+def test_update_segment_visual_overlay_preserves_other_overlay_types() -> None:
+    from videobox_core_engine.editing_session import build_editing_session
+    from videobox_core_engine.editing_session import update_segment_explanation_card
+    from videobox_core_engine.editing_session import update_segment_visual_overlay
+
+    session = build_editing_session(
+        project_id="project_001",
+        timeline={"timeline_id": "timeline_001"},
+        segments=[
+            {
+                "segment_id": "seg_001",
+                "text": "Keep this",
+                "start_sec": 0.0,
+                "end_sec": 1.0,
+                "review_required": False,
+                "cleanup_decision": "keep",
+            }
+        ],
+    )
+    with_explanation = update_segment_explanation_card(
+        session=session,
+        segment_id="seg_001",
+        title="Key takeaway",
+        body="Show the main explanation point.",
+        text="Key takeaway: Show the main explanation point.",
+    )
+
+    updated = update_segment_visual_overlay(
+        session=with_explanation,
+        segment_id="seg_001",
+        overlay_type="image_card",
+        asset_id="asset_image_001",
+    )
+
+    assert updated["segments"][0]["visual_overlays"] == [
+        {
+            "overlay_type": "explanation_card",
+            "title": "Key takeaway",
+            "body": "Show the main explanation point.",
+            "text": "Key takeaway: Show the main explanation point.",
+        },
+        {
+            "overlay_type": "image_card",
+            "asset_id": "asset_image_001",
+        },
+    ]
+
+
 def test_partial_regeneration_request_rejects_unknown_segment_and_field() -> None:
     import pytest
 
@@ -334,6 +615,69 @@ def test_partial_regeneration_request_deduplicates_step_union_and_keeps_timeline
     assert request["downstream_steps"] == [
         "segment_refresh",
         "broll_refresh",
+        "timeline_build",
+    ]
+
+
+def test_partial_regeneration_request_maps_explanation_and_tts_fields_to_explicit_steps() -> None:
+    from videobox_core_engine.editing_session import build_editing_session
+    from videobox_core_engine.editing_session import build_partial_regeneration_request
+
+    session = build_editing_session(
+        project_id="project_001",
+        timeline={"timeline_id": "timeline_001"},
+        segments=[
+            {
+                "segment_id": "seg_001",
+                "text": "Keep this",
+                "start_sec": 0.0,
+                "end_sec": 1.0,
+                "review_required": False,
+                "cleanup_decision": "keep",
+            }
+        ],
+    )
+
+    request = build_partial_regeneration_request(
+        session=session,
+        segment_ids=["seg_001"],
+        fields=["explanation_card", "tts_replacement"],
+    )
+
+    assert request["downstream_steps"] == [
+        "overlay_refresh",
+        "tts_refresh",
+        "timeline_build",
+    ]
+
+
+def test_partial_regeneration_request_maps_image_and_table_fields_to_overlay_refresh() -> None:
+    from videobox_core_engine.editing_session import build_editing_session
+    from videobox_core_engine.editing_session import build_partial_regeneration_request
+
+    session = build_editing_session(
+        project_id="project_001",
+        timeline={"timeline_id": "timeline_001"},
+        segments=[
+            {
+                "segment_id": "seg_001",
+                "text": "Keep this",
+                "start_sec": 0.0,
+                "end_sec": 1.0,
+                "review_required": False,
+                "cleanup_decision": "keep",
+            }
+        ],
+    )
+
+    request = build_partial_regeneration_request(
+        session=session,
+        segment_ids=["seg_001"],
+        fields=["image_overlay", "table_overlay"],
+    )
+
+    assert request["downstream_steps"] == [
+        "overlay_refresh",
         "timeline_build",
     ]
 
@@ -870,3 +1214,481 @@ def test_partial_regeneration_pipeline_preserves_overlay_shape_when_refreshing_v
             "asset_id": "asset_image_001",
         }
     ]
+
+
+def test_partial_regeneration_pipeline_clears_target_visual_overlays_when_session_state_is_empty(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Partial Regeneration Visual Clear Project")
+    runner = _LocalPipelineRunner(store)
+
+    store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        },
+                        {
+                            "clip_id": "clip_narration_002",
+                            "segment_id": "seg_002",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_002",
+                            "start_sec": 2.0,
+                            "end_sec": 4.0,
+                            "clip_type": "narration",
+                        },
+                    ],
+                }
+            ],
+            "export_overlays": [
+                {
+                    "segment_id": "seg_001",
+                    "overlay_type": "hook_title",
+                    "text": "Remove me",
+                    "start_sec": 0.0,
+                    "end_sec": 1.5,
+                },
+                {
+                    "segment_id": "seg_002",
+                    "overlay_type": "hook_title",
+                    "text": "Keep me",
+                    "start_sec": 2.0,
+                    "end_sec": 3.0,
+                },
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+            "lineage": {
+                "segment_analysis_job_id": "segment_analysis_job_001",
+                "recommendation_job_ids": [],
+            },
+        },
+    )
+    saved_session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id="timeline_001",
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Caption one",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [],
+                    "music_override": None,
+                    "tts_replacement": None,
+                },
+                {
+                    "segment_id": "seg_002",
+                    "caption_text": "Caption two",
+                    "start_sec": 2.0,
+                    "end_sec": 4.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [],
+                    "music_override": None,
+                    "tts_replacement": None,
+                },
+            ],
+            "history": [],
+        },
+    )
+
+    started = runner.start_editing_session_partial_regeneration(
+        project_id=project.project_id,
+        session_id=saved_session["session_id"],
+        segment_ids=["seg_001"],
+        fields=["visual_overlay"],
+    )
+    result = runner.get_partial_regeneration_result(project_id=project.project_id, job_id=started["job_id"])
+
+    assert result["timeline"]["export_overlays"] == [
+        {
+            "segment_id": "seg_002",
+            "overlay_type": "hook_title",
+            "text": "Keep me",
+            "start_sec": 2.0,
+            "end_sec": 3.0,
+        }
+    ]
+
+
+def test_partial_regeneration_pipeline_preserves_explanation_overlay_shape(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Partial Regeneration Explanation Project")
+    runner = _LocalPipelineRunner(store)
+
+    store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        },
+                        {
+                            "clip_id": "clip_narration_002",
+                            "segment_id": "seg_002",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_002",
+                            "start_sec": 2.0,
+                            "end_sec": 4.0,
+                            "clip_type": "narration",
+                        },
+                    ],
+                }
+            ],
+            "export_overlays": [
+                {
+                    "segment_id": "seg_001",
+                    "overlay_type": "explanation_card",
+                    "title": "Legacy title",
+                    "body": "Legacy body",
+                    "text": "Legacy title: Legacy body",
+                    "start_sec": 0.0,
+                    "end_sec": 1.5,
+                },
+                {
+                    "segment_id": "seg_002",
+                    "overlay_type": "hook_title",
+                    "text": "Keep me",
+                    "start_sec": 2.0,
+                    "end_sec": 3.0,
+                },
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+            "lineage": {
+                "segment_analysis_job_id": "segment_analysis_job_001",
+                "recommendation_job_ids": [],
+            },
+        },
+    )
+    saved_session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id="timeline_001",
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Caption one",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [
+                        {
+                            "overlay_type": "explanation_card",
+                            "title": "Fresh title",
+                            "body": "Fresh body",
+                            "text": "Fresh title: Fresh body",
+                        }
+                    ],
+                    "music_override": None,
+                    "tts_replacement": None,
+                },
+                {
+                    "segment_id": "seg_002",
+                    "caption_text": "Caption two",
+                    "start_sec": 2.0,
+                    "end_sec": 4.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [],
+                    "music_override": None,
+                    "tts_replacement": None,
+                },
+            ],
+            "history": [],
+        },
+    )
+
+    started = runner.start_editing_session_partial_regeneration(
+        project_id=project.project_id,
+        session_id=saved_session["session_id"],
+        segment_ids=["seg_001"],
+        fields=["explanation_card"],
+    )
+    result = runner.get_partial_regeneration_result(project_id=project.project_id, job_id=started["job_id"])
+
+    assert result["timeline"]["export_overlays"] == [
+        {
+            "segment_id": "seg_002",
+            "overlay_type": "hook_title",
+            "text": "Keep me",
+            "start_sec": 2.0,
+            "end_sec": 3.0,
+        },
+        {
+            "segment_id": "seg_001",
+            "overlay_type": "explanation_card",
+            "title": "Fresh title",
+            "body": "Fresh body",
+            "text": "Fresh title: Fresh body",
+            "start_sec": 0.0,
+            "end_sec": 1.5,
+        },
+    ]
+
+
+def test_partial_regeneration_pipeline_preserves_image_and_table_overlay_shapes(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Partial Regeneration Rich Overlay Project")
+    runner = _LocalPipelineRunner(store)
+
+    store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "export_overlays": [
+                {
+                    "segment_id": "seg_001",
+                    "overlay_type": "image_card",
+                    "asset_id": "asset_image_old",
+                    "text": "Old image",
+                    "start_sec": 0.0,
+                    "end_sec": 1.0,
+                },
+                {
+                    "segment_id": "seg_001",
+                    "overlay_type": "table_card",
+                    "columns": ["Old"],
+                    "rows": [["1"]],
+                    "text": "Old table",
+                    "start_sec": 1.0,
+                    "end_sec": 2.0,
+                },
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+            "lineage": {
+                "segment_analysis_job_id": "segment_analysis_job_001",
+                "recommendation_job_ids": [],
+            },
+        },
+    )
+    saved_session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id="timeline_001",
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Caption one",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [
+                        {
+                            "overlay_type": "image_card",
+                            "asset_id": "asset_image_new",
+                            "text": "Fresh image",
+                        },
+                        {
+                            "overlay_type": "table_card",
+                            "columns": ["Metric", "Value"],
+                            "rows": [["CTR", "4.2%"]],
+                            "text": "Metric | Value\nCTR | 4.2%",
+                        },
+                    ],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+
+    started = runner.start_editing_session_partial_regeneration(
+        project_id=project.project_id,
+        session_id=saved_session["session_id"],
+        segment_ids=["seg_001"],
+        fields=["image_overlay", "table_overlay"],
+    )
+    result = runner.get_partial_regeneration_result(project_id=project.project_id, job_id=started["job_id"])
+
+    assert result["timeline"]["export_overlays"] == [
+        {
+            "segment_id": "seg_001",
+            "overlay_type": "image_card",
+            "asset_id": "asset_image_new",
+            "text": "Fresh image",
+            "start_sec": 0.0,
+            "end_sec": 1.0,
+        },
+        {
+            "segment_id": "seg_001",
+            "overlay_type": "table_card",
+            "columns": ["Metric", "Value"],
+            "rows": [["CTR", "4.2%"]],
+            "text": "Metric | Value\nCTR | 4.2%",
+            "start_sec": 1.0,
+            "end_sec": 2.0,
+        },
+    ]
+
+
+def test_partial_regeneration_pipeline_adds_pending_tts_replacement_recommendation(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Partial Regeneration TTS Project")
+    runner = _LocalPipelineRunner(store)
+
+    store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        },
+                        {
+                            "clip_id": "clip_narration_002",
+                            "segment_id": "seg_002",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_002",
+                            "start_sec": 2.0,
+                            "end_sec": 4.0,
+                            "clip_type": "narration",
+                        },
+                    ],
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+            "export_overlays": [],
+            "lineage": {
+                "segment_analysis_job_id": "segment_analysis_job_001",
+                "recommendation_job_ids": [],
+            },
+        },
+    )
+    saved_session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id="timeline_001",
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Caption one",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [],
+                    "music_override": None,
+                    "tts_replacement": {
+                        "recommendation_id": "rec_tts_seg_001",
+                        "asset_id": "asset_tts_001",
+                    },
+                },
+                {
+                    "segment_id": "seg_002",
+                    "caption_text": "Caption two",
+                    "start_sec": 2.0,
+                    "end_sec": 4.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [],
+                    "music_override": None,
+                    "tts_replacement": None,
+                },
+            ],
+            "history": [],
+        },
+    )
+
+    started = runner.start_editing_session_partial_regeneration(
+        project_id=project.project_id,
+        session_id=saved_session["session_id"],
+        segment_ids=["seg_001"],
+        fields=["tts_replacement"],
+    )
+    result = runner.get_partial_regeneration_result(project_id=project.project_id, job_id=started["job_id"])
+
+    assert result["downstream_steps"] == ["tts_refresh", "timeline_build"]
+    assert result["timeline"]["pending_recommendations"] == [
+        {
+            "recommendation_id": "rec_tts_seg_001",
+            "target_segment_id": "seg_001",
+            "recommendation_type": "tts_replacement",
+            "selected_asset_id": "asset_tts_001",
+            "score": 1.0,
+            "reason": "Manual TTS replacement selection from editing session.",
+            "auto_apply_allowed": False,
+            "review_required": True,
+            "payload": {
+                "selection_source": "editing_session",
+                "provider_trace": {
+                    "routing_mode": "single_provider",
+                    "final_provider": "editing_session_manual",
+                    "fallback_reasons": [],
+                },
+            },
+            "provider_trace": {
+                "routing_mode": "single_provider",
+                "final_provider": "editing_session_manual",
+                "fallback_reasons": [],
+            },
+            "created_at": result["timeline"]["pending_recommendations"][0]["created_at"],
+        }
+    ]
+    assert result["timeline"]["tracks"][0]["track_type"] == "narration"

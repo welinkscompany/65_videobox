@@ -4101,6 +4101,225 @@ def test_editing_session_api_can_fetch_visual_overlay_and_music_updates(tmp_path
     assert payload["history"][-1]["mutation_type"] == "music_override_update"
 
 
+def test_editing_session_api_can_patch_explanation_and_tts_mutations(tmp_path: Path) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    create_response = client.post(
+        f"/api/projects/{project_id}/editing-sessions",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    session_id = create_response.json()["session_id"]
+
+    explanation_response = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/explanation-card",
+        json={
+            "title": "Key takeaway",
+            "body": "Explain the result clearly.",
+            "text": "Key takeaway: Explain the result clearly.",
+        },
+    )
+    tts_response = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/tts-replacement",
+        json={"recommendation_id": "rec_tts_seg_001", "asset_id": "asset_tts_001"},
+    )
+    get_response = client.get(f"/api/projects/{project_id}/editing-sessions/{session_id}")
+
+    assert explanation_response.status_code == 200
+    assert tts_response.status_code == 200
+    assert get_response.status_code == 200
+    payload = get_response.json()
+    assert payload["segments"][0]["visual_overlays"] == [
+        {
+            "overlay_type": "explanation_card",
+            "title": "Key takeaway",
+            "body": "Explain the result clearly.",
+            "text": "Key takeaway: Explain the result clearly.",
+        }
+    ]
+    assert payload["segments"][0]["tts_replacement"] == {
+        "recommendation_id": "rec_tts_seg_001",
+        "asset_id": "asset_tts_001",
+    }
+    assert payload["history"][-2]["mutation_type"] == "explanation_card_update"
+    assert payload["history"][-1]["mutation_type"] == "tts_replacement_select"
+
+
+def test_editing_session_api_can_clear_explanation_card(tmp_path: Path) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    create_response = client.post(
+        f"/api/projects/{project_id}/editing-sessions",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    session_id = create_response.json()["session_id"]
+
+    client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/explanation-card",
+        json={
+            "title": "Key takeaway",
+            "body": "Explain the result clearly.",
+            "text": "Key takeaway: Explain the result clearly.",
+        },
+    )
+    clear_response = client.delete(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/explanation-card",
+    )
+
+    assert clear_response.status_code == 200
+    payload = clear_response.json()
+    assert payload["segments"][0]["visual_overlays"] == []
+    assert payload["history"][-1]["mutation_type"] == "explanation_card_remove"
+
+
+def test_editing_session_api_can_clear_tts_replacement(tmp_path: Path) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    create_response = client.post(
+        f"/api/projects/{project_id}/editing-sessions",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    session_id = create_response.json()["session_id"]
+
+    client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/tts-replacement",
+        json={"recommendation_id": "rec_tts_seg_001", "asset_id": "asset_tts_001"},
+    )
+    clear_response = client.delete(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/tts-replacement",
+    )
+
+    assert clear_response.status_code == 200
+    payload = clear_response.json()
+    assert payload["segments"][0]["tts_replacement"] is None
+    assert payload["history"][-1]["mutation_type"] == "tts_replacement_clear"
+
+
+def test_editing_session_api_can_clear_image_and_table_overlays(tmp_path: Path) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    create_response = client.post(
+        f"/api/projects/{project_id}/editing-sessions",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    session_id = create_response.json()["session_id"]
+
+    client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/image-overlay",
+        json={"asset_id": "asset_image_001", "text": "Exterior reference image"},
+    )
+    client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/table-overlay",
+        json={
+            "columns": ["Metric", "Value"],
+            "rows": [["CTR", "4.2%"]],
+            "text": "Metric | Value\nCTR | 4.2%",
+        },
+    )
+
+    clear_image = client.delete(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/image-overlay",
+    )
+    clear_table = client.delete(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/table-overlay",
+    )
+
+    assert clear_image.status_code == 200
+    assert clear_table.status_code == 200
+    payload = clear_table.json()
+    assert payload["segments"][0]["visual_overlays"] == []
+    assert payload["history"][-2]["mutation_type"] == "image_overlay_remove"
+    assert payload["history"][-1]["mutation_type"] == "table_overlay_remove"
+
+
+def test_editing_session_api_visual_overlay_patch_preserves_existing_explanation_overlay(tmp_path: Path) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    create_response = client.post(
+        f"/api/projects/{project_id}/editing-sessions",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    session_id = create_response.json()["session_id"]
+
+    client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/explanation-card",
+        json={
+            "title": "Key takeaway",
+            "body": "Explain the result clearly.",
+            "text": "Key takeaway: Explain the result clearly.",
+        },
+    )
+    response = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/visual-overlay",
+        json={"overlay_type": "image_card", "asset_id": "asset_image_001"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["segments"][0]["visual_overlays"] == [
+        {
+            "overlay_type": "explanation_card",
+            "title": "Key takeaway",
+            "body": "Explain the result clearly.",
+            "text": "Key takeaway: Explain the result clearly.",
+        },
+        {
+            "overlay_type": "image_card",
+            "asset_id": "asset_image_001",
+        },
+    ]
+
+
+def test_editing_session_api_can_start_partial_regeneration_for_explanation_and_tts(tmp_path: Path) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    create_response = client.post(
+        f"/api/projects/{project_id}/editing-sessions",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    session_id = create_response.json()["session_id"]
+
+    client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/explanation-card",
+        json={
+            "title": "Key takeaway",
+            "body": "Explain the result clearly.",
+            "text": "Key takeaway: Explain the result clearly.",
+        },
+    )
+    client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/tts-replacement",
+        json={"recommendation_id": "rec_tts_seg_001", "asset_id": "asset_tts_001"},
+    )
+
+    response = client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/partial-regeneration",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["explanation_card", "tts_replacement"],
+        },
+    )
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["fields"] == ["explanation_card", "tts_replacement"]
+    assert payload["downstream_steps"] == [
+        "overlay_refresh",
+        "tts_refresh",
+        "timeline_build",
+    ]
+
 def test_approved_timeline_can_generate_subtitles_preview_and_export(
     tmp_path: Path,
     monkeypatch,

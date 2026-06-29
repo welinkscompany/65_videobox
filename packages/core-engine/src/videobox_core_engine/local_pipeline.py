@@ -9,10 +9,19 @@ from videobox_core_engine.auto_cut import AutoCutPlanner
 from videobox_core_engine.editing_session import (
     build_editing_session,
     build_partial_regeneration_request,
+    clear_segment_visual_overlays,
+    clear_segment_tts_replacement,
+    remove_segment_explanation_card,
+    remove_segment_image_overlay,
+    remove_segment_table_overlay,
+    select_segment_tts_replacement,
+    update_segment_explanation_card,
+    update_segment_image_overlay,
     update_segment_broll_override,
     update_segment_caption,
     update_segment_cut_action,
     update_segment_music_override,
+    update_segment_table_overlay,
     update_segment_visual_overlay,
 )
 from videobox_core_engine.output_operator_copy import (
@@ -758,6 +767,148 @@ class LocalPipelineRunner:
             session_payload=updated_session,
         )
 
+    def clear_editing_session_segment_visual_overlays(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+    ) -> dict[str, Any]:
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        updated_session = clear_segment_visual_overlays(
+            session=session,
+            segment_id=segment_id,
+        )
+        return self.store.update_editing_session(
+            project_id=project_id,
+            session_id=session_id,
+            session_payload=updated_session,
+        )
+
+    def update_editing_session_segment_explanation_card(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+        title: str,
+        body: str,
+        text: str,
+    ) -> dict[str, Any]:
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        updated_session = update_segment_explanation_card(
+            session=session,
+            segment_id=segment_id,
+            title=title,
+            body=body,
+            text=text,
+        )
+        return self.store.update_editing_session(
+            project_id=project_id,
+            session_id=session_id,
+            session_payload=updated_session,
+        )
+
+    def remove_editing_session_segment_explanation_card(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+    ) -> dict[str, Any]:
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        updated_session = remove_segment_explanation_card(
+            session=session,
+            segment_id=segment_id,
+        )
+        return self.store.update_editing_session(
+            project_id=project_id,
+            session_id=session_id,
+            session_payload=updated_session,
+        )
+
+    def update_editing_session_segment_image_overlay(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+        asset_id: str,
+        text: str,
+    ) -> dict[str, Any]:
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        updated_session = update_segment_image_overlay(
+            session=session,
+            segment_id=segment_id,
+            asset_id=asset_id,
+            text=text,
+        )
+        return self.store.update_editing_session(
+            project_id=project_id,
+            session_id=session_id,
+            session_payload=updated_session,
+        )
+
+    def update_editing_session_segment_table_overlay(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+        columns: list[str],
+        rows: list[list[str]],
+        text: str,
+    ) -> dict[str, Any]:
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        updated_session = update_segment_table_overlay(
+            session=session,
+            segment_id=segment_id,
+            columns=columns,
+            rows=rows,
+            text=text,
+        )
+        return self.store.update_editing_session(
+            project_id=project_id,
+            session_id=session_id,
+            session_payload=updated_session,
+        )
+
+    def remove_editing_session_segment_image_overlay(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+    ) -> dict[str, Any]:
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        updated_session = remove_segment_image_overlay(
+            session=session,
+            segment_id=segment_id,
+        )
+        return self.store.update_editing_session(
+            project_id=project_id,
+            session_id=session_id,
+            session_payload=updated_session,
+        )
+
+    def remove_editing_session_segment_table_overlay(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+    ) -> dict[str, Any]:
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        updated_session = remove_segment_table_overlay(
+            session=session,
+            segment_id=segment_id,
+        )
+        return self.store.update_editing_session(
+            project_id=project_id,
+            session_id=session_id,
+            session_payload=updated_session,
+        )
+
     def update_editing_session_segment_music_override(
         self,
         *,
@@ -771,6 +922,46 @@ class LocalPipelineRunner:
             session=session,
             segment_id=segment_id,
             asset_id=asset_id,
+        )
+        return self.store.update_editing_session(
+            project_id=project_id,
+            session_id=session_id,
+            session_payload=updated_session,
+        )
+
+    def select_editing_session_segment_tts_replacement(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+        recommendation_id: str,
+        asset_id: str,
+    ) -> dict[str, Any]:
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        updated_session = select_segment_tts_replacement(
+            session=session,
+            segment_id=segment_id,
+            recommendation_id=recommendation_id,
+            asset_id=asset_id,
+        )
+        return self.store.update_editing_session(
+            project_id=project_id,
+            session_id=session_id,
+            session_payload=updated_session,
+        )
+
+    def clear_editing_session_segment_tts_replacement(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+    ) -> dict[str, Any]:
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        updated_session = clear_segment_tts_replacement(
+            session=session,
+            segment_id=segment_id,
         )
         return self.store.update_editing_session(
             project_id=project_id,
@@ -1287,6 +1478,14 @@ class LocalPipelineRunner:
                     state=state,
                     session_segments=session_segments,
                     target_segment_ids=target_segment_ids,
+                    target_fields=target_fields,
+                )
+                continue
+            if step == "tts_refresh":
+                self._execute_partial_regeneration_tts_refresh_step(
+                    state=state,
+                    session_segments=session_segments,
+                    target_segment_ids=target_segment_ids,
                 )
 
         timeline = self.timeline_builder.build(
@@ -1519,6 +1718,7 @@ class LocalPipelineRunner:
         state: dict[str, Any],
         session_segments: dict[str, dict[str, Any]],
         target_segment_ids: set[str],
+        target_fields: set[str],
     ) -> None:
         existing_overlays = deepcopy(state["export_overlays"])
         preserved_overlays = [
@@ -1527,22 +1727,37 @@ class LocalPipelineRunner:
             if str(overlay.get("segment_id") or "") not in target_segment_ids
         ]
         refreshed_overlays: list[dict[str, Any]] = []
+        refresh_all_overlay_types = "visual_overlay" in target_fields
+        field_overlay_types = {
+            "explanation_card": "explanation_card",
+            "image_overlay": "image_card",
+            "table_overlay": "table_card",
+        }
         for segment_id in sorted(target_segment_ids):
             session_segment = session_segments.get(segment_id)
             if not session_segment:
                 continue
-            overlays = session_segment.get("visual_overlays")
-            if not isinstance(overlays, list) or not overlays:
-                refreshed_overlays.extend(
+            targeted_overlay_types = {
+                overlay_type
+                for field_name, overlay_type in field_overlay_types.items()
+                if field_name in target_fields
+            }
+            if not refresh_all_overlay_types:
+                preserved_overlays.extend(
                     [
                         overlay
                         for overlay in existing_overlays
                         if str(overlay.get("segment_id") or "") == segment_id
+                        and str(overlay.get("overlay_type") or "") not in targeted_overlay_types
                     ]
                 )
+            overlays = session_segment.get("visual_overlays")
+            if not isinstance(overlays, list) or not overlays:
                 continue
             for overlay in overlays:
                 if not isinstance(overlay, dict):
+                    continue
+                if not refresh_all_overlay_types and str(overlay.get("overlay_type") or "") not in targeted_overlay_types:
                     continue
                 base_overlay = next(
                     (
@@ -1556,14 +1771,63 @@ class LocalPipelineRunner:
                 refreshed_overlays.append(
                     {
                         **base_overlay,
+                        **deepcopy(overlay),
                         "segment_id": segment_id,
                         "overlay_type": str(overlay.get("overlay_type") or ""),
-                        "asset_id": str(overlay.get("asset_id") or ""),
                         "start_sec": base_overlay.get("start_sec", session_segment.get("start_sec")),
                         "end_sec": base_overlay.get("end_sec", session_segment.get("end_sec")),
                     }
                 )
         state["export_overlays"] = preserved_overlays + refreshed_overlays
+
+    def _execute_partial_regeneration_tts_refresh_step(
+        self,
+        *,
+        state: dict[str, Any],
+        session_segments: dict[str, dict[str, Any]],
+        target_segment_ids: set[str],
+    ) -> None:
+        state["recommendations"] = [
+            item
+            for item in state["recommendations"]
+            if not (
+                str(item.get("recommendation_type") or "") == RecommendationType.TTS_REPLACEMENT.value
+                and str(item.get("target_segment_id") or "") in target_segment_ids
+            )
+        ]
+        for segment_id in sorted(target_segment_ids):
+            session_segment = session_segments.get(segment_id)
+            if not session_segment:
+                continue
+            selection = session_segment.get("tts_replacement")
+            if not isinstance(selection, dict):
+                continue
+            recommendation_id = str(selection.get("recommendation_id") or "").strip()
+            asset_id = str(selection.get("asset_id") or "").strip()
+            if not recommendation_id or not asset_id:
+                continue
+            provider_trace = build_provider_trace(
+                final_provider="editing_session_manual",
+                routing_mode="single_provider",
+            )
+            state["recommendations"].append(
+                {
+                    "recommendation_id": recommendation_id,
+                    "target_segment_id": segment_id,
+                    "recommendation_type": RecommendationType.TTS_REPLACEMENT.value,
+                    "selected_asset_id": asset_id,
+                    "score": 1.0,
+                    "reason": "Manual TTS replacement selection from editing session.",
+                    "auto_apply_allowed": False,
+                    "review_required": True,
+                    "payload": {
+                        "selection_source": "editing_session",
+                        "provider_trace": provider_trace,
+                    },
+                    "created_at": self.store._now_iso(),
+                    "provider_trace": provider_trace,
+                }
+            )
 
     def _manual_recommendation_payload(
         self,
