@@ -455,12 +455,13 @@ class LocalProjectStore:
         project_id: str,
         session_id: str,
         session_payload: dict[str, Any],
+        timeline_id: str | None = None,
     ) -> dict[str, Any]:
         existing = self.get_editing_session(project_id=project_id, session_id=session_id)
         created_at = str(existing.get("created_at") or self._now_iso())
         return self._write_editing_session(
             project_id=project_id,
-            timeline_id=str(existing["timeline_id"]),
+            timeline_id=timeline_id or str(existing["timeline_id"]),
             session_id=session_id,
             session_payload=session_payload,
             is_new=False,
@@ -497,6 +498,49 @@ class LocalProjectStore:
         )
         self.clear_operator_guidance(project_id=project_id, timeline_id=timeline_id)
         return self.get_review_state(project_id=project_id, timeline_id=timeline_id)
+
+    def save_partial_regeneration_run(
+        self,
+        *,
+        project_id: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        sequence = self._next_sequence(
+            self.project_root(project_id) / "analysis" / "partial_regenerations",
+            "partial_regeneration_*.json",
+        )
+        partial_regeneration_id = f"partial_regeneration_{sequence:03d}"
+        created_at = self._now_iso()
+        run_payload = {
+            "partial_regeneration_id": partial_regeneration_id,
+            "created_at": created_at,
+            **payload,
+        }
+        file_path = (
+            self.project_root(project_id)
+            / "analysis"
+            / "partial_regenerations"
+            / f"{partial_regeneration_id}.json"
+        )
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_text(json.dumps(run_payload, indent=2, ensure_ascii=True), encoding="utf-8")
+        return run_payload
+
+    def get_partial_regeneration_run(
+        self,
+        *,
+        project_id: str,
+        partial_regeneration_id: str,
+    ) -> dict[str, Any]:
+        file_path = (
+            self.project_root(project_id)
+            / "analysis"
+            / "partial_regenerations"
+            / f"{partial_regeneration_id}.json"
+        )
+        if not file_path.exists():
+            raise KeyError(f"Partial regeneration run not found: {partial_regeneration_id}")
+        return json.loads(file_path.read_text(encoding="utf-8"))
 
     def save_gemini_provider_key(
         self,
@@ -1785,6 +1829,7 @@ class LocalProjectStore:
             project_root / "analysis" / "transcripts",
             project_root / "analysis" / "segments",
             project_root / "analysis" / "recommendations",
+            project_root / "analysis" / "partial_regenerations",
             project_root / "editing_sessions",
             project_root / "timelines",
             project_root / "previews",

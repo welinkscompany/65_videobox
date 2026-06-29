@@ -385,6 +385,24 @@ class ApiOrchestrator:
             fields=fields,
         )
 
+    def start_editing_session_partial_regeneration(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        segment_ids: list[str],
+        fields: list[str],
+    ) -> dict[str, Any]:
+        return self.pipeline.start_editing_session_partial_regeneration(
+            project_id=project_id,
+            session_id=session_id,
+            segment_ids=segment_ids,
+            fields=fields,
+        )
+
+    def get_partial_regeneration_result(self, *, project_id: str, job_id: str) -> dict[str, Any]:
+        return self.pipeline.get_partial_regeneration_result(project_id=project_id, job_id=job_id)
+
     def update_segment_visual_overlay(
         self,
         *,

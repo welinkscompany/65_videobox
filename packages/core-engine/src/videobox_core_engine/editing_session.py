@@ -11,6 +11,14 @@ ALLOWED_PARTIAL_REGEN_FIELDS = {
     "music",
 }
 
+PARTIAL_REGEN_STEPS_BY_FIELD = {
+    "caption": ("segment_refresh", "timeline_build"),
+    "cut_action": ("segment_refresh", "timeline_build"),
+    "broll": ("broll_refresh", "timeline_build"),
+    "visual_overlay": ("overlay_refresh", "timeline_build"),
+    "music": ("music_refresh", "timeline_build"),
+}
+
 
 def build_editing_session(
     *,
@@ -191,8 +199,18 @@ def build_partial_regeneration_request(
     if unsupported_fields:
         raise ValueError(f"Unsupported partial regeneration fields: {', '.join(unsupported_fields)}")
 
+    downstream_steps: list[str] = []
+    for field in normalized_fields:
+        for step in PARTIAL_REGEN_STEPS_BY_FIELD[field]:
+            if step == "timeline_build":
+                continue
+            if step not in downstream_steps:
+                downstream_steps.append(step)
+    downstream_steps.append("timeline_build")
+
     return {
         "session_id": session.get("session_id"),
         "segment_ids": normalized_segment_ids,
         "fields": normalized_fields,
+        "downstream_steps": downstream_steps,
     }

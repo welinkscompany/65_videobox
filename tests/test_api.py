@@ -3947,7 +3947,7 @@ def test_editing_session_api_can_fetch_cut_and_broll_updates(tmp_path: Path) -> 
     assert payload["history"][-1]["mutation_type"] == "broll_override_update"
 
 
-def test_editing_session_api_can_build_partial_regeneration_request(tmp_path: Path) -> None:
+def test_editing_session_api_can_start_partial_regeneration_job(tmp_path: Path) -> None:
     app = create_app(projects_root=tmp_path)
     client = TestClient(app)
     project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
@@ -3966,11 +3966,57 @@ def test_editing_session_api_can_build_partial_regeneration_request(tmp_path: Pa
         },
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 202
     payload = response.json()
+    assert payload["job_id"].startswith("partial_regeneration_job_")
+    assert payload["status"] == "succeeded"
     assert payload["session_id"] == session_id
     assert payload["segment_ids"] == ["seg_001"]
     assert payload["fields"] == ["broll", "visual_overlay"]
+    assert payload["downstream_steps"] == [
+        "broll_refresh",
+        "overlay_refresh",
+        "timeline_build",
+    ]
+
+
+def test_editing_session_api_can_fetch_partial_regeneration_result(tmp_path: Path) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    create_response = client.post(
+        f"/api/projects/{project_id}/editing-sessions",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    session_id = create_response.json()["session_id"]
+
+    client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/broll",
+        json={"asset_id": "asset_manual_001"},
+    )
+    start_response = client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/partial-regeneration",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["broll"],
+        },
+    )
+    job_id = start_response.json()["job_id"]
+
+    result_response = client.get(
+        f"/api/projects/{project_id}/partial-regenerations/{job_id}",
+    )
+
+    assert result_response.status_code == 200
+    payload = result_response.json()
+    assert payload["job_id"] == job_id
+    assert payload["status"] == "succeeded"
+    assert payload["session_id"] == session_id
+    assert payload["segment_ids"] == ["seg_001"]
+    assert payload["fields"] == ["broll"]
+    assert payload["downstream_steps"] == ["broll_refresh", "timeline_build"]
+    assert payload["timeline"]["timeline_id"].startswith("timeline_")
 
 
 def test_editing_session_api_rejects_invalid_partial_regeneration_request(tmp_path: Path) -> None:
@@ -3993,6 +4039,31 @@ def test_editing_session_api_rejects_invalid_partial_regeneration_request(tmp_pa
     )
 
     assert response.status_code == 400
+
+
+def test_editing_session_api_rejects_partial_regeneration_when_scope_normalizes_empty(tmp_path: Path) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    create_response = client.post(
+        f"/api/projects/{project_id}/editing-sessions",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    session_id = create_response.json()["session_id"]
+
+    before_jobs = client.get(f"/api/projects/{project_id}/jobs").json()["jobs"]
+    response = client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/partial-regeneration",
+        json={
+            "segment_ids": ["   "],
+            "fields": ["broll"],
+        },
+    )
+    after_jobs = client.get(f"/api/projects/{project_id}/jobs").json()["jobs"]
+
+    assert response.status_code == 400
+    assert before_jobs == after_jobs
 
 
 def test_editing_session_api_can_fetch_visual_overlay_and_music_updates(tmp_path: Path) -> None:

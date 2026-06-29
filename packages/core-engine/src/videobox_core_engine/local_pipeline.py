@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
@@ -664,6 +665,77 @@ class LocalPipelineRunner:
             fields=fields,
         )
 
+    def start_editing_session_partial_regeneration(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        segment_ids: list[str],
+        fields: list[str],
+    ) -> dict[str, Any]:
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        request = build_partial_regeneration_request(
+            session=session,
+            segment_ids=segment_ids,
+            fields=fields,
+        )
+        job = self.store.create_job(
+            project_id=project_id,
+            job_type=JobType.PARTIAL_REGENERATION,
+            input_ref=session_id,
+            status=JobStatus.RUNNING,
+        )
+        try:
+            result = self._execute_partial_regeneration(
+                project_id=project_id,
+                session=session,
+                request=request,
+            )
+            persisted = self.store.save_partial_regeneration_run(
+                project_id=project_id,
+                payload=result,
+            )
+            self.store.update_job(
+                project_id=project_id,
+                job_id=job["job_id"],
+                status=JobStatus.SUCCEEDED,
+                output_ref=persisted["partial_regeneration_id"],
+            )
+            self.store.update_editing_session(
+                project_id=project_id,
+                session_id=session_id,
+                session_payload=session,
+                timeline_id=result["timeline_id"],
+            )
+        except Exception as exc:
+            self.store.update_job(
+                project_id=project_id,
+                job_id=job["job_id"],
+                status=JobStatus.FAILED,
+                error_message=str(exc),
+            )
+            raise
+        return {
+            "job_id": job["job_id"],
+            "status": JobStatus.SUCCEEDED.value,
+            "session_id": session_id,
+            "segment_ids": request["segment_ids"],
+            "fields": request["fields"],
+            "downstream_steps": request["downstream_steps"],
+        }
+
+    def get_partial_regeneration_result(self, *, project_id: str, job_id: str) -> dict[str, Any]:
+        job = self.store.get_job(project_id=project_id, job_id=job_id)
+        result = self.store.get_partial_regeneration_run(
+            project_id=project_id,
+            partial_regeneration_id=str(job["output_ref"]),
+        )
+        return {
+            "job_id": job["job_id"],
+            "status": job["status"],
+            **result,
+        }
+
     def update_editing_session_segment_visual_overlay(
         self,
         *,
@@ -1143,3 +1215,397 @@ class LocalPipelineRunner:
         if not ordered_segment_ids:
             return all_segments
         return [segment_lookup[segment_id] for segment_id in ordered_segment_ids if segment_id in segment_lookup]
+
+    def _execute_partial_regeneration(
+        self,
+        *,
+        project_id: str,
+        session: dict[str, Any],
+        request: dict[str, Any],
+    ) -> dict[str, Any]:
+        source_timeline = self.store.get_timeline_run(
+            project_id=project_id,
+            timeline_id=str(session["timeline_id"]),
+        )
+        session_segments = {
+            str(segment["segment_id"]): segment
+            for segment in session.get("segments", [])
+        }
+        target_segment_ids = set(request["segment_ids"])
+        target_fields = set(request["fields"])
+        source_segments = self._segments_for_timeline(project_id=project_id, timeline=source_timeline)
+        if not source_segments:
+            source_segments = [
+                {
+                    "segment_id": str(segment.get("segment_id") or ""),
+                    "text": str(segment.get("caption_text") or ""),
+                    "start_sec": float(segment.get("start_sec") or 0.0),
+                    "end_sec": float(segment.get("end_sec") or 0.0),
+                    "confidence": 1.0,
+                    "review_required": bool(segment.get("review_required", False)),
+                    "cleanup_decision": str(segment.get("cut_action") or "keep"),
+                }
+                for segment in session.get("segments", [])
+                if str(segment.get("segment_id") or "").strip()
+            ]
+
+        state = {
+            "timeline_segments": deepcopy(source_segments),
+            "regenerated_segments": [],
+            "recommendations": deepcopy(source_timeline.get("applied_recommendations", []))
+            + deepcopy(source_timeline.get("pending_recommendations", [])),
+            "export_overlays": deepcopy(source_timeline.get("export_overlays", [])),
+        }
+
+        for step in request["downstream_steps"]:
+            if step == "segment_refresh":
+                self._execute_partial_regeneration_segment_refresh_step(
+                    state=state,
+                    session_segments=session_segments,
+                    target_segment_ids=target_segment_ids,
+                    target_fields=target_fields,
+                )
+                continue
+            if step == "broll_refresh":
+                self._execute_partial_regeneration_broll_refresh_step(
+                    project_id=project_id,
+                    state=state,
+                    session_segments=session_segments,
+                    target_segment_ids=target_segment_ids,
+                )
+                continue
+            if step == "music_refresh":
+                self._execute_partial_regeneration_music_refresh_step(
+                    project_id=project_id,
+                    state=state,
+                    session_segments=session_segments,
+                    target_segment_ids=target_segment_ids,
+                )
+                continue
+            if step == "overlay_refresh":
+                self._execute_partial_regeneration_overlay_refresh_step(
+                    state=state,
+                    session_segments=session_segments,
+                    target_segment_ids=target_segment_ids,
+                )
+
+        timeline = self.timeline_builder.build(
+            project_id=project_id,
+            segments=state["timeline_segments"],
+            recommendations=state["recommendations"],
+            narration_source_uri=source_timeline.get("narration_source_uri"),
+            export_overlays=state["export_overlays"],
+        )
+        timeline_payload = {
+            "project_id": timeline.project_id,
+            "narration_source_uri": timeline.narration_source_uri,
+            "tracks": [
+                {
+                    "track_id": track.track_id,
+                    "track_type": track.track_type,
+                    "clips": [
+                        {
+                            "clip_id": clip.clip_id,
+                            "segment_id": clip.segment_id,
+                            "asset_uri": clip.asset_uri,
+                            "start_sec": clip.start_sec,
+                            "end_sec": clip.end_sec,
+                            "clip_type": clip.clip_type,
+                            "recommendation_id": clip.recommendation_id,
+                        }
+                        for clip in track.clips
+                    ],
+                }
+                for track in timeline.tracks
+            ],
+            "review_flags": [
+                {
+                    "code": flag.code,
+                    "segment_id": flag.segment_id,
+                    "message": flag.message,
+                }
+                for flag in timeline.review_flags
+            ],
+            "applied_recommendations": timeline.applied_recommendations,
+            "pending_recommendations": timeline.pending_recommendations,
+            "export_overlays": timeline.export_overlays,
+            "lineage": {
+                **deepcopy(source_timeline.get("lineage", {})),
+                "partial_regeneration": {
+                    "session_id": request["session_id"],
+                    "source_timeline_id": str(session["timeline_id"]),
+                    "segment_ids": request["segment_ids"],
+                    "fields": request["fields"],
+                    "downstream_steps": request["downstream_steps"],
+                },
+            },
+        }
+        persisted = self.store.save_timeline_run(
+            project_id=project_id,
+            output_mode=timeline.output_mode,
+            timeline_payload=timeline_payload,
+        )
+        return {
+            "session_id": str(session["session_id"]),
+            "source_timeline_id": str(session["timeline_id"]),
+            "timeline_id": persisted["timeline_id"],
+            "segment_ids": request["segment_ids"],
+            "fields": request["fields"],
+            "downstream_steps": request["downstream_steps"],
+            "regenerated_segments": state["regenerated_segments"],
+            "timeline": persisted["timeline"],
+        }
+
+    def _execute_partial_regeneration_segment_refresh_step(
+        self,
+        *,
+        state: dict[str, Any],
+        session_segments: dict[str, dict[str, Any]],
+        target_segment_ids: set[str],
+        target_fields: set[str],
+    ) -> None:
+        regenerated_segments: list[dict[str, Any]] = []
+        timeline_segments: list[dict[str, Any]] = []
+        for source_segment in state["timeline_segments"]:
+            segment_id = str(source_segment["segment_id"])
+            session_segment = session_segments.get(segment_id)
+            caption_text = str(source_segment.get("text") or "")
+            cut_action = str(source_segment.get("cleanup_decision") or "keep")
+            if segment_id in target_segment_ids and session_segment is not None:
+                if "caption" in target_fields:
+                    caption_text = str(session_segment.get("caption_text") or caption_text)
+                if "cut_action" in target_fields:
+                    cut_action = str(session_segment.get("cut_action") or cut_action)
+                regenerated_segments.append(
+                    {
+                        "segment_id": segment_id,
+                        "caption_text": caption_text,
+                        "cut_action": cut_action,
+                    }
+                )
+            if cut_action == "remove":
+                continue
+            timeline_segments.append(
+                {
+                    **source_segment,
+                    "text": caption_text,
+                    "cleanup_decision": cut_action,
+                }
+            )
+        state["timeline_segments"] = timeline_segments
+        state["regenerated_segments"] = regenerated_segments
+
+    def _execute_partial_regeneration_broll_refresh_step(
+        self,
+        *,
+        project_id: str,
+        state: dict[str, Any],
+        session_segments: dict[str, dict[str, Any]],
+        target_segment_ids: set[str],
+    ) -> None:
+        state["recommendations"] = [
+            item
+            for item in state["recommendations"]
+            if not (
+                str(item.get("recommendation_type") or "") == RecommendationType.BROLL.value
+                and str(item.get("target_segment_id") or "") in target_segment_ids
+            )
+        ]
+        manual_segment_ids: set[str] = set()
+        for segment_id in sorted(target_segment_ids):
+            session_segment = session_segments.get(segment_id)
+            if not session_segment:
+                continue
+            override = session_segment.get("broll_override")
+            if not isinstance(override, dict) or not str(override.get("asset_id") or "").strip():
+                continue
+            manual_segment_ids.add(segment_id)
+            state["recommendations"].append(
+                self._manual_recommendation_payload(
+                    segment_id=segment_id,
+                    recommendation_type=RecommendationType.BROLL,
+                    asset_id=str(override["asset_id"]),
+                    reason="Manual B-roll override from editing session.",
+                )
+            )
+
+        segments_to_regenerate = [
+            segment
+            for segment in state["timeline_segments"]
+            if str(segment.get("segment_id") or "") in target_segment_ids - manual_segment_ids
+        ]
+        if not segments_to_regenerate:
+            return
+        candidates = self.broll_recommender.recommend(
+            RecommendationRequest(
+                project_id=project_id,
+                recommendation_type=RecommendationType.BROLL,
+                segments=segments_to_regenerate,
+                assets=self.store.list_assets(project_id=project_id, asset_type=AssetType.BROLL_VIDEO),
+            )
+        )
+        for candidate in candidates:
+            recommendation = self._candidate_payload(candidate)
+            recommendation["recommendation_type"] = RecommendationType.BROLL.value
+            state["recommendations"].append(
+                self._normalize_generated_recommendation(
+                    recommendation,
+                    fallback_provider="heuristic_fallback",
+                )
+            )
+
+    def _execute_partial_regeneration_music_refresh_step(
+        self,
+        *,
+        project_id: str,
+        state: dict[str, Any],
+        session_segments: dict[str, dict[str, Any]],
+        target_segment_ids: set[str],
+    ) -> None:
+        state["recommendations"] = [
+            item
+            for item in state["recommendations"]
+            if not (
+                str(item.get("recommendation_type") or "") == RecommendationType.BGM.value
+                and str(item.get("target_segment_id") or "") in target_segment_ids
+            )
+        ]
+        manual_segment_ids: set[str] = set()
+        for segment_id in sorted(target_segment_ids):
+            session_segment = session_segments.get(segment_id)
+            if not session_segment:
+                continue
+            override = session_segment.get("music_override")
+            if not isinstance(override, dict) or not str(override.get("asset_id") or "").strip():
+                continue
+            manual_segment_ids.add(segment_id)
+            state["recommendations"].append(
+                self._manual_recommendation_payload(
+                    segment_id=segment_id,
+                    recommendation_type=RecommendationType.BGM,
+                    asset_id=str(override["asset_id"]),
+                    reason="Manual music override from editing session.",
+                )
+            )
+
+        segments_to_regenerate = [
+            segment
+            for segment in state["timeline_segments"]
+            if str(segment.get("segment_id") or "") in target_segment_ids - manual_segment_ids
+        ]
+        if not segments_to_regenerate:
+            return
+        candidates = self.music_recommender.recommend(
+            RecommendationRequest(
+                project_id=project_id,
+                recommendation_type=RecommendationType.BGM,
+                segments=segments_to_regenerate,
+                assets=[],
+            )
+        )
+        for candidate in candidates:
+            recommendation = self._candidate_payload(candidate)
+            recommendation["recommendation_type"] = RecommendationType.BGM.value
+            state["recommendations"].append(
+                self._normalize_generated_recommendation(
+                    recommendation,
+                    fallback_provider="rule_based_fallback",
+                )
+            )
+
+    def _execute_partial_regeneration_overlay_refresh_step(
+        self,
+        *,
+        state: dict[str, Any],
+        session_segments: dict[str, dict[str, Any]],
+        target_segment_ids: set[str],
+    ) -> None:
+        existing_overlays = deepcopy(state["export_overlays"])
+        preserved_overlays = [
+            overlay
+            for overlay in existing_overlays
+            if str(overlay.get("segment_id") or "") not in target_segment_ids
+        ]
+        refreshed_overlays: list[dict[str, Any]] = []
+        for segment_id in sorted(target_segment_ids):
+            session_segment = session_segments.get(segment_id)
+            if not session_segment:
+                continue
+            overlays = session_segment.get("visual_overlays")
+            if not isinstance(overlays, list) or not overlays:
+                refreshed_overlays.extend(
+                    [
+                        overlay
+                        for overlay in existing_overlays
+                        if str(overlay.get("segment_id") or "") == segment_id
+                    ]
+                )
+                continue
+            for overlay in overlays:
+                if not isinstance(overlay, dict):
+                    continue
+                base_overlay = next(
+                    (
+                        existing
+                        for existing in existing_overlays
+                        if str(existing.get("segment_id") or "") == segment_id
+                        and str(existing.get("overlay_type") or "") == str(overlay.get("overlay_type") or "")
+                    ),
+                    {},
+                )
+                refreshed_overlays.append(
+                    {
+                        **base_overlay,
+                        "segment_id": segment_id,
+                        "overlay_type": str(overlay.get("overlay_type") or ""),
+                        "asset_id": str(overlay.get("asset_id") or ""),
+                        "start_sec": base_overlay.get("start_sec", session_segment.get("start_sec")),
+                        "end_sec": base_overlay.get("end_sec", session_segment.get("end_sec")),
+                    }
+                )
+        state["export_overlays"] = preserved_overlays + refreshed_overlays
+
+    def _manual_recommendation_payload(
+        self,
+        *,
+        segment_id: str,
+        recommendation_type: RecommendationType,
+        asset_id: str,
+        reason: str,
+    ) -> dict[str, Any]:
+        provider_trace = build_provider_trace(final_provider="editing_session_manual")
+        return {
+            "recommendation_id": f"manual_{recommendation_type.value}_{segment_id}",
+            "target_segment_id": segment_id,
+            "recommendation_type": recommendation_type.value,
+            "selected_asset_id": asset_id,
+            "score": 1.0,
+            "reason": reason,
+            "auto_apply_allowed": True,
+            "review_required": False,
+            "payload": {"provider_trace": provider_trace},
+            "created_at": self.store._now_iso(),
+            "provider_trace": provider_trace,
+        }
+
+    def _normalize_generated_recommendation(
+        self,
+        recommendation: dict[str, Any],
+        *,
+        fallback_provider: str,
+    ) -> dict[str, Any]:
+        recommendation.setdefault(
+            "recommendation_id",
+            f"generated_{recommendation.get('recommendation_type', 'recommendation')}_{recommendation.get('target_segment_id', 'segment')}",
+        )
+        recommendation.setdefault("created_at", self.store._now_iso())
+        provider_trace = recommendation.get("provider_trace")
+        if not isinstance(provider_trace, dict):
+            provider_trace = build_provider_trace(final_provider=fallback_provider)
+            recommendation["provider_trace"] = provider_trace
+        payload = recommendation.get("payload")
+        if not isinstance(payload, dict):
+            payload = {}
+            recommendation["payload"] = payload
+        payload.setdefault("provider_trace", provider_trace)
+        return recommendation

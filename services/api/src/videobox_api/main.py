@@ -218,9 +218,25 @@ class PartialRegenerationRequest(BaseModel):
 
 
 class PartialRegenerationResponse(BaseModel):
+    job_id: str | None = None
+    status: str | None = None
     session_id: str | None = None
     segment_ids: list[str] = Field(default_factory=list)
     fields: list[str] = Field(default_factory=list)
+    downstream_steps: list[str] = Field(default_factory=list)
+
+
+class PartialRegenerationJobResponse(StartJobResponse):
+    partial_regeneration_id: str
+    session_id: str
+    source_timeline_id: str
+    timeline_id: str
+    segment_ids: list[str] = Field(default_factory=list)
+    fields: list[str] = Field(default_factory=list)
+    downstream_steps: list[str] = Field(default_factory=list)
+    regenerated_segments: list[dict[str, object]] = Field(default_factory=list)
+    timeline: TimelinePayloadResponse
+    created_at: str | None = None
 
 
 class EditingSessionSegmentResponse(BaseModel):
@@ -839,14 +855,14 @@ def create_app(
             raise _http_error(exc) from exc
         return EditingSessionResponse(**result)
 
-    @app.post("/api/projects/{project_id}/editing-sessions/{session_id}/partial-regeneration")
-    def build_editing_session_partial_regeneration_request(
+    @app.post("/api/projects/{project_id}/editing-sessions/{session_id}/partial-regeneration", status_code=status.HTTP_202_ACCEPTED)
+    def start_editing_session_partial_regeneration(
         project_id: str,
         session_id: str,
         payload: PartialRegenerationRequest,
     ) -> PartialRegenerationResponse:
         try:
-            result = orchestrator.build_editing_session_partial_regeneration_request(
+            result = orchestrator.start_editing_session_partial_regeneration(
                 project_id=project_id,
                 session_id=session_id,
                 segment_ids=payload.segment_ids,
@@ -855,6 +871,27 @@ def create_app(
         except Exception as exc:
             raise _http_error(exc) from exc
         return PartialRegenerationResponse(**result)
+
+    @app.get("/api/projects/{project_id}/partial-regenerations/{job_id}")
+    def get_partial_regeneration_result(project_id: str, job_id: str) -> PartialRegenerationJobResponse:
+        try:
+            result = orchestrator.get_partial_regeneration_result(project_id=project_id, job_id=job_id)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return PartialRegenerationJobResponse(
+            job_id=result["job_id"],
+            status=result["status"],
+            partial_regeneration_id=result["partial_regeneration_id"],
+            session_id=result["session_id"],
+            source_timeline_id=result["source_timeline_id"],
+            timeline_id=result["timeline_id"],
+            segment_ids=result["segment_ids"],
+            fields=result["fields"],
+            downstream_steps=result["downstream_steps"],
+            regenerated_segments=result["regenerated_segments"],
+            timeline=TimelinePayloadResponse(**result["timeline"]),
+            created_at=result.get("created_at"),
+        )
 
     @app.patch("/api/projects/{project_id}/editing-sessions/{session_id}/segments/{segment_id}/visual-overlay")
     def patch_editing_session_visual_overlay(
