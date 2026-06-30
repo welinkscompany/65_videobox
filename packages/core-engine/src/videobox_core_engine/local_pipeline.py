@@ -9,6 +9,7 @@ from videobox_core_engine.auto_cut import AutoCutPlanner
 from videobox_core_engine.editing_session import (
     build_editing_session,
     build_partial_regeneration_request,
+    clear_segment_broll_override,
     clear_segment_music_override,
     clear_segment_visual_overlays,
     clear_segment_tts_replacement,
@@ -656,6 +657,24 @@ class LocalPipelineRunner:
             session=session,
             segment_id=segment_id,
             asset_id=asset_id,
+        )
+        return self.store.update_editing_session(
+            project_id=project_id,
+            session_id=session_id,
+            session_payload=updated_session,
+        )
+
+    def clear_editing_session_segment_broll_override(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+    ) -> dict[str, Any]:
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        updated_session = clear_segment_broll_override(
+            session=session,
+            segment_id=segment_id,
         )
         return self.store.update_editing_session(
             project_id=project_id,

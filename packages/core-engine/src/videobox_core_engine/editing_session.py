@@ -127,6 +127,26 @@ def update_segment_broll_override(
     raise KeyError(f"Segment not found in editing session: {segment_id}")
 
 
+def clear_segment_broll_override(
+    *,
+    session: dict[str, Any],
+    segment_id: str,
+) -> dict[str, Any]:
+    updated = deepcopy(session)
+    for segment in updated.get("segments", []):
+        if str(segment.get("segment_id")) != segment_id:
+            continue
+        segment["broll_override"] = None
+        updated.setdefault("history", []).append(
+            {
+                "mutation_type": "broll_override_clear",
+                "segment_id": segment_id,
+            }
+        )
+        return updated
+    raise KeyError(f"Segment not found in editing session: {segment_id}")
+
+
 def update_segment_visual_overlay(
     *,
     session: dict[str, Any],

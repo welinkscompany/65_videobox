@@ -2199,6 +2199,31 @@ export function App() {
                   >
                     Save B-roll override
                   </button>
+                  {selectedEditingSegment.broll_override ? (
+                    <button
+                      className="action-button"
+                      disabled={
+                        !selectedProjectId ||
+                        !activeEditingSessionId ||
+                        isSavingEditingMutation === `${selectedEditingSegment.segment_id}-broll`
+                      }
+                      onClick={() =>
+                        void applyEditingMutation(
+                          `${selectedEditingSegment.segment_id}-broll`,
+                          () =>
+                            api.clearEditingSessionBrollOverride(
+                              selectedProjectId!,
+                              activeEditingSessionId!,
+                              selectedEditingSegment.segment_id,
+                            ),
+                          { removeRegenerationField: "broll" },
+                        )
+                      }
+                      type="button"
+                    >
+                      Clear B-roll override
+                    </button>
+                  ) : null}
                   <label className="field">
                     <span>Music asset ID</span>
                     <input

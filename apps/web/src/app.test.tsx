@@ -837,6 +837,25 @@ function createFetchMock({
     }
     if (
       url.endsWith(
+        "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/broll",
+      ) &&
+      init?.method === "DELETE"
+    ) {
+      state.editingSession = {
+        ...state.editingSession,
+        segments: state.editingSession.segments.map((segment) =>
+          segment.segment_id === "seg_002"
+            ? {
+                ...segment,
+                broll_override: null,
+              }
+            : segment,
+        ),
+      };
+      return new Response(JSON.stringify(state.editingSession));
+    }
+    if (
+      url.endsWith(
         "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/explanation-card",
       ) &&
       init?.method === "PATCH"
@@ -2254,6 +2273,28 @@ describe("App", () => {
     expect(screen.queryByRole("button", { name: /clear music override/i })).not.toBeInTheDocument();
     expect(screen.getByLabelText(/music asset id/i)).toHaveValue("");
     expect(screen.getByRole("checkbox", { name: /^music$/i })).not.toBeChecked();
+  });
+
+  it("clears the saved b-roll override and invalidates the active candidate", async () => {
+    const fetchMock = await renderStartedEditingSession(
+      createFetchMock({ candidateReviewSnapshot: candidateReviewSnapshotResponse }),
+    );
+
+    await runCandidateToApprovalReady();
+    fireEvent.click(screen.getByRole("button", { name: /clear b-roll override/i }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/broll",
+        expect.objectContaining({
+          method: "DELETE",
+        }),
+      );
+    });
+    await expectCandidateInvalidated();
+    expect(screen.queryByRole("button", { name: /clear b-roll override/i })).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/b-roll asset id/i)).toHaveValue("");
+    expect(screen.getByRole("checkbox", { name: /broll/i })).not.toBeChecked();
   });
 
   it("blocks preflight and rerun while an editing save is still in flight", async () => {

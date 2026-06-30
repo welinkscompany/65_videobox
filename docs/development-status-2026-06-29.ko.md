@@ -217,6 +217,33 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - review->editor recommendation mapping coverage 중 `broll` happy-path 보강
 - review action placeholder를 실제 persistence contract와 연결할지 여부 설계
 
+## 15. 2026-06-30 thin editor B-roll override clear 기록
+
+이번 후속 작업으로 `thin editor B-roll override clear/remove` slice는 완료로 봐도 된다.
+
+이번에 추가로 확인된 사실은 아래와 같다.
+
+- editing session 도메인과 API에서 saved B-roll override clear 경로가 실제로 연결됐다
+- thin editor에서 `Clear B-roll override`를 직접 실행할 수 있다
+- clear 후 active candidate invalidation은 기존 mutation 규칙 그대로 유지된다
+- clear 후 rerun scope의 `broll` 선택 상태도 stale하게 남지 않는다
+- focused backend regression `143 passed`
+- frontend focused test `46 passed`
+- frontend build 성공
+- full backend regression `234 passed`
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. B-roll override save
+2. B-roll override clear/remove
+3. clear 후 candidate invalidation
+4. clear 후 rerun scope cleanup
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- review->editor recommendation mapping coverage 중 `broll` happy-path 보강
+- review action placeholder를 실제 persistence contract와 연결할지 여부 설계
+
 ## 14. 2026-06-30 thin editor music override clear 기록
 
 이번 후속 작업으로 `thin editor music override clear/remove` slice는 완료로 봐도 된다.

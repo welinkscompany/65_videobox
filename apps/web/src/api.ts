@@ -450,6 +450,17 @@ export const api = {
         body: JSON.stringify(payload),
       },
     ),
+  clearEditingSessionBrollOverride: (
+    projectId: string,
+    sessionId: string,
+    segmentId: string,
+  ) =>
+    request<EditingSession>(
+      `/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/broll`,
+      {
+        method: "DELETE",
+      },
+    ),
   updateEditingSessionMusicOverride: (
     projectId: string,
     sessionId: string,

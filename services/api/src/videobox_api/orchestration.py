@@ -373,6 +373,19 @@ class ApiOrchestrator:
             asset_id=asset_id,
         )
 
+    def clear_segment_broll_override(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+    ) -> dict[str, Any]:
+        return self.pipeline.clear_editing_session_segment_broll_override(
+            project_id=project_id,
+            session_id=session_id,
+            segment_id=segment_id,
+        )
+
     def build_editing_session_partial_regeneration_request(
         self,
         *,
