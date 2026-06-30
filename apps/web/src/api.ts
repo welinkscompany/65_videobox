@@ -462,6 +462,17 @@ export const api = {
         body: JSON.stringify(payload),
       },
     ),
+  removeEditingSessionExplanationCard: (
+    projectId: string,
+    sessionId: string,
+    segmentId: string,
+  ) =>
+    request<EditingSession>(
+      `/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/explanation-card`,
+      {
+        method: "DELETE",
+      },
+    ),
   updateEditingSessionImageOverlay: (
     projectId: string,
     sessionId: string,
@@ -476,6 +487,17 @@ export const api = {
           "Content-Type": "application/json",
         },
         body: JSON.stringify(payload),
+      },
+    ),
+  removeEditingSessionImageOverlay: (
+    projectId: string,
+    sessionId: string,
+    segmentId: string,
+  ) =>
+    request<EditingSession>(
+      `/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/image-overlay`,
+      {
+        method: "DELETE",
       },
     ),
   updateEditingSessionTableOverlay: (
@@ -494,6 +516,17 @@ export const api = {
         body: JSON.stringify(payload),
       },
     ),
+  removeEditingSessionTableOverlay: (
+    projectId: string,
+    sessionId: string,
+    segmentId: string,
+  ) =>
+    request<EditingSession>(
+      `/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/table-overlay`,
+      {
+        method: "DELETE",
+      },
+    ),
   updateEditingSessionTtsReplacement: (
     projectId: string,
     sessionId: string,
@@ -508,6 +541,17 @@ export const api = {
           "Content-Type": "application/json",
         },
         body: JSON.stringify(payload),
+      },
+    ),
+  clearEditingSessionTtsReplacement: (
+    projectId: string,
+    sessionId: string,
+    segmentId: string,
+  ) =>
+    request<EditingSession>(
+      `/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/tts-replacement`,
+      {
+        method: "DELETE",
       },
     ),
   previewPartialRegeneration: (

@@ -776,6 +776,27 @@ function createFetchMock({
     }
     if (
       url.endsWith(
+        "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/explanation-card",
+      ) &&
+      init?.method === "DELETE"
+    ) {
+      state.editingSession = {
+        ...state.editingSession,
+        segments: state.editingSession.segments.map((segment) =>
+          segment.segment_id === "seg_002"
+            ? {
+                ...segment,
+                visual_overlays: segment.visual_overlays.filter(
+                  (overlay) => String(overlay.overlay_type ?? "") !== "explanation_card",
+                ),
+              }
+            : segment,
+        ),
+      };
+      return new Response(JSON.stringify(state.editingSession));
+    }
+    if (
+      url.endsWith(
         "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/image-overlay",
       ) &&
       init?.method === "PATCH"
@@ -800,6 +821,27 @@ function createFetchMock({
                     text: payload.text,
                   },
                 ],
+              }
+            : segment,
+        ),
+      };
+      return new Response(JSON.stringify(state.editingSession));
+    }
+    if (
+      url.endsWith(
+        "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/image-overlay",
+      ) &&
+      init?.method === "DELETE"
+    ) {
+      state.editingSession = {
+        ...state.editingSession,
+        segments: state.editingSession.segments.map((segment) =>
+          segment.segment_id === "seg_002"
+            ? {
+                ...segment,
+                visual_overlays: segment.visual_overlays.filter(
+                  (overlay) => String(overlay.overlay_type ?? "") !== "image_overlay",
+                ),
               }
             : segment,
         ),
@@ -842,6 +884,27 @@ function createFetchMock({
     }
     if (
       url.endsWith(
+        "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/table-overlay",
+      ) &&
+      init?.method === "DELETE"
+    ) {
+      state.editingSession = {
+        ...state.editingSession,
+        segments: state.editingSession.segments.map((segment) =>
+          segment.segment_id === "seg_002"
+            ? {
+                ...segment,
+                visual_overlays: segment.visual_overlays.filter(
+                  (overlay) => String(overlay.overlay_type ?? "") !== "table_overlay",
+                ),
+              }
+            : segment,
+        ),
+      };
+      return new Response(JSON.stringify(state.editingSession));
+    }
+    if (
+      url.endsWith(
         "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/tts-replacement",
       ) &&
       init?.method === "PATCH"
@@ -860,6 +923,25 @@ function createFetchMock({
                   recommendation_id: payload.recommendation_id,
                   asset_id: payload.asset_id,
                 },
+              }
+            : segment,
+        ),
+      };
+      return new Response(JSON.stringify(state.editingSession));
+    }
+    if (
+      url.endsWith(
+        "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/tts-replacement",
+      ) &&
+      init?.method === "DELETE"
+    ) {
+      state.editingSession = {
+        ...state.editingSession,
+        segments: state.editingSession.segments.map((segment) =>
+          segment.segment_id === "seg_002"
+            ? {
+                ...segment,
+                tts_replacement: null,
               }
             : segment,
         ),
@@ -1666,6 +1748,16 @@ describe("App", () => {
     expect(imageButton).toBeDisabled();
     expect(tableButton).toBeDisabled();
     expect(ttsButton).toBeDisabled();
+    expect(explanationButton).toHaveAttribute("aria-describedby", "seg_002-explanation-save-help");
+    expect(imageButton).toHaveAttribute("aria-describedby", "seg_002-image-save-help");
+    expect(tableButton).toHaveAttribute("aria-describedby", "seg_002-table-save-help");
+    expect(ttsButton).toHaveAttribute("aria-describedby", "seg_002-tts-save-help");
+    expect(screen.getByText(/explanation text required before saving/i)).toBeInTheDocument();
+    expect(screen.getByText(/image overlay asset id required before saving/i)).toBeInTheDocument();
+    expect(screen.getByText(/table text required before saving/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/tts recommendation id and asset id required before saving/i),
+    ).toBeInTheDocument();
 
     fireEvent.click(explanationButton);
     fireEvent.click(imageButton);
@@ -1688,6 +1780,123 @@ describe("App", () => {
       "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/tts-replacement",
       expect.anything(),
     );
+  });
+
+  async function renderStartedEditingSession(fetchMock = createFetchMock()) {
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /start editing session/i }));
+    return fetchMock;
+  }
+
+  async function runCandidateToApprovalReady() {
+    fireEvent.click(await screen.findByRole("button", { name: /request regeneration preflight/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /run partial regeneration/i }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /approve timeline/i })).toBeEnabled();
+    });
+  }
+
+  async function expectCandidateInvalidated() {
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /approve timeline/i })).toBeDisabled();
+    });
+    expect(screen.queryByText(/partial_regeneration_job_001/i)).not.toBeInTheDocument();
+  }
+
+  it("removes the saved explanation card and invalidates the active candidate", async () => {
+    const fetchMock = await renderStartedEditingSession(
+      createFetchMock({ candidateReviewSnapshot: candidateReviewSnapshotResponse }),
+    );
+
+    await runCandidateToApprovalReady();
+    fireEvent.click(screen.getByRole("button", { name: /remove explanation card/i }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/explanation-card",
+        expect.objectContaining({
+          method: "DELETE",
+        }),
+      );
+    });
+    await expectCandidateInvalidated();
+  });
+
+  it("removes the saved image overlay and invalidates the active candidate", async () => {
+    const fetchMock = await renderStartedEditingSession(
+      createFetchMock({ candidateReviewSnapshot: candidateReviewSnapshotResponse }),
+    );
+
+    fireEvent.change(screen.getByLabelText(/image overlay asset id/i), {
+      target: { value: "asset_image_002" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /save image overlay/i }));
+
+    await runCandidateToApprovalReady();
+    fireEvent.click(screen.getByRole("button", { name: /remove image overlay/i }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/image-overlay",
+        expect.objectContaining({
+          method: "DELETE",
+        }),
+      );
+    });
+    await expectCandidateInvalidated();
+  });
+
+  it("removes the saved table overlay and invalidates the active candidate", async () => {
+    const fetchMock = await renderStartedEditingSession(
+      createFetchMock({ candidateReviewSnapshot: candidateReviewSnapshotResponse }),
+    );
+
+    fireEvent.change(screen.getByLabelText(/table text/i), {
+      target: { value: "Table overlay summary for operator review." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /save table overlay/i }));
+
+    await runCandidateToApprovalReady();
+    fireEvent.click(screen.getByRole("button", { name: /remove table overlay/i }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/table-overlay",
+        expect.objectContaining({
+          method: "DELETE",
+        }),
+      );
+    });
+    await expectCandidateInvalidated();
+  });
+
+  it("clears the saved tts replacement and invalidates the active candidate", async () => {
+    const fetchMock = await renderStartedEditingSession(
+      createFetchMock({ candidateReviewSnapshot: candidateReviewSnapshotResponse }),
+    );
+
+    fireEvent.change(screen.getByLabelText(/tts recommendation id/i), {
+      target: { value: "rec_tts_002" },
+    });
+    fireEvent.change(screen.getByLabelText(/tts asset id/i), {
+      target: { value: "tts_asset_002" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /save tts replacement/i }));
+
+    await runCandidateToApprovalReady();
+    fireEvent.click(screen.getByRole("button", { name: /clear tts replacement/i }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/tts-replacement",
+        expect.objectContaining({
+          method: "DELETE",
+        }),
+      );
+    });
+    await expectCandidateInvalidated();
   });
 
   it("disables run again while a replacement preflight request is still in flight", async () => {

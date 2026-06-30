@@ -2120,6 +2120,11 @@ export function App() {
                     />
                   </label>
                   <button
+                    aria-describedby={
+                      !selectedEditingDraft.explanationText
+                        ? `${selectedEditingSegment.segment_id}-explanation-save-help`
+                        : undefined
+                    }
                     className="action-button"
                     disabled={
                       !selectedProjectId ||
@@ -2145,6 +2150,40 @@ export function App() {
                   >
                     Save explanation card
                   </button>
+                  {!selectedEditingDraft.explanationText ? (
+                    <p
+                      className="meta-copy"
+                      id={`${selectedEditingSegment.segment_id}-explanation-save-help`}
+                    >
+                      Explanation text required before saving.
+                    </p>
+                  ) : null}
+                  {selectedEditingSegment.visual_overlays.some(
+                    (overlay) => String(overlay.overlay_type ?? "") === "explanation_card",
+                  ) ? (
+                    <button
+                      className="action-button"
+                      disabled={
+                        !selectedProjectId ||
+                        !activeEditingSessionId ||
+                        isSavingEditingMutation === `${selectedEditingSegment.segment_id}-explanation`
+                      }
+                      onClick={() =>
+                        void applyEditingMutation(
+                          `${selectedEditingSegment.segment_id}-explanation`,
+                          () =>
+                            api.removeEditingSessionExplanationCard(
+                              selectedProjectId!,
+                              activeEditingSessionId!,
+                              selectedEditingSegment.segment_id,
+                            ),
+                        )
+                      }
+                      type="button"
+                    >
+                      Remove explanation card
+                    </button>
+                  ) : null}
                   <label className="field">
                     <span>Image overlay asset ID</span>
                     <input
@@ -2168,6 +2207,11 @@ export function App() {
                     />
                   </label>
                   <button
+                    aria-describedby={
+                      !selectedEditingDraft.imageAssetId
+                        ? `${selectedEditingSegment.segment_id}-image-save-help`
+                        : undefined
+                    }
                     className="action-button"
                     disabled={
                       !selectedProjectId ||
@@ -2192,6 +2236,38 @@ export function App() {
                   >
                     Save image overlay
                   </button>
+                  {!selectedEditingDraft.imageAssetId ? (
+                    <p
+                      className="meta-copy"
+                      id={`${selectedEditingSegment.segment_id}-image-save-help`}
+                    >
+                      Image overlay asset ID required before saving.
+                    </p>
+                  ) : null}
+                  {selectedEditingSegment.visual_overlays.some(
+                    (overlay) => String(overlay.overlay_type ?? "") === "image_overlay",
+                  ) ? (
+                    <button
+                      className="action-button"
+                      disabled={
+                        !selectedProjectId ||
+                        !activeEditingSessionId ||
+                        isSavingEditingMutation === `${selectedEditingSegment.segment_id}-image`
+                      }
+                      onClick={() =>
+                        void applyEditingMutation(`${selectedEditingSegment.segment_id}-image`, () =>
+                          api.removeEditingSessionImageOverlay(
+                            selectedProjectId!,
+                            activeEditingSessionId!,
+                            selectedEditingSegment.segment_id,
+                          ),
+                        )
+                      }
+                      type="button"
+                    >
+                      Remove image overlay
+                    </button>
+                  ) : null}
                   <label className="field">
                     <span>Table columns</span>
                     <input
@@ -2226,6 +2302,11 @@ export function App() {
                     />
                   </label>
                   <button
+                    aria-describedby={
+                      !selectedEditingDraft.tableText
+                        ? `${selectedEditingSegment.segment_id}-table-save-help`
+                        : undefined
+                    }
                     className="action-button"
                     disabled={
                       !selectedProjectId ||
@@ -2262,6 +2343,38 @@ export function App() {
                   >
                     Save table overlay
                   </button>
+                  {!selectedEditingDraft.tableText ? (
+                    <p
+                      className="meta-copy"
+                      id={`${selectedEditingSegment.segment_id}-table-save-help`}
+                    >
+                      Table text required before saving.
+                    </p>
+                  ) : null}
+                  {selectedEditingSegment.visual_overlays.some(
+                    (overlay) => String(overlay.overlay_type ?? "") === "table_overlay",
+                  ) ? (
+                    <button
+                      className="action-button"
+                      disabled={
+                        !selectedProjectId ||
+                        !activeEditingSessionId ||
+                        isSavingEditingMutation === `${selectedEditingSegment.segment_id}-table`
+                      }
+                      onClick={() =>
+                        void applyEditingMutation(`${selectedEditingSegment.segment_id}-table`, () =>
+                          api.removeEditingSessionTableOverlay(
+                            selectedProjectId!,
+                            activeEditingSessionId!,
+                            selectedEditingSegment.segment_id,
+                          ),
+                        )
+                      }
+                      type="button"
+                    >
+                      Remove table overlay
+                    </button>
+                  ) : null}
                   <label className="field">
                     <span>TTS recommendation ID</span>
                     <input
@@ -2285,6 +2398,11 @@ export function App() {
                     />
                   </label>
                   <button
+                    aria-describedby={
+                      !selectedEditingDraft.ttsRecommendationId || !selectedEditingDraft.ttsAssetId
+                        ? `${selectedEditingSegment.segment_id}-tts-save-help`
+                        : undefined
+                    }
                     className="action-button"
                     disabled={
                       !selectedProjectId ||
@@ -2310,6 +2428,36 @@ export function App() {
                   >
                     Save TTS replacement
                   </button>
+                  {!selectedEditingDraft.ttsRecommendationId || !selectedEditingDraft.ttsAssetId ? (
+                    <p
+                      className="meta-copy"
+                      id={`${selectedEditingSegment.segment_id}-tts-save-help`}
+                    >
+                      TTS recommendation ID and asset ID required before saving.
+                    </p>
+                  ) : null}
+                  {selectedEditingSegment.tts_replacement ? (
+                    <button
+                      className="action-button"
+                      disabled={
+                        !selectedProjectId ||
+                        !activeEditingSessionId ||
+                        isSavingEditingMutation === `${selectedEditingSegment.segment_id}-tts`
+                      }
+                      onClick={() =>
+                        void applyEditingMutation(`${selectedEditingSegment.segment_id}-tts`, () =>
+                          api.clearEditingSessionTtsReplacement(
+                            selectedProjectId!,
+                            activeEditingSessionId!,
+                            selectedEditingSegment.segment_id,
+                          ),
+                        )
+                      }
+                      type="button"
+                    >
+                      Clear TTS replacement
+                    </button>
+                  ) : null}
                 </div>
               ) : (
                 <p className="empty-state">Choose a session segment to inspect its draft state.</p>
