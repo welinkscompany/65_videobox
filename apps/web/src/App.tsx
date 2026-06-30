@@ -262,6 +262,9 @@ export function App() {
   const [geminiKeys, setGeminiKeys] = useState<GeminiProviderKey[]>([]);
   const [geminiLoadError, setGeminiLoadError] = useState<string | null>(null);
   const [editingSessionRestoreError, setEditingSessionRestoreError] = useState<string | null>(null);
+  const [partialRegenerationRestoreWarning, setPartialRegenerationRestoreWarning] = useState<
+    string | null
+  >(null);
   const [loadState, setLoadState] = useState<LoadState>("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isRebuildingTimeline, setIsRebuildingTimeline] = useState(false);
@@ -341,6 +344,7 @@ export function App() {
       setErrorMessage(null);
       setGeminiLoadError(null);
       setEditingSessionRestoreError(null);
+      setPartialRegenerationRestoreWarning(null);
       try {
         const project = await api.getProject(projectId);
         const jobItems = await api.listJobs(projectId);
@@ -385,6 +389,7 @@ export function App() {
         let resumedSelection: { segmentId: string | null; fields: string[] } | null = null;
         let resumedPartialRegenerationPreflight: PartialRegenerationPreflight | null = null;
         let resumedPartialRegeneration: PartialRegenerationRun | null = null;
+        let resumedPartialRegenerationRestoreWarning: string | null = null;
         let activeSubtitle = subtitle;
         let activePreview = preview;
         let activeExport = capcutExport;
@@ -418,6 +423,8 @@ export function App() {
                     );
                   } catch {
                     resumedPartialRegenerationPreflight = null;
+                    resumedPartialRegenerationRestoreWarning =
+                      "Resumed candidate preflight interpretation is unavailable. Candidate scope is visible, but review prediction details could not be reused.";
                   }
                 }
                 activeTimeline = {
@@ -452,6 +459,8 @@ export function App() {
               }
             } catch {
               resumedPartialRegeneration = null;
+              resumedPartialRegenerationRestoreWarning =
+                "Resumed candidate could not be restored. Stable timeline data remains active below.";
             }
           }
         }
@@ -476,6 +485,7 @@ export function App() {
         }
         setPartialRegenerationPreflight(resumedPartialRegenerationPreflight);
         setPartialRegenerationRun(resumedPartialRegeneration);
+        setPartialRegenerationRestoreWarning(resumedPartialRegenerationRestoreWarning);
         setSubtitleJob(activeSubtitle);
         setPreviewJob(activePreview);
         setExportJob(activeExport);
@@ -642,6 +652,7 @@ export function App() {
     setIsStartingEditingSession(true);
     setErrorMessage(null);
     setEditingSessionRestoreError(null);
+    setPartialRegenerationRestoreWarning(null);
     try {
       const session = await api.createEditingSession(selectedProjectId, {
         timeline_job_id: latestTimelineBuildJob.job_id,
@@ -668,6 +679,7 @@ export function App() {
     }
     setIsRequestingRegenerationPreflight(true);
     setErrorMessage(null);
+    setPartialRegenerationRestoreWarning(null);
     setPartialRegenerationPreflight(null);
     try {
       const preflight = await api.previewPartialRegeneration(
@@ -701,6 +713,7 @@ export function App() {
     }
     setIsRunningPartialRegeneration(true);
     setErrorMessage(null);
+    setPartialRegenerationRestoreWarning(null);
     try {
       const result = await api.runPartialRegeneration(
         selectedProjectId,
@@ -829,6 +842,7 @@ export function App() {
     }
     setIsApprovingTimeline(true);
     setErrorMessage(null);
+    setPartialRegenerationRestoreWarning(null);
     try {
       await api.approveTimeline(selectedProjectId, activeTimelineJobId);
       const [timeline, review] = await Promise.all([
@@ -850,6 +864,7 @@ export function App() {
     }
     setIsReopeningTimeline(true);
     setErrorMessage(null);
+    setPartialRegenerationRestoreWarning(null);
     try {
       await api.reopenTimeline(selectedProjectId, activeTimelineJobId);
       const [timeline, review, jobItems] = await Promise.all([
@@ -1082,6 +1097,7 @@ export function App() {
     const nextSegment =
       editingSession?.segments.find((segment) => segment.segment_id === segmentId) ?? null;
     setSelectedRegenerationFields(buildDefaultRegenerationFields(nextSegment));
+    setPartialRegenerationRestoreWarning(null);
     setPartialRegenerationPreflight(null);
     setPartialRegenerationRun(null);
   };
@@ -1680,6 +1696,9 @@ export function App() {
               {editingSessionRestoreError ? (
                 <p className="error-banner">{editingSessionRestoreError}</p>
               ) : null}
+              {partialRegenerationRestoreWarning ? (
+                <p className="error-banner">{partialRegenerationRestoreWarning}</p>
+              ) : null}
               {editingSession ? (
                 <>
                   <dl className="summary-list">
@@ -1751,6 +1770,7 @@ export function App() {
                                 ? [...current, field]
                                 : current.filter((item) => item !== field),
                             );
+                            setPartialRegenerationRestoreWarning(null);
                             setPartialRegenerationPreflight(null);
                             setPartialRegenerationRun(null);
                           }}

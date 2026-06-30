@@ -538,6 +538,9 @@ function createFetchMock({
   editingSession = editingSessionResponse,
   latestEditingSession = editingSessionResponse,
   latestEditingSessionStatus,
+  candidateResultStatus,
+  candidateReviewStatus,
+  candidatePreflightStatus,
   reviewSnapshot = reviewSnapshotResponse,
   candidateReviewSnapshot = candidateReviewSnapshotResponse,
   partialRegenerationResult = partialRegenerationResultResponse,
@@ -548,6 +551,9 @@ function createFetchMock({
   editingSession?: typeof editingSessionResponse;
   latestEditingSession?: typeof editingSessionResponse | null;
   latestEditingSessionStatus?: number;
+  candidateResultStatus?: number;
+  candidateReviewStatus?: number;
+  candidatePreflightStatus?: number;
   reviewSnapshot?: typeof reviewSnapshotResponse;
   candidateReviewSnapshot?: ReviewSnapshot;
   partialRegenerationResult?: typeof partialRegenerationResultResponse;
@@ -627,9 +633,10 @@ function createFetchMock({
     if (url.endsWith("/api/projects/project_001/timelines/partial_regeneration_job_001")) {
       return new Response(
         JSON.stringify({
-          ...partialRegenerationResultResponse,
+          job_id: "partial_regeneration_job_001",
+          status: partialRegenerationResult.status,
           timeline: {
-            ...partialRegenerationResultResponse.timeline,
+            ...partialRegenerationResult.timeline,
             review_status: state.candidateTimelineReviewStatus,
           },
         }),
@@ -639,6 +646,9 @@ function createFetchMock({
       return new Response(JSON.stringify(reviewSnapshot));
     }
     if (url.endsWith("/api/projects/project_001/review-snapshots/partial_regeneration_job_001")) {
+      if (candidateReviewStatus != null) {
+        return new Response("candidate review error", { status: candidateReviewStatus });
+      }
       return new Response(
         JSON.stringify({
           ...state.candidateReviewSnapshot,
@@ -959,6 +969,9 @@ function createFetchMock({
       ) &&
       init?.method === "POST"
     ) {
+      if (candidatePreflightStatus != null) {
+        return new Response("candidate preflight error", { status: candidatePreflightStatus });
+      }
       return new Response(JSON.stringify(partialRegenerationPreflight));
     }
     if (
@@ -972,6 +985,9 @@ function createFetchMock({
       });
     }
     if (url.endsWith("/api/projects/project_001/partial-regenerations/partial_regeneration_job_001")) {
+      if (candidateResultStatus != null) {
+        return new Response("candidate result error", { status: candidateResultStatus });
+      }
       return new Response(
         JSON.stringify({
           ...partialRegenerationResult,
@@ -2469,6 +2485,181 @@ describe("App", () => {
 
     expect(await screen.findByText(/editing_session_001/i)).toBeInTheDocument();
     expect(screen.queryByText(/latest editing session could not be restored/i)).not.toBeInTheDocument();
+  });
+
+  it("shows a degraded resume warning when the resumed candidate result cannot be restored", async () => {
+    const fetchMock = createFetchMock({
+      candidateResultStatus: 500,
+      jobs: {
+        jobs: [
+          ...jobsResponse.jobs,
+          {
+            job_id: "partial_regeneration_job_001",
+            job_type: "partial_regeneration",
+            status: "succeeded",
+            input_ref: "editing_session_001",
+            output_ref: "partial_regeneration_run_001",
+            error_message: null,
+            started_at: "2026-06-28T00:00:16Z",
+            finished_at: "2026-06-28T00:00:17Z",
+          },
+        ],
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+
+    expect(await screen.findByText(/resumed candidate could not be restored/i)).toBeInTheDocument();
+    expect(screen.getByText(/stable timeline data remains active below/i)).toBeInTheDocument();
+    expect(screen.queryByText(/partial_regeneration_job_001/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /generate subtitle file/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /reopen review/i })).toBeEnabled();
+  });
+
+  it("shows a degraded resume warning when the resumed candidate review snapshot cannot be restored", async () => {
+    const fetchMock = createFetchMock({
+      candidateReviewStatus: 500,
+      jobs: {
+        jobs: [
+          ...jobsResponse.jobs,
+          {
+            job_id: "partial_regeneration_job_001",
+            job_type: "partial_regeneration",
+            status: "succeeded",
+            input_ref: "editing_session_001",
+            output_ref: "partial_regeneration_run_001",
+            error_message: null,
+            started_at: "2026-06-28T00:00:16Z",
+            finished_at: "2026-06-28T00:00:17Z",
+          },
+        ],
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+
+    expect(await screen.findByText(/resumed candidate could not be restored/i)).toBeInTheDocument();
+    expect(screen.getByText(/stable timeline data remains active below/i)).toBeInTheDocument();
+    expect(screen.queryByText(/partial_regeneration_job_001/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /generate subtitle file/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /reopen review/i })).toBeEnabled();
+  });
+
+  it("shows a limited restore warning when resumed preflight interpretation cannot be restored", async () => {
+    const fetchMock = createFetchMock({
+      candidatePreflightStatus: 500,
+      jobs: {
+        jobs: [
+          ...jobsResponse.jobs,
+          {
+            job_id: "partial_regeneration_job_001",
+            job_type: "partial_regeneration",
+            status: "succeeded",
+            input_ref: "editing_session_001",
+            output_ref: "partial_regeneration_run_001",
+            error_message: null,
+            started_at: "2026-06-28T00:00:16Z",
+            finished_at: "2026-06-28T00:00:17Z",
+          },
+        ],
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+
+    expect(await screen.findByText(/resumed candidate preflight interpretation is unavailable/i)).toBeInTheDocument();
+    expect(screen.getByText(/candidate scope is visible, but review prediction details could not be reused/i)).toBeInTheDocument();
+    expect(screen.getByText(/partial_regeneration_job_001/i)).toBeInTheDocument();
+    expect(screen.getByText(/resumed rerun scope/i)).toBeInTheDocument();
+    expect(screen.getAllByText("not-started").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("pending").length).toBeGreaterThan(0);
+    expect(screen.queryByText(/draft after rerun/i)).not.toBeInTheDocument();
+  });
+
+  it("clears resumed candidate restore warnings when the operator changes the rerun target", async () => {
+    const fetchMock = createFetchMock({
+      candidatePreflightStatus: 500,
+      jobs: {
+        jobs: [
+          ...jobsResponse.jobs,
+          {
+            job_id: "partial_regeneration_job_001",
+            job_type: "partial_regeneration",
+            status: "succeeded",
+            input_ref: "editing_session_001",
+            output_ref: "partial_regeneration_run_001",
+            error_message: null,
+            started_at: "2026-06-28T00:00:16Z",
+            finished_at: "2026-06-28T00:00:17Z",
+          },
+        ],
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+
+    expect(await screen.findByText(/resumed candidate preflight interpretation is unavailable/i)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("combobox", { name: /target segment/i }), {
+      target: { value: "seg_002" },
+    });
+
+    await waitFor(() => {
+      expect(
+        screen.queryByText(/resumed candidate preflight interpretation is unavailable/i),
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  it("clears resumed candidate restore warnings when the operator reopens review", async () => {
+    const fetchMock = createFetchMock({
+      candidateReviewSnapshot: candidateApprovedReviewSnapshotResponse,
+      candidatePreflightStatus: 500,
+      partialRegenerationResult: {
+        ...partialRegenerationResultResponse,
+        timeline: {
+          ...partialRegenerationResultResponse.timeline,
+          review_status: "approved",
+        },
+      },
+      jobs: {
+        jobs: [
+          ...jobsResponse.jobs,
+          {
+            job_id: "partial_regeneration_job_001",
+            job_type: "partial_regeneration",
+            status: "succeeded",
+            input_ref: "editing_session_001",
+            output_ref: "partial_regeneration_run_001",
+            error_message: null,
+            started_at: "2026-06-28T00:00:16Z",
+            finished_at: "2026-06-28T00:00:17Z",
+          },
+        ],
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+
+    expect(await screen.findByText(/resumed candidate preflight interpretation is unavailable/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /reopen review/i }));
+
+    await waitFor(() => {
+      expect(
+        screen.queryByText(/resumed candidate preflight interpretation is unavailable/i),
+      ).not.toBeInTheDocument();
+    });
   });
 
   it("reuses blocked preflight interpretation on refresh-resume for the latest fresh candidate", async () => {
