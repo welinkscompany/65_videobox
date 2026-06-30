@@ -1386,6 +1386,61 @@ describe("App", () => {
     expect(screen.getByRole("button", { name: /approve timeline/i })).toBeEnabled();
   });
 
+  it("opens the actionable pending recommendation in the editing session when marked for manual edit", async () => {
+    const actionableTimeline: TimelineJob = {
+      ...timelineResponse,
+      timeline: {
+        ...timelineResponse.timeline,
+        review_status: "blocked",
+        applied_recommendations: [],
+        pending_recommendations: [
+          {
+            recommendation_id: "rec_broll_review_002",
+            target_segment_id: "seg_002",
+            recommendation_type: "broll",
+            selected_asset_id: "asset_broll_review_002",
+            score: 0.88,
+            reason: "Operator should confirm the suggested B-roll pick.",
+            auto_apply_allowed: false,
+            review_required: true,
+            payload: { tags: ["team", "meeting"] },
+            created_at: "2026-06-30T00:00:00Z",
+          },
+        ],
+        review_flags: [
+          {
+            code: "broll_review_required",
+            segment_id: "seg_002",
+            message: "Operator must confirm the B-roll pick before approval.",
+          },
+        ],
+      },
+    };
+    const actionableReviewSnapshot: ReviewSnapshot = {
+      ...reviewSnapshotResponse,
+      review_status: "blocked",
+      applied_recommendations: [],
+      pending_recommendations: actionableTimeline.timeline.pending_recommendations,
+      review_flags: actionableTimeline.timeline.review_flags,
+    };
+    const fetchMock = createFetchMock({
+      timeline: actionableTimeline,
+      reviewSnapshot: actionableReviewSnapshot,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /review snapshot/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /mark for manual edit/i }));
+
+    expect(await screen.findByRole("heading", { name: /timeline-centered editor shell/i })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: /target segment/i })).toHaveValue("seg_002");
+    expect(screen.getByRole("checkbox", { name: /broll/i })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /tts replacement/i })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /explanation card/i })).not.toBeChecked();
+  });
+
   it("opens the flagged segment in the editing session without overwriting its default rerun scope when no direct field mapping exists", async () => {
     const fetchMock = createFetchMock({
       reviewSnapshot: blockedReviewSnapshotResponse,

@@ -920,6 +920,19 @@ export function App() {
     }
   }
 
+  function handleMarkRecommendationForManualEdit() {
+    if (!actionablePendingRecommendation) {
+      return;
+    }
+    const mappedField = mapRecommendationTypeToEditingField(
+      actionablePendingRecommendation.recommendation_type,
+    );
+    openSegmentInEditor(
+      actionablePendingRecommendation.target_segment_id,
+      mappedField ? [mappedField] : undefined,
+    );
+  }
+
   async function handleReopenTimeline() {
     if (!selectedProjectId || !activeTimelineJobId || !canReopenTimeline) {
       return;
@@ -1780,6 +1793,19 @@ export function App() {
                         disabled={!actionablePendingRecommendation}
                         key={action}
                         onClick={() => void handleApproveRecommendation()}
+                        type="button"
+                      >
+                        {action}
+                      </button>
+                    );
+                  }
+                  if (action === "Mark for manual edit") {
+                    return (
+                      <button
+                        className="action-button"
+                        disabled={!actionablePendingRecommendation}
+                        key={action}
+                        onClick={handleMarkRecommendationForManualEdit}
                         type="button"
                       >
                         {action}

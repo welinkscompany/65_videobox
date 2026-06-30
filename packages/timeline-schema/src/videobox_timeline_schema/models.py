@@ -46,4 +46,5 @@ class TimelineRecord:
     review_status: str = "draft"
     applied_recommendations: list[dict[str, object]] = field(default_factory=list)
     pending_recommendations: list[dict[str, object]] = field(default_factory=list)
+    recommendation_decisions: dict[str, str] = field(default_factory=dict)
     created_at: datetime = field(default_factory=_utc_now)

@@ -70,6 +70,7 @@ PROJECT_SCHEMA_STATEMENTS = (
         reason TEXT,
         auto_apply_allowed INTEGER NOT NULL,
         review_required INTEGER NOT NULL,
+        decision_state TEXT,
         payload_json TEXT,
         created_at TEXT NOT NULL
     )

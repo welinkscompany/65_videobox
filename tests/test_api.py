@@ -4047,6 +4047,717 @@ def test_review_snapshot_api_can_approve_pending_recommendation(tmp_path: Path) 
     )
 
 
+def test_review_snapshot_api_approve_preserves_non_target_review_items_and_blocked_status(
+    tmp_path: Path,
+) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    timeline_result = client.get(f"/api/projects/{project_id}/timelines/{timeline_job_id}")
+    timeline_payload = timeline_result.json()["timeline"]
+    timeline_path = (
+        tmp_path
+        / "projects"
+        / project_id
+        / "timelines"
+        / f'{timeline_payload["timeline_id"]}.json'
+    )
+    target_candidate = {
+        "recommendation_id": "rec_broll_review_002",
+        "target_segment_id": "seg_002",
+        "recommendation_type": "broll",
+        "selected_asset_id": "asset_broll_review_002",
+        "score": 0.88,
+        "reason": "Operator approved the suggested B-roll pick.",
+        "auto_apply_allowed": False,
+        "review_required": True,
+        "payload": {"tags": ["team", "meeting"]},
+        "created_at": "2026-06-30T00:00:00+00:00",
+        "provider_trace": build_provider_trace(final_provider="heuristic_fallback"),
+    }
+    non_target_candidate = {
+        "recommendation_id": "rec_tts_review_003",
+        "target_segment_id": "seg_003",
+        "recommendation_type": "tts_replacement",
+        "selected_asset_id": "asset_tts_review_003",
+        "score": 0.91,
+        "reason": "Operator still needs to review the regenerated narration.",
+        "auto_apply_allowed": False,
+        "review_required": True,
+        "payload": {"voice_sample_id": "voice_003"},
+        "created_at": "2026-06-30T00:00:01+00:00",
+        "provider_trace": build_provider_trace(final_provider="rule_based_fallback"),
+    }
+    persisted_timeline = json.loads(timeline_path.read_text(encoding="utf-8"))
+    persisted_timeline["applied_recommendations"] = []
+    persisted_timeline["pending_recommendations"] = [target_candidate, non_target_candidate]
+    persisted_timeline["review_flags"] = [
+        {
+            "code": "broll_review_required",
+            "segment_id": "seg_002",
+            "message": "Operator must confirm the B-roll pick before approval.",
+        },
+        {
+            "code": "tts_replacement_review_required",
+            "segment_id": "seg_003",
+            "message": "Operator must confirm the TTS replacement before approval.",
+        },
+    ]
+    timeline_path.write_text(json.dumps(persisted_timeline, indent=2), encoding="utf-8")
+
+    database_path = tmp_path / "projects" / project_id / "db" / "project.sqlite"
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute("DELETE FROM recommendations")
+        connection.executemany(
+            """
+            INSERT INTO recommendations (
+                recommendation_id,
+                project_id,
+                target_segment_id,
+                recommendation_type,
+                selected_asset_id,
+                score,
+                reason,
+                auto_apply_allowed,
+                review_required,
+                payload_json,
+                created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    target_candidate["recommendation_id"],
+                    project_id,
+                    target_candidate["target_segment_id"],
+                    target_candidate["recommendation_type"],
+                    target_candidate["selected_asset_id"],
+                    target_candidate["score"],
+                    target_candidate["reason"],
+                    0,
+                    1,
+                    json.dumps(target_candidate["payload"], ensure_ascii=True),
+                    target_candidate["created_at"],
+                ),
+                (
+                    non_target_candidate["recommendation_id"],
+                    project_id,
+                    non_target_candidate["target_segment_id"],
+                    non_target_candidate["recommendation_type"],
+                    non_target_candidate["selected_asset_id"],
+                    non_target_candidate["score"],
+                    non_target_candidate["reason"],
+                    0,
+                    1,
+                    json.dumps(non_target_candidate["payload"], ensure_ascii=True),
+                    non_target_candidate["created_at"],
+                ),
+            ],
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    approve_response = client.post(
+        f"/api/projects/{project_id}/review-snapshots/{timeline_job_id}/recommendations/"
+        "rec_broll_review_002/approve"
+    )
+
+    assert approve_response.status_code == 200
+    payload = approve_response.json()
+    assert payload["review_status"] == "blocked"
+    assert [item["recommendation_id"] for item in payload["pending_recommendations"]] == [
+        "rec_tts_review_003"
+    ]
+    assert payload["review_flags"] == [
+        {
+            "code": "tts_replacement_review_required",
+            "segment_id": "seg_003",
+            "message": "Operator must confirm the TTS replacement before approval.",
+        }
+    ]
+    assert [item["recommendation_id"] for item in payload["applied_recommendations"]] == [
+        "rec_broll_review_002"
+    ]
+
+    refreshed_timeline = client.get(f"/api/projects/{project_id}/timelines/{timeline_job_id}")
+    assert refreshed_timeline.status_code == 200
+    refreshed_timeline_payload = refreshed_timeline.json()["timeline"]
+    assert refreshed_timeline_payload["review_status"] == "blocked"
+    assert [
+        item["recommendation_id"] for item in refreshed_timeline_payload["pending_recommendations"]
+    ] == ["rec_tts_review_003"]
+    assert refreshed_timeline_payload["review_flags"] == [
+        {
+            "code": "tts_replacement_review_required",
+            "segment_id": "seg_003",
+            "message": "Operator must confirm the TTS replacement before approval.",
+        }
+    ]
+    assert [
+        item["recommendation_id"] for item in refreshed_timeline_payload["applied_recommendations"]
+    ] == ["rec_broll_review_002"]
+
+    connection = sqlite3.connect(database_path)
+    try:
+        target_row = connection.execute(
+            """
+            SELECT auto_apply_allowed, review_required, decision_state
+            FROM recommendations
+            WHERE recommendation_id = ?
+            """,
+            ("rec_broll_review_002",),
+        ).fetchone()
+        non_target_row = connection.execute(
+            """
+            SELECT auto_apply_allowed, review_required, decision_state
+            FROM recommendations
+            WHERE recommendation_id = ?
+            """,
+            ("rec_tts_review_003",),
+        ).fetchone()
+    finally:
+        connection.close()
+
+    persisted_timeline_after_approve = json.loads(timeline_path.read_text(encoding="utf-8"))
+
+    assert target_row == (1, 0, "approved")
+    assert non_target_row == (0, 1, None)
+    assert persisted_timeline_after_approve["recommendation_decisions"] == {
+        "rec_broll_review_002": "approved"
+    }
+
+
+def test_review_snapshot_api_can_reject_pending_recommendation_without_leaving_it_pending(
+    tmp_path: Path,
+) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    timeline_result = client.get(f"/api/projects/{project_id}/timelines/{timeline_job_id}")
+    timeline_payload = timeline_result.json()["timeline"]
+    timeline_path = (
+        tmp_path
+        / "projects"
+        / project_id
+        / "timelines"
+        / f'{timeline_payload["timeline_id"]}.json'
+    )
+    rejected_candidate = {
+        "recommendation_id": "rec_broll_review_002",
+        "target_segment_id": "seg_002",
+        "recommendation_type": "broll",
+        "selected_asset_id": "asset_broll_review_002",
+        "score": 0.88,
+        "reason": "Operator rejected the suggested B-roll pick.",
+        "auto_apply_allowed": False,
+        "review_required": True,
+        "payload": {"tags": ["team", "meeting"]},
+        "created_at": "2026-06-30T00:00:00+00:00",
+        "provider_trace": build_provider_trace(final_provider="heuristic_fallback"),
+    }
+    persisted_timeline = json.loads(timeline_path.read_text(encoding="utf-8"))
+    persisted_timeline["applied_recommendations"] = []
+    persisted_timeline["pending_recommendations"] = [rejected_candidate]
+    persisted_timeline["review_flags"] = [
+        {
+            "code": "broll_review_required",
+            "segment_id": "seg_002",
+            "message": "Operator must confirm the B-roll pick before approval.",
+        }
+    ]
+    timeline_path.write_text(json.dumps(persisted_timeline, indent=2), encoding="utf-8")
+
+    database_path = tmp_path / "projects" / project_id / "db" / "project.sqlite"
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute("DELETE FROM recommendations")
+        connection.execute(
+            """
+            INSERT INTO recommendations (
+                recommendation_id,
+                project_id,
+                target_segment_id,
+                recommendation_type,
+                selected_asset_id,
+                score,
+                reason,
+                auto_apply_allowed,
+                review_required,
+                payload_json,
+                created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                rejected_candidate["recommendation_id"],
+                project_id,
+                rejected_candidate["target_segment_id"],
+                rejected_candidate["recommendation_type"],
+                rejected_candidate["selected_asset_id"],
+                rejected_candidate["score"],
+                rejected_candidate["reason"],
+                0,
+                1,
+                json.dumps(rejected_candidate["payload"], ensure_ascii=True),
+                rejected_candidate["created_at"],
+            ),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    reject_response = client.post(
+        f"/api/projects/{project_id}/review-snapshots/{timeline_job_id}/recommendations/"
+        "rec_broll_review_002/reject"
+    )
+
+    assert reject_response.status_code == 200
+    payload = reject_response.json()
+    assert payload["review_status"] == "draft"
+    assert payload["pending_recommendations"] == []
+    assert payload["applied_recommendations"] == []
+    assert payload["review_flags"] == []
+
+    refreshed_timeline = client.get(f"/api/projects/{project_id}/timelines/{timeline_job_id}")
+    assert refreshed_timeline.status_code == 200
+    refreshed_timeline_payload = refreshed_timeline.json()["timeline"]
+    assert refreshed_timeline_payload["review_status"] == "draft"
+    assert refreshed_timeline_payload["pending_recommendations"] == []
+    assert refreshed_timeline_payload["applied_recommendations"] == []
+    assert refreshed_timeline_payload["review_flags"] == []
+
+    connection = sqlite3.connect(database_path)
+    try:
+        rejected_row = connection.execute(
+            """
+            SELECT auto_apply_allowed, review_required, decision_state
+            FROM recommendations
+            WHERE recommendation_id = ?
+            """,
+            ("rec_broll_review_002",),
+        ).fetchone()
+    finally:
+        connection.close()
+
+    persisted_timeline_after_reject = json.loads(timeline_path.read_text(encoding="utf-8"))
+
+    assert rejected_row == (0, 0, "rejected")
+    assert persisted_timeline_after_reject["recommendation_decisions"] == {
+        "rec_broll_review_002": "rejected"
+    }
+
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute(
+            """
+            UPDATE recommendations
+            SET auto_apply_allowed = 1, review_required = 0, decision_state = 'approved'
+            WHERE recommendation_id = ?
+            """,
+            ("rec_broll_review_002",),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    repeated_snapshot = client.get(f"/api/projects/{project_id}/review-snapshots/{timeline_job_id}")
+
+    assert repeated_snapshot.status_code == 200
+    assert repeated_snapshot.json()["review_status"] == "draft"
+    assert repeated_snapshot.json()["pending_recommendations"] == []
+    assert repeated_snapshot.json()["applied_recommendations"] == []
+    assert repeated_snapshot.json()["review_flags"] == []
+
+
+def test_review_snapshot_api_approve_rolls_back_timeline_and_recommendation_when_review_state_save_fails(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    timeline_result = client.get(f"/api/projects/{project_id}/timelines/{timeline_job_id}")
+    timeline_payload = timeline_result.json()["timeline"]
+    timeline_path = (
+        tmp_path
+        / "projects"
+        / project_id
+        / "timelines"
+        / f'{timeline_payload["timeline_id"]}.json'
+    )
+    approved_candidate = {
+        "recommendation_id": "rec_broll_review_rollback_002",
+        "target_segment_id": "seg_002",
+        "recommendation_type": "broll",
+        "selected_asset_id": "asset_broll_review_rollback_002",
+        "score": 0.88,
+        "reason": "Operator approved the suggested B-roll pick.",
+        "auto_apply_allowed": False,
+        "review_required": True,
+        "payload": {"tags": ["team", "meeting"]},
+        "created_at": "2026-06-30T00:00:00+00:00",
+    }
+    persisted_timeline = json.loads(timeline_path.read_text(encoding="utf-8"))
+    persisted_timeline["applied_recommendations"] = []
+    persisted_timeline["pending_recommendations"] = [approved_candidate]
+    persisted_timeline["review_flags"] = [
+        {
+            "code": "broll_review_required",
+            "segment_id": "seg_002",
+            "message": "Operator must confirm the B-roll pick before approval.",
+        }
+    ]
+    timeline_path.write_text(json.dumps(persisted_timeline, indent=2), encoding="utf-8")
+    original_timeline = json.loads(timeline_path.read_text(encoding="utf-8"))
+
+    database_path = tmp_path / "projects" / project_id / "db" / "project.sqlite"
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute("DELETE FROM recommendations")
+        connection.execute(
+            """
+            INSERT INTO recommendations (
+                recommendation_id,
+                project_id,
+                target_segment_id,
+                recommendation_type,
+                selected_asset_id,
+                score,
+                reason,
+                auto_apply_allowed,
+                review_required,
+                payload_json,
+                created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                approved_candidate["recommendation_id"],
+                project_id,
+                approved_candidate["target_segment_id"],
+                approved_candidate["recommendation_type"],
+                approved_candidate["selected_asset_id"],
+                approved_candidate["score"],
+                approved_candidate["reason"],
+                0,
+                1,
+                json.dumps(approved_candidate["payload"], ensure_ascii=True),
+                approved_candidate["created_at"],
+            ),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    def fail_save_review_state(
+        self,
+        *,
+        project_id: str,
+        timeline_id: str,
+        status: str,
+    ) -> dict[str, object]:
+        del self, project_id, timeline_id, status
+        raise OSError("review state persistence offline")
+
+    monkeypatch.setattr(LocalProjectStore, "save_review_state", fail_save_review_state)
+
+    approve_response = client.post(
+        f"/api/projects/{project_id}/review-snapshots/{timeline_job_id}/recommendations/"
+        "rec_broll_review_rollback_002/approve"
+    )
+
+    assert approve_response.status_code == 500
+
+    connection = sqlite3.connect(database_path)
+    try:
+        recommendation_row = connection.execute(
+            """
+            SELECT auto_apply_allowed, review_required, decision_state
+            FROM recommendations
+            WHERE recommendation_id = ?
+            """,
+            ("rec_broll_review_rollback_002",),
+        ).fetchone()
+    finally:
+        connection.close()
+
+    restored_timeline = json.loads(timeline_path.read_text(encoding="utf-8"))
+
+    assert restored_timeline["pending_recommendations"] == original_timeline["pending_recommendations"]
+    assert restored_timeline["applied_recommendations"] == original_timeline["applied_recommendations"]
+    assert restored_timeline["review_flags"] == original_timeline["review_flags"]
+    assert restored_timeline["recommendation_decisions"] == original_timeline.get("recommendation_decisions")
+    assert recommendation_row == (0, 1, None)
+
+
+def test_review_snapshot_stays_timeline_local_when_another_timeline_mutates_shared_recommendation_state(
+    tmp_path: Path,
+) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, timeline_a_job_id = _create_timeline_review_project(client, tmp_path)
+    store = LocalProjectStore(tmp_path)
+
+    timeline_a_result = client.get(f"/api/projects/{project_id}/timelines/{timeline_a_job_id}")
+    timeline_a_payload = timeline_a_result.json()["timeline"]
+    timeline_a_path = (
+        tmp_path
+        / "projects"
+        / project_id
+        / "timelines"
+        / f'{timeline_a_payload["timeline_id"]}.json'
+    )
+    persisted_timeline_a = json.loads(timeline_a_path.read_text(encoding="utf-8"))
+    shared_candidate = {
+        "recommendation_id": "rec_broll_shared_002",
+        "target_segment_id": "seg_002",
+        "recommendation_type": "broll",
+        "selected_asset_id": "asset_broll_shared_002",
+        "score": 0.88,
+        "reason": "Operator must decide on the shared B-roll pick per timeline.",
+        "auto_apply_allowed": False,
+        "review_required": True,
+        "payload": {"tags": ["team", "meeting"]},
+        "created_at": "2026-06-30T00:00:00+00:00",
+    }
+    persisted_timeline_a["applied_recommendations"] = []
+    persisted_timeline_a["pending_recommendations"] = [shared_candidate]
+    persisted_timeline_a["review_flags"] = [
+        {
+            "code": "broll_review_required",
+            "segment_id": "seg_002",
+            "message": "Operator must confirm the B-roll pick before approval.",
+        }
+    ]
+    timeline_a_path.write_text(json.dumps(persisted_timeline_a, indent=2), encoding="utf-8")
+
+    persisted_timeline_b = {
+        key: value
+        for key, value in persisted_timeline_a.items()
+        if key not in {"timeline_id", "file_uri", "created_at"}
+    }
+    created_timeline_b = store.save_timeline_run(
+        project_id=project_id,
+        output_mode="review",
+        timeline_payload=persisted_timeline_b,
+    )
+    timeline_b_job = store.create_job(
+        project_id=project_id,
+        job_type=JobType.TIMELINE_BUILD,
+        input_ref=str(persisted_timeline_a.get("lineage", {}).get("segment_analysis_job_id") or ""),
+    )
+    store.update_job(
+        project_id=project_id,
+        job_id=timeline_b_job["job_id"],
+        status=JobStatus.SUCCEEDED,
+        output_ref=created_timeline_b["timeline_id"],
+    )
+
+    database_path = tmp_path / "projects" / project_id / "db" / "project.sqlite"
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute("DELETE FROM recommendations")
+        connection.execute(
+            """
+            INSERT INTO recommendations (
+                recommendation_id,
+                project_id,
+                target_segment_id,
+                recommendation_type,
+                selected_asset_id,
+                score,
+                reason,
+                auto_apply_allowed,
+                review_required,
+                payload_json,
+                created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                shared_candidate["recommendation_id"],
+                project_id,
+                shared_candidate["target_segment_id"],
+                shared_candidate["recommendation_type"],
+                shared_candidate["selected_asset_id"],
+                shared_candidate["score"],
+                shared_candidate["reason"],
+                0,
+                1,
+                json.dumps(shared_candidate["payload"], ensure_ascii=True),
+                shared_candidate["created_at"],
+            ),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    approve_response = client.post(
+        f"/api/projects/{project_id}/review-snapshots/{timeline_a_job_id}/recommendations/"
+        "rec_broll_shared_002/approve"
+    )
+    timeline_b_snapshot = client.get(
+        f"/api/projects/{project_id}/review-snapshots/{timeline_b_job['job_id']}"
+    )
+
+    assert approve_response.status_code == 200
+    assert timeline_b_snapshot.status_code == 200
+    assert timeline_b_snapshot.json()["review_status"] == "blocked"
+    assert [item["recommendation_id"] for item in timeline_b_snapshot.json()["pending_recommendations"]] == [
+        "rec_broll_shared_002"
+    ]
+    assert timeline_b_snapshot.json()["review_flags"] == [
+        {
+            "code": "broll_review_required",
+            "segment_id": "seg_002",
+            "message": "Operator must confirm the B-roll pick before approval.",
+        }
+    ]
+
+
+def test_rejecting_one_duplicate_pending_recommendation_keeps_shared_review_flag_when_blocker_remains(
+    tmp_path: Path,
+) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    timeline_result = client.get(f"/api/projects/{project_id}/timelines/{timeline_job_id}")
+    timeline_payload = timeline_result.json()["timeline"]
+    timeline_path = (
+        tmp_path
+        / "projects"
+        / project_id
+        / "timelines"
+        / f'{timeline_payload["timeline_id"]}.json'
+    )
+    rejected_candidate = {
+        "recommendation_id": "rec_broll_review_002",
+        "target_segment_id": "seg_002",
+        "recommendation_type": "broll",
+        "selected_asset_id": "asset_broll_review_002",
+        "score": 0.88,
+        "reason": "Operator rejected the first B-roll pick.",
+        "auto_apply_allowed": False,
+        "review_required": True,
+        "payload": {"tags": ["team", "meeting"]},
+        "created_at": "2026-06-30T00:00:00+00:00",
+        "provider_trace": build_provider_trace(final_provider="heuristic_fallback"),
+    }
+    remaining_candidate = {
+        "recommendation_id": "rec_broll_review_003",
+        "target_segment_id": "seg_002",
+        "recommendation_type": "broll",
+        "selected_asset_id": "asset_broll_review_003",
+        "score": 0.84,
+        "reason": "Operator still needs to review the alternate B-roll pick.",
+        "auto_apply_allowed": False,
+        "review_required": True,
+        "payload": {"tags": ["team", "meeting", "alt"]},
+        "created_at": "2026-06-30T00:00:01+00:00",
+        "provider_trace": build_provider_trace(final_provider="heuristic_fallback"),
+    }
+    persisted_timeline = json.loads(timeline_path.read_text(encoding="utf-8"))
+    persisted_timeline["applied_recommendations"] = []
+    persisted_timeline["pending_recommendations"] = [rejected_candidate, remaining_candidate]
+    persisted_timeline["review_flags"] = [
+        {
+            "code": "broll_review_required",
+            "segment_id": "seg_002",
+            "message": "Operator must confirm the B-roll pick before approval.",
+        }
+    ]
+    timeline_path.write_text(json.dumps(persisted_timeline, indent=2), encoding="utf-8")
+
+    database_path = tmp_path / "projects" / project_id / "db" / "project.sqlite"
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute("DELETE FROM recommendations")
+        connection.executemany(
+            """
+            INSERT INTO recommendations (
+                recommendation_id,
+                project_id,
+                target_segment_id,
+                recommendation_type,
+                selected_asset_id,
+                score,
+                reason,
+                auto_apply_allowed,
+                review_required,
+                payload_json,
+                created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    rejected_candidate["recommendation_id"],
+                    project_id,
+                    rejected_candidate["target_segment_id"],
+                    rejected_candidate["recommendation_type"],
+                    rejected_candidate["selected_asset_id"],
+                    rejected_candidate["score"],
+                    rejected_candidate["reason"],
+                    0,
+                    1,
+                    json.dumps(rejected_candidate["payload"], ensure_ascii=True),
+                    rejected_candidate["created_at"],
+                ),
+                (
+                    remaining_candidate["recommendation_id"],
+                    project_id,
+                    remaining_candidate["target_segment_id"],
+                    remaining_candidate["recommendation_type"],
+                    remaining_candidate["selected_asset_id"],
+                    remaining_candidate["score"],
+                    remaining_candidate["reason"],
+                    0,
+                    1,
+                    json.dumps(remaining_candidate["payload"], ensure_ascii=True),
+                    remaining_candidate["created_at"],
+                ),
+            ],
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    reject_response = client.post(
+        f"/api/projects/{project_id}/review-snapshots/{timeline_job_id}/recommendations/"
+        "rec_broll_review_002/reject"
+    )
+
+    assert reject_response.status_code == 200
+    payload = reject_response.json()
+    assert payload["review_status"] == "blocked"
+    assert [item["recommendation_id"] for item in payload["pending_recommendations"]] == [
+        "rec_broll_review_003"
+    ]
+    assert payload["review_flags"] == [
+        {
+            "code": "broll_review_required",
+            "segment_id": "seg_002",
+            "message": "Operator must confirm the B-roll pick before approval.",
+        }
+    ]
+
+    refreshed_timeline = client.get(f"/api/projects/{project_id}/timelines/{timeline_job_id}")
+    assert refreshed_timeline.status_code == 200
+    refreshed_timeline_payload = refreshed_timeline.json()["timeline"]
+    assert refreshed_timeline_payload["review_status"] == "blocked"
+    assert [
+        item["recommendation_id"] for item in refreshed_timeline_payload["pending_recommendations"]
+    ] == ["rec_broll_review_003"]
+    assert refreshed_timeline_payload["review_flags"] == [
+        {
+            "code": "broll_review_required",
+            "segment_id": "seg_002",
+            "message": "Operator must confirm the B-roll pick before approval.",
+        }
+    ]
+
+
 def test_approved_tts_replacement_flows_through_preview_and_export_outputs(tmp_path: Path) -> None:
     store = LocalProjectStore(tmp_path)
     project = store.bootstrap_project(name="Approved TTS Output Project")

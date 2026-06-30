@@ -134,6 +134,7 @@ class TimelineBuilder:
             export_overlays=export_overlays or [],
             applied_recommendations=applied_recommendations,
             pending_recommendations=pending_recommendations,
+            recommendation_decisions={},
         )
 
     def _segment_payload(self, segment: dict[str, object] | SegmentRecord) -> dict[str, object]:

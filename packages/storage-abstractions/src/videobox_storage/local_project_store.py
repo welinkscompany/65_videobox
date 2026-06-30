@@ -316,6 +316,7 @@ class LocalProjectStore:
                 "payload": item.get("payload", record.payload or {}),
                 "created_at": record.created_at.isoformat(),
             }
+            persisted["decision_state"] = self._derive_recommendation_decision_state(persisted)
             persisted_items.append(persisted)
             self._execute(
                 project_id,
@@ -330,9 +331,10 @@ class LocalProjectStore:
                     reason,
                     auto_apply_allowed,
                     review_required,
+                    decision_state,
                     payload_json,
                     created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     record.recommendation_id,
@@ -344,6 +346,7 @@ class LocalProjectStore:
                     record.reason,
                     1 if persisted["auto_apply_allowed"] else 0,
                     1 if persisted["review_required"] else 0,
+                    persisted["decision_state"],
                     json.dumps(persisted["payload"], ensure_ascii=True),
                     record.created_at.isoformat(),
                 ),
@@ -507,18 +510,20 @@ class LocalProjectStore:
         recommendation_id: str,
         auto_apply_allowed: bool,
         review_required: bool,
+        decision_state: str | None = None,
     ) -> None:
         connection = self._connection(project_id)
         try:
             cursor = connection.execute(
                 """
                 UPDATE recommendations
-                SET auto_apply_allowed = ?, review_required = ?
+                SET auto_apply_allowed = ?, review_required = ?, decision_state = COALESCE(?, decision_state)
                 WHERE recommendation_id = ? AND project_id = ?
                 """,
                 (
                     1 if auto_apply_allowed else 0,
                     1 if review_required else 0,
+                    decision_state,
                     recommendation_id,
                     project_id,
                 ),
@@ -1247,7 +1252,7 @@ class LocalProjectStore:
                 """
                 SELECT recommendation_id, project_id, target_segment_id, recommendation_type,
                        selected_asset_id, score, reason, auto_apply_allowed,
-                       review_required, payload_json, created_at
+                       review_required, decision_state, payload_json, created_at
                 FROM recommendations
                 ORDER BY created_at ASC
                 """
@@ -1259,6 +1264,7 @@ class LocalProjectStore:
             payload = dict(row)
             payload["auto_apply_allowed"] = bool(payload["auto_apply_allowed"])
             payload["review_required"] = bool(payload["review_required"])
+            payload["decision_state"] = self._normalize_recommendation_decision_state(payload)
             payload["payload"] = self._json_object(payload.pop("payload_json"))
             payload["provider_trace"] = payload["payload"].get("provider_trace") or build_provider_trace(
                 final_provider="heuristic_fallback"
@@ -1526,17 +1532,35 @@ class LocalProjectStore:
         project_id: str,
         timeline_id: str | None = None,
         segments: list[dict[str, Any]],
-        recommendations: list[dict[str, Any]],
+        recommendations: list[dict[str, Any]] | None = None,
         timeline_review_flags: list[dict[str, Any]],
+        timeline_applied_recommendations: list[dict[str, Any]] | None = None,
+        timeline_pending_recommendations: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
-        applied = [
-            item for item in recommendations
-            if bool(item.get("auto_apply_allowed")) and not bool(item.get("review_required"))
-        ]
-        pending = [
-            item for item in recommendations
-            if not (bool(item.get("auto_apply_allowed")) and not bool(item.get("review_required")))
-        ]
+        if timeline_applied_recommendations is not None or timeline_pending_recommendations is not None:
+            applied = [
+                self._review_snapshot_recommendation_payload(item, fallback_decision_state="approved")
+                for item in timeline_applied_recommendations or []
+            ]
+            pending = [
+                self._review_snapshot_recommendation_payload(item, fallback_decision_state="pending")
+                for item in timeline_pending_recommendations or []
+            ]
+        else:
+            normalized_recommendations = [
+                self._review_snapshot_recommendation_payload(item)
+                for item in recommendations or []
+            ]
+            applied = [
+                item
+                for item in normalized_recommendations
+                if str(item.get("decision_state") or "") == "approved"
+            ]
+            pending = [
+                item
+                for item in normalized_recommendations
+                if str(item.get("decision_state") or "") == "pending"
+            ]
         if timeline_id:
             try:
                 review_status = self.get_review_state(
@@ -1556,6 +1580,27 @@ class LocalProjectStore:
             "pending_recommendations": pending,
             "review_flags": timeline_review_flags,
         }
+
+    def _review_snapshot_recommendation_payload(
+        self,
+        recommendation: dict[str, Any],
+        *,
+        fallback_decision_state: str | None = None,
+    ) -> dict[str, Any]:
+        payload = deepcopy(recommendation)
+        payload["decision_state"] = fallback_decision_state or self._normalize_recommendation_decision_state(
+            payload
+        )
+        payload["provider_trace"] = payload.get("provider_trace") or payload.get("payload", {}).get(
+            "provider_trace"
+        ) or build_provider_trace(
+            final_provider=(
+                "heuristic_fallback"
+                if str(payload.get("recommendation_type") or "") == RecommendationType.BROLL.value
+                else "rule_based_fallback"
+            )
+        )
+        return payload
 
     def get_provider_trace_audit(
         self,
@@ -1936,6 +1981,7 @@ class LocalProjectStore:
         try:
             for statement in PROJECT_SCHEMA_STATEMENTS:
                 connection.execute(statement)
+            self._ensure_recommendation_decision_state_column(connection)
             connection.execute(
                 """
                 INSERT OR REPLACE INTO projects (
@@ -1981,9 +2027,31 @@ class LocalProjectStore:
         connection = sqlite3.connect(self.database_path(project_id))
         for statement in PROJECT_SCHEMA_STATEMENTS:
             connection.execute(statement)
+        self._ensure_recommendation_decision_state_column(connection)
         connection.commit()
         connection.row_factory = sqlite3.Row
         return connection
+
+    def _ensure_recommendation_decision_state_column(self, connection: sqlite3.Connection) -> None:
+        existing_columns = {
+            str(row[1])
+            for row in connection.execute("PRAGMA table_info(recommendations)").fetchall()
+        }
+        if "decision_state" not in existing_columns:
+            connection.execute("ALTER TABLE recommendations ADD COLUMN decision_state TEXT")
+
+    def _derive_recommendation_decision_state(self, recommendation: dict[str, Any]) -> str:
+        if bool(recommendation.get("auto_apply_allowed")) and not bool(
+            recommendation.get("review_required")
+        ):
+            return "approved"
+        return "pending"
+
+    def _normalize_recommendation_decision_state(self, recommendation: dict[str, Any]) -> str:
+        decision_state = str(recommendation.get("decision_state") or "").strip().lower()
+        if decision_state in {"approved", "pending", "rejected"}:
+            return decision_state
+        return self._derive_recommendation_decision_state(recommendation)
 
     def _execute(self, project_id: str, query: str, params: tuple[Any, ...]) -> None:
         connection = self._connection(project_id)

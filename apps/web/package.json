@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:focused": "vitest run --run src/app.test.tsx"
   },
   "dependencies": {
     "react": "^19.1.0",
