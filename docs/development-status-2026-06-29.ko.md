@@ -107,3 +107,31 @@ UI부터 만들면 아래 문제가 바로 생긴다.
   - 현재 판단: 이번 `editing session`/`partial regeneration`/`review` 마일스톤에는 반입하지 않는다
   - 재검토 시점: shorts 파생 기능 milestone
   - 참고 포인트: highlight scoring, vertical reframe/local crop pipeline
+
+## 10. 2026-06-30 상태 갱신
+
+이번 후속 작업으로 `thin internal editor mutation verification` 단계는 계획서 기준 완료로 봐도 된다.
+
+현재 추가로 확인된 사실은 아래와 같다.
+
+- thin editor에서 explanation / image / table / TTS clear/remove 경로가 직접 검증 가능
+- clear/remove 이후 active candidate invalidation이 caption 외 mutation에도 회귀 테스트로 고정됨
+- incomplete input에 대한 invalid-state visibility가 문구와 접근성 연결까지 포함해 고정됨
+- mutation 저장/삭제 중에는 preflight / rerun 버튼이 잠겨 stale session race를 막음
+- clear/remove 이후 실제 editor state 제거까지 테스트가 확인함
+- frontend focused test `30 passed`
+- frontend build 성공
+- full backend regression `230 passed`
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. thin editor mutation happy-path save
+2. thin editor clear/remove
+3. active candidate invalidation
+4. preflight-first gating 유지
+5. resume/readability 관련 기존 계약 유지
+
+현재 이 단계에서 다음 핵심 빈칸은 다시 아래로 정리된다.
+
+- `latest editing session` 조회 실패를 너무 넓게 `null`로 삼키는 기존 복원 경로 리스크 점검
+- 이후 main goal 측면에서는 TTS replacement runtime/output 고도화가 아니라, 이미 남겨둔 더 상위 milestone로 넘어갈지 여부 판단

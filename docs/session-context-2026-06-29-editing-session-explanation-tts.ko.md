@@ -71,3 +71,45 @@
 2. generated TTS asset과 recommendation 선택 정보를 실제 narration output에 연결
 3. preview/export/review blocker 규칙 검증
 4. full backend regression 재실행
+
+## 7. 2026-06-30 후속 기록
+
+- thin internal editor에서 explanation / image / table / TTS mutation 검증 범위를 더 넓혔다
+- 이번 후속 작업은 새로운 편집 기능 추가보다 `검증 신뢰도 강화`에 초점을 맞췄다
+
+### 실제로 끝낸 것
+
+- explanation / image / table / TTS에 대해 thin editor clear/remove 직접 검증 경로 고정
+- clear/remove 이후 active partial-regeneration candidate invalidation 회귀 강화
+- incomplete input에 대한 invalid-state visibility 문구와 접근성 연결(`aria-describedby`) 고정
+- save/delete mutation 진행 중에는 preflight / partial regeneration run이 잠기도록 UI와 handler guard 양쪽 보강
+- clear/remove 테스트가 DELETE 요청 여부만이 아니라 실제 editor state 제거까지 확인하도록 강화
+
+### 이번에 다시 검증한 것
+
+- strict TDD로 새로운 실패 테스트 먼저 추가 후 구현
+- focused frontend regression:
+  - `apps/web/src/app.test.tsx`
+  - `30 passed`
+- frontend build:
+  - `apps/web`
+  - `npm run build` 성공
+- full backend regression:
+  - `230 passed`
+
+### 코드리뷰 / 갭검증 / 역방향 검증 결과
+
+- 이번 후속 검증에서 실제로 잡아낸 결함은 아래 2개였고 모두 반영했다
+  - mutation 저장/삭제 중 preflight/run race 가능성
+  - clear/remove 테스트가 실제 editor state 제거까지는 보장하지 못하던 문제
+
+- 반영 후 재검증 기준으로 이번 thin-editor verification slice에 남은 치명/중간 이슈는 다시 확인되지 않았다
+
+### 저장한 기준점
+
+- 이전 안정 커밋:
+  - `f11ae9f` `feat: require fresh preflight before rerun`
+- thin editor clear/remove 검증 기준점:
+  - `3c7e44e` `feat: add thin editor clear actions for manual assets`
+- thin editor verification hardening 기준점:
+  - `135d1cf` `test: harden thin editor mutation verification`
