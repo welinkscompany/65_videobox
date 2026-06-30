@@ -1822,6 +1822,9 @@ describe("App", () => {
       );
     });
     await expectCandidateInvalidated();
+    expect(screen.queryByRole("button", { name: /remove explanation card/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/no explanation card/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/explanation text/i)).toHaveValue("");
   });
 
   it("removes the saved image overlay and invalidates the active candidate", async () => {
@@ -1846,6 +1849,9 @@ describe("App", () => {
       );
     });
     await expectCandidateInvalidated();
+    expect(screen.queryByRole("button", { name: /remove image overlay/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/no image overlay/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/image overlay asset id/i)).toHaveValue("");
   });
 
   it("removes the saved table overlay and invalidates the active candidate", async () => {
@@ -1870,6 +1876,9 @@ describe("App", () => {
       );
     });
     await expectCandidateInvalidated();
+    expect(screen.queryByRole("button", { name: /remove table overlay/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/no table overlay/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/table text/i)).toHaveValue("");
   });
 
   it("clears the saved tts replacement and invalidates the active candidate", async () => {
@@ -1897,6 +1906,151 @@ describe("App", () => {
       );
     });
     await expectCandidateInvalidated();
+    expect(screen.queryByRole("button", { name: /clear tts replacement/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/no tts replacement/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/tts recommendation id/i)).toHaveValue("");
+    expect(screen.getByLabelText(/tts asset id/i)).toHaveValue("");
+  });
+
+  it("blocks preflight and rerun while an editing save is still in flight", async () => {
+    const baseFetch = createFetchMock();
+    let resolveImageSave: ((response: Response) => void) | null = null;
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (
+        url.endsWith(
+          "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/image-overlay",
+        ) &&
+        init?.method === "PATCH"
+      ) {
+        return new Promise<Response>((resolve) => {
+          resolveImageSave = resolve;
+        });
+      }
+      return baseFetch(input, init);
+    });
+
+    await renderStartedEditingSession(fetchMock);
+
+    fireEvent.change(screen.getByLabelText(/image overlay asset id/i), {
+      target: { value: "asset_image_002" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /save image overlay/i }));
+
+    const requestButton = screen.getByRole("button", {
+      name: /request regeneration preflight/i,
+    });
+    const runButton = screen.getByRole("button", { name: /run partial regeneration/i });
+
+    expect(requestButton).toBeDisabled();
+    expect(runButton).toBeDisabled();
+
+    fireEvent.click(requestButton);
+    fireEvent.click(runButton);
+
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/projects/project_001/editing-sessions/editing_session_001/partial-regeneration/preflight",
+      expect.anything(),
+    );
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/projects/project_001/editing-sessions/editing_session_001/partial-regeneration",
+      expect.anything(),
+    );
+
+    const imageSaveResolver = resolveImageSave as unknown as (response: Response) => void;
+    expect(imageSaveResolver).not.toBeNull();
+    imageSaveResolver(
+      new Response(
+        JSON.stringify({
+          ...editingSessionResponse,
+          segments: editingSessionResponse.segments.map((segment) =>
+            segment.segment_id === "seg_002"
+              ? {
+                  ...segment,
+                  visual_overlays: [
+                    ...segment.visual_overlays.filter(
+                      (overlay) => String(overlay.overlay_type ?? "") !== "image_overlay",
+                    ),
+                    {
+                      overlay_type: "image_overlay",
+                      asset_id: "asset_image_002",
+                      text: "",
+                    },
+                  ],
+                }
+              : segment,
+          ),
+        }),
+      ),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /request regeneration preflight/i })).toBeEnabled();
+    });
+  });
+
+  it("blocks preflight and rerun while a clear mutation is still in flight", async () => {
+    const baseFetch = createFetchMock();
+    let resolveTtsClear: ((response: Response) => void) | null = null;
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (
+        url.endsWith(
+          "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/tts-replacement",
+        ) &&
+        init?.method === "DELETE"
+      ) {
+        return new Promise<Response>((resolve) => {
+          resolveTtsClear = resolve;
+        });
+      }
+      return baseFetch(input, init);
+    });
+
+    await renderStartedEditingSession(fetchMock);
+
+    fireEvent.change(screen.getByLabelText(/tts recommendation id/i), {
+      target: { value: "rec_tts_002" },
+    });
+    fireEvent.change(screen.getByLabelText(/tts asset id/i), {
+      target: { value: "tts_asset_002" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /save tts replacement/i }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /clear tts replacement/i })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /clear tts replacement/i }));
+
+    const requestButton = screen.getByRole("button", {
+      name: /request regeneration preflight/i,
+    });
+    const runButton = screen.getByRole("button", { name: /run partial regeneration/i });
+
+    expect(requestButton).toBeDisabled();
+    expect(runButton).toBeDisabled();
+
+    const ttsClearResolver = resolveTtsClear as unknown as (response: Response) => void;
+    expect(ttsClearResolver).not.toBeNull();
+    ttsClearResolver(
+      new Response(
+        JSON.stringify({
+          ...editingSessionResponse,
+          segments: editingSessionResponse.segments.map((segment) =>
+            segment.segment_id === "seg_002"
+              ? {
+                  ...segment,
+                  tts_replacement: null,
+                }
+              : segment,
+          ),
+        }),
+      ),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /request regeneration preflight/i })).toBeEnabled();
+    });
   });
 
   it("disables run again while a replacement preflight request is still in flight", async () => {

@@ -652,6 +652,7 @@ export function App() {
     if (
       !selectedProjectId ||
       !editingSession ||
+      isSavingEditingMutation ||
       !selectedEditingSegmentId ||
       selectedRegenerationFields.length === 0
     ) {
@@ -682,6 +683,7 @@ export function App() {
     if (
       !selectedProjectId ||
       !editingSession ||
+      isSavingEditingMutation ||
       !selectedEditingSegmentId ||
       selectedRegenerationFields.length === 0 ||
       !hasFreshMatchingPreflight ||
@@ -1753,6 +1755,7 @@ export function App() {
                       disabled={
                         !selectedEditingSegmentId ||
                         selectedRegenerationFields.length === 0 ||
+                        !!isSavingEditingMutation ||
                         isRequestingRegenerationPreflight
                       }
                       onClick={() => void handleRequestRegenerationPreflight()}
@@ -1767,6 +1770,7 @@ export function App() {
                       disabled={
                         !selectedEditingSegmentId ||
                         selectedRegenerationFields.length === 0 ||
+                        !!isSavingEditingMutation ||
                         !hasFreshMatchingPreflight ||
                         isRequestingRegenerationPreflight ||
                         isRunningPartialRegeneration
