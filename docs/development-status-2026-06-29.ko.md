@@ -135,3 +135,29 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 
 - `latest editing session` 조회 실패를 너무 넓게 `null`로 삼키는 기존 복원 경로 리스크 점검
 - 이후 main goal 측면에서는 TTS replacement runtime/output 고도화가 아니라, 이미 남겨둔 더 상위 milestone로 넘어갈지 여부 판단
+
+## 11. 2026-06-30 resumed candidate restore visibility 완료 기록
+
+이번 후속 작업으로 `resumed partial-regeneration candidate restore visibility` hardening은 완료로 봐도 된다.
+
+이번에 추가로 확인된 사실은 아래와 같다.
+
+- refresh-resume 중 candidate result fetch 실패와 review snapshot fetch 실패가 더 이상 `그냥 resume candidate 없음`처럼 묻히지 않는다
+- resumed preflight fetch 실패는 full editor failure가 아니라 제한된 degraded warning으로 분리된다
+- stale restore warning이 target 변경, 새 preflight 요청, approval, reopen 이후 남지 않도록 정리됐다
+- valid resume 동작과 기존 freshness gate / preflight-first / multi-segment readability 계약은 유지됐다
+- frontend focused test `38 passed`
+- frontend build 성공
+- full backend regression `230 passed`
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. no resumable candidate / degraded resume / full candidate resume success 구분
+2. resumed preflight limited degradation visibility
+3. stale restore warning cleanup
+4. 기존 refresh-resume 계약 회귀 유지
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 이번 브랜치의 상위 계획서 기준 다음 대형 goal 재선정
+- refresh-resume보다 더 큰 제품 milestone로 넘어갈 때 필요한 다음 SSOT 문서 갱신
