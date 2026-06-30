@@ -99,6 +99,7 @@ type EditingSegmentDraft = {
   captionText: string;
   cutAction: string;
   brollAssetId: string;
+  musicAssetId: string;
   explanationTitle: string;
   explanationBody: string;
   explanationText: string;
@@ -132,6 +133,7 @@ function createEditingSegmentDraft(segment: EditingSessionSegment): EditingSegme
     captionText: segment.caption_text,
     cutAction: segment.cut_action,
     brollAssetId: String(segment.broll_override?.asset_id ?? ""),
+    musicAssetId: String(segment.music_override?.asset_id ?? ""),
     explanationTitle: String(explanationCard?.title ?? ""),
     explanationBody: String(explanationCard?.body ?? ""),
     explanationText: String(explanationCard?.text ?? ""),
@@ -161,6 +163,9 @@ function buildDefaultRegenerationFields(segment: EditingSessionSegment | null) {
   if (segment.broll_override) {
     defaultFields.push("broll");
   }
+  if (segment.music_override) {
+    defaultFields.push("music");
+  }
   if (readOverlay(segment, "explanation_card")) {
     defaultFields.push("explanation_card");
   }
@@ -181,6 +186,7 @@ function buildDefaultEditingSelection(session: EditingSession) {
     session.segments.find(
       (segment) =>
         segment.broll_override ||
+        segment.music_override ||
         segment.tts_replacement ||
         segment.visual_overlays.length > 0 ||
         segment.review_required,
@@ -635,12 +641,22 @@ export function App() {
   async function applyEditingMutation(
     mutationKey: string,
     action: () => Promise<EditingSession>,
+    options?: {
+      addRegenerationField?: string;
+    },
   ) {
     setIsSavingEditingMutation(mutationKey);
     setErrorMessage(null);
     try {
       const session = await action();
       applyEditingSessionState(session);
+      if (options?.addRegenerationField) {
+        setSelectedRegenerationFields((current) =>
+          current.includes(options.addRegenerationField!)
+            ? current
+            : [...current, options.addRegenerationField!],
+        );
+      }
       setPartialRegenerationPreflight(null);
       setPartialRegenerationRun(null);
       setTimelineJob(null);
@@ -1129,6 +1145,7 @@ export function App() {
     "caption",
     "cut_action",
     "broll",
+    "music",
     "explanation_card",
     "image_overlay",
     "table_overlay",
@@ -2176,6 +2193,52 @@ export function App() {
                   >
                     Save B-roll override
                   </button>
+                  <label className="field">
+                    <span>Music asset ID</span>
+                    <input
+                      onChange={(event) =>
+                        updateEditingDraft(selectedEditingSegment.segment_id, {
+                          musicAssetId: event.target.value,
+                        })
+                      }
+                      value={selectedEditingDraft.musicAssetId}
+                    />
+                  </label>
+                  <button
+                    aria-describedby={
+                      !selectedEditingDraft.musicAssetId
+                        ? `${selectedEditingSegment.segment_id}-music-save-help`
+                        : undefined
+                    }
+                    className="action-button"
+                    disabled={
+                      !selectedProjectId ||
+                      !activeEditingSessionId ||
+                      !selectedEditingDraft.musicAssetId ||
+                      isSavingEditingMutation === `${selectedEditingSegment.segment_id}-music`
+                    }
+                    onClick={() =>
+                      void applyEditingMutation(
+                        `${selectedEditingSegment.segment_id}-music`,
+                        () =>
+                          api.updateEditingSessionMusicOverride(
+                            selectedProjectId!,
+                            activeEditingSessionId!,
+                            selectedEditingSegment.segment_id,
+                            { asset_id: selectedEditingDraft.musicAssetId },
+                          ),
+                        { addRegenerationField: "music" },
+                      )
+                    }
+                    type="button"
+                  >
+                    Save music override
+                  </button>
+                  {!selectedEditingDraft.musicAssetId ? (
+                    <p className="meta-copy" id={`${selectedEditingSegment.segment_id}-music-save-help`}>
+                      Music asset ID required before saving.
+                    </p>
+                  ) : null}
                   <label className="field">
                     <span>Explanation title</span>
                     <input

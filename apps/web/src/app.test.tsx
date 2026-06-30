@@ -585,8 +585,8 @@ function createFetchMock({
   jobs = jobsResponse,
 }: {
   geminiKeys?: { keys: Array<Record<string, unknown>> };
-  editingSession?: typeof editingSessionResponse;
-  latestEditingSession?: typeof editingSessionResponse | null;
+  editingSession?: EditingSession;
+  latestEditingSession?: EditingSession | null;
   latestEditingSessionStatus?: number;
   candidateResultStatus?: number;
   candidateReviewStatus?: number;
@@ -786,6 +786,30 @@ function createFetchMock({
             ? {
                 ...segment,
                 caption_text: payload.caption_text,
+              }
+            : segment,
+        ),
+      };
+      return new Response(JSON.stringify(state.editingSession));
+    }
+    if (
+      url.endsWith(
+        "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/music",
+      ) &&
+      init?.method === "PATCH"
+    ) {
+      const payload = JSON.parse(String(init.body)) as {
+        asset_id: string;
+      };
+      state.editingSession = {
+        ...state.editingSession,
+        segments: state.editingSession.segments.map((segment) =>
+          segment.segment_id === "seg_002"
+            ? {
+                ...segment,
+                music_override: {
+                  asset_id: payload.asset_id,
+                },
               }
             : segment,
         ),
@@ -1870,7 +1894,7 @@ describe("App", () => {
     );
   });
 
-  it("keeps incomplete explanation image table and tts drafts local until the operator enters enough data to save", async () => {
+  it("keeps incomplete explanation image table music and tts drafts local until the operator enters enough data to save", async () => {
     const fetchMock = createFetchMock();
     vi.stubGlobal("fetch", fetchMock);
 
@@ -1887,19 +1911,23 @@ describe("App", () => {
     const explanationButton = screen.getByRole("button", { name: /save explanation card/i });
     const imageButton = screen.getByRole("button", { name: /save image overlay/i });
     const tableButton = screen.getByRole("button", { name: /save table overlay/i });
+    const musicButton = screen.getByRole("button", { name: /save music override/i });
     const ttsButton = screen.getByRole("button", { name: /save tts replacement/i });
 
     expect(explanationButton).toBeDisabled();
     expect(imageButton).toBeDisabled();
     expect(tableButton).toBeDisabled();
+    expect(musicButton).toBeDisabled();
     expect(ttsButton).toBeDisabled();
     expect(explanationButton).toHaveAttribute("aria-describedby", "seg_002-explanation-save-help");
     expect(imageButton).toHaveAttribute("aria-describedby", "seg_002-image-save-help");
     expect(tableButton).toHaveAttribute("aria-describedby", "seg_002-table-save-help");
+    expect(musicButton).toHaveAttribute("aria-describedby", "seg_002-music-save-help");
     expect(ttsButton).toHaveAttribute("aria-describedby", "seg_002-tts-save-help");
     expect(screen.getByText(/explanation text required before saving/i)).toBeInTheDocument();
     expect(screen.getByText(/image overlay asset id required before saving/i)).toBeInTheDocument();
     expect(screen.getByText(/table text required before saving/i)).toBeInTheDocument();
+    expect(screen.getByText(/music asset id required before saving/i)).toBeInTheDocument();
     expect(
       screen.getByText(/tts recommendation id and asset id required before saving/i),
     ).toBeInTheDocument();
@@ -1907,6 +1935,7 @@ describe("App", () => {
     fireEvent.click(explanationButton);
     fireEvent.click(imageButton);
     fireEvent.click(tableButton);
+    fireEvent.click(musicButton);
     fireEvent.click(ttsButton);
 
     expect(fetchMock).not.toHaveBeenCalledWith(
@@ -1919,6 +1948,10 @@ describe("App", () => {
     );
     expect(fetchMock).not.toHaveBeenCalledWith(
       "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/table-overlay",
+      expect.anything(),
+    );
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/music",
       expect.anything(),
     );
     expect(fetchMock).not.toHaveBeenCalledWith(
@@ -2055,6 +2088,90 @@ describe("App", () => {
     expect(screen.getByText(/no tts replacement/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/tts recommendation id/i)).toHaveValue("");
     expect(screen.getByLabelText(/tts asset id/i)).toHaveValue("");
+  });
+
+  it("saves the music override, invalidates the active candidate, and exposes music in the rerun scope", async () => {
+    const fetchMock = await renderStartedEditingSession(
+      createFetchMock({ candidateReviewSnapshot: candidateReviewSnapshotResponse }),
+    );
+
+    await runCandidateToApprovalReady();
+
+    fireEvent.change(screen.getByLabelText(/music asset id/i), {
+      target: { value: "music_manual_002" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /save music override/i }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/music",
+        expect.objectContaining({
+          method: "PATCH",
+          body: JSON.stringify({
+            asset_id: "music_manual_002",
+          }),
+        }),
+      );
+    });
+    await expectCandidateInvalidated();
+    expect(screen.getByLabelText(/music asset id/i)).toHaveValue("music_manual_002");
+    expect(screen.getByRole("checkbox", { name: /^music$/i })).toBeChecked();
+
+    fireEvent.click(screen.getByRole("button", { name: /request regeneration preflight/i }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/projects/project_001/editing-sessions/editing_session_001/partial-regeneration/preflight",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            segment_ids: ["seg_002"],
+            fields: ["broll", "explanation_card", "music"],
+          }),
+        }),
+      );
+    });
+  });
+
+  it("defaults the editor focus to a later segment that only carries a saved music override", async () => {
+    const musicOnlyEditingSession = {
+      ...editingSessionResponse,
+      segments: editingSessionResponse.segments.map((segment) =>
+        segment.segment_id === "seg_002"
+          ? {
+              ...segment,
+              broll_override: null,
+              visual_overlays: [],
+              music_override: { asset_id: "music_manual_001" },
+              tts_replacement: null,
+              review_required: false,
+            }
+          : {
+              ...segment,
+              broll_override: null,
+              visual_overlays: [],
+              music_override: null,
+              tts_replacement: null,
+              review_required: false,
+            },
+      ),
+    };
+    const fetchMock = createFetchMock({
+      editingSession: musicOnlyEditingSession,
+      latestEditingSession: musicOnlyEditingSession,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /start editing session/i }));
+
+    expect(await screen.findByText(/editing_session_001/i)).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: /target segment/i })).toHaveValue("seg_002");
+    expect(screen.getByLabelText(/music asset id/i)).toHaveValue("music_manual_001");
+    expect(screen.getByRole("checkbox", { name: /^music$/i })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /broll/i })).not.toBeChecked();
   });
 
   it("blocks preflight and rerun while an editing save is still in flight", async () => {

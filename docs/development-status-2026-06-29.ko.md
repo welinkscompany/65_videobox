@@ -188,3 +188,31 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 
 - thin editor 범위에서 아직 UI parity가 덜 채워진 `music override` 흐름 보강
 - review action placeholder를 실제 persistence contract와 연결할지 여부 설계
+
+## 13. 2026-06-30 thin editor music override parity 기록
+
+이번 후속 작업으로 `thin editor music override parity`의 첫 실제 slice는 완료로 봐도 된다.
+
+이번에 추가로 확인된 사실은 아래와 같다.
+
+- thin editor에서 music asset id를 직접 입력하고 저장할 수 있다
+- incomplete music draft는 asset id가 들어오기 전까지 로컬 상태로만 남고 저장은 막힌다
+- music override 저장 후 active candidate invalidation은 기존 mutation 흐름과 같은 규칙으로 유지된다
+- 저장된 music override는 rerun scope에서 `music` field로 바로 보이고 preflight request에도 반영된다
+- music override만 있는 후순위 세그먼트도 기본 editor focus 대상으로 잡힌다
+- frontend focused test `44 passed`
+- frontend build 성공
+- full backend regression `230 passed`
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. thin editor music save
+2. incomplete music local draft blocking
+3. save 후 candidate invalidation
+4. rerun scope music visibility
+5. music-only later segment default focus
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- review->editor recommendation mapping coverage 중 `broll` happy-path 보강
+- review action placeholder를 실제 persistence contract와 연결할지 여부 설계

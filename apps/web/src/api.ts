@@ -140,6 +140,10 @@ export type BrollOverrideRequest = {
   asset_id: string;
 };
 
+export type MusicOverrideRequest = {
+  asset_id: string;
+};
+
 export type ExplanationCardRequest = {
   title: string;
   body: string;
@@ -438,6 +442,22 @@ export const api = {
   ) =>
     request<EditingSession>(
       `/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/broll`,
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      },
+    ),
+  updateEditingSessionMusicOverride: (
+    projectId: string,
+    sessionId: string,
+    segmentId: string,
+    payload: MusicOverrideRequest,
+  ) =>
+    request<EditingSession>(
+      `/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/music`,
       {
         method: "PATCH",
         headers: {
