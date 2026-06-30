@@ -135,7 +135,7 @@ timeline["review_flags"] = [
 Run: `pytest tests/test_api.py -k "approve_pending_recommendation or approve_preserves_non_target_review_items_and_blocked_status" -q`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tests/test_api.py
@@ -249,7 +249,7 @@ if (action === "Mark for manual edit") {
 Run: `npm test -- --run src/app.test.tsx -t "opens the actionable pending recommendation in the editing session when marked for manual edit"`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/web/src/App.tsx apps/web/src/app.test.tsx
@@ -324,7 +324,7 @@ def reject_pending_recommendation(...):
 Run: `pytest tests/test_api.py -k "reject_pending_recommendation" -q`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tests/test_api.py packages/storage-abstractions/src/videobox_storage/sqlite_schema.py packages/storage-abstractions/src/videobox_storage/local_project_store.py packages/core-engine/src/videobox_core_engine/local_pipeline.py services/api/src/videobox_api/orchestration.py services/api/src/videobox_api/main.py
@@ -357,7 +357,7 @@ Expected: PASS
 Run: `pytest -q`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add .
