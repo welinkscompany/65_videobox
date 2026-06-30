@@ -1085,92 +1085,29 @@ class LocalPipelineRunner:
         timeline_job_id: str,
         recommendation_id: str,
     ) -> dict[str, Any]:
-        original_timeline = deepcopy(
-            self.get_timeline_result(project_id=project_id, job_id=timeline_job_id)["timeline"]
-        )
-        timeline = deepcopy(original_timeline)
-        original_review_state = self.store.get_review_state(
+        (
+            original_timeline,
+            original_review_state,
+            timeline,
+            original_recommendation,
+            _,
+        ) = self._prepare_pending_recommendation_decision(
             project_id=project_id,
-            timeline_id=str(original_timeline["timeline_id"]),
-        )
-        pending_recommendations = deepcopy(timeline.get("pending_recommendations", []))
-        original_recommendation: dict[str, Any] | None = None
-        approved_recommendation: dict[str, Any] | None = None
-        remaining_pending: list[dict[str, Any]] = []
-        for item in pending_recommendations:
-            if str(item.get("recommendation_id") or "") == recommendation_id:
-                original_recommendation = deepcopy(item)
-                approved_recommendation = deepcopy(item)
-                approved_recommendation["auto_apply_allowed"] = True
-                approved_recommendation["review_required"] = False
-                approved_recommendation["decision_state"] = "approved"
-                approved_recommendation["provider_trace"] = approved_recommendation.get(
-                    "provider_trace"
-                ) or build_provider_trace(
-                    final_provider=(
-                        "heuristic_fallback"
-                        if str(approved_recommendation.get("recommendation_type") or "") == "broll"
-                        else "rule_based_fallback"
-                    )
-                )
-                continue
-            remaining_pending.append(item)
-        if approved_recommendation is None:
-            raise KeyError(f"Pending recommendation not found: {recommendation_id}")
-
-        timeline["pending_recommendations"] = remaining_pending
-        timeline["applied_recommendations"] = [
-            *deepcopy(timeline.get("applied_recommendations", [])),
-            approved_recommendation,
-        ]
-        timeline["recommendation_decisions"] = self._timeline_recommendation_decisions(
-            timeline=timeline,
+            timeline_job_id=timeline_job_id,
             recommendation_id=recommendation_id,
             decision="approved",
         )
-        recommendation_flag_code = (
-            f"{str(approved_recommendation.get('recommendation_type') or '').strip()}_review_required"
+        self._persist_pending_recommendation_decision(
+            project_id=project_id,
+            timeline=timeline,
+            recommendation_id=recommendation_id,
+            auto_apply_allowed=True,
+            review_required=False,
+            decision_state="approved",
+            rollback_recommendation=original_recommendation,
+            original_timeline=original_timeline,
+            original_review_status=str(original_review_state["status"]),
         )
-        target_segment_id = str(approved_recommendation.get("target_segment_id") or "")
-        timeline["review_flags"] = [
-            flag
-            for flag in deepcopy(timeline.get("review_flags", []))
-            if self._should_keep_review_flag(
-                flag=flag,
-                recommendation_flag_code=recommendation_flag_code,
-                target_segment_id=target_segment_id,
-                remaining_pending=remaining_pending,
-            )
-        ]
-
-        try:
-            self.store.update_timeline_run(
-                project_id=project_id,
-                timeline_id=str(timeline["timeline_id"]),
-                timeline_payload=timeline,
-            )
-            self.store.update_recommendation_review(
-                project_id=project_id,
-                recommendation_id=recommendation_id,
-                auto_apply_allowed=True,
-                review_required=False,
-                decision_state="approved",
-            )
-            status = "blocked" if timeline.get("review_flags") or timeline.get("pending_recommendations") else "draft"
-            self.store.save_review_state(
-                project_id=project_id,
-                timeline_id=str(timeline["timeline_id"]),
-                status=status,
-            )
-        except Exception:
-            self._rollback_recommendation_review_mutation(
-                project_id=project_id,
-                timeline_id=str(original_timeline["timeline_id"]),
-                recommendation=original_recommendation or approved_recommendation,
-                original_timeline=original_timeline,
-                original_review_status=str(original_review_state["status"]),
-            )
-            raise
         return self.get_review_snapshot(project_id=project_id, job_id=timeline_job_id)
 
     def reject_pending_recommendation(
@@ -1180,74 +1117,29 @@ class LocalPipelineRunner:
         timeline_job_id: str,
         recommendation_id: str,
     ) -> dict[str, Any]:
-        original_timeline = deepcopy(
-            self.get_timeline_result(project_id=project_id, job_id=timeline_job_id)["timeline"]
-        )
-        timeline = deepcopy(original_timeline)
-        original_review_state = self.store.get_review_state(
+        (
+            original_timeline,
+            original_review_state,
+            timeline,
+            original_recommendation,
+            _,
+        ) = self._prepare_pending_recommendation_decision(
             project_id=project_id,
-            timeline_id=str(original_timeline["timeline_id"]),
-        )
-        pending_recommendations = deepcopy(timeline.get("pending_recommendations", []))
-        rejected_recommendation: dict[str, Any] | None = None
-        remaining_pending: list[dict[str, Any]] = []
-        for item in pending_recommendations:
-            if str(item.get("recommendation_id") or "") == recommendation_id:
-                rejected_recommendation = deepcopy(item)
-                continue
-            remaining_pending.append(item)
-        if rejected_recommendation is None:
-            raise KeyError(f"Pending recommendation not found: {recommendation_id}")
-
-        timeline["pending_recommendations"] = remaining_pending
-        timeline["recommendation_decisions"] = self._timeline_recommendation_decisions(
-            timeline=timeline,
+            timeline_job_id=timeline_job_id,
             recommendation_id=recommendation_id,
             decision="rejected",
         )
-        recommendation_flag_code = (
-            f"{str(rejected_recommendation.get('recommendation_type') or '').strip()}_review_required"
+        self._persist_pending_recommendation_decision(
+            project_id=project_id,
+            timeline=timeline,
+            recommendation_id=recommendation_id,
+            auto_apply_allowed=False,
+            review_required=False,
+            decision_state="rejected",
+            rollback_recommendation=original_recommendation,
+            original_timeline=original_timeline,
+            original_review_status=str(original_review_state["status"]),
         )
-        target_segment_id = str(rejected_recommendation.get("target_segment_id") or "")
-        timeline["review_flags"] = [
-            flag
-            for flag in deepcopy(timeline.get("review_flags", []))
-            if self._should_keep_review_flag(
-                flag=flag,
-                recommendation_flag_code=recommendation_flag_code,
-                target_segment_id=target_segment_id,
-                remaining_pending=remaining_pending,
-            )
-        ]
-
-        try:
-            self.store.update_timeline_run(
-                project_id=project_id,
-                timeline_id=str(timeline["timeline_id"]),
-                timeline_payload=timeline,
-            )
-            self.store.update_recommendation_review(
-                project_id=project_id,
-                recommendation_id=recommendation_id,
-                auto_apply_allowed=False,
-                review_required=False,
-                decision_state="rejected",
-            )
-            status = "blocked" if timeline.get("review_flags") or timeline.get("pending_recommendations") else "draft"
-            self.store.save_review_state(
-                project_id=project_id,
-                timeline_id=str(timeline["timeline_id"]),
-                status=status,
-            )
-        except Exception:
-            self._rollback_recommendation_review_mutation(
-                project_id=project_id,
-                timeline_id=str(original_timeline["timeline_id"]),
-                recommendation=rejected_recommendation,
-                original_timeline=original_timeline,
-                original_review_status=str(original_review_state["status"]),
-            )
-            raise
         return self.get_review_snapshot(project_id=project_id, job_id=timeline_job_id)
 
     def approve_timeline_review(self, *, project_id: str, timeline_job_id: str) -> dict[str, Any]:
@@ -1658,6 +1550,151 @@ class LocalPipelineRunner:
         } if isinstance(existing, dict) else {}
         normalized[recommendation_id] = decision
         return normalized
+
+    def _prepare_pending_recommendation_decision(
+        self,
+        *,
+        project_id: str,
+        timeline_job_id: str,
+        recommendation_id: str,
+        decision: str,
+    ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
+        original_timeline = deepcopy(
+            self.get_timeline_result(project_id=project_id, job_id=timeline_job_id)["timeline"]
+        )
+        timeline = deepcopy(original_timeline)
+        original_review_state = self.store.get_review_state(
+            project_id=project_id,
+            timeline_id=str(original_timeline["timeline_id"]),
+        )
+        original_recommendation, decided_recommendation, remaining_pending = (
+            self._extract_pending_recommendation_decision(
+                timeline=timeline,
+                recommendation_id=recommendation_id,
+                decision=decision,
+            )
+        )
+        timeline["pending_recommendations"] = remaining_pending
+        if decision == "approved":
+            timeline["applied_recommendations"] = [
+                *deepcopy(timeline.get("applied_recommendations", [])),
+                decided_recommendation,
+            ]
+        timeline["recommendation_decisions"] = self._timeline_recommendation_decisions(
+            timeline=timeline,
+            recommendation_id=recommendation_id,
+            decision=decision,
+        )
+        timeline["review_flags"] = self._filtered_review_flags_after_recommendation_decision(
+            timeline=timeline,
+            decided_recommendation=decided_recommendation,
+            remaining_pending=remaining_pending,
+        )
+        return (
+            original_timeline,
+            original_review_state,
+            timeline,
+            original_recommendation,
+            remaining_pending,
+        )
+
+    def _extract_pending_recommendation_decision(
+        self,
+        *,
+        timeline: dict[str, Any],
+        recommendation_id: str,
+        decision: str,
+    ) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
+        pending_recommendations = deepcopy(timeline.get("pending_recommendations", []))
+        original_recommendation: dict[str, Any] | None = None
+        decided_recommendation: dict[str, Any] | None = None
+        remaining_pending: list[dict[str, Any]] = []
+        for item in pending_recommendations:
+            if str(item.get("recommendation_id") or "") != recommendation_id:
+                remaining_pending.append(item)
+                continue
+            original_recommendation = deepcopy(item)
+            decided_recommendation = deepcopy(item)
+            if decision == "approved":
+                decided_recommendation["auto_apply_allowed"] = True
+                decided_recommendation["review_required"] = False
+                decided_recommendation["decision_state"] = "approved"
+                decided_recommendation["provider_trace"] = decided_recommendation.get(
+                    "provider_trace"
+                ) or build_provider_trace(
+                    final_provider=(
+                        "heuristic_fallback"
+                        if str(decided_recommendation.get("recommendation_type") or "") == "broll"
+                        else "rule_based_fallback"
+                    )
+                )
+        if original_recommendation is None or decided_recommendation is None:
+            raise KeyError(f"Pending recommendation not found: {recommendation_id}")
+        return original_recommendation, decided_recommendation, remaining_pending
+
+    def _filtered_review_flags_after_recommendation_decision(
+        self,
+        *,
+        timeline: dict[str, Any],
+        decided_recommendation: dict[str, Any],
+        remaining_pending: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        recommendation_flag_code = (
+            f"{str(decided_recommendation.get('recommendation_type') or '').strip()}_review_required"
+        )
+        target_segment_id = str(decided_recommendation.get("target_segment_id") or "")
+        return [
+            flag
+            for flag in deepcopy(timeline.get("review_flags", []))
+            if self._should_keep_review_flag(
+                flag=flag,
+                recommendation_flag_code=recommendation_flag_code,
+                target_segment_id=target_segment_id,
+                remaining_pending=remaining_pending,
+            )
+        ]
+
+    def _persist_pending_recommendation_decision(
+        self,
+        *,
+        project_id: str,
+        timeline: dict[str, Any],
+        recommendation_id: str,
+        auto_apply_allowed: bool,
+        review_required: bool,
+        decision_state: str,
+        rollback_recommendation: dict[str, Any],
+        original_timeline: dict[str, Any],
+        original_review_status: str,
+    ) -> None:
+        try:
+            self.store.update_timeline_run(
+                project_id=project_id,
+                timeline_id=str(timeline["timeline_id"]),
+                timeline_payload=timeline,
+            )
+            self.store.update_recommendation_review(
+                project_id=project_id,
+                recommendation_id=recommendation_id,
+                auto_apply_allowed=auto_apply_allowed,
+                review_required=review_required,
+                decision_state=decision_state,
+            )
+            status = "blocked" if timeline.get("review_flags") or timeline.get("pending_recommendations") else "draft"
+            self.store.save_review_state(
+                project_id=project_id,
+                timeline_id=str(timeline["timeline_id"]),
+                status=status,
+            )
+        except Exception:
+            self._rollback_recommendation_review_mutation(
+                project_id=project_id,
+                timeline_id=str(original_timeline["timeline_id"]),
+                recommendation=rollback_recommendation,
+                original_timeline=original_timeline,
+                original_review_status=original_review_status,
+            )
+            raise
 
     def _rollback_recommendation_review_mutation(
         self,
