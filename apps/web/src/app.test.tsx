@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import { App } from "./App";
-import type { PartialRegenerationPreflight, ReviewSnapshot } from "./api";
+import type { EditingSession, PartialRegenerationPreflight, ReviewSnapshot } from "./api";
 
 const projectsResponse = {
   projects: [
@@ -552,8 +552,13 @@ function createFetchMock({
   partialRegenerationPreflight?: typeof partialRegenerationPreflightResponse;
   jobs?: typeof jobsResponse;
 } = {}) {
-  const state = {
-    editingSession: structuredClone(editingSession),
+  const state: {
+    editingSession: EditingSession;
+    geminiKeys: { keys: Array<Record<string, unknown>> };
+    candidateReviewSnapshot: ReviewSnapshot;
+    candidateTimelineReviewStatus: string;
+  } = {
+    editingSession: structuredClone(editingSession) as EditingSession,
     geminiKeys: structuredClone(geminiKeys),
     candidateReviewSnapshot: structuredClone(candidateReviewSnapshot),
     candidateTimelineReviewStatus: partialRegenerationResult.timeline.review_status,
@@ -729,6 +734,132 @@ function createFetchMock({
             ? {
                 ...segment,
                 caption_text: payload.caption_text,
+              }
+            : segment,
+        ),
+      };
+      return new Response(JSON.stringify(state.editingSession));
+    }
+    if (
+      url.endsWith(
+        "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/explanation-card",
+      ) &&
+      init?.method === "PATCH"
+    ) {
+      const payload = JSON.parse(String(init.body)) as {
+        title: string;
+        body: string;
+        text: string;
+      };
+      state.editingSession = {
+        ...state.editingSession,
+        segments: state.editingSession.segments.map((segment) =>
+          segment.segment_id === "seg_002"
+            ? {
+                ...segment,
+                visual_overlays: [
+                  ...segment.visual_overlays.filter(
+                    (overlay) => String(overlay.overlay_type ?? "") !== "explanation_card",
+                  ),
+                  {
+                    overlay_type: "explanation_card",
+                    title: payload.title,
+                    body: payload.body,
+                    text: payload.text,
+                  },
+                ],
+              }
+            : segment,
+        ),
+      };
+      return new Response(JSON.stringify(state.editingSession));
+    }
+    if (
+      url.endsWith(
+        "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/image-overlay",
+      ) &&
+      init?.method === "PATCH"
+    ) {
+      const payload = JSON.parse(String(init.body)) as {
+        asset_id: string;
+        text: string;
+      };
+      state.editingSession = {
+        ...state.editingSession,
+        segments: state.editingSession.segments.map((segment) =>
+          segment.segment_id === "seg_002"
+            ? {
+                ...segment,
+                visual_overlays: [
+                  ...segment.visual_overlays.filter(
+                    (overlay) => String(overlay.overlay_type ?? "") !== "image_overlay",
+                  ),
+                  {
+                    overlay_type: "image_overlay",
+                    asset_id: payload.asset_id,
+                    text: payload.text,
+                  },
+                ],
+              }
+            : segment,
+        ),
+      };
+      return new Response(JSON.stringify(state.editingSession));
+    }
+    if (
+      url.endsWith(
+        "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/table-overlay",
+      ) &&
+      init?.method === "PATCH"
+    ) {
+      const payload = JSON.parse(String(init.body)) as {
+        columns: string[];
+        rows: string[][];
+        text: string;
+      };
+      state.editingSession = {
+        ...state.editingSession,
+        segments: state.editingSession.segments.map((segment) =>
+          segment.segment_id === "seg_002"
+            ? {
+                ...segment,
+                visual_overlays: [
+                  ...segment.visual_overlays.filter(
+                    (overlay) => String(overlay.overlay_type ?? "") !== "table_overlay",
+                  ),
+                  {
+                    overlay_type: "table_overlay",
+                    columns: payload.columns,
+                    rows: payload.rows,
+                    text: payload.text,
+                  },
+                ],
+              }
+            : segment,
+        ),
+      };
+      return new Response(JSON.stringify(state.editingSession));
+    }
+    if (
+      url.endsWith(
+        "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/tts-replacement",
+      ) &&
+      init?.method === "PATCH"
+    ) {
+      const payload = JSON.parse(String(init.body)) as {
+        recommendation_id: string;
+        asset_id: string;
+      };
+      state.editingSession = {
+        ...state.editingSession,
+        segments: state.editingSession.segments.map((segment) =>
+          segment.segment_id === "seg_002"
+            ? {
+                ...segment,
+                tts_replacement: {
+                  recommendation_id: payload.recommendation_id,
+                  asset_id: payload.asset_id,
+                },
               }
             : segment,
         ),
@@ -1319,6 +1450,298 @@ describe("App", () => {
     expect(screen.getByText(/timeline_002/i)).toBeInTheDocument();
   });
 
+  it("requires a fresh preflight before partial regeneration can run for the current scope", async () => {
+    const fetchMock = createFetchMock();
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /start editing session/i }));
+
+    const runButton = await screen.findByRole("button", { name: /run partial regeneration/i });
+    expect(runButton).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: /request regeneration preflight/i }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/projects/project_001/editing-sessions/editing_session_001/partial-regeneration/preflight",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            segment_ids: ["seg_002"],
+            fields: ["broll", "explanation_card"],
+          }),
+        }),
+      );
+    });
+
+    await waitFor(() => {
+      expect(runButton).toBeEnabled();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /seg_001/i }));
+    expect(runButton).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: /seg_002/i }));
+    expect(runButton).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("checkbox", { name: /broll/i }));
+    expect(runButton).toBeDisabled();
+  });
+
+  it("keeps explanation image table and tts validation in the thin editor and exposes a read-only preflight scope before execution", async () => {
+    const fetchMock = createFetchMock({
+      partialRegenerationPreflight: {
+        ...partialRegenerationPreflightResponse,
+        fields: [
+          "explanation_card",
+          "image_overlay",
+          "table_overlay",
+          "tts_replacement",
+        ],
+        downstream_steps: ["overlay_refresh", "tts_refresh", "timeline_build"],
+        affected_output_areas: [
+          "visual overlays",
+          "narration track",
+          "timeline preview",
+          "subtitle render",
+          "capcut export",
+        ],
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /start editing session/i }));
+
+    fireEvent.change(screen.getByLabelText(/explanation text/i), {
+      target: { value: "Meeting context: capture the approved discussion points." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /save explanation card/i }));
+
+    fireEvent.change(screen.getByLabelText(/image overlay asset id/i), {
+      target: { value: "asset_image_002" },
+    });
+    fireEvent.change(screen.getByLabelText(/image overlay text/i), {
+      target: { value: "Image overlay summary for the discussion." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /save image overlay/i }));
+
+    fireEvent.change(screen.getByLabelText(/table columns/i), {
+      target: { value: "Topic, Owner" },
+    });
+    fireEvent.change(screen.getByLabelText(/table rows/i), {
+      target: { value: "Launch plan, Louis\nQA follow-up, Team" },
+    });
+    fireEvent.change(screen.getByLabelText(/table text/i), {
+      target: { value: "Table overlay summary for operator review." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /save table overlay/i }));
+
+    fireEvent.change(screen.getByLabelText(/tts recommendation id/i), {
+      target: { value: "rec_tts_002" },
+    });
+    fireEvent.change(screen.getByLabelText(/tts asset id/i), {
+      target: { value: "tts_asset_002" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /save tts replacement/i }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/explanation-card",
+        expect.objectContaining({
+          method: "PATCH",
+          body: JSON.stringify({
+            title: "Meeting context",
+            body: "Summarize the active discussion.",
+            text: "Meeting context: capture the approved discussion points.",
+          }),
+        }),
+      );
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/image-overlay",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({
+          asset_id: "asset_image_002",
+          text: "Image overlay summary for the discussion.",
+        }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/table-overlay",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({
+          columns: ["Topic", "Owner"],
+          rows: [
+            ["Launch plan", "Louis"],
+            ["QA follow-up", "Team"],
+          ],
+          text: "Table overlay summary for operator review.",
+        }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/tts-replacement",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({
+          recommendation_id: "rec_tts_002",
+          asset_id: "tts_asset_002",
+        }),
+      }),
+    );
+
+    fireEvent.click(screen.getByRole("checkbox", { name: /broll/i }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /image overlay/i }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /table overlay/i }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /tts replacement/i }));
+
+    fireEvent.click(screen.getByRole("button", { name: /request regeneration preflight/i }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/projects/project_001/editing-sessions/editing_session_001/partial-regeneration/preflight",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            segment_ids: ["seg_002"],
+            fields: [
+              "explanation_card",
+              "image_overlay",
+              "table_overlay",
+              "tts_replacement",
+            ],
+          }),
+        }),
+      );
+    });
+
+    expect(
+      await screen.findByRole("heading", { name: /preflight scope/i }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/seg_002 included in preflight scope/i)).toBeInTheDocument();
+    expect(screen.getByText(/explanation card field selected for preflight/i)).toBeInTheDocument();
+    expect(screen.getByText(/image overlay field selected for preflight/i)).toBeInTheDocument();
+    expect(screen.getByText(/table overlay field selected for preflight/i)).toBeInTheDocument();
+    expect(screen.getByText(/tts replacement field selected for preflight/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/preflight is read-only\. the timeline draft stays unchanged until you run partial regeneration/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/partial_regeneration_job_001/i)).not.toBeInTheDocument();
+    expect(
+      fetchMock,
+    ).not.toHaveBeenCalledWith(
+      "/api/projects/project_001/editing-sessions/editing_session_001/partial-regeneration",
+      expect.anything(),
+    );
+  });
+
+  it("keeps incomplete explanation image table and tts drafts local until the operator enters enough data to save", async () => {
+    const fetchMock = createFetchMock();
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /start editing session/i }));
+    expect(await screen.findByText(/editing_session_001/i)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText(/explanation text/i), {
+      target: { value: "" },
+    });
+
+    const explanationButton = screen.getByRole("button", { name: /save explanation card/i });
+    const imageButton = screen.getByRole("button", { name: /save image overlay/i });
+    const tableButton = screen.getByRole("button", { name: /save table overlay/i });
+    const ttsButton = screen.getByRole("button", { name: /save tts replacement/i });
+
+    expect(explanationButton).toBeDisabled();
+    expect(imageButton).toBeDisabled();
+    expect(tableButton).toBeDisabled();
+    expect(ttsButton).toBeDisabled();
+
+    fireEvent.click(explanationButton);
+    fireEvent.click(imageButton);
+    fireEvent.click(tableButton);
+    fireEvent.click(ttsButton);
+
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/explanation-card",
+      expect.anything(),
+    );
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/image-overlay",
+      expect.anything(),
+    );
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/table-overlay",
+      expect.anything(),
+    );
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/tts-replacement",
+      expect.anything(),
+    );
+  });
+
+  it("disables run again while a replacement preflight request is still in flight", async () => {
+    const baseFetch = createFetchMock();
+    const pendingPreflightResolvers: Array<(value: Response) => void> = [];
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (
+        url.endsWith(
+          "/api/projects/project_001/editing-sessions/editing_session_001/partial-regeneration/preflight",
+        ) &&
+        init?.method === "POST"
+      ) {
+        return new Promise<Response>((resolve) => {
+          pendingPreflightResolvers.push(resolve);
+        });
+      }
+      return baseFetch(input, init);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /start editing session/i }));
+
+    const requestButton = await screen.findByRole("button", {
+      name: /request regeneration preflight/i,
+    });
+    const runButton = screen.getByRole("button", { name: /run partial regeneration/i });
+
+    fireEvent.click(requestButton);
+    expect(runButton).toBeDisabled();
+
+    pendingPreflightResolvers.shift()?.(
+      new Response(JSON.stringify(partialRegenerationPreflightResponse)),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /run partial regeneration/i })).toBeEnabled();
+    });
+
+    fireEvent.click(requestButton);
+    expect(screen.getByRole("button", { name: /run partial regeneration/i })).toBeDisabled();
+
+    pendingPreflightResolvers.shift()?.(
+      new Response(JSON.stringify(partialRegenerationPreflightResponse)),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /run partial regeneration/i })).toBeEnabled();
+    });
+  });
+
   it("rebases regeneration field selection when switching the target segment", async () => {
     const fetchMock = createFetchMock();
     vi.stubGlobal("fetch", fetchMock);
@@ -1350,6 +1773,9 @@ describe("App", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
     fireEvent.click(await screen.findByRole("button", { name: /start editing session/i }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /broll/i }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /explanation card/i }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /caption/i }));
     fireEvent.click(await screen.findByRole("button", { name: /request regeneration preflight/i }));
 
     expect(await screen.findByText(/blocked after rerun/i)).toBeInTheDocument();

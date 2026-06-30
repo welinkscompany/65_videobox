@@ -198,6 +198,12 @@ function formatFieldLabel(field: string) {
   return field.replace(/_/g, " ");
 }
 
+function haveSameMembers(left: string[], right: string[]) {
+  const leftSet = new Set(left);
+  const rightSet = new Set(right);
+  return leftSet.size === rightSet.size && [...leftSet].every((item) => rightSet.has(item));
+}
+
 function formatAffectedOutputArea(area: string) {
   if (area === "capcut export") {
     return "CapCut handoff";
@@ -653,6 +659,7 @@ export function App() {
     }
     setIsRequestingRegenerationPreflight(true);
     setErrorMessage(null);
+    setPartialRegenerationPreflight(null);
     try {
       const preflight = await api.previewPartialRegeneration(
         selectedProjectId,
@@ -676,7 +683,9 @@ export function App() {
       !selectedProjectId ||
       !editingSession ||
       !selectedEditingSegmentId ||
-      selectedRegenerationFields.length === 0
+      selectedRegenerationFields.length === 0 ||
+      !hasFreshMatchingPreflight ||
+      isRequestingRegenerationPreflight
     ) {
       return;
     }
@@ -1035,6 +1044,13 @@ export function App() {
   const decisionBlockerCount = decisionBlockerSegmentIds.size;
   const resumedScopeSegmentIds = partialRegenerationRun?.segment_ids ?? [];
   const resumedScopeFields = partialRegenerationRun?.fields ?? [];
+  const hasFreshMatchingPreflight =
+    !!editingSession &&
+    !!selectedEditingSegmentId &&
+    !!partialRegenerationPreflight &&
+    partialRegenerationPreflight.session_id === editingSession.session_id &&
+    haveSameMembers(partialRegenerationPreflight.segment_ids, [selectedEditingSegmentId]) &&
+    haveSameMembers(partialRegenerationPreflight.fields, selectedRegenerationFields);
   const decisionCue = !partialRegenerationRun
     ? null
     : decisionBlockerCount > 0
@@ -1751,6 +1767,8 @@ export function App() {
                       disabled={
                         !selectedEditingSegmentId ||
                         selectedRegenerationFields.length === 0 ||
+                        !hasFreshMatchingPreflight ||
+                        isRequestingRegenerationPreflight ||
                         isRunningPartialRegeneration
                       }
                       onClick={() => void handleRunPartialRegeneration()}
@@ -1768,6 +1786,21 @@ export function App() {
                         {formatPredictedReviewStatusDescription(
                           partialRegenerationPreflight.predicted_review_status_after_rerun,
                         )}
+                      </p>
+                      <h3>Preflight scope</h3>
+                      <div className="clip-list">
+                        {partialRegenerationPreflight.segment_ids.map((segmentId) => (
+                          <span key={segmentId}>{`${segmentId} included in preflight scope`}</span>
+                        ))}
+                      </div>
+                      <div className="clip-list">
+                        {partialRegenerationPreflight.fields.map((field) => (
+                          <span key={field}>{`${formatFieldLabel(field)} field selected for preflight`}</span>
+                        ))}
+                      </div>
+                      <p>
+                        Preflight is read-only. The timeline draft stays unchanged until you run
+                        partial regeneration.
                       </p>
                       {partialRegenerationPreflight.prediction_reasons.length > 0 ? (
                         <div className="clip-list">
