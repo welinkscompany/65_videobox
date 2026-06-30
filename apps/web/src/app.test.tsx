@@ -818,6 +818,25 @@ function createFetchMock({
     }
     if (
       url.endsWith(
+        "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/music",
+      ) &&
+      init?.method === "DELETE"
+    ) {
+      state.editingSession = {
+        ...state.editingSession,
+        segments: state.editingSession.segments.map((segment) =>
+          segment.segment_id === "seg_002"
+            ? {
+                ...segment,
+                music_override: null,
+              }
+            : segment,
+        ),
+      };
+      return new Response(JSON.stringify(state.editingSession));
+    }
+    if (
+      url.endsWith(
         "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/explanation-card",
       ) &&
       init?.method === "PATCH"
@@ -2172,6 +2191,69 @@ describe("App", () => {
     expect(screen.getByLabelText(/music asset id/i)).toHaveValue("music_manual_001");
     expect(screen.getByRole("checkbox", { name: /^music$/i })).toBeChecked();
     expect(screen.getByRole("checkbox", { name: /broll/i })).not.toBeChecked();
+  });
+
+  it("clears the saved music override and invalidates the active candidate", async () => {
+    const musicPreflightResponse: PartialRegenerationPreflight = {
+      ...partialRegenerationPreflightResponse,
+      fields: ["broll", "explanation_card", "music"],
+      downstream_steps: ["broll_refresh", "music_refresh", "overlay_refresh", "timeline_build"],
+      affected_output_areas: [
+        "b-roll track",
+        "music bed",
+        "visual overlays",
+        "timeline preview",
+        "subtitle render",
+        "capcut export",
+      ],
+    };
+    const musicResultResponse = {
+      ...partialRegenerationResultResponse,
+      fields: ["broll", "explanation_card", "music"],
+      downstream_steps: ["broll_refresh", "music_refresh", "overlay_refresh", "timeline_build"],
+      regenerated_segments: [
+        {
+          segment_id: "seg_002",
+          changed_fields: ["broll", "explanation_card", "music"],
+          output_changes: [
+            "b-roll asset replaced with regenerated recommendation",
+            "music bed replaced with manual override",
+            "explanation card text refreshed",
+          ],
+        },
+      ],
+    };
+    const fetchMock = await renderStartedEditingSession(
+      createFetchMock({
+        candidateReviewSnapshot: candidateReviewSnapshotResponse,
+        partialRegenerationPreflight: musicPreflightResponse,
+        partialRegenerationResult: musicResultResponse,
+      }),
+    );
+
+    fireEvent.change(screen.getByLabelText(/music asset id/i), {
+      target: { value: "music_manual_002" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /save music override/i }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /clear music override/i })).toBeInTheDocument();
+    });
+
+    await runCandidateToApprovalReady();
+    fireEvent.click(screen.getByRole("button", { name: /clear music override/i }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/music",
+        expect.objectContaining({
+          method: "DELETE",
+        }),
+      );
+    });
+    await expectCandidateInvalidated();
+    expect(screen.queryByRole("button", { name: /clear music override/i })).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/music asset id/i)).toHaveValue("");
+    expect(screen.getByRole("checkbox", { name: /^music$/i })).not.toBeChecked();
   });
 
   it("blocks preflight and rerun while an editing save is still in flight", async () => {

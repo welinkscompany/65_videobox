@@ -278,6 +278,37 @@ def test_update_segment_music_override_records_history() -> None:
     assert updated["history"][-1]["mutation_type"] == "music_override_update"
 
 
+def test_clear_segment_music_override_records_history() -> None:
+    from videobox_core_engine.editing_session import build_editing_session
+    from videobox_core_engine.editing_session import clear_segment_music_override
+    from videobox_core_engine.editing_session import update_segment_music_override
+
+    session = build_editing_session(
+        project_id="project_001",
+        timeline={"timeline_id": "timeline_001"},
+        segments=[
+            {
+                "segment_id": "seg_001",
+                "text": "Keep this",
+                "start_sec": 0.0,
+                "end_sec": 1.0,
+                "review_required": False,
+                "cleanup_decision": "keep",
+            }
+        ],
+    )
+
+    updated = update_segment_music_override(
+        session=session,
+        segment_id="seg_001",
+        asset_id="music_manual_001",
+    )
+    cleared = clear_segment_music_override(session=updated, segment_id="seg_001")
+
+    assert cleared["segments"][0]["music_override"] is None
+    assert cleared["history"][-1]["mutation_type"] == "music_override_clear"
+
+
 def test_update_segment_explanation_card_records_history() -> None:
     from videobox_core_engine.editing_session import build_editing_session
     from videobox_core_engine.editing_session import update_segment_explanation_card

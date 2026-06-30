@@ -643,6 +643,7 @@ export function App() {
     action: () => Promise<EditingSession>,
     options?: {
       addRegenerationField?: string;
+      removeRegenerationField?: string;
     },
   ) {
     setIsSavingEditingMutation(mutationKey);
@@ -655,6 +656,11 @@ export function App() {
           current.includes(options.addRegenerationField!)
             ? current
             : [...current, options.addRegenerationField!],
+        );
+      }
+      if (options?.removeRegenerationField) {
+        setSelectedRegenerationFields((current) =>
+          current.filter((item) => item !== options.removeRegenerationField),
         );
       }
       setPartialRegenerationPreflight(null);
@@ -2238,6 +2244,31 @@ export function App() {
                     <p className="meta-copy" id={`${selectedEditingSegment.segment_id}-music-save-help`}>
                       Music asset ID required before saving.
                     </p>
+                  ) : null}
+                  {selectedEditingSegment.music_override ? (
+                    <button
+                      className="action-button"
+                      disabled={
+                        !selectedProjectId ||
+                        !activeEditingSessionId ||
+                        isSavingEditingMutation === `${selectedEditingSegment.segment_id}-music`
+                      }
+                      onClick={() =>
+                        void applyEditingMutation(
+                          `${selectedEditingSegment.segment_id}-music`,
+                          () =>
+                            api.clearEditingSessionMusicOverride(
+                              selectedProjectId!,
+                              activeEditingSessionId!,
+                              selectedEditingSegment.segment_id,
+                            ),
+                          { removeRegenerationField: "music" },
+                        )
+                      }
+                      type="button"
+                    >
+                      Clear music override
+                    </button>
                   ) : null}
                   <label className="field">
                     <span>Explanation title</span>

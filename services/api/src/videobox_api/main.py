@@ -1270,6 +1270,22 @@ def create_app(
             raise _http_error(exc) from exc
         return EditingSessionResponse(**result)
 
+    @app.delete("/api/projects/{project_id}/editing-sessions/{session_id}/segments/{segment_id}/music")
+    def delete_editing_session_music_override(
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+    ) -> EditingSessionResponse:
+        try:
+            result = orchestrator.clear_segment_music_override(
+                project_id=project_id,
+                session_id=session_id,
+                segment_id=segment_id,
+            )
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return EditingSessionResponse(**result)
+
     @app.patch("/api/projects/{project_id}/editing-sessions/{session_id}/segments/{segment_id}/tts-replacement")
     def patch_editing_session_tts_replacement(
         project_id: str,

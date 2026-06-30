@@ -4584,6 +4584,31 @@ def test_editing_session_api_can_fetch_visual_overlay_and_music_updates(tmp_path
     assert payload["history"][-1]["mutation_type"] == "music_override_update"
 
 
+def test_editing_session_api_can_clear_music_override(tmp_path: Path) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    create_response = client.post(
+        f"/api/projects/{project_id}/editing-sessions",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    session_id = create_response.json()["session_id"]
+
+    client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/music",
+        json={"asset_id": "music_manual_001"},
+    )
+    clear_response = client.delete(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/music",
+    )
+
+    assert clear_response.status_code == 200
+    payload = clear_response.json()
+    assert payload["segments"][0]["music_override"] is None
+    assert payload["history"][-1]["mutation_type"] == "music_override_clear"
+
+
 def test_editing_session_api_can_patch_explanation_and_tts_mutations(tmp_path: Path) -> None:
     app = create_app(projects_root=tmp_path)
     client = TestClient(app)

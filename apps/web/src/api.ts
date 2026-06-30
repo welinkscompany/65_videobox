@@ -466,6 +466,17 @@ export const api = {
         body: JSON.stringify(payload),
       },
     ),
+  clearEditingSessionMusicOverride: (
+    projectId: string,
+    sessionId: string,
+    segmentId: string,
+  ) =>
+    request<EditingSession>(
+      `/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/music`,
+      {
+        method: "DELETE",
+      },
+    ),
   updateEditingSessionExplanationCard: (
     projectId: string,
     sessionId: string,

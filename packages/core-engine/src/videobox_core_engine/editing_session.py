@@ -296,6 +296,26 @@ def update_segment_music_override(
     raise KeyError(f"Segment not found in editing session: {segment_id}")
 
 
+def clear_segment_music_override(
+    *,
+    session: dict[str, Any],
+    segment_id: str,
+) -> dict[str, Any]:
+    updated = deepcopy(session)
+    for segment in updated.get("segments", []):
+        if str(segment.get("segment_id")) != segment_id:
+            continue
+        segment["music_override"] = None
+        updated.setdefault("history", []).append(
+            {
+                "mutation_type": "music_override_clear",
+                "segment_id": segment_id,
+            }
+        )
+        return updated
+    raise KeyError(f"Segment not found in editing session: {segment_id}")
+
+
 def select_segment_tts_replacement(
     *,
     session: dict[str, Any],
