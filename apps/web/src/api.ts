@@ -380,6 +380,17 @@ export const api = {
     request<TimelineJob>(`/api/projects/${projectId}/timelines/${jobId}`),
   getReviewSnapshot: (projectId: string, jobId: string) =>
     request<ReviewSnapshot>(`/api/projects/${projectId}/review-snapshots/${jobId}`),
+  approveReviewRecommendation: (
+    projectId: string,
+    jobId: string,
+    recommendationId: string,
+  ) =>
+    request<ReviewSnapshot>(
+      `/api/projects/${projectId}/review-snapshots/${jobId}/recommendations/${recommendationId}/approve`,
+      {
+        method: "POST",
+      },
+    ),
   createEditingSession: (projectId: string, payload: CreateEditingSessionRequest) =>
     request<EditingSession>(`/api/projects/${projectId}/editing-sessions`, {
       method: "POST",

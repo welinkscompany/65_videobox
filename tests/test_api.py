@@ -3949,6 +3949,104 @@ def test_preview_export_and_subtitles_require_explicit_approval_even_without_blo
     assert "approval" in preview_response.json()["detail"].lower()
 
 
+def test_review_snapshot_api_can_approve_pending_recommendation(tmp_path: Path) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    timeline_result = client.get(f"/api/projects/{project_id}/timelines/{timeline_job_id}")
+    timeline_payload = timeline_result.json()["timeline"]
+    timeline_path = (
+        tmp_path
+        / "projects"
+        / project_id
+        / "timelines"
+        / f'{timeline_payload["timeline_id"]}.json'
+    )
+    persisted_timeline = json.loads(timeline_path.read_text(encoding="utf-8"))
+    approved_candidate = {
+        "recommendation_id": "rec_broll_review_002",
+        "target_segment_id": "seg_002",
+        "recommendation_type": "broll",
+        "selected_asset_id": "asset_broll_review_002",
+        "score": 0.88,
+        "reason": "Operator approved the suggested B-roll pick.",
+        "auto_apply_allowed": False,
+        "review_required": True,
+        "payload": {"tags": ["team", "meeting"]},
+        "created_at": "2026-06-30T00:00:00+00:00",
+    }
+    persisted_timeline["applied_recommendations"] = []
+    persisted_timeline["pending_recommendations"] = [approved_candidate]
+    persisted_timeline["review_flags"] = [
+        {
+            "code": "broll_review_required",
+            "segment_id": "seg_002",
+            "message": "Operator must confirm the B-roll pick before approval.",
+        }
+    ]
+    timeline_path.write_text(json.dumps(persisted_timeline, indent=2), encoding="utf-8")
+
+    database_path = tmp_path / "projects" / project_id / "db" / "project.sqlite"
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute("DELETE FROM recommendations")
+        connection.execute(
+            """
+            INSERT INTO recommendations (
+                recommendation_id,
+                project_id,
+                target_segment_id,
+                recommendation_type,
+                selected_asset_id,
+                score,
+                reason,
+                auto_apply_allowed,
+                review_required,
+                payload_json,
+                created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                approved_candidate["recommendation_id"],
+                project_id,
+                approved_candidate["target_segment_id"],
+                approved_candidate["recommendation_type"],
+                approved_candidate["selected_asset_id"],
+                approved_candidate["score"],
+                approved_candidate["reason"],
+                0,
+                1,
+                json.dumps(approved_candidate["payload"], ensure_ascii=True),
+                approved_candidate["created_at"],
+            ),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    approve_response = client.post(
+        f"/api/projects/{project_id}/review-snapshots/{timeline_job_id}/recommendations/"
+        "rec_broll_review_002/approve"
+    )
+
+    assert approve_response.status_code == 200
+    payload = approve_response.json()
+    assert payload["review_status"] == "draft"
+    assert payload["pending_recommendations"] == []
+    assert payload["review_flags"] == []
+    assert payload["applied_recommendations"][0]["recommendation_id"] == "rec_broll_review_002"
+
+    refreshed_timeline = client.get(f"/api/projects/{project_id}/timelines/{timeline_job_id}")
+    assert refreshed_timeline.status_code == 200
+    refreshed_timeline_payload = refreshed_timeline.json()["timeline"]
+    assert refreshed_timeline_payload["pending_recommendations"] == []
+    assert refreshed_timeline_payload["review_flags"] == []
+    assert refreshed_timeline_payload["applied_recommendations"][0]["recommendation_id"] == (
+        "rec_broll_review_002"
+    )
+
+
 def test_approved_tts_replacement_flows_through_preview_and_export_outputs(tmp_path: Path) -> None:
     store = LocalProjectStore(tmp_path)
     project = store.bootstrap_project(name="Approved TTS Output Project")

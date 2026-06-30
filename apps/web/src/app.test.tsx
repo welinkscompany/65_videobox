@@ -1,7 +1,14 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import { App } from "./App";
-import type { EditingSession, PartialRegenerationPreflight, ReviewSnapshot } from "./api";
+import type {
+  EditingSession,
+  PartialRegenerationPreflight,
+  RecommendationItem,
+  ReviewSnapshot,
+  TimelineJob,
+  TimelinePayload,
+} from "./api";
 
 const projectsResponse = {
   projects: [
@@ -114,6 +121,7 @@ const timelineResponse = {
     project_id: "project_001",
     version: "v001",
     output_mode: "review",
+    review_status: "approved",
     created_at: "2026-06-28T00:00:09Z",
     tracks: [
       {
@@ -572,6 +580,7 @@ const geminiKeysResponse = {
 
 function createFetchMock({
   geminiKeys = geminiKeysResponse,
+  timeline = timelineResponse,
   editingSession = editingSessionResponse,
   latestEditingSession = editingSessionResponse,
   latestEditingSessionStatus,
@@ -585,26 +594,31 @@ function createFetchMock({
   jobs = jobsResponse,
 }: {
   geminiKeys?: { keys: Array<Record<string, unknown>> };
+  timeline?: TimelineJob;
   editingSession?: EditingSession;
   latestEditingSession?: EditingSession | null;
   latestEditingSessionStatus?: number;
   candidateResultStatus?: number;
   candidateReviewStatus?: number;
   candidatePreflightStatus?: number;
-  reviewSnapshot?: typeof reviewSnapshotResponse;
+  reviewSnapshot?: ReviewSnapshot;
   candidateReviewSnapshot?: ReviewSnapshot;
   partialRegenerationResult?: typeof partialRegenerationResultResponse;
   partialRegenerationPreflight?: typeof partialRegenerationPreflightResponse;
   jobs?: typeof jobsResponse;
 } = {}) {
   const state: {
+    timeline: TimelinePayload;
     editingSession: EditingSession;
     geminiKeys: { keys: Array<Record<string, unknown>> };
+    reviewSnapshot: ReviewSnapshot;
     candidateReviewSnapshot: ReviewSnapshot;
     candidateTimelineReviewStatus: string;
   } = {
+    timeline: structuredClone(timeline.timeline),
     editingSession: structuredClone(editingSession) as EditingSession,
     geminiKeys: structuredClone(geminiKeys),
+    reviewSnapshot: structuredClone(reviewSnapshot),
     candidateReviewSnapshot: structuredClone(candidateReviewSnapshot),
     candidateTimelineReviewStatus: partialRegenerationResult.timeline.review_status,
   };
@@ -665,7 +679,12 @@ function createFetchMock({
       );
     }
     if (url.endsWith("/api/projects/project_001/timelines/timeline_build_job_005")) {
-      return new Response(JSON.stringify(timelineResponse));
+      return new Response(
+        JSON.stringify({
+          ...timeline,
+          timeline: state.timeline,
+        }),
+      );
     }
     if (url.endsWith("/api/projects/project_001/timelines/partial_regeneration_job_001")) {
       return new Response(
@@ -680,7 +699,56 @@ function createFetchMock({
       );
     }
     if (url.endsWith("/api/projects/project_001/review-snapshots/timeline_build_job_005")) {
-      return new Response(JSON.stringify(reviewSnapshot));
+      return new Response(JSON.stringify(state.reviewSnapshot));
+    }
+    if (
+      url.includes("/api/projects/project_001/review-snapshots/timeline_build_job_005/recommendations/") &&
+      url.endsWith("/approve") &&
+      init?.method === "POST"
+    ) {
+      const recommendationId = url.split("/").slice(-2)[0] ?? "";
+      const approved: RecommendationItem | undefined = state.reviewSnapshot.pending_recommendations.find(
+        (item) => item.recommendation_id === recommendationId,
+      );
+      if (!approved) {
+        return new Response("recommendation not found", { status: 404 });
+      }
+      const nextApproved = {
+        ...approved,
+        auto_apply_allowed: true,
+        review_required: false,
+      };
+      state.reviewSnapshot = {
+        ...state.reviewSnapshot,
+        review_status: "draft",
+        applied_recommendations: [...state.reviewSnapshot.applied_recommendations, nextApproved],
+        pending_recommendations: state.reviewSnapshot.pending_recommendations.filter(
+          (item) => item.recommendation_id !== recommendationId,
+        ),
+        review_flags: state.reviewSnapshot.review_flags.filter(
+          (flag) =>
+            !(
+              flag.code === `${approved.recommendation_type}_review_required` &&
+              flag.segment_id === approved.target_segment_id
+            ),
+        ),
+      };
+      state.timeline = {
+        ...state.timeline,
+        review_status: "draft",
+        applied_recommendations: [...state.timeline.applied_recommendations, nextApproved],
+        pending_recommendations: state.timeline.pending_recommendations.filter(
+          (item) => item.recommendation_id !== recommendationId,
+        ),
+        review_flags: state.timeline.review_flags.filter(
+          (flag) =>
+            !(
+              String(flag.code ?? "") === `${approved.recommendation_type}_review_required` &&
+              String(flag.segment_id ?? "") === approved.target_segment_id
+            ),
+        ),
+      };
+      return new Response(JSON.stringify(state.reviewSnapshot));
     }
     if (url.endsWith("/api/projects/project_001/review-snapshots/partial_regeneration_job_001")) {
       if (candidateReviewStatus != null) {
@@ -1248,6 +1316,74 @@ describe("App", () => {
     expect(screen.getByRole("checkbox", { name: /tts replacement/i })).toBeChecked();
     expect(screen.getByRole("checkbox", { name: /broll/i })).not.toBeChecked();
     expect(screen.getByRole("checkbox", { name: /explanation card/i })).not.toBeChecked();
+  });
+
+  it("approves a pending recommendation through the review action and refreshes the review snapshot", async () => {
+    const actionableTimeline: TimelineJob = {
+      ...timelineResponse,
+      timeline: {
+        ...timelineResponse.timeline,
+        review_status: "blocked",
+        applied_recommendations: [],
+        pending_recommendations: [
+          {
+            recommendation_id: "rec_broll_review_002",
+            target_segment_id: "seg_002",
+            recommendation_type: "broll",
+            selected_asset_id: "asset_broll_review_002",
+            score: 0.88,
+            reason: "Operator should confirm the suggested B-roll pick.",
+            auto_apply_allowed: false,
+            review_required: true,
+            payload: { tags: ["team", "meeting"] },
+            created_at: "2026-06-30T00:00:00Z",
+          },
+        ],
+        review_flags: [
+          {
+            code: "broll_review_required",
+            segment_id: "seg_002",
+            message: "Operator must confirm the B-roll pick before approval.",
+          },
+        ],
+      },
+    };
+    const actionableReviewSnapshot: ReviewSnapshot = {
+      ...reviewSnapshotResponse,
+      review_status: "blocked",
+      applied_recommendations: [],
+      pending_recommendations: actionableTimeline.timeline.pending_recommendations,
+      review_flags: actionableTimeline.timeline.review_flags,
+    };
+    const fetchMock = createFetchMock({
+      timeline: actionableTimeline,
+      reviewSnapshot: actionableReviewSnapshot,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /review snapshot/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^approve recommendation$/i }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/projects/project_001/review-snapshots/timeline_build_job_005/recommendations/rec_broll_review_002/approve",
+        expect.objectContaining({
+          method: "POST",
+        }),
+      );
+    });
+
+    await waitFor(() => {
+      expect(
+        screen.queryByText(/operator must confirm the b-roll pick before approval/i),
+      ).not.toBeInTheDocument();
+    });
+    expect(
+      screen.getByRole("button", { name: /^approve recommendation$/i }),
+    ).toBeDisabled();
+    expect(screen.getByRole("button", { name: /approve timeline/i })).toBeEnabled();
   });
 
   it("opens the flagged segment in the editing session without overwriting its default rerun scope when no direct field mapping exists", async () => {

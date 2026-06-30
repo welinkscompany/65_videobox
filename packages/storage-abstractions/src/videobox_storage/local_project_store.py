@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 import shutil
 import sqlite3
 from datetime import UTC, datetime
@@ -498,6 +499,81 @@ class LocalProjectStore:
         )
         self.clear_operator_guidance(project_id=project_id, timeline_id=timeline_id)
         return self.get_review_state(project_id=project_id, timeline_id=timeline_id)
+
+    def update_recommendation_review(
+        self,
+        *,
+        project_id: str,
+        recommendation_id: str,
+        auto_apply_allowed: bool,
+        review_required: bool,
+    ) -> None:
+        connection = self._connection(project_id)
+        try:
+            cursor = connection.execute(
+                """
+                UPDATE recommendations
+                SET auto_apply_allowed = ?, review_required = ?
+                WHERE recommendation_id = ? AND project_id = ?
+                """,
+                (
+                    1 if auto_apply_allowed else 0,
+                    1 if review_required else 0,
+                    recommendation_id,
+                    project_id,
+                ),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+        if cursor.rowcount == 0:
+            raise KeyError(f"Recommendation not found: {recommendation_id}")
+
+    def update_timeline_run(
+        self,
+        *,
+        project_id: str,
+        timeline_id: str,
+        timeline_payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        existing = self.get_timeline_run(project_id=project_id, timeline_id=timeline_id)
+        payload = deepcopy(timeline_payload)
+        payload.pop("summary", None)
+        payload["timeline_id"] = timeline_id
+        payload["project_id"] = project_id
+        payload["version"] = str(payload.get("version", existing.get("version", "v001")))
+        payload["output_mode"] = str(payload.get("output_mode", existing.get("output_mode", "review")))
+        payload["file_uri"] = str(existing.get("file_uri"))
+        payload["created_at"] = str(existing.get("created_at"))
+
+        file_path = self._timeline_file_path(project_id=project_id, timeline_id=timeline_id)
+        file_path.write_text(json.dumps(payload, indent=2, ensure_ascii=True), encoding="utf-8")
+
+        summary_json = json.dumps(
+            {
+                "track_count": len(payload.get("tracks", [])),
+                "review_flag_count": len(payload.get("review_flags", [])),
+                "applied_recommendation_count": len(payload.get("applied_recommendations", [])),
+                "pending_recommendation_count": len(payload.get("pending_recommendations", [])),
+            },
+            ensure_ascii=True,
+        )
+        self._execute(
+            project_id,
+            """
+            UPDATE timelines
+            SET version = ?, output_mode = ?, summary_json = ?
+            WHERE timeline_id = ? AND project_id = ?
+            """,
+            (
+                payload["version"],
+                payload["output_mode"],
+                summary_json,
+                timeline_id,
+                project_id,
+            ),
+        )
+        return self.get_timeline_run(project_id=project_id, timeline_id=timeline_id)
 
     def save_partial_regeneration_run(
         self,

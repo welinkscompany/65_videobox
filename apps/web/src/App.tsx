@@ -614,6 +614,10 @@ export function App() {
   const canReopenTimeline = !!activeTimelineJobId && reviewStatus === "approved";
   const canGenerateOutputs =
     !!activeTimelineJobId && !hasReviewBlockers && reviewStatus === "approved";
+  const actionablePendingRecommendation =
+    reviewSnapshot?.pending_recommendations.length === 1
+      ? reviewSnapshot.pending_recommendations[0]
+      : null;
 
   function applyEditingSessionState(session: EditingSession) {
     setEditingSession(session);
@@ -887,6 +891,32 @@ export function App() {
       setErrorMessage(error instanceof Error ? error.message : "Unknown error");
     } finally {
       setIsApprovingTimeline(false);
+    }
+  }
+
+  async function handleApproveRecommendation() {
+    if (
+      !selectedProjectId ||
+      !activeTimelineJobId ||
+      !actionablePendingRecommendation
+    ) {
+      return;
+    }
+    setErrorMessage(null);
+    setPartialRegenerationRestoreWarning(null);
+    try {
+      const [review, timeline] = await Promise.all([
+        api.approveReviewRecommendation(
+          selectedProjectId,
+          activeTimelineJobId,
+          actionablePendingRecommendation.recommendation_id,
+        ),
+        api.getTimeline(selectedProjectId, activeTimelineJobId),
+      ]);
+      setReviewSnapshot(review);
+      setTimelineJob(timeline);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Unknown error");
     }
   }
 
@@ -1742,11 +1772,26 @@ export function App() {
                 ))}
               </div>
               <div className="action-row">
-                {reviewActions.map((action) => (
-                  <button className="action-button" key={action} type="button">
-                    {action}
-                  </button>
-                ))}
+                {reviewActions.map((action) => {
+                  if (action === "Approve recommendation") {
+                    return (
+                      <button
+                        className="action-button"
+                        disabled={!actionablePendingRecommendation}
+                        key={action}
+                        onClick={() => void handleApproveRecommendation()}
+                        type="button"
+                      >
+                        {action}
+                      </button>
+                    );
+                  }
+                  return (
+                    <button className="action-button" key={action} type="button">
+                      {action}
+                    </button>
+                  );
+                })}
               </div>
             </article>
           </section>

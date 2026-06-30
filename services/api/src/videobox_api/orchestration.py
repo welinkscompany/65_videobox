@@ -604,6 +604,19 @@ class ApiOrchestrator:
     def get_review_snapshot(self, *, project_id: str, job_id: str) -> dict[str, Any]:
         return self.pipeline.get_review_snapshot(project_id=project_id, job_id=job_id)
 
+    def approve_pending_recommendation(
+        self,
+        *,
+        project_id: str,
+        job_id: str,
+        recommendation_id: str,
+    ) -> dict[str, Any]:
+        return self.pipeline.approve_pending_recommendation(
+            project_id=project_id,
+            timeline_job_id=job_id,
+            recommendation_id=recommendation_id,
+        )
+
     def approve_timeline_review(self, *, project_id: str, job_id: str) -> dict[str, Any]:
         return self.pipeline.approve_timeline_review(project_id=project_id, timeline_job_id=job_id)
 

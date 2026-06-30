@@ -217,6 +217,33 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - review->editor recommendation mapping coverage 중 `broll` happy-path 보강
 - review action placeholder를 실제 persistence contract와 연결할지 여부 설계
 
+## 16. 2026-06-30 review recommendation approve persistence 착수 기록
+
+이번 후속 작업으로 `review action placeholder -> first approve persistence`의 최소 slice는 착수 및 focused verification까지는 됐다고 본다.
+
+이번에 추가로 확인된 사실은 아래와 같다.
+
+- review panel의 `Approve recommendation` 버튼이 실제 approve API 호출로 연결됐다
+- backend에서 pending recommendation을 applied recommendation으로 이동시키고 관련 review flag를 제거할 수 있다
+- recommendation row의 `auto_apply_allowed/review_required` 값이 승인 결과에 맞게 갱신된다
+- approve 후 review snapshot과 timeline refresh가 같이 일어나도록 frontend 배선이 연결됐다
+- backend focused test `1 passed`
+- frontend focused test `1 passed`
+
+다만 이 단계는 아직 완결 milestone로 닫지 않았다.
+
+- 아직 확인하지 않은 것
+  - frontend build
+  - full backend regression
+  - reject/manual-edit persistence
+- 따라서 현재 상태는 `작동하는 첫 slice`이지 `완료된 review action family`는 아니다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- approve persistence slice의 broader verification
+- non-target recommendation/flag 보존에 대한 역방향 검증 보강
+- reject/manual-edit 중 다음 최소 persistence slice 선정
+
 ## 15. 2026-06-30 thin editor B-roll override clear 기록
 
 이번 후속 작업으로 `thin editor B-roll override clear/remove` slice는 완료로 봐도 된다.

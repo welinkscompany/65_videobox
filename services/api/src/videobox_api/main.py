@@ -1354,6 +1354,31 @@ def create_app(
             operator_guidance=OperatorGuidanceResponse(**result["operator_guidance"]),
         )
 
+    @app.post("/api/projects/{project_id}/review-snapshots/{job_id}/recommendations/{recommendation_id}/approve")
+    def approve_pending_recommendation(
+        project_id: str,
+        job_id: str,
+        recommendation_id: str,
+    ) -> ReviewSnapshotResponse:
+        try:
+            result = orchestrator.approve_pending_recommendation(
+                project_id=project_id,
+                job_id=job_id,
+                recommendation_id=recommendation_id,
+            )
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return ReviewSnapshotResponse(
+            project_id=result["project_id"],
+            timeline_id=result["timeline_id"],
+            review_status=result["review_status"],
+            segments=[SegmentAnalysisRecord(**item) for item in result["segments"]],
+            applied_recommendations=[RecommendationItemResponse(**item) for item in result["applied_recommendations"]],
+            pending_recommendations=[RecommendationItemResponse(**item) for item in result["pending_recommendations"]],
+            review_flags=[ReviewFlagResponse(**item) for item in result["review_flags"]],
+            operator_guidance=OperatorGuidanceResponse(**result["operator_guidance"]),
+        )
+
     @app.post("/api/projects/{project_id}/review-approvals/{job_id}/approve", status_code=status.HTTP_202_ACCEPTED)
     def approve_review(project_id: str, job_id: str) -> ReviewApprovalResponse:
         try:
