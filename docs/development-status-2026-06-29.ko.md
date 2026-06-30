@@ -161,3 +161,30 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 
 - 이번 브랜치의 상위 계획서 기준 다음 대형 goal 재선정
 - refresh-resume보다 더 큰 제품 milestone로 넘어갈 때 필요한 다음 SSOT 문서 갱신
+
+## 12. 2026-06-30 review snapshot to editing session handoff 기록
+
+이번 후속 작업으로 `review snapshot -> editing session handoff`의 첫 실제 slice는 완료로 봐도 된다.
+
+이번에 추가로 확인된 사실은 아래와 같다.
+
+- review snapshot 세그먼트 카드에서 대상 세그먼트를 editing session으로 바로 열 수 있다
+- pending recommendation 카드에서 현재 UI가 지원하는 recommendation type은 해당 rerun field로 바로 좁혀서 editor를 열 수 있다
+- unsupported recommendation type은 강제 매핑하지 않고 세그먼트 기본 rerun scope로 fallback 한다
+- review flag 카드에서 editor로 이동해도 기본 rerun scope를 덮어쓰지 않는다
+- placeholder global review action 버튼은 이 단계에서 의도적으로 그대로 유지됐다
+- frontend focused test `42 passed`
+- frontend build 성공
+- full backend regression `230 passed`
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. review snapshot segment direct-open
+2. pending recommendation -> mapped field narrowing
+3. unsupported recommendation -> default rerun fallback
+4. review flag -> default rerun preserve
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- thin editor 범위에서 아직 UI parity가 덜 채워진 `music override` 흐름 보강
+- review action placeholder를 실제 persistence contract와 연결할지 여부 설계

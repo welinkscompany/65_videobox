@@ -198,6 +198,16 @@ function formatFieldLabel(field: string) {
   return field.replace(/_/g, " ");
 }
 
+function mapRecommendationTypeToEditingField(recommendationType: string) {
+  if (recommendationType === "tts_replacement") {
+    return "tts_replacement";
+  }
+  if (recommendationType === "broll") {
+    return "broll";
+  }
+  return null;
+}
+
 function haveSameMembers(left: string[], right: string[]) {
   const leftSet = new Set(left);
   const rightSet = new Set(right);
@@ -1101,6 +1111,20 @@ export function App() {
     setPartialRegenerationPreflight(null);
     setPartialRegenerationRun(null);
   };
+  const openSegmentInEditor = (segmentId: string, fields?: string[]) => {
+    setSelectedSection("editing");
+    setSelectedEditingSegmentId(segmentId);
+    if (fields) {
+      setSelectedRegenerationFields(fields);
+    } else {
+      const nextSegment =
+        editingSession?.segments.find((segment) => segment.segment_id === segmentId) ?? null;
+      setSelectedRegenerationFields(buildDefaultRegenerationFields(nextSegment));
+    }
+    setPartialRegenerationRestoreWarning(null);
+    setPartialRegenerationPreflight(null);
+    setPartialRegenerationRun(null);
+  };
   const regenerationFieldOptions = [
     "caption",
     "cut_action",
@@ -1611,6 +1635,13 @@ export function App() {
                     <p>{segment.text}</p>
                     <span>{formatSeconds(segment.start_sec, segment.end_sec)}</span>
                     <span>Confidence {segment.confidence.toFixed(2)}</span>
+                    <button
+                      className="action-button"
+                      onClick={() => openSegmentInEditor(segment.segment_id)}
+                      type="button"
+                    >
+                      Open {segment.segment_id} in editor
+                    </button>
                   </div>
                 )) ?? <p className="empty-state">No review snapshot data.</p>}
               </div>
@@ -1636,13 +1667,30 @@ export function App() {
                 </div>
                 <div>
                   <h3>Pending review</h3>
-                  {(reviewSnapshot?.pending_recommendations ?? []).map((item) => (
-                    <div className="recommendation-card pending" key={item.recommendation_id}>
-                      <strong>{prettifyJobType(item.recommendation_type)}</strong>
-                      <p>{item.reason}</p>
-                      <span>{item.target_segment_id}</span>
-                    </div>
-                  ))}
+                  {(reviewSnapshot?.pending_recommendations ?? []).map((item) => {
+                    const mappedField = mapRecommendationTypeToEditingField(
+                      item.recommendation_type,
+                    );
+                    return (
+                      <div className="recommendation-card pending" key={item.recommendation_id}>
+                        <strong>{prettifyJobType(item.recommendation_type)}</strong>
+                        <p>{item.reason}</p>
+                        <span>{item.target_segment_id}</span>
+                        <button
+                          className="action-button"
+                          onClick={() =>
+                            openSegmentInEditor(
+                              item.target_segment_id,
+                              mappedField ? [mappedField] : undefined,
+                            )
+                          }
+                          type="button"
+                        >
+                          Review {item.target_segment_id} in editor
+                        </button>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             </article>
@@ -1660,6 +1708,13 @@ export function App() {
                     <strong>{prettifyJobType(flag.code)}</strong>
                     <p>{flag.message}</p>
                     <span>{flag.segment_id}</span>
+                    <button
+                      className="action-button"
+                      onClick={() => openSegmentInEditor(flag.segment_id)}
+                      type="button"
+                    >
+                      Inspect {flag.segment_id} in editor
+                    </button>
                   </div>
                 ))}
               </div>

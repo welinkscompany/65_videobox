@@ -496,6 +496,43 @@ const candidateApprovedReviewSnapshotResponse: ReviewSnapshot = {
   review_status: "approved",
 };
 
+const blockedReviewSnapshotResponse: ReviewSnapshot = {
+  ...reviewSnapshotResponse,
+  review_status: "blocked",
+  segments: reviewSnapshotResponse.segments.map((segment) =>
+    segment.segment_id === "seg_002"
+      ? {
+          ...segment,
+          text: "Team meeting restart",
+          confidence: 0.78,
+          review_required: true,
+          cleanup_decision: "review",
+        }
+      : segment,
+  ),
+  pending_recommendations: [
+    {
+      recommendation_id: "rec_011",
+      target_segment_id: "seg_002",
+      recommendation_type: "tts_replacement",
+      selected_asset_id: null,
+      score: 0.74,
+      reason: "Pronunciation restart detected",
+      auto_apply_allowed: false,
+      review_required: true,
+      payload: { provider: "voicebox" },
+      created_at: "2026-06-28T00:00:06Z",
+    },
+  ],
+  review_flags: [
+    {
+      code: "segment_review_required",
+      segment_id: "seg_002",
+      message: "Segment requires operator review before export.",
+    },
+  ],
+};
+
 const geminiKeysResponse = {
   keys: [
     {
@@ -1131,6 +1168,93 @@ describe("App", () => {
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith("/api/projects", undefined);
     });
+  });
+
+  it("opens the pending recommendation target in the editing session and narrows the rerun field to the relevant recommendation type", async () => {
+    const fetchMock = createFetchMock({
+      reviewSnapshot: blockedReviewSnapshotResponse,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /review snapshot/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /review seg_002 in editor/i }));
+
+    expect(await screen.findByRole("heading", { name: /timeline-centered editor shell/i })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: /target segment/i })).toHaveValue("seg_002");
+    expect(screen.getByRole("checkbox", { name: /tts replacement/i })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /broll/i })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /explanation card/i })).not.toBeChecked();
+  });
+
+  it("opens the flagged segment in the editing session without overwriting its default rerun scope when no direct field mapping exists", async () => {
+    const fetchMock = createFetchMock({
+      reviewSnapshot: blockedReviewSnapshotResponse,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /review snapshot/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /inspect seg_002 in editor/i }));
+
+    expect(await screen.findByRole("heading", { name: /timeline-centered editor shell/i })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: /target segment/i })).toHaveValue("seg_002");
+    expect(screen.getByRole("checkbox", { name: /broll/i })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /explanation card/i })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /tts replacement/i })).not.toBeChecked();
+  });
+
+  it("opens the review snapshot segment directly in the editing session", async () => {
+    const fetchMock = createFetchMock({
+      reviewSnapshot: blockedReviewSnapshotResponse,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /review snapshot/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /open seg_002 in editor/i }));
+
+    expect(await screen.findByRole("heading", { name: /timeline-centered editor shell/i })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: /target segment/i })).toHaveValue("seg_002");
+    expect(screen.getByRole("checkbox", { name: /broll/i })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /explanation card/i })).toBeChecked();
+  });
+
+  it("falls back to the segment default rerun scope when a pending recommendation type is not mapped to an editor field", async () => {
+    const fetchMock = createFetchMock({
+      reviewSnapshot: {
+        ...blockedReviewSnapshotResponse,
+        pending_recommendations: [
+          {
+            recommendation_id: "rec_012",
+            target_segment_id: "seg_002",
+            recommendation_type: "manual_review",
+            selected_asset_id: null,
+            score: 0.41,
+            reason: "Operator should inspect this segment manually.",
+            auto_apply_allowed: false,
+            review_required: true,
+            payload: {},
+            created_at: "2026-06-28T00:00:07Z",
+          },
+        ],
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /review snapshot/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /review seg_002 in editor/i }));
+
+    expect(await screen.findByRole("heading", { name: /timeline-centered editor shell/i })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: /target segment/i })).toHaveValue("seg_002");
+    expect(screen.getByRole("checkbox", { name: /broll/i })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /explanation card/i })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /tts replacement/i })).not.toBeChecked();
   });
 
   it("disables preview and export controls until review blockers are cleared", async () => {
