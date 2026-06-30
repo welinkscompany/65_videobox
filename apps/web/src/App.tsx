@@ -261,6 +261,7 @@ export function App() {
   const [exportJob, setExportJob] = useState<ExportJob | null>(null);
   const [geminiKeys, setGeminiKeys] = useState<GeminiProviderKey[]>([]);
   const [geminiLoadError, setGeminiLoadError] = useState<string | null>(null);
+  const [editingSessionRestoreError, setEditingSessionRestoreError] = useState<string | null>(null);
   const [loadState, setLoadState] = useState<LoadState>("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isRebuildingTimeline, setIsRebuildingTimeline] = useState(false);
@@ -339,13 +340,19 @@ export function App() {
       setLoadState("loading");
       setErrorMessage(null);
       setGeminiLoadError(null);
+      setEditingSessionRestoreError(null);
       try {
         const project = await api.getProject(projectId);
         const jobItems = await api.listJobs(projectId);
         let latestEditingSession: EditingSession | null = null;
         try {
           latestEditingSession = await api.getLatestEditingSession(projectId);
-        } catch {
+        } catch (error) {
+          setEditingSessionRestoreError(
+            error instanceof Error
+              ? `Latest editing session could not be restored. Stable timeline data is still available below. (${error.message})`
+              : "Latest editing session could not be restored. Stable timeline data is still available below.",
+          );
           latestEditingSession = null;
         }
         const latestTimelineJob = findLatestTimelineJob(jobItems);
@@ -634,6 +641,7 @@ export function App() {
     }
     setIsStartingEditingSession(true);
     setErrorMessage(null);
+    setEditingSessionRestoreError(null);
     try {
       const session = await api.createEditingSession(selectedProjectId, {
         timeline_job_id: latestTimelineBuildJob.job_id,
@@ -1669,6 +1677,9 @@ export function App() {
                   {isStartingEditingSession ? "Starting editing session..." : "Start editing session"}
                 </button>
               </div>
+              {editingSessionRestoreError ? (
+                <p className="error-banner">{editingSessionRestoreError}</p>
+              ) : null}
               {editingSession ? (
                 <>
                   <dl className="summary-list">

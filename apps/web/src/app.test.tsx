@@ -537,6 +537,7 @@ function createFetchMock({
   geminiKeys = geminiKeysResponse,
   editingSession = editingSessionResponse,
   latestEditingSession = editingSessionResponse,
+  latestEditingSessionStatus,
   reviewSnapshot = reviewSnapshotResponse,
   candidateReviewSnapshot = candidateReviewSnapshotResponse,
   partialRegenerationResult = partialRegenerationResultResponse,
@@ -546,6 +547,7 @@ function createFetchMock({
   geminiKeys?: { keys: Array<Record<string, unknown>> };
   editingSession?: typeof editingSessionResponse;
   latestEditingSession?: typeof editingSessionResponse | null;
+  latestEditingSessionStatus?: number;
   reviewSnapshot?: typeof reviewSnapshotResponse;
   candidateReviewSnapshot?: ReviewSnapshot;
   partialRegenerationResult?: typeof partialRegenerationResultResponse;
@@ -715,6 +717,9 @@ function createFetchMock({
       return new Response(JSON.stringify(state.editingSession));
     }
     if (url.endsWith("/api/projects/project_001/editing-sessions/latest")) {
+      if (latestEditingSessionStatus != null) {
+        return new Response("latest session error", { status: latestEditingSessionStatus });
+      }
       if (latestEditingSession == null) {
         return new Response("not found", { status: 404 });
       }
@@ -2405,6 +2410,65 @@ describe("App", () => {
     expect(screen.getByText(/explanation card field resumed/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /approve timeline/i })).toBeEnabled();
     expect(screen.getByRole("button", { name: /generate subtitle file/i })).toBeDisabled();
+  });
+
+  it("treats latest editing session 404 as a normal no-session case", async () => {
+    const fetchMock = createFetchMock({
+      latestEditingSession: null,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+
+    expect((await screen.findAllByText(/no editing session loaded yet/i)).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/latest editing session could not be restored/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /start editing session/i })).toBeEnabled();
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/projects/project_001/partial-regenerations/partial_regeneration_job_001",
+      undefined,
+    );
+  });
+
+  it("shows a restore warning when latest editing session fetch fails with non-404 error", async () => {
+    const fetchMock = createFetchMock({
+      latestEditingSession: null,
+      latestEditingSessionStatus: 500,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+
+    expect(await screen.findByText(/latest editing session could not be restored/i)).toBeInTheDocument();
+    expect(screen.getByText(/stable timeline data is still available below/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/no editing session loaded yet/i).length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: /start editing session/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /generate subtitle file/i })).toBeEnabled();
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/projects/project_001/partial-regenerations/partial_regeneration_job_001",
+      undefined,
+    );
+  });
+
+  it("clears the restore warning after the operator starts a fresh editing session", async () => {
+    const fetchMock = createFetchMock({
+      latestEditingSession: null,
+      latestEditingSessionStatus: 500,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+    expect(await screen.findByText(/latest editing session could not be restored/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /start editing session/i }));
+
+    expect(await screen.findByText(/editing_session_001/i)).toBeInTheDocument();
+    expect(screen.queryByText(/latest editing session could not be restored/i)).not.toBeInTheDocument();
   });
 
   it("reuses blocked preflight interpretation on refresh-resume for the latest fresh candidate", async () => {
