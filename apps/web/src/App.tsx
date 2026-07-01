@@ -17,6 +17,7 @@ import {
 } from "./api";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
+type RestoredTargetedSegment = Record<string, unknown>;
 
 const reviewActions = [
   "Approve recommendation",
@@ -113,9 +114,15 @@ type EditingSegmentDraft = {
 };
 
 function readOverlay(segment: EditingSessionSegment, overlayType: string) {
+  const overlayTypeAliases: Record<string, string[]> = {
+    visual_overlay: ["visual_overlay", "hook_title"],
+    image_overlay: ["image_overlay", "image_card", "image"],
+    table_overlay: ["table_overlay", "table_card"],
+  };
+  const acceptedTypes = overlayTypeAliases[overlayType] ?? [overlayType];
   return (
     segment.visual_overlays.find(
-      (overlay) => String(overlay.overlay_type ?? "") === overlayType,
+      (overlay) => acceptedTypes.includes(String(overlay.overlay_type ?? "")),
     ) ?? null
   );
 }
@@ -165,6 +172,9 @@ function buildDefaultRegenerationFields(segment: EditingSessionSegment | null) {
   }
   if (segment.music_override) {
     defaultFields.push("music");
+  }
+  if (readOverlay(segment, "visual_overlay")) {
+    defaultFields.push("visual_overlay");
   }
   if (readOverlay(segment, "explanation_card")) {
     defaultFields.push("explanation_card");
@@ -217,7 +227,34 @@ function mapRecommendationTypeToEditingField(recommendationType: string) {
 function haveSameMembers(left: string[], right: string[]) {
   const leftSet = new Set(left);
   const rightSet = new Set(right);
-  return leftSet.size === rightSet.size && [...leftSet].every((item) => rightSet.has(item));
+  return (
+    left.length === right.length &&
+    leftSet.size === rightSet.size &&
+    [...leftSet].every((item) => rightSet.has(item))
+  );
+}
+
+function findEditingSessionSegmentById(session: EditingSession, segmentId: string) {
+  return session.segments.find((item) => item.segment_id === segmentId) ?? null;
+}
+
+function readRecordValue(value: unknown) {
+  return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null;
+}
+
+function restoredTargetedSegmentsMatch(
+  restoredSegments: RestoredTargetedSegment[],
+  session: EditingSession,
+  matcher: (restoredSegment: RestoredTargetedSegment, currentSegment: EditingSessionSegment) => boolean,
+) {
+  return restoredSegments.every((segment) => {
+    const restoredSegmentId = String(segment.segment_id ?? "");
+    if (!restoredSegmentId) {
+      return false;
+    }
+    const currentSessionSegment = findEditingSessionSegmentById(session, restoredSegmentId);
+    return !!currentSessionSegment && matcher(segment, currentSessionSegment);
+  });
 }
 
 function formatAffectedOutputArea(area: string) {
@@ -429,7 +466,7 @@ export function App() {
                 const canRepresentResumedScope = candidateResult.segment_ids.length === 1;
                 if (canRepresentResumedScope) {
                   try {
-                    resumedPartialRegenerationPreflight = await api.previewPartialRegeneration(
+                    const restoredPreflight = await api.previewPartialRegeneration(
                       projectId,
                       candidateResult.session_id,
                       {
@@ -437,6 +474,88 @@ export function App() {
                         fields: candidateResult.fields,
                       },
                     );
+                    const restoredTargetedSegmentIds = restoredPreflight.targeted_segments
+                      .map((segment) => String(segment.segment_id ?? ""))
+                      .filter(Boolean);
+                    const restoredTargetedSegmentsMatchReviewState = restoredTargetedSegmentsMatch(
+                      restoredPreflight.targeted_segments,
+                      latestEditingSession,
+                      (segment, currentSessionSegment) =>
+                        Boolean(segment.review_required) ===
+                        Boolean(currentSessionSegment.review_required),
+                    );
+                    const restoredTargetedSegmentsMatchTtsReplacement = restoredTargetedSegmentsMatch(
+                      restoredPreflight.targeted_segments,
+                      latestEditingSession,
+                      (segment, currentSessionSegment) => {
+                        const restoredTtsRecommendationId = String(
+                          readRecordValue(segment.tts_replacement)?.recommendation_id ?? "",
+                        );
+                        const restoredTtsAssetId = String(
+                          readRecordValue(segment.tts_replacement)?.asset_id ?? "",
+                        );
+                        const currentTtsRecommendationId = String(
+                          currentSessionSegment.tts_replacement?.recommendation_id ?? "",
+                        );
+                        const currentTtsAssetId = String(
+                          currentSessionSegment.tts_replacement?.asset_id ?? "",
+                        );
+                        return (
+                          restoredTtsRecommendationId === currentTtsRecommendationId &&
+                          restoredTtsAssetId === currentTtsAssetId
+                        );
+                      },
+                    );
+                    const restoredTargetedSegmentsMatchVisualOverlays = restoredTargetedSegmentsMatch(
+                      restoredPreflight.targeted_segments,
+                      latestEditingSession,
+                      (segment, currentSessionSegment) =>
+                        JSON.stringify(segment.visual_overlays ?? []) ===
+                        JSON.stringify(currentSessionSegment.visual_overlays ?? []),
+                    );
+                    const restoredTargetedSegmentsMatchBrollOverride = restoredTargetedSegmentsMatch(
+                      restoredPreflight.targeted_segments,
+                      latestEditingSession,
+                      (segment, currentSessionSegment) => {
+                        const restoredBrollAssetId = String(
+                          readRecordValue(segment.broll_override)?.asset_id ?? "",
+                        );
+                        const currentBrollAssetId = String(
+                          currentSessionSegment.broll_override?.asset_id ?? "",
+                        );
+                        return restoredBrollAssetId === currentBrollAssetId;
+                      },
+                    );
+                    const restoredTargetedSegmentsMatchMusicOverride = restoredTargetedSegmentsMatch(
+                      restoredPreflight.targeted_segments,
+                      latestEditingSession,
+                      (segment, currentSessionSegment) => {
+                        const restoredMusicAssetId = String(
+                          readRecordValue(segment.music_override)?.asset_id ?? "",
+                        );
+                        const currentMusicAssetId = String(
+                          currentSessionSegment.music_override?.asset_id ?? "",
+                        );
+                        return restoredMusicAssetId === currentMusicAssetId;
+                      },
+                    );
+                    if (
+                      restoredPreflight.session_id === candidateResult.session_id &&
+                      haveSameMembers(restoredPreflight.segment_ids, candidateResult.segment_ids) &&
+                      haveSameMembers(restoredTargetedSegmentIds, candidateResult.segment_ids) &&
+                      restoredTargetedSegmentsMatchReviewState &&
+                      restoredTargetedSegmentsMatchTtsReplacement &&
+                      restoredTargetedSegmentsMatchVisualOverlays &&
+                      restoredTargetedSegmentsMatchBrollOverride &&
+                      restoredTargetedSegmentsMatchMusicOverride &&
+                      haveSameMembers(restoredPreflight.fields, candidateResult.fields)
+                    ) {
+                      resumedPartialRegenerationPreflight = restoredPreflight;
+                    } else {
+                      resumedPartialRegenerationPreflight = null;
+                      resumedPartialRegenerationRestoreWarning =
+                        "Resumed candidate preflight interpretation is unavailable. Candidate scope is visible, but review prediction details could not be reused.";
+                    }
                   } catch {
                     resumedPartialRegenerationPreflight = null;
                     resumedPartialRegenerationRestoreWarning =
@@ -1195,6 +1314,7 @@ export function App() {
     "cut_action",
     "broll",
     "music",
+    "visual_overlay",
     "explanation_card",
     "image_overlay",
     "table_overlay",
@@ -2524,9 +2644,7 @@ export function App() {
                       Image overlay asset ID required before saving.
                     </p>
                   ) : null}
-                  {selectedEditingSegment.visual_overlays.some(
-                    (overlay) => String(overlay.overlay_type ?? "") === "image_overlay",
-                  ) ? (
+                  {Boolean(readOverlay(selectedEditingSegment, "image_overlay")) ? (
                     <button
                       className="action-button"
                       disabled={
@@ -2631,9 +2749,7 @@ export function App() {
                       Table text required before saving.
                     </p>
                   ) : null}
-                  {selectedEditingSegment.visual_overlays.some(
-                    (overlay) => String(overlay.overlay_type ?? "") === "table_overlay",
-                  ) ? (
+                  {Boolean(readOverlay(selectedEditingSegment, "table_overlay")) ? (
                     <button
                       className="action-button"
                       disabled={

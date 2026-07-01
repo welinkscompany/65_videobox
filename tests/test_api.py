@@ -3820,13 +3820,393 @@ def test_preview_and_export_surface_pending_tts_replacement_blocker_before_appro
         f"/api/projects/{project.project_id}/jobs/capcut-export",
         json={"timeline_job_id": timeline_job["job_id"]},
     )
+    subtitle_response = client.post(
+        f"/api/projects/{project.project_id}/jobs/subtitle-render",
+        json={"timeline_job_id": timeline_job["job_id"]},
+    )
 
     assert preview_response.status_code == 400
     assert export_response.status_code == 400
+    assert subtitle_response.status_code == 400
     assert "tts_replacement" in preview_response.json()["detail"]
     assert "rec_tts_seg_001" in preview_response.json()["detail"]
     assert "tts_replacement" in export_response.json()["detail"]
     assert "rec_tts_seg_001" in export_response.json()["detail"]
+    assert "tts_replacement" in subtitle_response.json()["detail"]
+    assert "rec_tts_seg_001" in subtitle_response.json()["detail"]
+
+    jobs_response = client.get(f"/api/projects/{project.project_id}/jobs")
+    jobs_payload = jobs_response.json()["jobs"]
+    preview_job = next(job for job in jobs_payload if job["job_type"] == "preview_render")
+    export_job = next(job for job in jobs_payload if job["job_type"] == "capcut_export")
+    subtitle_job = next(job for job in jobs_payload if job["job_type"] == "subtitle_render")
+    assert preview_job["status"] == "failed"
+    assert export_job["status"] == "failed"
+    assert subtitle_job["status"] == "failed"
+
+    project_root = tmp_path / "projects" / project.project_id
+    assert not list((project_root / "previews").glob("preview_*.json"))
+    assert not list((project_root / "exports" / "capcut").glob("export_*"))
+    assert not list((project_root / "subtitles").glob("subtitle_*.srt"))
+
+
+def test_output_jobs_ignore_stale_truthy_blocker_shapes_on_approved_timeline(tmp_path: Path) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    timeline_response = client.get(f"/api/projects/{project_id}/timelines/{timeline_job_id}")
+    timeline_payload = timeline_response.json()["timeline"]
+    timeline_path = (
+        tmp_path
+        / "projects"
+        / project_id
+        / "timelines"
+        / f'{timeline_payload["timeline_id"]}.json'
+    )
+    persisted_timeline = json.loads(timeline_path.read_text(encoding="utf-8"))
+    persisted_timeline["review_flags"] = "stale_review_flag_container"
+    persisted_timeline["pending_recommendations"] = ["stale_entry"]
+    timeline_path.write_text(json.dumps(persisted_timeline, indent=2), encoding="utf-8")
+
+    store = LocalProjectStore(tmp_path)
+    store.save_review_state(
+        project_id=project_id,
+        timeline_id=str(timeline_payload["timeline_id"]),
+        status="approved",
+    )
+
+    subtitle_response = client.post(
+        f"/api/projects/{project_id}/jobs/subtitle-render",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    preview_response = client.post(
+        f"/api/projects/{project_id}/jobs/preview-render",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    export_response = client.post(
+        f"/api/projects/{project_id}/jobs/capcut-export",
+        json={"timeline_job_id": timeline_job_id},
+    )
+
+    assert subtitle_response.status_code == 202
+    assert preview_response.status_code == 202
+    assert export_response.status_code == 202
+
+    subtitle_result = client.get(f"/api/projects/{project_id}/subtitles/{subtitle_response.json()['job_id']}")
+    preview_result = client.get(f"/api/projects/{project_id}/previews/{preview_response.json()['job_id']}")
+    export_result = client.get(f"/api/projects/{project_id}/exports/{export_response.json()['job_id']}")
+
+    assert subtitle_result.status_code == 200
+    assert preview_result.status_code == 200
+    assert export_result.status_code == 200
+
+
+def test_approved_review_state_still_blocks_outputs_when_timeline_has_residual_review_blockers(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Approved State Residual Blocker Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 1.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [
+                {
+                    "code": "tts_replacement_review_required",
+                    "segment_id": "seg_001",
+                    "message": "Approved TTS replacement is still required before output.",
+                }
+            ],
+            "applied_recommendations": [],
+            "pending_recommendations": [
+                {
+                    "recommendation_id": "rec_tts_seg_001",
+                    "target_segment_id": "seg_001",
+                    "recommendation_type": "tts_replacement",
+                    "selected_asset_id": "asset_tts_001",
+                    "score": 1.0,
+                    "reason": "Manual TTS replacement selection from editing session.",
+                    "auto_apply_allowed": False,
+                    "review_required": True,
+                    "payload": {},
+                    "created_at": "2026-07-01T00:00:00+00:00",
+                    "provider_trace": build_provider_trace(final_provider="rule_based_fallback"),
+                }
+            ],
+        },
+    )
+    store.save_review_state(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        status="approved",
+    )
+    timeline_job = store.create_job(
+        project_id=project.project_id,
+        job_type=JobType.TIMELINE_BUILD,
+        input_ref="segment_analysis_job_001",
+        status=JobStatus.SUCCEEDED,
+    )
+    store.update_job(
+        project_id=project.project_id,
+        job_id=timeline_job["job_id"],
+        status=JobStatus.SUCCEEDED,
+        output_ref=timeline["timeline_id"],
+    )
+
+    client = TestClient(create_app(projects_root=tmp_path))
+    preview_response = client.post(
+        f"/api/projects/{project.project_id}/jobs/preview-render",
+        json={"timeline_job_id": timeline_job["job_id"]},
+    )
+    export_response = client.post(
+        f"/api/projects/{project.project_id}/jobs/capcut-export",
+        json={"timeline_job_id": timeline_job["job_id"]},
+    )
+    subtitle_response = client.post(
+        f"/api/projects/{project.project_id}/jobs/subtitle-render",
+        json={"timeline_job_id": timeline_job["job_id"]},
+    )
+
+    assert preview_response.status_code == 400
+    assert export_response.status_code == 400
+    assert subtitle_response.status_code == 400
+    assert "review blockers" in preview_response.json()["detail"].lower()
+    assert "review blockers" in export_response.json()["detail"].lower()
+    assert "review blockers" in subtitle_response.json()["detail"].lower()
+    assert "tts_replacement" in preview_response.json()["detail"]
+    assert "rec_tts_seg_001" in preview_response.json()["detail"]
+    assert "tts_replacement" in export_response.json()["detail"]
+    assert "rec_tts_seg_001" in export_response.json()["detail"]
+    assert "tts_replacement" in subtitle_response.json()["detail"]
+    assert "rec_tts_seg_001" in subtitle_response.json()["detail"]
+
+    jobs_response = client.get(f"/api/projects/{project.project_id}/jobs")
+    jobs_payload = jobs_response.json()["jobs"]
+    preview_job = next(job for job in jobs_payload if job["job_type"] == "preview_render")
+    export_job = next(job for job in jobs_payload if job["job_type"] == "capcut_export")
+    subtitle_job = next(job for job in jobs_payload if job["job_type"] == "subtitle_render")
+    assert preview_job["status"] == "failed"
+    assert export_job["status"] == "failed"
+    assert subtitle_job["status"] == "failed"
+
+    project_root = tmp_path / "projects" / project.project_id
+    assert not list((project_root / "previews").glob("preview_*.json"))
+    assert not list((project_root / "exports" / "capcut").glob("export_*"))
+    assert not list((project_root / "subtitles").glob("subtitle_*.srt"))
+
+
+def test_approved_review_state_still_blocks_outputs_when_only_review_flags_remain(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Approved State Review Flag Only Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 1.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [
+                {
+                    "code": "tts_replacement_review_required",
+                    "segment_id": "seg_001",
+                    "message": "Approved TTS replacement is still required before output.",
+                }
+            ],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+        },
+    )
+    store.save_review_state(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        status="approved",
+    )
+    timeline_job = store.create_job(
+        project_id=project.project_id,
+        job_type=JobType.TIMELINE_BUILD,
+        input_ref="segment_analysis_job_001",
+        status=JobStatus.SUCCEEDED,
+    )
+    store.update_job(
+        project_id=project.project_id,
+        job_id=timeline_job["job_id"],
+        status=JobStatus.SUCCEEDED,
+        output_ref=timeline["timeline_id"],
+    )
+
+    client = TestClient(create_app(projects_root=tmp_path))
+    preview_response = client.post(
+        f"/api/projects/{project.project_id}/jobs/preview-render",
+        json={"timeline_job_id": timeline_job["job_id"]},
+    )
+    export_response = client.post(
+        f"/api/projects/{project.project_id}/jobs/capcut-export",
+        json={"timeline_job_id": timeline_job["job_id"]},
+    )
+    subtitle_response = client.post(
+        f"/api/projects/{project.project_id}/jobs/subtitle-render",
+        json={"timeline_job_id": timeline_job["job_id"]},
+    )
+
+    assert preview_response.status_code == 400
+    assert export_response.status_code == 400
+    assert subtitle_response.status_code == 400
+    assert "review blockers" in preview_response.json()["detail"].lower()
+    assert "review blockers" in export_response.json()["detail"].lower()
+    assert "review blockers" in subtitle_response.json()["detail"].lower()
+    assert "tts_replacement_review_required@seg_001" in preview_response.json()["detail"]
+    assert "tts_replacement_review_required@seg_001" in export_response.json()["detail"]
+    assert "tts_replacement_review_required@seg_001" in subtitle_response.json()["detail"]
+
+    jobs_response = client.get(f"/api/projects/{project.project_id}/jobs")
+    jobs_payload = jobs_response.json()["jobs"]
+    preview_job = next(job for job in jobs_payload if job["job_type"] == "preview_render")
+    export_job = next(job for job in jobs_payload if job["job_type"] == "capcut_export")
+    subtitle_job = next(job for job in jobs_payload if job["job_type"] == "subtitle_render")
+    assert preview_job["status"] == "failed"
+    assert export_job["status"] == "failed"
+    assert subtitle_job["status"] == "failed"
+
+    project_root = tmp_path / "projects" / project.project_id
+    assert not list((project_root / "previews").glob("preview_*.json"))
+    assert not list((project_root / "exports" / "capcut").glob("export_*"))
+    assert not list((project_root / "subtitles").glob("subtitle_*.srt"))
+
+
+def test_approved_review_state_still_blocks_outputs_when_only_pending_recommendations_remain(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Approved State Pending Only Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 1.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [
+                {
+                    "recommendation_id": "rec_tts_seg_001",
+                    "target_segment_id": "seg_001",
+                    "recommendation_type": "tts_replacement",
+                    "selected_asset_id": "asset_tts_001",
+                    "score": 1.0,
+                    "reason": "Manual TTS replacement selection from editing session.",
+                    "auto_apply_allowed": False,
+                    "review_required": True,
+                    "payload": {},
+                    "created_at": "2026-07-01T00:00:00+00:00",
+                    "provider_trace": build_provider_trace(final_provider="rule_based_fallback"),
+                }
+            ],
+        },
+    )
+    store.save_review_state(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        status="approved",
+    )
+    timeline_job = store.create_job(
+        project_id=project.project_id,
+        job_type=JobType.TIMELINE_BUILD,
+        input_ref="segment_analysis_job_001",
+        status=JobStatus.SUCCEEDED,
+    )
+    store.update_job(
+        project_id=project.project_id,
+        job_id=timeline_job["job_id"],
+        status=JobStatus.SUCCEEDED,
+        output_ref=timeline["timeline_id"],
+    )
+
+    client = TestClient(create_app(projects_root=tmp_path))
+    preview_response = client.post(
+        f"/api/projects/{project.project_id}/jobs/preview-render",
+        json={"timeline_job_id": timeline_job["job_id"]},
+    )
+    export_response = client.post(
+        f"/api/projects/{project.project_id}/jobs/capcut-export",
+        json={"timeline_job_id": timeline_job["job_id"]},
+    )
+    subtitle_response = client.post(
+        f"/api/projects/{project.project_id}/jobs/subtitle-render",
+        json={"timeline_job_id": timeline_job["job_id"]},
+    )
+
+    assert preview_response.status_code == 400
+    assert export_response.status_code == 400
+    assert subtitle_response.status_code == 400
+    assert "review blockers" in preview_response.json()["detail"].lower()
+    assert "review blockers" in export_response.json()["detail"].lower()
+    assert "review blockers" in subtitle_response.json()["detail"].lower()
+    assert "tts_replacement:rec_tts_seg_001@seg_001" in preview_response.json()["detail"]
+    assert "tts_replacement:rec_tts_seg_001@seg_001" in export_response.json()["detail"]
+    assert "tts_replacement:rec_tts_seg_001@seg_001" in subtitle_response.json()["detail"]
+
+    jobs_response = client.get(f"/api/projects/{project.project_id}/jobs")
+    jobs_payload = jobs_response.json()["jobs"]
+    preview_job = next(job for job in jobs_payload if job["job_type"] == "preview_render")
+    export_job = next(job for job in jobs_payload if job["job_type"] == "capcut_export")
+    subtitle_job = next(job for job in jobs_payload if job["job_type"] == "subtitle_render")
+    assert preview_job["status"] == "failed"
+    assert export_job["status"] == "failed"
+    assert subtitle_job["status"] == "failed"
+
+    project_root = tmp_path / "projects" / project.project_id
+    assert not list((project_root / "previews").glob("preview_*.json"))
+    assert not list((project_root / "exports" / "capcut").glob("export_*"))
+    assert not list((project_root / "subtitles").glob("subtitle_*.srt"))
 
 
 def test_preview_export_and_subtitles_require_explicit_approval_even_without_blockers(
@@ -3947,6 +4327,22 @@ def test_preview_export_and_subtitles_require_explicit_approval_even_without_blo
     assert export_response.status_code == 400
     assert subtitle_response.status_code == 400
     assert "approval" in preview_response.json()["detail"].lower()
+    assert "approval" in export_response.json()["detail"].lower()
+    assert "approval" in subtitle_response.json()["detail"].lower()
+
+    jobs_response = client.get(f"/api/projects/{project_id}/jobs")
+    jobs_payload = jobs_response.json()["jobs"]
+    preview_job = next(job for job in jobs_payload if job["job_type"] == "preview_render")
+    export_job = next(job for job in jobs_payload if job["job_type"] == "capcut_export")
+    subtitle_job = next(job for job in jobs_payload if job["job_type"] == "subtitle_render")
+    assert preview_job["status"] == "failed"
+    assert export_job["status"] == "failed"
+    assert subtitle_job["status"] == "failed"
+
+    project_root = tmp_path / "projects" / project_id
+    assert not list((project_root / "previews").glob("preview_*.json"))
+    assert not list((project_root / "exports" / "capcut").glob("export_*"))
+    assert not list((project_root / "subtitles").glob("subtitle_*.srt"))
 
 
 def test_review_snapshot_api_can_approve_pending_recommendation(tmp_path: Path) -> None:
@@ -4045,6 +4441,135 @@ def test_review_snapshot_api_can_approve_pending_recommendation(tmp_path: Path) 
     assert refreshed_timeline_payload["applied_recommendations"][0]["recommendation_id"] == (
         "rec_broll_review_002"
     )
+
+
+def test_approving_last_pending_recommendation_still_requires_explicit_review_approval_for_output(
+    tmp_path: Path,
+) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    timeline_result = client.get(f"/api/projects/{project_id}/timelines/{timeline_job_id}")
+    timeline_payload = timeline_result.json()["timeline"]
+    timeline_path = (
+        tmp_path
+        / "projects"
+        / project_id
+        / "timelines"
+        / f'{timeline_payload["timeline_id"]}.json'
+    )
+    approved_candidate = {
+        "recommendation_id": "rec_broll_review_002",
+        "target_segment_id": "seg_002",
+        "recommendation_type": "broll",
+        "selected_asset_id": "asset_broll_review_002",
+        "score": 0.88,
+        "reason": "Operator approved the suggested B-roll pick.",
+        "auto_apply_allowed": False,
+        "review_required": True,
+        "payload": {"tags": ["team", "meeting"]},
+        "created_at": "2026-06-30T00:00:00+00:00",
+    }
+    persisted_timeline = json.loads(timeline_path.read_text(encoding="utf-8"))
+    persisted_timeline["applied_recommendations"] = []
+    persisted_timeline["pending_recommendations"] = [approved_candidate]
+    persisted_timeline["review_flags"] = [
+        {
+            "code": "broll_review_required",
+            "segment_id": "seg_002",
+            "message": "Operator must confirm the B-roll pick before approval.",
+        }
+    ]
+    timeline_path.write_text(json.dumps(persisted_timeline, indent=2), encoding="utf-8")
+
+    database_path = tmp_path / "projects" / project_id / "db" / "project.sqlite"
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute("DELETE FROM recommendations")
+        connection.execute(
+            """
+            INSERT INTO recommendations (
+                recommendation_id,
+                project_id,
+                target_segment_id,
+                recommendation_type,
+                selected_asset_id,
+                score,
+                reason,
+                auto_apply_allowed,
+                review_required,
+                payload_json,
+                created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                approved_candidate["recommendation_id"],
+                project_id,
+                approved_candidate["target_segment_id"],
+                approved_candidate["recommendation_type"],
+                approved_candidate["selected_asset_id"],
+                approved_candidate["score"],
+                approved_candidate["reason"],
+                0,
+                1,
+                json.dumps(approved_candidate["payload"], ensure_ascii=True),
+                approved_candidate["created_at"],
+            ),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    approve_response = client.post(
+        f"/api/projects/{project_id}/review-snapshots/{timeline_job_id}/recommendations/"
+        "rec_broll_review_002/approve"
+    )
+    preview_response = client.post(
+        f"/api/projects/{project_id}/jobs/preview-render",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    export_response = client.post(
+        f"/api/projects/{project_id}/jobs/capcut-export",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    subtitle_response = client.post(
+        f"/api/projects/{project_id}/jobs/subtitle-render",
+        json={"timeline_job_id": timeline_job_id},
+    )
+
+    assert approve_response.status_code == 200
+    assert approve_response.json()["review_status"] == "draft"
+    assert preview_response.status_code == 400
+    assert export_response.status_code == 400
+    assert subtitle_response.status_code == 400
+    assert "approval" in preview_response.json()["detail"].lower()
+    assert "approval" in export_response.json()["detail"].lower()
+    assert "approval" in subtitle_response.json()["detail"].lower()
+
+    jobs_response = client.get(f"/api/projects/{project_id}/jobs")
+    jobs_payload = jobs_response.json()["jobs"]
+    preview_job = next(job for job in jobs_payload if job["job_type"] == "preview_render")
+    export_job = next(job for job in jobs_payload if job["job_type"] == "capcut_export")
+    subtitle_job = next(job for job in jobs_payload if job["job_type"] == "subtitle_render")
+    assert preview_job["status"] == "failed"
+    assert export_job["status"] == "failed"
+    assert subtitle_job["status"] == "failed"
+
+    refreshed_timeline = client.get(f"/api/projects/{project_id}/timelines/{timeline_job_id}")
+    assert refreshed_timeline.status_code == 200
+    refreshed_timeline_payload = refreshed_timeline.json()["timeline"]
+    assert refreshed_timeline_payload["review_status"] == "draft"
+    assert refreshed_timeline_payload["pending_recommendations"] == []
+    assert refreshed_timeline_payload["review_flags"] == []
+    assert [item["recommendation_id"] for item in refreshed_timeline_payload["applied_recommendations"]] == [
+        "rec_broll_review_002"
+    ]
+
+    project_root = tmp_path / "projects" / project_id
+    assert not list((project_root / "previews").glob("preview_*.json"))
+    assert not list((project_root / "exports" / "capcut").glob("export_*"))
+    assert not list((project_root / "subtitles").glob("subtitle_*.srt"))
 
 
 def test_review_snapshot_api_approve_preserves_non_target_review_items_and_blocked_status(
@@ -4227,6 +4752,706 @@ def test_review_snapshot_api_approve_preserves_non_target_review_items_and_block
     assert persisted_timeline_after_approve["recommendation_decisions"] == {
         "rec_broll_review_002": "approved"
     }
+
+
+def test_approving_one_of_multiple_pending_recommendations_keeps_output_blocked_by_remaining_detail(
+    tmp_path: Path,
+) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    timeline_result = client.get(f"/api/projects/{project_id}/timelines/{timeline_job_id}")
+    timeline_payload = timeline_result.json()["timeline"]
+    timeline_path = (
+        tmp_path
+        / "projects"
+        / project_id
+        / "timelines"
+        / f'{timeline_payload["timeline_id"]}.json'
+    )
+    target_candidate = {
+        "recommendation_id": "rec_broll_review_002",
+        "target_segment_id": "seg_002",
+        "recommendation_type": "broll",
+        "selected_asset_id": "asset_broll_review_002",
+        "score": 0.88,
+        "reason": "Operator approved the suggested B-roll pick.",
+        "auto_apply_allowed": False,
+        "review_required": True,
+        "payload": {"tags": ["team", "meeting"]},
+        "created_at": "2026-06-30T00:00:00+00:00",
+        "provider_trace": build_provider_trace(final_provider="heuristic_fallback"),
+    }
+    remaining_candidate = {
+        "recommendation_id": "rec_tts_review_003",
+        "target_segment_id": "seg_003",
+        "recommendation_type": "tts_replacement",
+        "selected_asset_id": "asset_tts_review_003",
+        "score": 0.91,
+        "reason": "Operator still needs to review the regenerated narration.",
+        "auto_apply_allowed": False,
+        "review_required": True,
+        "payload": {"voice_sample_id": "voice_003"},
+        "created_at": "2026-06-30T00:00:01+00:00",
+        "provider_trace": build_provider_trace(final_provider="rule_based_fallback"),
+    }
+    persisted_timeline = json.loads(timeline_path.read_text(encoding="utf-8"))
+    persisted_timeline["applied_recommendations"] = []
+    persisted_timeline["pending_recommendations"] = [target_candidate, remaining_candidate]
+    persisted_timeline["review_flags"] = [
+        {
+            "code": "broll_review_required",
+            "segment_id": "seg_002",
+            "message": "Operator must confirm the B-roll pick before approval.",
+        },
+        {
+            "code": "tts_replacement_review_required",
+            "segment_id": "seg_003",
+            "message": "Operator must confirm the TTS replacement before approval.",
+        },
+    ]
+    timeline_path.write_text(json.dumps(persisted_timeline, indent=2), encoding="utf-8")
+
+    database_path = tmp_path / "projects" / project_id / "db" / "project.sqlite"
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute("DELETE FROM recommendations")
+        connection.executemany(
+            """
+            INSERT INTO recommendations (
+                recommendation_id,
+                project_id,
+                target_segment_id,
+                recommendation_type,
+                selected_asset_id,
+                score,
+                reason,
+                auto_apply_allowed,
+                review_required,
+                payload_json,
+                created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    target_candidate["recommendation_id"],
+                    project_id,
+                    target_candidate["target_segment_id"],
+                    target_candidate["recommendation_type"],
+                    target_candidate["selected_asset_id"],
+                    target_candidate["score"],
+                    target_candidate["reason"],
+                    0,
+                    1,
+                    json.dumps(target_candidate["payload"], ensure_ascii=True),
+                    target_candidate["created_at"],
+                ),
+                (
+                    remaining_candidate["recommendation_id"],
+                    project_id,
+                    remaining_candidate["target_segment_id"],
+                    remaining_candidate["recommendation_type"],
+                    remaining_candidate["selected_asset_id"],
+                    remaining_candidate["score"],
+                    remaining_candidate["reason"],
+                    0,
+                    1,
+                    json.dumps(remaining_candidate["payload"], ensure_ascii=True),
+                    remaining_candidate["created_at"],
+                ),
+            ],
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    approve_response = client.post(
+        f"/api/projects/{project_id}/review-snapshots/{timeline_job_id}/recommendations/"
+        "rec_broll_review_002/approve"
+    )
+    preview_response = client.post(
+        f"/api/projects/{project_id}/jobs/preview-render",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    export_response = client.post(
+        f"/api/projects/{project_id}/jobs/capcut-export",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    subtitle_response = client.post(
+        f"/api/projects/{project_id}/jobs/subtitle-render",
+        json={"timeline_job_id": timeline_job_id},
+    )
+
+    assert approve_response.status_code == 200
+    assert approve_response.json()["review_status"] == "blocked"
+    assert preview_response.status_code == 400
+    assert export_response.status_code == 400
+    assert subtitle_response.status_code == 400
+    assert "tts_replacement" in preview_response.json()["detail"]
+    assert "rec_tts_review_003" in preview_response.json()["detail"]
+    assert "tts_replacement" in export_response.json()["detail"]
+    assert "rec_tts_review_003" in export_response.json()["detail"]
+    assert "tts_replacement" in subtitle_response.json()["detail"]
+    assert "rec_tts_review_003" in subtitle_response.json()["detail"]
+
+    jobs_response = client.get(f"/api/projects/{project_id}/jobs")
+    jobs_payload = jobs_response.json()["jobs"]
+    preview_job = next(job for job in jobs_payload if job["job_type"] == "preview_render")
+    export_job = next(job for job in jobs_payload if job["job_type"] == "capcut_export")
+    subtitle_job = next(job for job in jobs_payload if job["job_type"] == "subtitle_render")
+    assert preview_job["status"] == "failed"
+    assert export_job["status"] == "failed"
+    assert subtitle_job["status"] == "failed"
+
+    project_root = tmp_path / "projects" / project_id
+    assert not list((project_root / "previews").glob("preview_*.json"))
+    assert not list((project_root / "exports" / "capcut").glob("export_*"))
+    assert not list((project_root / "subtitles").glob("subtitle_*.srt"))
+
+
+def test_last_blocker_approval_followed_by_explicit_review_approval_unlocks_outputs(
+    tmp_path: Path,
+) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    timeline_result = client.get(f"/api/projects/{project_id}/timelines/{timeline_job_id}")
+    timeline_payload = timeline_result.json()["timeline"]
+    timeline_path = (
+        tmp_path
+        / "projects"
+        / project_id
+        / "timelines"
+        / f'{timeline_payload["timeline_id"]}.json'
+    )
+    approved_candidate = {
+        "recommendation_id": "rec_broll_review_002",
+        "target_segment_id": "seg_002",
+        "recommendation_type": "broll",
+        "selected_asset_id": "asset_broll_review_002",
+        "score": 0.88,
+        "reason": "Operator approved the suggested B-roll pick.",
+        "auto_apply_allowed": False,
+        "review_required": True,
+        "payload": {"tags": ["team", "meeting"]},
+        "created_at": "2026-06-30T00:00:00+00:00",
+    }
+    persisted_timeline = json.loads(timeline_path.read_text(encoding="utf-8"))
+    persisted_timeline["applied_recommendations"] = []
+    persisted_timeline["pending_recommendations"] = [approved_candidate]
+    persisted_timeline["review_flags"] = [
+        {
+            "code": "broll_review_required",
+            "segment_id": "seg_002",
+            "message": "Operator must confirm the B-roll pick before approval.",
+        }
+    ]
+    timeline_path.write_text(json.dumps(persisted_timeline, indent=2), encoding="utf-8")
+
+    database_path = tmp_path / "projects" / project_id / "db" / "project.sqlite"
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute("DELETE FROM recommendations")
+        connection.execute(
+            """
+            INSERT INTO recommendations (
+                recommendation_id,
+                project_id,
+                target_segment_id,
+                recommendation_type,
+                selected_asset_id,
+                score,
+                reason,
+                auto_apply_allowed,
+                review_required,
+                payload_json,
+                created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                approved_candidate["recommendation_id"],
+                project_id,
+                approved_candidate["target_segment_id"],
+                approved_candidate["recommendation_type"],
+                approved_candidate["selected_asset_id"],
+                approved_candidate["score"],
+                approved_candidate["reason"],
+                0,
+                1,
+                json.dumps(approved_candidate["payload"], ensure_ascii=True),
+                approved_candidate["created_at"],
+            ),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    approve_recommendation_response = client.post(
+        f"/api/projects/{project_id}/review-snapshots/{timeline_job_id}/recommendations/"
+        "rec_broll_review_002/approve"
+    )
+    blocked_preview_response = client.post(
+        f"/api/projects/{project_id}/jobs/preview-render",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    approve_review_response = client.post(
+        f"/api/projects/{project_id}/review-approvals/{timeline_job_id}/approve"
+    )
+    subtitle_response = client.post(
+        f"/api/projects/{project_id}/jobs/subtitle-render",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    preview_response = client.post(
+        f"/api/projects/{project_id}/jobs/preview-render",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    export_response = client.post(
+        f"/api/projects/{project_id}/jobs/capcut-export",
+        json={"timeline_job_id": timeline_job_id},
+    )
+
+    assert approve_recommendation_response.status_code == 200
+    assert approve_recommendation_response.json()["review_status"] == "draft"
+    assert blocked_preview_response.status_code == 400
+    assert "approval" in blocked_preview_response.json()["detail"].lower()
+    assert approve_review_response.status_code == 202
+    assert subtitle_response.status_code == 202
+    assert preview_response.status_code == 202
+    assert export_response.status_code == 202
+
+    refreshed_timeline = client.get(f"/api/projects/{project_id}/timelines/{timeline_job_id}")
+    review_snapshot = client.get(f"/api/projects/{project_id}/review-snapshots/{timeline_job_id}")
+    subtitle_result = client.get(
+        f"/api/projects/{project_id}/subtitles/{subtitle_response.json()['job_id']}"
+    )
+    preview_result = client.get(
+        f"/api/projects/{project_id}/previews/{preview_response.json()['job_id']}"
+    )
+    export_result = client.get(
+        f"/api/projects/{project_id}/exports/{export_response.json()['job_id']}"
+    )
+
+    assert refreshed_timeline.status_code == 200
+    assert refreshed_timeline.json()["timeline"]["review_status"] == "approved"
+    assert review_snapshot.status_code == 200
+    assert review_snapshot.json()["review_status"] == "approved"
+    assert subtitle_result.status_code == 200
+    assert subtitle_result.json()["subtitle"]["format"] == "srt"
+    assert subtitle_result.json()["subtitle"]["file_uri"].endswith(".srt")
+    assert preview_result.status_code == 200
+    assert preview_result.json()["preview"]["artifact_kind"] == "playable_html_preview"
+    assert preview_result.json()["preview"]["player_uri"].endswith(".html")
+    assert export_result.status_code == 200
+    assert export_result.json()["export"]["adapter"] == "capcut_v1_port"
+    assert export_result.json()["export"]["subtitle_file_uri"].endswith(".srt")
+
+
+def test_reopening_approved_review_reblocks_outputs_until_reapproved(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    def clean_transcribe(self, request):  # noqa: ANN001
+        return STTResult(
+            text="Office overview. Team meeting overview.",
+            segments=[
+                STTSegment(start_sec=0.0, end_sec=1.0, text="Office overview.", confidence=0.99),
+                STTSegment(
+                    start_sec=1.0,
+                    end_sec=2.2,
+                    text="Team meeting overview.",
+                    confidence=0.98,
+                ),
+            ],
+            provider_name="mock_stt",
+        )
+
+    monkeypatch.setattr(
+        "videobox_provider_interfaces.stt.MockSTTProvider.transcribe",
+        clean_transcribe,
+    )
+
+    source_audio = tmp_path / "source-narration.wav"
+    source_script = tmp_path / "source-script.txt"
+    broll_city = tmp_path / "city-office.mp4"
+    source_audio.write_bytes(b"fake wav data")
+    source_script.write_text("Office overview.\n\nTeam meeting overview.\n", encoding="utf-8")
+    broll_city.write_bytes(b"video bytes 1")
+
+    app = create_app(
+        projects_root=tmp_path,
+        local_first_runtime_service_factory=_local_first_service_factory(
+            local_provider=FakeStructuredProvider(
+                errors=[
+                    LLMProviderError(
+                        provider_name="local_qwen",
+                        message="offline test local unavailable",
+                        retryable=True,
+                        error_code="LOCAL_UNAVAILABLE",
+                    )
+                    for _ in range(8)
+                ]
+            ),
+            gemini_provider=FakeStructuredProvider(),
+            local_enabled=True,
+        ),
+    )
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "Reopen Approval Draft"}).json()["project_id"]
+
+    narration_asset_id = client.post(
+        f"/api/projects/{project_id}/assets/narration-audio",
+        json={"source_path": str(source_audio)},
+    ).json()["asset_id"]
+    script_asset_id = client.post(
+        f"/api/projects/{project_id}/assets/script-document",
+        json={"source_path": str(source_script)},
+    ).json()["asset_id"]
+    client.post(
+        f"/api/projects/{project_id}/assets/broll-video",
+        json={
+            "source_path": str(broll_city),
+            "title": "Office skyline",
+            "tags": ["office", "city", "overview"],
+        },
+    )
+
+    transcription_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/transcription",
+        json={"narration_asset_id": narration_asset_id},
+    ).json()["job_id"]
+    segment_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/segment-analysis",
+        json={
+            "transcription_job_id": transcription_job_id,
+            "script_asset_id": script_asset_id,
+        },
+    ).json()["job_id"]
+    broll_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/broll-recommendation",
+        json={"segment_analysis_job_id": segment_job_id},
+    ).json()["job_id"]
+    music_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/music-recommendation",
+        json={"segment_analysis_job_id": segment_job_id},
+    ).json()["job_id"]
+    timeline_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/build-timeline",
+        json={
+            "segment_analysis_job_id": segment_job_id,
+            "recommendation_job_ids": [broll_job_id, music_job_id],
+        },
+    ).json()["job_id"]
+
+    approve_response = client.post(f"/api/projects/{project_id}/review-approvals/{timeline_job_id}/approve")
+    preview_response = client.post(
+        f"/api/projects/{project_id}/jobs/preview-render",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    export_response = client.post(
+        f"/api/projects/{project_id}/jobs/capcut-export",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    subtitle_response = client.post(
+        f"/api/projects/{project_id}/jobs/subtitle-render",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    reopen_response = client.post(f"/api/projects/{project_id}/review-approvals/{timeline_job_id}/reopen")
+    reblocked_preview_response = client.post(
+        f"/api/projects/{project_id}/jobs/preview-render",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    reblocked_export_response = client.post(
+        f"/api/projects/{project_id}/jobs/capcut-export",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    reblocked_subtitle_response = client.post(
+        f"/api/projects/{project_id}/jobs/subtitle-render",
+        json={"timeline_job_id": timeline_job_id},
+    )
+
+    assert approve_response.status_code == 202
+    assert preview_response.status_code == 202
+    assert export_response.status_code == 202
+    assert subtitle_response.status_code == 202
+    assert reopen_response.status_code == 202
+    assert reopen_response.json()["review_status"] == "draft"
+    assert reblocked_preview_response.status_code == 400
+    assert reblocked_export_response.status_code == 400
+    assert reblocked_subtitle_response.status_code == 400
+    assert "approval" in reblocked_preview_response.json()["detail"].lower()
+    assert "approval" in reblocked_export_response.json()["detail"].lower()
+    assert "approval" in reblocked_subtitle_response.json()["detail"].lower()
+
+    refreshed_timeline = client.get(f"/api/projects/{project_id}/timelines/{timeline_job_id}")
+    refreshed_snapshot = client.get(f"/api/projects/{project_id}/review-snapshots/{timeline_job_id}")
+    jobs_payload = client.get(f"/api/projects/{project_id}/jobs").json()["jobs"]
+
+    assert refreshed_timeline.status_code == 200
+    assert refreshed_timeline.json()["timeline"]["review_status"] == "draft"
+    assert refreshed_snapshot.status_code == 200
+    assert refreshed_snapshot.json()["review_status"] == "draft"
+
+    failed_preview_jobs = [job for job in jobs_payload if job["job_type"] == "preview_render" and job["status"] == "failed"]
+    failed_export_jobs = [job for job in jobs_payload if job["job_type"] == "capcut_export" and job["status"] == "failed"]
+    failed_subtitle_jobs = [job for job in jobs_payload if job["job_type"] == "subtitle_render" and job["status"] == "failed"]
+    assert failed_preview_jobs
+    assert failed_export_jobs
+    assert failed_subtitle_jobs
+
+
+def test_reopening_approved_review_with_residual_blockers_returns_blocked_status(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Reopen Residual Blocker Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 1.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [
+                {
+                    "code": "tts_replacement_review_required",
+                    "segment_id": "seg_001",
+                    "message": "Approved TTS replacement is still required before output.",
+                }
+            ],
+            "applied_recommendations": [],
+            "pending_recommendations": [
+                {
+                    "recommendation_id": "rec_tts_seg_001",
+                    "target_segment_id": "seg_001",
+                    "recommendation_type": "tts_replacement",
+                    "selected_asset_id": "asset_tts_001",
+                    "score": 1.0,
+                    "reason": "Manual TTS replacement selection from editing session.",
+                    "auto_apply_allowed": False,
+                    "review_required": True,
+                    "payload": {},
+                    "created_at": "2026-07-01T00:00:00+00:00",
+                    "provider_trace": build_provider_trace(final_provider="rule_based_fallback"),
+                }
+            ],
+        },
+    )
+    store.save_review_state(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        status="approved",
+    )
+    timeline_job = store.create_job(
+        project_id=project.project_id,
+        job_type=JobType.TIMELINE_BUILD,
+        input_ref="segment_analysis_job_001",
+        status=JobStatus.SUCCEEDED,
+    )
+    store.update_job(
+        project_id=project.project_id,
+        job_id=timeline_job["job_id"],
+        status=JobStatus.SUCCEEDED,
+        output_ref=timeline["timeline_id"],
+    )
+
+    client = TestClient(create_app(projects_root=tmp_path))
+    reopen_response = client.post(
+        f"/api/projects/{project.project_id}/review-approvals/{timeline_job['job_id']}/reopen"
+    )
+    preview_response = client.post(
+        f"/api/projects/{project.project_id}/jobs/preview-render",
+        json={"timeline_job_id": timeline_job["job_id"]},
+    )
+    export_response = client.post(
+        f"/api/projects/{project.project_id}/jobs/capcut-export",
+        json={"timeline_job_id": timeline_job["job_id"]},
+    )
+    subtitle_response = client.post(
+        f"/api/projects/{project.project_id}/jobs/subtitle-render",
+        json={"timeline_job_id": timeline_job["job_id"]},
+    )
+
+    assert reopen_response.status_code == 202
+    assert reopen_response.json()["review_status"] == "blocked"
+    assert preview_response.status_code == 400
+    assert export_response.status_code == 400
+    assert subtitle_response.status_code == 400
+    assert "review blockers" in preview_response.json()["detail"].lower()
+    assert "review blockers" in export_response.json()["detail"].lower()
+    assert "review blockers" in subtitle_response.json()["detail"].lower()
+
+    refreshed_timeline = client.get(f"/api/projects/{project.project_id}/timelines/{timeline_job['job_id']}")
+    refreshed_snapshot = client.get(
+        f"/api/projects/{project.project_id}/review-snapshots/{timeline_job['job_id']}"
+    )
+
+    assert refreshed_timeline.status_code == 200
+    assert refreshed_timeline.json()["timeline"]["review_status"] == "blocked"
+    assert refreshed_snapshot.status_code == 200
+    assert refreshed_snapshot.json()["review_status"] == "blocked"
+
+
+def test_review_snapshot_api_approve_tts_replacement_updates_target_narration_clip_and_keeps_other_blockers(
+    tmp_path: Path,
+) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    timeline_result = client.get(f"/api/projects/{project_id}/timelines/{timeline_job_id}")
+    timeline_payload = timeline_result.json()["timeline"]
+    timeline_path = (
+        tmp_path
+        / "projects"
+        / project_id
+        / "timelines"
+        / f'{timeline_payload["timeline_id"]}.json'
+    )
+    target_candidate = {
+        "recommendation_id": "rec_tts_review_002",
+        "target_segment_id": "seg_002",
+        "recommendation_type": "tts_replacement",
+        "selected_asset_id": "asset_tts_review_002",
+        "score": 0.94,
+        "reason": "Operator approved the regenerated narration take.",
+        "auto_apply_allowed": False,
+        "review_required": True,
+        "payload": {
+            "selected_asset_uri": (
+                f"local://projects/{project_id}/assets/generated/asset_tts_review_002.wav"
+            )
+        },
+        "created_at": "2026-07-01T00:00:00+00:00",
+        "provider_trace": build_provider_trace(final_provider="rule_based_fallback"),
+    }
+    non_target_candidate = {
+        "recommendation_id": "rec_broll_review_001",
+        "target_segment_id": "seg_001",
+        "recommendation_type": "broll",
+        "selected_asset_id": "asset_broll_review_001",
+        "score": 0.81,
+        "reason": "Operator still needs to review the B-roll pick.",
+        "auto_apply_allowed": False,
+        "review_required": True,
+        "payload": {"tags": ["office"]},
+        "created_at": "2026-07-01T00:00:01+00:00",
+        "provider_trace": build_provider_trace(final_provider="heuristic_fallback"),
+    }
+    persisted_timeline = json.loads(timeline_path.read_text(encoding="utf-8"))
+    persisted_timeline["applied_recommendations"] = []
+    persisted_timeline["pending_recommendations"] = [target_candidate, non_target_candidate]
+    persisted_timeline["review_flags"] = [
+        {
+            "code": "tts_replacement_review_required",
+            "segment_id": "seg_002",
+            "message": "Operator must confirm the TTS replacement before approval.",
+        },
+        {
+            "code": "broll_review_required",
+            "segment_id": "seg_001",
+            "message": "Operator must confirm the B-roll pick before approval.",
+        },
+    ]
+    timeline_path.write_text(json.dumps(persisted_timeline, indent=2), encoding="utf-8")
+
+    database_path = tmp_path / "projects" / project_id / "db" / "project.sqlite"
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute("DELETE FROM recommendations")
+        connection.executemany(
+            """
+            INSERT INTO recommendations (
+                recommendation_id,
+                project_id,
+                target_segment_id,
+                recommendation_type,
+                selected_asset_id,
+                score,
+                reason,
+                auto_apply_allowed,
+                review_required,
+                payload_json,
+                created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    target_candidate["recommendation_id"],
+                    project_id,
+                    target_candidate["target_segment_id"],
+                    target_candidate["recommendation_type"],
+                    target_candidate["selected_asset_id"],
+                    target_candidate["score"],
+                    target_candidate["reason"],
+                    0,
+                    1,
+                    json.dumps(target_candidate["payload"], ensure_ascii=True),
+                    target_candidate["created_at"],
+                ),
+                (
+                    non_target_candidate["recommendation_id"],
+                    project_id,
+                    non_target_candidate["target_segment_id"],
+                    non_target_candidate["recommendation_type"],
+                    non_target_candidate["selected_asset_id"],
+                    non_target_candidate["score"],
+                    non_target_candidate["reason"],
+                    0,
+                    1,
+                    json.dumps(non_target_candidate["payload"], ensure_ascii=True),
+                    non_target_candidate["created_at"],
+                ),
+            ],
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    approve_response = client.post(
+        f"/api/projects/{project_id}/review-snapshots/{timeline_job_id}/recommendations/"
+        "rec_tts_review_002/approve"
+    )
+
+    assert approve_response.status_code == 200
+    refreshed_timeline = client.get(f"/api/projects/{project_id}/timelines/{timeline_job_id}")
+    assert refreshed_timeline.status_code == 200
+    refreshed_timeline_payload = refreshed_timeline.json()["timeline"]
+    assert refreshed_timeline_payload["review_status"] == "blocked"
+    assert [
+        item["recommendation_id"] for item in refreshed_timeline_payload["pending_recommendations"]
+    ] == ["rec_broll_review_001"]
+    assert refreshed_timeline_payload["review_flags"] == [
+        {
+            "code": "broll_review_required",
+            "segment_id": "seg_001",
+            "message": "Operator must confirm the B-roll pick before approval.",
+        }
+    ]
+    narration_track = next(
+        track for track in refreshed_timeline_payload["tracks"] if track["track_type"] == "narration"
+    )
+    clip_by_segment = {
+        clip["segment_id"]: clip["asset_uri"]
+        for clip in narration_track["clips"]
+    }
+    assert clip_by_segment["seg_001"] == f"local://projects/{project_id}/segments/seg_001"
+    assert clip_by_segment["seg_002"] == target_candidate["payload"]["selected_asset_uri"]
 
 
 def test_review_snapshot_api_can_reject_pending_recommendation_without_leaving_it_pending(
@@ -5380,6 +6605,12 @@ def test_editing_session_api_marks_preflight_blocked_for_manual_tts_rerun_scope_
         "source timeline already has unresolved review blockers that rerun will preserve",
         "selected segments already require operator review, so rerun output stays blocked",
     ]
+    assert payload["affected_output_areas"] == [
+        "narration track",
+        "timeline preview",
+        "subtitle render",
+        "capcut export",
+    ]
     assert payload["targeted_segments"] == [
         {
             "segment_id": "seg_002",
@@ -5468,7 +6699,4449 @@ def test_editing_session_api_marks_preflight_as_draft_for_clean_rerun_scope(
     assert payload["prediction_reasons"] == []
 
 
-def test_editing_session_api_marks_preflight_blocked_when_source_timeline_still_has_review_blockers(
+def test_editing_session_api_marks_preflight_as_draft_for_clean_manual_tts_rerun_scope(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Clean Manual TTS Preflight Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Clean caption",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [],
+                    "music_override": None,
+                    "tts_replacement": {
+                        "recommendation_id": "rec_tts_seg_001",
+                        "asset_id": "asset_tts_001",
+                    },
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    before_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration/preflight",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["tts_replacement"],
+        },
+    )
+    after_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["predicted_review_status_after_rerun"] == "draft"
+    assert payload["prediction_reasons"] == []
+    assert payload["affected_output_areas"] == [
+        "narration track",
+        "timeline preview",
+        "subtitle render",
+        "capcut export",
+    ]
+    assert payload["targeted_segments"] == [
+        {
+            "segment_id": "seg_001",
+            "caption_text": "Clean caption",
+            "cut_action": "keep",
+            "review_required": False,
+            "broll_override": None,
+            "visual_overlays": [],
+            "music_override": None,
+            "tts_replacement": {
+                "recommendation_id": "rec_tts_seg_001",
+                "asset_id": "asset_tts_001",
+            },
+        }
+    ]
+    assert before_jobs == after_jobs
+
+
+def test_editing_session_api_normalizes_invalid_cut_action_to_keep_in_preflight_targeted_segments(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Invalid Cut Action Preflight Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Caption with stale cut action",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "stale_invalid_value",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    before_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration/preflight",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["caption"],
+        },
+    )
+    after_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["predicted_review_status_after_rerun"] == "draft"
+    assert payload["prediction_reasons"] == []
+    assert payload["targeted_segments"] == [
+        {
+            "segment_id": "seg_001",
+            "caption_text": "Caption with stale cut action",
+            "cut_action": "keep",
+            "review_required": False,
+            "broll_override": None,
+            "visual_overlays": [],
+            "music_override": None,
+            "tts_replacement": None,
+        }
+    ]
+    assert before_jobs == after_jobs
+
+
+def test_editing_session_api_normalizes_missing_visual_overlays_to_empty_list_in_preflight_targeted_segments(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Missing Visual Overlays Preflight Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Caption with missing overlay list",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": None,
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    before_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration/preflight",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["caption"],
+        },
+    )
+    after_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["targeted_segments"] == [
+        {
+            "segment_id": "seg_001",
+            "caption_text": "Caption with missing overlay list",
+            "cut_action": "keep",
+            "review_required": False,
+            "broll_override": None,
+            "visual_overlays": [],
+            "music_override": None,
+            "tts_replacement": None,
+        }
+    ]
+    assert payload["predicted_review_status_after_rerun"] == "draft"
+    assert payload["prediction_reasons"] == []
+    assert before_jobs == after_jobs
+
+
+def test_editing_session_api_filters_stale_non_dict_visual_overlay_entries_in_preflight_targeted_segments(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Stale Visual Overlay Entry Preflight Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Caption with stale overlay entry",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [
+                        "stale_overlay_entry",
+                        {
+                            "overlay_id": "overlay_image_001",
+                            "overlay_type": "image",
+                            "asset_id": "asset_image_001",
+                        },
+                    ],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    before_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration/preflight",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["visual_overlay"],
+        },
+    )
+    after_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["targeted_segments"] == [
+        {
+            "segment_id": "seg_001",
+            "caption_text": "Caption with stale overlay entry",
+            "cut_action": "keep",
+            "review_required": False,
+            "broll_override": None,
+            "visual_overlays": [
+                {
+                    "overlay_id": "overlay_image_001",
+                    "overlay_type": "image",
+                    "asset_id": "asset_image_001",
+                }
+            ],
+            "music_override": None,
+            "tts_replacement": None,
+        }
+    ]
+    assert payload["predicted_review_status_after_rerun"] == "draft"
+    assert payload["prediction_reasons"] == []
+    assert before_jobs == after_jobs
+
+
+def test_editing_session_api_filters_empty_visual_overlay_dict_entries_in_preflight_targeted_segments(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Empty Visual Overlay Entry Preflight Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Caption with empty visual overlay entry",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [
+                        {},
+                        {
+                            "overlay_id": "overlay_image_001",
+                            "overlay_type": "image",
+                            "asset_id": "asset_image_001",
+                        },
+                    ],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    before_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration/preflight",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["visual_overlay"],
+        },
+    )
+    after_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["targeted_segments"] == [
+        {
+            "segment_id": "seg_001",
+            "caption_text": "Caption with empty visual overlay entry",
+            "cut_action": "keep",
+            "review_required": False,
+            "broll_override": None,
+            "visual_overlays": [
+                {
+                    "overlay_id": "overlay_image_001",
+                    "overlay_type": "image",
+                    "asset_id": "asset_image_001",
+                }
+            ],
+            "music_override": None,
+            "tts_replacement": None,
+        }
+    ]
+    assert payload["predicted_review_status_after_rerun"] == "draft"
+    assert payload["prediction_reasons"] == []
+    assert before_jobs == after_jobs
+
+
+def test_editing_session_api_filters_stale_minimal_dict_visual_overlay_entries_in_preflight_targeted_segments(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Stale Minimal Dict Visual Overlay Preflight Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Caption with stale minimal visual overlay",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [
+                        {
+                            "legacy": "stale_visual_overlay_dict",
+                        },
+                        {
+                            "overlay_id": "overlay_image_001",
+                            "overlay_type": "image",
+                            "asset_id": "asset_image_001",
+                        },
+                    ],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    before_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration/preflight",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["visual_overlay"],
+        },
+    )
+    after_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["targeted_segments"] == [
+        {
+            "segment_id": "seg_001",
+            "caption_text": "Caption with stale minimal visual overlay",
+            "cut_action": "keep",
+            "review_required": False,
+            "broll_override": None,
+            "visual_overlays": [
+                {
+                    "overlay_id": "overlay_image_001",
+                    "overlay_type": "image",
+                    "asset_id": "asset_image_001",
+                }
+            ],
+            "music_override": None,
+            "tts_replacement": None,
+        }
+    ]
+    assert payload["predicted_review_status_after_rerun"] == "draft"
+    assert payload["prediction_reasons"] == []
+    assert before_jobs == after_jobs
+
+
+def test_editing_session_api_filters_overlay_type_only_visual_overlay_entries_in_preflight_targeted_segments(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Overlay Type Only Visual Overlay Preflight Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Caption with overlay-type-only visual overlay",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [
+                        {
+                            "overlay_type": "image_card",
+                        },
+                        {
+                            "overlay_type": "image_card",
+                            "asset_id": "asset_image_001",
+                            "text": "Exterior reference image",
+                        },
+                    ],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    before_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration/preflight",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["visual_overlay"],
+        },
+    )
+    after_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["targeted_segments"] == [
+        {
+            "segment_id": "seg_001",
+            "caption_text": "Caption with overlay-type-only visual overlay",
+            "cut_action": "keep",
+            "review_required": False,
+            "broll_override": None,
+            "visual_overlays": [
+                {
+                    "overlay_type": "image_card",
+                    "asset_id": "asset_image_001",
+                    "text": "Exterior reference image",
+                }
+            ],
+            "music_override": None,
+            "tts_replacement": None,
+        }
+    ]
+    assert payload["predicted_review_status_after_rerun"] == "draft"
+    assert payload["prediction_reasons"] == []
+    assert before_jobs == after_jobs
+
+
+def test_editing_session_api_filters_unknown_overlay_type_entries_in_preflight_targeted_segments(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Unknown Overlay Type Preflight Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Caption with unknown overlay type",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [
+                        {
+                            "overlay_type": "legacy_card",
+                            "asset_id": "asset_legacy_001",
+                        },
+                        {
+                            "overlay_type": "image_card",
+                            "asset_id": "asset_image_001",
+                            "text": "Exterior reference image",
+                        },
+                    ],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    before_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration/preflight",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["visual_overlay"],
+        },
+    )
+    after_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["targeted_segments"] == [
+        {
+            "segment_id": "seg_001",
+            "caption_text": "Caption with unknown overlay type",
+            "cut_action": "keep",
+            "review_required": False,
+            "broll_override": None,
+            "visual_overlays": [
+                {
+                    "overlay_type": "image_card",
+                    "asset_id": "asset_image_001",
+                    "text": "Exterior reference image",
+                }
+            ],
+            "music_override": None,
+            "tts_replacement": None,
+        }
+    ]
+    assert payload["predicted_review_status_after_rerun"] == "draft"
+    assert payload["prediction_reasons"] == []
+    assert before_jobs == after_jobs
+
+
+def test_editing_session_api_preserves_legacy_hook_title_overlay_in_preflight_targeted_segments(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Legacy Hook Title Preflight Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Caption with legacy hook title overlay",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [
+                        {
+                            "overlay_type": "hook_title",
+                            "asset_id": "asset_hook_title_001",
+                        }
+                    ],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    before_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration/preflight",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["visual_overlay"],
+        },
+    )
+    after_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["targeted_segments"] == [
+        {
+            "segment_id": "seg_001",
+            "caption_text": "Caption with legacy hook title overlay",
+            "cut_action": "keep",
+            "review_required": False,
+            "broll_override": None,
+            "visual_overlays": [
+                {
+                    "overlay_type": "hook_title",
+                    "asset_id": "asset_hook_title_001",
+                }
+            ],
+            "music_override": None,
+            "tts_replacement": None,
+        }
+    ]
+    assert payload["predicted_review_status_after_rerun"] == "draft"
+    assert payload["prediction_reasons"] == []
+    assert before_jobs == after_jobs
+
+
+def test_editing_session_api_preserves_canonical_visual_overlay_in_preflight_targeted_segments(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Canonical Visual Overlay Preflight Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Caption with canonical visual overlay",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [
+                        {
+                            "overlay_type": "visual_overlay",
+                            "asset_id": "asset_visual_overlay_001",
+                        }
+                    ],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    before_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration/preflight",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["visual_overlay"],
+        },
+    )
+    after_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["targeted_segments"] == [
+        {
+            "segment_id": "seg_001",
+            "caption_text": "Caption with canonical visual overlay",
+            "cut_action": "keep",
+            "review_required": False,
+            "broll_override": None,
+            "visual_overlays": [
+                {
+                    "overlay_type": "visual_overlay",
+                    "asset_id": "asset_visual_overlay_001",
+                }
+            ],
+            "music_override": None,
+            "tts_replacement": None,
+        }
+    ]
+    assert payload["predicted_review_status_after_rerun"] == "draft"
+    assert payload["prediction_reasons"] == []
+    assert before_jobs == after_jobs
+
+
+def test_editing_session_api_preserves_canonical_image_overlay_in_preflight_targeted_segments(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Canonical Image Overlay Preflight Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Caption with canonical image overlay",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [
+                        {
+                            "overlay_type": "image_overlay",
+                            "asset_id": "asset_image_overlay_001",
+                        }
+                    ],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    before_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration/preflight",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["image_overlay"],
+        },
+    )
+    after_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["targeted_segments"] == [
+        {
+            "segment_id": "seg_001",
+            "caption_text": "Caption with canonical image overlay",
+            "cut_action": "keep",
+            "review_required": False,
+            "broll_override": None,
+            "visual_overlays": [
+                {
+                    "overlay_type": "image_overlay",
+                    "asset_id": "asset_image_overlay_001",
+                }
+            ],
+            "music_override": None,
+            "tts_replacement": None,
+        }
+    ]
+    assert payload["predicted_review_status_after_rerun"] == "draft"
+    assert payload["prediction_reasons"] == []
+    assert before_jobs == after_jobs
+
+
+def test_editing_session_api_preserves_canonical_table_overlay_in_preflight_targeted_segments(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Canonical Table Overlay Preflight Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Caption with canonical table overlay",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [
+                        {
+                            "overlay_type": "table_overlay",
+                            "text": "Revenue | Cost | Margin",
+                        }
+                    ],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    before_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration/preflight",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["table_overlay"],
+        },
+    )
+    after_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["targeted_segments"] == [
+        {
+            "segment_id": "seg_001",
+            "caption_text": "Caption with canonical table overlay",
+            "cut_action": "keep",
+            "review_required": False,
+            "broll_override": None,
+            "visual_overlays": [
+                {
+                    "overlay_type": "table_overlay",
+                    "text": "Revenue | Cost | Margin",
+                }
+            ],
+            "music_override": None,
+            "tts_replacement": None,
+        }
+    ]
+    assert payload["predicted_review_status_after_rerun"] == "draft"
+    assert payload["prediction_reasons"] == []
+    assert before_jobs == after_jobs
+
+
+def test_editing_session_api_normalizes_string_false_review_required_in_preflight_targeted_segments(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="String False Review Required Preflight Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Caption with string false review_required",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": "false",
+                    "broll_override": None,
+                    "visual_overlays": [],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    before_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration/preflight",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["caption"],
+        },
+    )
+    after_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["targeted_segments"] == [
+        {
+            "segment_id": "seg_001",
+            "caption_text": "Caption with string false review_required",
+            "cut_action": "keep",
+            "review_required": False,
+            "broll_override": None,
+            "visual_overlays": [],
+            "music_override": None,
+            "tts_replacement": None,
+        }
+    ]
+    assert payload["predicted_review_status_after_rerun"] == "draft"
+    assert payload["prediction_reasons"] == []
+    assert before_jobs == after_jobs
+
+
+def test_editing_session_api_normalizes_stale_non_bool_review_required_to_false_in_preflight_targeted_segments(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Stale Non Bool Review Required Preflight Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Caption with stale non-bool review_required",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": {"stale": "review_required_container"},
+                    "broll_override": None,
+                    "visual_overlays": [],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    before_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration/preflight",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["caption"],
+        },
+    )
+    after_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["targeted_segments"] == [
+        {
+            "segment_id": "seg_001",
+            "caption_text": "Caption with stale non-bool review_required",
+            "cut_action": "keep",
+            "review_required": False,
+            "broll_override": None,
+            "visual_overlays": [],
+            "music_override": None,
+            "tts_replacement": None,
+        }
+    ]
+    assert payload["predicted_review_status_after_rerun"] == "draft"
+    assert payload["prediction_reasons"] == []
+    assert before_jobs == after_jobs
+
+
+def test_editing_session_api_normalizes_stale_broll_override_to_none_in_preflight_targeted_segments(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Stale Broll Override Preflight Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Caption with stale broll override",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": "stale_broll_override",
+                    "visual_overlays": [],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    before_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration/preflight",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["caption"],
+        },
+    )
+    after_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["targeted_segments"] == [
+        {
+            "segment_id": "seg_001",
+            "caption_text": "Caption with stale broll override",
+            "cut_action": "keep",
+            "review_required": False,
+            "broll_override": None,
+            "visual_overlays": [],
+            "music_override": None,
+            "tts_replacement": None,
+        }
+    ]
+    assert payload["predicted_review_status_after_rerun"] == "draft"
+    assert payload["prediction_reasons"] == []
+    assert before_jobs == after_jobs
+
+
+def test_editing_session_api_normalizes_empty_broll_override_dict_to_none_in_preflight_targeted_segments(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Empty Broll Override Dict Preflight Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Caption with empty broll override dict",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": {
+                        "asset_id": "   ",
+                    },
+                    "visual_overlays": [],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    before_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration/preflight",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["caption"],
+        },
+    )
+    after_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["targeted_segments"] == [
+        {
+            "segment_id": "seg_001",
+            "caption_text": "Caption with empty broll override dict",
+            "cut_action": "keep",
+            "review_required": False,
+            "broll_override": None,
+            "visual_overlays": [],
+            "music_override": None,
+            "tts_replacement": None,
+        }
+    ]
+    assert payload["predicted_review_status_after_rerun"] == "draft"
+    assert payload["prediction_reasons"] == []
+    assert before_jobs == after_jobs
+
+
+def test_editing_session_api_normalizes_nested_broll_override_asset_id_to_none_in_preflight_targeted_segments(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Nested Broll Override Asset Preflight Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Caption with nested broll asset id",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": {
+                        "asset_id": {"stale": "nested_broll_asset_id"},
+                    },
+                    "visual_overlays": [],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    before_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration/preflight",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["caption"],
+        },
+    )
+    after_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["targeted_segments"] == [
+        {
+            "segment_id": "seg_001",
+            "caption_text": "Caption with nested broll asset id",
+            "cut_action": "keep",
+            "review_required": False,
+            "broll_override": None,
+            "visual_overlays": [],
+            "music_override": None,
+            "tts_replacement": None,
+        }
+    ]
+    assert payload["predicted_review_status_after_rerun"] == "draft"
+    assert payload["prediction_reasons"] == []
+    assert before_jobs == after_jobs
+
+
+def test_editing_session_api_normalizes_stale_music_override_to_none_in_preflight_targeted_segments(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Stale Music Override Preflight Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Caption with stale music override",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [],
+                    "music_override": "stale_music_override",
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    before_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration/preflight",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["caption"],
+        },
+    )
+    after_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["targeted_segments"] == [
+        {
+            "segment_id": "seg_001",
+            "caption_text": "Caption with stale music override",
+            "cut_action": "keep",
+            "review_required": False,
+            "broll_override": None,
+            "visual_overlays": [],
+            "music_override": None,
+            "tts_replacement": None,
+        }
+    ]
+    assert payload["predicted_review_status_after_rerun"] == "draft"
+    assert payload["prediction_reasons"] == []
+    assert before_jobs == after_jobs
+
+
+def test_editing_session_api_normalizes_empty_music_override_dict_to_none_in_preflight_targeted_segments(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Empty Music Override Dict Preflight Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Caption with empty music override dict",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [],
+                    "music_override": {
+                        "asset_id": "   ",
+                    },
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    before_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration/preflight",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["caption"],
+        },
+    )
+    after_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["targeted_segments"] == [
+        {
+            "segment_id": "seg_001",
+            "caption_text": "Caption with empty music override dict",
+            "cut_action": "keep",
+            "review_required": False,
+            "broll_override": None,
+            "visual_overlays": [],
+            "music_override": None,
+            "tts_replacement": None,
+        }
+    ]
+    assert payload["predicted_review_status_after_rerun"] == "draft"
+    assert payload["prediction_reasons"] == []
+    assert before_jobs == after_jobs
+
+
+def test_editing_session_api_normalizes_nested_music_override_asset_id_to_none_in_preflight_targeted_segments(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Nested Music Override Asset Preflight Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Caption with nested music asset id",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [],
+                    "music_override": {
+                        "asset_id": {"stale": "nested_music_asset_id"},
+                    },
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    before_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration/preflight",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["caption"],
+        },
+    )
+    after_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["targeted_segments"] == [
+        {
+            "segment_id": "seg_001",
+            "caption_text": "Caption with nested music asset id",
+            "cut_action": "keep",
+            "review_required": False,
+            "broll_override": None,
+            "visual_overlays": [],
+            "music_override": None,
+            "tts_replacement": None,
+        }
+    ]
+    assert payload["predicted_review_status_after_rerun"] == "draft"
+    assert payload["prediction_reasons"] == []
+    assert before_jobs == after_jobs
+
+
+def test_editing_session_api_normalizes_stale_tts_replacement_to_none_in_preflight_targeted_segments(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Stale TTS Replacement Preflight Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Caption with stale tts replacement",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [],
+                    "music_override": None,
+                    "tts_replacement": "stale_tts_replacement",
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    before_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration/preflight",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["caption"],
+        },
+    )
+    after_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["targeted_segments"] == [
+        {
+            "segment_id": "seg_001",
+            "caption_text": "Caption with stale tts replacement",
+            "cut_action": "keep",
+            "review_required": False,
+            "broll_override": None,
+            "visual_overlays": [],
+            "music_override": None,
+            "tts_replacement": None,
+        }
+    ]
+    assert payload["predicted_review_status_after_rerun"] == "draft"
+    assert payload["prediction_reasons"] == []
+    assert before_jobs == after_jobs
+
+
+def test_editing_session_api_normalizes_nested_tts_recommendation_id_to_none_in_preflight_targeted_segments(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Nested TTS Recommendation Id Preflight Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Caption with nested tts recommendation id",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [],
+                    "music_override": None,
+                    "tts_replacement": {
+                        "recommendation_id": {"stale": "nested_tts_recommendation_id"},
+                        "asset_id": "asset_tts_001",
+                    },
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    before_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration/preflight",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["caption"],
+        },
+    )
+    after_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["targeted_segments"] == [
+        {
+            "segment_id": "seg_001",
+            "caption_text": "Caption with nested tts recommendation id",
+            "cut_action": "keep",
+            "review_required": False,
+            "broll_override": None,
+            "visual_overlays": [],
+            "music_override": None,
+            "tts_replacement": None,
+        }
+    ]
+    assert payload["predicted_review_status_after_rerun"] == "draft"
+    assert payload["prediction_reasons"] == []
+    assert before_jobs == after_jobs
+
+
+def test_editing_session_api_normalizes_empty_tts_replacement_dict_to_none_in_preflight_targeted_segments(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Empty TTS Replacement Dict Preflight Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Caption with empty tts replacement dict",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [],
+                    "music_override": None,
+                    "tts_replacement": {
+                        "recommendation_id": "   ",
+                        "asset_id": "",
+                    },
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    before_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration/preflight",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["caption"],
+        },
+    )
+    after_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["targeted_segments"] == [
+        {
+            "segment_id": "seg_001",
+            "caption_text": "Caption with empty tts replacement dict",
+            "cut_action": "keep",
+            "review_required": False,
+            "broll_override": None,
+            "visual_overlays": [],
+            "music_override": None,
+            "tts_replacement": None,
+        }
+    ]
+    assert payload["predicted_review_status_after_rerun"] == "draft"
+    assert payload["prediction_reasons"] == []
+    assert before_jobs == after_jobs
+
+
+def test_editing_session_api_preserves_request_segment_order_in_preflight_targeted_segments(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Ordered Multi Segment Preflight Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        },
+                        {
+                            "clip_id": "clip_narration_002",
+                            "segment_id": "seg_002",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_002",
+                            "start_sec": 2.0,
+                            "end_sec": 4.0,
+                            "clip_type": "narration",
+                        },
+                    ],
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "First caption",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": {"asset_id": "asset_broll_001"},
+                    "visual_overlays": [],
+                    "music_override": None,
+                    "tts_replacement": None,
+                },
+                {
+                    "segment_id": "seg_002",
+                    "caption_text": "Second caption",
+                    "start_sec": 2.0,
+                    "end_sec": 4.0,
+                    "cut_action": "trim",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [],
+                    "music_override": {"asset_id": "music_manual_002"},
+                    "tts_replacement": None,
+                },
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    before_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration/preflight",
+        json={
+            "segment_ids": ["seg_002", "seg_001"],
+            "fields": ["music", "broll"],
+        },
+    )
+    after_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["segment_ids"] == ["seg_002", "seg_001"]
+    assert payload["targeted_segments"] == [
+        {
+            "segment_id": "seg_002",
+            "caption_text": "Second caption",
+            "cut_action": "trim",
+            "review_required": False,
+            "broll_override": None,
+            "visual_overlays": [],
+            "music_override": {"asset_id": "music_manual_002"},
+            "tts_replacement": None,
+        },
+        {
+            "segment_id": "seg_001",
+            "caption_text": "First caption",
+            "cut_action": "keep",
+            "review_required": False,
+            "broll_override": {"asset_id": "asset_broll_001"},
+            "visual_overlays": [],
+            "music_override": None,
+            "tts_replacement": None,
+        },
+    ]
+    assert payload["affected_output_areas"] == [
+        "music bed",
+        "b-roll track",
+        "timeline preview",
+        "subtitle render",
+        "capcut export",
+    ]
+    assert payload["predicted_review_status_after_rerun"] == "draft"
+    assert payload["prediction_reasons"] == []
+    assert before_jobs == after_jobs
+
+
+def test_editing_session_api_deduplicates_repeated_segment_ids_in_preflight_scope(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Duplicate Segment Preflight Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        },
+                        {
+                            "clip_id": "clip_narration_002",
+                            "segment_id": "seg_002",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_002",
+                            "start_sec": 2.0,
+                            "end_sec": 4.0,
+                            "clip_type": "narration",
+                        },
+                    ],
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "First caption",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [],
+                    "music_override": None,
+                    "tts_replacement": None,
+                },
+                {
+                    "segment_id": "seg_002",
+                    "caption_text": "Second caption",
+                    "start_sec": 2.0,
+                    "end_sec": 4.0,
+                    "cut_action": "trim",
+                    "review_required": False,
+                    "broll_override": {"asset_id": "asset_broll_002"},
+                    "visual_overlays": [],
+                    "music_override": None,
+                    "tts_replacement": None,
+                },
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    before_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration/preflight",
+        json={
+            "segment_ids": ["seg_002", "seg_001", "seg_002"],
+            "fields": ["broll"],
+        },
+    )
+    after_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["segment_ids"] == ["seg_002", "seg_001"]
+    assert payload["targeted_segments"] == [
+        {
+            "segment_id": "seg_002",
+            "caption_text": "Second caption",
+            "cut_action": "trim",
+            "review_required": False,
+            "broll_override": {"asset_id": "asset_broll_002"},
+            "visual_overlays": [],
+            "music_override": None,
+            "tts_replacement": None,
+        },
+        {
+            "segment_id": "seg_001",
+            "caption_text": "First caption",
+            "cut_action": "keep",
+            "review_required": False,
+            "broll_override": None,
+            "visual_overlays": [],
+            "music_override": None,
+            "tts_replacement": None,
+        },
+    ]
+    assert payload["affected_output_areas"] == [
+        "b-roll track",
+        "timeline preview",
+        "subtitle render",
+        "capcut export",
+    ]
+    assert payload["predicted_review_status_after_rerun"] == "draft"
+    assert payload["prediction_reasons"] == []
+    assert before_jobs == after_jobs
+
+
+def test_editing_session_api_matches_trimmed_session_segment_ids_in_preflight_targeted_segments(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Trimmed Session Segment Id Preflight Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": " seg_001 ",
+                    "caption_text": "Caption with padded session segment id",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    before_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration/preflight",
+        json={
+            "segment_ids": [" seg_001 "],
+            "fields": ["caption"],
+        },
+    )
+    after_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["segment_ids"] == ["seg_001"]
+    assert payload["targeted_segments"] == [
+        {
+            "segment_id": "seg_001",
+            "caption_text": "Caption with padded session segment id",
+            "cut_action": "keep",
+            "review_required": False,
+            "broll_override": None,
+            "visual_overlays": [],
+            "music_override": None,
+            "tts_replacement": None,
+        }
+    ]
+    assert payload["predicted_review_status_after_rerun"] == "draft"
+    assert payload["prediction_reasons"] == []
+    assert before_jobs == after_jobs
+
+
+def test_editing_session_api_deduplicates_repeated_fields_in_preflight_scope(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Duplicate Field Preflight Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Caption with duplicate field request",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": {"asset_id": "asset_broll_001"},
+                    "visual_overlays": [],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    before_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration/preflight",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["caption", "broll", "caption", "broll"],
+        },
+    )
+    after_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["segment_ids"] == ["seg_001"]
+    assert payload["fields"] == ["caption", "broll"]
+    assert payload["downstream_steps"] == [
+        "segment_refresh",
+        "broll_refresh",
+        "timeline_build",
+    ]
+    assert payload["affected_output_areas"] == [
+        "segment copy",
+        "b-roll track",
+        "timeline preview",
+        "subtitle render",
+        "capcut export",
+    ]
+    assert payload["predicted_review_status_after_rerun"] == "draft"
+    assert payload["prediction_reasons"] == []
+    assert before_jobs == after_jobs
+
+
+def test_editing_session_api_rejects_preflight_for_unsupported_field_scope_without_creating_jobs(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Unknown Preflight Prediction Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Clean caption",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    before_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration/preflight",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["unsupported_field"],
+        },
+    )
+    after_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    assert response.status_code == 400
+    assert "Unsupported partial regeneration fields: unsupported_field" in response.json()["detail"]
+    assert before_jobs == after_jobs
+
+
+def test_editing_session_api_marks_preflight_blocked_when_source_timeline_still_has_review_blockers_only(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Source Blockers Only Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [
+                {
+                    "code": "tts_replacement_review_required",
+                    "segment_id": "seg_009",
+                    "message": "Operator review still required.",
+                }
+            ],
+            "applied_recommendations": [],
+            "pending_recommendations": [
+                {
+                    "recommendation_id": "rec_tts_review_009",
+                    "target_segment_id": "seg_009",
+                    "recommendation_type": "tts_replacement",
+                    "selected_asset_id": "asset_tts_review_009",
+                    "score": 0.93,
+                    "reason": "Awaiting operator approval.",
+                    "auto_apply_allowed": False,
+                    "review_required": True,
+                    "payload": {},
+                    "created_at": "2026-06-29T00:00:00+00:00",
+                }
+            ],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Stable caption",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration/preflight",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["caption"],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["predicted_review_status_after_rerun"] == "blocked"
+    assert payload["prediction_reasons"] == [
+        "source timeline already has unresolved review blockers that rerun will preserve",
+    ]
+
+
+def test_editing_session_api_normalizes_stale_source_review_flags_shape_to_draft_prediction(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Stale Source Review Flags Preflight Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": "stale_review_flag_container",
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Stable caption",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    before_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration/preflight",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["caption"],
+        },
+    )
+    after_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["predicted_review_status_after_rerun"] == "draft"
+    assert payload["prediction_reasons"] == []
+    assert before_jobs == after_jobs
+
+
+def test_editing_session_api_filters_stale_non_dict_source_review_flag_entries_from_preflight_prediction(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Stale Source Review Flag Entry Preflight Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": ["stale_review_flag_entry"],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Stable caption",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    before_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration/preflight",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["caption"],
+        },
+    )
+    after_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["predicted_review_status_after_rerun"] == "draft"
+    assert payload["prediction_reasons"] == []
+    assert before_jobs == after_jobs
+
+
+def test_editing_session_api_filters_stale_minimal_dict_source_review_flag_entries_from_preflight_prediction(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(
+        name="Stale Minimal Dict Source Review Flag Entries Preflight Project"
+    )
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [
+                {
+                    "legacy": "stale_review_flag_dict",
+                }
+            ],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Stable caption",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    before_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration/preflight",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["caption"],
+        },
+    )
+    after_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["predicted_review_status_after_rerun"] == "draft"
+    assert payload["prediction_reasons"] == []
+    assert before_jobs == after_jobs
+
+
+def test_editing_session_api_filters_code_only_source_review_flag_entries_from_preflight_prediction(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(
+        name="Code Only Source Review Flag Entries Preflight Project"
+    )
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [
+                {
+                    "code": "segment_review_required",
+                }
+            ],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Stable caption",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    before_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration/preflight",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["caption"],
+        },
+    )
+    after_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["predicted_review_status_after_rerun"] == "draft"
+    assert payload["prediction_reasons"] == []
+    assert before_jobs == after_jobs
+
+
+def test_editing_session_api_filters_unknown_code_source_review_flag_entries_from_preflight_prediction(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Unknown Code Source Review Flag Preflight Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [
+                {
+                    "code": "legacy_manual_attention",
+                    "segment_id": "seg_009",
+                    "message": "Stale legacy blocker should not survive prediction.",
+                }
+            ],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Stable caption",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    before_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration/preflight",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["caption"],
+        },
+    )
+    after_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["predicted_review_status_after_rerun"] == "draft"
+    assert payload["prediction_reasons"] == []
+    assert before_jobs == after_jobs
+
+
+def test_editing_session_api_marks_preflight_blocked_when_source_timeline_has_pending_recommendations_only(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Source Pending Recommendations Only Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [
+                {
+                    "recommendation_id": "rec_tts_review_009",
+                    "target_segment_id": "seg_009",
+                    "recommendation_type": "tts_replacement",
+                    "selected_asset_id": "asset_tts_review_009",
+                    "score": 0.93,
+                    "reason": "Awaiting operator approval.",
+                    "auto_apply_allowed": False,
+                    "review_required": True,
+                    "payload": {},
+                    "created_at": "2026-06-29T00:00:00+00:00",
+                }
+            ],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Stable caption",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration/preflight",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["caption"],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["predicted_review_status_after_rerun"] == "blocked"
+    assert payload["prediction_reasons"] == [
+        "source timeline already has unresolved review blockers that rerun will preserve",
+    ]
+
+
+def test_editing_session_api_normalizes_stale_source_pending_recommendations_shape_to_draft_prediction(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(
+        name="Stale Source Pending Recommendations Preflight Project"
+    )
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": "stale_pending_recommendation_container",
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Stable caption",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    before_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration/preflight",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["caption"],
+        },
+    )
+    after_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["predicted_review_status_after_rerun"] == "draft"
+    assert payload["prediction_reasons"] == []
+    assert before_jobs == after_jobs
+
+
+def test_editing_session_api_filters_stale_non_dict_source_pending_recommendation_entries_from_preflight_prediction(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(
+        name="Stale Source Pending Recommendation Entry Preflight Project"
+    )
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": ["stale_pending_recommendation_entry"],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Stable caption",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    before_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration/preflight",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["caption"],
+        },
+    )
+    after_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["predicted_review_status_after_rerun"] == "draft"
+    assert payload["prediction_reasons"] == []
+    assert before_jobs == after_jobs
+
+
+def test_editing_session_api_filters_stale_minimal_dict_source_pending_recommendation_entries_from_preflight_prediction(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(
+        name="Stale Minimal Dict Source Pending Recommendation Entries Preflight Project"
+    )
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [
+                {
+                    "recommendation_id": "rec_stale_only",
+                },
+            ],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Stable caption",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration/preflight",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["caption"],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["predicted_review_status_after_rerun"] == "draft"
+    assert payload["prediction_reasons"] == []
+
+
+def test_editing_session_api_filters_recommendation_id_only_source_pending_recommendation_entries_from_preflight_prediction(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(
+        name="Recommendation Id Only Source Pending Recommendation Preflight Project"
+    )
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [
+                {
+                    "recommendation_id": "rec_stale_only",
+                }
+            ],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Stable caption",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    before_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration/preflight",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["caption"],
+        },
+    )
+    after_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["predicted_review_status_after_rerun"] == "draft"
+    assert payload["prediction_reasons"] == []
+    assert before_jobs == after_jobs
+
+
+def test_editing_session_api_filters_unknown_type_source_pending_recommendation_entries_from_preflight_prediction(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(
+        name="Unknown Type Source Pending Recommendation Preflight Project"
+    )
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [
+                {
+                    "recommendation_id": "rec_stale_unknown_type",
+                    "target_segment_id": "seg_009",
+                    "recommendation_type": "legacy_overlay_pick",
+                }
+            ],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Stable caption",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    before_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration/preflight",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["caption"],
+        },
+    )
+    after_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["predicted_review_status_after_rerun"] == "draft"
+    assert payload["prediction_reasons"] == []
+    assert before_jobs == after_jobs
+
+
+def test_editing_session_api_ignores_stale_minimal_dict_source_pending_recommendation_entries_when_running_partial_regeneration(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(
+        name="Stale Minimal Dict Source Pending Recommendation Runtime Project"
+    )
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [
+                {
+                    "legacy": "stale_pending_recommendation_dict",
+                },
+            ],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Updated caption",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["caption"],
+        },
+    )
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["status"] == "succeeded"
+    result_response = client.get(
+        f"/api/projects/{project.project_id}/partial-regenerations/{payload['job_id']}",
+    )
+    assert result_response.status_code == 200
+    result_payload = result_response.json()
+    assert result_payload["timeline"]["review_status"] == "draft"
+    assert result_payload["timeline"]["pending_recommendations"] == []
+    assert result_payload["timeline"]["review_flags"] == []
+
+
+def test_editing_session_api_normalizes_string_false_review_required_when_running_partial_regeneration(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(
+        name="String False Review Required Runtime Fallback Project"
+    )
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "segments": [],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Updated caption without review blocker",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": "false",
+                    "broll_override": None,
+                    "visual_overlays": [],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["caption"],
+        },
+    )
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["status"] == "succeeded"
+    result_response = client.get(
+        f"/api/projects/{project.project_id}/partial-regenerations/{payload['job_id']}",
+    )
+    assert result_response.status_code == 200
+    result_payload = result_response.json()
+    assert result_payload["timeline"]["review_status"] == "draft"
+    assert result_payload["timeline"]["pending_recommendations"] == []
+    assert result_payload["timeline"]["review_flags"] == []
+
+
+def test_editing_session_api_normalizes_invalid_cut_action_when_running_partial_regeneration(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(
+        name="Invalid Cut Action Runtime Fallback Project"
+    )
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "segments": [],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Updated caption with stale cut action",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "stale_invalid_value",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["caption"],
+        },
+    )
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["status"] == "succeeded"
+    result_response = client.get(
+        f"/api/projects/{project.project_id}/partial-regenerations/{payload['job_id']}",
+    )
+    assert result_response.status_code == 200
+    result_payload = result_response.json()
+    assert result_payload["regenerated_segments"] == [
+        {
+            "segment_id": "seg_001",
+            "caption_text": "Updated caption with stale cut action",
+            "cut_action": "keep",
+        }
+    ]
+    assert result_payload["timeline"]["review_status"] == "draft"
+
+
+def test_editing_session_api_normalizes_invalid_target_cut_action_when_running_partial_regeneration(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(
+        name="Invalid Target Cut Action Runtime Project"
+    )
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "segments": [],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Stable caption",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "stale_invalid_value",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["cut_action"],
+        },
+    )
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["status"] == "succeeded"
+    result_response = client.get(
+        f"/api/projects/{project.project_id}/partial-regenerations/{payload['job_id']}",
+    )
+    assert result_response.status_code == 200
+    result_payload = result_response.json()
+    assert result_payload["regenerated_segments"] == [
+        {
+            "segment_id": "seg_001",
+            "caption_text": "Stable caption",
+            "cut_action": "keep",
+        }
+    ]
+
+
+def test_editing_session_api_matches_trimmed_session_segment_ids_when_running_partial_regeneration(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(
+        name="Trimmed Session Segment Id Runtime Project"
+    )
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "segments": [],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": " seg_001 ",
+                    "caption_text": "Caption updated through trimmed runtime lookup",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["caption"],
+        },
+    )
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["status"] == "succeeded"
+    result_response = client.get(
+        f"/api/projects/{project.project_id}/partial-regenerations/{payload['job_id']}",
+    )
+    assert result_response.status_code == 200
+    result_payload = result_response.json()
+    assert result_payload["regenerated_segments"] == [
+        {
+            "segment_id": "seg_001",
+            "caption_text": "Caption updated through trimmed runtime lookup",
+            "cut_action": "keep",
+        }
+    ]
+
+
+def test_editing_session_api_filters_unknown_overlay_type_when_running_partial_regeneration(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(
+        name="Unknown Overlay Type Runtime Project"
+    )
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "segments": [],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Overlay refresh caption",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [
+                        {
+                            "overlay_type": "legacy_card",
+                            "text": "stale overlay should be ignored",
+                        },
+                        {
+                            "overlay_type": "image_card",
+                            "asset_id": "asset_image_001",
+                            "text": "valid image card",
+                        },
+                    ],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["visual_overlay"],
+        },
+    )
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["status"] == "succeeded"
+    result_response = client.get(
+        f"/api/projects/{project.project_id}/partial-regenerations/{payload['job_id']}",
+    )
+    assert result_response.status_code == 200
+    result_payload = result_response.json()
+    timeline_path = (
+        tmp_path
+        / "projects"
+        / project.project_id
+        / "timelines"
+        / f'{result_payload["timeline_id"]}.json'
+    )
+    persisted_timeline = json.loads(timeline_path.read_text(encoding="utf-8"))
+    assert persisted_timeline["export_overlays"] == [
+        {
+            "segment_id": "seg_001",
+            "overlay_type": "image_card",
+            "asset_id": "asset_image_001",
+            "text": "valid image card",
+            "start_sec": 0.0,
+            "end_sec": 2.0,
+        }
+    ]
+
+
+def test_editing_session_api_filters_assetless_image_overlay_when_running_partial_regeneration(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(
+        name="Assetless Image Overlay Runtime Project"
+    )
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "segments": [],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Overlay refresh caption",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [
+                        {
+                            "overlay_type": "image_card",
+                            "asset_id": "   ",
+                            "text": "stale image overlay should be ignored",
+                        },
+                        {
+                            "overlay_type": "image_card",
+                            "asset_id": "asset_image_001",
+                            "text": "valid image card",
+                        },
+                    ],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["visual_overlay"],
+        },
+    )
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["status"] == "succeeded"
+    result_response = client.get(
+        f"/api/projects/{project.project_id}/partial-regenerations/{payload['job_id']}",
+    )
+    assert result_response.status_code == 200
+    result_payload = result_response.json()
+    timeline_path = (
+        tmp_path
+        / "projects"
+        / project.project_id
+        / "timelines"
+        / f'{result_payload["timeline_id"]}.json'
+    )
+    persisted_timeline = json.loads(timeline_path.read_text(encoding="utf-8"))
+    assert persisted_timeline["export_overlays"] == [
+        {
+            "segment_id": "seg_001",
+            "overlay_type": "image_card",
+            "asset_id": "asset_image_001",
+            "text": "valid image card",
+            "start_sec": 0.0,
+            "end_sec": 2.0,
+        }
+    ]
+
+
+def test_editing_session_api_preserves_canonical_table_overlay_when_running_partial_regeneration(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(
+        name="Canonical Table Overlay Runtime Project"
+    )
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "segments": [],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Overlay refresh caption",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [
+                        {
+                            "overlay_type": "table_overlay",
+                            "text": "Revenue | Cost | Margin",
+                        }
+                    ],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["table_overlay"],
+        },
+    )
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["status"] == "succeeded"
+    result_response = client.get(
+        f"/api/projects/{project.project_id}/partial-regenerations/{payload['job_id']}",
+    )
+    assert result_response.status_code == 200
+    result_payload = result_response.json()
+    timeline_path = (
+        tmp_path
+        / "projects"
+        / project.project_id
+        / "timelines"
+        / f'{result_payload["timeline_id"]}.json'
+    )
+    persisted_timeline = json.loads(timeline_path.read_text(encoding="utf-8"))
+    assert persisted_timeline["export_overlays"] == [
+        {
+            "segment_id": "seg_001",
+            "overlay_type": "table_overlay",
+            "text": "Revenue | Cost | Margin",
+            "start_sec": 0.0,
+            "end_sec": 2.0,
+        }
+    ]
+
+
+def test_editing_session_api_does_not_preserve_unknown_existing_overlay_type_on_targeted_overlay_rerun(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(
+        name="Unknown Existing Overlay Preservation Runtime Project"
+    )
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "segments": [],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+            "export_overlays": [
+                {
+                    "segment_id": "seg_001",
+                    "overlay_type": "legacy_card",
+                    "text": "stale preserved overlay should be dropped",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                },
+                {
+                    "segment_id": "seg_001",
+                    "overlay_type": "image_card",
+                    "asset_id": "asset_image_old",
+                    "text": "old image card",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                },
+            ],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Overlay refresh caption",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [
+                        {
+                            "overlay_type": "image_card",
+                            "asset_id": "asset_image_001",
+                            "text": "valid image card",
+                        }
+                    ],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["image_overlay"],
+        },
+    )
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["status"] == "succeeded"
+    result_response = client.get(
+        f"/api/projects/{project.project_id}/partial-regenerations/{payload['job_id']}",
+    )
+    assert result_response.status_code == 200
+    result_payload = result_response.json()
+    timeline_path = (
+        tmp_path
+        / "projects"
+        / project.project_id
+        / "timelines"
+        / f'{result_payload["timeline_id"]}.json'
+    )
+    persisted_timeline = json.loads(timeline_path.read_text(encoding="utf-8"))
+    assert persisted_timeline["export_overlays"] == [
+        {
+            "segment_id": "seg_001",
+            "overlay_type": "image_card",
+            "asset_id": "asset_image_001",
+            "text": "valid image card",
+            "start_sec": 0.0,
+            "end_sec": 2.0,
+        }
+    ]
+
+
+def test_editing_session_api_marks_preflight_blocked_when_target_segment_still_requires_review_only(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Target Review Only Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Needs operator review",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": True,
+                    "broll_override": None,
+                    "visual_overlays": [],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration/preflight",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["caption"],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["predicted_review_status_after_rerun"] == "blocked"
+    assert payload["prediction_reasons"] == [
+        "selected segments already require operator review, so rerun output stays blocked",
+    ]
+
+
+def test_editing_session_api_marks_preflight_blocked_when_source_timeline_and_target_segment_both_keep_review_blockers(
     tmp_path: Path,
 ) -> None:
     app = create_app(projects_root=tmp_path)

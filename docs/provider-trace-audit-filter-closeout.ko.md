@@ -1,5 +1,7 @@
 # Provider Trace Audit Filter Closeout
 
+> Historical closeout note: 이 문서는 `provider trace audit filter` 작업 종료 시점의 검증 기록이다. 현재 authoritative 상태/next slice 판단은 `docs/session-context-2026-07-01-system-hygiene.ko.md`, `docs/development-status-2026-06-29.ko.md`의 `## 17`, `docs/implementation-plan.ko.md`의 2026-07-01 체크포인트를 우선 적용한다.
+
 ## 1. 이번 작업에서 완료한 것
 
 - `/api/projects/{project_id}/provider-traces`에 `timeline_id`, `job_type`, `artifact_type`, `final_provider`, `fallback_reason` 필터를 추가했다.

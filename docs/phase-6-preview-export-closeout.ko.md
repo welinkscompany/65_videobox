@@ -1,5 +1,7 @@
 # VideoBox Phase 6 마감 메모
 
+> Historical closeout note: 이 문서는 `Phase 6 preview/export` 단계 종료 시점의 마감 기록이다. 현재 authoritative 상태/next slice 판단은 `docs/session-context-2026-07-01-system-hygiene.ko.md`, `docs/development-status-2026-06-29.ko.md`의 `## 17`, `docs/implementation-plan.ko.md`의 2026-07-01 체크포인트를 우선 적용한다.
+
 ## 1. 이번 단계에서 완료한 것
 
 - reviewed timeline job 결과를 기준으로 preview render job을 시작할 수 있게 만들었다.

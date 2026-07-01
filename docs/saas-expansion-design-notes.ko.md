@@ -183,6 +183,6 @@ LLM, STT, TTS는 전부 provider 인터페이스 뒤로 숨긴다.
 5. timeline JSON 생성
 6. preview 렌더 출력
 7. CapCut export
-8. 기본 review UI
+8. 기본 local-first operator dashboard / lightweight editing UI
 
 위 경계만 잘 지키면 이 MVP도 장기적으로 SaaS 확장 가능한 구조를 유지할 수 있다.

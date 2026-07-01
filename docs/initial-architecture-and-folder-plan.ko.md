@@ -1,5 +1,7 @@
 # VideoBox 초기 아키텍처 및 폴더 계획
 
+> Historical plan note: 이 문서는 초기 폴더 구조와 역할 분리를 잡던 시점의 계획 기록이다. 현재 아키텍처/실행 경로 판단은 `docs/architecture-plan.ko.md`, `docs/development-context.ko.md`, `docs/implementation-plan.ko.md`의 최신 체크포인트를 우선 적용한다. 특히 `apps/web`의 현재 역할은 이 문서의 초기 가정보다 넓게 확정되어 있다.
+
 ## 목표
 
 VideoBox를 로컬 우선 애플리케이션으로 시작하되, SaaS 확장 가능 아키텍처를 가진 구조로 세팅한다.

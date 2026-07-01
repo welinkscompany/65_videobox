@@ -1,5 +1,7 @@
 # VideoBox 세션 컨텍스트
 
+> Historical note: 이 문서는 `경량 후편집기 범위 확정` 당시의 중간 저장 기록이다. 현재 authoritative 제품 방향과 next slice 판단은 최신 SSOT 문서를 우선 적용한다: `docs/session-context-2026-07-01-system-hygiene.ko.md`, `docs/development-status-2026-06-29.ko.md`의 `## 17`, `docs/implementation-plan.ko.md`의 2026-07-01 체크포인트.
+
 작성일:
 
 - 2026-06-29

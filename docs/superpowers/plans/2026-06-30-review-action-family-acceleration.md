@@ -1,5 +1,7 @@
 # Review Action Family Acceleration Implementation Plan
 
+> Historical note: this plan's execution scope is complete on `codex/tts-approved-runtime`. Keep it as rollout evidence for the closed review-action family, not as the current next-priority plan.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Close the remaining review-action family gaps with the fastest safe order: approve hardening, manual-edit routing, then explicit reject semantics without breaking existing editing-session, review/output, Gemini fallback, provider trace, or persistence contracts.

@@ -329,6 +329,12 @@ const blockedPartialRegenerationPreflightResponse: PartialRegenerationPreflight 
   ...partialRegenerationPreflightResponse,
   fields: ["caption"],
   downstream_steps: ["segment_refresh", "timeline_build"],
+  targeted_segments: [
+    {
+      ...editingSessionResponse.segments[1],
+      review_required: true,
+    },
+  ],
   affected_output_areas: [
     "segment copy",
     "timeline preview",
@@ -338,6 +344,7 @@ const blockedPartialRegenerationPreflightResponse: PartialRegenerationPreflight 
   predicted_review_status_after_rerun: "blocked",
   prediction_reasons: [
     "source timeline already has unresolved review blockers that rerun will preserve",
+    "selected segments already require operator review, so rerun output stays blocked",
   ],
 };
 
@@ -2403,6 +2410,242 @@ describe("App", () => {
     expect(screen.getByRole("checkbox", { name: /broll/i })).not.toBeChecked();
   });
 
+  it("maps a backend image_card overlay into the image overlay preflight field", async () => {
+    const imageCardEditingSession = {
+      ...editingSessionResponse,
+      segments: editingSessionResponse.segments.map((segment) =>
+        segment.segment_id === "seg_002"
+          ? {
+              ...segment,
+              broll_override: null,
+              visual_overlays: [
+                {
+                  overlay_type: "image_card",
+                  asset_id: "asset_image_002",
+                  text: "Saved backend image card",
+                },
+              ],
+              music_override: null,
+              tts_replacement: null,
+              review_required: false,
+            }
+          : {
+              ...segment,
+              broll_override: null,
+              visual_overlays: [],
+              music_override: null,
+              tts_replacement: null,
+              review_required: false,
+            },
+      ),
+    };
+    const fetchMock = createFetchMock({
+      editingSession: imageCardEditingSession,
+      latestEditingSession: imageCardEditingSession,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /start editing session/i }));
+
+    expect(await screen.findByText(/editing_session_001/i)).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: /target segment/i })).toHaveValue("seg_002");
+
+    fireEvent.click(screen.getByRole("button", { name: /request regeneration preflight/i }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/projects/project_001/editing-sessions/editing_session_001/partial-regeneration/preflight",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            segment_ids: ["seg_002"],
+            fields: ["image_overlay"],
+          }),
+        }),
+      );
+    });
+  });
+
+  it("maps a backend legacy image overlay into the image overlay preflight field", async () => {
+    const legacyImageEditingSession = {
+      ...editingSessionResponse,
+      segments: editingSessionResponse.segments.map((segment) =>
+        segment.segment_id === "seg_002"
+          ? {
+              ...segment,
+              broll_override: null,
+              visual_overlays: [
+                {
+                  overlay_type: "image",
+                  asset_id: "asset_image_legacy_002",
+                  text: "Saved legacy image overlay",
+                },
+              ],
+              music_override: null,
+              tts_replacement: null,
+              review_required: false,
+            }
+          : {
+              ...segment,
+              broll_override: null,
+              visual_overlays: [],
+              music_override: null,
+              tts_replacement: null,
+              review_required: false,
+            },
+      ),
+    };
+    const fetchMock = createFetchMock({
+      editingSession: legacyImageEditingSession,
+      latestEditingSession: legacyImageEditingSession,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /start editing session/i }));
+
+    expect(await screen.findByText(/editing_session_001/i)).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: /target segment/i })).toHaveValue("seg_002");
+
+    fireEvent.click(screen.getByRole("button", { name: /request regeneration preflight/i }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/projects/project_001/editing-sessions/editing_session_001/partial-regeneration/preflight",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            segment_ids: ["seg_002"],
+            fields: ["image_overlay"],
+          }),
+        }),
+      );
+    });
+  });
+
+  it("maps a backend hook_title overlay into the visual overlay preflight field", async () => {
+    const hookTitleEditingSession = {
+      ...editingSessionResponse,
+      segments: editingSessionResponse.segments.map((segment) =>
+        segment.segment_id === "seg_002"
+          ? {
+              ...segment,
+              broll_override: null,
+              visual_overlays: [
+                {
+                  overlay_type: "hook_title",
+                  asset_id: "asset_hook_title_002",
+                  text: "Saved legacy hook title overlay",
+                },
+              ],
+              music_override: null,
+              tts_replacement: null,
+              review_required: false,
+            }
+          : {
+              ...segment,
+              broll_override: null,
+              visual_overlays: [],
+              music_override: null,
+              tts_replacement: null,
+              review_required: false,
+            },
+      ),
+    };
+    const fetchMock = createFetchMock({
+      editingSession: hookTitleEditingSession,
+      latestEditingSession: hookTitleEditingSession,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /start editing session/i }));
+
+    expect(await screen.findByText(/editing_session_001/i)).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: /target segment/i })).toHaveValue("seg_002");
+
+    fireEvent.click(screen.getByRole("button", { name: /request regeneration preflight/i }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/projects/project_001/editing-sessions/editing_session_001/partial-regeneration/preflight",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            segment_ids: ["seg_002"],
+            fields: ["visual_overlay"],
+          }),
+        }),
+      );
+    });
+  });
+
+  it("maps a backend canonical visual_overlay into the visual overlay preflight field", async () => {
+    const visualOverlayEditingSession = {
+      ...editingSessionResponse,
+      segments: editingSessionResponse.segments.map((segment) =>
+        segment.segment_id === "seg_002"
+          ? {
+              ...segment,
+              broll_override: null,
+              visual_overlays: [
+                {
+                  overlay_type: "visual_overlay",
+                  asset_id: "asset_visual_overlay_002",
+                  text: "Saved canonical visual overlay",
+                },
+              ],
+              music_override: null,
+              tts_replacement: null,
+              review_required: false,
+            }
+          : {
+              ...segment,
+              broll_override: null,
+              visual_overlays: [],
+              music_override: null,
+              tts_replacement: null,
+              review_required: false,
+            },
+      ),
+    };
+    const fetchMock = createFetchMock({
+      editingSession: visualOverlayEditingSession,
+      latestEditingSession: visualOverlayEditingSession,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /start editing session/i }));
+
+    expect(await screen.findByText(/editing_session_001/i)).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: /target segment/i })).toHaveValue("seg_002");
+
+    fireEvent.click(screen.getByRole("button", { name: /request regeneration preflight/i }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/projects/project_001/editing-sessions/editing_session_001/partial-regeneration/preflight",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            segment_ids: ["seg_002"],
+            fields: ["visual_overlay"],
+          }),
+        }),
+      );
+    });
+  });
+
   it("clears the saved music override and invalidates the active candidate", async () => {
     const musicPreflightResponse: PartialRegenerationPreflight = {
       ...partialRegenerationPreflightResponse,
@@ -2720,6 +2963,9 @@ describe("App", () => {
     expect(await screen.findByText(/blocked after rerun/i)).toBeInTheDocument();
     expect(
       screen.getByText(/source timeline already has unresolved review blockers that rerun will preserve/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/selected segments already require operator review, so rerun output stays blocked/i),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /run partial regeneration/i })).toBeEnabled();
   });
@@ -3174,6 +3420,41 @@ describe("App", () => {
     });
   });
 
+  it("clears resumed candidate restore warnings when the operator changes the rerun fields", async () => {
+    const fetchMock = createFetchMock({
+      candidatePreflightStatus: 500,
+      jobs: {
+        jobs: [
+          ...jobsResponse.jobs,
+          {
+            job_id: "partial_regeneration_job_001",
+            job_type: "partial_regeneration",
+            status: "succeeded",
+            input_ref: "editing_session_001",
+            output_ref: "partial_regeneration_run_001",
+            error_message: null,
+            started_at: "2026-06-28T00:00:16Z",
+            finished_at: "2026-06-28T00:00:17Z",
+          },
+        ],
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+
+    expect(await screen.findByText(/resumed candidate preflight interpretation is unavailable/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("checkbox", { name: /caption/i }));
+
+    await waitFor(() => {
+      expect(
+        screen.queryByText(/resumed candidate preflight interpretation is unavailable/i),
+      ).not.toBeInTheDocument();
+    });
+  });
+
   it("clears resumed candidate restore warnings when the operator reopens review", async () => {
     const fetchMock = createFetchMock({
       candidateReviewSnapshot: candidateApprovedReviewSnapshotResponse,
@@ -3215,6 +3496,116 @@ describe("App", () => {
         screen.queryByText(/resumed candidate preflight interpretation is unavailable/i),
       ).not.toBeInTheDocument();
     });
+  });
+
+  it("clears resumed candidate restore warnings when the operator approves the active candidate timeline", async () => {
+    const fetchMock = createFetchMock({
+      candidatePreflightStatus: 500,
+      jobs: {
+        jobs: [
+          ...jobsResponse.jobs,
+          {
+            job_id: "partial_regeneration_job_001",
+            job_type: "partial_regeneration",
+            status: "succeeded",
+            input_ref: "editing_session_001",
+            output_ref: "partial_regeneration_run_001",
+            error_message: null,
+            started_at: "2026-06-28T00:00:16Z",
+            finished_at: "2026-06-28T00:00:17Z",
+          },
+        ],
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+
+    expect(await screen.findByText(/resumed candidate preflight interpretation is unavailable/i)).toBeInTheDocument();
+
+    const approveButton = screen.getByRole("button", { name: /approve timeline/i });
+    await waitFor(() => {
+      expect(approveButton).toBeEnabled();
+    });
+    fireEvent.click(approveButton);
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/projects/project_001/review-approvals/partial_regeneration_job_001/approve",
+        expect.objectContaining({
+          method: "POST",
+        }),
+      );
+    });
+    await waitFor(() => {
+      expect(
+        screen.queryByText(/resumed candidate preflight interpretation is unavailable/i),
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  it("clears resumed candidate restore warnings when the operator requests a fresh preflight", async () => {
+    const baseFetchMock = createFetchMock({
+      jobs: {
+        jobs: [
+          ...jobsResponse.jobs,
+          {
+            job_id: "partial_regeneration_job_001",
+            job_type: "partial_regeneration",
+            status: "succeeded",
+            input_ref: "editing_session_001",
+            output_ref: "partial_regeneration_run_001",
+            error_message: null,
+            started_at: "2026-06-28T00:00:16Z",
+            finished_at: "2026-06-28T00:00:17Z",
+          },
+        ],
+      },
+    });
+    let preflightRequestCount = 0;
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (
+        url.endsWith(
+          "/api/projects/project_001/editing-sessions/editing_session_001/partial-regeneration/preflight",
+        ) &&
+        init?.method === "POST"
+      ) {
+        preflightRequestCount += 1;
+        if (preflightRequestCount === 1) {
+          return Promise.resolve(new Response("candidate preflight error", { status: 500 }));
+        }
+      }
+      return baseFetchMock(input, init);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+
+    expect(await screen.findByText(/resumed candidate preflight interpretation is unavailable/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /request regeneration preflight/i }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/projects/project_001/editing-sessions/editing_session_001/partial-regeneration/preflight",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            segment_ids: ["seg_002"],
+            fields: ["broll", "explanation_card"],
+          }),
+        }),
+      );
+    });
+    await waitFor(() => {
+      expect(
+        screen.queryByText(/resumed candidate preflight interpretation is unavailable/i),
+      ).not.toBeInTheDocument();
+    });
+    expect(await screen.findByText(/draft after rerun/i)).toBeInTheDocument();
   });
 
   it("reuses blocked preflight interpretation on refresh-resume for the latest fresh candidate", async () => {
@@ -3267,6 +3658,9 @@ describe("App", () => {
     expect(
       screen.getByText(/source timeline already has unresolved review blockers that rerun will preserve/i),
     ).toBeInTheDocument();
+    expect(
+      screen.getByText(/selected segments already require operator review, so rerun output stays blocked/i),
+    ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /approve timeline/i })).toBeEnabled();
   });
 
@@ -3314,6 +3708,506 @@ describe("App", () => {
     expect(screen.getByRole("checkbox", { name: /caption/i })).toBeChecked();
     expect(screen.getByRole("checkbox", { name: /broll/i })).not.toBeChecked();
     expect(screen.getByRole("checkbox", { name: /explanation card/i })).not.toBeChecked();
+  });
+
+  it("does not reuse resumed preflight interpretation when the restored preflight scope differs from the resumed candidate", async () => {
+    const fetchMock = createFetchMock({
+      partialRegenerationPreflight: {
+        ...partialRegenerationPreflightResponse,
+        segment_ids: ["seg_001"],
+        fields: ["caption"],
+        downstream_steps: ["segment_refresh", "timeline_build"],
+        targeted_segments: [editingSessionResponse.segments[0]],
+        affected_output_areas: [
+          "segment copy",
+          "timeline preview",
+          "subtitle render",
+          "capcut export",
+        ],
+      },
+      partialRegenerationResult: {
+        ...partialRegenerationResultResponse,
+        segment_ids: ["seg_002"],
+        fields: ["broll", "explanation_card"],
+      },
+      jobs: {
+        jobs: [
+          ...jobsResponse.jobs,
+          {
+            job_id: "partial_regeneration_job_001",
+            job_type: "partial_regeneration",
+            status: "succeeded",
+            input_ref: "editing_session_001",
+            output_ref: "partial_regeneration_run_001",
+            error_message: null,
+            started_at: "2026-06-28T00:00:16Z",
+            finished_at: "2026-06-28T00:00:17Z",
+          },
+        ],
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+
+    expect(await screen.findByText(/partial_regeneration_job_001/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/resumed candidate preflight interpretation is unavailable/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/candidate scope is visible, but review prediction details could not be reused/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/draft after rerun/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/resumed rerun scope/i)).toBeInTheDocument();
+    expect(screen.getByText(/seg_002 included in resumed scope/i)).toBeInTheDocument();
+    expect(screen.getByText(/broll field resumed/i)).toBeInTheDocument();
+    expect(screen.getByText(/explanation card field resumed/i)).toBeInTheDocument();
+  });
+
+  it("does not reuse resumed preflight interpretation when the restored preflight session_id differs from the resumed candidate session", async () => {
+    const fetchMock = createFetchMock({
+      partialRegenerationPreflight: {
+        ...partialRegenerationPreflightResponse,
+        session_id: "editing_session_999",
+        segment_ids: ["seg_002"],
+        fields: ["broll", "explanation_card"],
+      },
+      partialRegenerationResult: {
+        ...partialRegenerationResultResponse,
+        session_id: "editing_session_001",
+        segment_ids: ["seg_002"],
+        fields: ["broll", "explanation_card"],
+      },
+      jobs: {
+        jobs: [
+          ...jobsResponse.jobs,
+          {
+            job_id: "partial_regeneration_job_001",
+            job_type: "partial_regeneration",
+            status: "succeeded",
+            input_ref: "editing_session_001",
+            output_ref: "partial_regeneration_run_001",
+            error_message: null,
+            started_at: "2026-06-28T00:00:16Z",
+            finished_at: "2026-06-28T00:00:17Z",
+          },
+        ],
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+
+    expect(await screen.findByText(/partial_regeneration_job_001/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/resumed candidate preflight interpretation is unavailable/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/candidate scope is visible, but review prediction details could not be reused/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/draft after rerun/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/resumed rerun scope/i)).toBeInTheDocument();
+    expect(screen.getByText(/seg_002 included in resumed scope/i)).toBeInTheDocument();
+    expect(screen.getByText(/broll field resumed/i)).toBeInTheDocument();
+    expect(screen.getByText(/explanation card field resumed/i)).toBeInTheDocument();
+  });
+
+  it("does not reuse resumed preflight interpretation when the restored preflight fields include duplicates", async () => {
+    const fetchMock = createFetchMock({
+      partialRegenerationPreflight: {
+        ...partialRegenerationPreflightResponse,
+        segment_ids: ["seg_002"],
+        fields: ["broll", "explanation_card", "broll"],
+      },
+      partialRegenerationResult: {
+        ...partialRegenerationResultResponse,
+        session_id: "editing_session_001",
+        segment_ids: ["seg_002"],
+        fields: ["broll", "explanation_card"],
+      },
+      jobs: {
+        jobs: [
+          ...jobsResponse.jobs,
+          {
+            job_id: "partial_regeneration_job_001",
+            job_type: "partial_regeneration",
+            status: "succeeded",
+            input_ref: "editing_session_001",
+            output_ref: "partial_regeneration_run_001",
+            error_message: null,
+            started_at: "2026-06-28T00:00:16Z",
+            finished_at: "2026-06-28T00:00:17Z",
+          },
+        ],
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+
+    expect(await screen.findByText(/partial_regeneration_job_001/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/resumed candidate preflight interpretation is unavailable/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/candidate scope is visible, but review prediction details could not be reused/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/draft after rerun/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/resumed rerun scope/i)).toBeInTheDocument();
+    expect(screen.getByText(/seg_002 included in resumed scope/i)).toBeInTheDocument();
+    expect(screen.getByText(/broll field resumed/i)).toBeInTheDocument();
+    expect(screen.getByText(/explanation card field resumed/i)).toBeInTheDocument();
+  });
+
+  it("does not reuse resumed preflight interpretation when restored targeted segments differ from the resumed candidate scope", async () => {
+    const fetchMock = createFetchMock({
+      partialRegenerationPreflight: {
+        ...partialRegenerationPreflightResponse,
+        session_id: "editing_session_001",
+        segment_ids: ["seg_002"],
+        fields: ["broll", "explanation_card"],
+        targeted_segments: [editingSessionResponse.segments[0]],
+      },
+      partialRegenerationResult: {
+        ...partialRegenerationResultResponse,
+        session_id: "editing_session_001",
+        segment_ids: ["seg_002"],
+        fields: ["broll", "explanation_card"],
+      },
+      jobs: {
+        jobs: [
+          ...jobsResponse.jobs,
+          {
+            job_id: "partial_regeneration_job_001",
+            job_type: "partial_regeneration",
+            status: "succeeded",
+            input_ref: "editing_session_001",
+            output_ref: "partial_regeneration_run_001",
+            error_message: null,
+            started_at: "2026-06-28T00:00:16Z",
+            finished_at: "2026-06-28T00:00:17Z",
+          },
+        ],
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+
+    expect(await screen.findByText(/partial_regeneration_job_001/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/resumed candidate preflight interpretation is unavailable/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/candidate scope is visible, but review prediction details could not be reused/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/draft after rerun/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/resumed rerun scope/i)).toBeInTheDocument();
+    expect(screen.getByText(/seg_002 included in resumed scope/i)).toBeInTheDocument();
+    expect(screen.getByText(/broll field resumed/i)).toBeInTheDocument();
+    expect(screen.getByText(/explanation card field resumed/i)).toBeInTheDocument();
+  });
+
+  it("does not reuse resumed preflight interpretation when restored targeted segment review state differs from the editing session", async () => {
+    const fetchMock = createFetchMock({
+      partialRegenerationPreflight: {
+        ...partialRegenerationPreflightResponse,
+        session_id: "editing_session_001",
+        segment_ids: ["seg_002"],
+        fields: ["broll", "explanation_card"],
+        targeted_segments: [
+          {
+            ...editingSessionResponse.segments[1],
+            review_required: true,
+          },
+        ],
+      },
+      partialRegenerationResult: {
+        ...partialRegenerationResultResponse,
+        session_id: "editing_session_001",
+        segment_ids: ["seg_002"],
+        fields: ["broll", "explanation_card"],
+      },
+      jobs: {
+        jobs: [
+          ...jobsResponse.jobs,
+          {
+            job_id: "partial_regeneration_job_001",
+            job_type: "partial_regeneration",
+            status: "succeeded",
+            input_ref: "editing_session_001",
+            output_ref: "partial_regeneration_run_001",
+            error_message: null,
+            started_at: "2026-06-28T00:00:16Z",
+            finished_at: "2026-06-28T00:00:17Z",
+          },
+        ],
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+
+    expect(await screen.findByText(/partial_regeneration_job_001/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/resumed candidate preflight interpretation is unavailable/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/candidate scope is visible, but review prediction details could not be reused/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/draft after rerun/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/resumed rerun scope/i)).toBeInTheDocument();
+    expect(screen.getByText(/seg_002 included in resumed scope/i)).toBeInTheDocument();
+    expect(screen.getByText(/broll field resumed/i)).toBeInTheDocument();
+    expect(screen.getByText(/explanation card field resumed/i)).toBeInTheDocument();
+  });
+
+  it("does not reuse resumed preflight interpretation when restored targeted segment tts replacement differs from the editing session", async () => {
+    const fetchMock = createFetchMock({
+      partialRegenerationPreflight: {
+        ...partialRegenerationPreflightResponse,
+        session_id: "editing_session_001",
+        segment_ids: ["seg_002"],
+        fields: ["broll", "explanation_card"],
+        targeted_segments: [
+          {
+            ...editingSessionResponse.segments[1],
+            tts_replacement: {
+              recommendation_id: "rec_tts_seg_002",
+              asset_id: "asset_tts_002",
+            },
+          },
+        ],
+      },
+      partialRegenerationResult: {
+        ...partialRegenerationResultResponse,
+        session_id: "editing_session_001",
+        segment_ids: ["seg_002"],
+        fields: ["broll", "explanation_card"],
+      },
+      jobs: {
+        jobs: [
+          ...jobsResponse.jobs,
+          {
+            job_id: "partial_regeneration_job_001",
+            job_type: "partial_regeneration",
+            status: "succeeded",
+            input_ref: "editing_session_001",
+            output_ref: "partial_regeneration_run_001",
+            error_message: null,
+            started_at: "2026-06-28T00:00:16Z",
+            finished_at: "2026-06-28T00:00:17Z",
+          },
+        ],
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+
+    expect(await screen.findByText(/partial_regeneration_job_001/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/resumed candidate preflight interpretation is unavailable/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/candidate scope is visible, but review prediction details could not be reused/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/draft after rerun/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/resumed rerun scope/i)).toBeInTheDocument();
+    expect(screen.getByText(/seg_002 included in resumed scope/i)).toBeInTheDocument();
+    expect(screen.getByText(/broll field resumed/i)).toBeInTheDocument();
+    expect(screen.getByText(/explanation card field resumed/i)).toBeInTheDocument();
+  });
+
+  it("does not reuse resumed preflight interpretation when restored targeted segment visual overlays differ from the editing session", async () => {
+    const fetchMock = createFetchMock({
+      partialRegenerationPreflight: {
+        ...partialRegenerationPreflightResponse,
+        session_id: "editing_session_001",
+        segment_ids: ["seg_002"],
+        fields: ["broll", "explanation_card"],
+        targeted_segments: [
+          {
+            ...editingSessionResponse.segments[1],
+            visual_overlays: [
+              {
+                overlay_type: "explanation_card",
+                title: "Restored mismatch",
+                body: "Different overlay state",
+                text: "Restored mismatch: Different overlay state",
+              },
+            ],
+          },
+        ],
+      },
+      partialRegenerationResult: {
+        ...partialRegenerationResultResponse,
+        session_id: "editing_session_001",
+        segment_ids: ["seg_002"],
+        fields: ["broll", "explanation_card"],
+      },
+      jobs: {
+        jobs: [
+          ...jobsResponse.jobs,
+          {
+            job_id: "partial_regeneration_job_001",
+            job_type: "partial_regeneration",
+            status: "succeeded",
+            input_ref: "editing_session_001",
+            output_ref: "partial_regeneration_run_001",
+            error_message: null,
+            started_at: "2026-06-28T00:00:16Z",
+            finished_at: "2026-06-28T00:00:17Z",
+          },
+        ],
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+
+    expect(await screen.findByText(/partial_regeneration_job_001/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/resumed candidate preflight interpretation is unavailable/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/candidate scope is visible, but review prediction details could not be reused/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/draft after rerun/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/resumed rerun scope/i)).toBeInTheDocument();
+    expect(screen.getByText(/seg_002 included in resumed scope/i)).toBeInTheDocument();
+    expect(screen.getByText(/broll field resumed/i)).toBeInTheDocument();
+    expect(screen.getByText(/explanation card field resumed/i)).toBeInTheDocument();
+  });
+
+  it("does not reuse resumed preflight interpretation when restored targeted segment broll override differs from the editing session", async () => {
+    const fetchMock = createFetchMock({
+      partialRegenerationPreflight: {
+        ...partialRegenerationPreflightResponse,
+        session_id: "editing_session_001",
+        segment_ids: ["seg_002"],
+        fields: ["broll", "explanation_card"],
+        targeted_segments: [
+          {
+            ...editingSessionResponse.segments[1],
+            broll_override: {
+              asset_id: "asset_broll_restored_mismatch_002",
+            },
+          },
+        ],
+      },
+      partialRegenerationResult: {
+        ...partialRegenerationResultResponse,
+        session_id: "editing_session_001",
+        segment_ids: ["seg_002"],
+        fields: ["broll", "explanation_card"],
+      },
+      jobs: {
+        jobs: [
+          ...jobsResponse.jobs,
+          {
+            job_id: "partial_regeneration_job_001",
+            job_type: "partial_regeneration",
+            status: "succeeded",
+            input_ref: "editing_session_001",
+            output_ref: "partial_regeneration_run_001",
+            error_message: null,
+            started_at: "2026-06-28T00:00:16Z",
+            finished_at: "2026-06-28T00:00:17Z",
+          },
+        ],
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+
+    expect(await screen.findByText(/partial_regeneration_job_001/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/resumed candidate preflight interpretation is unavailable/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/candidate scope is visible, but review prediction details could not be reused/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/draft after rerun/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/resumed rerun scope/i)).toBeInTheDocument();
+    expect(screen.getByText(/seg_002 included in resumed scope/i)).toBeInTheDocument();
+    expect(screen.getByText(/broll field resumed/i)).toBeInTheDocument();
+    expect(screen.getByText(/explanation card field resumed/i)).toBeInTheDocument();
+  });
+
+  it("does not reuse resumed preflight interpretation when restored targeted segment music override differs from the editing session", async () => {
+    const fetchMock = createFetchMock({
+      partialRegenerationPreflight: {
+        ...partialRegenerationPreflightResponse,
+        session_id: "editing_session_001",
+        segment_ids: ["seg_002"],
+        fields: ["music", "explanation_card"],
+        targeted_segments: [
+          {
+            ...editingSessionResponse.segments[1],
+            music_override: {
+              asset_id: "asset_music_restored_mismatch_002",
+            },
+          },
+        ],
+      },
+      partialRegenerationResult: {
+        ...partialRegenerationResultResponse,
+        session_id: "editing_session_001",
+        segment_ids: ["seg_002"],
+        fields: ["music", "explanation_card"],
+      },
+      jobs: {
+        jobs: [
+          ...jobsResponse.jobs,
+          {
+            job_id: "partial_regeneration_job_001",
+            job_type: "partial_regeneration",
+            status: "succeeded",
+            input_ref: "editing_session_001",
+            output_ref: "partial_regeneration_run_001",
+            error_message: null,
+            started_at: "2026-06-28T00:00:16Z",
+            finished_at: "2026-06-28T00:00:17Z",
+          },
+        ],
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+
+    expect(await screen.findByText(/partial_regeneration_job_001/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/resumed candidate preflight interpretation is unavailable/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/candidate scope is visible, but review prediction details could not be reused/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/draft after rerun/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/resumed rerun scope/i)).toBeInTheDocument();
+    expect(screen.getByText(/seg_002 included in resumed scope/i)).toBeInTheDocument();
+    expect(screen.getByText(/music field resumed/i)).toBeInTheDocument();
+    expect(screen.getByText(/explanation card field resumed/i)).toBeInTheDocument();
   });
 
   it("does not reuse preflight interpretation for a resumed multi-segment candidate that the current editor cannot represent", async () => {
@@ -3369,6 +4263,94 @@ describe("App", () => {
     expect(screen.queryByText(/draft after rerun/i)).not.toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: /caption/i })).not.toBeChecked();
     expect(screen.getByRole("checkbox", { name: /broll/i })).toBeChecked();
+  });
+
+  it("clears resumed multi-segment scope when the operator changes the rerun target", async () => {
+    const fetchMock = createFetchMock({
+      partialRegenerationResult: {
+        ...partialRegenerationResultResponse,
+        segment_ids: ["seg_001", "seg_002"],
+        fields: ["caption", "broll"],
+      },
+      jobs: {
+        jobs: [
+          ...jobsResponse.jobs,
+          {
+            job_id: "partial_regeneration_job_001",
+            job_type: "partial_regeneration",
+            status: "succeeded",
+            input_ref: "editing_session_001",
+            output_ref: "partial_regeneration_run_001",
+            error_message: null,
+            started_at: "2026-06-28T00:00:16Z",
+            finished_at: "2026-06-28T00:00:17Z",
+          },
+        ],
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+
+    expect(await screen.findByText(/partial_regeneration_job_001/i)).toBeInTheDocument();
+    expect(screen.getByText(/2 segments in scope/i)).toBeInTheDocument();
+    expect(screen.getByText(/multi-segment resumed scope is readable here, but not mapped into single-segment editor defaults/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /seg_001/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByText(/partial_regeneration_job_001/i)).not.toBeInTheDocument();
+    });
+    expect(screen.queryByText(/2 segments in scope/i)).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/multi-segment resumed scope is readable here, but not mapped into single-segment editor defaults/i),
+    ).not.toBeInTheDocument();
+  });
+
+  it("clears resumed multi-segment scope when the operator changes the rerun fields", async () => {
+    const fetchMock = createFetchMock({
+      partialRegenerationResult: {
+        ...partialRegenerationResultResponse,
+        segment_ids: ["seg_001", "seg_002"],
+        fields: ["caption", "broll"],
+      },
+      jobs: {
+        jobs: [
+          ...jobsResponse.jobs,
+          {
+            job_id: "partial_regeneration_job_001",
+            job_type: "partial_regeneration",
+            status: "succeeded",
+            input_ref: "editing_session_001",
+            output_ref: "partial_regeneration_run_001",
+            error_message: null,
+            started_at: "2026-06-28T00:00:16Z",
+            finished_at: "2026-06-28T00:00:17Z",
+          },
+        ],
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+
+    expect(await screen.findByText(/partial_regeneration_job_001/i)).toBeInTheDocument();
+    expect(screen.getByText(/2 segments in scope/i)).toBeInTheDocument();
+    expect(screen.getByText(/multi-segment resumed scope is readable here, but not mapped into single-segment editor defaults/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("checkbox", { name: /caption/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByText(/partial_regeneration_job_001/i)).not.toBeInTheDocument();
+    });
+    expect(screen.queryByText(/2 segments in scope/i)).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/multi-segment resumed scope is readable here, but not mapped into single-segment editor defaults/i),
+    ).not.toBeInTheDocument();
   });
 
   it("falls back to the stable timeline when the latest candidate freshness is no longer provable", async () => {

@@ -264,7 +264,7 @@ MCP는 가능하면 큰 바이너리 파일 자체를 들고 다니지 않는다
 
 대응:
 
-- timeline 세부 수정은 MCP보다 review UI에 맡긴다
+- timeline 세부 수정은 MCP보다 operator dashboard / lightweight editing UI에 맡긴다
 
 ## 14. 결론
 

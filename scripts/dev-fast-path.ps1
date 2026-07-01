@@ -1,0 +1,182 @@
+param(
+    [ValidateSet(
+        "status",
+        "review-action-backend",
+        "review-action-frontend",
+        "output-gating",
+        "preflight-backend",
+        "preflight-frontend",
+        "current-focused",
+        "broader",
+        "all"
+    )]
+    [string]$Mode = "current-focused",
+    [string]$BackendPattern = "",
+    [string]$FrontendPattern = ""
+)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
+
+$repoRoot = Split-Path -Parent $PSScriptRoot
+$frontendRoot = Join-Path $repoRoot "apps\web"
+
+$reviewActionBackendExpr = if ($BackendPattern -and $Mode -eq "review-action-backend") {
+    $BackendPattern
+}
+else {
+    'approve_pending_recommendation or approve_preserves_non_target_review_items_and_blocked_status or approve_tts_replacement_updates_target_narration_clip_and_keeps_other_blockers or reject_pending_recommendation or timeline_local_when_another_timeline_mutates_shared_recommendation_state or rejecting_one_duplicate_pending_recommendation_keeps_shared_review_flag'
+}
+
+$outputGatingExpr = if ($BackendPattern -and $Mode -eq "output-gating") {
+    $BackendPattern
+}
+else {
+    'approved_review_state_still_blocks_outputs_when_timeline_has_residual_review_blockers or approved_review_state_still_blocks_outputs_when_only_review_flags_remain or approved_review_state_still_blocks_outputs_when_only_pending_recommendations_remain or output_jobs_ignore_stale_truthy_blocker_shapes_on_approved_timeline or preview_export_and_subtitles_require_explicit_approval_even_without_blockers or approving_one_of_multiple_pending_recommendations_keeps_output_blocked_by_remaining_detail or reopening_approved_review_reblocks_outputs_until_reapproved or reopening_approved_review_with_residual_blockers_returns_blocked_status or approved_timeline_can_generate_subtitles_preview_and_export'
+}
+
+$preflightBackendExpr = if ($BackendPattern -and $Mode -eq "preflight-backend") {
+    $BackendPattern
+}
+else {
+    'test_editing_session_api_marks_preflight_ or test_editing_session_api_normalizes_ or test_editing_session_api_filters_stale_non_dict_visual_overlay_entries_in_preflight_targeted_segments or test_editing_session_api_filters_empty_visual_overlay_dict_entries_in_preflight_targeted_segments or test_editing_session_api_filters_stale_minimal_dict_visual_overlay_entries_in_preflight_targeted_segments or test_editing_session_api_filters_overlay_type_only_visual_overlay_entries_in_preflight_targeted_segments or test_editing_session_api_filters_unknown_overlay_type_entries_in_preflight_targeted_segments or test_editing_session_api_preserves_legacy_hook_title_overlay_in_preflight_targeted_segments or test_editing_session_api_preserves_canonical_visual_overlay_in_preflight_targeted_segments or test_editing_session_api_preserves_canonical_image_overlay_in_preflight_targeted_segments or test_editing_session_api_preserves_canonical_table_overlay_in_preflight_targeted_segments or test_editing_session_api_filters_stale_non_dict_source_review_flag_entries_from_preflight_prediction or test_editing_session_api_filters_stale_minimal_dict_source_review_flag_entries_from_preflight_prediction or test_editing_session_api_filters_code_only_source_review_flag_entries_from_preflight_prediction or test_editing_session_api_filters_unknown_code_source_review_flag_entries_from_preflight_prediction or test_editing_session_api_filters_stale_non_dict_source_pending_recommendation_entries_from_preflight_prediction or test_editing_session_api_filters_stale_minimal_dict_source_pending_recommendation_entries_from_preflight_prediction or test_editing_session_api_filters_recommendation_id_only_source_pending_recommendation_entries_from_preflight_prediction or test_editing_session_api_filters_unknown_type_source_pending_recommendation_entries_from_preflight_prediction or test_editing_session_api_ignores_stale_minimal_dict_source_pending_recommendation_entries_when_running_partial_regeneration or test_editing_session_api_normalizes_string_false_review_required_when_running_partial_regeneration or test_editing_session_api_normalizes_invalid_cut_action_when_running_partial_regeneration or test_editing_session_api_normalizes_invalid_target_cut_action_when_running_partial_regeneration or test_editing_session_api_matches_trimmed_session_segment_ids_when_running_partial_regeneration or test_editing_session_api_filters_unknown_overlay_type_when_running_partial_regeneration or test_editing_session_api_preserves_canonical_table_overlay_when_running_partial_regeneration or test_editing_session_api_does_not_preserve_unknown_existing_overlay_type_on_targeted_overlay_rerun or test_editing_session_api_matches_trimmed_session_segment_ids_in_preflight_targeted_segments or test_editing_session_api_preserves_request_segment_order_in_preflight_targeted_segments or test_editing_session_api_deduplicates_repeated_segment_ids_in_preflight_scope or test_editing_session_api_deduplicates_repeated_fields_in_preflight_scope or test_editing_session_api_rejects_preflight_for_unsupported_field_scope_without_creating_jobs'
+}
+
+$reviewActionFrontendExpr = if ($FrontendPattern -and $Mode -eq "review-action-frontend") {
+    $FrontendPattern
+}
+else {
+    'approves a pending recommendation through the review action and refreshes the review snapshot|opens the actionable pending recommendation in the editing session when marked for manual edit'
+}
+
+$preflightFrontendExpr = if ($FrontendPattern -and $Mode -eq "preflight-frontend") {
+    $FrontendPattern
+}
+else {
+    'shows a blocked preflight warning before execution when the rerun preserves existing review blockers|shows a limited restore warning when resumed preflight interpretation cannot be restored|clears resumed candidate restore warnings when the operator changes the rerun target|clears resumed candidate restore warnings when the operator changes the rerun fields|clears resumed candidate restore warnings when the operator reopens review|clears resumed candidate restore warnings when the operator approves the active candidate timeline|clears resumed candidate restore warnings when the operator requests a fresh preflight|reuses blocked preflight interpretation on refresh-resume for the latest fresh candidate|aligns the selected rerun scope with the resumed candidate before reusing preflight interpretation|does not reuse resumed preflight interpretation when the restored preflight scope differs from the resumed candidate|does not reuse resumed preflight interpretation when the restored preflight session_id differs from the resumed candidate session|does not reuse resumed preflight interpretation when the restored preflight fields include duplicates|does not reuse resumed preflight interpretation when restored targeted segments differ from the resumed candidate scope|does not reuse resumed preflight interpretation when restored targeted segment review state differs from the editing session|does not reuse resumed preflight interpretation when restored targeted segment tts replacement differs from the editing session|does not reuse resumed preflight interpretation when restored targeted segment visual overlays differ from the editing session|does not reuse resumed preflight interpretation when restored targeted segment broll override differs from the editing session|does not reuse resumed preflight interpretation when restored targeted segment music override differs from the editing session|does not reuse preflight interpretation for a resumed multi-segment candidate that the current editor cannot represent|clears resumed multi-segment scope when the operator changes the rerun target|clears resumed multi-segment scope when the operator changes the rerun fields|maps a backend image_card overlay into the image overlay preflight field|maps a backend legacy image overlay into the image overlay preflight field|maps a backend hook_title overlay into the visual overlay preflight field|maps a backend canonical visual_overlay into the visual overlay preflight field'
+}
+
+function Invoke-Step {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Label,
+        [Parameter(Mandatory = $true)]
+        [string]$Command,
+        [Parameter(Mandatory = $true)]
+        [string]$WorkingDirectory
+    )
+
+    Write-Host ""
+    Write-Host "==> $Label" -ForegroundColor Cyan
+    Push-Location $WorkingDirectory
+    try {
+        Invoke-Expression $Command
+    }
+    finally {
+        Pop-Location
+    }
+}
+
+switch ($Mode) {
+    "review-action-backend" {
+        Invoke-Step `
+            -Label "Backend review-action maintenance slice" `
+            -Command "pytest tests/test_api.py -q -k `"$reviewActionBackendExpr`"" `
+            -WorkingDirectory $repoRoot
+    }
+    "review-action-frontend" {
+        Invoke-Step `
+            -Label "Frontend review-action maintenance slice" `
+            -Command "npm test -- --run src/app.test.tsx -t `"$reviewActionFrontendExpr`"" `
+            -WorkingDirectory $frontendRoot
+    }
+    "output-gating" {
+        Invoke-Step `
+            -Label "Backend output gating slice" `
+            -Command "pytest tests/test_api.py -q -k `"$outputGatingExpr`"" `
+            -WorkingDirectory $repoRoot
+    }
+    "preflight-backend" {
+        Invoke-Step `
+            -Label "Backend preflight slice" `
+            -Command "pytest tests/test_api.py -q -k `"$preflightBackendExpr`"" `
+            -WorkingDirectory $repoRoot
+    }
+    "preflight-frontend" {
+        Invoke-Step `
+            -Label "Frontend preflight slice" `
+            -Command "npm test -- --run src/app.test.tsx -t `"$preflightFrontendExpr`"" `
+            -WorkingDirectory $frontendRoot
+    }
+    "current-focused" {
+        Invoke-Step `
+            -Label "Backend output gating slice" `
+            -Command "pytest tests/test_api.py -q -k `"$outputGatingExpr`"" `
+            -WorkingDirectory $repoRoot
+        Invoke-Step `
+            -Label "Backend preflight slice" `
+            -Command "pytest tests/test_api.py -q -k `"$preflightBackendExpr`"" `
+            -WorkingDirectory $repoRoot
+        Invoke-Step `
+            -Label "Frontend preflight slice" `
+            -Command "npm test -- --run src/app.test.tsx -t `"$preflightFrontendExpr`"" `
+            -WorkingDirectory $frontendRoot
+    }
+    "broader" {
+        Invoke-Step `
+            -Label "Frontend production build" `
+            -Command "npm run build" `
+            -WorkingDirectory $frontendRoot
+        Invoke-Step `
+            -Label "Full backend regression" `
+            -Command "pytest -q" `
+            -WorkingDirectory $repoRoot
+    }
+    "all" {
+        Invoke-Step `
+            -Label "Backend output gating slice" `
+            -Command "pytest tests/test_api.py -q -k `"$outputGatingExpr`"" `
+            -WorkingDirectory $repoRoot
+        Invoke-Step `
+            -Label "Backend preflight slice" `
+            -Command "pytest tests/test_api.py -q -k `"$preflightBackendExpr`"" `
+            -WorkingDirectory $repoRoot
+        Invoke-Step `
+            -Label "Frontend preflight slice" `
+            -Command "npm test -- --run src/app.test.tsx -t `"$preflightFrontendExpr`"" `
+            -WorkingDirectory $frontendRoot
+        Invoke-Step `
+            -Label "Frontend production build" `
+            -Command "npm run build" `
+            -WorkingDirectory $frontendRoot
+        Invoke-Step `
+            -Label "Full backend regression" `
+            -Command "pytest -q" `
+            -WorkingDirectory $repoRoot
+    }
+    "status" {
+        Write-Host ""
+        Write-Host "VideoBox current fast path status" -ForegroundColor Cyan
+        Write-Host "Repo root: $repoRoot"
+        Write-Host "Frontend root: $frontendRoot"
+        Write-Host ""
+        Write-Host "Current-priority loop:" -ForegroundColor Yellow
+        Write-Host "  1. Add one failing test"
+        Write-Host "  2. ./scripts/dev-fast-path.ps1 -Mode output-gating   or preflight-backend / preflight-frontend"
+        Write-Host "  3. Apply minimal GREEN"
+        Write-Host "  4. ./scripts/dev-fast-path.ps1 -Mode current-focused"
+        Write-Host "  5. ./scripts/dev-fast-path.ps1 -Mode broader"
+        Write-Host ""
+        Write-Host "Current backend output-gating pattern:"
+        Write-Host "  $outputGatingExpr"
+        Write-Host ""
+        Write-Host "Current backend preflight pattern:"
+        Write-Host "  $preflightBackendExpr"
+        Write-Host ""
+        Write-Host "Current frontend preflight pattern:"
+        Write-Host "  $preflightFrontendExpr"
+        Write-Host ""
+        Write-Host "Review-action maintenance helper remains available:"
+        Write-Host "  ./scripts/review-action-fast-path.ps1 -Mode status"
+    }
+}

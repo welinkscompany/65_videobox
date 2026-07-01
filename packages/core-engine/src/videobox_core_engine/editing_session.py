@@ -391,7 +391,12 @@ def build_partial_regeneration_request(
     segment_ids: list[str],
     fields: list[str],
 ) -> dict[str, Any]:
-    normalized_segment_ids = [segment_id.strip() for segment_id in segment_ids if segment_id.strip()]
+    normalized_segment_ids: list[str] = []
+    for segment_id in segment_ids:
+        normalized_segment_id = segment_id.strip()
+        if not normalized_segment_id or normalized_segment_id in normalized_segment_ids:
+            continue
+        normalized_segment_ids.append(normalized_segment_id)
     if not normalized_segment_ids:
         raise ValueError("segment_ids must contain at least one valid segment id.")
 
@@ -404,7 +409,12 @@ def build_partial_regeneration_request(
     if unknown_segment_ids:
         raise ValueError(f"Unknown session segment ids: {', '.join(unknown_segment_ids)}")
 
-    normalized_fields = [field.strip() for field in fields if field.strip()]
+    normalized_fields: list[str] = []
+    for field in fields:
+        normalized_field = field.strip()
+        if not normalized_field or normalized_field in normalized_fields:
+            continue
+        normalized_fields.append(normalized_field)
     if not normalized_fields:
         raise ValueError("fields must contain at least one valid field.")
 

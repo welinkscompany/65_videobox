@@ -1,6 +1,8 @@
 # Review Action Next Slice Subagent Prompt
 
-아래 프롬프트를 다음 구현 goal의 기본값으로 사용한다.
+> Historical note: 이 프롬프트는 review-action family를 닫던 시점의 작업용이다. `codex/tts-approved-runtime`의 현재 next-priority goal 기본값으로 쓰지 말고, 닫힌 review-action rollout evidence로만 참조한다.
+
+아래 프롬프트는 당시 다음 구현 goal의 기본값으로 사용했다.
 
 ```text
 브랜치: codex/tts-approved-runtime
@@ -67,3 +69,9 @@ override 예시:
 - 남은 리스크
 - 다음 최소 slice 제안 1개
 ```
+
+현재 브랜치의 최신 우선순위는 이 문서가 아니라 아래 문서를 따른다.
+
+- `docs/implementation-plan.ko.md`
+- `docs/development-status-2026-06-29.ko.md`
+- `docs/session-context-2026-07-01-system-hygiene.ko.md`

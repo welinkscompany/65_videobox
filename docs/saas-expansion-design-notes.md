@@ -184,6 +184,6 @@ For the first implementation phase, the plan should narrow to:
 5. timeline JSON generation
 6. preview render output
 7. CapCut export
-8. basic review UI
+8. basic local-first operator dashboard / lightweight editing UI
 
 This still fits the long-term SaaS-capable architecture if the boundaries above are respected.

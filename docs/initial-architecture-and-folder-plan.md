@@ -1,5 +1,7 @@
 # VideoBox Initial Architecture And Folder Plan
 
+> Historical plan note: This document captures the initial folder and boundary plan. For current architecture and active execution paths, prioritize `docs/architecture-plan.ko.md`, `docs/development-context.ko.md`, and the latest checkpoint sections in `docs/implementation-plan.ko.md`. In particular, the current `apps/web` role is broader than the original assumption recorded here.
+
 ## Goal
 
 Set up VideoBox as a local-first application with a SaaS-expandable architecture.

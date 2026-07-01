@@ -199,7 +199,7 @@ BrollBox는 VideoBox의 선행 실험체로서 가치가 높다.
 
 - Streamlit 기반 구조가 VideoBox의 장기 구조와 맞지 않는다
 - 페이지 구조 자체가 BrollBox의 운영 흐름에 최적화되어 있다
-- 지금 필요한 것은 `local-first operator app` 또는 얇은 review UI이지, BrollBox UI 복제가 아니다
+- 지금 필요한 것은 `local-first operator dashboard / lightweight editing UI`이지, BrollBox UI 복제가 아니다
 
 권장 처리:
 

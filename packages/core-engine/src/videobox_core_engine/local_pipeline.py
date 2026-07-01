@@ -35,6 +35,7 @@ from videobox_core_engine.preview_renderer import PreviewRenderer
 from videobox_core_engine.provider_trace import build_provider_trace
 from videobox_core_engine.recommenders import KeywordBrollRecommender, RuleBasedMusicRecommender
 from videobox_core_engine.review_action_mutations import (
+    apply_approved_recommendation_to_timeline,
     extract_pending_recommendation_decision,
     filtered_review_flags_after_recommendation_decision,
     timeline_recommendation_decisions,
@@ -49,6 +50,67 @@ from videobox_domain_models.recommendations import RecommendationType
 from videobox_provider_interfaces.recommenders import RecommendationProvider, RecommendationRequest
 from videobox_provider_interfaces.stt import MockSTTProvider, STTProvider, STTRequest
 from videobox_storage.local_project_store import LocalProjectStore
+
+VALID_RESTORED_RECOMMENDATION_TYPES = {
+    RecommendationType.TTS_REPLACEMENT.value,
+    RecommendationType.BROLL.value,
+    RecommendationType.BGM.value,
+    RecommendationType.OVERLAY.value,
+}
+
+
+def _normalize_runtime_review_required(value: object) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() not in {"", "0", "false", "no", "off"}
+    return bool(value)
+
+
+def _normalize_runtime_cut_action(value: object) -> str:
+    cut_action = str(value or "keep")
+    if cut_action not in {"keep", "remove", "trim"}:
+        return "keep"
+    return cut_action
+
+
+def _is_valid_runtime_overlay(overlay: object) -> bool:
+    if not isinstance(overlay, dict):
+        return False
+    overlay_type = str(overlay.get("overlay_type") or "").strip()
+    if overlay_type not in {
+        "image",
+        "image_card",
+        "image_overlay",
+        "explanation_card",
+        "table_card",
+        "table_overlay",
+        "hook_title",
+        "visual_overlay",
+    }:
+        return False
+    if overlay_type in {"explanation_card", "table_card", "table_overlay"}:
+        return bool(str(overlay.get("text") or "").strip())
+    if overlay_type in {"hook_title", "visual_overlay"}:
+        return bool(str(overlay.get("text") or "").strip()) or bool(
+            str(overlay.get("asset_id") or "").strip()
+        )
+    return bool(str(overlay.get("asset_id") or "").strip())
+
+
+def _is_runtime_blocking_review_flag(flag: object) -> bool:
+    return (
+        isinstance(flag, dict)
+        and bool(str(flag.get("code") or "").strip())
+        and bool(str(flag.get("segment_id") or "").strip())
+    )
+
+
+def _is_runtime_blocking_pending_recommendation(item: object) -> bool:
+    return (
+        isinstance(item, dict)
+        and bool(str(item.get("recommendation_id") or "").strip())
+        and bool(str(item.get("target_segment_id") or "").strip())
+        and str(item.get("recommendation_type") or "").strip() in VALID_RESTORED_RECOMMENDATION_TYPES
+    )
 
 
 class LocalPipelineRunner:
@@ -1499,12 +1561,23 @@ class LocalPipelineRunner:
 
     def _ensure_timeline_has_no_blockers(self, timeline: dict[str, Any]) -> None:
         review_flags = timeline.get("review_flags", [])
+        if not isinstance(review_flags, list):
+            review_flags = []
+        else:
+            review_flags = [flag for flag in review_flags if _is_runtime_blocking_review_flag(flag)]
         pending_recommendations = timeline.get("pending_recommendations", [])
+        if not isinstance(pending_recommendations, list):
+            pending_recommendations = []
+        else:
+            pending_recommendations = [
+                item
+                for item in pending_recommendations
+                if _is_runtime_blocking_pending_recommendation(item)
+            ]
         if review_flags or pending_recommendations:
             review_flag_codes = [
                 f"{str(flag.get('code') or '')}@{str(flag.get('segment_id') or '')}"
                 for flag in review_flags
-                if isinstance(flag, dict)
             ]
             pending_codes = [
                 (
@@ -1513,7 +1586,6 @@ class LocalPipelineRunner:
                     f"{str(item.get('target_segment_id') or '')}"
                 )
                 for item in pending_recommendations
-                if isinstance(item, dict)
             ]
             raise ValueError(
                 "Timeline still has review blockers. "
@@ -1551,6 +1623,10 @@ class LocalPipelineRunner:
                 *deepcopy(timeline.get("applied_recommendations", [])),
                 decided_recommendation,
             ]
+            apply_approved_recommendation_to_timeline(
+                timeline=timeline,
+                decided_recommendation=decided_recommendation,
+            )
         timeline["recommendation_decisions"] = timeline_recommendation_decisions(
             timeline=timeline,
             recommendation_id=recommendation_id,
@@ -1707,8 +1783,9 @@ class LocalPipelineRunner:
             timeline_id=str(session["timeline_id"]),
         )
         session_segments = {
-            str(segment["segment_id"]): segment
+            str(segment.get("segment_id") or "").strip(): segment
             for segment in session.get("segments", [])
+            if str(segment.get("segment_id") or "").strip()
         }
         target_segment_ids = set(request["segment_ids"])
         target_fields = set(request["fields"])
@@ -1716,23 +1793,41 @@ class LocalPipelineRunner:
         if not source_segments:
             source_segments = [
                 {
-                    "segment_id": str(segment.get("segment_id") or ""),
+                    "segment_id": str(segment.get("segment_id") or "").strip(),
                     "text": str(segment.get("caption_text") or ""),
                     "start_sec": float(segment.get("start_sec") or 0.0),
                     "end_sec": float(segment.get("end_sec") or 0.0),
                     "confidence": 1.0,
-                    "review_required": bool(segment.get("review_required", False)),
-                    "cleanup_decision": str(segment.get("cut_action") or "keep"),
+                    "review_required": _normalize_runtime_review_required(
+                        segment.get("review_required", False)
+                    ),
+                    "cleanup_decision": _normalize_runtime_cut_action(segment.get("cut_action")),
                 }
                 for segment in session.get("segments", [])
                 if str(segment.get("segment_id") or "").strip()
             ]
 
+        source_pending_recommendations = source_timeline.get("pending_recommendations", [])
+        if not isinstance(source_pending_recommendations, list):
+            source_pending_recommendations = []
+        else:
+            source_pending_recommendations = [
+                item
+                for item in source_pending_recommendations
+                if (
+                isinstance(item, dict)
+                and str(item.get("recommendation_id") or "").strip()
+                and str(item.get("target_segment_id") or "").strip()
+                and str(item.get("recommendation_type") or "").strip()
+                in VALID_RESTORED_RECOMMENDATION_TYPES
+            )
+        ]
+
         state = {
             "timeline_segments": deepcopy(source_segments),
             "regenerated_segments": [],
             "recommendations": deepcopy(source_timeline.get("applied_recommendations", []))
-            + deepcopy(source_timeline.get("pending_recommendations", [])),
+            + deepcopy(source_pending_recommendations),
             "export_overlays": deepcopy(source_timeline.get("export_overlays", [])),
         }
 
@@ -1864,7 +1959,9 @@ class LocalPipelineRunner:
                 if "caption" in target_fields:
                     caption_text = str(session_segment.get("caption_text") or caption_text)
                 if "cut_action" in target_fields:
-                    cut_action = str(session_segment.get("cut_action") or cut_action)
+                    cut_action = _normalize_runtime_cut_action(
+                        session_segment.get("cut_action") or cut_action
+                    )
                 regenerated_segments.append(
                     {
                         "segment_id": segment_id,
@@ -2015,13 +2112,14 @@ class LocalPipelineRunner:
             overlay
             for overlay in existing_overlays
             if str(overlay.get("segment_id") or "") not in target_segment_ids
+            and _is_valid_runtime_overlay(overlay)
         ]
         refreshed_overlays: list[dict[str, Any]] = []
         refresh_all_overlay_types = "visual_overlay" in target_fields
         field_overlay_types = {
-            "explanation_card": "explanation_card",
-            "image_overlay": "image_card",
-            "table_overlay": "table_card",
+            "explanation_card": {"explanation_card"},
+            "image_overlay": {"image", "image_card", "image_overlay"},
+            "table_overlay": {"table_card", "table_overlay"},
         }
         for segment_id in sorted(target_segment_ids):
             session_segment = session_segments.get(segment_id)
@@ -2029,8 +2127,9 @@ class LocalPipelineRunner:
                 continue
             targeted_overlay_types = {
                 overlay_type
-                for field_name, overlay_type in field_overlay_types.items()
+                for field_name, overlay_types in field_overlay_types.items()
                 if field_name in target_fields
+                for overlay_type in overlay_types
             }
             if not refresh_all_overlay_types:
                 preserved_overlays.extend(
@@ -2039,13 +2138,14 @@ class LocalPipelineRunner:
                         for overlay in existing_overlays
                         if str(overlay.get("segment_id") or "") == segment_id
                         and str(overlay.get("overlay_type") or "") not in targeted_overlay_types
+                        and _is_valid_runtime_overlay(overlay)
                     ]
                 )
             overlays = session_segment.get("visual_overlays")
             if not isinstance(overlays, list) or not overlays:
                 continue
             for overlay in overlays:
-                if not isinstance(overlay, dict):
+                if not _is_valid_runtime_overlay(overlay):
                     continue
                 if not refresh_all_overlay_types and str(overlay.get("overlay_type") or "") not in targeted_overlay_types:
                     continue

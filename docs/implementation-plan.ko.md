@@ -1,5 +1,7 @@
 # VideoBox 실행용 구현 계획서
 
+> 현재 worktree 기준 구현 상태와 next slice 판단은 `## 12. 2026-07-01 현재 구현 체크포인트`와 `## 13. 다음 실제 작업`을 우선 적용한다. 그 외 상위 milestone/범위/순서 섹션은 제품·구현 계획의 기준을 설명하는 문서다.
+
 ## 1. 목적
 
 이 문서는 VideoBox를 실제로 구현하기 위한 실행 계획서다.
@@ -325,7 +327,7 @@
 - transcript alignment, segment analysis, B-roll 추천, 음악 추천, timeline 생성, review approval, subtitle render, preview render, CapCut export 흐름이 이미 연결돼 있다
 - 로컬 우선 LLM runtime은 `Local Qwen -> Gemini fallback` 구조로 이미 들어가 있다
 - editing session 생성/조회/수정 API와 partial regeneration request contract가 이미 들어가 있다
-- 전체 백엔드 테스트는 현재 기준 `194 passed` 상태다
+- 이 구간은 2026-06-29 시점 스냅샷이며, 최신 검증 기준은 아래 2026-07-01 체크포인트를 따른다
 
 현재 기준으로 아직 비어 있는 핵심 범위:
 
@@ -453,12 +455,17 @@
 - reject explicit decision-state persistence contract
 - timeline-local review snapshot truth 보존
 - review-action rollback hardening과 warning surface
+- pending `tts_replacement` approve 시 target narration track clip `asset_uri`를 승인된 `selected_asset_uri`로 반영하는 계약
 
 현재 확인된 검증 기준:
 
-- frontend focused test `48 passed`
-- review-action backend focused slice `5 passed`
-- full backend regression `242 passed`
+- frontend `src/app.test.tsx` 전체 `66 passed`
+- helper `frontend-focused` gate `2 passed`
+- review-action backend focused slice `6 passed`
+- current-focused helper backend output-gating slice `9 passed`
+- current-focused helper backend preflight slice `52 passed`
+- current-focused helper frontend preflight slice `25 passed`
+- full backend regression `302 passed`
 - frontend build 성공
 
 이 체크포인트 기준으로 review-action placeholder 단계는 이미 지난 상태다.
@@ -468,14 +475,17 @@
 
 현재 기준 다음 실제 작업은 아래 순서로 재고정한다.
 
-1. TTS replacement를 실제 narration/output propagation까지 더 분명하게 고정
-2. review-required 상태에서 preview/export gating과 승인 후 반영 규칙을 세분화
-3. partial regeneration preflight를 비파괴 조회 경로로 API/UI 어느 쪽에 노출할지 결정
-4. thin editor 범위에서 아직 직접 검증이 약한 남은 고위험 경로를 보강
-5. `local_pipeline`의 다음 대형 분리 후보인 partial regeneration / output 경로를 점진 정리
+1. review-required 상태에서 subtitle/preview/export gating의 추가 경계와 승인 후 반영 규칙을 세분화
+2. partial regeneration preflight의 backend read-only/prediction contract와 frontend resume 경계를 더 세분화
+3. TTS replacement approval/output contract에서 아직 테스트로 고정되지 않은 추가 경계를 선별 보강
+4. 그 다음 `local_pipeline`의 partial regeneration / output 경로를 최소 단위로 점진 정리
+5. thin editor 범위에서 아직 직접 검증이 약한 남은 고위험 경로를 보강
 
 중요:
 
 - 오픈소스 편집기 셸 반입은 현재도 핵심 우선순위가 아니다
+- 대시보드 화이트톤 리디자인은 post-MVP polish로 보류하고, 현재는 기능 완결과 검증 속도를 우선한다
+- 저장된 컬러 방향은 `white / gray / light orange` 기반의 밝은 무채색 톤으로 유지하고, 실제 적용은 MVP 사용 피드백 이후 최소 범위로 진행한다
+- 후속 적용 순서는 `token/semantic color 정리 -> layout contrast 재점검 -> component skin 최소 치환`으로 제한해, MVP 기능 검증이 끝나기 전에는 실제 UI 리디자인 작업을 시작하지 않는다
 - CapCut export와 review/output 계약은 계속 유지한다
 - TTS, editing session, review 상태 계약은 서로 따로 놀지 않도록 같은 증거 기준으로 검증해야 한다

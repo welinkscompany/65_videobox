@@ -19,9 +19,22 @@ from videobox_core_engine.settings import (
     AutoCutConfig,
     LocalOpenAICompatibleRuntimeConfig,
 )
+from videobox_domain_models.recommendations import RecommendationType
 from videobox_provider_interfaces.gemini import GeminiHTTPTransport, GeminiRESTStructuredProvider
 from videobox_provider_interfaces.llm import LLMProviderConfig
 from videobox_storage.local_project_store import LocalProjectStore
+
+VALID_PREVIEW_RECOMMENDATION_TYPES = {
+    RecommendationType.TTS_REPLACEMENT.value,
+    RecommendationType.BROLL.value,
+    RecommendationType.BGM.value,
+    RecommendationType.OVERLAY.value,
+}
+VALID_PREVIEW_REVIEW_FLAG_CODES = {
+    "segment_review_required",
+    "broll_review_required",
+    "tts_replacement_review_required",
+}
 
 
 class CreateProjectRequest(BaseModel):
@@ -562,29 +575,103 @@ class GeminiProviderKeyListResponse(BaseModel):
     keys: list[GeminiProviderKeyResponse]
 
 
+def _is_valid_preflight_visual_overlay(overlay: object) -> bool:
+    if not isinstance(overlay, dict):
+        return False
+    overlay_type = str(overlay.get("overlay_type") or "").strip()
+    if not overlay_type:
+        return False
+    if overlay_type not in {
+        "image",
+        "image_card",
+        "image_overlay",
+        "explanation_card",
+        "table_card",
+        "table_overlay",
+        "hook_title",
+        "visual_overlay",
+    }:
+        return False
+    if overlay_type in {"explanation_card", "table_card", "table_overlay"}:
+        return bool(str(overlay.get("text") or "").strip())
+    if overlay_type in {"hook_title", "visual_overlay"}:
+        return bool(str(overlay.get("text") or "").strip()) or bool(
+            str(overlay.get("asset_id") or "").strip()
+        )
+    return bool(str(overlay.get("asset_id") or "").strip())
+
+
 def _build_targeted_segments(
     session: dict[str, Any],
     segment_ids: list[str],
 ) -> list[dict[str, object]]:
-    target_set = set(segment_ids)
-    targeted_segments: list[dict[str, object]] = []
+    segment_lookup: dict[str, dict[str, object]] = {}
     for segment in session.get("segments", []):
-        segment_id = str(segment.get("segment_id") or "")
-        if segment_id not in target_set:
+        segment_id = str(segment.get("segment_id") or "").strip()
+        if not segment_id:
+            continue
+        segment_lookup[segment_id] = segment
+
+    targeted_segments: list[dict[str, object]] = []
+    for segment_id in segment_ids:
+        segment = segment_lookup.get(str(segment_id or ""))
+        if not isinstance(segment, dict):
             continue
         cut_action = str(segment.get("cut_action") or "keep")
         if cut_action not in {"keep", "remove", "trim"}:
             cut_action = "keep"
+        review_required = segment.get("review_required", False)
+        if isinstance(review_required, str):
+            normalized_review_required = review_required.strip().lower()
+            review_required = normalized_review_required not in {"", "0", "false", "no", "off"}
+        elif not isinstance(review_required, bool):
+            review_required = False
+        broll_override = segment.get("broll_override")
+        if not isinstance(broll_override, dict):
+            broll_override = None
+        else:
+            broll_asset_id = broll_override.get("asset_id")
+            if not isinstance(broll_asset_id, str) or not broll_asset_id.strip():
+                broll_override = None
+        visual_overlays = segment.get("visual_overlays")
+        if not isinstance(visual_overlays, list):
+            visual_overlays = []
+        else:
+            visual_overlays = [
+                overlay
+                for overlay in visual_overlays
+                if _is_valid_preflight_visual_overlay(overlay)
+            ]
+        music_override = segment.get("music_override")
+        if not isinstance(music_override, dict):
+            music_override = None
+        else:
+            music_asset_id = music_override.get("asset_id")
+            if not isinstance(music_asset_id, str) or not music_asset_id.strip():
+                music_override = None
+        tts_replacement = segment.get("tts_replacement")
+        if not isinstance(tts_replacement, dict):
+            tts_replacement = None
+        else:
+            recommendation_id = tts_replacement.get("recommendation_id")
+            asset_id = tts_replacement.get("asset_id")
+            if (
+                not isinstance(recommendation_id, str)
+                or not recommendation_id.strip()
+                or not isinstance(asset_id, str)
+                or not asset_id.strip()
+            ):
+                tts_replacement = None
         targeted_segments.append(
             {
                 "segment_id": segment_id,
                 "caption_text": str(segment.get("caption_text") or ""),
                 "cut_action": cut_action,
-                "review_required": bool(segment.get("review_required", False)),
-                "broll_override": segment.get("broll_override"),
-                "visual_overlays": segment.get("visual_overlays", []),
-                "music_override": segment.get("music_override"),
-                "tts_replacement": segment.get("tts_replacement"),
+                "review_required": bool(review_required),
+                "broll_override": broll_override,
+                "visual_overlays": visual_overlays,
+                "music_override": music_override,
+                "tts_replacement": tts_replacement,
             }
         )
     return targeted_segments
@@ -601,8 +688,8 @@ def _build_affected_output_areas(downstream_steps: list[str]) -> list[str]:
             areas.append("music bed")
         if step == "overlay_refresh" and "visual overlays" not in areas:
             areas.append("visual overlays")
-        if step == "tts_refresh" and "narration audio" not in areas:
-            areas.append("narration audio")
+        if step == "tts_refresh" and "narration track" not in areas:
+            areas.append("narration track")
         if step == "timeline_build":
             for area in ["timeline preview", "subtitle render", "capcut export"]:
                 if area not in areas:
@@ -617,7 +704,36 @@ def _build_preflight_review_prediction(
     fields: list[str],
 ) -> tuple[str, list[str]]:
     prediction_reasons: list[str] = []
-    if source_timeline.get("review_flags") or source_timeline.get("pending_recommendations"):
+    source_review_flags = source_timeline.get("review_flags")
+    if not isinstance(source_review_flags, list):
+        source_review_flags = []
+    else:
+        source_review_flags = [
+            flag
+            for flag in source_review_flags
+            if (
+                isinstance(flag, dict)
+                and str(flag.get("code") or "").strip() in VALID_PREVIEW_REVIEW_FLAG_CODES
+                and str(flag.get("segment_id") or "").strip()
+                and str(flag.get("message") or "").strip()
+            )
+        ]
+    source_pending_recommendations = source_timeline.get("pending_recommendations")
+    if not isinstance(source_pending_recommendations, list):
+        source_pending_recommendations = []
+    else:
+        source_pending_recommendations = [
+            item
+            for item in source_pending_recommendations
+            if (
+                isinstance(item, dict)
+                and str(item.get("recommendation_id") or "").strip()
+                and str(item.get("target_segment_id") or "").strip()
+                and str(item.get("recommendation_type") or "").strip()
+                in VALID_PREVIEW_RECOMMENDATION_TYPES
+            )
+        ]
+    if source_review_flags or source_pending_recommendations:
         prediction_reasons.append(
             "source timeline already has unresolved review blockers that rerun will preserve"
         )

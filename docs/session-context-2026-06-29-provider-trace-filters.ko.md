@@ -1,5 +1,7 @@
 # VideoBox 세션 컨텍스트
 
+> Historical note: 이 문서는 `provider trace audit filter 추가와 실패 timeline 필터 보강` 당시의 중간 저장 기록이다. 현재 authoritative 상태/next slice 판단은 `docs/session-context-2026-07-01-system-hygiene.ko.md`, `docs/development-status-2026-06-29.ko.md`의 `## 17`, `docs/implementation-plan.ko.md`의 2026-07-01 체크포인트를 우선 적용한다.
+
 작성일:
 
 - 2026-06-29

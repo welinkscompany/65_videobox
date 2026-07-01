@@ -100,3 +100,29 @@ def filtered_review_flags_after_recommendation_decision(
             remaining_pending=remaining_pending,
         )
     ]
+
+
+def apply_approved_recommendation_to_timeline(
+    *,
+    timeline: dict[str, Any],
+    decided_recommendation: dict[str, Any],
+) -> None:
+    if str(decided_recommendation.get("recommendation_type") or "") != "tts_replacement":
+        return
+    payload = decided_recommendation.get("payload")
+    if not isinstance(payload, dict):
+        return
+    selected_asset_uri = str(payload.get("selected_asset_uri") or "").strip()
+    target_segment_id = str(decided_recommendation.get("target_segment_id") or "").strip()
+    if not selected_asset_uri or not target_segment_id:
+        return
+    for track in timeline.get("tracks", []):
+        if str(track.get("track_type") or "") != "narration":
+            continue
+        clips = track.get("clips")
+        if not isinstance(clips, list):
+            continue
+        for clip in clips:
+            if str(clip.get("segment_id") or "") == target_segment_id:
+                clip["asset_uri"] = selected_asset_uri
+                return
