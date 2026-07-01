@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
+import warnings
 
 from videobox_capcut_export import CapCutExportAdapter
 from videobox_core_engine.auto_cut import AutoCutPlanner
@@ -33,6 +34,11 @@ from videobox_core_engine.output_operator_copy import (
 from videobox_core_engine.preview_renderer import PreviewRenderer
 from videobox_core_engine.provider_trace import build_provider_trace
 from videobox_core_engine.recommenders import KeywordBrollRecommender, RuleBasedMusicRecommender
+from videobox_core_engine.review_action_mutations import (
+    extract_pending_recommendation_decision,
+    filtered_review_flags_after_recommendation_decision,
+    timeline_recommendation_decisions,
+)
 from videobox_core_engine.review_guidance import HeuristicReviewGuidanceBuilder, ReviewGuidanceBuilder
 from videobox_core_engine.script_scene_planner import HeuristicSegmentAnalyzer, SegmentAnalyzer
 from videobox_core_engine.timeline_builder import TimelineBuilder
@@ -1516,41 +1522,6 @@ class LocalPipelineRunner:
                 "Clear review flags and pending recommendations before approval or output."
             )
 
-    def _should_keep_review_flag(
-        self,
-        *,
-        flag: dict[str, Any],
-        recommendation_flag_code: str,
-        target_segment_id: str,
-        remaining_pending: list[dict[str, Any]],
-    ) -> bool:
-        if not (
-            str(flag.get("code") or "") == recommendation_flag_code
-            and str(flag.get("segment_id") or "") == target_segment_id
-        ):
-            return True
-        return any(
-            str(item.get("recommendation_type") or "").strip() == recommendation_flag_code.removesuffix("_review_required")
-            and str(item.get("target_segment_id") or "") == target_segment_id
-            for item in remaining_pending
-        )
-
-    def _timeline_recommendation_decisions(
-        self,
-        *,
-        timeline: dict[str, Any],
-        recommendation_id: str,
-        decision: str,
-    ) -> dict[str, str]:
-        existing = timeline.get("recommendation_decisions")
-        normalized = {
-            str(key): str(value)
-            for key, value in existing.items()
-            if str(key).strip() and str(value).strip()
-        } if isinstance(existing, dict) else {}
-        normalized[recommendation_id] = decision
-        return normalized
-
     def _prepare_pending_recommendation_decision(
         self,
         *,
@@ -1568,7 +1539,7 @@ class LocalPipelineRunner:
             timeline_id=str(original_timeline["timeline_id"]),
         )
         original_recommendation, decided_recommendation, remaining_pending = (
-            self._extract_pending_recommendation_decision(
+            extract_pending_recommendation_decision(
                 timeline=timeline,
                 recommendation_id=recommendation_id,
                 decision=decision,
@@ -1580,12 +1551,12 @@ class LocalPipelineRunner:
                 *deepcopy(timeline.get("applied_recommendations", [])),
                 decided_recommendation,
             ]
-        timeline["recommendation_decisions"] = self._timeline_recommendation_decisions(
+        timeline["recommendation_decisions"] = timeline_recommendation_decisions(
             timeline=timeline,
             recommendation_id=recommendation_id,
             decision=decision,
         )
-        timeline["review_flags"] = self._filtered_review_flags_after_recommendation_decision(
+        timeline["review_flags"] = filtered_review_flags_after_recommendation_decision(
             timeline=timeline,
             decided_recommendation=decided_recommendation,
             remaining_pending=remaining_pending,
@@ -1597,62 +1568,6 @@ class LocalPipelineRunner:
             original_recommendation,
             remaining_pending,
         )
-
-    def _extract_pending_recommendation_decision(
-        self,
-        *,
-        timeline: dict[str, Any],
-        recommendation_id: str,
-        decision: str,
-    ) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
-        pending_recommendations = deepcopy(timeline.get("pending_recommendations", []))
-        original_recommendation: dict[str, Any] | None = None
-        decided_recommendation: dict[str, Any] | None = None
-        remaining_pending: list[dict[str, Any]] = []
-        for item in pending_recommendations:
-            if str(item.get("recommendation_id") or "") != recommendation_id:
-                remaining_pending.append(item)
-                continue
-            original_recommendation = deepcopy(item)
-            decided_recommendation = deepcopy(item)
-            if decision == "approved":
-                decided_recommendation["auto_apply_allowed"] = True
-                decided_recommendation["review_required"] = False
-                decided_recommendation["decision_state"] = "approved"
-                decided_recommendation["provider_trace"] = decided_recommendation.get(
-                    "provider_trace"
-                ) or build_provider_trace(
-                    final_provider=(
-                        "heuristic_fallback"
-                        if str(decided_recommendation.get("recommendation_type") or "") == "broll"
-                        else "rule_based_fallback"
-                    )
-                )
-        if original_recommendation is None or decided_recommendation is None:
-            raise KeyError(f"Pending recommendation not found: {recommendation_id}")
-        return original_recommendation, decided_recommendation, remaining_pending
-
-    def _filtered_review_flags_after_recommendation_decision(
-        self,
-        *,
-        timeline: dict[str, Any],
-        decided_recommendation: dict[str, Any],
-        remaining_pending: list[dict[str, Any]],
-    ) -> list[dict[str, Any]]:
-        recommendation_flag_code = (
-            f"{str(decided_recommendation.get('recommendation_type') or '').strip()}_review_required"
-        )
-        target_segment_id = str(decided_recommendation.get("target_segment_id") or "")
-        return [
-            flag
-            for flag in deepcopy(timeline.get("review_flags", []))
-            if self._should_keep_review_flag(
-                flag=flag,
-                recommendation_flag_code=recommendation_flag_code,
-                target_segment_id=target_segment_id,
-                remaining_pending=remaining_pending,
-            )
-        ]
 
     def _persist_pending_recommendation_decision(
         self,
@@ -1711,8 +1626,14 @@ class LocalPipelineRunner:
                 timeline_id=timeline_id,
                 timeline_payload=original_timeline,
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            warnings.warn(
+                (
+                    "Failed to roll back timeline review mutation after downstream error. "
+                    f"project_id={project_id} timeline_id={timeline_id} stage=timeline error={exc}"
+                ),
+                stacklevel=2,
+            )
         try:
             connection = self.store._connection(project_id)
             try:
@@ -1733,16 +1654,28 @@ class LocalPipelineRunner:
                 connection.commit()
             finally:
                 connection.close()
-        except Exception:
-            pass
+        except Exception as exc:
+            warnings.warn(
+                (
+                    "Failed to roll back recommendation review mutation after downstream error. "
+                    f"project_id={project_id} timeline_id={timeline_id} stage=recommendation error={exc}"
+                ),
+                stacklevel=2,
+            )
         try:
             self.store.save_review_state(
                 project_id=project_id,
                 timeline_id=timeline_id,
                 status=original_review_status,
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            warnings.warn(
+                (
+                    "Failed to roll back review state after downstream error. "
+                    f"project_id={project_id} timeline_id={timeline_id} stage=review_state error={exc}"
+                ),
+                stacklevel=2,
+            )
 
     def _segments_for_timeline(
         self,
