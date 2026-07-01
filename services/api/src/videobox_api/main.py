@@ -715,7 +715,6 @@ def _build_preflight_review_prediction(
                 isinstance(flag, dict)
                 and str(flag.get("code") or "").strip() in VALID_PREVIEW_REVIEW_FLAG_CODES
                 and str(flag.get("segment_id") or "").strip()
-                and str(flag.get("message") or "").strip()
             )
         ]
     source_pending_recommendations = source_timeline.get("pending_recommendations")

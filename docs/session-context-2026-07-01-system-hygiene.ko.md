@@ -12,13 +12,13 @@
 
 ## 1. 이번 세션에서 실제로 확인한 것
 
-- 현재 worktree 기준 backend full regression은 `302 passed`다
+- 현재 worktree 기준 backend full regression은 `304 passed`다
 - frontend build는 성공한다
 - frontend `src/app.test.tsx` 전체는 `66 passed`다
 - helper `frontend-focused` gate는 `2 passed`다
 - current-priority helper `scripts/dev-fast-path.ps1`를 추가해 `output gating / preflight backend / preflight frontend / broader` 검증 레일을 분리했다
 - review-action backend focused slice는 `6 passed`다
-- backend full regression은 현재 direct 실행 기준으로 `302 passed`까지 다시 확인됐다
+- backend full regression은 현재 direct 실행 기준으로 `304 passed`까지 다시 확인됐다
 - 세션 후반 재검증에서도 review-action backend focused `6 passed`, helper `frontend-focused` gate `2 passed`, frontend `src/app.test.tsx` 전체 `66 passed`, frontend build 성공을 다시 확인했다
 - 이후 fresh `pytest -q` 전체 회귀를 다시 캡처해 `293 passed in 791.57s`를 확인했고, 최신 full-backend baseline을 그 수치로 갱신했다
 - 세부 focused gate도 이후 다시 확인했다
@@ -27,8 +27,8 @@
   - preflight focused regression `11 passed`
   - frontend blocked-warning + resumed multi-segment cleanup 묶음 `3 passed`
 - current-priority helper `./scripts/dev-fast-path.ps1 -Mode current-focused`도 바로 검증했다
-  - backend output-gating slice `9 passed`
-  - backend preflight slice `52 passed`
+  - backend output-gating slice `10 passed`
+  - backend preflight slice `53 passed`
   - frontend preflight slice `25 passed`
 - helper 추가 후 broader verification도 다시 확인했다
   - frontend build 성공
@@ -37,6 +37,7 @@
 - `reopen review` 후 residual blocker가 남아 있는 경우 review 상태가 `draft`가 아니라 `blocked`로 돌아가고 output도 blocker detail로 다시 막히는 backend regression `1 passed`도 추가로 확인했다
 - `approved + review_flag only` 조합에서도 output이 blocker detail로 계속 막히는 backend regression `1 passed`를 추가로 확인해 output gating 매트릭스를 더 촘촘히 고정했다
 - `approved + pending_recommendation only` 조합에서도 output이 blocker detail로 계속 막히는 backend regression `1 passed`를 추가로 확인해 output gating의 단일 blocker 매트릭스를 더 닫았다
+- approved timeline을 `reopen review`할 때 stale truthy blocker shape가 residual blocker로 오판되지 않고 `draft`로 돌아간 뒤 explicit approval gating만 다시 요구하는 backend regression `1 passed`를 추가로 확인했다
 - ignored generated artifact 정리 후보 중 repo 내부 build/cache 산출물은 안전 범위에서 실제로 정리했다
   - `.pytest_cache`
   - `apps/web/dist`
@@ -65,6 +66,7 @@
 - partial regeneration preflight의 stale minimal-dict source `review_flags` entry는 read-only prediction에서 blocker flag로 취급하지 않고 clean scope면 `draft` prediction을 유지하도록 고정됐다
 - partial regeneration preflight의 `code`만 있는 source `review_flags` stale dict는 read-only prediction에서 blocker flag로 취급하지 않고 clean scope면 `draft` prediction을 유지하도록 고정됐다
 - partial regeneration preflight의 unknown `review_flags.code` source stale dict는 read-only prediction에서 blocker flag로 취급하지 않고 clean scope면 `draft` prediction을 유지하도록 고정됐다
+- partial regeneration preflight의 valid `review_flags.code/segment_id` source legacy dict는 `message`가 비어 있어도 runtime blocker 의미를 보존해 `blocked` prediction으로 유지하도록 고정됐다
 - partial regeneration preflight의 stale non-dict-only source `pending_recommendations` list는 read-only prediction에서 blocker list로 취급하지 않고 clean scope면 `draft` prediction을 유지하도록 고정됐다
 - partial regeneration preflight의 stale minimal-dict source `pending_recommendations` entry는 read-only prediction에서 blocker recommendation으로 취급하지 않고 clean scope면 `draft` prediction을 유지하도록 고정됐다
 - partial regeneration preflight의 `recommendation_id`만 있는 source `pending_recommendations` stale dict는 read-only prediction에서 blocker recommendation으로 취급하지 않고 clean scope면 `draft` prediction을 유지하도록 고정됐다
@@ -100,9 +102,9 @@
 - partial regeneration preflight targeted segment preview는 nested stale `broll_override.asset_id` shape도 `None`으로 정규화해 invalid override object가 read-only scope에 남지 않도록 고정했다
 - partial regeneration preflight targeted segment preview는 nested stale `music_override.asset_id` shape도 `None`으로 정규화해 invalid music override object가 read-only scope에 남지 않도록 고정했다
 - partial regeneration preflight targeted segment preview는 nested stale `tts_replacement.recommendation_id` shape도 `None`으로 정규화해 invalid replacement object가 read-only scope에 남지 않도록 고정했다
-- current-focused helper 재검증 기준으로 backend preflight slice는 현재 `52 passed`다
+- current-focused helper 재검증 기준으로 backend preflight slice는 현재 `53 passed`다
 - current-focused helper 재검증 기준으로 frontend preflight slice는 현재 `25 passed`다
-- current-focused helper 재검증 기준으로 backend output-gating slice는 현재 `9 passed`다
+- current-focused helper 재검증 기준으로 backend output-gating slice는 현재 `10 passed`다
 - resumed multi-segment candidate의 stale scope card가 target 변경 시 내려가는지 frontend focused test로 고정했다
 - resumed multi-segment candidate의 stale scope card가 field 변경 시에도 내려가는지 frontend focused test로 고정했다
 - pending `tts_replacement` approve 시 target narration track clip `asset_uri`가 승인된 `selected_asset_uri`로 즉시 동기화되는지 backend focused test로 고정했다

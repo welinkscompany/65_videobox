@@ -286,7 +286,9 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - blocker가 없는 clean timeline이라도 explicit approval이 없으면 subtitle-render도 preview/export와 같은 failed job/no-artifact 상태를 유지하는 회귀를 고정 완료
 - approved timeline을 `reopen review`한 뒤에는 subtitle/preview/export가 다시 explicit approval을 요구하며 막히는 전이 경계를 focused regression으로 고정 완료
 - approved timeline의 stale truthy `review_flags` / `pending_recommendations` shape는 output gating에서 실제 blocker로 오판하지 않고 유효 blocker만 기준으로 막도록 고정 완료
+- approved timeline을 `reopen review`할 때 stale truthy `review_flags` / `pending_recommendations` shape는 residual blocker로 오판하지 않고 `draft` 상태로 되돌린 뒤 explicit approval gating만 다시 요구하도록 고정 완료
 - unsupported partial-regeneration field scope는 preflight prediction으로 흘리지 않고 `400`으로 즉시 거부하며 no-job 상태를 유지하는 계약을 고정 완료
+- partial regeneration preflight는 source timeline의 valid `review_flags.code/segment_id` 조합이 `message` 없이 저장된 legacy shape여도 runtime blocker 의미를 보존해 `blocked` prediction으로 올바르게 분류하도록 고정 완료
 
 이번 정비 시점의 실제 검증 결과:
 
@@ -296,7 +298,7 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - frontend `src/app.test.tsx` 전체 `66 passed`
 - helper `frontend-focused` gate `2 passed`
 - frontend build 성공
-- full backend regression `302 passed`
+- full backend regression `304 passed`
 - full backend regression은 현재 direct 실행 기준으로 다시 확인됐다
 - focused output gating regression `2 passed`
 - explicit approval gating regression `1 passed`
@@ -308,8 +310,8 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - resumed multi-segment field-change cleanup regression `1 passed`
 - preflight unsupported-field rejection regression `1 passed`
 - current-priority helper `./scripts/dev-fast-path.ps1 -Mode current-focused`
-  - backend output-gating slice `9 passed`
-  - backend preflight slice `52 passed`
+  - backend output-gating slice `10 passed`
+  - backend preflight slice `53 passed`
   - frontend preflight slice `25 passed`
 - frontend preflight field inference는 backend legacy `image` overlay도 `image_overlay` rerun field로 올바르게 매핑해 saved overlay가 `caption` fallback으로 잘못 좁혀지지 않도록 고정했다
 - frontend preflight field inference는 backend legacy `hook_title` overlay도 `visual_overlay` rerun field로 올바르게 매핑해 saved overlay가 `caption` fallback으로 잘못 좁혀지지 않도록 고정했다

@@ -1221,7 +1221,8 @@ class LocalPipelineRunner:
 
     def reopen_timeline_review(self, *, project_id: str, timeline_job_id: str) -> dict[str, Any]:
         timeline = self.get_timeline_result(project_id=project_id, job_id=timeline_job_id)["timeline"]
-        status = "blocked" if timeline.get("review_flags") or timeline.get("pending_recommendations") else "draft"
+        review_flags, pending_recommendations = self._normalized_timeline_blockers(timeline)
+        status = "blocked" if review_flags or pending_recommendations else "draft"
         return self.store.save_review_state(
             project_id=project_id,
             timeline_id=str(timeline["timeline_id"]),
@@ -1560,20 +1561,7 @@ class LocalPipelineRunner:
             raise ValueError("Timeline requires explicit approval before preview, subtitle, or export.")
 
     def _ensure_timeline_has_no_blockers(self, timeline: dict[str, Any]) -> None:
-        review_flags = timeline.get("review_flags", [])
-        if not isinstance(review_flags, list):
-            review_flags = []
-        else:
-            review_flags = [flag for flag in review_flags if _is_runtime_blocking_review_flag(flag)]
-        pending_recommendations = timeline.get("pending_recommendations", [])
-        if not isinstance(pending_recommendations, list):
-            pending_recommendations = []
-        else:
-            pending_recommendations = [
-                item
-                for item in pending_recommendations
-                if _is_runtime_blocking_pending_recommendation(item)
-            ]
+        review_flags, pending_recommendations = self._normalized_timeline_blockers(timeline)
         if review_flags or pending_recommendations:
             review_flag_codes = [
                 f"{str(flag.get('code') or '')}@{str(flag.get('segment_id') or '')}"
@@ -1593,6 +1581,26 @@ class LocalPipelineRunner:
                 f"pending_recommendations={pending_codes}. "
                 "Clear review flags and pending recommendations before approval or output."
             )
+
+    def _normalized_timeline_blockers(
+        self,
+        timeline: dict[str, Any],
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        review_flags = timeline.get("review_flags", [])
+        if not isinstance(review_flags, list):
+            review_flags = []
+        else:
+            review_flags = [flag for flag in review_flags if _is_runtime_blocking_review_flag(flag)]
+        pending_recommendations = timeline.get("pending_recommendations", [])
+        if not isinstance(pending_recommendations, list):
+            pending_recommendations = []
+        else:
+            pending_recommendations = [
+                item
+                for item in pending_recommendations
+                if _is_runtime_blocking_pending_recommendation(item)
+            ]
+        return review_flags, pending_recommendations
 
     def _prepare_pending_recommendation_decision(
         self,

@@ -3902,6 +3902,58 @@ def test_output_jobs_ignore_stale_truthy_blocker_shapes_on_approved_timeline(tmp
     assert export_result.status_code == 200
 
 
+def test_reopening_approved_review_ignores_stale_truthy_blocker_shapes_and_returns_draft(
+    tmp_path: Path,
+) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    timeline_response = client.get(f"/api/projects/{project_id}/timelines/{timeline_job_id}")
+    timeline_payload = timeline_response.json()["timeline"]
+    timeline_path = (
+        tmp_path
+        / "projects"
+        / project_id
+        / "timelines"
+        / f'{timeline_payload["timeline_id"]}.json'
+    )
+    persisted_timeline = json.loads(timeline_path.read_text(encoding="utf-8"))
+    persisted_timeline["review_flags"] = "stale_review_flag_container"
+    persisted_timeline["pending_recommendations"] = ["stale_entry"]
+    timeline_path.write_text(json.dumps(persisted_timeline, indent=2), encoding="utf-8")
+
+    store = LocalProjectStore(tmp_path)
+    store.save_review_state(
+        project_id=project_id,
+        timeline_id=str(timeline_payload["timeline_id"]),
+        status="approved",
+    )
+
+    reopen_response = client.post(f"/api/projects/{project_id}/review-approvals/{timeline_job_id}/reopen")
+    preview_response = client.post(
+        f"/api/projects/{project_id}/jobs/preview-render",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    export_response = client.post(
+        f"/api/projects/{project_id}/jobs/capcut-export",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    subtitle_response = client.post(
+        f"/api/projects/{project_id}/jobs/subtitle-render",
+        json={"timeline_job_id": timeline_job_id},
+    )
+
+    assert reopen_response.status_code == 202
+    assert reopen_response.json()["review_status"] == "draft"
+    assert preview_response.status_code == 400
+    assert export_response.status_code == 400
+    assert subtitle_response.status_code == 400
+    assert "approval" in preview_response.json()["detail"].lower()
+    assert "approval" in export_response.json()["detail"].lower()
+    assert "approval" in subtitle_response.json()["detail"].lower()
+
+
 def test_approved_review_state_still_blocks_outputs_when_timeline_has_residual_review_blockers(
     tmp_path: Path,
 ) -> None:
@@ -9753,6 +9805,83 @@ def test_editing_session_api_filters_unknown_code_source_review_flag_entries_fro
     assert payload["predicted_review_status_after_rerun"] == "draft"
     assert payload["prediction_reasons"] == []
     assert before_jobs == after_jobs
+
+
+def test_editing_session_api_marks_preflight_blocked_when_source_review_flag_has_valid_code_and_segment_without_message(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Source Review Flag Without Message Preflight Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [
+                {
+                    "code": "tts_replacement_review_required",
+                    "segment_id": "seg_009",
+                }
+            ],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Stable caption",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration/preflight",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["caption"],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["predicted_review_status_after_rerun"] == "blocked"
+    assert payload["prediction_reasons"] == [
+        "source timeline already has unresolved review blockers that rerun will preserve",
+    ]
 
 
 def test_editing_session_api_marks_preflight_blocked_when_source_timeline_has_pending_recommendations_only(
