@@ -758,6 +758,94 @@ def _build_preflight_review_prediction(
     return "draft", []
 
 
+def _normalize_provider_trace_response(value: object) -> dict[str, object]:
+    if isinstance(value, dict):
+        routing_mode = str(value.get("routing_mode") or "").strip()
+        final_provider = str(value.get("final_provider") or "").strip()
+        fallback_reasons = value.get("fallback_reasons")
+        return {
+            "routing_mode": routing_mode or "local_first",
+            "final_provider": final_provider or "rule_based_fallback",
+            "fallback_reasons": [
+                str(reason)
+                for reason in fallback_reasons
+                if isinstance(reason, str) and reason.strip()
+            ]
+            if isinstance(fallback_reasons, list)
+            else [],
+        }
+    return build_provider_trace(final_provider="rule_based_fallback")
+
+
+def _normalize_review_flags_for_response(value: object) -> list[dict[str, str]]:
+    if not isinstance(value, list):
+        return []
+    normalized: list[dict[str, str]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        code = str(item.get("code") or "").strip()
+        segment_id = str(item.get("segment_id") or "").strip()
+        if not code or not segment_id:
+            continue
+        message = str(item.get("message") or "").strip()
+        normalized.append(
+            {
+                "code": code,
+                "segment_id": segment_id,
+                "message": message or "Operator review required before approval or output.",
+            }
+        )
+    return normalized
+
+
+def _normalize_recommendations_for_response(value: object) -> list[dict[str, object]]:
+    if not isinstance(value, list):
+        return []
+    normalized: list[dict[str, object]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        recommendation_id = str(item.get("recommendation_id") or "").strip()
+        target_segment_id = str(item.get("target_segment_id") or "").strip()
+        if not recommendation_id or not target_segment_id:
+            continue
+        score_value = item.get("score", 0.0)
+        try:
+            score = float(score_value)
+        except (TypeError, ValueError):
+            score = 0.0
+        payload = item.get("payload")
+        normalized.append(
+            {
+                "recommendation_id": recommendation_id,
+                "target_segment_id": target_segment_id,
+                "selected_asset_id": str(item.get("selected_asset_id") or "").strip() or None,
+                "score": score,
+                "reason": str(item.get("reason") or "").strip()
+                or "Operator review required before approval or output.",
+                "auto_apply_allowed": bool(item.get("auto_apply_allowed", False)),
+                "review_required": bool(item.get("review_required", False)),
+                "payload": payload if isinstance(payload, dict) else {},
+                "created_at": str(item.get("created_at") or "").strip() or "unknown",
+                "provider_trace": _normalize_provider_trace_response(item.get("provider_trace")),
+            }
+        )
+    return normalized
+
+
+def _normalize_timeline_payload_for_response(timeline: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(timeline)
+    normalized["review_flags"] = _normalize_review_flags_for_response(timeline.get("review_flags"))
+    normalized["applied_recommendations"] = _normalize_recommendations_for_response(
+        timeline.get("applied_recommendations")
+    )
+    normalized["pending_recommendations"] = _normalize_recommendations_for_response(
+        timeline.get("pending_recommendations")
+    )
+    return normalized
+
+
 def create_app(
     *,
     projects_root: Path | None = None,
@@ -1045,7 +1133,7 @@ def create_app(
         return TimelineJobResponse(
             job_id=result["job_id"],
             status=result["status"],
-            timeline=TimelinePayloadResponse(**result["timeline"]),
+            timeline=TimelinePayloadResponse(**_normalize_timeline_payload_for_response(result["timeline"])),
         )
 
     @app.post("/api/projects/{project_id}/editing-sessions", status_code=status.HTTP_201_CREATED)
@@ -1458,14 +1546,25 @@ def create_app(
             result = orchestrator.get_review_snapshot(project_id=project_id, job_id=job_id)
         except Exception as exc:
             raise _http_error(exc) from exc
+        normalized_review_flags = _normalize_review_flags_for_response(result["review_flags"])
+        normalized_applied_recommendations = _normalize_recommendations_for_response(
+            result["applied_recommendations"]
+        )
+        normalized_pending_recommendations = _normalize_recommendations_for_response(
+            result["pending_recommendations"]
+        )
         return ReviewSnapshotResponse(
             project_id=result["project_id"],
             timeline_id=result["timeline_id"],
             review_status=result["review_status"],
             segments=[SegmentAnalysisRecord(**item) for item in result["segments"]],
-            applied_recommendations=[RecommendationItemResponse(**item) for item in result["applied_recommendations"]],
-            pending_recommendations=[RecommendationItemResponse(**item) for item in result["pending_recommendations"]],
-            review_flags=[ReviewFlagResponse(**item) for item in result["review_flags"]],
+            applied_recommendations=[
+                RecommendationItemResponse(**item) for item in normalized_applied_recommendations
+            ],
+            pending_recommendations=[
+                RecommendationItemResponse(**item) for item in normalized_pending_recommendations
+            ],
+            review_flags=[ReviewFlagResponse(**item) for item in normalized_review_flags],
             operator_guidance=OperatorGuidanceResponse(**result["operator_guidance"]),
         )
 
@@ -1483,14 +1582,25 @@ def create_app(
             )
         except Exception as exc:
             raise _http_error(exc) from exc
+        normalized_review_flags = _normalize_review_flags_for_response(result["review_flags"])
+        normalized_applied_recommendations = _normalize_recommendations_for_response(
+            result["applied_recommendations"]
+        )
+        normalized_pending_recommendations = _normalize_recommendations_for_response(
+            result["pending_recommendations"]
+        )
         return ReviewSnapshotResponse(
             project_id=result["project_id"],
             timeline_id=result["timeline_id"],
             review_status=result["review_status"],
             segments=[SegmentAnalysisRecord(**item) for item in result["segments"]],
-            applied_recommendations=[RecommendationItemResponse(**item) for item in result["applied_recommendations"]],
-            pending_recommendations=[RecommendationItemResponse(**item) for item in result["pending_recommendations"]],
-            review_flags=[ReviewFlagResponse(**item) for item in result["review_flags"]],
+            applied_recommendations=[
+                RecommendationItemResponse(**item) for item in normalized_applied_recommendations
+            ],
+            pending_recommendations=[
+                RecommendationItemResponse(**item) for item in normalized_pending_recommendations
+            ],
+            review_flags=[ReviewFlagResponse(**item) for item in normalized_review_flags],
             operator_guidance=OperatorGuidanceResponse(**result["operator_guidance"]),
         )
 
@@ -1508,14 +1618,25 @@ def create_app(
             )
         except Exception as exc:
             raise _http_error(exc) from exc
+        normalized_review_flags = _normalize_review_flags_for_response(result["review_flags"])
+        normalized_applied_recommendations = _normalize_recommendations_for_response(
+            result["applied_recommendations"]
+        )
+        normalized_pending_recommendations = _normalize_recommendations_for_response(
+            result["pending_recommendations"]
+        )
         return ReviewSnapshotResponse(
             project_id=result["project_id"],
             timeline_id=result["timeline_id"],
             review_status=result["review_status"],
             segments=[SegmentAnalysisRecord(**item) for item in result["segments"]],
-            applied_recommendations=[RecommendationItemResponse(**item) for item in result["applied_recommendations"]],
-            pending_recommendations=[RecommendationItemResponse(**item) for item in result["pending_recommendations"]],
-            review_flags=[ReviewFlagResponse(**item) for item in result["review_flags"]],
+            applied_recommendations=[
+                RecommendationItemResponse(**item) for item in normalized_applied_recommendations
+            ],
+            pending_recommendations=[
+                RecommendationItemResponse(**item) for item in normalized_pending_recommendations
+            ],
+            review_flags=[ReviewFlagResponse(**item) for item in normalized_review_flags],
             operator_guidance=OperatorGuidanceResponse(**result["operator_guidance"]),
         )
 

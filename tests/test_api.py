@@ -3954,6 +3954,53 @@ def test_reopening_approved_review_ignores_stale_truthy_blocker_shapes_and_retur
     assert "approval" in subtitle_response.json()["detail"].lower()
 
 
+def test_timeline_and_review_snapshot_read_paths_normalize_stale_truthy_blocker_shapes_after_reopen(
+    tmp_path: Path,
+) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    timeline_response = client.get(f"/api/projects/{project_id}/timelines/{timeline_job_id}")
+    timeline_payload = timeline_response.json()["timeline"]
+    timeline_path = (
+        tmp_path
+        / "projects"
+        / project_id
+        / "timelines"
+        / f'{timeline_payload["timeline_id"]}.json'
+    )
+    persisted_timeline = json.loads(timeline_path.read_text(encoding="utf-8"))
+    persisted_timeline["review_flags"] = "stale_review_flag_container"
+    persisted_timeline["pending_recommendations"] = ["stale_entry"]
+    timeline_path.write_text(json.dumps(persisted_timeline, indent=2), encoding="utf-8")
+
+    store = LocalProjectStore(tmp_path)
+    store.save_review_state(
+        project_id=project_id,
+        timeline_id=str(timeline_payload["timeline_id"]),
+        status="approved",
+    )
+
+    reopen_response = client.post(f"/api/projects/{project_id}/review-approvals/{timeline_job_id}/reopen")
+
+    assert reopen_response.status_code == 202
+    assert reopen_response.json()["review_status"] == "draft"
+
+    refreshed_timeline = client.get(f"/api/projects/{project_id}/timelines/{timeline_job_id}")
+    refreshed_snapshot = client.get(f"/api/projects/{project_id}/review-snapshots/{timeline_job_id}")
+
+    assert refreshed_timeline.status_code == 200
+    assert refreshed_timeline.json()["timeline"]["review_status"] == "draft"
+    assert refreshed_timeline.json()["timeline"]["review_flags"] == []
+    assert refreshed_timeline.json()["timeline"]["pending_recommendations"] == []
+
+    assert refreshed_snapshot.status_code == 200
+    assert refreshed_snapshot.json()["review_status"] == "draft"
+    assert refreshed_snapshot.json()["review_flags"] == []
+    assert refreshed_snapshot.json()["pending_recommendations"] == []
+
+
 def test_approved_review_state_still_blocks_outputs_when_timeline_has_residual_review_blockers(
     tmp_path: Path,
 ) -> None:

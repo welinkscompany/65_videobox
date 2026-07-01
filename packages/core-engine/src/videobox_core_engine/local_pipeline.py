@@ -1107,13 +1107,36 @@ class LocalPipelineRunner:
 
     def get_review_snapshot(self, *, project_id: str, job_id: str) -> dict[str, Any]:
         timeline = self.get_timeline_result(project_id=project_id, job_id=job_id)["timeline"]
+        timeline_applied_recommendations = timeline.get("applied_recommendations", [])
+        if not isinstance(timeline_applied_recommendations, list):
+            timeline_applied_recommendations = []
+        else:
+            timeline_applied_recommendations = [
+                item for item in timeline_applied_recommendations if isinstance(item, dict)
+            ]
+        timeline_pending_recommendations = timeline.get("pending_recommendations", [])
+        if not isinstance(timeline_pending_recommendations, list):
+            timeline_pending_recommendations = []
+        else:
+            timeline_pending_recommendations = [
+                item
+                for item in timeline_pending_recommendations
+                if _is_runtime_blocking_pending_recommendation(item)
+            ]
+        timeline_review_flags = timeline.get("review_flags", [])
+        if not isinstance(timeline_review_flags, list):
+            timeline_review_flags = []
+        else:
+            timeline_review_flags = [
+                item for item in timeline_review_flags if _is_runtime_blocking_review_flag(item)
+            ]
         snapshot = self.store.build_review_snapshot(
             project_id=project_id,
             timeline_id=str(timeline.get("timeline_id") or ""),
             segments=self.store.list_segments(project_id=project_id),
-            timeline_applied_recommendations=deepcopy(timeline.get("applied_recommendations", [])),
-            timeline_pending_recommendations=deepcopy(timeline.get("pending_recommendations", [])),
-            timeline_review_flags=timeline.get("review_flags", []),
+            timeline_applied_recommendations=deepcopy(timeline_applied_recommendations),
+            timeline_pending_recommendations=deepcopy(timeline_pending_recommendations),
+            timeline_review_flags=timeline_review_flags,
         )
         persisted_operator_guidance = self.store.get_persisted_operator_guidance(
             project_id=project_id,
