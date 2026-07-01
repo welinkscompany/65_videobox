@@ -438,20 +438,44 @@
 - 로컬 파일/프로젝트 저장 전략 확정
 - 본인 목소리 TTS 허용 범위 확정
 
-## 12. 다음 실제 작업
+## 12. 2026-07-01 현재 구현 체크포인트
 
-현재 기준 다음 실제 작업은 아래 순서로 고정한다.
+현재 기준 아래 범위는 코드와 검증으로 실제 연결되어 있다.
 
-1. `editing session` 데이터 모델 작성
-2. 편집 세션 저장/조회 구조 작성
-3. 컷/자막/B-roll/설명 자산/음악 수정 API 작성
-4. 부분 재생성 요청 contract와 적용 범위 규칙 작성
-5. 실제 partial regeneration job 연결
-6. 얇은 내부 편집 UI로 수정 흐름 검증
-7. 그 다음 오픈소스 편집기 셸 선별 반입 여부 평가
+- `editing session` 저장/조회/수정 API
+- partial regeneration request contract와 backend job 실행
+- thin editor mutation save / clear / remove
+- review snapshot -> editing session handoff
+- review action family
+  - `Approve recommendation`
+  - `Reject recommendation`
+  - `Mark for manual edit`
+- reject explicit decision-state persistence contract
+- timeline-local review snapshot truth 보존
+- review-action rollback hardening과 warning surface
+
+현재 확인된 검증 기준:
+
+- frontend focused test `48 passed`
+- review-action backend focused slice `5 passed`
+- full backend regression `242 passed`
+- frontend build 성공
+
+이 체크포인트 기준으로 review-action placeholder 단계는 이미 지난 상태다.
+따라서 이후 작업 우선순위는 review-action 연결 자체가 아니라, 더 상위 출력/편집 흐름 고도화 쪽으로 넘어가야 한다.
+
+## 13. 다음 실제 작업
+
+현재 기준 다음 실제 작업은 아래 순서로 재고정한다.
+
+1. TTS replacement를 실제 narration/output propagation까지 더 분명하게 고정
+2. review-required 상태에서 preview/export gating과 승인 후 반영 규칙을 세분화
+3. partial regeneration preflight를 비파괴 조회 경로로 API/UI 어느 쪽에 노출할지 결정
+4. thin editor 범위에서 아직 직접 검증이 약한 남은 고위험 경로를 보강
+5. `local_pipeline`의 다음 대형 분리 후보인 partial regeneration / output 경로를 점진 정리
 
 중요:
 
-- 오픈소스 편집기 반입은 5단계 이후다
-- CapCut export는 계속 유지한다
-- TTS와 설명 자산도 편집 세션 모델 안에 들어갈 자리까지 같이 설계해야 한다
+- 오픈소스 편집기 셸 반입은 현재도 핵심 우선순위가 아니다
+- CapCut export와 review/output 계약은 계속 유지한다
+- TTS, editing session, review 상태 계약은 서로 따로 놀지 않도록 같은 증거 기준으로 검증해야 한다

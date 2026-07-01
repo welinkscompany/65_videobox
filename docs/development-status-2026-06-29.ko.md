@@ -217,6 +217,39 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - review->editor recommendation mapping coverage 중 `broll` happy-path 보강
 - review action placeholder를 실제 persistence contract와 연결할지 여부 설계
 
+## 17. 2026-07-01 시스템 정비 기준 최신 상태
+
+이번 정비에서 현재 코드/문서/검증 기준을 다시 맞춰 확인한 결과, 아래는 더 이상 `계획 중`이 아니라 `실제 연결 완료` 상태다.
+
+- review action family
+  - `Approve recommendation` 실제 persistence 연결 완료
+  - `Reject recommendation` 실제 persistence 연결 완료
+  - `Mark for manual edit` 기존 editor flow 재사용 연결 완료
+- reject explicit decision-state contract 반영 완료
+- review snapshot의 timeline-local truth 보존 완료
+- approve/reject mutation의 rollback hardening 완료
+- rollback failure warning surface 추가 완료
+- review-action mutation helper 일부 분리로 `local_pipeline` 중복 감소
+
+이번 정비 시점의 실제 검증 결과:
+
+- review-action backend focused slice `5 passed`
+- frontend focused test 전체 `48 passed`
+- frontend build 성공
+- full backend regression `242 passed`
+
+이 갱신으로 아래 판단은 더 이상 현재 truth가 아니다.
+
+- `review action placeholder를 실제 persistence contract와 연결할지 여부 설계`
+- `Approve recommendation`이 아직 첫 slice만 된 상태라는 판단
+
+현재 기준 남은 핵심 범위는 다시 아래다.
+
+- TTS replacement의 실제 narration/output propagation 고도화
+- review-required 상태의 preview/export gating과 승인 후 반영 규칙 세분화
+- partial regeneration preflight의 비파괴 조회 경로 정리
+- `local_pipeline`의 다음 대형 분리 후보인 partial regeneration / output 경로 정리
+
 ## 16. 2026-06-30 review recommendation approve persistence 착수 기록
 
 이번 후속 작업으로 `review action placeholder -> first approve persistence`의 최소 slice는 착수 및 focused verification까지는 됐다고 본다.
