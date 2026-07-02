@@ -120,6 +120,26 @@ def _is_runtime_blocking_pending_recommendation(item: object) -> bool:
     )
 
 
+def _normalized_runtime_pending_recommendations(items: object) -> list[dict[str, Any]]:
+    normalized_pending_recommendations: list[dict[str, Any]] = []
+    existing_pending_keys: set[tuple[str, str, str]] = set()
+    if not isinstance(items, list):
+        return normalized_pending_recommendations
+    for item in items:
+        if not _is_runtime_blocking_pending_recommendation(item):
+            continue
+        pending_key = (
+            str(item.get("recommendation_id") or "").strip(),
+            str(item.get("target_segment_id") or "").strip(),
+            str(item.get("recommendation_type") or "").strip(),
+        )
+        if pending_key in existing_pending_keys:
+            continue
+        existing_pending_keys.add(pending_key)
+        normalized_pending_recommendations.append(item)
+    return normalized_pending_recommendations
+
+
 class LocalPipelineRunner:
     def __init__(
         self,
@@ -1634,22 +1654,9 @@ class LocalPipelineRunner:
             for flag in self._normalized_timeline_review_flags(timeline)
             if str(flag.get("code") or "").strip() in VALID_RUNTIME_BLOCKING_REVIEW_FLAG_CODES
         ]
-        pending_recommendations = timeline.get("pending_recommendations", [])
-        normalized_pending_recommendations: list[dict[str, Any]] = []
-        existing_pending_keys: set[tuple[str, str, str]] = set()
-        if isinstance(pending_recommendations, list):
-            for item in pending_recommendations:
-                if not _is_runtime_blocking_pending_recommendation(item):
-                    continue
-                pending_key = (
-                    str(item.get("recommendation_id") or "").strip(),
-                    str(item.get("target_segment_id") or "").strip(),
-                    str(item.get("recommendation_type") or "").strip(),
-                )
-                if pending_key in existing_pending_keys:
-                    continue
-                existing_pending_keys.add(pending_key)
-                normalized_pending_recommendations.append(item)
+        normalized_pending_recommendations = _normalized_runtime_pending_recommendations(
+            timeline.get("pending_recommendations", [])
+        )
         return review_flags, normalized_pending_recommendations
 
     def _normalized_timeline_review_flags(
@@ -1906,21 +1913,9 @@ class LocalPipelineRunner:
                 if str(segment.get("segment_id") or "").strip()
             ]
 
-        source_pending_recommendations = source_timeline.get("pending_recommendations", [])
-        if not isinstance(source_pending_recommendations, list):
-            source_pending_recommendations = []
-        else:
-            source_pending_recommendations = [
-                item
-                for item in source_pending_recommendations
-                if (
-                isinstance(item, dict)
-                and str(item.get("recommendation_id") or "").strip()
-                and str(item.get("target_segment_id") or "").strip()
-                and str(item.get("recommendation_type") or "").strip()
-                in VALID_RESTORED_RECOMMENDATION_TYPES
-            )
-        ]
+        source_pending_recommendations = _normalized_runtime_pending_recommendations(
+            source_timeline.get("pending_recommendations", [])
+        )
 
         state = {
             "timeline_segments": deepcopy(source_segments),
@@ -2023,6 +2018,25 @@ class LocalPipelineRunner:
                 },
             },
         }
+        existing_pending_keys = {
+            (
+                str(item.get("recommendation_id") or "").strip(),
+                str(item.get("target_segment_id") or "").strip(),
+                str(item.get("recommendation_type") or "").strip(),
+            )
+            for item in timeline_payload["pending_recommendations"]
+            if isinstance(item, dict)
+        }
+        for item in source_pending_recommendations:
+            pending_key = (
+                str(item.get("recommendation_id") or "").strip(),
+                str(item.get("target_segment_id") or "").strip(),
+                str(item.get("recommendation_type") or "").strip(),
+            )
+            if pending_key in existing_pending_keys:
+                continue
+            existing_pending_keys.add(pending_key)
+            timeline_payload["pending_recommendations"].append(deepcopy(item))
         persisted = self.store.save_timeline_run(
             project_id=project_id,
             output_mode=timeline.output_mode,
