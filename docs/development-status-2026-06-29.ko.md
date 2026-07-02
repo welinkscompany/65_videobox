@@ -237,6 +237,7 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - pending `tts_replacement` approve 시 같은 target segment를 가리키는 duplicate narration clip이 있어도 첫 clip만 갱신하고 멈추지 않고 모든 target narration clip `asset_uri`를 승인된 `selected_asset_uri`로 동기화하도록 보강 완료
 - pending `tts_replacement` approve는 `payload.selected_asset_uri`가 비어 있는 stale recommendation shape를 더 이상 승인 상태로 통과시키지 않고 `400`으로 즉시 거부하도록 보강 완료
 - pending `tts_replacement` approve는 `target_segment_id`에 대응하는 narration clip이 없는 stale timeline shape도 더 이상 승인 상태로 통과시키지 않고 `400`으로 즉시 거부하도록 보강 완료
+- pending `tts_replacement` approve 뒤 `applied_recommendations` read path는 `decision_state=approved`와 `recommendation_type=tts_replacement`를 approve 응답, timeline, review snapshot에서 일관되게 surface하도록 보강 완료
 - approved timeline이라도 snapshot `review_flags/pending_recommendations`가 비어 있는 상태에서 segment-level `review_required=true`가 남아 있으면 subtitle/preview/export를 계속 막는 output gating 경계 고정 완료
 - approved timeline의 stale non-bool `segment.review_required` shape는 synthetic output blocker로 오판하지 않고 canonical bool/string 값만 review-required blocker로 인정하도록 보강 완료
 - 위 segment-level `review_required` blocker는 last pending recommendation approve 이후에도 synthetic `segment_review_required` flag가 API read path와 review snapshot에 반영돼 review_status와 output gating이 어긋나지 않도록 보강 완료
@@ -371,6 +372,12 @@ UI부터 만들면 아래 문제가 바로 생긴다.
   - frontend preflight slice `25 passed`
   - frontend build 성공
   - full backend regression `327 passed`
+- TTS approve decision-state read-path hardening 추가 후 focused / broader verification 재실행
+  - backend output-gating slice `22 passed`
+  - backend preflight slice `55 passed`
+  - frontend preflight slice `25 passed`
+  - frontend build 성공
+  - full backend regression `329 passed`
 - 이 체크포인트 직전 latest pushed closeout commit
   - `9df0363 Harden preflight pending recommendation prediction`
 
@@ -381,7 +388,7 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 
 현재 기준 남은 핵심 범위는 다시 아래다.
 
-- TTS replacement의 실제 narration/output propagation baseline, approve 후 target clip 반영, missing `selected_asset_uri` stale approval 차단, missing target narration clip stale approval 차단까지 연결되어 있고, 남은 일은 approval/review contract의 추가 경계 보강이다
+- TTS replacement의 실제 narration/output propagation baseline, approve 후 target clip 반영, missing `selected_asset_uri` stale approval 차단, missing target narration clip stale approval 차단, approved decision-state/read-path surface까지 연결되어 있고, 남은 일은 approval/review contract의 추가 경계 보강이다
 - review-required 상태의 subtitle/preview/export gating은 기본 경로와 reopen-after-approval 전이까지 고정돼 있고, 남은 일은 다른 승인 후 반영 규칙 세분화와 추가 경계 검증이다
 - partial regeneration preflight의 비파괴 조회 경로는 baseline, duplicate-scope normalization, 일반 preflight blocked-warning combined reason surface까지 연결되어 있고, 남은 일은 backend read-only/prediction contract의 추가 경계와 frontend resume 경계 정리다
 - TTS replacement approval/output contract의 아직 테스트로 고정되지 않은 추가 경계 보강

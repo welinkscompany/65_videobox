@@ -376,11 +376,13 @@ class ProviderTraceResponse(BaseModel):
 class RecommendationItemResponse(BaseModel):
     recommendation_id: str
     target_segment_id: str
+    recommendation_type: str
     selected_asset_id: str | None = None
     score: float
     reason: str
     auto_apply_allowed: bool
     review_required: bool
+    decision_state: str | None = None
     payload: dict[str, object]
     created_at: str
     provider_trace: ProviderTraceResponse
@@ -825,12 +827,14 @@ def _normalize_recommendations_for_response(value: object) -> list[dict[str, obj
             {
                 "recommendation_id": recommendation_id,
                 "target_segment_id": target_segment_id,
+                "recommendation_type": str(item.get("recommendation_type") or "").strip(),
                 "selected_asset_id": str(item.get("selected_asset_id") or "").strip() or None,
                 "score": score,
                 "reason": str(item.get("reason") or "").strip()
                 or "Operator review required before approval or output.",
                 "auto_apply_allowed": bool(item.get("auto_apply_allowed", False)),
                 "review_required": bool(item.get("review_required", False)),
+                "decision_state": str(item.get("decision_state") or "").strip() or None,
                 "payload": payload if isinstance(payload, dict) else {},
                 "created_at": str(item.get("created_at") or "").strip() or "unknown",
                 "provider_trace": _normalize_provider_trace_response(item.get("provider_trace")),

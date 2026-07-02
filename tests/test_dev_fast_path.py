@@ -25,3 +25,10 @@ def test_output_gating_fast_path_includes_missing_target_narration_clip_tts_appr
     script_text = script_path.read_text(encoding="utf-8")
 
     assert "review_snapshot_api_rejects_tts_approval_without_matching_target_narration_clip" in script_text
+
+
+def test_output_gating_fast_path_includes_tts_approval_decision_state_read_path_regression() -> None:
+    script_path = Path(__file__).resolve().parents[1] / "scripts" / "dev-fast-path.ps1"
+    script_text = script_path.read_text(encoding="utf-8")
+
+    assert "review_snapshot_api_approve_tts_replacement_surfaces_approved_decision_state_in_read_paths" in script_text
