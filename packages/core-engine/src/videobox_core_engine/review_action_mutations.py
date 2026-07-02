@@ -112,11 +112,13 @@ def apply_approved_recommendation_to_timeline(
         return
     payload = decided_recommendation.get("payload")
     if not isinstance(payload, dict):
-        return
+        raise ValueError("Approved TTS replacement requires payload.selected_asset_uri.")
     selected_asset_uri = str(payload.get("selected_asset_uri") or "").strip()
     target_segment_id = str(decided_recommendation.get("target_segment_id") or "").strip()
-    if not selected_asset_uri or not target_segment_id:
-        return
+    if not selected_asset_uri:
+        raise ValueError("Approved TTS replacement requires payload.selected_asset_uri.")
+    if not target_segment_id:
+        raise ValueError("Approved TTS replacement requires target_segment_id.")
     for track in timeline.get("tracks", []):
         if str(track.get("track_type") or "") != "narration":
             continue
