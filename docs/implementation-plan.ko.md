@@ -497,6 +497,14 @@
 4. 그 다음 `local_pipeline`의 partial regeneration / output 경로를 최소 단위로 점진 정리
 5. thin editor 범위에서 아직 직접 검증이 약한 남은 고위험 경로를 보강
 
+단, 2026-07-03 기준 `2일 내 1차 데모 완성` 실행 레일은 위 장기 우선순위를 그대로 넓게 다 가져가지 않는다.
+즉시 실행 기준은 `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`를 따른다.
+그 문서 기준 기본 범위는 아래 3개뿐이다.
+
+1. approved TTS persisted truth gap 1개 확인
+2. 실제 프로젝트 1개 happy-path smoke
+3. evidence / closeout / SSOT freeze
+
 중요:
 
 - 오픈소스 편집기 셸 반입은 현재도 핵심 우선순위가 아니다
