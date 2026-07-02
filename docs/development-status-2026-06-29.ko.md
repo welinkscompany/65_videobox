@@ -234,6 +234,10 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - rollback failure warning surface 추가 완료
 - review-action mutation helper 일부 분리로 `local_pipeline` 중복 감소
 - pending `tts_replacement` approve 시 target narration clip `asset_uri`가 승인된 `selected_asset_uri`로 즉시 동기화되도록 보강 완료
+- approved timeline이라도 snapshot `review_flags/pending_recommendations`가 비어 있는 상태에서 segment-level `review_required=true`가 남아 있으면 subtitle/preview/export를 계속 막는 output gating 경계 고정 완료
+- 위 segment-level `review_required` blocker는 last pending recommendation approve 이후에도 synthetic `segment_review_required` flag가 API read path와 review snapshot에 반영돼 review_status와 output gating이 어긋나지 않도록 보강 완료
+- malformed duplicated segment entry가 같은 `segment_id`로 반복돼도 synthetic `segment_review_required` blocker detail이 중복으로 불어나지 않도록 dedupe 고정 완료
+- synthetic blocker 때문에 effective review status가 `approved -> blocked`로 바뀌는 경우에도 persisted approved `operator_guidance`를 재사용하지 않고 blocked snapshot 기준 guidance를 다시 계산하도록 보강 완료
 - partial regeneration preflight의 TTS affected-output label을 `narration audio`에서 `narration track`으로 정렬 완료
 - partial regeneration preflight의 `prediction_reasons` 조합을 `source only / target only / both` 기준 테스트로 분리 완료
 - partial regeneration preflight의 repeated `segment_ids`는 first-seen order를 유지한 채 dedupe되어 read-only scope와 targeted segment preview에 중복이 남지 않도록 고정 완료
@@ -297,12 +301,12 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 이번 정비 시점의 실제 검증 결과:
 
 - review-action backend focused slice `6 passed`
-- current-focused helper backend output-gating slice `12 passed`
+- current-focused helper backend output-gating slice `16 passed`
 - current-focused helper backend preflight slice `55 passed`
 - frontend `src/app.test.tsx` 전체 `66 passed`
 - helper `frontend-focused` gate `2 passed`
 - frontend build 성공
-- full backend regression `308 passed`
+- full backend regression `312 passed`
 - full backend regression은 현재 direct 실행 기준으로 다시 확인됐다
 - focused output gating regression `2 passed`
 - explicit approval gating regression `1 passed`
@@ -314,7 +318,7 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - resumed multi-segment field-change cleanup regression `1 passed`
 - preflight unsupported-field rejection regression `1 passed`
 - current-priority helper `./scripts/dev-fast-path.ps1 -Mode current-focused`
-  - backend output-gating slice `12 passed`
+  - backend output-gating slice `16 passed`
   - backend preflight slice `55 passed`
   - frontend preflight slice `25 passed`
 - frontend preflight field inference는 backend legacy `image` overlay도 `image_overlay` rerun field로 올바르게 매핑해 saved overlay가 `caption` fallback으로 잘못 좁혀지지 않도록 고정했다
@@ -330,7 +334,7 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - partial regeneration preflight targeted segment preview는 nested stale `tts_replacement.recommendation_id` shape도 `None`으로 정규화해 invalid replacement object가 read-only scope에 남지 않도록 고정했다
 - broader verification 재실행
   - frontend build 성공
-  - full backend regression `308 passed`
+  - full backend regression `312 passed`
 - latest pushed closeout commit
   - `9df0363 Harden preflight pending recommendation prediction`
 

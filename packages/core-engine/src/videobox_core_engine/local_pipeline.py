@@ -1102,7 +1102,10 @@ class LocalPipelineRunner:
             project_id=project_id,
             timeline_id=str(timeline["timeline_id"]),
         )
-        timeline["review_status"] = review_state["status"]
+        review_flags, pending_recommendations = self._normalized_timeline_blockers(timeline)
+        timeline["review_flags"] = review_flags
+        timeline["pending_recommendations"] = pending_recommendations
+        timeline["review_status"] = "blocked" if review_flags or pending_recommendations else review_state["status"]
         return {"job_id": job["job_id"], "status": job["status"], "timeline": timeline}
 
     def get_review_snapshot(self, *, project_id: str, job_id: str) -> dict[str, Any]:
@@ -1138,17 +1141,24 @@ class LocalPipelineRunner:
             timeline_pending_recommendations=deepcopy(timeline_pending_recommendations),
             timeline_review_flags=timeline_review_flags,
         )
+        snapshot["review_status"] = timeline["review_status"]
+        persisted_review_status = self.store.get_review_state(
+            project_id=project_id,
+            timeline_id=str(timeline["timeline_id"]),
+        )["status"]
         persisted_operator_guidance = self.store.get_persisted_operator_guidance(
             project_id=project_id,
             timeline_id=str(timeline["timeline_id"]),
         )
-        if persisted_operator_guidance is not None:
+        if persisted_operator_guidance is not None and timeline["review_status"] == persisted_review_status:
             snapshot["operator_guidance"] = persisted_operator_guidance
             return snapshot
         snapshot["operator_guidance"] = self.review_guidance_builder.build(
             project_id=project_id,
             review_snapshot=snapshot,
         )
+        if timeline["review_status"] != persisted_review_status:
+            return snapshot
         try:
             self.store.save_operator_guidance(
                 project_id=project_id,
@@ -1623,6 +1633,30 @@ class LocalPipelineRunner:
                 for item in pending_recommendations
                 if _is_runtime_blocking_pending_recommendation(item)
             ]
+        existing_review_flag_keys = {
+            (
+                str(flag.get("code") or "").strip(),
+                str(flag.get("segment_id") or "").strip(),
+            )
+            for flag in review_flags
+        }
+        for segment in timeline.get("segments", []):
+            if not isinstance(segment, dict):
+                continue
+            segment_id = str(segment.get("segment_id") or "").strip()
+            if (
+                segment_id
+                and _normalize_runtime_review_required(segment.get("review_required", False))
+                and ("segment_review_required", segment_id) not in existing_review_flag_keys
+            ):
+                existing_review_flag_keys.add(("segment_review_required", segment_id))
+                review_flags.append(
+                    {
+                        "code": "segment_review_required",
+                        "segment_id": segment_id,
+                        "message": "Segment requires operator review before export.",
+                    }
+                )
         return review_flags, pending_recommendations
 
     def _prepare_pending_recommendation_decision(
@@ -1702,7 +1736,10 @@ class LocalPipelineRunner:
                 review_required=review_required,
                 decision_state=decision_state,
             )
-            status = "blocked" if timeline.get("review_flags") or timeline.get("pending_recommendations") else "draft"
+            review_flags, pending_recommendations = self._normalized_timeline_blockers(timeline)
+            timeline["review_flags"] = review_flags
+            timeline["pending_recommendations"] = pending_recommendations
+            status = "blocked" if review_flags or pending_recommendations else "draft"
             self.store.save_review_state(
                 project_id=project_id,
                 timeline_id=str(timeline["timeline_id"]),

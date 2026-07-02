@@ -2600,6 +2600,101 @@ def test_review_snapshot_invalidates_persisted_guidance_when_review_status_chang
     }
 
 
+def test_review_snapshot_ignores_persisted_approved_guidance_when_synthetic_segment_blocker_makes_status_blocked(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Synthetic Segment Blocker Guidance Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 1.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "start_sec": 0.0,
+                    "end_sec": 1.0,
+                    "transcript_text": "Operator cleanup still required.",
+                    "script_text": "Operator cleanup still required.",
+                    "summary": "Segment still requires review.",
+                    "keywords": ["operator", "review"],
+                    "visual_plan": "Review before output.",
+                    "broll_query": "operator review",
+                    "narration_text": "Operator cleanup still required.",
+                    "review_required": True,
+                    "cleanup_decision": "review",
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+        },
+    )
+    store.save_review_state(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        status="approved",
+    )
+    store.save_operator_guidance(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        operator_guidance={
+            "summary": "Timeline review is approved and outputs can be generated.",
+            "action_items": ["Generate subtitles, preview, or export from the approved timeline."],
+            "provider_trace": build_provider_trace(final_provider="heuristic_fallback"),
+        },
+    )
+    timeline_job = store.create_job(
+        project_id=project.project_id,
+        job_type=JobType.TIMELINE_BUILD,
+        input_ref="segment_analysis_job_001",
+        status=JobStatus.SUCCEEDED,
+    )
+    store.update_job(
+        project_id=project.project_id,
+        job_id=timeline_job["job_id"],
+        status=JobStatus.SUCCEEDED,
+        output_ref=timeline["timeline_id"],
+    )
+
+    client = TestClient(create_app(projects_root=tmp_path))
+    review_snapshot = client.get(f"/api/projects/{project.project_id}/review-snapshots/{timeline_job['job_id']}")
+
+    assert review_snapshot.status_code == 200
+    payload = review_snapshot.json()
+    assert payload["review_status"] == "blocked"
+    assert payload["review_flags"] == [
+        {
+            "code": "segment_review_required",
+            "segment_id": "seg_001",
+            "message": "Segment requires operator review before export.",
+        }
+    ]
+    assert payload["operator_guidance"]["summary"] != (
+        "Timeline review is approved and outputs can be generated."
+    )
+    assert payload["operator_guidance"]["action_items"] != [
+        "Generate subtitles, preview, or export from the approved timeline."
+    ]
+
+
 def test_review_snapshot_falls_back_to_gemini_when_local_fails(
     tmp_path: Path,
     monkeypatch,
@@ -4444,6 +4539,135 @@ def test_preview_export_and_subtitles_require_explicit_approval_even_without_blo
     assert not list((project_root / "subtitles").glob("subtitle_*.srt"))
 
 
+def test_approved_review_state_still_blocks_outputs_when_segment_review_required_remains_without_snapshot_blockers(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Approved State Segment Review Required Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 1.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "start_sec": 0.0,
+                    "end_sec": 1.0,
+                    "transcript_text": "Operator cleanup still required.",
+                    "script_text": "Operator cleanup still required.",
+                    "summary": "Segment still requires review.",
+                    "keywords": ["operator", "review"],
+                    "visual_plan": "Review before output.",
+                    "broll_query": "operator review",
+                    "narration_text": "Operator cleanup still required.",
+                    "review_required": True,
+                    "cleanup_decision": "review",
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+        },
+    )
+    store.save_review_state(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        status="approved",
+    )
+    timeline_job = store.create_job(
+        project_id=project.project_id,
+        job_type=JobType.TIMELINE_BUILD,
+        input_ref="segment_analysis_job_001",
+        status=JobStatus.SUCCEEDED,
+    )
+    store.update_job(
+        project_id=project.project_id,
+        job_id=timeline_job["job_id"],
+        status=JobStatus.SUCCEEDED,
+        output_ref=timeline["timeline_id"],
+    )
+
+    client = TestClient(create_app(projects_root=tmp_path))
+    preview_response = client.post(
+        f"/api/projects/{project.project_id}/jobs/preview-render",
+        json={"timeline_job_id": timeline_job["job_id"]},
+    )
+    export_response = client.post(
+        f"/api/projects/{project.project_id}/jobs/capcut-export",
+        json={"timeline_job_id": timeline_job["job_id"]},
+    )
+    subtitle_response = client.post(
+        f"/api/projects/{project.project_id}/jobs/subtitle-render",
+        json={"timeline_job_id": timeline_job["job_id"]},
+    )
+
+    assert preview_response.status_code == 400
+    assert export_response.status_code == 400
+    assert subtitle_response.status_code == 400
+    assert "review blockers" in preview_response.json()["detail"].lower()
+    assert "review blockers" in export_response.json()["detail"].lower()
+    assert "review blockers" in subtitle_response.json()["detail"].lower()
+    assert "segment_review_required@seg_001" in preview_response.json()["detail"]
+    assert "segment_review_required@seg_001" in export_response.json()["detail"]
+    assert "segment_review_required@seg_001" in subtitle_response.json()["detail"]
+
+    jobs_response = client.get(f"/api/projects/{project.project_id}/jobs")
+    jobs_payload = jobs_response.json()["jobs"]
+    preview_job = next(job for job in jobs_payload if job["job_type"] == "preview_render")
+    export_job = next(job for job in jobs_payload if job["job_type"] == "capcut_export")
+    subtitle_job = next(job for job in jobs_payload if job["job_type"] == "subtitle_render")
+    assert preview_job["status"] == "failed"
+    assert export_job["status"] == "failed"
+    assert subtitle_job["status"] == "failed"
+
+    refreshed_timeline = client.get(f"/api/projects/{project.project_id}/timelines/{timeline_job['job_id']}")
+    refreshed_snapshot = client.get(
+        f"/api/projects/{project.project_id}/review-snapshots/{timeline_job['job_id']}"
+    )
+    assert refreshed_timeline.status_code == 200
+    assert refreshed_snapshot.status_code == 200
+    assert refreshed_timeline.json()["timeline"]["review_status"] == "blocked"
+    assert refreshed_snapshot.json()["review_status"] == "blocked"
+    assert refreshed_timeline.json()["timeline"]["review_flags"] == [
+        {
+            "code": "segment_review_required",
+            "segment_id": "seg_001",
+            "message": "Segment requires operator review before export.",
+        }
+    ]
+    assert refreshed_snapshot.json()["review_flags"] == [
+        {
+            "code": "segment_review_required",
+            "segment_id": "seg_001",
+            "message": "Segment requires operator review before export.",
+        }
+    ]
+    assert refreshed_timeline.json()["timeline"]["pending_recommendations"] == []
+    assert refreshed_snapshot.json()["pending_recommendations"] == []
+
+    project_root = tmp_path / "projects" / project.project_id
+    assert not list((project_root / "previews").glob("preview_*.json"))
+    assert not list((project_root / "exports" / "capcut").glob("export_*"))
+    assert not list((project_root / "subtitles").glob("subtitle_*.srt"))
+
+
 def test_review_snapshot_api_can_approve_pending_recommendation(tmp_path: Path) -> None:
     app = create_app(projects_root=tmp_path)
     client = TestClient(app)
@@ -4540,6 +4764,238 @@ def test_review_snapshot_api_can_approve_pending_recommendation(tmp_path: Path) 
     assert refreshed_timeline_payload["applied_recommendations"][0]["recommendation_id"] == (
         "rec_broll_review_002"
     )
+
+
+def test_approving_last_pending_recommendation_keeps_review_blocked_when_segment_review_required_remains(
+    tmp_path: Path,
+) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    timeline_result = client.get(f"/api/projects/{project_id}/timelines/{timeline_job_id}")
+    timeline_payload = timeline_result.json()["timeline"]
+    timeline_path = (
+        tmp_path
+        / "projects"
+        / project_id
+        / "timelines"
+        / f'{timeline_payload["timeline_id"]}.json'
+    )
+    persisted_timeline = json.loads(timeline_path.read_text(encoding="utf-8"))
+    approved_candidate = {
+        "recommendation_id": "rec_broll_review_002",
+        "target_segment_id": "seg_002",
+        "recommendation_type": "broll",
+        "selected_asset_id": "asset_broll_review_002",
+        "score": 0.88,
+        "reason": "Operator approved the suggested B-roll pick.",
+        "auto_apply_allowed": False,
+        "review_required": True,
+        "payload": {"tags": ["team", "meeting"]},
+        "created_at": "2026-06-30T00:00:00+00:00",
+    }
+    persisted_timeline["segments"] = [
+        {
+            "segment_id": "seg_001",
+            "start_sec": 0.0,
+            "end_sec": 2.0,
+            "transcript_text": "Intro segment.",
+            "script_text": "Intro segment.",
+            "summary": "Intro segment.",
+            "keywords": ["intro"],
+            "visual_plan": "Keep current visuals.",
+            "broll_query": "intro",
+            "narration_text": "Intro segment.",
+            "review_required": False,
+            "cleanup_decision": "keep",
+        },
+        {
+            "segment_id": "seg_002",
+            "start_sec": 2.0,
+            "end_sec": 4.0,
+            "transcript_text": "Needs operator review.",
+            "script_text": "Needs operator review.",
+            "summary": "Needs operator review.",
+            "keywords": ["review"],
+            "visual_plan": "Review before output.",
+            "broll_query": "review",
+            "narration_text": "Needs operator review.",
+            "review_required": True,
+            "cleanup_decision": "review",
+        },
+    ]
+    persisted_timeline["applied_recommendations"] = []
+    persisted_timeline["pending_recommendations"] = [approved_candidate]
+    persisted_timeline["review_flags"] = []
+    timeline_path.write_text(json.dumps(persisted_timeline, indent=2), encoding="utf-8")
+
+    database_path = tmp_path / "projects" / project_id / "db" / "project.sqlite"
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute("DELETE FROM recommendations")
+        connection.execute(
+            """
+            INSERT INTO recommendations (
+                recommendation_id,
+                project_id,
+                target_segment_id,
+                recommendation_type,
+                selected_asset_id,
+                score,
+                reason,
+                auto_apply_allowed,
+                review_required,
+                payload_json,
+                created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                approved_candidate["recommendation_id"],
+                project_id,
+                approved_candidate["target_segment_id"],
+                approved_candidate["recommendation_type"],
+                approved_candidate["selected_asset_id"],
+                approved_candidate["score"],
+                approved_candidate["reason"],
+                0,
+                1,
+                json.dumps(approved_candidate["payload"], ensure_ascii=True),
+                approved_candidate["created_at"],
+            ),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    approve_response = client.post(
+        f"/api/projects/{project_id}/review-snapshots/{timeline_job_id}/recommendations/"
+        "rec_broll_review_002/approve"
+    )
+
+    assert approve_response.status_code == 200
+    payload = approve_response.json()
+    assert payload["review_status"] == "blocked"
+    assert payload["pending_recommendations"] == []
+    assert payload["review_flags"] == [
+        {
+            "code": "segment_review_required",
+            "segment_id": "seg_002",
+            "message": "Segment requires operator review before export.",
+        }
+    ]
+
+    refreshed_timeline = client.get(f"/api/projects/{project_id}/timelines/{timeline_job_id}")
+    refreshed_snapshot = client.get(f"/api/projects/{project_id}/review-snapshots/{timeline_job_id}")
+    assert refreshed_timeline.status_code == 200
+    assert refreshed_snapshot.status_code == 200
+    assert refreshed_timeline.json()["timeline"]["review_status"] == "blocked"
+    assert refreshed_timeline.json()["timeline"]["pending_recommendations"] == []
+    assert refreshed_timeline.json()["timeline"]["review_flags"] == [
+        {
+            "code": "segment_review_required",
+            "segment_id": "seg_002",
+            "message": "Segment requires operator review before export.",
+        }
+    ]
+    assert refreshed_snapshot.json()["review_status"] == "blocked"
+    assert refreshed_snapshot.json()["pending_recommendations"] == []
+    assert refreshed_snapshot.json()["review_flags"] == [
+        {
+            "code": "segment_review_required",
+            "segment_id": "seg_002",
+            "message": "Segment requires operator review before export.",
+        }
+    ]
+
+
+def test_output_blocker_synthesis_deduplicates_repeated_segment_review_required_entries(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Duplicate Segment Review Required Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 1.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "start_sec": 0.0,
+                    "end_sec": 1.0,
+                    "transcript_text": "Duplicate review segment first copy.",
+                    "script_text": "Duplicate review segment first copy.",
+                    "summary": "First copy.",
+                    "keywords": ["duplicate"],
+                    "visual_plan": "Review before output.",
+                    "broll_query": "duplicate",
+                    "narration_text": "Duplicate review segment first copy.",
+                    "review_required": True,
+                    "cleanup_decision": "review",
+                },
+                {
+                    "segment_id": "seg_001",
+                    "start_sec": 0.0,
+                    "end_sec": 1.0,
+                    "transcript_text": "Duplicate review segment second copy.",
+                    "script_text": "Duplicate review segment second copy.",
+                    "summary": "Second copy.",
+                    "keywords": ["duplicate"],
+                    "visual_plan": "Review before output.",
+                    "broll_query": "duplicate",
+                    "narration_text": "Duplicate review segment second copy.",
+                    "review_required": True,
+                    "cleanup_decision": "review",
+                },
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+        },
+    )
+    store.save_review_state(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        status="approved",
+    )
+    timeline_job = store.create_job(
+        project_id=project.project_id,
+        job_type=JobType.TIMELINE_BUILD,
+        input_ref="segment_analysis_job_001",
+        status=JobStatus.SUCCEEDED,
+    )
+    store.update_job(
+        project_id=project.project_id,
+        job_id=timeline_job["job_id"],
+        status=JobStatus.SUCCEEDED,
+        output_ref=timeline["timeline_id"],
+    )
+
+    client = TestClient(create_app(projects_root=tmp_path))
+    preview_response = client.post(
+        f"/api/projects/{project.project_id}/jobs/preview-render",
+        json={"timeline_job_id": timeline_job["job_id"]},
+    )
+
+    assert preview_response.status_code == 400
+    assert preview_response.json()["detail"].count("segment_review_required@seg_001") == 1
 
 
 def test_approving_last_pending_recommendation_still_requires_explicit_review_approval_for_output(
