@@ -728,10 +728,12 @@ def _build_preflight_review_prediction(
             for item in source_pending_recommendations
             if (
                 isinstance(item, dict)
-                and str(item.get("recommendation_id") or "").strip()
-                and str(item.get("target_segment_id") or "").strip()
-                and str(item.get("recommendation_type") or "").strip()
-                in VALID_PREVIEW_RECOMMENDATION_TYPES
+                and isinstance(item.get("recommendation_id"), str)
+                and item.get("recommendation_id").strip()
+                and isinstance(item.get("target_segment_id"), str)
+                and item.get("target_segment_id").strip()
+                and isinstance(item.get("recommendation_type"), str)
+                and item.get("recommendation_type").strip() in VALID_PREVIEW_RECOMMENDATION_TYPES
             )
         ]
     if source_review_flags or source_pending_recommendations:

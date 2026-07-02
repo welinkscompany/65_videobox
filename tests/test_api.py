@@ -10600,6 +10600,94 @@ def test_editing_session_api_filters_unknown_type_source_pending_recommendation_
     assert before_jobs == after_jobs
 
 
+def test_editing_session_api_filters_nested_target_segment_id_source_pending_recommendation_from_preflight_prediction(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(
+        name="Nested Target Segment Id Source Pending Recommendation Preflight Project"
+    )
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [
+                {
+                    "recommendation_id": "rec_tts_review_nested_target",
+                    "target_segment_id": {"stale": "nested_target_segment_id"},
+                    "recommendation_type": "tts_replacement",
+                    "selected_asset_id": "asset_tts_review_nested_target",
+                    "score": 0.93,
+                    "reason": "Nested stale target segment id should not survive prediction.",
+                    "auto_apply_allowed": False,
+                    "review_required": True,
+                    "payload": {},
+                    "created_at": "2026-06-29T00:00:00+00:00",
+                }
+            ],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Stable caption",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    before_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration/preflight",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["caption"],
+        },
+    )
+    after_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["predicted_review_status_after_rerun"] == "draft"
+    assert payload["prediction_reasons"] == []
+    assert before_jobs == after_jobs
+
+
 def test_editing_session_api_ignores_stale_minimal_dict_source_pending_recommendation_entries_when_running_partial_regeneration(
     tmp_path: Path,
 ) -> None:
