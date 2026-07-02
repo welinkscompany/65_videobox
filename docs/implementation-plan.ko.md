@@ -458,6 +458,7 @@
 - pending `tts_replacement` approve 시 target narration track clip `asset_uri`를 승인된 `selected_asset_uri`로 반영하는 계약
 - pending `tts_replacement` approve 시 같은 target segment를 가리키는 duplicate narration clip이 있어도 target narration clip 전체의 `asset_uri`를 승인된 `selected_asset_uri`로 동기화하는 계약
 - pending `tts_replacement` approve는 `payload.selected_asset_uri`가 비어 있는 stale recommendation shape를 승인 상태로 통과시키지 않고 즉시 거부하는 계약
+- pending `tts_replacement` approve는 `target_segment_id`에 대응하는 narration clip이 없는 stale timeline shape도 승인 상태로 통과시키지 않고 즉시 거부하는 계약
 - approved timeline이라도 snapshot blocker 컬렉션이 비어 있는 상태에서 segment-level `review_required=true`가 남아 있으면 subtitle / preview / export를 계속 막는 output gating 계약
 - approved timeline의 stale non-bool `segment.review_required` shape는 synthetic output blocker로 오판하지 않고 canonical bool/string 값만 review-required blocker로 인정하는 계약
 - 위 segment-level `review_required` blocker는 API read path와 review snapshot에서 같은 synthetic flag로 반영돼 review 상태/출력 상태가 서로 어긋나지 않도록 유지하는 계약
@@ -472,11 +473,11 @@
 - frontend `src/app.test.tsx` 전체 `66 passed`
 - helper `frontend-focused` gate `2 passed`
 - review-action backend focused slice `6 passed`
-- current-focused helper backend output-gating slice `20 passed`
+- current-focused helper backend output-gating slice `21 passed`
 - current-focused helper backend preflight slice `55 passed`
 - current-focused helper frontend preflight slice `25 passed`
 - speed-up helper `current-focused-parallel`
-  - backend output-gating `20 passed`
+  - backend output-gating `21 passed`
   - backend preflight `55 passed`
   - frontend preflight `25 passed`
 - full backend regression `318 passed`
@@ -490,7 +491,7 @@
 현재 기준 다음 실제 작업은 아래 순서로 재고정한다.
 
 1. review-required 상태에서 subtitle/preview/export gating의 추가 경계와 승인 후 반영 규칙을 세분화
-2. TTS replacement approval/output contract에서 missing `selected_asset_uri` stale approval 차단 이후에도 남아 있는 추가 경계를 선별 보강
+2. TTS replacement approval/output contract에서 missing `selected_asset_uri`와 missing target narration clip stale approval 차단 이후에도 남아 있는 추가 경계를 선별 보강
 3. partial regeneration preflight의 backend read-only/prediction contract와 frontend resume 경계에서 남은 작은 경계를 계속 세분화
 4. 그 다음 `local_pipeline`의 partial regeneration / output 경로를 최소 단위로 점진 정리
 5. thin editor 범위에서 아직 직접 검증이 약한 남은 고위험 경로를 보강

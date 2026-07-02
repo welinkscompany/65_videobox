@@ -7044,6 +7044,133 @@ def test_review_snapshot_api_rejects_tts_approval_without_selected_asset_uri(
         connection.close()
 
     assert target_row == (0, 1, None)
+
+
+def test_review_snapshot_api_rejects_tts_approval_without_matching_target_narration_clip(
+    tmp_path: Path,
+) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    timeline_result = client.get(f"/api/projects/{project_id}/timelines/{timeline_job_id}")
+    timeline_payload = timeline_result.json()["timeline"]
+    timeline_path = (
+        tmp_path
+        / "projects"
+        / project_id
+        / "timelines"
+        / f'{timeline_payload["timeline_id"]}.json'
+    )
+    target_candidate = {
+        "recommendation_id": "rec_tts_review_missing_clip",
+        "target_segment_id": "seg_999",
+        "recommendation_type": "tts_replacement",
+        "selected_asset_id": "asset_tts_review_missing_clip",
+        "score": 0.94,
+        "reason": "Operator approved the regenerated narration take.",
+        "auto_apply_allowed": False,
+        "review_required": True,
+        "payload": {
+            "selected_asset_uri": (
+                f"local://projects/{project_id}/assets/generated/asset_tts_review_missing_clip.wav"
+            )
+        },
+        "created_at": "2026-07-03T00:00:00+00:00",
+        "provider_trace": build_provider_trace(final_provider="rule_based_fallback"),
+    }
+    persisted_timeline = json.loads(timeline_path.read_text(encoding="utf-8"))
+    original_narration_track = json.loads(
+        json.dumps(
+            next(track for track in persisted_timeline["tracks"] if track["track_type"] == "narration")
+        )
+    )
+    persisted_timeline["applied_recommendations"] = []
+    persisted_timeline["pending_recommendations"] = [target_candidate]
+    persisted_timeline["review_flags"] = [
+        {
+            "code": "tts_replacement_review_required",
+            "segment_id": "seg_999",
+            "message": "Operator must confirm the TTS replacement before approval.",
+        }
+    ]
+    timeline_path.write_text(json.dumps(persisted_timeline, indent=2), encoding="utf-8")
+
+    database_path = tmp_path / "projects" / project_id / "db" / "project.sqlite"
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute("DELETE FROM recommendations")
+        connection.execute(
+            """
+            INSERT INTO recommendations (
+                recommendation_id,
+                project_id,
+                target_segment_id,
+                recommendation_type,
+                selected_asset_id,
+                score,
+                reason,
+                auto_apply_allowed,
+                review_required,
+                payload_json,
+                created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                target_candidate["recommendation_id"],
+                project_id,
+                target_candidate["target_segment_id"],
+                target_candidate["recommendation_type"],
+                target_candidate["selected_asset_id"],
+                target_candidate["score"],
+                target_candidate["reason"],
+                0,
+                1,
+                json.dumps(target_candidate["payload"], ensure_ascii=True),
+                target_candidate["created_at"],
+            ),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    approve_response = client.post(
+        f"/api/projects/{project_id}/review-snapshots/{timeline_job_id}/recommendations/"
+        "rec_tts_review_missing_clip/approve"
+    )
+
+    assert approve_response.status_code == 400
+    assert "target narration clip" in approve_response.json()["detail"].lower()
+
+    persisted_timeline_after_attempt = json.loads(timeline_path.read_text(encoding="utf-8"))
+    assert persisted_timeline_after_attempt["applied_recommendations"] == []
+    assert [
+        item["recommendation_id"]
+        for item in persisted_timeline_after_attempt["pending_recommendations"]
+    ] == ["rec_tts_review_missing_clip"]
+    narration_track_after_attempt = next(
+        track
+        for track in persisted_timeline_after_attempt["tracks"]
+        if track["track_type"] == "narration"
+    )
+    assert narration_track_after_attempt == original_narration_track
+
+    connection = sqlite3.connect(database_path)
+    try:
+        target_row = connection.execute(
+            """
+            SELECT auto_apply_allowed, review_required, decision_state
+            FROM recommendations
+            WHERE recommendation_id = ?
+            """,
+            ("rec_tts_review_missing_clip",),
+        ).fetchone()
+    finally:
+        connection.close()
+
+    assert target_row == (0, 1, None)
+
+
 def test_review_snapshot_api_can_reject_pending_recommendation_without_leaving_it_pending(
     tmp_path: Path,
 ) -> None:

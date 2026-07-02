@@ -119,6 +119,7 @@ def apply_approved_recommendation_to_timeline(
         raise ValueError("Approved TTS replacement requires payload.selected_asset_uri.")
     if not target_segment_id:
         raise ValueError("Approved TTS replacement requires target_segment_id.")
+    matched_clip = False
     for track in timeline.get("tracks", []):
         if str(track.get("track_type") or "") != "narration":
             continue
@@ -127,4 +128,7 @@ def apply_approved_recommendation_to_timeline(
             continue
         for clip in clips:
             if str(clip.get("segment_id") or "") == target_segment_id:
+                matched_clip = True
                 clip["asset_uri"] = selected_asset_uri
+    if not matched_clip:
+        raise ValueError("Approved TTS replacement requires a matching target narration clip.")
