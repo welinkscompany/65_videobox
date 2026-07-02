@@ -331,6 +331,8 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - broader verification 재실행
   - frontend build 성공
   - full backend regression `308 passed`
+- latest pushed closeout commit
+  - `9df0363 Harden preflight pending recommendation prediction`
 
 이 갱신으로 아래 판단은 더 이상 현재 truth가 아니다.
 
