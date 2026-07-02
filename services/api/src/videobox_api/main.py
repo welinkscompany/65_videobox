@@ -713,8 +713,10 @@ def _build_preflight_review_prediction(
             for flag in source_review_flags
             if (
                 isinstance(flag, dict)
-                and str(flag.get("code") or "").strip() in VALID_PREVIEW_REVIEW_FLAG_CODES
-                and str(flag.get("segment_id") or "").strip()
+                and isinstance(flag.get("code"), str)
+                and flag.get("code").strip() in VALID_PREVIEW_REVIEW_FLAG_CODES
+                and isinstance(flag.get("segment_id"), str)
+                and flag.get("segment_id").strip()
             )
         ]
     source_pending_recommendations = source_timeline.get("pending_recommendations")
