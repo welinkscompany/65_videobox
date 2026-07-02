@@ -1635,15 +1635,22 @@ class LocalPipelineRunner:
             if str(flag.get("code") or "").strip() in VALID_RUNTIME_BLOCKING_REVIEW_FLAG_CODES
         ]
         pending_recommendations = timeline.get("pending_recommendations", [])
-        if not isinstance(pending_recommendations, list):
-            pending_recommendations = []
-        else:
-            pending_recommendations = [
-                item
-                for item in pending_recommendations
-                if _is_runtime_blocking_pending_recommendation(item)
-            ]
-        return review_flags, pending_recommendations
+        normalized_pending_recommendations: list[dict[str, Any]] = []
+        existing_pending_keys: set[tuple[str, str, str]] = set()
+        if isinstance(pending_recommendations, list):
+            for item in pending_recommendations:
+                if not _is_runtime_blocking_pending_recommendation(item):
+                    continue
+                pending_key = (
+                    str(item.get("recommendation_id") or "").strip(),
+                    str(item.get("target_segment_id") or "").strip(),
+                    str(item.get("recommendation_type") or "").strip(),
+                )
+                if pending_key in existing_pending_keys:
+                    continue
+                existing_pending_keys.add(pending_key)
+                normalized_pending_recommendations.append(item)
+        return review_flags, normalized_pending_recommendations
 
     def _normalized_timeline_review_flags(
         self,

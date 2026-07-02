@@ -5300,6 +5300,108 @@ def test_output_blockers_deduplicate_repeated_persisted_review_flag_entries(
     assert preview_response.json()["detail"].count("tts_replacement_review_required@seg_001") == 1
 
 
+def test_output_blockers_deduplicate_repeated_persisted_pending_recommendation_entries(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Duplicate Persisted Pending Recommendation Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 1.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "start_sec": 0.0,
+                    "end_sec": 1.0,
+                    "transcript_text": "Duplicate persisted pending recommendation segment.",
+                    "script_text": "Duplicate persisted pending recommendation segment.",
+                    "summary": "Duplicate pending recommendation.",
+                    "keywords": ["duplicate"],
+                    "visual_plan": "Review before output.",
+                    "broll_query": "duplicate",
+                    "narration_text": "Duplicate persisted pending recommendation segment.",
+                    "review_required": False,
+                    "cleanup_decision": "keep",
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [
+                {
+                    "recommendation_id": "rec_tts_seg_001",
+                    "target_segment_id": "seg_001",
+                    "recommendation_type": "tts_replacement",
+                    "selected_asset_id": "asset_tts_001",
+                    "score": 1.0,
+                    "reason": "Operator must confirm the TTS replacement before output.",
+                    "auto_apply_allowed": False,
+                    "review_required": True,
+                    "payload": {},
+                    "created_at": "2026-07-02T00:00:00+00:00",
+                    "provider_trace": build_provider_trace(final_provider="rule_based_fallback"),
+                },
+                {
+                    "recommendation_id": "rec_tts_seg_001",
+                    "target_segment_id": "seg_001",
+                    "recommendation_type": "tts_replacement",
+                    "selected_asset_id": "asset_tts_001",
+                    "score": 1.0,
+                    "reason": "Operator must confirm the TTS replacement before output.",
+                    "auto_apply_allowed": False,
+                    "review_required": True,
+                    "payload": {},
+                    "created_at": "2026-07-02T00:00:00+00:00",
+                    "provider_trace": build_provider_trace(final_provider="rule_based_fallback"),
+                },
+            ],
+        },
+    )
+    store.save_review_state(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        status="approved",
+    )
+    timeline_job = store.create_job(
+        project_id=project.project_id,
+        job_type=JobType.TIMELINE_BUILD,
+        input_ref="segment_analysis_job_001",
+        status=JobStatus.SUCCEEDED,
+    )
+    store.update_job(
+        project_id=project.project_id,
+        job_id=timeline_job["job_id"],
+        status=JobStatus.SUCCEEDED,
+        output_ref=timeline["timeline_id"],
+    )
+
+    client = TestClient(create_app(projects_root=tmp_path))
+    preview_response = client.post(
+        f"/api/projects/{project.project_id}/jobs/preview-render",
+        json={"timeline_job_id": timeline_job["job_id"]},
+    )
+
+    assert preview_response.status_code == 400
+    assert preview_response.json()["detail"].count("tts_replacement:rec_tts_seg_001@seg_001") == 1
+
+
 def test_approving_last_pending_recommendation_still_requires_explicit_review_approval_for_output(
     tmp_path: Path,
 ) -> None:

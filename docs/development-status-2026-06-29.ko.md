@@ -242,6 +242,7 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - synthetic blocker 때문에 effective review status가 `approved -> blocked`로 바뀌는 경우에도 persisted approved `operator_guidance`를 재사용하지 않고 blocked snapshot 기준 guidance를 다시 계산하도록 보강 완료
 - unknown dict-shaped `review_flag.code`는 approved timeline output gating blocker로 오판하지 않고 canonical review flag code만 blocker로 유지하도록 보강 완료
 - approved timeline의 persisted duplicate `review_flags`도 output blocker detail에서 code/segment 기준으로 dedupe되어 같은 blocker가 중복 노출되지 않도록 보강 완료
+- approved timeline의 persisted duplicate `pending_recommendations`도 output blocker detail에서 recommendation id / target segment / recommendation type 기준으로 dedupe되어 같은 blocker가 중복 노출되지 않도록 보강 완료
 - partial regeneration preflight의 TTS affected-output label을 `narration audio`에서 `narration track`으로 정렬 완료
 - partial regeneration preflight의 `prediction_reasons` 조합을 `source only / target only / both` 기준 테스트로 분리 완료
 - partial regeneration preflight의 repeated `segment_ids`는 first-seen order를 유지한 채 dedupe되어 read-only scope와 targeted segment preview에 중복이 남지 않도록 고정 완료
@@ -353,6 +354,9 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - TTS duplicate target narration clip propagation 추가 후 broader verification 재실행
   - frontend build 성공
   - full backend regression `317 passed`
+- output-gating persisted duplicate pending-recommendation dedupe 추가 후 broader verification 재실행
+  - frontend build 성공
+  - full backend regression `318 passed`
 - 이 체크포인트 직전 latest pushed closeout commit
   - `9df0363 Harden preflight pending recommendation prediction`
 
