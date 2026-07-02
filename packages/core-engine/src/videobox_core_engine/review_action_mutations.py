@@ -93,6 +93,7 @@ def filtered_review_flags_after_recommendation_decision(
     return [
         flag
         for flag in deepcopy(timeline.get("review_flags", []))
+        if isinstance(flag, dict)
         if should_keep_review_flag(
             flag=flag,
             recommendation_flag_code=recommendation_flag_code,
