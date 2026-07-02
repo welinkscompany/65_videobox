@@ -461,6 +461,7 @@
 - 위 segment-level `review_required` blocker는 API read path와 review snapshot에서 같은 synthetic flag로 반영돼 review 상태/출력 상태가 서로 어긋나지 않도록 유지하는 계약
 - 위 synthetic blocker로 effective review status가 바뀌는 경우 persisted approved `operator_guidance`를 그대로 재사용하지 않고 blocked snapshot 기준 guidance를 다시 계산하는 계약
 - unknown dict-shaped `review_flag.code`는 approved timeline output gating blocker로 오판하지 않고 canonical review flag code만 blocker로 유지하는 계약
+- approved timeline의 persisted duplicate `review_flags`도 output blocker detail에서 code/segment 기준으로 dedupe되어 같은 blocker가 중복 노출되지 않는 계약
 
 현재 확인된 검증 기준:
 
@@ -470,7 +471,11 @@
 - current-focused helper backend output-gating slice `18 passed`
 - current-focused helper backend preflight slice `55 passed`
 - current-focused helper frontend preflight slice `25 passed`
-- full backend regression `314 passed`
+- speed-up helper `current-focused-parallel`
+  - backend output-gating `18 passed`
+  - backend preflight `55 passed`
+  - frontend preflight `25 passed`
+- full backend regression `315 passed`
 - frontend build 성공
 
 이 체크포인트 기준으로 review-action placeholder 단계는 이미 지난 상태다.

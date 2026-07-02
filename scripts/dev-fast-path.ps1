@@ -7,6 +7,7 @@ param(
         "preflight-backend",
         "preflight-frontend",
         "current-focused",
+        "current-focused-parallel",
         "broader",
         "all"
     )]
@@ -77,6 +78,61 @@ function Invoke-Step {
     }
 }
 
+function Invoke-ParallelSteps {
+    param(
+        [Parameter(Mandatory = $true)]
+        [array]$Steps
+    )
+
+    $jobs = @()
+    try {
+        foreach ($step in $Steps) {
+            $jobs += Start-Job -ScriptBlock {
+                param($Label, $Command, $WorkingDirectory)
+                Set-StrictMode -Version Latest
+                $ErrorActionPreference = "Stop"
+                Push-Location $WorkingDirectory
+                try {
+                    $output = Invoke-Expression $Command 2>&1 | Out-String
+                    [pscustomobject]@{
+                        Label = $Label
+                        Output = $output.TrimEnd()
+                        Failed = $false
+                    }
+                }
+                catch {
+                    [pscustomobject]@{
+                        Label = $Label
+                        Output = (($_ | Out-String).TrimEnd())
+                        Failed = $true
+                    }
+                }
+                finally {
+                    Pop-Location
+                }
+            } -ArgumentList $step.Label, $step.Command, $step.WorkingDirectory
+        }
+
+        Wait-Job -Job $jobs | Out-Null
+        $results = $jobs | Receive-Job
+        foreach ($result in $results) {
+            Write-Host ""
+            Write-Host "==> $($result.Label)" -ForegroundColor Cyan
+            if ($result.Output) {
+                Write-Host $result.Output
+            }
+            if ($result.Failed) {
+                throw "Parallel step failed: $($result.Label)"
+            }
+        }
+    }
+    finally {
+        foreach ($job in $jobs) {
+            Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 switch ($Mode) {
     "review-action-backend" {
         Invoke-Step `
@@ -122,6 +178,25 @@ switch ($Mode) {
             -Command "npm test -- --run src/app.test.tsx -t `"$preflightFrontendExpr`"" `
             -WorkingDirectory $frontendRoot
     }
+    "current-focused-parallel" {
+        Invoke-ParallelSteps -Steps @(
+            @{
+                Label = "Backend output gating slice"
+                Command = "pytest tests/test_api.py -q -k `"$outputGatingExpr`""
+                WorkingDirectory = $repoRoot
+            },
+            @{
+                Label = "Backend preflight slice"
+                Command = "pytest tests/test_api.py -q -k `"$preflightBackendExpr`""
+                WorkingDirectory = $repoRoot
+            },
+            @{
+                Label = "Frontend preflight slice"
+                Command = "npm test -- --run src/app.test.tsx -t `"$preflightFrontendExpr`""
+                WorkingDirectory = $frontendRoot
+            }
+        )
+    }
     "broader" {
         Invoke-Step `
             -Label "Frontend production build" `
@@ -161,6 +236,14 @@ switch ($Mode) {
         Write-Host "Frontend root: $frontendRoot"
         Write-Host ""
         Write-Host "Current-priority loop:" -ForegroundColor Yellow
+        Write-Host "  1. Add one failing test"
+        Write-Host "  2. Run one exact test first with pytest -k / npm test -t"
+        Write-Host "  3. Apply minimal GREEN"
+        Write-Host "  4. ./scripts/dev-fast-path.ps1 -Mode output-gating   or preflight-backend / preflight-frontend"
+        Write-Host "  5. ./scripts/dev-fast-path.ps1 -Mode current-focused-parallel"
+        Write-Host "  6. ./scripts/dev-fast-path.ps1 -Mode broader"
+        Write-Host ""
+        Write-Host "Compatibility loop (sequential):" -ForegroundColor Yellow
         Write-Host "  1. Add one failing test"
         Write-Host "  2. ./scripts/dev-fast-path.ps1 -Mode output-gating   or preflight-backend / preflight-frontend"
         Write-Host "  3. Apply minimal GREEN"

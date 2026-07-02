@@ -26,6 +26,7 @@
 ./scripts/dev-fast-path.ps1 -Mode preflight-backend
 ./scripts/dev-fast-path.ps1 -Mode preflight-frontend
 ./scripts/dev-fast-path.ps1 -Mode current-focused
+./scripts/dev-fast-path.ps1 -Mode current-focused-parallel
 ./scripts/dev-fast-path.ps1 -Mode broader
 ```
 
@@ -39,6 +40,8 @@
   - blocked-warning / resumed preflight degraded warning / resumed-candidate scope cleanup 관련 frontend focused gate만 실행
 - `current-focused`
   - 현재 우선순위인 `output gating -> preflight backend -> preflight frontend`를 한 번에 실행
+- `current-focused-parallel`
+  - 위 `current-focused`와 같은 검증 범위를 병렬로 실행해 slice-close 대기 시간을 줄인다
 - `broader`
   - frontend build + full backend regression 실행
 - `status`
@@ -60,20 +63,32 @@
 
 1. plan과 현재 변경 상태를 먼저 맞춘다
 2. failing test 1개만 추가한다
-3. 해당 slice에 맞는 `output-gating`, `preflight-backend`, `preflight-frontend`만 돌려 fail을 확인한다
+3. RED 단계에서는 exact test 1개만 먼저 돌려 fail을 확인한다
 4. minimal implementation만 넣는다
-5. 같은 focused gate를 다시 돌린다
-6. slice가 닫히면 `current-focused`로 인접 경계까지 다시 확인한다
-7. task 단위가 닫히면 마지막에만 `broader`를 돌린다
+5. GREEN 단계에서도 같은 exact test를 먼저 다시 돌린다
+6. 그 다음 해당 slice에 맞는 `output-gating`, `preflight-backend`, `preflight-frontend` lane만 돌린다
+7. slice가 닫히면 기본값으로 `current-focused-parallel`로 인접 경계까지 다시 확인한다
+8. task 단위가 닫히면 마지막에만 `broader`를 돌린다
 
 추가 운영 규칙:
 
 - `output-gating`은 subtitle/preview/export의 blocker/approval 경계를 기본으로 묶는다
 - `preflight-backend`는 targeted-segment normalization, duplicate normalization, unsupported scope rejection, blocked/draft prediction 경계를 기본으로 묶는다
 - `preflight-frontend`는 blocked-warning surface, resumed preflight degraded warning, resumed mismatch non-reuse, resumed scope cleanup 경계를 기본으로 묶는다
-- 새 slice에서 정확히 1개 테스트만 보고 싶으면 script override를 써서 범위를 더 줄인다
+- 새 slice에서 RED/GREEN은 helper 전체 대신 정확히 1개 테스트만 먼저 본다
+  - backend: `pytest tests/test_api.py -q -k "<exact test name>"`
+  - frontend: `npm test -- --run src/app.test.tsx -t "<exact test name>"`
+- lane close가 필요하면 script override를 써서 helper 범위를 더 줄인다
 - current status 문서에 `frontend src/app.test.tsx 전체`를 주장할 때는 helper gate와 별도로 `npm test -- --run src/app.test.tsx`를 다시 실행한다
 - broader는 slice close 직전까지만 미룬다. 다만 focused 없이 broader부터 돌리지는 않는다
+
+속도 우선 기본값:
+
+1. RED/GREEN 단계에서는 exact test만 돌린다
+2. lane close에서는 해당 lane helper만 돌린다
+3. slice close에서는 `current-focused` 대신 `current-focused-parallel`을 먼저 쓴다
+4. 문서 수정은 focused green 이후로 미룬다
+5. `frontend src/app.test.tsx` 전체 재실행은 상태 문서 갱신이나 task close가 필요할 때만 돌린다
 
 ## 4. review-action 변경 시 꼭 보는 함정
 
@@ -103,12 +118,13 @@
 
 1. `./scripts/dev-fast-path.ps1 -Mode status`로 현재 gate와 pattern을 먼저 확인한다
 2. 다음 최소 slice에 대해 failing test 1개만 추가한다
-3. 필요한 경우 override pattern으로 RED를 확인한다
-4. minimal GREEN만 넣고 같은 override/focused gate를 다시 돌린다
-5. slice가 닫히면 `current-focused`를 다시 돌린다
-6. 현재 상태 문서에 frontend 전체 수치를 남길 필요가 있으면 `npm test -- --run src/app.test.tsx`를 별도로 돌린다
-7. task 단위가 닫히면 `broader`를 돌린다
-8. 그 뒤에만 spec review -> code-quality review를 붙인다
+3. RED/GREEN은 가능한 한 exact test 1개로 먼저 확인한다
+4. minimal GREEN만 넣고 같은 exact test를 다시 돌린다
+5. lane close가 필요하면 관련 helper만 돌린다
+6. slice가 닫히면 `current-focused-parallel`을 다시 돌린다
+7. 현재 상태 문서에 frontend 전체 수치를 남길 필요가 있으면 `npm test -- --run src/app.test.tsx`를 별도로 돌린다
+8. task 단위가 닫히면 `broader`를 돌린다
+9. 그 뒤에만 spec review -> code-quality review를 붙인다
 
 이 순서의 의도:
 

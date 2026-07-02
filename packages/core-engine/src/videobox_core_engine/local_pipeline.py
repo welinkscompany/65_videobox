@@ -1650,18 +1650,20 @@ class LocalPipelineRunner:
         timeline: dict[str, Any],
     ) -> list[dict[str, Any]]:
         review_flags = timeline.get("review_flags", [])
-        if not isinstance(review_flags, list):
-            review_flags = []
-        else:
-            review_flags = [flag for flag in review_flags if _is_runtime_blocking_review_flag(flag)]
+        normalized_review_flags: list[dict[str, Any]] = []
+        existing_review_flag_keys: set[tuple[str, str]] = set()
+        if isinstance(review_flags, list):
+            for flag in review_flags:
+                if not _is_runtime_blocking_review_flag(flag):
+                    continue
+                code = str(flag.get("code") or "").strip()
+                segment_id = str(flag.get("segment_id") or "").strip()
+                review_flag_key = (code, segment_id)
+                if review_flag_key in existing_review_flag_keys:
+                    continue
+                existing_review_flag_keys.add(review_flag_key)
+                normalized_review_flags.append(flag)
 
-        existing_review_flag_keys = {
-            (
-                str(flag.get("code") or "").strip(),
-                str(flag.get("segment_id") or "").strip(),
-            )
-            for flag in review_flags
-        }
         for segment in timeline.get("segments", []):
             if not isinstance(segment, dict):
                 continue
@@ -1672,14 +1674,14 @@ class LocalPipelineRunner:
                 and ("segment_review_required", segment_id) not in existing_review_flag_keys
             ):
                 existing_review_flag_keys.add(("segment_review_required", segment_id))
-                review_flags.append(
+                normalized_review_flags.append(
                     {
                         "code": "segment_review_required",
                         "segment_id": segment_id,
                         "message": "Segment requires operator review before export.",
                     }
                 )
-        return review_flags
+        return normalized_review_flags
 
     def _prepare_pending_recommendation_decision(
         self,
