@@ -610,7 +610,8 @@ def _build_targeted_segments(
         segment_id = str(segment.get("segment_id") or "").strip()
         if not segment_id:
             continue
-        segment_lookup[segment_id] = segment
+        if segment_id not in segment_lookup:
+            segment_lookup[segment_id] = segment
 
     targeted_segments: list[dict[str, object]] = []
     for segment_id in segment_ids:

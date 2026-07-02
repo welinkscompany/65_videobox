@@ -9889,6 +9889,103 @@ def test_editing_session_api_preserves_request_segment_order_in_preflight_target
     assert before_jobs == after_jobs
 
 
+def test_editing_session_api_preserves_first_seen_duplicate_session_segment_in_preflight_targeted_segments(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Duplicate Session Segment Preflight Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Canonical first caption",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": {"asset_id": "asset_broll_001"},
+                    "visual_overlays": [],
+                    "music_override": None,
+                    "tts_replacement": None,
+                },
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Stale duplicate caption that should not override",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "remove",
+                    "review_required": True,
+                    "broll_override": None,
+                    "visual_overlays": [],
+                    "music_override": {"asset_id": "music_stale_001"},
+                    "tts_replacement": None,
+                },
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    before_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration/preflight",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["caption"],
+        },
+    )
+    after_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["targeted_segments"] == [
+        {
+            "segment_id": "seg_001",
+            "caption_text": "Canonical first caption",
+            "cut_action": "keep",
+            "review_required": False,
+            "broll_override": {"asset_id": "asset_broll_001"},
+            "visual_overlays": [],
+            "music_override": None,
+            "tts_replacement": None,
+        }
+    ]
+    assert payload["predicted_review_status_after_rerun"] == "draft"
+    assert payload["prediction_reasons"] == []
+    assert before_jobs == after_jobs
+
+
 def test_editing_session_api_deduplicates_repeated_segment_ids_in_preflight_scope(
     tmp_path: Path,
 ) -> None:

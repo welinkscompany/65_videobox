@@ -244,6 +244,7 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - partial regeneration preflight의 TTS affected-output label을 `narration audio`에서 `narration track`으로 정렬 완료
 - partial regeneration preflight의 `prediction_reasons` 조합을 `source only / target only / both` 기준 테스트로 분리 완료
 - partial regeneration preflight의 repeated `segment_ids`는 first-seen order를 유지한 채 dedupe되어 read-only scope와 targeted segment preview에 중복이 남지 않도록 고정 완료
+- partial regeneration preflight는 editing session 내부에 같은 `segment_id`가 중복 저장된 stale shape여도 targeted segment preview에서 first-seen segment를 유지하고 뒤의 stale duplicate가 canonical 값을 덮어쓰지 않도록 고정 완료
 - partial regeneration preflight는 whitespace가 섞인 legacy session `segment_id`도 trimmed request scope와 같은 세그먼트로 맞춰 targeted segment preview를 비우지 않도록 고정 완료
 - partial regeneration preflight의 repeated `fields`도 first-seen order를 유지한 채 dedupe되어 read-only scope와 downstream step preview에 중복이 남지 않도록 고정 완료
 - partial regeneration preflight의 stale `visual_overlays: null`도 targeted segment preview에서는 빈 리스트로 정규화되도록 고정 완료
@@ -345,6 +346,9 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - output-gating persisted duplicate review-flag dedupe 추가 후 broader verification 재실행
   - frontend build 성공
   - full backend regression `315 passed`
+- preflight duplicate session-segment first-seen preserve 추가 후 broader verification 재실행
+  - frontend build 성공
+  - full backend regression `316 passed`
 - 이 체크포인트 직전 latest pushed closeout commit
   - `9df0363 Harden preflight pending recommendation prediction`
 
@@ -358,6 +362,7 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - TTS replacement의 실제 narration/output propagation baseline과 approve 후 target clip 반영은 연결되어 있고, 남은 일은 approval/review contract의 추가 경계 보강이다
 - review-required 상태의 subtitle/preview/export gating은 기본 경로와 reopen-after-approval 전이까지 고정돼 있고, 남은 일은 다른 승인 후 반영 규칙 세분화와 추가 경계 검증이다
 - partial regeneration preflight의 비파괴 조회 경로는 baseline, duplicate-scope normalization, 일반 preflight blocked-warning combined reason surface까지 연결되어 있고, 남은 일은 backend read-only/prediction contract의 추가 경계와 frontend resume 경계 정리다
+- TTS replacement approval/output contract의 아직 테스트로 고정되지 않은 추가 경계 보강
 - `local_pipeline`의 다음 대형 분리 후보인 partial regeneration / output 경로 정리
 
 아래 이어지는 `## 16` 이하의 낮은 번호 섹션들도 당시 시점 기록을 보존한 historical log다.

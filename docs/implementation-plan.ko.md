@@ -462,6 +462,7 @@
 - 위 synthetic blocker로 effective review status가 바뀌는 경우 persisted approved `operator_guidance`를 그대로 재사용하지 않고 blocked snapshot 기준 guidance를 다시 계산하는 계약
 - unknown dict-shaped `review_flag.code`는 approved timeline output gating blocker로 오판하지 않고 canonical review flag code만 blocker로 유지하는 계약
 - approved timeline의 persisted duplicate `review_flags`도 output blocker detail에서 code/segment 기준으로 dedupe되어 같은 blocker가 중복 노출되지 않는 계약
+- partial regeneration preflight는 editing session 내부에 같은 `segment_id`가 중복 저장된 stale shape여도 targeted segment preview에서 first-seen segment를 유지하고 뒤의 stale duplicate가 canonical 값을 덮어쓰지 않는 계약
 
 현재 확인된 검증 기준:
 
@@ -475,7 +476,7 @@
   - backend output-gating `18 passed`
   - backend preflight `55 passed`
   - frontend preflight `25 passed`
-- full backend regression `315 passed`
+- full backend regression `316 passed`
 - frontend build 성공
 
 이 체크포인트 기준으로 review-action placeholder 단계는 이미 지난 상태다.
@@ -486,8 +487,8 @@
 현재 기준 다음 실제 작업은 아래 순서로 재고정한다.
 
 1. review-required 상태에서 subtitle/preview/export gating의 추가 경계와 승인 후 반영 규칙을 세분화
-2. partial regeneration preflight의 backend read-only/prediction contract와 frontend resume 경계를 더 세분화
-3. TTS replacement approval/output contract에서 아직 테스트로 고정되지 않은 추가 경계를 선별 보강
+2. TTS replacement approval/output contract에서 아직 테스트로 고정되지 않은 추가 경계를 선별 보강
+3. partial regeneration preflight의 backend read-only/prediction contract와 frontend resume 경계에서 남은 작은 경계를 계속 세분화
 4. 그 다음 `local_pipeline`의 partial regeneration / output 경로를 최소 단위로 점진 정리
 5. thin editor 범위에서 아직 직접 검증이 약한 남은 고위험 경로를 보강
 
