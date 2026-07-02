@@ -459,16 +459,17 @@
 - approved timeline이라도 snapshot blocker 컬렉션이 비어 있는 상태에서 segment-level `review_required=true`가 남아 있으면 subtitle / preview / export를 계속 막는 output gating 계약
 - 위 segment-level `review_required` blocker는 API read path와 review snapshot에서 같은 synthetic flag로 반영돼 review 상태/출력 상태가 서로 어긋나지 않도록 유지하는 계약
 - 위 synthetic blocker로 effective review status가 바뀌는 경우 persisted approved `operator_guidance`를 그대로 재사용하지 않고 blocked snapshot 기준 guidance를 다시 계산하는 계약
+- unknown dict-shaped `review_flag.code`는 approved timeline output gating blocker로 오판하지 않고 canonical review flag code만 blocker로 유지하는 계약
 
 현재 확인된 검증 기준:
 
 - frontend `src/app.test.tsx` 전체 `66 passed`
 - helper `frontend-focused` gate `2 passed`
 - review-action backend focused slice `6 passed`
-- current-focused helper backend output-gating slice `16 passed`
+- current-focused helper backend output-gating slice `17 passed`
 - current-focused helper backend preflight slice `55 passed`
 - current-focused helper frontend preflight slice `25 passed`
-- full backend regression `312 passed`
+- full backend regression `313 passed`
 - frontend build 성공
 
 이 체크포인트 기준으로 review-action placeholder 단계는 이미 지난 상태다.

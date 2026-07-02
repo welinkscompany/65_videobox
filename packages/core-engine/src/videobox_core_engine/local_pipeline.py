@@ -57,6 +57,11 @@ VALID_RESTORED_RECOMMENDATION_TYPES = {
     RecommendationType.BGM.value,
     RecommendationType.OVERLAY.value,
 }
+VALID_RUNTIME_BLOCKING_REVIEW_FLAG_CODES = {
+    "segment_review_required",
+    "broll_review_required",
+    "tts_replacement_review_required",
+}
 
 
 def _normalize_runtime_review_required(value: object) -> bool:
@@ -1102,10 +1107,13 @@ class LocalPipelineRunner:
             project_id=project_id,
             timeline_id=str(timeline["timeline_id"]),
         )
-        review_flags, pending_recommendations = self._normalized_timeline_blockers(timeline)
+        review_flags = self._normalized_timeline_review_flags(timeline)
+        blocker_review_flags, pending_recommendations = self._normalized_timeline_blockers(timeline)
         timeline["review_flags"] = review_flags
         timeline["pending_recommendations"] = pending_recommendations
-        timeline["review_status"] = "blocked" if review_flags or pending_recommendations else review_state["status"]
+        timeline["review_status"] = (
+            "blocked" if blocker_review_flags or pending_recommendations else review_state["status"]
+        )
         return {"job_id": job["job_id"], "status": job["status"], "timeline": timeline}
 
     def get_review_snapshot(self, *, project_id: str, job_id: str) -> dict[str, Any]:
@@ -1619,11 +1627,11 @@ class LocalPipelineRunner:
         self,
         timeline: dict[str, Any],
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-        review_flags = timeline.get("review_flags", [])
-        if not isinstance(review_flags, list):
-            review_flags = []
-        else:
-            review_flags = [flag for flag in review_flags if _is_runtime_blocking_review_flag(flag)]
+        review_flags = [
+            flag
+            for flag in self._normalized_timeline_review_flags(timeline)
+            if str(flag.get("code") or "").strip() in VALID_RUNTIME_BLOCKING_REVIEW_FLAG_CODES
+        ]
         pending_recommendations = timeline.get("pending_recommendations", [])
         if not isinstance(pending_recommendations, list):
             pending_recommendations = []
@@ -1633,6 +1641,18 @@ class LocalPipelineRunner:
                 for item in pending_recommendations
                 if _is_runtime_blocking_pending_recommendation(item)
             ]
+        return review_flags, pending_recommendations
+
+    def _normalized_timeline_review_flags(
+        self,
+        timeline: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        review_flags = timeline.get("review_flags", [])
+        if not isinstance(review_flags, list):
+            review_flags = []
+        else:
+            review_flags = [flag for flag in review_flags if _is_runtime_blocking_review_flag(flag)]
+
         existing_review_flag_keys = {
             (
                 str(flag.get("code") or "").strip(),
@@ -1657,7 +1677,7 @@ class LocalPipelineRunner:
                         "message": "Segment requires operator review before export.",
                     }
                 )
-        return review_flags, pending_recommendations
+        return review_flags
 
     def _prepare_pending_recommendation_decision(
         self,

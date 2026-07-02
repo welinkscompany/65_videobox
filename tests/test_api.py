@@ -4301,6 +4301,114 @@ def test_approved_review_state_still_blocks_outputs_when_only_review_flags_remai
     assert not list((project_root / "subtitles").glob("subtitle_*.srt"))
 
 
+def test_output_jobs_ignore_unknown_dict_shaped_review_flag_on_approved_timeline(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Approved State Unknown Review Flag Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 1.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [
+                {
+                    "code": "legacy_review_flag",
+                    "segment_id": "seg_001",
+                    "message": "Legacy metadata that should not block output.",
+                }
+            ],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+        },
+    )
+    store.save_review_state(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        status="approved",
+    )
+    timeline_job = store.create_job(
+        project_id=project.project_id,
+        job_type=JobType.TIMELINE_BUILD,
+        input_ref="segment_analysis_job_001",
+        status=JobStatus.SUCCEEDED,
+    )
+    store.update_job(
+        project_id=project.project_id,
+        job_id=timeline_job["job_id"],
+        status=JobStatus.SUCCEEDED,
+        output_ref=timeline["timeline_id"],
+    )
+
+    client = TestClient(create_app(projects_root=tmp_path))
+    subtitle_response = client.post(
+        f"/api/projects/{project.project_id}/jobs/subtitle-render",
+        json={"timeline_job_id": timeline_job["job_id"]},
+    )
+    preview_response = client.post(
+        f"/api/projects/{project.project_id}/jobs/preview-render",
+        json={"timeline_job_id": timeline_job["job_id"]},
+    )
+    export_response = client.post(
+        f"/api/projects/{project.project_id}/jobs/capcut-export",
+        json={"timeline_job_id": timeline_job["job_id"]},
+    )
+
+    assert subtitle_response.status_code == 202
+    assert preview_response.status_code == 202
+    assert export_response.status_code == 202
+
+    subtitle_result = client.get(
+        f"/api/projects/{project.project_id}/subtitles/{subtitle_response.json()['job_id']}"
+    )
+    preview_result = client.get(
+        f"/api/projects/{project.project_id}/previews/{preview_response.json()['job_id']}"
+    )
+    export_result = client.get(
+        f"/api/projects/{project.project_id}/exports/{export_response.json()['job_id']}"
+    )
+    timeline_result = client.get(f"/api/projects/{project.project_id}/timelines/{timeline_job['job_id']}")
+    review_snapshot = client.get(
+        f"/api/projects/{project.project_id}/review-snapshots/{timeline_job['job_id']}"
+    )
+
+    assert subtitle_result.status_code == 200
+    assert preview_result.status_code == 200
+    assert export_result.status_code == 200
+    assert timeline_result.status_code == 200
+    assert review_snapshot.status_code == 200
+    assert timeline_result.json()["timeline"]["review_status"] == "approved"
+    assert review_snapshot.json()["review_status"] == "approved"
+    assert timeline_result.json()["timeline"]["review_flags"] == [
+        {
+            "code": "legacy_review_flag",
+            "segment_id": "seg_001",
+            "message": "Legacy metadata that should not block output.",
+        }
+    ]
+    assert review_snapshot.json()["review_flags"] == [
+        {
+            "code": "legacy_review_flag",
+            "segment_id": "seg_001",
+            "message": "Legacy metadata that should not block output.",
+        }
+    ]
+
+
 def test_approved_review_state_still_blocks_outputs_when_only_pending_recommendations_remain(
     tmp_path: Path,
 ) -> None:
