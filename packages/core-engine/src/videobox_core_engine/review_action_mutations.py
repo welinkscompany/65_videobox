@@ -126,4 +126,3 @@ def apply_approved_recommendation_to_timeline(
         for clip in clips:
             if str(clip.get("segment_id") or "") == target_segment_id:
                 clip["asset_uri"] = selected_asset_uri
-                return

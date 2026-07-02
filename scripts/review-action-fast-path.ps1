@@ -15,7 +15,7 @@ $backendFocusedExpr = if ($BackendPattern) {
     $BackendPattern
 }
 else {
-    'approve_pending_recommendation or approve_preserves_non_target_review_items_and_blocked_status or approve_tts_replacement_updates_target_narration_clip_and_keeps_other_blockers or reject_pending_recommendation or timeline_local_when_another_timeline_mutates_shared_recommendation_state or rejecting_one_duplicate_pending_recommendation_keeps_shared_review_flag'
+    'approve_pending_recommendation or approve_preserves_non_target_review_items_and_blocked_status or approve_tts_replacement_updates_target_narration_clip_and_keeps_other_blockers or approve_tts_replacement_updates_all_duplicate_target_narration_clips or reject_pending_recommendation or timeline_local_when_another_timeline_mutates_shared_recommendation_state or rejecting_one_duplicate_pending_recommendation_keeps_shared_review_flag'
 }
 $frontendFocusedName = 'src/app.test.tsx'
 $frontendFocusedExpr = if ($FrontendPattern) {

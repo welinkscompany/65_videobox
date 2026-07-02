@@ -234,6 +234,7 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - rollback failure warning surface 추가 완료
 - review-action mutation helper 일부 분리로 `local_pipeline` 중복 감소
 - pending `tts_replacement` approve 시 target narration clip `asset_uri`가 승인된 `selected_asset_uri`로 즉시 동기화되도록 보강 완료
+- pending `tts_replacement` approve 시 같은 target segment를 가리키는 duplicate narration clip이 있어도 첫 clip만 갱신하고 멈추지 않고 모든 target narration clip `asset_uri`를 승인된 `selected_asset_uri`로 동기화하도록 보강 완료
 - approved timeline이라도 snapshot `review_flags/pending_recommendations`가 비어 있는 상태에서 segment-level `review_required=true`가 남아 있으면 subtitle/preview/export를 계속 막는 output gating 경계 고정 완료
 - approved timeline의 stale non-bool `segment.review_required` shape는 synthetic output blocker로 오판하지 않고 canonical bool/string 값만 review-required blocker로 인정하도록 보강 완료
 - 위 segment-level `review_required` blocker는 last pending recommendation approve 이후에도 synthetic `segment_review_required` flag가 API read path와 review snapshot에 반영돼 review_status와 output gating이 어긋나지 않도록 보강 완료
@@ -349,6 +350,9 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - preflight duplicate session-segment first-seen preserve 추가 후 broader verification 재실행
   - frontend build 성공
   - full backend regression `316 passed`
+- TTS duplicate target narration clip propagation 추가 후 broader verification 재실행
+  - frontend build 성공
+  - full backend regression `317 passed`
 - 이 체크포인트 직전 latest pushed closeout commit
   - `9df0363 Harden preflight pending recommendation prediction`
 

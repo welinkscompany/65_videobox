@@ -456,6 +456,7 @@
 - timeline-local review snapshot truth 보존
 - review-action rollback hardening과 warning surface
 - pending `tts_replacement` approve 시 target narration track clip `asset_uri`를 승인된 `selected_asset_uri`로 반영하는 계약
+- pending `tts_replacement` approve 시 같은 target segment를 가리키는 duplicate narration clip이 있어도 target narration clip 전체의 `asset_uri`를 승인된 `selected_asset_uri`로 동기화하는 계약
 - approved timeline이라도 snapshot blocker 컬렉션이 비어 있는 상태에서 segment-level `review_required=true`가 남아 있으면 subtitle / preview / export를 계속 막는 output gating 계약
 - approved timeline의 stale non-bool `segment.review_required` shape는 synthetic output blocker로 오판하지 않고 canonical bool/string 값만 review-required blocker로 인정하는 계약
 - 위 segment-level `review_required` blocker는 API read path와 review snapshot에서 같은 synthetic flag로 반영돼 review 상태/출력 상태가 서로 어긋나지 않도록 유지하는 계약
@@ -476,7 +477,7 @@
   - backend output-gating `18 passed`
   - backend preflight `55 passed`
   - frontend preflight `25 passed`
-- full backend regression `316 passed`
+- full backend regression `317 passed`
 - frontend build 성공
 
 이 체크포인트 기준으로 review-action placeholder 단계는 이미 지난 상태다.
