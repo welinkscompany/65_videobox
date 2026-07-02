@@ -67,7 +67,9 @@ VALID_RUNTIME_BLOCKING_REVIEW_FLAG_CODES = {
 def _normalize_runtime_review_required(value: object) -> bool:
     if isinstance(value, str):
         return value.strip().lower() not in {"", "0", "false", "no", "off"}
-    return bool(value)
+    if isinstance(value, bool):
+        return value
+    return False
 
 
 def _normalize_runtime_cut_action(value: object) -> str:
