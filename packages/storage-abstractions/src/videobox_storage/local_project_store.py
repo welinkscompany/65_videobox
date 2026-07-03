@@ -1898,7 +1898,9 @@ class LocalProjectStore:
                 self._provider_trace_entry(
                     artifact_type="review_guidance",
                     artifact_id=str(item.get("artifact_id") or timeline_id),
-                    job_type=JobType.TIMELINE_BUILD.value,
+                    job_type=str(timeline_job.get("job_type") or JobType.TIMELINE_BUILD.value)
+                    if timeline_job
+                    else JobType.TIMELINE_BUILD.value,
                     job=None,
                     source_job_id=timeline_job["job_id"] if timeline_job else None,
                     trace=trace,
@@ -1940,7 +1942,9 @@ class LocalProjectStore:
                     self._provider_trace_entry(
                         artifact_type="review_guidance",
                         artifact_id=str(item.get("artifact_id") or timeline_id),
-                        job_type=JobType.TIMELINE_BUILD.value,
+                        job_type=str(timeline_job.get("job_type") or JobType.TIMELINE_BUILD.value)
+                        if timeline_job
+                        else JobType.TIMELINE_BUILD.value,
                         job=None,
                         source_job_id=timeline_job["job_id"] if timeline_job else None,
                         trace=trace,

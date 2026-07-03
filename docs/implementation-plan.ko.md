@@ -470,6 +470,7 @@
 - partial regeneration preflight는 editing session 내부에 같은 `segment_id`가 중복 저장된 stale shape여도 targeted segment preview에서 first-seen segment를 유지하고 뒤의 stale duplicate가 canonical 값을 덮어쓰지 않는 계약
 - partial regeneration candidate timeline도 provider-trace audit의 `timeline_id + include_upstream=true` filter에서 source lineage를 잃지 않고 segment analysis / recommendation upstream entry를 같이 보여주는 계약
 - partial regeneration candidate timeline의 provider-trace `review_guidance` audit entry도 source job truth를 잃지 않고 `partial_regeneration_job_*`에 연결되는 계약
+- partial regeneration candidate timeline의 provider-trace `review_guidance` audit entry도 `partial_regeneration_job_*`의 job type truth를 유지하는 계약
 - partial regeneration candidate timeline의 provider-trace `review_guidance_attempt` audit entry도 `partial_regeneration_job_*`의 job type / job id / source job id truth를 유지하는 계약
 - partial regeneration candidate timeline의 provider-trace `review_guidance_attempt` audit entry도 `partial_regeneration_job_*`의 `finished_at` truth를 유지하는 계약
 - partial regeneration candidate timeline의 provider-trace `subtitle_render` audit entry도 persisted subtitle artifact의 `created_at` truth를 유지하는 계약

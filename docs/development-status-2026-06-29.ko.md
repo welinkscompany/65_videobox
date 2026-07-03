@@ -910,6 +910,36 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
 - exact failing test 1개로만 다시 시작한다
 
+## 31. 2026-07-03 partial regeneration candidate review guidance job type closeout
+
+이번 후속 작업에서는 review/output 장기 우선순위 queue를 유지한 채 provider-trace audit 인접면의 가장 작은 남은 경계 1개를 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- candidate `review_guidance` audit entry는 이미 `job_id/source_job_id`는 `partial_regeneration_job_*`를 가리키고 있었지만, `job_type`은 여전히 `timeline_build`로 잘못 고정돼 있었다
+- strict TDD로 `test_provider_trace_audit_candidate_review_guidance_entry_uses_partial_regeneration_job_type` exact regression을 먼저 추가했고, 실제로 `timeline_build != partial_regeneration` RED를 확인했다
+- 원인은 provider-trace read path가 candidate `review_guidance` entry를 복원할 때 linked job을 찾고도 `job_type`만은 `timeline_build` 상수로 넣고 있던 점이었다
+- 최소 수정으로 candidate/legacy review guidance entry가 linked timeline job이 있으면 그 job의 `job_type`을 그대로 surface하도록 맞췄다
+- 이번 수정은 review/output rules, TTS approval/output truth, preflight contract, Gemini fallback, persistence 규칙을 건드리지 않고 candidate review guidance provider-trace read path의 job type truth만 좁게 수정했다
+- exact regression `1 passed`
+- focused provider-trace audit slice `40 passed`
+- broader verification은 이번 turn에서는 다시 돌리지 않았다
+  - 판단:
+    - provider-trace review guidance read path의 job type truth 한 점에 국한된 수정이라 exact + provider-trace focused evidence가 더 직접적이다
+    - latest full broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. partial regeneration candidate review guidance entry가 `partial_regeneration_job_*`의 job id truth를 유지함
+2. partial regeneration candidate review guidance entry가 `partial_regeneration_job_*`의 source job truth를 유지함
+3. partial regeneration candidate review guidance entry가 `partial_regeneration_job_*`의 job type truth를 유지함
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
 ## 16. 2026-06-30 review recommendation approve persistence 착수 기록
 
 이번 후속 작업으로 `review action placeholder -> first approve persistence`의 최소 slice는 착수 및 focused verification까지는 됐다고 본다.
