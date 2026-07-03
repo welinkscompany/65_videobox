@@ -1450,6 +1450,7 @@ class LocalProjectStore:
         payload = json.loads(file_path.read_text(encoding="utf-8"))
         payload["provider_trace"] = payload.get("provider_trace") or build_provider_trace(final_provider="static_fallback")
         payload["summary"] = json.loads(row["summary_json"] or "{}")
+        payload["created_at"] = row["created_at"]
         return payload
 
     def get_subtitle_run(self, *, project_id: str, subtitle_id: str) -> dict[str, Any]:
@@ -1749,6 +1750,7 @@ class LocalProjectStore:
                         source_job_id=str(job.get("input_ref") or ""),
                         trace=preview["provider_trace"],
                         timeline_id=str(preview.get("timeline_id") or ""),
+                        created_at=str(preview.get("created_at") or ""),
                     )
                 )
             elif job_type == JobType.CAPCUT_EXPORT.value and job.get("output_ref"):
