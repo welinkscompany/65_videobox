@@ -12238,6 +12238,91 @@ def test_editing_session_api_filters_nested_segment_id_source_review_flag_entrie
     assert before_jobs == after_jobs
 
 
+def test_editing_session_api_ignores_nested_segment_id_source_review_flag_when_running_partial_regeneration(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(
+        name="Nested Segment Id Source Review Flag Runtime Project"
+    )
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [
+                {
+                    "code": "tts_replacement_review_required",
+                    "segment_id": {"stale": "nested_segment_id"},
+                    "message": "Nested stale segment id should not survive runtime.",
+                }
+            ],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Updated caption",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["caption"],
+        },
+    )
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["status"] == "succeeded"
+    result_response = client.get(
+        f"/api/projects/{project.project_id}/partial-regenerations/{payload['job_id']}",
+    )
+    assert result_response.status_code == 200
+    result_payload = result_response.json()
+    assert result_payload["timeline"]["review_status"] == "draft"
+    assert result_payload["timeline"]["review_flags"] == []
+    assert result_payload["timeline"]["pending_recommendations"] == []
+
+
 def test_editing_session_api_marks_preflight_blocked_when_source_timeline_has_pending_recommendations_only(
     tmp_path: Path,
 ) -> None:

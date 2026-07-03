@@ -849,10 +849,12 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - 하지만 실제 partial regeneration runtime은 source `pending_recommendations`만 carry-forward하고 source `review_flags`는 버리고 있어서, 같은 입력에서도 candidate result의 `review_status`가 `draft`로 풀렸다
 - strict TDD로 `test_partial_regeneration_result_marks_review_status_blocked_when_preserved_source_review_flag_remains` exact regression을 먼저 추가했고, 실제로 `review_status == "draft"` RED를 확인했다
 - 첫 GREEN 시도에서는 source review flag를 복원했지만 legacy `message`가 비어 API response validation error가 나왔고, 여기서 `message` canonicalization까지 이 경계에 포함해야 한다는 점을 추가로 확인했다
+- 같은 slice의 역방향 검증으로 `test_editing_session_api_ignores_nested_segment_id_source_review_flag_when_running_partial_regeneration`도 추가했고, 실제로 nested dict `segment_id` stale shape가 runtime preserve 경로를 통과해 partial regeneration result API response validation error를 만드는 RED를 확인했다
 - 최소 수정으로 runtime이 valid source blocker review flag를 `code + segment_id` 기준으로 dedupe해 candidate timeline payload에 복원하고, legacy shape도 API contract를 깨지 않도록 default message를 채우게 맞췄다
+- 동시에 `_is_runtime_blocking_review_flag(...)`를 string `code`와 string `segment_id`만 blocker review flag로 인정하게 축소해 nested stale shape를 runtime preserve에서 다시 살리지 않도록 맞췄다
 - 이번 수정은 review/output rules, TTS approval/output truth, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 runtime source review flag carry-forward 경계만 좁게 수정했다
 - exact regression `1 passed`
-- focused adjacency slice `4 passed`
+- focused adjacency slice `6 passed`
 - broader verification은 이번 turn에서는 다시 돌리지 않았다
   - 판단:
     - runtime source review flag carry-forward 한 점에 국한된 수정이라 focused evidence가 더 직접적이다
@@ -864,6 +866,7 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 2. partial regeneration runtime도 같은 source review flag blocker를 candidate result에 복원함
 3. candidate result의 `review_status`가 `blocked`로 유지됨
 4. preserved source review flag가 legacy message 부재 때문에 API response validation error를 내지 않음
+5. nested dict `segment_id`가 섞인 stale source review flag는 runtime에서도 blocker review flag로 복원되지 않음
 
 현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
 

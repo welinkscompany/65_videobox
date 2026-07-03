@@ -104,10 +104,15 @@ def _is_valid_runtime_overlay(overlay: object) -> bool:
 
 
 def _is_runtime_blocking_review_flag(flag: object) -> bool:
+    if not isinstance(flag, dict):
+        return False
+    code = flag.get("code")
+    segment_id = flag.get("segment_id")
     return (
-        isinstance(flag, dict)
-        and bool(str(flag.get("code") or "").strip())
-        and bool(str(flag.get("segment_id") or "").strip())
+        isinstance(code, str)
+        and bool(code.strip())
+        and isinstance(segment_id, str)
+        and bool(segment_id.strip())
     )
 
 

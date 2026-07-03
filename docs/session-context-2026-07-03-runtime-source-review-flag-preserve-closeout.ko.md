@@ -28,12 +28,19 @@
   - 실제 실패:
     - candidate result의 `review_status`가 `blocked`가 아니라 `draft`
     - 첫 GREEN 시도 후에는 preserved source review flag의 `message`가 비어 API response validation error도 확인됨
+- same-slice reverse verification
+  - `python -m pytest tests/test_api.py -q -k "test_editing_session_api_ignores_nested_segment_id_source_review_flag_when_running_partial_regeneration"`
+  - 결과: `1 failed`
+  - 실제 실패:
+    - nested dict `segment_id` stale shape가 runtime preserve 경로를 통과해 partial regeneration result API response validation error를 만들었다
 - GREEN
   - `tests/test_api.py`
     - exact regression `test_partial_regeneration_result_marks_review_status_blocked_when_preserved_source_review_flag_remains` 추가
+    - reverse regression `test_editing_session_api_ignores_nested_segment_id_source_review_flag_when_running_partial_regeneration` 추가
   - `packages/core-engine/src/videobox_core_engine/local_pipeline.py`
     - partial regeneration runtime이 valid source blocker review flag를 `code + segment_id` 기준 dedupe해 candidate timeline payload에 복원
     - legacy shape도 API contract를 깨지 않도록 default review flag message를 함께 채움
+    - `_is_runtime_blocking_review_flag(...)`가 string `code`와 string `segment_id`만 blocker review flag로 인정하게 축소
   - 같은 exact test 재실행
   - 결과: `1 passed`
 
@@ -42,8 +49,8 @@
 - exact regression
   - `1 passed`
 - focused adjacency slice
-  - `python -m pytest tests/test_api.py -q -k "filters_unknown_code_source_review_flag_entries_from_preflight_prediction or marks_preflight_blocked_when_source_review_flag_has_valid_code_and_segment_without_message or preserved_source_review_flag_remains or preserved_pending_recommendation_remains"`
-  - 결과: `4 passed`
+  - `python -m pytest tests/test_api.py -q -k "filters_unknown_code_source_review_flag_entries_from_preflight_prediction or filters_nested_segment_id_source_review_flag_entries_from_preflight_prediction or ignores_nested_segment_id_source_review_flag_when_running_partial_regeneration or marks_preflight_blocked_when_source_review_flag_has_valid_code_and_segment_without_message or preserved_source_review_flag_remains or preserved_pending_recommendation_remains"`
+  - 결과: `6 passed`
 - broader verification
   - 실행하지 않음
   - 판단:
@@ -66,7 +73,7 @@
 ## 6. 쉽게 말한 현재 개발상황
 
 - 지금은 부분 재생성(candidate)을 만들었을 때, 원본 timeline에 남아 있던 검수 blocker가 실제 결과에도 똑같이 남아야 하는지 하나씩 맞추는 단계다
-- 이번 수정으로 preflight에서는 막힌다고 나오는데 실제 candidate 결과는 멀쩡한 draft처럼 보이던 어긋남이 하나 줄었다
+- 이번 수정으로 preflight에서는 막힌다고 나오는데 실제 candidate 결과는 멀쩡한 draft처럼 보이던 어긋남이 줄었고, 동시에 nested stale review flag shape가 runtime 결과 조회를 깨뜨리는 누수도 같이 막혔다
 
 ## 7. 다음 세션 첫 시작점
 
