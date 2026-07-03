@@ -221,6 +221,30 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - review->editor recommendation mapping coverage 중 `broll` happy-path 보강
 - review action placeholder를 실제 persistence contract와 연결할지 여부 설계
 
+## 19. 2026-07-03 Task 1 회귀 증거 고정
+
+이번 후속 작업에서는 `approved TTS persisted truth gap`을 실제 코드 변경보다 `회귀 증거 강화` 관점에서 다시 확인했다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- 기존 코드 기준으로도 `approve -> persisted timeline 갱신` 계약은 이미 살아 있었다
+- 기존 코드 기준으로도 `approved timeline -> preview/export consumer` 계약은 이미 살아 있었다
+- 다만 이 둘 사이의 middle link는 단일 회귀로는 약했기 때문에 아래 두 exact regression을 새로 고정했다
+  - `test_review_approval_persists_tts_narration_asset_uri_before_preview_and_export_read_timeline`
+  - `test_review_approval_duplicate_tts_narration_clips_flow_through_preview_and_export_outputs`
+- `scripts/dev-fast-path.ps1`의 `output-gating` 기본 패턴도 위 두 회귀를 포함하도록 갱신했다
+- helper regression `6 passed`
+- output-gating focused slice `24 passed`
+- current-focused-parallel 재검증 결과
+  - backend output-gating `24 passed`
+  - backend preflight `55 passed`
+  - frontend preflight `25 passed`
+
+이 기록의 의미는 아래와 같다.
+
+- Task 1은 이번 시점에서 `새 runtime bug fix`보다 `already-true contract를 stronger regression과 helper rail로 고정`한 slice로 보는 것이 맞다
+- 따라서 다음 실제 작업은 Task 2인 `실제 프로젝트 1개 happy-path smoke + evidence freeze`로 넘어가는 편이 더 효율적이다
+
 ## 17. 2026-07-01 시스템 정비 기준 최신 상태
 
 이번 정비에서 현재 코드/문서/검증 기준을 다시 맞춰 확인한 결과, 아래는 더 이상 `계획 중`이 아니라 `실제 연결 완료` 상태다.

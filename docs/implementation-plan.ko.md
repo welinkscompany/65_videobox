@@ -474,11 +474,11 @@
 - frontend `src/app.test.tsx` 전체 `66 passed`
 - helper `frontend-focused` gate `2 passed`
 - review-action backend focused slice `6 passed`
-- current-focused helper backend output-gating slice `22 passed`
+- current-focused helper backend output-gating slice `24 passed`
 - current-focused helper backend preflight slice `55 passed`
 - current-focused helper frontend preflight slice `25 passed`
 - speed-up helper `current-focused-parallel`
-  - backend output-gating `22 passed`
+  - backend output-gating `24 passed`
   - backend preflight `55 passed`
   - frontend preflight `25 passed`
 - full backend regression `318 passed`

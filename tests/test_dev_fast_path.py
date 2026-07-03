@@ -32,3 +32,17 @@ def test_output_gating_fast_path_includes_tts_approval_decision_state_read_path_
     script_text = script_path.read_text(encoding="utf-8")
 
     assert "review_snapshot_api_approve_tts_replacement_surfaces_approved_decision_state_in_read_paths" in script_text
+
+
+def test_output_gating_fast_path_includes_tts_approval_persisted_timeline_output_read_regression() -> None:
+    script_path = Path(__file__).resolve().parents[1] / "scripts" / "dev-fast-path.ps1"
+    script_text = script_path.read_text(encoding="utf-8")
+
+    assert "review_approval_persists_tts_narration_asset_uri_before_preview_and_export_read_timeline" in script_text
+
+
+def test_output_gating_fast_path_includes_duplicate_tts_output_consumer_regression() -> None:
+    script_path = Path(__file__).resolve().parents[1] / "scripts" / "dev-fast-path.ps1"
+    script_text = script_path.read_text(encoding="utf-8")
+
+    assert "review_approval_duplicate_tts_narration_clips_flow_through_preview_and_export_outputs" in script_text

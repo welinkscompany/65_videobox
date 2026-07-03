@@ -8145,6 +8145,293 @@ def test_approved_tts_replacement_flows_through_preview_and_export_outputs(tmp_p
     ]
 
 
+def test_review_approval_persists_tts_narration_asset_uri_before_preview_and_export_read_timeline(
+    tmp_path: Path,
+) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    timeline_result = client.get(f"/api/projects/{project_id}/timelines/{timeline_job_id}")
+    timeline_payload = timeline_result.json()["timeline"]
+    timeline_path = (
+        tmp_path
+        / "projects"
+        / project_id
+        / "timelines"
+        / f'{timeline_payload["timeline_id"]}.json'
+    )
+    target_candidate = {
+        "recommendation_id": "rec_tts_review_002",
+        "target_segment_id": "seg_002",
+        "recommendation_type": "tts_replacement",
+        "selected_asset_id": "asset_tts_review_002",
+        "score": 0.94,
+        "reason": "Operator approved the regenerated narration take.",
+        "auto_apply_allowed": False,
+        "review_required": True,
+        "payload": {
+            "selected_asset_uri": (
+                f"local://projects/{project_id}/assets/generated/asset_tts_review_002.wav"
+            )
+        },
+        "created_at": "2026-07-01T00:00:00+00:00",
+        "provider_trace": build_provider_trace(final_provider="rule_based_fallback"),
+    }
+    persisted_timeline = json.loads(timeline_path.read_text(encoding="utf-8"))
+    persisted_timeline["applied_recommendations"] = []
+    persisted_timeline["pending_recommendations"] = [target_candidate]
+    persisted_timeline["review_flags"] = [
+        {
+            "code": "tts_replacement_review_required",
+            "segment_id": "seg_002",
+            "message": "Operator must confirm the TTS replacement before approval.",
+        }
+    ]
+    timeline_path.write_text(json.dumps(persisted_timeline, indent=2), encoding="utf-8")
+
+    database_path = tmp_path / "projects" / project_id / "db" / "project.sqlite"
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute("DELETE FROM recommendations")
+        connection.execute(
+            """
+            INSERT INTO recommendations (
+                recommendation_id,
+                project_id,
+                target_segment_id,
+                recommendation_type,
+                selected_asset_id,
+                score,
+                reason,
+                auto_apply_allowed,
+                review_required,
+                payload_json,
+                created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                target_candidate["recommendation_id"],
+                project_id,
+                target_candidate["target_segment_id"],
+                target_candidate["recommendation_type"],
+                target_candidate["selected_asset_id"],
+                target_candidate["score"],
+                target_candidate["reason"],
+                0,
+                1,
+                json.dumps(target_candidate["payload"], ensure_ascii=True),
+                target_candidate["created_at"],
+            ),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    approve_response = client.post(
+        f"/api/projects/{project_id}/review-snapshots/{timeline_job_id}/recommendations/"
+        "rec_tts_review_002/approve"
+    )
+
+    assert approve_response.status_code == 200
+
+    refreshed_timeline = client.get(f"/api/projects/{project_id}/timelines/{timeline_job_id}")
+    assert refreshed_timeline.status_code == 200
+    narration_track = next(
+        track for track in refreshed_timeline.json()["timeline"]["tracks"] if track["track_type"] == "narration"
+    )
+    seg_002_clip = next(
+        clip for clip in narration_track["clips"] if clip["segment_id"] == "seg_002"
+    )
+    assert seg_002_clip["asset_uri"] == target_candidate["payload"]["selected_asset_uri"]
+
+    approve_review_response = client.post(
+        f"/api/projects/{project_id}/review-approvals/{timeline_job_id}/approve"
+    )
+    assert approve_review_response.status_code == 202
+
+    preview_response = client.post(
+        f"/api/projects/{project_id}/jobs/preview-render",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    export_response = client.post(
+        f"/api/projects/{project_id}/jobs/capcut-export",
+        json={"timeline_job_id": timeline_job_id},
+    )
+
+    assert preview_response.status_code == 202
+    assert export_response.status_code == 202
+
+    preview_payload = client.get(
+        f"/api/projects/{project_id}/previews/{preview_response.json()['job_id']}"
+    ).json()
+    export_payload = client.get(
+        f"/api/projects/{project_id}/exports/{export_response.json()['job_id']}"
+    ).json()
+
+    store = LocalProjectStore(tmp_path)
+    preview_html_path = store.resolve_storage_uri(
+        project_id=project_id,
+        storage_uri=preview_payload["preview"]["player_uri"],
+    )
+    assert target_candidate["payload"]["selected_asset_uri"] in preview_html_path.read_text(encoding="utf-8")
+    voiceover_track = next(
+        track for track in export_payload["export"]["capcut_tracks"] if track["track_name"] == "voiceover"
+    )
+    assert target_candidate["payload"]["selected_asset_uri"] in [
+        segment["source_uri"] for segment in voiceover_track["segments"]
+    ]
+
+
+def test_review_approval_duplicate_tts_narration_clips_flow_through_preview_and_export_outputs(
+    tmp_path: Path,
+) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    timeline_result = client.get(f"/api/projects/{project_id}/timelines/{timeline_job_id}")
+    timeline_payload = timeline_result.json()["timeline"]
+    timeline_path = (
+        tmp_path
+        / "projects"
+        / project_id
+        / "timelines"
+        / f'{timeline_payload["timeline_id"]}.json'
+    )
+    target_candidate = {
+        "recommendation_id": "rec_tts_review_duplicate_output",
+        "target_segment_id": "seg_002",
+        "recommendation_type": "tts_replacement",
+        "selected_asset_id": "asset_tts_review_duplicate_output",
+        "score": 0.94,
+        "reason": "Operator approved the regenerated narration take.",
+        "auto_apply_allowed": False,
+        "review_required": True,
+        "payload": {
+            "selected_asset_uri": (
+                f"local://projects/{project_id}/assets/generated/asset_tts_review_duplicate_output.wav"
+            )
+        },
+        "created_at": "2026-07-03T00:00:00+00:00",
+        "provider_trace": build_provider_trace(final_provider="rule_based_fallback"),
+    }
+    persisted_timeline = json.loads(timeline_path.read_text(encoding="utf-8"))
+    narration_track = next(
+        track for track in persisted_timeline["tracks"] if track["track_type"] == "narration"
+    )
+    narration_track["clips"].append(
+        {
+            "clip_id": "clip_narration_duplicate_seg_002_output",
+            "segment_id": "seg_002",
+            "asset_uri": f"local://projects/{project_id}/segments/seg_002_duplicate_stale",
+            "start_sec": 8.0,
+            "end_sec": 10.0,
+            "clip_type": "narration",
+        }
+    )
+    persisted_timeline["applied_recommendations"] = []
+    persisted_timeline["pending_recommendations"] = [target_candidate]
+    persisted_timeline["review_flags"] = [
+        {
+            "code": "tts_replacement_review_required",
+            "segment_id": "seg_002",
+            "message": "Operator must confirm the TTS replacement before approval.",
+        }
+    ]
+    timeline_path.write_text(json.dumps(persisted_timeline, indent=2), encoding="utf-8")
+
+    database_path = tmp_path / "projects" / project_id / "db" / "project.sqlite"
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute("DELETE FROM recommendations")
+        connection.execute(
+            """
+            INSERT INTO recommendations (
+                recommendation_id,
+                project_id,
+                target_segment_id,
+                recommendation_type,
+                selected_asset_id,
+                score,
+                reason,
+                auto_apply_allowed,
+                review_required,
+                payload_json,
+                created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                target_candidate["recommendation_id"],
+                project_id,
+                target_candidate["target_segment_id"],
+                target_candidate["recommendation_type"],
+                target_candidate["selected_asset_id"],
+                target_candidate["score"],
+                target_candidate["reason"],
+                0,
+                1,
+                json.dumps(target_candidate["payload"], ensure_ascii=True),
+                target_candidate["created_at"],
+            ),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    approve_response = client.post(
+        f"/api/projects/{project_id}/review-snapshots/{timeline_job_id}/recommendations/"
+        "rec_tts_review_duplicate_output/approve"
+    )
+    assert approve_response.status_code == 200
+
+    approve_review_response = client.post(
+        f"/api/projects/{project_id}/review-approvals/{timeline_job_id}/approve"
+    )
+    assert approve_review_response.status_code == 202
+
+    preview_response = client.post(
+        f"/api/projects/{project_id}/jobs/preview-render",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    export_response = client.post(
+        f"/api/projects/{project_id}/jobs/capcut-export",
+        json={"timeline_job_id": timeline_job_id},
+    )
+
+    assert preview_response.status_code == 202
+    assert export_response.status_code == 202
+
+    preview_payload = client.get(
+        f"/api/projects/{project_id}/previews/{preview_response.json()['job_id']}"
+    ).json()
+    export_payload = client.get(
+        f"/api/projects/{project_id}/exports/{export_response.json()['job_id']}"
+    ).json()
+
+    store = LocalProjectStore(tmp_path)
+    preview_html_path = store.resolve_storage_uri(
+        project_id=project_id,
+        storage_uri=preview_payload["preview"]["player_uri"],
+    )
+    assert (
+        preview_html_path.read_text(encoding="utf-8").count(target_candidate["payload"]["selected_asset_uri"])
+        == 2
+    )
+    voiceover_track = next(
+        track for track in export_payload["export"]["capcut_tracks"] if track["track_name"] == "voiceover"
+    )
+    selected_sources = [
+        segment["source_uri"]
+        for segment in voiceover_track["segments"]
+        if segment["source_uri"] == target_candidate["payload"]["selected_asset_uri"]
+    ]
+    assert selected_sources == [
+        target_candidate["payload"]["selected_asset_uri"],
+        target_candidate["payload"]["selected_asset_uri"],
+    ]
+
+
 def test_editing_session_api_can_create_and_patch_caption_override(tmp_path: Path) -> None:
     app = create_app(projects_root=tmp_path)
     client = TestClient(app)
