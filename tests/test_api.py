@@ -15794,6 +15794,52 @@ def test_provider_trace_audit_timeline_filter_include_upstream_supports_partial_
     assert review_entry["timeline_id"] == candidate_timeline_id
 
 
+def test_provider_trace_audit_candidate_review_guidance_entry_uses_partial_regeneration_job_id(
+    tmp_path: Path,
+) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    create_response = client.post(
+        f"/api/projects/{project_id}/editing-sessions",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    session_id = create_response.json()["session_id"]
+
+    client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/caption",
+        json={"caption_text": "Candidate review guidance job lineage check."},
+    )
+    partial_response = client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/partial-regeneration",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["caption"],
+        },
+    )
+    partial_job_id = partial_response.json()["job_id"]
+
+    review_snapshot = client.get(f"/api/projects/{project_id}/review-snapshots/{partial_job_id}")
+    partial_result = client.get(f"/api/projects/{project_id}/partial-regenerations/{partial_job_id}")
+
+    assert review_snapshot.status_code == 200
+    assert partial_result.status_code == 200
+
+    candidate_timeline_id = partial_result.json()["timeline"]["timeline_id"]
+    filtered_response = client.get(
+        f"/api/projects/{project_id}/provider-traces",
+        params={"timeline_id": candidate_timeline_id, "artifact_type": "review_guidance"},
+    )
+
+    assert filtered_response.status_code == 200
+    assert [entry["artifact_type"] for entry in filtered_response.json()["entries"]] == ["review_guidance"]
+    review_entry = filtered_response.json()["entries"][0]
+    assert review_entry["timeline_id"] == candidate_timeline_id
+    assert review_entry["job_id"] == partial_job_id
+    assert review_entry["source_job_id"] == partial_job_id
+
+
 def test_provider_trace_audit_timeline_filter_include_upstream_includes_failed_upstream_job(
     tmp_path: Path,
 ) -> None:

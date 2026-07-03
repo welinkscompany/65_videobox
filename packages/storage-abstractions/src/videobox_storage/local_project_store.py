@@ -1628,11 +1628,28 @@ class LocalProjectStore:
             for job in jobs
             if job["job_type"] == JobType.TIMELINE_BUILD.value and job.get("output_ref")
         }
+        review_guidance_jobs_by_timeline_id = dict(timeline_jobs_by_timeline_id)
         timeline_ids_by_timeline_job_id = {
             str(job.get("job_id") or ""): str(job.get("output_ref") or "")
             for job in jobs
             if job["job_type"] == JobType.TIMELINE_BUILD.value and job.get("output_ref")
         }
+        for job in jobs:
+            if job["job_type"] != JobType.PARTIAL_REGENERATION.value or not job.get("output_ref"):
+                continue
+            try:
+                partial_regeneration = self.get_partial_regeneration_run(
+                    project_id=project_id,
+                    partial_regeneration_id=str(job["output_ref"]),
+                )
+            except Exception:
+                continue
+            timeline_payload = partial_regeneration.get("timeline")
+            if not isinstance(timeline_payload, dict):
+                continue
+            timeline_id = str(timeline_payload.get("timeline_id") or "").strip()
+            if timeline_id:
+                review_guidance_jobs_by_timeline_id[timeline_id] = job
         if include_upstream and filter_timeline_id is not None:
             timeline_job = timeline_jobs_by_timeline_id.get(filter_timeline_id)
             if timeline_job is not None:
@@ -1851,7 +1868,7 @@ class LocalProjectStore:
             timeline_id = str(item.get("timeline_id") or "")
             if timeline_id:
                 guidance_timeline_ids_with_events.add(timeline_id)
-            timeline_job = timeline_jobs_by_timeline_id.get(timeline_id)
+            timeline_job = review_guidance_jobs_by_timeline_id.get(timeline_id)
             trace = item.get("provider_trace")
             if not isinstance(trace, dict):
                 trace = build_provider_trace(final_provider="heuristic_fallback")
@@ -1892,7 +1909,7 @@ class LocalProjectStore:
                         or build_provider_trace(final_provider="heuristic_fallback"),
                     }
                 ]
-            timeline_job = timeline_jobs_by_timeline_id.get(timeline_id)
+            timeline_job = review_guidance_jobs_by_timeline_id.get(timeline_id)
             for item in legacy_entries:
                 trace = item.get("provider_trace")
                 if not isinstance(trace, dict):

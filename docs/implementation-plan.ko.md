@@ -469,6 +469,7 @@
 - approved timeline의 persisted duplicate `pending_recommendations`도 output blocker detail에서 recommendation id / target segment / recommendation type 기준으로 dedupe되어 같은 blocker가 중복 노출되지 않는 계약
 - partial regeneration preflight는 editing session 내부에 같은 `segment_id`가 중복 저장된 stale shape여도 targeted segment preview에서 first-seen segment를 유지하고 뒤의 stale duplicate가 canonical 값을 덮어쓰지 않는 계약
 - partial regeneration candidate timeline도 provider-trace audit의 `timeline_id + include_upstream=true` filter에서 source lineage를 잃지 않고 segment analysis / recommendation upstream entry를 같이 보여주는 계약
+- partial regeneration candidate timeline의 provider-trace `review_guidance` audit entry도 source job truth를 잃지 않고 `partial_regeneration_job_*`에 연결되는 계약
 
 현재 확인된 검증 기준:
 
@@ -497,7 +498,9 @@
   - blocked scope start prediction `1 passed`
 - partial regeneration candidate provider-trace upstream audit regression
   - `1 passed`
-- provider-trace audit focused slice `30 passed`
+- partial regeneration candidate provider-trace review guidance job lineage regression
+  - `1 passed`
+- provider-trace audit focused slice `31 passed`
 - full backend regression `337 passed`
 - frontend build 성공
 
