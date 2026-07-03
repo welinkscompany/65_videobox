@@ -491,6 +491,9 @@
   - candidate review snapshot 조회 성공
   - candidate approve 성공
   - subtitle / preview / CapCut export 성공
+- partial regeneration start response prediction symmetry regressions
+  - clean scope start prediction `1 passed`
+  - blocked scope start prediction `1 passed`
 - full backend regression `334 passed`
 - frontend build 성공
 

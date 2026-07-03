@@ -8600,6 +8600,129 @@ def test_editing_session_api_can_start_partial_regeneration_job(tmp_path: Path) 
     ]
 
 
+def test_editing_session_api_surfaces_draft_prediction_when_starting_partial_regeneration(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Partial Regeneration Start Prediction Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Updated caption",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["caption"],
+        },
+    )
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["predicted_review_status_after_rerun"] == "draft"
+    assert payload["prediction_reasons"] == []
+    assert payload["affected_output_areas"] == [
+        "segment copy",
+        "timeline preview",
+        "subtitle render",
+        "capcut export",
+    ]
+
+
+def test_editing_session_api_surfaces_blocked_prediction_when_starting_partial_regeneration(
+    tmp_path: Path,
+) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    create_response = client.post(
+        f"/api/projects/{project_id}/editing-sessions",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    session_id = create_response.json()["session_id"]
+
+    client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_002/caption",
+        json={"caption_text": "Team meeting overview with corrected label"},
+    )
+    client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_002/broll",
+        json={"asset_id": "asset_manual_002"},
+    )
+
+    response = client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/partial-regeneration",
+        json={
+            "segment_ids": ["seg_002"],
+            "fields": ["caption", "broll", "visual_overlay"],
+        },
+    )
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["predicted_review_status_after_rerun"] == "blocked"
+    assert payload["prediction_reasons"] == [
+        "source timeline already has unresolved review blockers that rerun will preserve",
+        "selected segments already require operator review, so rerun output stays blocked",
+    ]
+    assert payload["affected_output_areas"] == [
+        "segment copy",
+        "b-roll track",
+        "visual overlays",
+        "timeline preview",
+        "subtitle render",
+        "capcut export",
+    ]
+
+
 def test_editing_session_api_can_preview_partial_regeneration_scope_without_creating_job(
     tmp_path: Path,
 ) -> None:

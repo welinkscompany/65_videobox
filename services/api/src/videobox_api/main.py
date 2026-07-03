@@ -1303,6 +1303,10 @@ def create_app(
                 project_id=project_id,
                 job_id=str(result["job_id"]),
             )
+            source_timeline = store.get_timeline_run(
+                project_id=project_id,
+                timeline_id=str(job_result["source_timeline_id"]),
+            )
         except Exception as exc:
             raise _http_error(exc) from exc
         result["targeted_segments"] = _build_targeted_segments(
@@ -1310,6 +1314,13 @@ def create_app(
             segment_ids=result["segment_ids"],
         )
         result["affected_output_areas"] = _build_affected_output_areas(result["downstream_steps"])
+        predicted_review_status_after_rerun, prediction_reasons = _build_preflight_review_prediction(
+            source_timeline=source_timeline,
+            targeted_segments=result["targeted_segments"],
+            fields=result["fields"],
+        )
+        result["predicted_review_status_after_rerun"] = predicted_review_status_after_rerun
+        result["prediction_reasons"] = prediction_reasons
         result["delta"] = {
             "regenerated_segments": job_result["regenerated_segments"],
             "timeline_id": job_result["timeline_id"],

@@ -263,6 +263,35 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - `review/output` 또는 `preflight contract` 중 가장 작은 남은 경계 1개만 재선정
 - exact failing test 1개로 다음 slice 시작
 
+## 17. 2026-07-03 partial regeneration start prediction symmetry 기록
+
+이번 후속 작업에서는 `partial regeneration start` 응답이 preflight와 같은 review prediction contract를 유지하는지 작은 리스크 관점에서 다시 고정했다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- clean scope partial regeneration start 응답도 `predicted_review_status_after_rerun`를 `unknown`이 아니라 실제 `draft`로 surface해야 한다
+- blocked scope partial regeneration start 응답도 preflight와 같은 `prediction_reasons`를 유지해야 한다
+- strict TDD로 아래 exact regression을 고정했다
+  - `test_editing_session_api_surfaces_draft_prediction_when_starting_partial_regeneration`
+  - `test_editing_session_api_surfaces_blocked_prediction_when_starting_partial_regeneration`
+- 구현은 `services/api/src/videobox_api/main.py`의 start endpoint에서 source timeline + targeted segments 기준 prediction 계산을 재사용하는 최소 수정으로 닫았다
+- exact clean-scope regression `1 passed`
+- exact blocked-scope regression `1 passed`
+- focused backend verification
+  - `4 passed`
+  - `./scripts/dev-fast-path.ps1 -Mode preflight-backend` -> `55 passed`
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. partial regeneration preflight 응답 prediction surface
+2. partial regeneration start 응답 clean-scope prediction surface
+3. partial regeneration start 응답 blocked-scope prediction surface
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue 유지
+- 이번에는 `review/output` 쪽에서 가장 작은 남은 경계 1개를 다시 고르는 편이 더 효율적이다
+
 ## 19. 2026-07-03 Task 1 회귀 증거 고정
 
 이번 후속 작업에서는 `approved TTS persisted truth gap`을 실제 코드 변경보다 `회귀 증거 강화` 관점에서 다시 확인했다.
