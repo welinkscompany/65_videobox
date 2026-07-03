@@ -1755,6 +1755,23 @@ class LocalProjectStore:
                         created_at=str(preview.get("created_at") or ""),
                     )
                 )
+            elif job_type == JobType.SUBTITLE_RENDER.value and job.get("output_ref"):
+                try:
+                    subtitle = self.get_subtitle_run(project_id=project_id, subtitle_id=str(job["output_ref"]))
+                except Exception:
+                    continue
+                entries.append(
+                    self._provider_trace_entry(
+                        artifact_type="subtitle_render",
+                        artifact_id=str(subtitle["subtitle_id"]),
+                        job_type=job_type,
+                        job=job,
+                        source_job_id=str(job.get("input_ref") or ""),
+                        trace=build_provider_trace(final_provider="static_fallback"),
+                        timeline_id=str(subtitle.get("timeline_id") or ""),
+                        created_at=str(subtitle.get("created_at") or ""),
+                    )
+                )
             elif job_type == JobType.CAPCUT_EXPORT.value and job.get("output_ref"):
                 try:
                     export = self.get_export_run(project_id=project_id, export_id=str(job["output_ref"]))

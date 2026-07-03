@@ -472,6 +472,7 @@
 - partial regeneration candidate timeline의 provider-trace `review_guidance` audit entry도 source job truth를 잃지 않고 `partial_regeneration_job_*`에 연결되는 계약
 - partial regeneration candidate timeline의 provider-trace `review_guidance_attempt` audit entry도 `partial_regeneration_job_*`의 job type / job id / source job id truth를 유지하는 계약
 - partial regeneration candidate timeline의 provider-trace `review_guidance_attempt` audit entry도 `partial_regeneration_job_*`의 `finished_at` truth를 유지하는 계약
+- partial regeneration candidate timeline의 provider-trace `subtitle_render` audit entry도 persisted subtitle artifact의 `created_at` truth를 유지하는 계약
 - partial regeneration candidate timeline의 provider-trace `preview_render` audit entry도 persisted preview artifact의 `created_at` truth를 유지하는 계약
 - partial regeneration candidate timeline의 provider-trace `capcut_export` audit entry도 persisted export artifact의 `created_at` truth를 유지하는 계약
 - partial regeneration candidate timeline filter도 approval 없이 막힌 failed `preview_render` output job을 source job / candidate timeline truth와 함께 계속 보여주는 계약
@@ -512,6 +513,8 @@
   - `1 passed`
 - partial regeneration candidate provider-trace review guidance attempt finished_at regression
   - `1 passed`
+- partial regeneration candidate provider-trace subtitle_render created_at regression
+  - `1 passed`
 - partial regeneration candidate provider-trace preview_render created_at regression
   - `1 passed`
 - partial regeneration candidate provider-trace capcut_export created_at regression
@@ -522,7 +525,7 @@
   - `1 passed`
 - partial regeneration candidate failed subtitle_render audit filter regression
   - `1 passed`
-- provider-trace audit focused slice `38 passed`
+- provider-trace audit focused slice `39 passed`
 - full backend regression `346 passed`
 - frontend build 성공
 
