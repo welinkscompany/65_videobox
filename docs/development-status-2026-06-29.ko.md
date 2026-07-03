@@ -221,6 +221,48 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - review->editor recommendation mapping coverage 중 `broll` happy-path 보강
 - review action placeholder를 실제 persistence contract와 연결할지 여부 설계
 
+## 16. 2026-07-03 Task 2 real-project smoke + evidence freeze 기록
+
+이번 후속 작업으로 `Task 2: 실제 프로젝트 1개 happy-path smoke + evidence freeze`는 완료로 본다.
+
+이번에 추가로 확인된 사실은 아래와 같다.
+
+- 실제 smoke에서 `partial_regeneration_job_*` candidate를 review snapshot / approve / output에 넘길 때 `candidate timeline` 대신 persisted `partial_regeneration_id`를 timeline id처럼 읽어 `404`가 나는 경계가 있었다
+- strict TDD로 `test_review_snapshot_api_uses_partial_regeneration_job_id_for_candidate_timeline` exact regression을 추가했고, 실제로 `404` RED를 확인한 뒤 최소 수정으로 닫았다
+- `local_pipeline.get_timeline_result()`는 이제 `partial_regeneration` job일 때 persisted run에서 candidate timeline을 읽어 review snapshot / approve / subtitle / preview / export가 같은 truth를 타도록 맞춰졌다
+- clean real-project smoke를 다시 수행했고 아래 흐름이 실제로 끝까지 통과했다
+  - timeline build
+  - review snapshot
+  - editing session
+  - mutation 1회
+  - preflight
+  - partial regeneration
+  - approve
+  - subtitle / preview / export
+- smoke evidence 기준 clean project의 candidate approve 이후 output artifact도 정상 확인됐다
+  - subtitle file uri `local://projects/task2-smoke-project/subtitles/subtitle_001.srt`
+  - preview player uri `local://projects/task2-smoke-project/previews/preview_001.html`
+  - CapCut export adapter `capcut_v1_port`
+  - export track order `voiceover / broll / subtitle / bgm`
+- exact backend regression `1 passed`
+- exact frontend regression `1 passed`
+- frontend build 성공
+- full backend regression `334 passed`
+
+이 갱신으로 아래 범위는 현재 기준 실제 증거로 닫혔다.
+
+1. partial regeneration candidate job id review snapshot read
+2. partial regeneration candidate approve routing
+3. partial regeneration candidate subtitle / preview / export routing
+4. 실제 프로젝트 1개 happy-path smoke
+5. Task 2 evidence / closeout / SSOT freeze
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue로 복귀
+- `review/output` 또는 `preflight contract` 중 가장 작은 남은 경계 1개만 재선정
+- exact failing test 1개로 다음 slice 시작
+
 ## 19. 2026-07-03 Task 1 회귀 증거 고정
 
 이번 후속 작업에서는 `approved TTS persisted truth gap`을 실제 코드 변경보다 `회귀 증거 강화` 관점에서 다시 확인했다.

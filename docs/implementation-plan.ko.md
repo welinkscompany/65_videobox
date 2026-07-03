@@ -481,7 +481,17 @@
   - backend output-gating `24 passed`
   - backend preflight `55 passed`
   - frontend preflight `25 passed`
-- full backend regression `318 passed`
+- Task 2 candidate timeline exact regression `1 passed`
+- Task 2 frontend candidate routing exact regression `1 passed`
+- Task 2 real-project clean happy-path smoke
+  - review snapshot `draft`
+  - editing session mutation 1회
+  - preflight `draft`
+  - partial regeneration candidate `partial_regeneration_job_006`
+  - candidate review snapshot 조회 성공
+  - candidate approve 성공
+  - subtitle / preview / CapCut export 성공
+- full backend regression `334 passed`
 - frontend build 성공
 
 이 체크포인트 기준으로 review-action placeholder 단계는 이미 지난 상태다.
@@ -501,9 +511,12 @@
 즉시 실행 기준은 `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`를 따른다.
 그 문서 기준 기본 범위는 아래 3개뿐이다.
 
-1. approved TTS persisted truth gap 1개 확인
-2. 실제 프로젝트 1개 happy-path smoke
-3. evidence / closeout / SSOT freeze
+1. approved TTS persisted truth gap 1개 확인 완료
+2. 실제 프로젝트 1개 happy-path smoke 완료
+3. evidence / closeout / SSOT freeze 완료
+
+이제 이 2일 실행 레일의 기본 범위는 모두 닫혔다.
+다음 실제 작업은 다시 장기 우선순위로 돌아가되, 가장 작은 남은 경계부터 재선정한다.
 
 중요:
 

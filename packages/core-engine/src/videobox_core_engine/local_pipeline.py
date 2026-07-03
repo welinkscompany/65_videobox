@@ -1147,7 +1147,14 @@ class LocalPipelineRunner:
 
     def get_timeline_result(self, *, project_id: str, job_id: str) -> dict[str, Any]:
         job = self.store.get_job(project_id=project_id, job_id=job_id)
-        timeline = self.store.get_timeline_run(project_id=project_id, timeline_id=job["output_ref"])
+        if str(job.get("job_type")) == JobType.PARTIAL_REGENERATION.value:
+            partial_regeneration = self.store.get_partial_regeneration_run(
+                project_id=project_id,
+                partial_regeneration_id=str(job["output_ref"]),
+            )
+            timeline = partial_regeneration["timeline"]
+        else:
+            timeline = self.store.get_timeline_run(project_id=project_id, timeline_id=job["output_ref"])
         timeline = self._hydrate_timeline_review_status(project_id=project_id, timeline=timeline)
         return {"job_id": job["job_id"], "status": job["status"], "timeline": timeline}
 

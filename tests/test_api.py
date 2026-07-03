@@ -13895,6 +13895,39 @@ def test_editing_session_api_can_fetch_partial_regeneration_result(tmp_path: Pat
     assert payload["session_updated_at"] == latest_session["updated_at"]
 
 
+def test_review_snapshot_api_uses_partial_regeneration_job_id_for_candidate_timeline(tmp_path: Path) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    create_response = client.post(
+        f"/api/projects/{project_id}/editing-sessions",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    session_id = create_response.json()["session_id"]
+
+    client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/caption",
+        json={"caption_text": "Office overview tightened for smoke"},
+    )
+    partial_response = client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/partial-regeneration",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["caption"],
+        },
+    )
+    partial_job_id = partial_response.json()["job_id"]
+
+    response = client.get(f"/api/projects/{project_id}/review-snapshots/{partial_job_id}")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["timeline_id"] == "timeline_002"
+    assert payload["review_status"] == "blocked"
+    assert payload["segments"][0]["segment_id"] == "seg_001"
+
+
 def test_editing_session_api_rejects_invalid_partial_regeneration_request(tmp_path: Path) -> None:
     app = create_app(projects_root=tmp_path)
     client = TestClient(app)
