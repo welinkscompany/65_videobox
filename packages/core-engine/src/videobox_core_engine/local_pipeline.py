@@ -1379,11 +1379,17 @@ class LocalPipelineRunner:
                 timeline=timeline,
             )
         except Exception as exc:
-            self.store.update_job(
+            failed_job = self.store.update_job(
                 project_id=project_id,
                 job_id=job["job_id"],
                 status=JobStatus.FAILED,
                 error_message=str(exc),
+            )
+            self._save_failed_provider_trace_audit_event(
+                project_id=project_id,
+                job=failed_job,
+                source_job_id=timeline_job_id,
+                exc=exc,
             )
             raise
         try:

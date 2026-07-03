@@ -1652,6 +1652,7 @@ class LocalProjectStore:
             timeline_id = str(timeline_payload.get("timeline_id") or "").strip()
             if timeline_id:
                 review_guidance_jobs_by_timeline_id[timeline_id] = job
+                timeline_ids_by_timeline_job_id[str(job.get("job_id") or "")] = timeline_id
         if include_upstream and filter_timeline_id is not None:
             timeline_job = timeline_jobs_by_timeline_id.get(filter_timeline_id)
             if timeline_job is not None:

@@ -666,6 +666,41 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
 - exact failing test 1개로만 다시 시작한다
 
+## 24. 2026-07-03 partial regeneration candidate failed preview trace filter closeout
+
+이번 후속 작업에서는 review/output과 바로 맞닿은 candidate failed output trace 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- approval 없이 막힌 candidate `preview_render` failed job은 jobs 목록에는 남아도 `provider-traces?timeline_id=<candidate>` filter에서는 빠지는 경계가 있었다
+- strict TDD로 `test_provider_trace_audit_candidate_timeline_filter_includes_failed_preview_render_without_approval` exact regression을 먼저 추가했고, 실제로 failed preview entry를 찾지 못하는 `StopIteration` RED를 확인했다
+- 원인은 2개였다
+  - approval gate failure 경로가 failed provider-trace audit event를 남기지 않았다
+  - candidate failed entry가 `source_job_id=partial_regeneration_job_*`를 candidate `timeline_id`로 역매핑하지 못했다
+- 최소 수정으로 preview approval-gate failure도 failed provider-trace audit event를 저장하게 하고, partial regeneration job id -> candidate timeline id 역매핑을 provider-trace read path에 추가해 candidate timeline filter가 failed preview entry를 계속 보여주도록 맞췄다
+- 이번 수정은 review/output rules, TTS approval/output truth, preflight contract, Gemini fallback, persistence 규칙을 건드리지 않고 candidate failed preview provider-trace save/filter 경계만 좁게 수정했다
+- exact regression `1 passed`
+- provider-trace audit focused slice `36 passed`
+- broader verification은 이번 turn에서도 생략
+  - 판단:
+    - candidate failed preview trace save/filter 한 점에 국한된 수정이라 exact + focused evidence가 더 직접적이다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. partial regeneration candidate review guidance attempt audit entry 노출
+2. partial regeneration candidate review guidance attempt job/source job lineage 유지
+3. partial regeneration candidate review guidance attempt job type truth 유지
+4. partial regeneration candidate review guidance attempt finished_at truth 유지
+5. partial regeneration candidate preview_render created_at truth 유지
+6. partial regeneration candidate capcut_export created_at truth 유지
+7. partial regeneration candidate timeline filter가 approval 없이 막힌 failed preview_render output job도 유지
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
 ## 16. 2026-06-30 review recommendation approve persistence 착수 기록
 
 이번 후속 작업으로 `review action placeholder -> first approve persistence`의 최소 slice는 착수 및 focused verification까지는 됐다고 본다.
