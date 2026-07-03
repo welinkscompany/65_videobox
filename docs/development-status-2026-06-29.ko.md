@@ -493,6 +493,33 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 아래 이어지는 `## 16` 이하의 낮은 번호 섹션들도 당시 시점 기록을 보존한 historical log다.
 현재 truth나 현재 next slice 판단에는 위 `## 17. 2026-07-01 시스템 정비 기준 최신 상태`를 우선 적용한다.
 
+## 18. 2026-07-03 partial regeneration candidate provider-trace upstream audit closeout
+
+이번 후속 작업에서는 `review/output` 장기 queue를 다시 보되, provider trace audit이 partial regeneration candidate timeline까지 같은 truth를 유지하는지 가장 작은 리스크 1개만 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- 기존 `provider-traces?timeline_id=...&include_upstream=true` filter는 `TIMELINE_BUILD` job에만 기대고 있어 partial regeneration candidate timeline에서는 upstream lineage를 비워 버리는 경계가 있었다
+- strict TDD로 `test_provider_trace_audit_timeline_filter_include_upstream_supports_partial_regeneration_candidate` exact regression을 먼저 추가했고, 실제로 candidate timeline의 `upstream_entries == []` RED를 확인했다
+- 최소 수정으로 timeline filter가 `TIMELINE_BUILD` job 유무와 관계없이 persisted timeline lineage를 직접 읽도록 바꿔 candidate timeline도 source segment analysis / recommendation upstream entry를 같이 보여주게 맞췄다
+- 이번 수정은 review/output gating, TTS approve/output truth, editing-session SSOT, Gemini fallback, persistence 규칙을 건드리지 않고 provider trace audit filter 계산 경계만 좁게 수정했다
+- exact regression `1 passed`
+- provider-trace audit focused slice `30 passed`
+- frontend build 성공
+- full backend regression `337 passed`
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. partial regeneration candidate review snapshot audit entry 노출
+2. partial regeneration candidate timeline filter direct review guidance 유지
+3. partial regeneration candidate timeline filter include_upstream lineage 복원
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
 ## 16. 2026-06-30 review recommendation approve persistence 착수 기록
 
 이번 후속 작업으로 `review action placeholder -> first approve persistence`의 최소 slice는 착수 및 focused verification까지는 됐다고 본다.

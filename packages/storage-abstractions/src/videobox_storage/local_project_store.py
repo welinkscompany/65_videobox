@@ -1637,23 +1637,25 @@ class LocalProjectStore:
             timeline_job = timeline_jobs_by_timeline_id.get(filter_timeline_id)
             if timeline_job is not None:
                 segment_job_id = str(timeline_job.get("input_ref") or "")
-                try:
-                    timeline_payload = self.get_timeline_run(project_id=project_id, timeline_id=filter_timeline_id)
-                except Exception:
-                    timeline_payload = {}
-                lineage = timeline_payload.get("lineage")
-                if isinstance(lineage, dict):
-                    segment_job_id = str(lineage.get("segment_analysis_job_id") or segment_job_id)
-                    recommendation_job_ids = lineage.get("recommendation_job_ids")
-                    if isinstance(recommendation_job_ids, list):
-                        upstream_recommendation_job_ids = {
-                            str(job_id).strip()
-                            for job_id in recommendation_job_ids
-                            if str(job_id).strip()
-                        }
-                        use_exact_recommendation_lineage = True
-                if segment_job_id:
-                    upstream_segment_job_ids.add(segment_job_id)
+            else:
+                segment_job_id = ""
+            try:
+                timeline_payload = self.get_timeline_run(project_id=project_id, timeline_id=filter_timeline_id)
+            except Exception:
+                timeline_payload = {}
+            lineage = timeline_payload.get("lineage")
+            if isinstance(lineage, dict):
+                segment_job_id = str(lineage.get("segment_analysis_job_id") or segment_job_id)
+                recommendation_job_ids = lineage.get("recommendation_job_ids")
+                if isinstance(recommendation_job_ids, list):
+                    upstream_recommendation_job_ids = {
+                        str(job_id).strip()
+                        for job_id in recommendation_job_ids
+                        if str(job_id).strip()
+                    }
+                    use_exact_recommendation_lineage = True
+            if segment_job_id:
+                upstream_segment_job_ids.add(segment_job_id)
 
         for job in jobs:
             job_type = str(job["job_type"])
