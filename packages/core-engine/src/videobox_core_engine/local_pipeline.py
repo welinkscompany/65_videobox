@@ -139,15 +139,21 @@ def _normalized_runtime_pending_recommendations(items: object) -> list[dict[str,
     for item in items:
         if not _is_runtime_blocking_pending_recommendation(item):
             continue
+        normalized_item = {
+            **deepcopy(item),
+            "provider_trace": item.get("provider_trace")
+            if isinstance(item.get("provider_trace"), dict)
+            else build_provider_trace(final_provider="rule_based_fallback"),
+        }
         pending_key = (
-            str(item.get("recommendation_id") or "").strip(),
-            str(item.get("target_segment_id") or "").strip(),
-            str(item.get("recommendation_type") or "").strip(),
+            str(normalized_item.get("recommendation_id") or "").strip(),
+            str(normalized_item.get("target_segment_id") or "").strip(),
+            str(normalized_item.get("recommendation_type") or "").strip(),
         )
         if pending_key in existing_pending_keys:
             continue
         existing_pending_keys.add(pending_key)
-        normalized_pending_recommendations.append(item)
+        normalized_pending_recommendations.append(normalized_item)
     return normalized_pending_recommendations
 
 

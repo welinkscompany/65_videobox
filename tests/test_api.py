@@ -13259,6 +13259,117 @@ def test_partial_regeneration_result_marks_review_status_blocked_when_preserved_
     assert result_payload["timeline"]["review_status"] == "blocked"
 
 
+def test_partial_regeneration_result_preserves_source_pending_recommendation_with_default_provider_trace(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Partial Regeneration Pending Recommendation Default Trace Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [
+                {
+                    "recommendation_id": "rec_tts_review_missing_trace",
+                    "target_segment_id": "seg_009",
+                    "recommendation_type": "tts_replacement",
+                    "selected_asset_id": "asset_tts_review_missing_trace",
+                    "score": 0.93,
+                    "reason": "Awaiting operator approval.",
+                    "auto_apply_allowed": False,
+                    "review_required": True,
+                    "payload": {},
+                    "created_at": "2026-06-29T00:00:00+00:00",
+                }
+            ],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Updated caption",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["caption"],
+        },
+    )
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["status"] == "succeeded"
+    result_response = client.get(
+        f"/api/projects/{project.project_id}/partial-regenerations/{payload['job_id']}",
+    )
+    assert result_response.status_code == 200
+    result_payload = result_response.json()
+    assert result_payload["timeline"]["review_status"] == "blocked"
+    assert result_payload["timeline"]["review_flags"] == [
+        {
+            "code": "tts_replacement_review_required",
+            "segment_id": "seg_009",
+            "message": "Awaiting operator approval.",
+        }
+    ]
+    assert result_payload["timeline"]["pending_recommendations"] == [
+        {
+            "recommendation_id": "rec_tts_review_missing_trace",
+            "target_segment_id": "seg_009",
+            "recommendation_type": "tts_replacement",
+            "selected_asset_id": "asset_tts_review_missing_trace",
+            "score": 0.93,
+            "reason": "Awaiting operator approval.",
+            "auto_apply_allowed": False,
+            "review_required": True,
+            "decision_state": None,
+            "payload": {},
+            "created_at": "2026-06-29T00:00:00+00:00",
+            "provider_trace": build_provider_trace(final_provider="rule_based_fallback"),
+        }
+    ]
+
+
 def test_partial_regeneration_result_marks_review_status_blocked_when_preserved_source_review_flag_remains(
     tmp_path: Path,
 ) -> None:
@@ -13339,6 +13450,101 @@ def test_partial_regeneration_result_marks_review_status_blocked_when_preserved_
     assert result_payload["timeline"]["review_status"] == "blocked"
     assert result_payload["timeline"]["pending_recommendations"] == []
     assert result_payload["timeline"]["review_flags"] == [
+        {
+            "code": "tts_replacement_review_required",
+            "segment_id": "seg_009",
+            "message": "Operator review required before approval or output.",
+        }
+    ]
+
+
+def test_review_snapshot_deduplicates_preserved_source_review_flags_for_partial_regeneration_candidate(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(
+        name="Partial Regeneration Duplicate Source Review Flag Snapshot Project"
+    )
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [
+                {
+                    "code": "tts_replacement_review_required",
+                    "segment_id": "seg_009",
+                },
+                {
+                    "code": "tts_replacement_review_required",
+                    "segment_id": "seg_009",
+                    "message": "Duplicate source blocker should be deduped in candidate review snapshot.",
+                },
+            ],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Updated caption",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["caption"],
+        },
+    )
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["status"] == "succeeded"
+    snapshot_response = client.get(
+        f"/api/projects/{project.project_id}/review-snapshots/{payload['job_id']}",
+    )
+    assert snapshot_response.status_code == 200
+    snapshot_payload = snapshot_response.json()
+    assert snapshot_payload["review_status"] == "blocked"
+    assert snapshot_payload["pending_recommendations"] == []
+    assert snapshot_payload["review_flags"] == [
         {
             "code": "tts_replacement_review_required",
             "segment_id": "seg_009",

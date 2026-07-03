@@ -874,6 +874,42 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
 - exact failing test 1개로만 다시 시작한다
 
+## 30. 2026-07-03 partial regeneration runtime pending recommendation default provider-trace closeout
+
+이번 후속 작업에서는 직전 nested pending recommendation 경계의 인접면에서 남아 있던 `runtime preserve는 되지만 result API read path가 깨지는` 실제 계약 비대칭 1개를 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- preflight는 source timeline의 valid `pending_recommendations` blocker를 보면 이미 `blocked` prediction을 유지하고 있었다
+- runtime도 같은 valid source pending recommendation을 candidate 결과에 복원하고 있었지만, legacy source shape에 `provider_trace`가 빠져 있으면 partial regeneration result API read path가 `provider_trace Field required` validation error로 깨졌다
+- strict TDD로 `test_partial_regeneration_result_preserves_source_pending_recommendation_with_default_provider_trace` exact regression을 먼저 추가했고, 실제로 result 조회 시 Pydantic validation error가 나는 RED를 확인했다
+- 원인은 `_normalized_runtime_pending_recommendations(...)`가 valid blocker recommendation 자체는 통과시키면서도 missing `provider_trace`를 canonicalize하지 않아 response model contract를 깨뜨리는 점이었다
+- 최소 수정으로 runtime pending recommendation normalization이 valid source blocker를 복원할 때 dict `provider_trace`가 없으면 `build_provider_trace(final_provider="rule_based_fallback")`를 채우도록 맞췄다
+- 이번 수정은 review/output rules, TTS approval/output truth, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 runtime pending recommendation canonicalization 경계만 좁게 수정했다
+- exact regression `1 passed`
+- focused adjacency slice `6 passed`
+- broader fast-path verification
+  - `backend output-gating 24 passed`
+  - `backend preflight 55 passed`
+  - `frontend preflight 25 passed`
+- full broader baseline은 이번 turn에서 다시 돌리지 않았다
+  - 판단:
+    - runtime pending recommendation fallback trace 한 점에 국한된 수정이라 exact + focused + current-focused-parallel evidence로 충분하다
+    - latest full broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. partial regeneration preflight가 valid source pending recommendation blocker를 `blocked` prediction으로 유지함
+2. partial regeneration runtime도 같은 source pending recommendation blocker를 candidate result에 복원함
+3. preserved source pending recommendation에 `provider_trace`가 빠져 있어도 default fallback trace로 canonicalize되어 result API validation error를 내지 않음
+4. candidate result의 `review_status`가 `blocked`로 유지됨
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
 ## 16. 2026-06-30 review recommendation approve persistence 착수 기록
 
 이번 후속 작업으로 `review action placeholder -> first approve persistence`의 최소 slice는 착수 및 focused verification까지는 됐다고 본다.
