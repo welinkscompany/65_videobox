@@ -1489,6 +1489,7 @@ class LocalProjectStore:
         payload = json.loads(file_path.read_text(encoding="utf-8"))
         payload["provider_trace"] = payload.get("provider_trace") or build_provider_trace(final_provider="static_fallback")
         payload["metadata"] = json.loads(row["metadata_json"] or "{}")
+        payload["created_at"] = row["created_at"]
         return payload
 
     def get_editing_session(self, *, project_id: str, session_id: str) -> dict[str, Any]:
@@ -1767,6 +1768,7 @@ class LocalProjectStore:
                         source_job_id=str(job.get("input_ref") or ""),
                         trace=export["provider_trace"],
                         timeline_id=str(export.get("timeline_id") or ""),
+                        created_at=str(export.get("created_at") or ""),
                     )
                 )
 

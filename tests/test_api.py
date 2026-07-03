@@ -16192,6 +16192,148 @@ def test_provider_trace_audit_candidate_preview_render_entry_uses_preview_create
     assert preview_entry["created_at"] == preview_row["created_at"]
 
 
+def test_provider_trace_audit_candidate_capcut_export_entry_uses_export_created_at(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "videobox_provider_interfaces.stt.MockSTTProvider.transcribe",
+        _single_segment_transcribe,
+    )
+    local_provider = FakeStructuredProvider(
+        responses=[
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"review_required": False, "cleanup_decision": "keep"},
+                raw_text='{"review_required":false,"cleanup_decision":"keep"}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"keywords": ["office"]},
+                raw_text='{"keywords":["office"]}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"music_mood": "steady documentary", "score": 0.78},
+                raw_text='{"music_mood":"steady documentary","score":0.78}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={
+                    "summary": "Initial review summary.",
+                    "action_items": ["Approve the timeline now."],
+                },
+                raw_text='{"summary":"Initial review summary.","action_items":["Approve the timeline now."]}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"review_required": False, "cleanup_decision": "keep"},
+                raw_text='{"review_required":false,"cleanup_decision":"keep"}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={
+                    "summary": "Candidate review summary.",
+                    "action_items": ["Approve the candidate now."],
+                },
+                raw_text='{"summary":"Candidate review summary.","action_items":["Approve the candidate now."]}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={
+                    "summary": "Export operator copy.",
+                    "action_items": ["Validate the export artifact."],
+                },
+                raw_text='{"summary":"Export operator copy.","action_items":["Validate the export artifact."]}',
+                metadata={},
+            ),
+        ]
+    )
+    app = create_app(
+        projects_root=tmp_path,
+        local_first_runtime_service_factory=_local_first_service_factory(
+            local_provider=local_provider,
+            gemini_provider=FakeStructuredProvider(),
+            local_enabled=True,
+        ),
+    )
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    create_response = client.post(
+        f"/api/projects/{project_id}/editing-sessions",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    session_id = create_response.json()["session_id"]
+    client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/caption",
+        json={"caption_text": "Candidate export created_at check."},
+    )
+    partial_response = client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/partial-regeneration",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["caption"],
+        },
+    )
+    partial_job_id = partial_response.json()["job_id"]
+
+    review_snapshot = client.get(f"/api/projects/{project_id}/review-snapshots/{partial_job_id}")
+    partial_result = client.get(f"/api/projects/{project_id}/partial-regenerations/{partial_job_id}")
+    assert review_snapshot.status_code == 200
+    assert partial_result.status_code == 200
+
+    approve_response = client.post(f"/api/projects/{project_id}/review-approvals/{partial_job_id}/approve")
+    export_response = client.post(
+        f"/api/projects/{project_id}/jobs/capcut-export",
+        json={"timeline_job_id": partial_job_id},
+    )
+
+    assert approve_response.status_code == 202
+    assert export_response.status_code == 202
+
+    export_job_id = export_response.json()["job_id"]
+    export_result = client.get(f"/api/projects/{project_id}/exports/{export_job_id}")
+    assert export_result.status_code == 200
+    export_id = export_result.json()["export"]["export_id"]
+    store = LocalProjectStore(tmp_path)
+    export_row = store._fetchone(
+        project_id,
+        """
+        SELECT created_at
+        FROM exports
+        WHERE export_id = ?
+        """,
+        (export_id,),
+    )
+    candidate_timeline_id = partial_result.json()["timeline"]["timeline_id"]
+    filtered_response = client.get(
+        f"/api/projects/{project_id}/provider-traces",
+        params={"timeline_id": candidate_timeline_id, "artifact_type": "capcut_export"},
+    )
+
+    assert export_row is not None
+    assert filtered_response.status_code == 200
+    assert [entry["artifact_type"] for entry in filtered_response.json()["entries"]] == ["capcut_export"]
+    export_entry = filtered_response.json()["entries"][0]
+    assert export_entry["job_id"] == export_response.json()["job_id"]
+    assert export_entry["source_job_id"] == partial_job_id
+    assert export_entry["created_at"] == export_row["created_at"]
+
+
 def test_provider_trace_audit_timeline_filter_include_upstream_includes_failed_upstream_job(
     tmp_path: Path,
 ) -> None:
