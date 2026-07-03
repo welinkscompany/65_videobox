@@ -1850,7 +1850,7 @@ class LocalProjectStore:
                     self._provider_trace_entry(
                         artifact_type="review_guidance_attempt",
                         artifact_id=str(item.get("artifact_id") or timeline_id),
-                        job_type=JobType.TIMELINE_BUILD.value,
+                        job_type=str(item.get("job_type") or JobType.TIMELINE_BUILD.value),
                         job=None,
                         source_job_id=str(item.get("source_job_id") or timeline_job_id or "") or None,
                         trace=trace,

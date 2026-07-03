@@ -548,6 +548,34 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
 - exact failing test 1개로만 다시 시작한다
 
+## 20. 2026-07-03 partial regeneration candidate review guidance attempt job truth closeout
+
+이번 후속 작업에서는 같은 provider trace audit 축 안에서 `review_guidance_attempt`의 candidate truth를 가장 작은 남은 경계 1개로 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- candidate timeline의 `review_guidance_attempt` audit entry는 `job_id/source_job_id`는 partial regeneration job을 가리켜도 `job_type`을 `timeline_build`로 고정해서 surface하는 경계가 있었다
+- strict TDD로 `test_provider_trace_audit_candidate_review_guidance_attempt_entry_uses_partial_regeneration_job_truth` exact regression을 먼저 추가했고, 실제로 `job_type == "timeline_build"` RED를 확인했다
+- 최소 수정으로 attempt audit event writer가 실제 source job type을 같이 저장하고, read path도 persisted `job_type`을 그대로 surface하도록 바꿔 candidate attempt entry가 `partial_regeneration` truth를 유지하게 맞췄다
+- 이번 수정은 review/output gating, TTS approval/output truth, preflight contract, Gemini fallback, persistence 규칙을 건드리지 않고 provider trace audit attempt read/write path만 좁게 수정했다
+- exact regression `1 passed`
+- provider-trace audit focused slice `32 passed`
+- broader verification은 이번 turn에서도 생략
+  - 판단:
+    - provider trace audit attempt path 한 점에 국한된 수정이라 exact + focused evidence가 더 직접적이다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. partial regeneration candidate review guidance attempt audit entry 노출
+2. partial regeneration candidate review guidance attempt job/source job lineage 유지
+3. partial regeneration candidate review guidance attempt job type truth 유지
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
 ## 16. 2026-06-30 review recommendation approve persistence 착수 기록
 
 이번 후속 작업으로 `review action placeholder -> first approve persistence`의 최소 slice는 착수 및 focused verification까지는 됐다고 본다.

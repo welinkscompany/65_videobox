@@ -1159,6 +1159,7 @@ class LocalPipelineRunner:
         return {"job_id": job["job_id"], "status": job["status"], "timeline": timeline}
 
     def get_review_snapshot(self, *, project_id: str, job_id: str) -> dict[str, Any]:
+        job = self.store.get_job(project_id=project_id, job_id=job_id)
         timeline = self.get_timeline_result(project_id=project_id, job_id=job_id)["timeline"]
         timeline_applied_recommendations = timeline.get("applied_recommendations", [])
         if not isinstance(timeline_applied_recommendations, list):
@@ -1219,6 +1220,7 @@ class LocalPipelineRunner:
             self._save_review_guidance_attempt_audit_event(
                 project_id=project_id,
                 timeline_job_id=job_id,
+                timeline_job_type=str(job.get("job_type") or JobType.TIMELINE_BUILD.value),
                 timeline_id=str(timeline["timeline_id"]),
                 operator_guidance=snapshot["operator_guidance"],
                 error_message=str(exc),
@@ -1570,6 +1572,7 @@ class LocalPipelineRunner:
         *,
         project_id: str,
         timeline_job_id: str,
+        timeline_job_type: str,
         timeline_id: str,
         operator_guidance: dict[str, Any],
         error_message: str | None = None,
@@ -1580,7 +1583,7 @@ class LocalPipelineRunner:
                 event={
                     "artifact_type": "review_guidance_attempt",
                     "artifact_id": f"{timeline_id}:review_guidance_attempt:{self.store._next_provider_trace_event_sequence(project_id=project_id):03d}",
-                    "job_type": JobType.TIMELINE_BUILD.value,
+                    "job_type": timeline_job_type,
                     "job_id": timeline_job_id,
                     "source_job_id": timeline_job_id,
                     "timeline_id": timeline_id,
