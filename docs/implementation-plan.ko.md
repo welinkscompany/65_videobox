@@ -477,6 +477,7 @@
 - partial regeneration candidate timeline filter도 approval 없이 막힌 failed `preview_render` output job을 source job / candidate timeline truth와 함께 계속 보여주는 계약
 - partial regeneration candidate timeline filter도 approval 없이 막힌 failed `capcut_export` output job을 source job / candidate timeline truth와 함께 계속 보여주는 계약
 - partial regeneration candidate timeline filter도 approval 없이 막힌 failed `subtitle_render` output job을 source job / candidate timeline truth와 함께 계속 보여주는 계약
+- partial regeneration runtime도 preflight와 마찬가지로 nested dict `target_segment_id`가 섞인 stale source `pending_recommendations`를 blocker recommendation으로 복원하지 않고 clean scope rerun result의 `review_status/pending_recommendations/review_flags`를 `draft/[]/[]`로 유지하는 계약
 
 현재 확인된 검증 기준:
 
@@ -522,7 +523,7 @@
 - partial regeneration candidate failed subtitle_render audit filter regression
   - `1 passed`
 - provider-trace audit focused slice `38 passed`
-- full backend regression `337 passed`
+- full backend regression `346 passed`
 - frontend build 성공
 
 이 체크포인트 기준으로 review-action placeholder 단계는 이미 지난 상태다.

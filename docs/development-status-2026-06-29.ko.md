@@ -378,6 +378,7 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - partial regeneration runtime은 preflight와 마찬가지로 whitespace가 섞인 legacy session `segment_id`도 trimmed request scope와 같은 세그먼트로 맞춰 actual rerun target lookup과 regenerated segment 반영이 비지 않도록 고정 완료
 - partial regeneration runtime은 actual overlay refresh에서도 unknown `overlay_type` session overlay를 persisted timeline `export_overlays`에 싣지 않고 canonical overlay만 반영하도록 고정 완료
 - partial regeneration runtime은 targeted overlay rerun에서 target segment의 stale unknown existing overlay도 preserve path로 되살리지 않고 canonical overlay만 남기도록 고정 완료
+- partial regeneration runtime은 preflight와 마찬가지로 nested dict `target_segment_id`가 섞인 stale source `pending_recommendations`를 blocker recommendation으로 복원하지 않고 clean scope rerun result의 `review_status/pending_recommendations/review_flags`를 `draft/[]/[]`로 유지하도록 고정 완료
 - current-priority helper `scripts/dev-fast-path.ps1`를 추가해 `output gating / preflight backend / preflight frontend / broader` 검증 레일을 분리 완료
 - 일반 preflight UI에서도 blocked prediction reason의 combined 문구 두 개가 모두 surface되는지 frontend focused test로 고정 완료
 - refresh-resume 시 restored preflight 응답의 scope가 resumed candidate와 다르면 그 interpretation을 재사용하지 않고 degraded warning으로 내려가도록 frontend focused test로 고정 완료
@@ -765,6 +766,35 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 7. partial regeneration candidate timeline filter가 approval 없이 막힌 failed preview_render output job도 유지
 8. partial regeneration candidate timeline filter가 approval 없이 막힌 failed capcut_export output job도 유지
 9. partial regeneration candidate timeline filter가 approval 없이 막힌 failed subtitle_render output job도 유지
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
+## 27. 2026-07-03 partial regeneration runtime nested pending recommendation closeout
+
+이번 후속 작업에서는 provider-trace 축이 아니라 `preflight는 통과하지만 runtime 결과 조회는 깨지는` 실제 계약 비대칭 1개를 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- source timeline의 `pending_recommendations[].target_segment_id`가 nested dict stale shape여도 preflight prediction은 이미 blocker recommendation으로 취급하지 않고 `draft`를 예측하고 있었다
+- 하지만 실제 partial regeneration runtime은 같은 stale entry를 그대로 carry-forward해서 결과 timeline에 남겼고, 그 결과 partial regeneration result API read path가 `target_segment_id string required`와 `provider_trace required` validation error로 깨졌다
+- strict TDD로 `test_editing_session_api_ignores_nested_target_segment_id_source_pending_recommendation_when_running_partial_regeneration` exact regression을 먼저 추가했고, 실제로 result 조회 시 Pydantic validation error가 나는 RED를 확인했다
+- 원인은 `_is_runtime_blocking_pending_recommendation(...)`가 `target_segment_id`를 string인지 보지 않고 `str(...)` truthy만 확인해서 nested dict stale shape까지 blocker recommendation으로 통과시키는 점이었다
+- 최소 수정으로 runtime pending recommendation 판정이 string `recommendation_id`와 string `target_segment_id`만 blocker recommendation으로 인정하게 좁혀, runtime도 preflight와 같은 기준으로 nested stale shape를 버리도록 맞췄다
+- 이번 수정은 review/output rules, TTS approval/output truth, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 runtime pending recommendation normalization 경계만 좁게 수정했다
+- exact regression `1 passed`
+- focused adjacency slice `5 passed`
+- full backend regression `346 passed`
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. partial regeneration preflight가 nested stale `pending_recommendation.target_segment_id`를 blocker prediction으로 복원하지 않음
+2. partial regeneration runtime도 같은 nested stale source pending recommendation을 blocker result로 복원하지 않음
+3. clean scope rerun result의 `review_status/pending_recommendations/review_flags`가 `draft/[]/[]`로 유지됨
+4. partial regeneration result API read path가 stale nested pending recommendation 때문에 validation error로 깨지지 않음
 
 현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
 

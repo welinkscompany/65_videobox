@@ -112,11 +112,17 @@ def _is_runtime_blocking_review_flag(flag: object) -> bool:
 
 
 def _is_runtime_blocking_pending_recommendation(item: object) -> bool:
+    if not isinstance(item, dict):
+        return False
+    recommendation_id = item.get("recommendation_id")
+    target_segment_id = item.get("target_segment_id")
+    recommendation_type = item.get("recommendation_type")
     return (
-        isinstance(item, dict)
-        and bool(str(item.get("recommendation_id") or "").strip())
-        and bool(str(item.get("target_segment_id") or "").strip())
-        and str(item.get("recommendation_type") or "").strip() in VALID_RESTORED_RECOMMENDATION_TYPES
+        isinstance(recommendation_id, str)
+        and bool(recommendation_id.strip())
+        and isinstance(target_segment_id, str)
+        and bool(target_segment_id.strip())
+        and str(recommendation_type or "").strip() in VALID_RESTORED_RECOMMENDATION_TYPES
     )
 
 
