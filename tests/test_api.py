@@ -15945,6 +15945,111 @@ def test_provider_trace_audit_candidate_review_guidance_attempt_entry_uses_parti
     assert attempt_entry["job_type"] == "partial_regeneration"
 
 
+def test_provider_trace_audit_candidate_review_guidance_attempt_entry_uses_partial_regeneration_finished_at(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "videobox_provider_interfaces.stt.MockSTTProvider.transcribe",
+        _single_segment_transcribe,
+    )
+
+    def fail_save_operator_guidance(
+        self,
+        *,
+        project_id: str,
+        timeline_id: str,
+        operator_guidance: dict[str, object],
+    ) -> dict[str, object]:
+        del self, project_id, timeline_id, operator_guidance
+        raise OSError("review guidance persistence offline")
+
+    monkeypatch.setattr(LocalProjectStore, "save_operator_guidance", fail_save_operator_guidance)
+    local_provider = FakeStructuredProvider(
+        responses=[
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"review_required": True, "cleanup_decision": "review"},
+                raw_text='{"review_required":true,"cleanup_decision":"review"}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"keywords": ["office"]},
+                raw_text='{"keywords":["office"]}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"music_mood": "cinematic pulse", "score": 0.91},
+                raw_text='{"music_mood":"cinematic pulse","score":0.91}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={
+                    "summary": "Candidate attempt finished_at summary.",
+                    "action_items": ["Check candidate attempt finished_at lineage."],
+                },
+                raw_text='{"summary":"Candidate attempt finished_at summary.","action_items":["Check candidate attempt finished_at lineage."]}',
+                metadata={},
+            ),
+        ]
+    )
+    app = create_app(
+        projects_root=tmp_path,
+        local_first_runtime_service_factory=_local_first_service_factory(
+            local_provider=local_provider,
+            gemini_provider=FakeStructuredProvider(),
+            local_enabled=True,
+        ),
+    )
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    create_response = client.post(
+        f"/api/projects/{project_id}/editing-sessions",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    session_id = create_response.json()["session_id"]
+    client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/caption",
+        json={"caption_text": "Candidate attempt finished_at check."},
+    )
+    partial_response = client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/partial-regeneration",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["caption"],
+        },
+    )
+    partial_job_id = partial_response.json()["job_id"]
+
+    review_snapshot = client.get(f"/api/projects/{project_id}/review-snapshots/{partial_job_id}")
+    partial_result = client.get(f"/api/projects/{project_id}/partial-regenerations/{partial_job_id}")
+    jobs_payload = client.get(f"/api/projects/{project_id}/jobs").json()["jobs"]
+
+    assert review_snapshot.status_code == 500
+    assert partial_result.status_code == 200
+
+    partial_job = next(job for job in jobs_payload if job["job_id"] == partial_job_id)
+    candidate_timeline_id = partial_result.json()["timeline"]["timeline_id"]
+    filtered_response = client.get(
+        f"/api/projects/{project_id}/provider-traces",
+        params={"timeline_id": candidate_timeline_id, "artifact_type": "review_guidance_attempt"},
+    )
+
+    assert filtered_response.status_code == 200
+    assert [entry["artifact_type"] for entry in filtered_response.json()["entries"]] == ["review_guidance_attempt"]
+    attempt_entry = filtered_response.json()["entries"][0]
+    assert attempt_entry["job_id"] == partial_job_id
+    assert attempt_entry["finished_at"] == partial_job["finished_at"]
+
+
 def test_provider_trace_audit_timeline_filter_include_upstream_includes_failed_upstream_job(
     tmp_path: Path,
 ) -> None:

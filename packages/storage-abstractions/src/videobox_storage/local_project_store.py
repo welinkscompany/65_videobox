@@ -1840,7 +1840,7 @@ class LocalProjectStore:
                 continue
             if str(item.get("artifact_type") or "") == "review_guidance_attempt":
                 timeline_id = str(item.get("timeline_id") or "")
-                timeline_job = timeline_jobs_by_timeline_id.get(timeline_id)
+                timeline_job = review_guidance_jobs_by_timeline_id.get(timeline_id)
                 trace = item.get("provider_trace")
                 if not isinstance(trace, dict):
                     trace = build_provider_trace(final_provider="heuristic_fallback")
