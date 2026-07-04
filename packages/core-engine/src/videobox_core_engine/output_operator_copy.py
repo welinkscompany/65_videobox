@@ -195,13 +195,16 @@ class LocalFirstOutputOperatorCopyBuilder(OutputOperatorCopyBuilder):
         review_flags = timeline.get("review_flags", [])
         pending_recommendations = timeline.get("pending_recommendations", [])
         target_label = "preview" if output_target == "preview_render" else "capcut export"
-        track_summary = [
-            {
-                "track_type": _canonical_track_type(track.get("track_type")),
-                "clip_count": len(track.get("clips", [])),
-            }
-            for track in tracks
-        ]
+        track_summary = []
+        for track in tracks:
+            if not isinstance(track, dict):
+                continue
+            track_summary.append(
+                {
+                    "track_type": _canonical_track_type(track.get("track_type")),
+                    "clip_count": len(track.get("clips", [])),
+                }
+            )
         prompt_review_flags = []
         for flag in review_flags:
             if not isinstance(flag, dict):
