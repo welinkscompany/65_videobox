@@ -17160,6 +17160,77 @@ def test_editing_session_api_replaces_trimmed_stale_applied_tts_recommendation_w
     ]
 
 
+def test_editing_session_api_replaces_trimmed_stale_applied_broll_recommendation_when_running_partial_regeneration(
+    tmp_path: Path,
+) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    timeline_result = client.get(f"/api/projects/{project_id}/timelines/{timeline_job_id}")
+    timeline_payload = timeline_result.json()["timeline"]
+    timeline_path = (
+        tmp_path
+        / "projects"
+        / project_id
+        / "timelines"
+        / f'{timeline_payload["timeline_id"]}.json'
+    )
+    persisted_timeline = json.loads(timeline_path.read_text(encoding="utf-8"))
+    persisted_timeline["applied_recommendations"] = [
+        {
+            "recommendation_id": "rec_trimmed_stale_broll",
+            "target_segment_id": "seg_001",
+            "recommendation_type": " broll ",
+            "selected_asset_id": "asset_stale_broll",
+            "score": 1.0,
+            "reason": "Stale trimmed B-roll recommendation should be replaced by refresh.",
+            "auto_apply_allowed": True,
+            "review_required": False,
+            "payload": {},
+            "created_at": "2026-07-04T00:00:00+00:00",
+        }
+    ]
+    persisted_timeline["pending_recommendations"] = []
+    persisted_timeline["review_flags"] = []
+    timeline_path.write_text(json.dumps(persisted_timeline, indent=2), encoding="utf-8")
+
+    create_response = client.post(
+        f"/api/projects/{project_id}/editing-sessions",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    session_id = create_response.json()["session_id"]
+
+    client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/broll",
+        json={"asset_id": "asset_manual_001"},
+    )
+
+    response = client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/partial-regeneration",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["broll"],
+        },
+    )
+
+    assert response.status_code == 202
+    payload = response.json()
+    result_response = client.get(
+        f"/api/projects/{project_id}/partial-regenerations/{payload['job_id']}",
+    )
+
+    assert result_response.status_code == 200
+    result_payload = result_response.json()
+    broll_track = next(track for track in result_payload["timeline"]["tracks"] if track["track_type"] == "broll")
+    assert [clip["asset_uri"] for clip in broll_track["clips"]] == [
+        f"local://projects/{project_id}/assets/asset_manual_001"
+    ]
+    assert [item["recommendation_id"] for item in result_payload["timeline"]["applied_recommendations"]] == [
+        f"manual_broll_seg_001"
+    ]
+
+
 def test_editing_session_api_filters_unknown_overlay_type_when_running_partial_regeneration(
     tmp_path: Path,
 ) -> None:

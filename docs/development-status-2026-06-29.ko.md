@@ -496,6 +496,27 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
 - exact failing test 1개로만 다시 시작한다
 
+## 81. 2026-07-04 partial regeneration trimmed stale applied broll replacement closeout
+
+이번 후속 작업에서는 방금 닫은 partial regeneration `tts_refresh` trim family를 `broll_refresh`까지 이어, stale approved recommendation 교체 경계 1개만 다시 닫았다.
+
+- `packages/core-engine/src/videobox_core_engine/local_pipeline.py`의 `_execute_partial_regeneration_broll_refresh_step(...)`도 refresh 전에 기존 B-roll recommendation을 걷어낼 때 raw `recommendation_type` 비교를 써 source timeline에 `" broll "` stale approved recommendation이 남아 있으면 제거하지 못하고 carry-forward하고 있었다
+- strict TDD로 `test_editing_session_api_replaces_trimmed_stale_applied_broll_recommendation_when_running_partial_regeneration` exact regression을 먼저 추가했고, 실제로 partial regeneration 결과 broll track에 stale clip과 새 manual clip이 함께 남는 RED를 확인했다
+- 최소 수정으로 `broll_refresh` 기존 recommendation 제거 분기도 canonical trimmed type 기준으로 비교하게 맞춰, whitespace가 섞인 stale approved B-roll recommendation도 새 manual selection으로 정상 교체되게 했다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 partial regeneration runtime `broll_refresh` trim 경계만 좁게 수정했다
+
+검증:
+
+- exact regression
+  - `pytest tests/test_api.py -k "replaces_trimmed_stale_applied_broll_recommendation_when_running_partial_regeneration"` -> `1 passed`
+- output-gating focused slice
+  - `./scripts/dev-fast-path.ps1 -Mode output-gating -BackendPattern "replaces_trimmed_stale_applied_broll_recommendation_when_running_partial_regeneration or replaces_trimmed_stale_applied_tts_recommendation_when_running_partial_regeneration or timeline_builder_applies_trimmed_tts_replacement_type_to_narration_clip or trimmed_broll_type_for_default_provider_trace"` -> `2 passed`
+
+남은 판단:
+
+- broader verification은 이번 수정이 partial regeneration runtime `broll_refresh` type 비교 1줄에 국한되고 exact + focused evidence가 직접적이라 아직 재실행하지 않았다
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+
 ## 80. 2026-07-04 partial regeneration trimmed stale applied tts replacement closeout
 
 이번 후속 작업에서는 timeline builder 쪽에서 막 닫은 trimmed recommendation type family를 partial regeneration runtime의 `tts_refresh` 단계까지 이어, stale approved recommendation 교체 경계 1개만 다시 닫았다.
