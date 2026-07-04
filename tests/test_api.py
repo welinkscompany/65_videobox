@@ -18800,6 +18800,55 @@ def test_editing_session_api_replaces_trimmed_target_segment_id_stale_applied_bg
     ]
 
 
+def test_editing_session_api_matches_trimmed_source_segment_id_for_music_refresh_partial_regeneration(
+    tmp_path: Path,
+) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    database_path = tmp_path / "projects" / project_id / "db" / "project.sqlite"
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute(
+            "UPDATE segments SET segment_id = ? WHERE project_id = ? AND segment_id = ?",
+            (" seg_001 ", project_id, "seg_001"),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    create_response = client.post(
+        f"/api/projects/{project_id}/editing-sessions",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    session_id = create_response.json()["session_id"]
+
+    response = client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/partial-regeneration",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["music"],
+        },
+    )
+
+    assert response.status_code == 202
+    payload = response.json()
+    result_response = client.get(
+        f"/api/projects/{project_id}/partial-regenerations/{payload['job_id']}",
+    )
+
+    assert result_response.status_code == 200
+    result_payload = result_response.json()
+    bgm_track = next(track for track in result_payload["timeline"]["tracks"] if track["track_type"] == "bgm")
+    clip_segment_ids = [clip["segment_id"] for clip in bgm_track["clips"]]
+    assert "seg_001" in clip_segment_ids
+    assert any(
+        item["target_segment_id"] == "seg_001"
+        for item in result_payload["timeline"]["applied_recommendations"]
+    )
+
+
 def test_editing_session_api_filters_unknown_overlay_type_when_running_partial_regeneration(
     tmp_path: Path,
 ) -> None:

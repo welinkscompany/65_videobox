@@ -165,7 +165,7 @@ class TimelineBuilder:
     def _segment_payload(self, segment: dict[str, object] | SegmentRecord) -> dict[str, object]:
         if isinstance(segment, SegmentRecord):
             return {
-                "segment_id": segment.segment_id,
+                "segment_id": segment.segment_id.strip(),
                 "text": segment.text,
                 "start_sec": segment.start_sec,
                 "end_sec": segment.end_sec,
@@ -174,6 +174,7 @@ class TimelineBuilder:
                 "cleanup_decision": "review" if segment.review_required else "keep",
             }
         payload = dict(segment)
+        payload["segment_id"] = str(payload.get("segment_id") or "").strip()
         payload["review_required"] = _normalize_boolish(payload.get("review_required", False))
         return payload
 

@@ -4152,3 +4152,40 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - 장기 우선순위 queue는 유지
 - 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
 - exact failing test 1개로만 다시 시작한다
+
+## 107. 2026-07-04 partial regeneration music refresh trimmed source segment id closeout
+
+이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `TTS approval/output`과 `local_pipeline` partial regeneration runtime에 가장 가까운 `music_refresh` source segment id 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/core-engine/src/videobox_core_engine/local_pipeline.py`의 `_execute_partial_regeneration_music_refresh_step(...)`는 source segment row가 `" seg_001 "`처럼 whitespace stale `segment_id`를 가지면 targeted `segment_ids=["seg_001"]`와 매칭하지 못해 refreshed music recommendation을 만들지 못하고 있었다
+- strict TDD로 `test_editing_session_api_matches_trimmed_source_segment_id_for_music_refresh_partial_regeneration` exact regression을 먼저 추가했고, 실제로 partial regeneration result의 bgm clip이 `['seg_002']`만 남는 RED를 확인했다
+- 첫 시도에서는 adjacent `broll_refresh` 줄에 trim이 잘못 들어가 exact가 그대로 RED였고, 실제 누수 지점을 다시 확인한 뒤 `music_refresh` 대상 segment 선택 줄을 `strip()` 기준으로 맞춰 같은 exact test를 GREEN으로 닫았다
+- 같은 slice에서 `packages/core-engine/src/videobox_core_engine/timeline_builder.py`의 dict segment payload도 `segment_id`를 trim하도록 맞춰, refreshed recommendation은 canonical id인데 segment payload만 raw padded id를 유지해 timeline track 결합이 어긋나는 인접 누수도 함께 정리했다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 partial regeneration music refresh와 timeline build의 segment-id canonicalization 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 failed` 확인 후 `1 passed`
+- focused verification
+  - partial regeneration music 인접 exact
+  - 결과: `4 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - music refresh source segment match와 timeline builder segment payload canonicalization 두 점에 국한된 수정이라 exact + 인접 music family evidence가 가장 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. partial regeneration `music_refresh`가 whitespace stale persisted source segment id도 canonical trimmed id 기준으로 다시 선택한다
+2. refreshed music recommendation과 timeline builder segment payload가 같은 trimmed segment id 기준으로 결합된다
+3. partial regeneration result가 raw padded source segment id 때문에 targeted bgm refresh를 놓치지 않는다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다

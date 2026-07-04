@@ -2287,7 +2287,7 @@ class LocalPipelineRunner:
         segments_to_regenerate = [
             segment
             for segment in state["timeline_segments"]
-            if str(segment.get("segment_id") or "") in target_segment_ids - manual_segment_ids
+            if str(segment.get("segment_id") or "").strip() in target_segment_ids - manual_segment_ids
         ]
         if not segments_to_regenerate:
             return
@@ -2347,7 +2347,7 @@ class LocalPipelineRunner:
         segments_to_regenerate = [
             segment
             for segment in state["timeline_segments"]
-            if str(segment.get("segment_id") or "") in target_segment_ids - manual_segment_ids
+            if str(segment.get("segment_id") or "").strip() in target_segment_ids - manual_segment_ids
         ]
         if not segments_to_regenerate:
             return

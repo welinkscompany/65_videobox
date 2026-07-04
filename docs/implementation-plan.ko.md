@@ -730,6 +730,11 @@
 4. 그 다음 `local_pipeline`의 partial regeneration / output 경로를 최소 단위로 점진 정리
 5. thin editor 범위에서 아직 직접 검증이 약한 남은 고위험 경로를 보강
 
+2026-07-04 최신 누적 메모:
+
+- partial regeneration `music_refresh`가 whitespace stale source `segment_id`를 가진 segment도 다시 선택하도록 `local_pipeline` source-segment match를 trim 기준으로 맞췄다
+- 같은 slice에서 `timeline_builder` dict segment payload도 `segment_id`를 trim해 refreshed recommendation과 segment lookup이 서로 다른 id 기준으로 어긋나지 않게 정리했다
+
 단, 2026-07-03 기준 `2일 내 1차 데모 완성` 실행 레일은 위 장기 우선순위를 그대로 넓게 다 가져가지 않는다.
 즉시 실행 기준은 `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`를 따른다.
 그 문서 기준 기본 범위는 아래 3개뿐이다.
