@@ -14,6 +14,10 @@ def _canonical_review_flag_code(value: object) -> str:
     return str(value or "").strip().lower()
 
 
+def _canonical_track_type(value: object) -> str:
+    return str(value or "").strip().lower()
+
+
 def extract_pending_recommendation_decision(
     *,
     timeline: dict[str, Any],
@@ -133,7 +137,7 @@ def apply_approved_recommendation_to_timeline(
         raise ValueError("Approved TTS replacement requires target_segment_id.")
     matched_clip = False
     for track in timeline.get("tracks", []):
-        if str(track.get("track_type") or "") != "narration":
+        if _canonical_track_type(track.get("track_type")) != "narration":
             continue
         clips = track.get("clips")
         if not isinstance(clips, list):

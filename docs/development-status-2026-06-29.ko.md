@@ -545,6 +545,42 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
 - exact failing test 1개로만 다시 시작한다
 
+## 126. 2026-07-04 review approval mixed-case narration track type closeout
+
+이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `TTS approval/output`에 가장 가까운 review recommendation approval mutation 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/core-engine/src/videobox_core_engine/review_action_mutations.py`의 `apply_approved_recommendation_to_timeline(...)`는 approved TTS replacement를 narration clip에 반영할 때 `track_type`를 raw 문자열 그대로 `narration`과 비교하고 있어, legacy `" NARRATION "` 같은 mixed-case stale shape가 남으면 target narration clip을 찾지 못하고 실패하고 있었다
+- strict TDD로 `test_apply_approved_tts_recommendation_matches_mixed_case_narration_track_type` exact regression을 먼저 추가했고, 실제로 `Approved TTS replacement requires a matching target narration clip.` 예외가 나는 RED를 확인했다
+- 최소 수정으로 review action mutation에 track type canonical helper를 추가해 `strip().lower()` 기준으로 narration track을 찾도록 맞췄다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence behavior를 건드리지 않고 approved TTS narration 적용의 track-type read-path 한 점만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 failed` 확인 후 `1 passed`
+- focused verification
+  - review approval / TTS output 인접 exact
+  - 결과: `4 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - approved TTS narration track-type canonicalization 한 점 수정이라 exact + approval/output 인접 focused evidence가 가장 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. review recommendation approval mutation이 legacy mixed-case narration `track_type`도 canonical lowercase 기준으로 해석한다
+2. stale narration track type 때문에 approved TTS asset이 target narration clip에 반영되지 않는 문제를 막는다
+3. review approval mutation, preview renderer, CapCut export가 narration track type 해석에서 더 같은 canonical 기준을 사용한다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
 ## 118. 2026-07-04 output operator copy mixed-case review status prompt closeout
 
 이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `review/output gating`과 바로 이어지는 operator copy prompt surface 경계 1개만 다시 닫았다.

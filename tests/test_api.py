@@ -20,6 +20,7 @@ from videobox_core_engine.local_pipeline import LocalPipelineRunner
 from videobox_core_engine.output_operator_copy import LocalFirstOutputOperatorCopyBuilder
 from videobox_core_engine.preview_renderer import PreviewRenderer
 from videobox_core_engine.provider_trace import build_provider_trace
+from videobox_core_engine.review_action_mutations import apply_approved_recommendation_to_timeline
 from videobox_core_engine.review_guidance import HeuristicReviewGuidanceBuilder, LocalFirstReviewGuidanceBuilder
 from videobox_core_engine.settings import AutoCutConfig, LocalOpenAICompatibleRuntimeConfig
 from videobox_core_engine.timeline_builder import TimelineBuilder
@@ -824,6 +825,42 @@ def test_preview_renderer_canonicalizes_mixed_case_track_type_surface() -> None:
 
     assert "<strong>narration</strong>: 0 clips" in payload["player_html"]
     assert "<strong> NARRATION </strong>" not in payload["player_html"]
+
+
+def test_apply_approved_tts_recommendation_matches_mixed_case_narration_track_type() -> None:
+    timeline = {
+        "tracks": [
+            {
+                "track_id": "narration_primary",
+                "track_type": " NARRATION ",
+                "clips": [
+                    {
+                        "clip_id": "clip_narration_001",
+                        "segment_id": "seg_001",
+                        "asset_uri": "local://projects/project_001/segments/seg_001",
+                        "start_sec": 0.0,
+                        "end_sec": 1.0,
+                        "clip_type": "narration",
+                    }
+                ],
+            }
+        ]
+    }
+
+    apply_approved_recommendation_to_timeline(
+        timeline=timeline,
+        decided_recommendation={
+            "recommendation_type": "tts_replacement",
+            "target_segment_id": "seg_001",
+            "payload": {
+                "selected_asset_uri": "local://projects/project_001/assets/generated/asset_tts_001.wav"
+            },
+        },
+    )
+
+    assert timeline["tracks"][0]["clips"][0]["asset_uri"] == (
+        "local://projects/project_001/assets/generated/asset_tts_001.wav"
+    )
 
 
 def test_output_operator_copy_builder_canonicalizes_mixed_case_review_status_in_prompt() -> None:
