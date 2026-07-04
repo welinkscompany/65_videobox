@@ -232,5 +232,7 @@ class LocalFirstReviewGuidanceBuilder(ReviewGuidanceBuilder):
                 prompt_row["decision_state"] = str(prompt_row.get("decision_state") or "").strip().lower()
             if "selected_asset_id" in prompt_row:
                 prompt_row["selected_asset_id"] = str(prompt_row.get("selected_asset_id") or "").strip()
+            if "created_at" in prompt_row:
+                prompt_row["created_at"] = str(prompt_row.get("created_at") or "").strip()
             prompt_rows.append(prompt_row)
         return prompt_rows
