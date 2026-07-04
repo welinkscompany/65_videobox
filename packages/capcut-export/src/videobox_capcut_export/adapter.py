@@ -152,7 +152,7 @@ class CapCutExportAdapter:
             start_sec = float(clip.get("start_sec") or 0.0)
             end_sec = float(clip.get("end_sec") or 0.0)
             source_uri = track_source_uri or str(clip.get("asset_uri") or "")
-            if str(clip.get("segment_id") or "") in effective_override_segment_ids:
+            if str(clip.get("segment_id") or "").strip() in effective_override_segment_ids:
                 source_uri = str(clip.get("asset_uri") or source_uri)
             segments.append(
                 {

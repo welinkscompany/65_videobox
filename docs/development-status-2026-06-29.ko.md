@@ -4261,3 +4261,39 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - 장기 우선순위 queue는 유지
 - 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
 - exact failing test 1개로만 다시 시작한다
+
+## 110. 2026-07-04 capcut export trimmed narration clip segment id closeout
+
+이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `TTS approval/output`에 가장 가까운 export read path 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/capcut-export/src/videobox_capcut_export/adapter.py`의 `_build_clip_track(...)`는 narration clip `segment_id`를 raw 문자열로 비교하고 있어 `" seg_001 "`처럼 whitespace stale clip id를 가진 timeline에서 trimmed TTS recommendation target과 매칭하지 못했다
+- strict TDD로 `test_capcut_export_adapter_matches_trimmed_narration_clip_segment_id_for_segment_level_narration_sources` exact regression을 먼저 추가했고, 실제로 voiceover track 첫 segment가 approved TTS asset이 아니라 original narration source URI를 계속 사용하던 RED를 확인했다
+- 최소 수정으로 CapCut export adapter의 clip `segment_id`도 `strip()` 기준으로 맞춰, export read path가 trimmed TTS recommendation target과 같은 기준으로 narration source를 고르게 했다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 CapCut export voiceover source selection 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 failed` 확인 후 `1 passed`
+- focused verification
+  - CapCut export TTS 인접 exact
+  - 결과: `5 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - export voiceover source selection의 segment-id canonicalization 한 점 수정이라 exact + export 인접 evidence가 가장 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. CapCut export adapter가 whitespace stale narration clip segment id도 canonical trimmed id 기준으로 approved TTS recommendation과 매칭한다
+2. export payload voiceover source가 raw padded clip id 때문에 original narration source로 잘못 남지 않는다
+3. preview renderer와 CapCut export adapter가 approved narration source selection에서 같은 trimmed segment id 기준을 사용한다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
