@@ -473,6 +473,7 @@
 - recommendation run read path도 saved recommendation run JSON의 top-level `recommendation_type`이 legacy/mixed-case stale shape여도 canonical lowercase type 기준으로 artifact read truth와 returned response surface를 유지해 recommendation result/output build 경로를 끊지 않는 계약
 - timeline builder도 approved recommendation의 `recommendation_type`에 whitespace가 섞인 stale shape여도 canonical recommendation type 기준으로 narration/B-roll/BGM clip 반영 분기를 유지해 timeline/output truth를 일관되게 유지하는 계약
 - timeline builder도 approved recommendation의 legacy/mixed-case `recommendation_type` shape를 raw casing 그대로 비교하지 않고 canonical lowercase type 기준으로 narration/B-roll/BGM clip 반영 분기를 유지해 timeline/output truth를 일관되게 유지하는 계약
+- timeline builder도 approved TTS recommendation의 `target_segment_id`에 whitespace가 섞인 stale shape여도 trimmed segment id 기준으로 narration clip override를 유지하는 계약
 - preview renderer도 applied recommendation의 `recommendation_type`에 whitespace가 섞인 stale TTS shape여도 canonical recommendation type 기준으로 selected narration source를 유지하는 계약
 - preview renderer도 applied recommendation의 legacy/mixed-case `recommendation_type` TTS shape를 raw casing 그대로 비교하지 않고 canonical lowercase type 기준으로 selected narration source를 유지하는 계약
 - preview renderer도 applied TTS recommendation의 `target_segment_id`에 whitespace가 섞인 stale shape여도 trimmed segment id 기준으로 selected narration source를 유지하는 계약
