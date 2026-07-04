@@ -4369,3 +4369,39 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - 장기 우선순위 queue는 유지
 - 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
 - exact failing test 1개로만 다시 시작한다
+
+## 113. 2026-07-04 preview renderer trimmed narration clip segment id surface closeout
+
+이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `TTS approval/output`에 가장 가까운 preview HTML surface 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/core-engine/src/videobox_core_engine/preview_renderer.py`의 narration sources HTML surface는 approved narration source selection은 이미 trimmed 기준으로 맞춰져 있어도, 목록에 보이는 `segment_id`는 raw 문자열 그대로 노출해 `" seg_001 "` 같은 whitespace stale shape를 preview surface에 남기고 있었다
+- strict TDD로 `test_preview_renderer_trims_narration_clip_segment_id_surface_for_narration_source` exact regression을 먼저 추가했고, 실제로 preview HTML이 `<li> seg_001 : ...</li>`를 노출하는 RED를 확인했다
+- 최소 수정으로 narration sources HTML surface의 `segment_id`도 `strip()` 기준으로 맞춰, preview read path가 approved narration source와 segment id surface를 같은 canonical 기준으로 유지하게 정리했다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 preview renderer HTML surface 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 failed` 확인 후 `1 passed`
+- focused verification
+  - preview renderer TTS 인접 exact
+  - 결과: `4 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - preview HTML surface segment-id canonicalization 한 점 수정이라 exact + preview 인접 evidence가 가장 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. preview renderer가 whitespace stale narration clip segment id를 approved narration source selection뿐 아니라 HTML surface에서도 canonical trimmed id로 유지한다
+2. preview HTML narration sources 목록이 raw padded clip id를 그대로 노출하지 않는다
+3. preview renderer의 approved narration source와 visible segment surface가 같은 trimmed 기준을 사용한다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다

@@ -61,7 +61,7 @@ class PreviewRenderer:
         narration_source_items = "".join(
             (
                 "<li>"
-                f"{escape(str(clip.get('segment_id', '')))}: "
+                f"{escape(str(clip.get('segment_id', '')).strip())}: "
                 f"{escape(self._effective_narration_source_uri(timeline=timeline, clip=clip, tts_segments=tts_segments))}"
                 "</li>"
             )
