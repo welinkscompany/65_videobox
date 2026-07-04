@@ -924,6 +924,25 @@ def test_review_guidance_builder_ignores_string_false_segment_review_required() 
     ) == ["seg_002"]
 
 
+def test_review_guidance_builder_trims_segment_ids_needing_attention_in_prompt() -> None:
+    builder = LocalFirstReviewGuidanceBuilder(runtime_service=object())
+
+    prompt = builder._build_prompt(
+        review_snapshot={
+            "review_status": "blocked",
+            "review_flags": [],
+            "pending_recommendations": [],
+            "segments": [
+                {"segment_id": " seg_001 ", "review_required": True},
+                {"segment_id": "seg_002", "review_required": False},
+            ],
+        }
+    )
+
+    assert "Segments needing attention: ['seg_001']" in prompt
+    assert "Segments needing attention: [' seg_001 ']" not in prompt
+
+
 def test_heuristic_review_guidance_builder_canonicalizes_mixed_case_approved_review_status() -> None:
     builder = HeuristicReviewGuidanceBuilder()
 

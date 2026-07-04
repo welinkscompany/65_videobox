@@ -183,7 +183,8 @@ class LocalFirstReviewGuidanceBuilder(ReviewGuidanceBuilder):
 
     def _segments_needing_attention(self, segments: list[dict[str, Any]]) -> list[str]:
         return [
-            str(segment.get("segment_id") or "")
+            str(segment.get("segment_id") or "").strip()
             for segment in segments
             if _normalize_boolish(segment.get("review_required"))
+            and str(segment.get("segment_id") or "").strip()
         ]
