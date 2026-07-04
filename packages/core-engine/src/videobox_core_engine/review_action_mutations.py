@@ -32,7 +32,7 @@ def extract_pending_recommendation_decision(
             ) or build_provider_trace(
                 final_provider=(
                     "heuristic_fallback"
-                    if str(decided_recommendation.get("recommendation_type") or "") == "broll"
+                    if str(decided_recommendation.get("recommendation_type") or "").strip() == "broll"
                     else "rule_based_fallback"
                 )
             )
