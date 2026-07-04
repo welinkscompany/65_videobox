@@ -11,6 +11,7 @@ from videobox_api.orchestration import ApiOrchestrator, build_local_first_runtim
 from videobox_core_engine.auto_cut import AutoCutPlanner
 from videobox_core_engine.local_pipeline import LocalPipelineRunner
 from videobox_core_engine.output_operator_copy import LocalFirstOutputOperatorCopyBuilder
+from videobox_core_engine.provider_trace import build_provider_trace
 from videobox_core_engine.recommenders import LocalFirstKeywordBrollRecommender, LocalFirstMusicRecommender
 from videobox_core_engine.review_guidance import LocalFirstReviewGuidanceBuilder
 from videobox_core_engine.script_scene_planner import LocalFirstSegmentAnalyzer
@@ -722,15 +723,26 @@ def _build_preflight_review_prediction(
                 and flag.get("segment_id").strip()
             )
         ]
+    recommendation_blocker_sources: list[object] = []
     source_pending_recommendations = source_timeline.get("pending_recommendations")
-    if not isinstance(source_pending_recommendations, list):
-        source_pending_recommendations = []
-    else:
-        source_pending_recommendations = [
+    if isinstance(source_pending_recommendations, list):
+        recommendation_blocker_sources.extend(source_pending_recommendations)
+    source_applied_recommendations = source_timeline.get("applied_recommendations")
+    if isinstance(source_applied_recommendations, list):
+        recommendation_blocker_sources.extend(source_applied_recommendations)
+    source_pending_recommendations = [
             item
-            for item in source_pending_recommendations
+            for item in recommendation_blocker_sources
             if (
                 isinstance(item, dict)
+                and (
+                    not str(item.get("decision_state") or "").strip()
+                    or str(item.get("decision_state") or "").strip().lower() == "pending"
+                )
+                and (
+                    not _normalize_boolish_response(item.get("auto_apply_allowed", False))
+                    or _normalize_boolish_response(item.get("review_required", False))
+                )
                 and isinstance(item.get("recommendation_id"), str)
                 and item.get("recommendation_id").strip()
                 and isinstance(item.get("target_segment_id"), str)
@@ -806,6 +818,14 @@ def _normalize_review_flags_for_response(value: object) -> list[dict[str, str]]:
     return normalized
 
 
+def _normalize_boolish_response(value: object) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() not in {"", "0", "false", "no", "off"}
+    if isinstance(value, bool):
+        return value
+    return False
+
+
 def _normalize_recommendations_for_response(value: object) -> list[dict[str, object]]:
     if not isinstance(value, list):
         return []
@@ -832,8 +852,12 @@ def _normalize_recommendations_for_response(value: object) -> list[dict[str, obj
                 "score": score,
                 "reason": str(item.get("reason") or "").strip()
                 or "Operator review required before approval or output.",
-                "auto_apply_allowed": bool(item.get("auto_apply_allowed", False)),
-                "review_required": bool(item.get("review_required", False)),
+                "auto_apply_allowed": _normalize_boolish_response(
+                    item.get("auto_apply_allowed", False)
+                ),
+                "review_required": _normalize_boolish_response(
+                    item.get("review_required", False)
+                ),
                 "decision_state": str(item.get("decision_state") or "").strip() or None,
                 "payload": payload if isinstance(payload, dict) else {},
                 "created_at": str(item.get("created_at") or "").strip() or "unknown",
@@ -853,6 +877,27 @@ def _normalize_timeline_payload_for_response(timeline: dict[str, Any]) -> dict[s
         timeline.get("pending_recommendations")
     )
     return normalized
+
+
+def _normalize_operator_guidance_response(value: object) -> dict[str, object]:
+    if not isinstance(value, dict):
+        value = {}
+    action_items = value.get("action_items")
+    provider_trace = value.get("provider_trace")
+    return {
+        "summary": str(value.get("summary") or "").strip()
+        or "Operator review guidance is unavailable.",
+        "action_items": [
+            str(item).strip()
+            for item in action_items
+            if str(item).strip()
+        ]
+        if isinstance(action_items, list)
+        else [],
+        "provider_trace": provider_trace
+        if isinstance(provider_trace, dict)
+        else build_provider_trace(final_provider="heuristic_fallback"),
+    }
 
 
 def create_app(
@@ -1345,7 +1390,9 @@ def create_app(
             fields=result["fields"],
             downstream_steps=result["downstream_steps"],
             regenerated_segments=result["regenerated_segments"],
-            timeline=TimelinePayloadResponse(**result["timeline"]),
+            timeline=TimelinePayloadResponse(
+                **_normalize_timeline_payload_for_response(result["timeline"])
+            ),
             created_at=result.get("created_at"),
         )
 
@@ -1585,7 +1632,9 @@ def create_app(
                 RecommendationItemResponse(**item) for item in normalized_pending_recommendations
             ],
             review_flags=[ReviewFlagResponse(**item) for item in normalized_review_flags],
-            operator_guidance=OperatorGuidanceResponse(**result["operator_guidance"]),
+            operator_guidance=OperatorGuidanceResponse(
+                **_normalize_operator_guidance_response(result["operator_guidance"])
+            ),
         )
 
     @app.post("/api/projects/{project_id}/review-snapshots/{job_id}/recommendations/{recommendation_id}/approve")
@@ -1621,7 +1670,9 @@ def create_app(
                 RecommendationItemResponse(**item) for item in normalized_pending_recommendations
             ],
             review_flags=[ReviewFlagResponse(**item) for item in normalized_review_flags],
-            operator_guidance=OperatorGuidanceResponse(**result["operator_guidance"]),
+            operator_guidance=OperatorGuidanceResponse(
+                **_normalize_operator_guidance_response(result["operator_guidance"])
+            ),
         )
 
     @app.post("/api/projects/{project_id}/review-snapshots/{job_id}/recommendations/{recommendation_id}/reject")
@@ -1657,7 +1708,9 @@ def create_app(
                 RecommendationItemResponse(**item) for item in normalized_pending_recommendations
             ],
             review_flags=[ReviewFlagResponse(**item) for item in normalized_review_flags],
-            operator_guidance=OperatorGuidanceResponse(**result["operator_guidance"]),
+            operator_guidance=OperatorGuidanceResponse(
+                **_normalize_operator_guidance_response(result["operator_guidance"])
+            ),
         )
 
     @app.post("/api/projects/{project_id}/review-approvals/{job_id}/approve", status_code=status.HTTP_202_ACCEPTED)

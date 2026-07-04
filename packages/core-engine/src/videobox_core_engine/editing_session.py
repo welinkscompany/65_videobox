@@ -28,6 +28,14 @@ PARTIAL_REGEN_STEPS_BY_FIELD = {
 }
 
 
+def _normalize_boolish(value: object) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() not in {"", "0", "false", "no", "off"}
+    if isinstance(value, bool):
+        return value
+    return False
+
+
 def build_editing_session(
     *,
     project_id: str,
@@ -43,7 +51,7 @@ def build_editing_session(
                 "start_sec": segment["start_sec"],
                 "end_sec": segment["end_sec"],
                 "cut_action": segment.get("cleanup_decision", "keep"),
-                "review_required": bool(segment.get("review_required", False)),
+                "review_required": _normalize_boolish(segment.get("review_required", False)),
                 "broll_override": None,
                 "visual_overlays": [],
                 "music_override": None,

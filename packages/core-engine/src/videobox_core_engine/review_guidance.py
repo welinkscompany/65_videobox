@@ -9,6 +9,14 @@ from videobox_core_engine.provider_trace import build_provider_trace, response_p
 from videobox_provider_interfaces.llm import LLMProviderError, LLMTaskType
 
 
+def _normalize_boolish(value: object) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() not in {"", "0", "false", "no", "off"}
+    if isinstance(value, bool):
+        return value
+    return False
+
+
 class StructuredReviewGuidanceRuntime(Protocol):
     def generate_structured(
         self,
@@ -173,5 +181,5 @@ class LocalFirstReviewGuidanceBuilder(ReviewGuidanceBuilder):
         return [
             str(segment.get("segment_id") or "")
             for segment in segments
-            if bool(segment.get("review_required"))
+            if _normalize_boolish(segment.get("review_required"))
         ]

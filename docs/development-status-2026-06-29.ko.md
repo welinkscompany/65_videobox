@@ -221,6 +221,832 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - review->editor recommendation mapping coverage 중 `broll` happy-path 보강
 - review action placeholder를 실제 persistence contract와 연결할지 여부 설계
 
+## 44. 2026-07-04 timeline builder review snapshot legacy string false recommendation fields closeout
+
+이번 후속 작업에서는 이미 닫힌 store fallback 경계를 다시 넓히지 않고, 그 바로 인접면인 `timeline_builder.build_review_snapshot()` direct dict 입력에서 legacy false-like recommendation payload가 applied truth를 pending blocker로 뒤집는 가장 작은 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/core-engine/src/videobox_core_engine/timeline_builder.py`의 `build_review_snapshot(...)`는 direct dict recommendation 입력의 `auto_apply_allowed="true"` / `review_required="false"` 값을 raw `bool(...)`로 읽어 applied recommendation을 pending recommendation으로 잘못 분류하고 있었다
+- strict TDD로 `test_timeline_builder_review_snapshot_treats_string_false_recommendation_fields_as_applied` exact regression을 먼저 추가했고, 실제로 `applied_recommendations == []` RED를 확인했다
+- 구현 전에 검토한 `partial regeneration result` 후보 경계는 현재 코드 기준 이미 닫혀 있었고, 실제 runtime 반환 계약에 맞게 test setup을 보정한 뒤 exact regression이 바로 GREEN이었다
+- 원인은 builder review snapshot read path가 upstream/store normalization을 재사용하지 않고 recommendation bool fields를 raw truthiness로 다시 판정하던 점이었다
+- 최소 수정으로 `build_review_snapshot(...)`도 `_recommendation_payload(...)`를 거쳐 bool-ish normalization을 먼저 적용하도록 맞춰 legacy false-like recommendation fields를 canonical applied/pending truth로 분류하게 했다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 timeline builder review snapshot truth 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 passed`
+- output-gating focused slice
+  - `24 passed`
+- current-focused-parallel
+  - backend output-gating `24 passed`
+  - backend preflight `56 passed`
+  - frontend preflight `25 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - timeline builder review snapshot bool-ish normalization 한 점에 국한된 수정이라 exact + focused evidence가 더 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. timeline builder review snapshot direct dict 입력이 legacy recommendation payload의 `auto_apply_allowed="true"` / `review_required="false"` shape를 pending blocker로 오판하지 않음
+2. applied recommendation truth가 builder review snapshot에서도 그대로 유지됨
+3. builder review snapshot truth와 store fallback / API read truth가 bool-ish false shape에서 같은 기준을 사용함
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
+## 57. 2026-07-04 review snapshot helper unknown pending recommendation surface closeout
+
+이번 후속 작업에서는 direct review-snapshot helper의 stale recommendation family를 한 단계 더 좁혀, unknown legacy pending recommendation이 status는 막지 않더라도 `pending_recommendations` surface에는 blocker처럼 남는 가장 작은 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/storage-abstractions/src/videobox_storage/local_project_store.py`의 `build_review_snapshot(...)`는 helper status 계산은 이미 canonical blocker만 보도록 좁혀졌지만, `pending_recommendations` surface는 `decision_state="pending"`만 보면 recommendation type validity와 무관하게 그대로 남기고 있었다
+- strict TDD로 `test_store_build_review_snapshot_filters_unknown_pending_recommendation_from_surface` exact regression을 먼저 추가했고, 실제로 `pending_recommendations`에 `legacy_overlay_pick` stale entry가 그대로 남는 RED를 확인했다
+- 최소 수정으로 direct helper pending surface도 canonical blocking pending recommendation만 유지하도록 좁혀, unknown / non-blocking pending recommendation은 status뿐 아니라 helper surface에서도 blocker처럼 남지 않게 맞췄다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 review snapshot helper pending-surface truth 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 passed`
+- output-gating focused slice
+  - `24 passed`
+- current-focused-parallel
+  - backend output-gating `24 passed`
+  - backend preflight `57 passed`
+  - frontend preflight `25 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - review snapshot helper unknown-pending surface filtering 한 점에 국한된 수정이라 exact + focused evidence가 더 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. review snapshot direct helper가 unknown / non-blocking `timeline_pending_recommendations` shape를 `pending_recommendations` surface에 blocker처럼 남기지 않음
+2. helper status truth와 pending surface truth가 stale recommendation family에서 같은 기준을 사용함
+3. helper pending surface와 runtime output gating / preflight read truth가 같은 canonical blocker 기준을 사용함
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
+## 58. 2026-07-04 timeline persistence unknown pending recommendation initial status closeout
+
+이번 후속 작업에서는 direct review-snapshot helper와 output gating truth를 다시 넓히지 않고, 그 바로 아래 persistence initial review state가 unknown pending recommendation stale entry 하나 때문에 `blocked`로 저장되는 가장 작은 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/storage-abstractions/src/videobox_storage/local_project_store.py`의 `save_timeline_run(...)`는 initial review status를 계산할 때 pending/applied bucket 안 recommendation의 normalized `decision_state == "pending"`만 보면 blocker로 세고 있어, `legacy_overlay_pick` 같은 unknown recommendation type도 `blocked` 초기 상태로 저장하고 있었다
+- strict TDD로 `test_store_save_timeline_run_ignores_unknown_pending_recommendation_when_setting_initial_status` exact regression을 먼저 추가했고, 실제로 `review_state["status"] == "blocked"` RED를 확인했다
+- 최소 수정으로 persistence initial status 계산도 canonical blocking pending recommendation만 blocker로 세도록 좁혀, unknown / non-blocking pending recommendation 하나만으로는 `draft` truth를 유지하게 맞췄다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 timeline persistence initial-status truth 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 passed`
+- output-gating focused slice
+  - `24 passed`
+- current-focused-parallel
+  - backend output-gating `24 passed`
+  - backend preflight `57 passed`
+  - frontend preflight `25 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - timeline persistence initial-status blocker classification 한 점에 국한된 수정이라 exact + focused evidence가 더 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. timeline persistence initial review state가 unknown / non-blocking `pending_recommendations` shape 하나만으로 `blocked`를 저장하지 않음
+2. canonical blocking pending recommendation이 없는 경우 persisted initial review state가 `draft` truth를 유지함
+3. persistence initial-status truth와 review snapshot helper / runtime output gating truth가 같은 canonical blocker 기준을 사용함
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
+## 59. 2026-07-04 timeline API unknown applied recommendation surface closeout
+
+이번 후속 작업에서는 이미 닫힌 pending-like misbucketed applied 경계를 다시 넓히지 않고, timeline API read path에 남아 있던 unknown stale recommendation applied-surface 누수 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/core-engine/src/videobox_core_engine/local_pipeline.py`의 `_hydrate_timeline_review_status(...)`는 applied recommendation read path에서 pending-like blocker만 제외하고 있어, `legacy_overlay_pick` 같은 unknown recommendation type stale entry는 approved timeline의 `applied_recommendations` surface에 그대로 남기고 있었다
+- strict TDD로 `test_timeline_api_filters_unknown_type_entry_misbucketed_into_applied_recommendations` exact regression을 먼저 추가했고, 실제로 `payload["applied_recommendations"]`에 stale unknown recommendation이 그대로 남는 RED를 확인했다
+- 최소 수정으로 timeline API applied surface도 canonical supported recommendation type만 유지하도록 좁혀, unknown / non-blocking applied stale entry는 user-facing surface에서 제거되게 맞췄다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 timeline API applied-surface truth 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 passed`
+- output-gating focused slice
+  - `24 passed`
+- current-focused-parallel
+  - backend output-gating `24 passed`
+  - backend preflight `57 passed`
+  - frontend preflight `25 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - timeline API applied-surface filtering 한 점에 국한된 수정이라 exact + focused evidence가 더 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. timeline API read path가 unknown / non-blocking `applied_recommendations` stale entry를 applied surface에 남기지 않음
+2. canonical supported recommendation type만 user-facing applied surface에 유지됨
+3. timeline API applied surface truth와 pending blocker read truth가 stale recommendation family에서 더 일관된 기준을 사용함
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
+## 60. 2026-07-04 review snapshot helper unknown applied recommendation surface closeout
+
+이번 후속 작업에서는 timeline API applied-surface truth를 다시 넓히지 않고, direct review-snapshot helper override 입력에 남아 있던 unknown applied stale recommendation surface 누수 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/storage-abstractions/src/videobox_storage/local_project_store.py`의 `build_review_snapshot(...)`는 applied surface를 만들 때 `decision_state="approved"`만 보면 recommendation type validity와 무관하게 그대로 남기고 있어, `legacy_overlay_pick` 같은 unknown recommendation type stale entry를 applied surface에 계속 노출하고 있었다
+- strict TDD로 `test_store_build_review_snapshot_filters_unknown_applied_recommendation_from_surface` exact regression을 먼저 추가했고, 실제로 `snapshot["applied_recommendations"]`에 stale unknown recommendation이 그대로 남는 RED를 확인했다
+- 최소 수정으로 direct helper applied surface도 canonical supported recommendation type만 유지하도록 좁혀, unknown / non-blocking applied stale entry는 helper surface에서 제거되게 맞췄다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 review snapshot helper applied-surface truth 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 passed`
+- output-gating focused slice
+  - `24 passed`
+- current-focused-parallel
+  - backend output-gating `24 passed`
+  - backend preflight `57 passed`
+  - frontend preflight `25 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - review snapshot helper applied-surface filtering 한 점에 국한된 수정이라 exact + focused evidence가 더 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. review snapshot direct helper가 unknown / non-blocking `timeline_applied_recommendations` stale entry를 applied surface에 남기지 않음
+2. canonical supported recommendation type만 helper applied surface에 유지됨
+3. review snapshot helper applied surface truth와 timeline API read truth가 stale recommendation family에서 더 일관된 기준을 사용함
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
+## 61. 2026-07-04 timeline builder unknown applied recommendation surface closeout
+
+이번 후속 작업에서는 helper/API applied-surface truth를 다시 넓히지 않고, partial regeneration runtime이 직접 의존하는 timeline builder source-truth에 남아 있던 unknown applied stale recommendation surface 누수 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/core-engine/src/videobox_core_engine/timeline_builder.py`의 `build(...)`는 recommendation을 normalized bool fields만 보고 분류하고 있어, `legacy_overlay_pick` 같은 unknown recommendation type stale entry도 `auto_apply_allowed=true` / `review_required=false`이면 applied surface에 그대로 남기고 있었다
+- strict TDD로 `test_timeline_builder_filters_unknown_applied_recommendation_from_surface` exact regression을 먼저 추가했고, 실제로 `timeline.applied_recommendations`에 stale unknown recommendation이 그대로 남는 RED를 확인했다
+- 최소 수정으로 builder도 canonical supported recommendation type만 recommendation flow에 반입하도록 좁혀, unknown / non-blocking applied stale entry는 source-truth 단계에서 제거되게 맞췄다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 timeline builder source-truth 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 passed`
+- output-gating focused slice
+  - `24 passed`
+- current-focused-parallel
+  - backend output-gating `24 passed`
+  - backend preflight `57 passed`
+  - frontend preflight `25 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - timeline builder source-truth filtering 한 점에 국한된 수정이라 exact + focused evidence가 더 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. timeline builder가 unknown / non-blocking recommendation stale entry를 applied/pending surface에 반입하지 않음
+2. canonical supported recommendation type만 builder source-truth에 유지됨
+3. builder source-truth와 review snapshot helper / timeline API applied surface truth가 stale recommendation family에서 더 일관된 기준을 사용함
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
+## 62. 2026-07-04 timeline builder review snapshot unknown applied recommendation surface closeout
+
+이번 후속 작업에서는 timeline builder 본체 applied-surface truth를 다시 넓히지 않고, 같은 파일의 review snapshot direct dict 입력면에 남아 있던 unknown applied stale recommendation surface 누수 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/core-engine/src/videobox_core_engine/timeline_builder.py`의 `build_review_snapshot(...)`는 recommendation을 bool fields만 보고 분류하고 있어, `legacy_overlay_pick` 같은 unknown recommendation type stale entry도 `auto_apply_allowed=true` / `review_required=false`이면 applied surface에 그대로 남기고 있었다
+- strict TDD로 `test_timeline_builder_review_snapshot_filters_unknown_applied_recommendation_from_surface` exact regression을 먼저 추가했고, 실제로 `snapshot["applied_recommendations"]`에 stale unknown recommendation이 그대로 남는 RED를 확인했다
+- 최소 수정으로 builder review snapshot도 canonical supported recommendation type만 recommendation flow에 반입하도록 좁혀, unknown / non-blocking applied stale entry는 source-truth 단계에서 제거되게 맞췄다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 timeline builder review snapshot truth 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 passed`
+- output-gating focused slice
+  - `24 passed`
+- current-focused-parallel
+  - backend output-gating `24 passed`
+  - backend preflight `57 passed`
+  - frontend preflight `25 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - timeline builder review snapshot source-truth filtering 한 점에 국한된 수정이라 exact + focused evidence가 더 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. timeline builder review snapshot이 unknown / non-blocking recommendation stale entry를 applied/pending surface에 반입하지 않음
+2. canonical supported recommendation type만 builder review snapshot truth에 유지됨
+3. timeline builder 본체와 builder review snapshot truth가 stale recommendation family에서 더 일관된 기준을 사용함
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
+## 64. 2026-07-04 review snapshot persisted operator guidance default provider trace closeout
+
+이번 후속 작업에서는 partial regeneration result response fallback 경계를 다시 넓히지 않고, 같은 review/output read-contract 축의 바로 인접면인 persisted `operator_guidance` legacy shape 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `services/api/src/videobox_api/main.py`의 review snapshot 응답은 recommendation/review_flag와 달리 persisted `operator_guidance`를 raw `OperatorGuidanceResponse`에 바로 넣고 있어, legacy guidance에 `provider_trace`가 빠져 있으면 응답 모델 validation error가 났다
+- strict TDD로 `test_review_snapshot_fills_default_provider_trace_for_persisted_operator_guidance` exact regression을 먼저 추가했고, 실제로 `operator_guidance.provider_trace Field required` RED를 확인했다
+- 첫 최소 수정에서 generic response fallback을 재사용하면 `rule_based_fallback`이 들어가 review guidance truth와 어긋났고, guidance response normalization을 별도로 두어 missing trace일 때 `heuristic_fallback`을 채우는 쪽으로 한 단계 더 좁혀 맞췄다
+- 최소 수정으로 review snapshot / approve / reject 응답의 operator guidance response layer만 normalization 하도록 좁혀, persisted legacy guidance shape도 canonical fallback trace를 가진 review snapshot response로 읽히게 맞췄다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 review snapshot operator-guidance read-contract 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 passed`
+- output-gating focused slice
+  - `24 passed`
+- current-focused-parallel
+  - backend output-gating `24 passed`
+  - backend preflight `57 passed`
+  - frontend preflight `25 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - review snapshot operator-guidance response normalization 한 점에 국한된 수정이라 exact + focused evidence가 더 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. review snapshot read path가 missing `provider_trace` persisted operator guidance shape를 그대로 validation error로 흘리지 않음
+2. persisted operator guidance response가 `heuristic_fallback` trace를 채운 canonical shape를 유지함
+3. review snapshot guidance read truth와 최근 recommendation/provider-trace fallback read truth가 같은 방향의 canonical response 규칙을 사용함
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
+## 63. 2026-07-04 partial regeneration result applied recommendation default provider trace closeout
+
+이번 후속 작업에서는 partial regeneration source-truth나 blocker 경계를 다시 넓히지 않고, result read path에서 applied recommendation `provider_trace` 누락이 그대로 API validation error로 이어지는 가장 작은 response-contract 누수 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `services/api/src/videobox_api/main.py`의 `GET /api/projects/{project_id}/partial-regenerations/{job_id}`는 raw timeline payload를 그대로 `TimelinePayloadResponse`에 넣고 있어, applied recommendation에 `provider_trace`가 빠진 legacy shape가 있으면 응답 모델 validation error가 났다
+- strict TDD로 `test_partial_regeneration_result_fills_default_provider_trace_for_applied_recommendation` exact regression을 먼저 추가했고, 실제로 `applied_recommendations.0.provider_trace Field required` RED를 확인했다
+- 응답 normalization 연결 뒤에는 `_normalize_provider_trace_response(...)` fallback helper import가 빠져 있어 `NameError`가 드러났고, 이 import 복구까지 포함한 최소 수정으로 canonical fallback trace response를 유지하게 맞췄다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 partial regeneration result read-contract 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 passed`
+- output-gating focused slice
+  - `24 passed`
+- current-focused-parallel
+  - backend output-gating `24 passed`
+  - backend preflight `57 passed`
+  - frontend preflight `25 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - partial regeneration result response normalization 한 점에 국한된 수정이라 exact + focused evidence가 더 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. partial regeneration result read path가 missing `provider_trace` applied recommendation shape를 그대로 validation error로 흘리지 않음
+2. applied recommendation response가 fallback trace를 채운 canonical shape를 유지함
+3. partial regeneration result read truth와 timeline/read response truth가 recommendation provider trace fallback에서 더 일관된 기준을 사용함
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
+## 56. 2026-07-04 review snapshot helper unknown pending recommendation approved-status closeout
+
+이번 후속 작업에서는 direct review-snapshot helper의 stale recommendation family를 다시 좁혀, unknown legacy pending recommendation이 존재해도 persisted approved status를 `blocked`로 다시 뒤집는 가장 작은 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/storage-abstractions/src/videobox_storage/local_project_store.py`의 `build_review_snapshot(...)`는 normalized pending override가 비어 있지 않기만 하면 recommendation type validity와 무관하게 `review_status="blocked"`를 우선하고 있어, `legacy_overlay_pick` 같은 unknown recommendation type도 persisted approved status를 다시 막고 있었다
+- strict TDD로 `test_store_build_review_snapshot_ignores_unknown_pending_recommendation_for_status_when_persisted_approved` exact regression을 먼저 추가했고, 실제로 `snapshot["review_status"] == "blocked"` RED를 확인했다
+- 최소 수정으로 direct helper status 계산도 canonical blocking pending recommendation만 blocker로 세도록 좁혀, unknown / non-blocking pending recommendation은 surface에 남더라도 persisted approved truth를 다시 뒤집지 않게 맞췄다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 review snapshot helper pending-status truth 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 passed`
+- output-gating focused slice
+  - `24 passed`
+- current-focused-parallel
+  - backend output-gating `24 passed`
+  - backend preflight `57 passed`
+  - frontend preflight `25 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - review snapshot helper unknown-pending status precedence 한 점에 국한된 수정이라 exact + focused evidence가 더 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. review snapshot direct helper가 unknown / non-blocking `timeline_pending_recommendations` shape 하나만으로 persisted approved status를 다시 `blocked`로 뒤집지 않음
+2. canonical blocking pending recommendation이 없는 경우 helper `review_status`가 persisted approved truth를 유지함
+3. helper status truth와 runtime output gating / preflight read truth가 같은 stale recommendation family에서 같은 기준을 사용함
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
+## 55. 2026-07-04 review snapshot helper unknown review flag approved-status closeout
+
+이번 후속 작업에서는 direct review-snapshot helper의 stale review-flag family를 다시 좁혀, unknown legacy review flag가 surface에는 남아 있어도 persisted approved status를 `blocked`로 다시 뒤집는 가장 작은 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/storage-abstractions/src/videobox_storage/local_project_store.py`의 `build_review_snapshot(...)`는 `timeline_review_flags`가 비어 있지 않기만 하면 code validity와 무관하게 `review_status="blocked"`를 우선하고 있어, `legacy_review_flag` 같은 unknown metadata도 persisted approved status를 다시 막고 있었다
+- strict TDD로 `test_store_build_review_snapshot_ignores_unknown_review_flag_for_status_when_persisted_approved` exact regression을 먼저 추가했고, 실제로 `snapshot["review_status"] == "blocked"` RED를 확인했다
+- 최소 수정으로 direct helper status 계산도 canonical blocking review flag만 blocker로 세도록 좁혀, unknown / non-blocking review flag는 surface에 남더라도 persisted approved truth를 다시 뒤집지 않게 맞췄다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 review snapshot helper status truth 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 passed`
+- output-gating focused slice
+  - `24 passed`
+- current-focused-parallel
+  - backend output-gating `24 passed`
+  - backend preflight `58 passed`
+  - frontend preflight `25 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - review snapshot helper unknown-review-flag status precedence 한 점에 국한된 수정이라 exact + focused evidence가 더 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. review snapshot direct helper가 unknown / non-blocking `timeline_review_flags` shape 하나만으로 persisted approved status를 다시 `blocked`로 뒤집지 않음
+2. canonical blocking review flag가 없는 경우 helper `review_status`가 persisted approved truth를 유지함
+3. helper status truth와 runtime output gating / preflight read truth가 같은 stale review-flag family에서 같은 기준을 사용함
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
+## 54. 2026-07-04 timeline persistence stale non-list review flags initial status closeout
+
+이번 후속 작업에서는 stale review-flag family를 저장 시점까지 다시 내려가 확인해, non-list `review_flags` shape 하나만으로 timeline persistence가 initial review state를 `blocked`로 저장하는 가장 작은 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/storage-abstractions/src/videobox_storage/local_project_store.py`의 `save_timeline_run(...)`는 initial review state를 계산할 때 `review_flags`를 raw truthiness로만 보고 있어, `"stale_review_flag_container"` 같은 non-list shape도 `blocked` 근거로 오판하고 있었다
+- strict TDD로 `test_store_save_timeline_run_ignores_stale_nonlist_review_flags_when_setting_initial_status` exact regression을 먼저 추가했고, 실제로 persisted review state가 `draft`가 아니라 `blocked`인 RED를 확인했다
+- 최소 수정으로 save path도 canonical blocking review flag만 blocker로 세도록 검증을 좁혀, stale non-list / non-blocking `review_flags` shape는 initial review state를 막지 않게 맞췄다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 timeline persistence initial status truth 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 passed`
+- output-gating focused slice
+  - `24 passed`
+- current-focused-parallel
+  - backend output-gating `24 passed`
+  - backend preflight `57 passed`
+  - frontend preflight `25 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - timeline persistence initial status의 stale review-flag normalization 한 점에 국한된 수정이라 exact + focused evidence가 더 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. timeline save path가 stale non-list `review_flags` shape 하나만으로 `blocked` review state를 저장하지 않음
+2. persisted initial review state가 canonical blocking review flag truth가 없으면 `draft`를 유지함
+3. persistence truth와 preflight/read-path truth가 같은 stale review-flag family에서 같은 기준을 사용함
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
+## 53. 2026-07-04 review snapshot helper persisted-approved pending-override status closeout
+
+이번 후속 작업에서는 direct store helper의 review status 일관성 경계를 다시 좁혀, pending override나 blocker flag가 이미 존재하는데도 persisted approved status를 그대로 우선하는 가장 작은 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/storage-abstractions/src/videobox_storage/local_project_store.py`의 `build_review_snapshot(...)`는 `timeline_id`가 있고 persisted review state가 `approved`면, pending recommendation override가 이미 존재해도 `review_status="approved"`를 그대로 반환하고 있었다
+- strict TDD로 `test_store_build_review_snapshot_marks_status_blocked_when_pending_override_exists_despite_persisted_approved` exact regression을 먼저 추가했고, 실제로 `snapshot["review_status"] == "approved"` RED를 확인했다
+- 최소 수정으로 direct helper도 `timeline_review_flags`나 `pending` recommendation이 이미 계산된 경우 persisted status보다 blocker truth를 우선해 `review_status="blocked"`를 반환하도록 맞췄다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 review snapshot helper status truth 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 passed`
+- output-gating focused slice
+  - `24 passed`
+- current-focused-parallel
+  - backend output-gating `24 passed`
+  - backend preflight `57 passed`
+  - frontend preflight `25 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - review snapshot helper status precedence 한 점에 국한된 수정이라 exact + focused evidence가 더 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. review snapshot direct helper가 pending override나 blocker flag 존재 시 persisted approved status를 그대로 우선하지 않음
+2. computed blocker truth와 `review_status`가 helper 수준에서도 일치함
+3. helper status truth와 timeline/review snapshot/preflight read truth가 같은 stale bucket family에서 같은 기준을 사용함
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
+## 52. 2026-07-04 timeline persistence misbucketed applied pending-like recommendation closeout
+
+이번 후속 작업에서는 stale bucket family를 저장 시점까지 내려가 확인해, pending-like legacy recommendation이 `applied_recommendations` bucket에 잘못 들어 있는 경우 timeline persistence가 initial review state를 `draft`로 저장하는 가장 작은 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/storage-abstractions/src/videobox_storage/local_project_store.py`의 `save_timeline_run(...)`는 initial review state를 `review_flags`와 `pending_recommendations` 존재 여부만으로 결정하고 있어, `applied_recommendations`에 misbucket된 pending-like recommendation은 무시한 채 `draft`를 저장하고 있었다
+- strict TDD로 `test_store_save_timeline_run_marks_misbucketed_applied_pending_like_recommendation_as_blocked` exact regression을 먼저 추가했고, 실제로 persisted review state가 `blocked`가 아니라 `draft`인 RED를 확인했다
+- 최소 수정으로 save path도 `pending_recommendations + applied_recommendations` 양쪽에서 recommendation dict를 모은 뒤 `_normalize_recommendation_decision_state(...) == "pending"`인 항목이 있으면 initial review state를 `blocked`로 저장하도록 맞췄다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 timeline persistence truth 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 passed`
+- output-gating focused slice
+  - `24 passed`
+- current-focused-parallel
+  - backend output-gating `24 passed`
+  - backend preflight `57 passed`
+  - frontend preflight `25 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - timeline persistence initial review-state normalization 한 점에 국한된 수정이라 exact + focused evidence가 더 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. timeline save path가 misbucketed pending-like applied recommendation을 무시한 채 `draft` review state를 저장하지 않음
+2. persisted initial review state가 source recommendation truth와 맞게 `blocked`를 유지함
+3. persistence truth와 timeline/review snapshot/preflight read truth가 같은 stale bucket family에서 같은 기준을 사용함
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
+## 51. 2026-07-04 preflight misbucketed applied pending-like recommendation closeout
+
+이번 후속 작업에서는 같은 stale bucket family를 preflight prediction read path로 옮겨, pending-like legacy recommendation이 `applied_recommendations` bucket에 잘못 들어 있는 경우 source blocker truth를 놓치는 가장 작은 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `services/api/src/videobox_api/main.py`의 `_build_preflight_review_prediction(...)`는 source timeline의 `pending_recommendations`만 blocker source로 보고 있었고, `applied_recommendations`에 misbucket된 pending-like recommendation은 무시해 `draft` prediction을 반환하고 있었다
+- strict TDD로 `test_editing_session_api_marks_preflight_blocked_when_source_timeline_has_misbucketed_applied_pending_like_recommendation` exact regression을 먼저 추가했고, 실제로 `predicted_review_status_after_rerun == "draft"` RED를 확인했다
+- 최소 수정으로 preflight prediction도 blocker source를 `pending_recommendations + applied_recommendations`로 합쳐 같은 bool-ish normalization 기준으로 필터링하도록 맞춰, misbucketed pending-like recommendation을 unresolved blocker로 다시 복원하게 했다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 preflight prediction truth 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 passed`
+- preflight-backend focused slice
+  - `57 passed`
+- current-focused-parallel
+  - backend output-gating `24 passed`
+  - backend preflight `57 passed`
+  - frontend preflight `25 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - preflight prediction blocker-source normalization 한 점에 국한된 수정이라 exact + focused evidence가 더 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. preflight prediction이 misbucketed pending-like applied recommendation을 unresolved blocker로 다시 복원함
+2. source blocker truth와 `predicted_review_status_after_rerun`가 `blocked`로 일치함
+3. preflight prediction truth와 timeline/review snapshot read truth가 같은 stale bucket family에서 같은 기준을 사용함
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
+## 50. 2026-07-04 timeline API misbucketed applied pending-like recommendation closeout
+
+이번 후속 작업에서는 review snapshot API와 같은 stale bucket family의 바로 옆 read surface인 timeline API에서, pending-like legacy recommendation이 `applied_recommendations` bucket에 남아 있어 review truth와 applied surface가 어긋나는 가장 작은 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/core-engine/src/videobox_core_engine/local_pipeline.py`의 timeline hydration은 pending-like recommendation을 blocker로는 복원할 수 있어도 `applied_recommendations` 컬렉션 자체는 그대로 두고 있어 timeline API response에서 stale applied entry가 계속 노출되고 있었다
+- strict TDD로 `test_timeline_api_reclassifies_pending_like_entry_misbucketed_into_applied_recommendations` exact regression을 먼저 추가했고, 실제로 `review_status="blocked"`이더라도 `applied_recommendations`에 해당 recommendation이 남는 RED를 확인했다
+- 최소 수정으로 hydration 단계가 runtime blocker shape를 `applied_recommendations`에서도 먼저 제외하도록 맞춰 timeline API response의 applied surface와 synthesized pending blocker truth를 일치시켰다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 timeline API read truth 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 passed`
+- output-gating focused slice
+  - `24 passed`
+- current-focused-parallel
+  - backend output-gating `24 passed`
+  - backend preflight `56 passed`
+  - frontend preflight `25 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - timeline API read truth와 hydration cleanup 한 점에 국한된 수정이라 exact + focused evidence가 더 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. timeline API가 misbucketed pending-like applied recommendation을 applied surface에서 제거함
+2. `review_status`와 pending blocker truth가 timeline response에서도 일관되게 유지됨
+3. timeline/read truth와 review snapshot/read truth가 같은 stale bucket family에서 같은 기준을 사용함
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
+## 49. 2026-07-04 review snapshot API misbucketed applied pending-like recommendation closeout
+
+이번 후속 작업에서는 direct store helper보다 한 단계 위 read path인 review snapshot API에서, pending-like legacy recommendation이 stale하게 `applied_recommendations` bucket에 들어 있는 경우 pending blocker truth와 `review_status`를 같이 잃는 가장 작은 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/core-engine/src/videobox_core_engine/local_pipeline.py`의 timeline hydration은 pending blocker normalization을 `pending_recommendations`만 기준으로 보고 있었고, `applied_recommendations`에 잘못 들어간 pending-like legacy recommendation은 blocker로 보지 않아 `review_status=approved`가 유지됐다
+- strict TDD로 `test_review_snapshot_api_reclassifies_pending_like_entry_misbucketed_into_applied_recommendations` exact regression을 먼저 추가했고, 실제로 review snapshot API가 `review_status="approved"`를 반환하는 RED를 확인했다
+- 최소 수정으로 timeline hydration의 blocker source에 `applied_recommendations`도 포함해 pending-like recommendation을 다시 blocker로 복원했고, 같은 recommendation이 snapshot에서 duplicate pending blocker로 늘어나지 않도록 review snapshot API applied collection에서도 runtime blocker shape를 먼저 제외했다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 review snapshot API read truth 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 passed`
+- output-gating focused slice
+  - `24 passed`
+- current-focused-parallel
+  - backend output-gating `24 passed`
+  - backend preflight `56 passed`
+  - frontend preflight `25 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - review snapshot API read truth와 runtime blocker synthesis 한 점에 국한된 수정이라 exact + focused evidence가 더 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. review snapshot API가 misbucketed pending-like applied recommendation을 pending blocker로 다시 복원함
+2. `review_status`가 pending blocker truth와 맞게 `blocked`로 유지됨
+3. 같은 recommendation이 applied/pending 양쪽에 중복으로 남지 않음
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
+## 48. 2026-07-04 review snapshot applied override legacy pending-like recommendation closeout
+
+이번 후속 작업에서는 직전 pending override 경계의 대칭면인 review snapshot direct applied override 입력을 다시 좁혀, `timeline_applied_recommendations` 안의 legacy pending-like recommendation이 applied로 고정되는 가장 작은 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/storage-abstractions/src/videobox_storage/local_project_store.py`의 `build_review_snapshot(...)`는 `timeline_applied_recommendations` override 경로에서 모든 항목에 fallback `decision_state="approved"`를 강제로 써서 `auto_apply_allowed="false"` / `review_required="true"` legacy pending-like recommendation까지 applied recommendation으로 고정하고 있었다
+- strict TDD로 `test_store_build_review_snapshot_reclassifies_legacy_pending_like_timeline_applied_override` exact regression을 먼저 추가했고, 실제로 `applied_recommendations`에 해당 recommendation이 그대로 남는 RED를 확인했다
+- 원인은 direct applied override 경로도 raw item의 recommendation truth를 먼저 판단하지 않고 caller bucket을 그대로 우선시하던 점이었다
+- 최소 수정으로 applied override 입력도 raw item 기준 `_normalize_recommendation_decision_state(...)`를 먼저 계산한 뒤 payload fallback에 반영하고, applied/pending 컬렉션을 같은 normalized decision-state 기준으로 다시 나누도록 맞췄다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 review snapshot helper truth 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 passed`
+- output-gating focused slice
+  - `24 passed`
+- current-focused-parallel
+  - backend output-gating `24 passed`
+  - backend preflight `56 passed`
+  - frontend preflight `25 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - review snapshot helper decision-state normalization 한 점에 국한된 수정이라 exact + focused evidence가 더 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. review snapshot direct applied override 입력이 legacy pending-like recommendation shape를 applied recommendation으로 오판하지 않음
+2. `decision_state`가 비어 있어도 pending truth에 해당하는 recommendation shape는 pending recommendation으로 재분류됨
+3. review snapshot helper truth와 runtime output gating / preflight prediction / store fallback truth가 bool-ish false shape에서 같은 기준을 사용함
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
+## 47. 2026-07-04 review snapshot pending override legacy applied-like recommendation closeout
+
+이번 후속 작업에서는 runtime caller filter에만 의존하던 review snapshot direct helper 경계를 다시 좁혀, `timeline_pending_recommendations` override 입력 안의 legacy applied-like recommendation이 pending blocker로 남는 가장 작은 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/storage-abstractions/src/videobox_storage/local_project_store.py`의 `build_review_snapshot(...)`는 `timeline_pending_recommendations` override 경로에서 모든 항목에 fallback `decision_state="pending"`를 강제로 써서 `auto_apply_allowed="true"` / `review_required="false"` legacy applied-like recommendation까지 pending recommendation으로 고정하고 있었다
+- strict TDD로 `test_store_build_review_snapshot_reclassifies_legacy_applied_like_timeline_pending_override` exact regression을 먼저 추가했고, 실제로 `applied_recommendations == []` RED를 확인했다
+- 원인은 direct pending override 경로가 raw item의 recommendation truth를 먼저 판단하지 않고 caller bucket만 그대로 우선시하던 점이었다
+- 최소 수정으로 pending override 입력도 raw item 기준 `_normalize_recommendation_decision_state(...)`를 먼저 계산한 뒤 payload fallback에 반영하도록 맞춰 legacy applied-like recommendation은 applied 쪽으로 재분류되게 했다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 review snapshot helper truth 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 passed`
+- output-gating focused slice
+  - `24 passed`
+- current-focused-parallel
+  - backend output-gating `24 passed`
+  - backend preflight `56 passed`
+  - frontend preflight `25 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - review snapshot helper decision-state normalization 한 점에 국한된 수정이라 exact + focused evidence가 더 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. review snapshot direct pending override 입력이 legacy applied-like recommendation shape를 pending blocker로 오판하지 않음
+2. `decision_state`가 비어 있어도 applied truth에 해당하는 recommendation shape는 applied recommendation으로 재분류됨
+3. review snapshot helper truth와 runtime output gating / preflight prediction / store fallback truth가 bool-ish false shape에서 같은 기준을 사용함
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
+## 46. 2026-07-04 output gating legacy applied-like pending recommendation closeout
+
+이번 후속 작업에서는 이미 닫힌 `approved/rejected decision_state stale pending recommendation` 경계를 다시 넓히지 않고, 그 바로 인접면인 runtime output gating에서 legacy applied-like pending recommendation shape가 unresolved blocker로 남는 가장 작은 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/core-engine/src/videobox_core_engine/local_pipeline.py`의 `_is_runtime_blocking_pending_recommendation(...)`는 `decision_state`가 비어 있는 `auto_apply_allowed="true"` / `review_required="false"` legacy applied-like recommendation을 subtitle / preview / export blocker로 오판하고 있었다
+- strict TDD로 `test_output_jobs_ignore_legacy_applied_like_entries_left_in_pending_recommendations` exact regression을 먼저 추가했고, 실제로 subtitle render start가 `202`가 아니라 `400`으로 막히는 RED를 확인했다
+- 원인은 runtime blocker 판정이 explicit `decision_state`만 보고 있었고, applied-like bool-ish truth를 보지 않던 점이었다
+- 최소 수정으로 runtime pending recommendation blocker 판정에도 bool-ish normalization을 적용해 `auto_apply_allowed=true`이면서 `review_required=false`인 recommendation shape는 blocker에서 제외하도록 맞췄다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 output gating truth 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 passed`
+- output-gating focused slice
+  - `24 passed`
+- current-focused-parallel
+  - backend output-gating `24 passed`
+  - backend preflight `56 passed`
+  - frontend preflight `25 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - runtime output gating bool-ish normalization 한 점에 국한된 수정이라 exact + focused evidence가 더 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. approved timeline output gating이 legacy applied-like pending recommendation shape를 unresolved blocker로 오판하지 않음
+2. `decision_state`가 비어 있어도 applied truth에 해당하는 recommendation shape는 subtitle / preview / export를 막지 않음
+3. runtime output gating truth와 preflight prediction/API response/store fallback truth가 bool-ish false shape에서 같은 기준을 사용함
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
+## 45. 2026-07-04 preflight legacy applied-like pending recommendation prediction closeout
+
+이번 후속 작업에서는 이미 닫힌 approved/rejected `decision_state` stale pending recommendation 경계를 다시 넓히지 않고, 그 바로 인접면인 preflight prediction read path에서 legacy applied-like recommendation payload가 unresolved blocker로 남는 가장 작은 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `services/api/src/videobox_api/main.py`의 `_build_preflight_review_prediction(...)`는 source timeline `pending_recommendations`를 필터링할 때 `decision_state`와 식별자만 보고 있었고, `auto_apply_allowed="true"` / `review_required="false"` legacy applied-like shape를 unresolved blocker recommendation으로 오판하고 있었다
+- strict TDD로 `test_editing_session_api_filters_legacy_applied_like_source_pending_recommendation_from_preflight_prediction` exact regression을 먼저 추가했고, 실제로 preflight prediction이 `draft`가 아니라 `blocked`가 되는 RED를 확인했다
+- 원인은 preflight prediction read path가 API response/runtime/store 쪽에서 이미 쓰는 bool-ish normalization 기준을 재사용하지 않고 raw pending collection shape만 보고 blocker 여부를 결정하던 점이었다
+- 최소 수정으로 preflight pending recommendation filter에도 bool-ish normalization을 적용해 `auto_apply_allowed=false` 또는 `review_required=true`인 recommendation만 unresolved blocker로 남도록 맞췄다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 preflight prediction truth 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 passed`
+- preflight-backend focused slice
+  - `56 passed`
+- current-focused-parallel
+  - backend output-gating `24 passed`
+  - backend preflight `56 passed`
+  - frontend preflight `25 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - preflight prediction bool-ish normalization 한 점에 국한된 수정이라 exact + focused evidence가 더 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. partial regeneration preflight prediction이 source timeline의 legacy applied-like pending recommendation을 unresolved blocker로 오판하지 않음
+2. `decision_state`가 비어 있어도 applied truth에 해당하는 recommendation shape는 `draft` prediction을 유지함
+3. preflight prediction truth와 runtime/API response/store fallback truth가 bool-ish false shape에서 같은 기준을 사용함
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
 ## 16. 2026-07-03 Task 2 real-project smoke + evidence freeze 기록
 
 이번 후속 작업으로 `Task 2: 실제 프로젝트 1개 happy-path smoke + evidence freeze`는 완료로 본다.
@@ -933,6 +1759,486 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 1. partial regeneration candidate review guidance entry가 `partial_regeneration_job_*`의 job id truth를 유지함
 2. partial regeneration candidate review guidance entry가 `partial_regeneration_job_*`의 source job truth를 유지함
 3. partial regeneration candidate review guidance entry가 `partial_regeneration_job_*`의 job type truth를 유지함
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
+## 32. 2026-07-04 approved timeline stale pending decision-state output gating closeout
+
+이번 후속 작업에서는 장기 우선순위 queue를 유지한 채 `review/output gating`과 `TTS approval/output`이 맞닿는 가장 작은 stale pending 경계 1개를 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- approved timeline의 `pending_recommendations`에 이미 `decision_state=approved`인 stale recommendation entry가 잘못 남아 있으면, 실제로는 unresolved blocker가 아니어야 하지만 output gating은 그대로 막고 있었다
+- strict TDD로 `test_output_jobs_ignore_approved_decision_state_entries_left_in_pending_recommendations` exact regression을 먼저 추가했고, 실제로 subtitle render가 `400`으로 막히는 RED를 확인했다
+- 원인은 `_is_runtime_blocking_pending_recommendation(...)`가 `recommendation_id/target_segment_id/recommendation_type`만 보고 blocker 여부를 판정해, 이미 `approved/rejected`로 끝난 stale entry까지 pending blocker로 취급하던 점이었다
+- 최소 수정으로 runtime pending blocker 판정이 explicit `decision_state`가 있을 때는 `pending`만 unresolved blocker로 인정하게 좁혀, API read path와 subtitle / preview / export가 stale approved/rejected entry를 무시하도록 맞췄다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 stale pending blocker normalization 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 passed`
+- output-gating focused slice
+  - `24 passed`
+- current-focused-parallel
+  - backend output-gating `24 passed`
+  - backend preflight `55 passed`
+  - frontend preflight `25 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - stale pending decision-state blocker normalization 한 점에 국한된 수정이라 exact + focused evidence가 더 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. approved timeline에 stale `decision_state=approved/rejected` pending recommendation entry가 남아 있어도 unresolved blocker로 오판하지 않음
+2. subtitle / preview / export output gating이 stale pending decision-state entry 때문에 다시 막히지 않음
+3. timeline read path와 review snapshot도 stale pending entry를 canonical pending blocker로 surface하지 않음
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
+## 33. 2026-07-04 partial regeneration preflight stale pending decision-state prediction closeout
+
+이번 후속 작업에서는 방금 닫은 output gating 경계와 같은 stale pending family 안에서, `preflight contract` 쪽에 남아 있던 가장 작은 prediction 비대칭 1개를 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- output gating/runtime은 이미 `decision_state=approved/rejected` stale pending recommendation entry를 unresolved blocker로 보지 않게 맞춰졌지만, partial regeneration preflight prediction은 같은 source shape를 여전히 blocker로 취급하고 있었다
+- strict TDD로 `test_editing_session_api_filters_approved_decision_state_source_pending_recommendation_from_preflight_prediction` exact regression을 먼저 추가했고, 실제로 `predicted_review_status_after_rerun == blocked` RED를 확인했다
+- 원인은 `services/api/src/videobox_api/main.py`의 `_build_preflight_review_prediction(...)`가 source pending recommendation을 필터링할 때 `decision_state`를 보지 않고 `recommendation_id/target_segment_id/recommendation_type`만으로 blocker 후보를 유지하던 점이었다
+- 최소 수정으로 preflight source pending recommendation filter도 explicit `decision_state`가 있을 때 `pending`만 unresolved blocker로 인정하도록 좁혀, preflight prediction이 runtime/output truth와 같은 기준을 쓰게 맞췄다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 preflight pending blocker normalization 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 passed`
+- preflight-backend focused slice
+  - `55 passed`
+- current-focused-parallel
+  - backend output-gating `24 passed`
+  - backend preflight `55 passed`
+  - frontend preflight `25 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - preflight source pending decision-state prediction 한 점에 국한된 수정이라 exact + focused evidence가 더 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. partial regeneration preflight가 source timeline의 stale `decision_state=approved/rejected` pending recommendation entry를 unresolved blocker prediction으로 복원하지 않음
+2. clean scope preflight prediction이 stale pending decision-state entry 때문에 `blocked`로 오염되지 않음
+3. preflight prediction과 runtime/output gating이 stale pending decision-state family에서 같은 blocker 기준을 사용함
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
+## 34. 2026-07-04 timeline builder string false recommendation review_required closeout
+
+이번 후속 작업에서는 stale pending decision-state family를 더 넓히지 않고, `review/output` truth에 바로 닿는 timeline build 경계의 가장 작은 legacy bool-shape 1개를 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `TimelineBuilder`는 recommendation dict의 `review_required="false"` 같은 legacy string false shape를 그대로 `bool(...)`로 해석해 pending recommendation과 review blocker로 오판하고 있었다
+- strict TDD로 `test_timeline_builder_treats_string_false_recommendation_review_required_as_false` exact regression을 먼저 추가했고, 실제로 auto-apply 가능한 B-roll recommendation이 applied로 가지 않고 pending으로 남는 RED를 확인했다
+- 원인은 `packages/core-engine/src/videobox_core_engine/timeline_builder.py`가 dict recommendation/segment payload를 그대로 보존한 채 `bool(recommendation.get("review_required"))`를 사용하던 점이었다
+- 최소 수정으로 `TimelineBuilder` 내부 bool-ish normalization을 추가해 dict segment/recommendation payload의 false-like string을 canonical bool로 맞추고, build/build-review-snapshot 계열이 같은 기준을 쓰게 했다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 timeline build truth 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 passed`
+- output-gating focused slice
+  - `24 passed`
+- current-focused-parallel
+  - backend output-gating `24 passed`
+  - backend preflight `55 passed`
+  - frontend preflight `25 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - timeline builder bool-ish normalization 한 점에 국한된 수정이라 exact + focused evidence가 더 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. timeline build가 recommendation의 `review_required="false"` legacy string shape를 review blocker로 오판하지 않음
+2. auto-apply 가능한 recommendation이 stale string false 때문에 pending recommendation으로 밀리지 않음
+3. timeline build truth와 output gating truth가 bool-ish false shape에서 같은 기준을 사용함
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
+## 35. 2026-07-04 recommendation store string false review_required closeout
+
+이번 후속 작업에서는 방금 닫은 timeline build 경계보다 한 단계 앞단인 저장소 write path에서, 같은 legacy bool-shape가 persisted truth를 오염시키는 가장 작은 경계 1개를 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `save_recommendation_run(...)`는 incoming recommendation dict의 `review_required="false"` 같은 legacy string false shape를 그대로 `bool(...)`로 해석해 persisted recommendation과 DB row를 blocker truth로 저장하고 있었다
+- strict TDD로 `test_store_save_recommendation_run_treats_string_false_review_required_as_false` exact regression을 먼저 추가했고, 실제로 returned payload의 `review_required is True` RED를 확인했다
+- 원인은 `packages/storage-abstractions/src/videobox_storage/local_project_store.py`가 recommendation 저장 시 `auto_apply_allowed/review_required`를 그대로 `bool(...)`로 캐스팅하던 점이었다
+- 최소 수정으로 저장소 write path에 bool-ish normalization을 추가해 `auto_apply_allowed/review_required`의 false-like string을 canonical bool로 저장하도록 맞췄다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 recommendation persistence truth 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 passed`
+- output-gating focused slice
+  - `24 passed`
+- current-focused-parallel
+  - backend output-gating `24 passed`
+  - backend preflight `55 passed`
+  - frontend preflight `25 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - recommendation store bool-ish normalization 한 점에 국한된 수정이라 exact + focused evidence가 더 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. recommendation 저장 write path가 `review_required="false"` legacy string shape를 blocker truth로 저장하지 않음
+2. returned recommendation payload와 DB row가 canonical false를 유지함
+3. recommendation persistence truth와 downstream timeline build truth가 bool-ish false shape에서 같은 기준을 사용함
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
+## 36. 2026-07-04 recommendation read path legacy string false closeout
+
+이번 후속 작업에서는 저장소 write path 다음 단계인 recommendation read path에서, legacy DB text bool-shape가 read truth를 오염시키는 가장 작은 경계 1개를 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `list_recommendation_rows(...)`는 legacy DB row의 `auto_apply_allowed="false"` / `review_required="false"` text 값을 그대로 `bool(...)`로 해석해 read path에서 truthy로 뒤집고 있었다
+- strict TDD로 `test_store_list_recommendation_rows_treats_legacy_string_false_columns_as_false` exact regression을 먼저 추가했고, 실제로 `auto_apply_allowed is True` RED를 확인했다
+- 원인은 `packages/storage-abstractions/src/videobox_storage/local_project_store.py`의 recommendation row hydration이 DB 값을 그대로 `bool(...)`로 캐스팅하던 점이었다
+- 최소 수정으로 recommendation read path도 같은 bool-ish normalization을 재사용해 legacy string false를 canonical false로 읽도록 맞췄다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 recommendation read truth 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 passed`
+- output-gating focused slice
+  - `24 passed`
+- current-focused-parallel
+  - backend output-gating `24 passed`
+  - backend preflight `55 passed`
+  - frontend preflight `25 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - recommendation read-path bool-ish normalization 한 점에 국한된 수정이라 exact + focused evidence가 더 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. recommendation read path가 legacy DB text `"false"` shape를 truthy blocker로 읽지 않음
+2. hydrated recommendation row가 canonical false를 유지함
+3. recommendation read truth와 write truth가 bool-ish false shape에서 같은 기준을 사용함
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
+## 37. 2026-07-04 editing session legacy string false segment review_required closeout
+
+이번 후속 작업에서는 recommendation bool-ish family를 더 넓히지 않고, editing-session SSOT에 직접 닿는 segment read path의 가장 작은 legacy bool-shape 1개를 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `list_segments(...)`와 `build_editing_session(...)`는 legacy segment row의 `review_required="false"` text 값을 그대로 truthy로 취급해 editing session 생성 시 `review_required=True`로 오염시키고 있었다
+- strict TDD로 `test_editing_session_api_normalizes_legacy_string_false_segment_review_required_from_store` exact regression을 먼저 추가했고, 실제로 create editing session 응답의 `review_required`가 `True`로 뒤집히는 RED를 확인했다
+- 원인은 `packages/storage-abstractions/src/videobox_storage/local_project_store.py`의 segment row hydration과 `packages/core-engine/src/videobox_core_engine/editing_session.py`의 session segment 빌드가 모두 `bool(...)` 기반으로 legacy string false를 읽던 점이었다
+- 최소 수정으로 두 read path에 같은 bool-ish normalization을 적용해 legacy segment row의 false-like string을 canonical false로 읽도록 맞췄다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 editing-session segment truth 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 passed`
+- preflight-backend focused slice
+  - `56 passed`
+- current-focused-parallel
+  - backend output-gating `24 passed`
+  - backend preflight `56 passed`
+  - frontend preflight `25 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - editing session segment bool-ish normalization 한 점에 국한된 수정이라 exact + focused evidence가 더 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. editing session 생성 read path가 legacy segment row의 `review_required="false"` shape를 truthy review-required로 읽지 않음
+2. session segment payload와 downstream preflight targeted segment가 canonical false를 유지함
+3. segment read truth와 editing-session SSOT가 bool-ish false shape에서 같은 기준을 사용함
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
+## 38. 2026-07-04 segment analysis write path string false segment review_required closeout
+
+이번 후속 작업에서는 방금 닫은 editing-session segment read path보다 한 단계 앞단인 persistence write path에서, 같은 legacy bool-shape가 stored segment truth를 오염시키는 가장 작은 경계 1개를 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `save_segment_analysis(...)`는 incoming segment dict의 `review_required="false"` 값을 그대로 truthy로 취급해 persisted `segments.review_required`를 `1`로 저장하고 있었다
+- strict TDD로 `test_editing_session_api_preserves_string_false_segment_review_required_after_segment_analysis_write` exact regression을 먼저 추가했고, 실제로 segment analysis 저장 이후 create editing session 응답의 `review_required`가 `True`로 오염되는 RED를 확인했다
+- 원인은 `packages/storage-abstractions/src/videobox_storage/local_project_store.py`의 segment insert path가 `review_required`를 그대로 `bool(...)` 기반 truthiness로 저장하던 점이었다
+- 최소 수정으로 segment analysis write path에도 같은 bool-ish normalization을 적용해 false-like string을 canonical false로 저장하도록 맞췄다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 segment persistence truth 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 passed`
+- preflight-backend focused slice
+  - `56 passed`
+- current-focused-parallel
+  - backend output-gating `24 passed`
+  - backend preflight `56 passed`
+  - frontend preflight `25 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - segment analysis write-path bool-ish normalization 한 점에 국한된 수정이라 exact + focused evidence가 더 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. segment analysis 저장 write path가 `review_required="false"` legacy string shape를 truthy review-required로 저장하지 않음
+2. persisted segment row와 downstream editing session이 canonical false를 유지함
+3. segment write truth와 read truth가 bool-ish false shape에서 같은 기준을 사용함
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
+## 39. 2026-07-04 timeline response legacy string false recommendation fields closeout
+
+이번 후속 작업에서는 bool-ish false family를 더 넓히지 않고, timeline/read contract에 직접 닿는 API response layer의 가장 작은 legacy recommendation 경계 1개를 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `services/api/src/videobox_api/main.py`의 `_normalize_recommendations_for_response(...)`는 legacy timeline payload 안의 `auto_apply_allowed="false"` / `review_required="false"` text 값을 그대로 truthy로 취급해 timeline API response에서 `True`로 뒤집고 있었다
+- strict TDD로 `test_timeline_api_normalizes_legacy_string_false_pending_recommendation_fields` exact regression을 먼저 추가했고, 실제로 timeline API의 pending recommendation response에서 두 필드가 모두 `True`로 뒤집히는 RED를 확인했다
+- 원인은 API response normalization이 recommendation bool 필드를 raw `bool(...)`로 캐스팅하던 점이었다
+- 최소 수정으로 response layer에도 bool-ish normalization helper를 추가해 legacy false-like string을 canonical false로 읽도록 맞췄다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 timeline/read truth 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 passed`
+- output-gating focused slice
+  - `24 passed`
+- current-focused-parallel
+  - backend output-gating `24 passed`
+  - backend preflight `56 passed`
+  - frontend preflight `25 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - API response bool-ish normalization 한 점에 국한된 수정이라 exact + focused evidence가 더 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. timeline API response가 legacy recommendation payload의 `auto_apply_allowed="false"` / `review_required="false"` shape를 truthy recommendation state로 읽지 않음
+2. pending recommendation response가 canonical false를 유지함
+3. timeline/read truth와 downstream review snapshot/partial regeneration result response가 bool-ish false shape에서 같은 기준을 사용함
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
+## 40. 2026-07-04 approve rollback legacy string false recommendation fields closeout
+
+이번 후속 작업에서는 timeline/read response 경계보다 한 단계 아래인 recommendation rollback persistence에서, downstream failure 후 legacy false-like payload가 DB row truth를 다시 오염시키는 가장 작은 경계 1개를 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- review state 저장 실패 후 rollback이 실행될 때 `packages/core-engine/src/videobox_core_engine/local_pipeline.py`는 original recommendation payload의 `auto_apply_allowed="false"` / `review_required="false"` 값을 raw `bool(...)`로 다시 써서 DB row를 `(1, 1, "pending")`로 오염시키고 있었다
+- strict TDD로 `test_review_snapshot_api_approve_rollback_normalizes_legacy_string_false_recommendation_fields` exact regression을 먼저 추가했고, 실제로 approve rollback 뒤 recommendation row가 `(0, 0, "pending")`이 아니라 `(1, 1, "pending")`가 되는 RED를 확인했다
+- 원인은 `_rollback_recommendation_review_mutation(...)`의 recommendation row restore path가 legacy false-like string을 canonicalize하지 않던 점이었다
+- 최소 수정으로 rollback persistence path에도 runtime bool-ish normalization을 적용해 legacy false-like recommendation fields를 canonical false DB 값으로 복구하도록 맞췄다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 recommendation rollback truth 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 passed`
+- output-gating focused slice
+  - `24 passed`
+- current-focused-parallel
+  - backend output-gating `24 passed`
+  - backend preflight `56 passed`
+  - frontend preflight `25 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - rollback persistence bool-ish normalization 한 점에 국한된 수정이라 exact + focused evidence가 더 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. approve rollback persistence가 legacy recommendation payload의 `auto_apply_allowed="false"` / `review_required="false"` shape를 truthy DB row로 복구하지 않음
+2. downstream failure 뒤 recommendation row가 canonical false와 original decision state를 유지함
+3. recommendation rollback truth와 timeline/read truth가 bool-ish false shape에서 같은 기준을 사용함
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
+## 41. 2026-07-04 preview renderer string false TTS recommendation review_required closeout
+
+이번 후속 작업에서는 review mutation rollback보다 더 사용자 출력에 가까운 `TTS approval/output` 인접면에서, preview narration source 선택이 legacy false-like recommendation field 때문에 틀어지는 가장 작은 경계 1개를 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/core-engine/src/videobox_core_engine/preview_renderer.py`는 applied `tts_replacement` recommendation의 `auto_apply_allowed="true"` / `review_required="false"` 값을 raw `bool(...)`로 읽어 실제 selected narration source 대신 original narration source를 preview HTML에 노출하고 있었다
+- strict TDD로 `test_preview_renderer_treats_string_false_tts_recommendation_review_required_as_false` exact regression을 먼저 추가했고, 실제로 preview HTML이 selected TTS source를 잃고 original narration source를 계속 노출하는 RED를 확인했다
+- 원인은 preview renderer의 TTS applied-segment 판정이 bool-ish false normalization 없이 raw truthiness를 쓰던 점이었다
+- 최소 수정으로 preview renderer에도 bool-ish normalization helper를 추가해 legacy false-like recommendation fields를 canonical bool로 해석하도록 맞췄다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 preview/TTS read truth 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 passed`
+- output-gating focused slice
+  - `24 passed`
+- current-focused-parallel
+  - backend output-gating `24 passed`
+  - backend preflight `56 passed`
+  - frontend preflight `25 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - preview renderer bool-ish normalization 한 점에 국한된 수정이라 exact + focused evidence가 더 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. preview renderer가 applied `tts_replacement` recommendation의 `review_required="false"` legacy string shape를 blocker로 오판하지 않음
+2. preview HTML narration source가 selected TTS source를 유지함
+3. preview/TTS read truth와 timeline/recommendation normalization이 bool-ish false shape에서 같은 기준을 사용함
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
+## 42. 2026-07-04 review snapshot fallback legacy string false recommendation decision-state closeout
+
+이번 후속 작업에서는 preview/TTS read path 다음 인접면인 review snapshot fallback classification에서, legacy false-like recommendation payload가 applied recommendation truth를 pending blocker로 뒤집는 가장 작은 경계 1개를 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/storage-abstractions/src/videobox_storage/local_project_store.py`의 `_derive_recommendation_decision_state(...)`는 legacy recommendation payload의 `auto_apply_allowed="true"` / `review_required="false"` 값을 raw truthiness로 읽어 review snapshot fallback에서 `pending`으로 오판하고 있었다
+- strict TDD로 `test_store_build_review_snapshot_treats_legacy_string_false_recommendation_as_approved` exact regression을 먼저 추가했고, 실제로 review snapshot의 `applied_recommendations`가 비고 recommendation이 pending 쪽으로 밀리는 RED를 확인했다
+- 원인은 fallback decision-state derivation이 bool-ish false normalization 없이 raw truthiness를 쓰던 점이었다
+- 최소 수정으로 `_derive_recommendation_decision_state(...)`도 같은 bool-ish normalization을 사용하도록 맞춰 legacy recommendation payload를 canonical decision-state로 분류하게 했다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 review snapshot fallback truth 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 passed`
+- output-gating focused slice
+  - `24 passed`
+- current-focused-parallel
+  - backend output-gating `24 passed`
+  - backend preflight `56 passed`
+  - frontend preflight `25 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - review snapshot fallback decision-state normalization 한 점에 국한된 수정이라 exact + focused evidence가 더 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. review snapshot fallback classification이 legacy recommendation payload의 `review_required="false"` shape를 pending blocker로 오판하지 않음
+2. auto-apply 가능한 recommendation이 applied recommendation truth를 유지함
+3. review snapshot fallback truth와 recommendation persistence/read truth가 bool-ish false shape에서 같은 기준을 사용함
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
+## 43. 2026-07-04 review guidance string false segment review_required closeout
+
+이번 후속 작업에서는 review snapshot fallback 다음 인접면인 operator guidance prompt surface에서, legacy false-like segment payload가 attention-required segment를 잘못 늘리는 가장 작은 경계 1개를 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/core-engine/src/videobox_core_engine/review_guidance.py`의 `_segments_needing_attention(...)`는 segment payload의 `review_required="false"` 값을 raw truthiness로 읽어 operator guidance prompt에 실제로는 review가 필요 없는 segment까지 attention 대상으로 포함하고 있었다
+- strict TDD로 `test_review_guidance_builder_ignores_string_false_segment_review_required` exact regression을 먼저 추가했고, 실제로 `["seg_001", "seg_002"]`가 나와야 할 자리에 `["seg_002"]`만 남아야 하는 RED를 확인했다
+- 원인은 operator guidance의 segment attention 계산이 bool-ish false normalization 없이 raw truthiness를 쓰던 점이었다
+- 최소 수정으로 review guidance에도 bool-ish normalization helper를 추가해 legacy false-like segment fields를 canonical bool로 해석하도록 맞췄다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 operator guidance prompt truth 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 passed`
+- output-gating focused slice
+  - `24 passed`
+- current-focused-parallel
+  - backend output-gating `24 passed`
+  - backend preflight `56 passed`
+  - frontend preflight `25 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - operator guidance bool-ish normalization 한 점에 국한된 수정이라 exact + focused evidence가 더 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. operator guidance prompt가 legacy segment payload의 `review_required="false"` shape를 attention-required segment로 오판하지 않음
+2. `segments needing attention` 계산이 실제 review-required segment만 유지함
+3. operator guidance truth와 segment persistence/read truth가 bool-ish false shape에서 같은 기준을 사용함
 
 현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
 

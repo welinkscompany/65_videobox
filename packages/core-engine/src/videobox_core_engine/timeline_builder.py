@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from uuid import uuid4
 
-from videobox_domain_models.recommendations import RecommendationRecord
+from videobox_domain_models.recommendations import RecommendationRecord, RecommendationType
 from videobox_domain_models.segments import SegmentRecord
 from videobox_timeline_schema.models import (
     TimelineClip,
@@ -11,6 +11,20 @@ from videobox_timeline_schema.models import (
     TimelineReviewFlag,
     TimelineTrack,
 )
+
+
+def _normalize_boolish(value: object) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() not in {"", "0", "false", "no", "off"}
+    return bool(value)
+
+
+SUPPORTED_TIMELINE_RECOMMENDATION_TYPES = {
+    RecommendationType.TTS_REPLACEMENT.value,
+    RecommendationType.BROLL.value,
+    RecommendationType.BGM.value,
+    RecommendationType.OVERLAY.value,
+}
 
 
 class TimelineBuilder:
@@ -27,6 +41,12 @@ class TimelineBuilder:
         normalized_recommendations = [
             self._recommendation_payload(recommendation)
             for recommendation in recommendations
+        ]
+        normalized_recommendations = [
+            recommendation
+            for recommendation in normalized_recommendations
+            if str(recommendation.get("recommendation_type") or "").strip()
+            in SUPPORTED_TIMELINE_RECOMMENDATION_TYPES
         ]
         applied_recommendations: list[dict[str, object]] = []
         pending_recommendations: list[dict[str, object]] = []
@@ -148,7 +168,9 @@ class TimelineBuilder:
                 "review_required": segment.review_required,
                 "cleanup_decision": "review" if segment.review_required else "keep",
             }
-        return dict(segment)
+        payload = dict(segment)
+        payload["review_required"] = _normalize_boolish(payload.get("review_required", False))
+        return payload
 
     def _recommendation_payload(
         self,
@@ -167,7 +189,10 @@ class TimelineBuilder:
                 "payload": recommendation.payload or {},
                 "created_at": recommendation.created_at.isoformat(),
             }
-        return dict(recommendation)
+        payload = dict(recommendation)
+        payload["auto_apply_allowed"] = _normalize_boolish(payload.get("auto_apply_allowed", False))
+        payload["review_required"] = _normalize_boolish(payload.get("review_required", False))
+        return payload
 
     def build_review_snapshot(
         self,
@@ -178,14 +203,21 @@ class TimelineBuilder:
         recommendations: list[dict[str, object]],
         timeline_review_flags: list[TimelineReviewFlag],
     ) -> dict[str, object]:
+        normalized_recommendations = [self._recommendation_payload(recommendation) for recommendation in recommendations]
+        normalized_recommendations = [
+            recommendation
+            for recommendation in normalized_recommendations
+            if str(recommendation.get("recommendation_type") or "").strip()
+            in SUPPORTED_TIMELINE_RECOMMENDATION_TYPES
+        ]
         applied_recommendations = [
             recommendation
-            for recommendation in recommendations
+            for recommendation in normalized_recommendations
             if bool(recommendation.get("auto_apply_allowed")) and not bool(recommendation.get("review_required"))
         ]
         pending_recommendations = [
             recommendation
-            for recommendation in recommendations
+            for recommendation in normalized_recommendations
             if not bool(recommendation.get("auto_apply_allowed")) or bool(recommendation.get("review_required"))
         ]
         return {

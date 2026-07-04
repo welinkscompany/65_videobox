@@ -12,8 +12,11 @@ from videobox_api.main import create_app
 from videobox_api.orchestration import LocalFirstRuntimeService
 from videobox_core_engine.local_first_runtime import LocalFirstStructuredGenerationError
 from videobox_core_engine.local_pipeline import LocalPipelineRunner
+from videobox_core_engine.preview_renderer import PreviewRenderer
 from videobox_core_engine.provider_trace import build_provider_trace
+from videobox_core_engine.review_guidance import LocalFirstReviewGuidanceBuilder
 from videobox_core_engine.settings import AutoCutConfig, LocalOpenAICompatibleRuntimeConfig
+from videobox_core_engine.timeline_builder import TimelineBuilder
 from videobox_domain_models.jobs import JobStatus, JobType
 from videobox_domain_models.recommendations import RecommendationType
 from videobox_provider_interfaces.llm import (
@@ -101,6 +104,1349 @@ class FailingOutputOperatorCopyBuilder:
                 fallback_reasons=["local_provider_error", "gemini_unavailable"],
             ),
         )
+
+
+def test_timeline_builder_treats_string_false_recommendation_review_required_as_false() -> None:
+    builder = TimelineBuilder()
+
+    timeline = builder.build(
+        project_id="project_001",
+        segments=[
+            {
+                "segment_id": "seg_001",
+                "text": "Office overview.",
+                "start_sec": 0.0,
+                "end_sec": 1.0,
+                "confidence": 0.99,
+                "review_required": False,
+                "cleanup_decision": "keep",
+            }
+        ],
+        recommendations=[
+            {
+                "recommendation_id": "rec_broll_001",
+                "target_segment_id": "seg_001",
+                "recommendation_type": RecommendationType.BROLL.value,
+                "selected_asset_id": "asset_broll_001",
+                "score": 0.88,
+                "reason": "Office skyline b-roll.",
+                "auto_apply_allowed": True,
+                "review_required": "false",
+                "payload": {},
+                "created_at": "2026-07-04T00:00:00+00:00",
+            }
+        ],
+    )
+
+    assert [item["recommendation_id"] for item in timeline.applied_recommendations] == ["rec_broll_001"]
+    assert timeline.pending_recommendations == []
+    assert timeline.review_flags == []
+
+
+def test_timeline_builder_review_snapshot_treats_string_false_recommendation_fields_as_applied() -> None:
+    builder = TimelineBuilder()
+
+    snapshot = builder.build_review_snapshot(
+        project_id="project_001",
+        timeline_id="timeline_001",
+        segments=[],
+        recommendations=[
+            {
+                "recommendation_id": "rec_broll_001",
+                "target_segment_id": "seg_001",
+                "recommendation_type": RecommendationType.BROLL.value,
+                "selected_asset_id": "asset_broll_001",
+                "score": 0.91,
+                "reason": "Keep existing B-roll choice.",
+                "auto_apply_allowed": "true",
+                "review_required": "false",
+                "payload": {},
+                "created_at": "2026-07-04T00:00:00+00:00",
+            }
+        ],
+        timeline_review_flags=[],
+    )
+
+    assert [item["recommendation_id"] for item in snapshot["applied_recommendations"]] == ["rec_broll_001"]
+    assert snapshot["pending_recommendations"] == []
+
+
+def test_timeline_builder_filters_unknown_applied_recommendation_from_surface() -> None:
+    builder = TimelineBuilder()
+
+    timeline = builder.build(
+        project_id="project_001",
+        segments=[
+            {
+                "segment_id": "seg_001",
+                "text": "Office overview.",
+                "start_sec": 0.0,
+                "end_sec": 1.0,
+                "confidence": 0.99,
+                "review_required": False,
+                "cleanup_decision": "keep",
+            }
+        ],
+        recommendations=[
+            {
+                "recommendation_id": "rec_unknown_applied_surface",
+                "target_segment_id": "seg_001",
+                "recommendation_type": "legacy_overlay_pick",
+                "selected_asset_id": "asset_overlay_001",
+                "score": 0.5,
+                "reason": "Unknown stale recommendation should not remain on applied surface.",
+                "auto_apply_allowed": True,
+                "review_required": False,
+                "payload": {},
+                "created_at": "2026-07-04T00:00:00+00:00",
+            }
+        ],
+    )
+
+    assert timeline.applied_recommendations == []
+
+
+def test_timeline_builder_review_snapshot_filters_unknown_applied_recommendation_from_surface() -> None:
+    builder = TimelineBuilder()
+
+    snapshot = builder.build_review_snapshot(
+        project_id="project_001",
+        timeline_id="timeline_001",
+        segments=[],
+        recommendations=[
+            {
+                "recommendation_id": "rec_unknown_applied_surface",
+                "target_segment_id": "seg_001",
+                "recommendation_type": "legacy_overlay_pick",
+                "selected_asset_id": "asset_overlay_001",
+                "score": 0.5,
+                "reason": "Unknown stale recommendation should not remain on applied surface.",
+                "auto_apply_allowed": True,
+                "review_required": False,
+                "payload": {},
+                "created_at": "2026-07-04T00:00:00+00:00",
+            }
+        ],
+        timeline_review_flags=[],
+    )
+
+    assert snapshot["applied_recommendations"] == []
+
+
+def test_preview_renderer_treats_string_false_tts_recommendation_review_required_as_false() -> None:
+    renderer = PreviewRenderer()
+
+    payload = renderer.build_preview_payload(
+        project_id="project_001",
+        timeline={
+            "timeline_id": "timeline_001",
+            "review_status": "approved",
+            "narration_source_uri": "local://projects/project_001/assets/narration_original.wav",
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": "local://projects/project_001/assets/tts_selected.wav",
+                            "start_sec": 0.0,
+                            "end_sec": 1.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "applied_recommendations": [
+                {
+                    "recommendation_id": "rec_tts_001",
+                    "target_segment_id": "seg_001",
+                    "recommendation_type": "tts_replacement",
+                    "selected_asset_id": "asset_tts_001",
+                    "score": 1.0,
+                    "reason": "Approved TTS replacement.",
+                    "auto_apply_allowed": "true",
+                    "review_required": "false",
+                    "payload": {
+                        "selected_asset_uri": "local://projects/project_001/assets/tts_selected.wav"
+                    },
+                    "created_at": "2026-07-04T00:00:00+00:00",
+                }
+            ],
+        },
+    )
+
+    assert "local://projects/project_001/assets/tts_selected.wav" in payload["player_html"]
+    assert "local://projects/project_001/assets/narration_original.wav" not in payload["player_html"]
+
+
+def test_review_guidance_builder_ignores_string_false_segment_review_required() -> None:
+    builder = LocalFirstReviewGuidanceBuilder(runtime_service=object())
+
+    assert builder._segments_needing_attention(
+        [
+            {
+                "segment_id": "seg_001",
+                "review_required": "false",
+            },
+            {
+                "segment_id": "seg_002",
+                "review_required": True,
+            },
+        ]
+    ) == ["seg_002"]
+
+
+def test_store_save_recommendation_run_treats_string_false_review_required_as_false(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="String False Recommendation Store Project")
+
+    run = store.save_recommendation_run(
+        project_id=project.project_id,
+        recommendation_type=RecommendationType.BROLL,
+        source_job_id="segment_analysis_job_001",
+        recommendations=[
+            {
+                "target_segment_id": "seg_001",
+                "selected_asset_id": "asset_broll_001",
+                "score": 0.88,
+                "reason": "Office skyline b-roll.",
+                "auto_apply_allowed": True,
+                "review_required": "false",
+                "payload": {},
+            }
+        ],
+    )
+
+    persisted = run["recommendations"][0]
+    recommendation_rows = store.list_recommendation_rows(project_id=project.project_id)
+
+    assert persisted["review_required"] is False
+    assert persisted["decision_state"] == "approved"
+    assert recommendation_rows[0]["review_required"] is False
+    assert recommendation_rows[0]["decision_state"] == "approved"
+
+
+def test_store_save_recommendation_run_treats_string_false_auto_apply_allowed_as_false(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="String False Auto Apply Store Project")
+
+    run = store.save_recommendation_run(
+        project_id=project.project_id,
+        recommendation_type=RecommendationType.BROLL,
+        source_job_id="segment_analysis_job_001",
+        recommendations=[
+            {
+                "target_segment_id": "seg_001",
+                "selected_asset_id": "asset_broll_001",
+                "score": 0.88,
+                "reason": "Office skyline b-roll.",
+                "auto_apply_allowed": "false",
+                "review_required": False,
+                "payload": {},
+            }
+        ],
+    )
+
+    persisted = run["recommendations"][0]
+    recommendation_rows = store.list_recommendation_rows(project_id=project.project_id)
+
+    assert persisted["auto_apply_allowed"] is False
+    assert persisted["decision_state"] == "pending"
+    assert recommendation_rows[0]["auto_apply_allowed"] is False
+    assert recommendation_rows[0]["decision_state"] == "pending"
+
+
+def test_store_list_recommendation_rows_treats_legacy_string_false_columns_as_false(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Legacy String False Recommendation Row Project")
+    database_path = tmp_path / "projects" / project.project_id / "db" / "project.sqlite"
+
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute(
+            """
+            INSERT INTO recommendations (
+                recommendation_id,
+                project_id,
+                target_segment_id,
+                recommendation_type,
+                selected_asset_id,
+                score,
+                reason,
+                auto_apply_allowed,
+                review_required,
+                decision_state,
+                payload_json,
+                created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "rec_legacy_false_row",
+                project.project_id,
+                "seg_001",
+                RecommendationType.BROLL.value,
+                "asset_broll_001",
+                0.88,
+                "Office skyline b-roll.",
+                "false",
+                "false",
+                "approved",
+                json.dumps({}, ensure_ascii=True),
+                "2026-07-04T00:00:00+00:00",
+            ),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    recommendation_rows = store.list_recommendation_rows(project_id=project.project_id)
+
+    assert recommendation_rows[0]["auto_apply_allowed"] is False
+    assert recommendation_rows[0]["review_required"] is False
+
+
+def test_store_build_review_snapshot_treats_legacy_string_false_recommendation_as_approved(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Legacy String False Review Snapshot Project")
+
+    snapshot = store.build_review_snapshot(
+        project_id=project.project_id,
+        timeline_id=None,
+        segments=[],
+        recommendations=[
+            {
+                "recommendation_id": "rec_legacy_false_snapshot",
+                "target_segment_id": "seg_001",
+                "recommendation_type": RecommendationType.BROLL.value,
+                "selected_asset_id": "asset_broll_001",
+                "score": 0.88,
+                "reason": "Legacy string false recommendation for review snapshot.",
+                "auto_apply_allowed": "true",
+                "review_required": "false",
+                "payload": {},
+                "created_at": "2026-07-04T00:00:00+00:00",
+            }
+        ],
+        timeline_review_flags=[],
+    )
+
+    assert [item["recommendation_id"] for item in snapshot["applied_recommendations"]] == [
+        "rec_legacy_false_snapshot"
+    ]
+    assert snapshot["pending_recommendations"] == []
+
+
+def test_store_build_review_snapshot_reclassifies_legacy_applied_like_timeline_pending_override(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Review Snapshot Pending Override Legacy Applied Like Project")
+
+    snapshot = store.build_review_snapshot(
+        project_id=project.project_id,
+        timeline_id=None,
+        segments=[],
+        timeline_applied_recommendations=[],
+        timeline_pending_recommendations=[
+            {
+                "recommendation_id": "rec_tts_legacy_applied_like",
+                "target_segment_id": "seg_001",
+                "recommendation_type": RecommendationType.TTS_REPLACEMENT.value,
+                "selected_asset_id": "asset_tts_001",
+                "score": 1.0,
+                "reason": "Legacy applied-like recommendation should not remain pending.",
+                "auto_apply_allowed": "true",
+                "review_required": "false",
+                "decision_state": None,
+                "payload": {
+                    "selected_asset_uri": (
+                        "local://projects/project_001/assets/generated/asset_tts_001.wav"
+                    )
+                },
+                "created_at": "2026-07-04T00:00:00+00:00",
+            }
+        ],
+        timeline_review_flags=[],
+    )
+
+    assert [item["recommendation_id"] for item in snapshot["applied_recommendations"]] == [
+        "rec_tts_legacy_applied_like"
+    ]
+    assert snapshot["pending_recommendations"] == []
+
+
+def test_store_build_review_snapshot_reclassifies_legacy_pending_like_timeline_applied_override(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Review Snapshot Applied Override Legacy Pending Like Project")
+
+    snapshot = store.build_review_snapshot(
+        project_id=project.project_id,
+        timeline_id=None,
+        segments=[],
+        timeline_applied_recommendations=[
+            {
+                "recommendation_id": "rec_tts_legacy_pending_like",
+                "target_segment_id": "seg_001",
+                "recommendation_type": RecommendationType.TTS_REPLACEMENT.value,
+                "selected_asset_id": "asset_tts_001",
+                "score": 1.0,
+                "reason": "Legacy pending-like recommendation should not remain applied.",
+                "auto_apply_allowed": "false",
+                "review_required": "true",
+                "decision_state": None,
+                "payload": {
+                    "selected_asset_uri": (
+                        "local://projects/project_001/assets/generated/asset_tts_001.wav"
+                    )
+                },
+                "created_at": "2026-07-04T00:00:00+00:00",
+            }
+        ],
+        timeline_pending_recommendations=[],
+        timeline_review_flags=[],
+    )
+
+    assert snapshot["applied_recommendations"] == []
+    assert [item["recommendation_id"] for item in snapshot["pending_recommendations"]] == [
+        "rec_tts_legacy_pending_like"
+    ]
+
+
+def test_store_build_review_snapshot_marks_status_blocked_when_pending_override_exists_despite_persisted_approved(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Review Snapshot Persisted Approved Pending Override Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+        },
+    )
+    store.save_review_state(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        status="approved",
+    )
+
+    snapshot = store.build_review_snapshot(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        segments=[],
+        timeline_applied_recommendations=[],
+        timeline_pending_recommendations=[
+            {
+                "recommendation_id": "rec_tts_pending_override",
+                "target_segment_id": "seg_001",
+                "recommendation_type": RecommendationType.TTS_REPLACEMENT.value,
+                "selected_asset_id": "asset_tts_001",
+                "score": 1.0,
+                "reason": "Pending override should force blocked review status.",
+                "auto_apply_allowed": False,
+                "review_required": True,
+                "payload": {},
+                "created_at": "2026-07-04T00:00:00+00:00",
+            }
+        ],
+        timeline_review_flags=[],
+    )
+
+    assert snapshot["review_status"] == "blocked"
+
+
+def test_store_build_review_snapshot_ignores_unknown_review_flag_for_status_when_persisted_approved(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Review Snapshot Unknown Flag Approved Status Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+        },
+    )
+    store.save_review_state(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        status="approved",
+    )
+
+    snapshot = store.build_review_snapshot(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        segments=[],
+        timeline_applied_recommendations=[],
+        timeline_pending_recommendations=[],
+        timeline_review_flags=[
+            {
+                "code": "legacy_review_flag",
+                "segment_id": "seg_001",
+                "message": "Legacy metadata should not reopen review status.",
+            }
+        ],
+    )
+
+    assert snapshot["review_status"] == "approved"
+
+
+def test_store_build_review_snapshot_ignores_unknown_pending_recommendation_for_status_when_persisted_approved(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(
+        name="Review Snapshot Unknown Pending Recommendation Approved Status Project"
+    )
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+        },
+    )
+    store.save_review_state(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        status="approved",
+    )
+
+    snapshot = store.build_review_snapshot(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        segments=[],
+        timeline_applied_recommendations=[],
+        timeline_pending_recommendations=[
+            {
+                "recommendation_id": "rec_stale_unknown_type",
+                "target_segment_id": "seg_001",
+                "recommendation_type": "legacy_overlay_pick",
+                "auto_apply_allowed": False,
+                "review_required": True,
+                "payload": {},
+                "created_at": "2026-07-04T00:00:00+00:00",
+            }
+        ],
+        timeline_review_flags=[],
+    )
+
+    assert snapshot["review_status"] == "approved"
+
+
+def test_store_build_review_snapshot_filters_unknown_pending_recommendation_from_surface(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(
+        name="Review Snapshot Unknown Pending Recommendation Surface Project"
+    )
+
+    snapshot = store.build_review_snapshot(
+        project_id=project.project_id,
+        timeline_id=None,
+        segments=[],
+        timeline_applied_recommendations=[],
+        timeline_pending_recommendations=[
+            {
+                "recommendation_id": "rec_stale_unknown_type",
+                "target_segment_id": "seg_001",
+                "recommendation_type": "legacy_overlay_pick",
+                "auto_apply_allowed": False,
+                "review_required": True,
+                "payload": {},
+                "created_at": "2026-07-04T00:00:00+00:00",
+            }
+        ],
+        timeline_review_flags=[],
+    )
+
+    assert snapshot["pending_recommendations"] == []
+
+
+def test_store_build_review_snapshot_filters_unknown_applied_recommendation_from_surface(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(
+        name="Review Snapshot Unknown Applied Recommendation Surface Project"
+    )
+
+    snapshot = store.build_review_snapshot(
+        project_id=project.project_id,
+        timeline_id=None,
+        segments=[],
+        timeline_applied_recommendations=[
+            {
+                "recommendation_id": "rec_unknown_applied_surface",
+                "target_segment_id": "seg_001",
+                "recommendation_type": "legacy_overlay_pick",
+                "selected_asset_id": "asset_overlay_001",
+                "score": 0.5,
+                "reason": "Unknown stale recommendation should not remain on applied surface.",
+                "auto_apply_allowed": True,
+                "review_required": False,
+                "decision_state": "approved",
+                "payload": {},
+                "created_at": "2026-07-04T00:00:00+00:00",
+            }
+        ],
+        timeline_pending_recommendations=[],
+        timeline_review_flags=[],
+    )
+
+    assert snapshot["applied_recommendations"] == []
+
+
+def test_store_save_timeline_run_marks_misbucketed_applied_pending_like_recommendation_as_blocked(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Timeline Save Pending Like Applied Bucket Project")
+
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [],
+            "review_flags": [],
+            "applied_recommendations": [
+                {
+                    "recommendation_id": "rec_tts_legacy_pending_like",
+                    "target_segment_id": "seg_001",
+                    "recommendation_type": RecommendationType.TTS_REPLACEMENT.value,
+                    "selected_asset_id": "asset_tts_001",
+                    "score": 1.0,
+                    "reason": "Pending-like recommendation leaked into applied bucket.",
+                    "auto_apply_allowed": "false",
+                    "review_required": "true",
+                    "decision_state": None,
+                    "payload": {},
+                    "created_at": "2026-07-04T00:00:00+00:00",
+                }
+            ],
+            "pending_recommendations": [],
+        },
+    )
+
+    review_state = store.get_review_state(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+    )
+
+    assert review_state["status"] == "blocked"
+
+
+def test_store_save_timeline_run_ignores_stale_nonlist_review_flags_when_setting_initial_status(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Timeline Save Stale Review Flags Initial Status Project")
+
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [],
+            "review_flags": "stale_review_flag_container",
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+        },
+    )
+
+    review_state = store.get_review_state(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+    )
+
+    assert review_state["status"] == "draft"
+
+
+def test_store_save_timeline_run_ignores_unknown_pending_recommendation_when_setting_initial_status(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(
+        name="Timeline Save Unknown Pending Recommendation Initial Status Project"
+    )
+
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [
+                {
+                    "recommendation_id": "rec_stale_unknown_type",
+                    "target_segment_id": "seg_001",
+                    "recommendation_type": "legacy_overlay_pick",
+                    "auto_apply_allowed": False,
+                    "review_required": True,
+                    "payload": {},
+                    "created_at": "2026-07-04T00:00:00+00:00",
+                }
+            ],
+        },
+    )
+
+    review_state = store.get_review_state(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+    )
+
+    assert review_state["status"] == "draft"
+
+
+def test_editing_session_api_normalizes_legacy_string_false_segment_review_required_from_store(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Legacy String False Segment Editing Session Project")
+    database_path = tmp_path / "projects" / project.project_id / "db" / "project.sqlite"
+
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute(
+            """
+            INSERT INTO segments (
+                segment_id,
+                project_id,
+                start_sec,
+                end_sec,
+                text,
+                source_asset_id,
+                confidence,
+                cleanup_decision,
+                review_required,
+                metadata_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "seg_001",
+                project.project_id,
+                0.0,
+                2.0,
+                "Legacy string false segment row.",
+                "asset_narration_001",
+                0.99,
+                "keep",
+                "false",
+                json.dumps({}, ensure_ascii=True),
+            ),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "transcript_text": "Legacy string false segment row.",
+                    "script_text": "Legacy string false segment row.",
+                    "summary": "Legacy string false segment row.",
+                    "keywords": ["legacy"],
+                    "visual_plan": "Keep current visuals.",
+                    "broll_query": "legacy",
+                    "narration_text": "Legacy string false segment row.",
+                    "review_required": False,
+                    "cleanup_decision": "keep",
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+        },
+    )
+    timeline_job = store.create_job(
+        project_id=project.project_id,
+        job_type=JobType.TIMELINE_BUILD,
+        input_ref="segment_analysis_job_001",
+        status=JobStatus.SUCCEEDED,
+    )
+    store.update_job(
+        project_id=project.project_id,
+        job_id=timeline_job["job_id"],
+        status=JobStatus.SUCCEEDED,
+        output_ref=timeline["timeline_id"],
+    )
+
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions",
+        json={"timeline_job_id": timeline_job["job_id"]},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["segments"] == [
+        {
+            "segment_id": "seg_001",
+            "caption_text": "Legacy string false segment row.",
+            "start_sec": 0.0,
+            "end_sec": 2.0,
+            "cut_action": "keep",
+            "review_required": False,
+            "broll_override": None,
+            "visual_overlays": [],
+            "music_override": None,
+            "tts_replacement": None,
+        }
+    ]
+
+
+def test_editing_session_api_preserves_string_false_segment_review_required_after_segment_analysis_write(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="String False Segment Analysis Write Project")
+
+    store.save_segment_analysis(
+        project_id=project.project_id,
+        transcript_id="transcript_001",
+        script_asset_id=None,
+        segments=[
+            {
+                "segment_id": "seg_001",
+                "text": "Segment analysis stored string false.",
+                "start_sec": 0.0,
+                "end_sec": 2.0,
+                "confidence": 0.99,
+                "review_required": "false",
+                "cleanup_decision": "keep",
+            }
+        ],
+    )
+
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "transcript_text": "Segment analysis stored string false.",
+                    "script_text": "Segment analysis stored string false.",
+                    "summary": "Segment analysis stored string false.",
+                    "keywords": ["segment"],
+                    "visual_plan": "Keep current visuals.",
+                    "broll_query": "segment",
+                    "narration_text": "Segment analysis stored string false.",
+                    "review_required": False,
+                    "cleanup_decision": "keep",
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+        },
+    )
+    timeline_job = store.create_job(
+        project_id=project.project_id,
+        job_type=JobType.TIMELINE_BUILD,
+        input_ref="segment_analysis_job_001",
+        status=JobStatus.SUCCEEDED,
+    )
+    store.update_job(
+        project_id=project.project_id,
+        job_id=timeline_job["job_id"],
+        status=JobStatus.SUCCEEDED,
+        output_ref=timeline["timeline_id"],
+    )
+
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions",
+        json={"timeline_job_id": timeline_job["job_id"]},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["segments"] == [
+        {
+            "segment_id": "seg_001",
+            "caption_text": "Segment analysis stored string false.",
+            "start_sec": 0.0,
+            "end_sec": 2.0,
+            "cut_action": "keep",
+            "review_required": False,
+            "broll_override": None,
+            "visual_overlays": [],
+            "music_override": None,
+            "tts_replacement": None,
+        }
+    ]
+
+
+def test_timeline_api_normalizes_legacy_string_false_pending_recommendation_fields(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Legacy String False Timeline Recommendation Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "transcript_text": "Legacy string false pending recommendation.",
+                    "script_text": "Legacy string false pending recommendation.",
+                    "summary": "Legacy string false pending recommendation.",
+                    "keywords": ["legacy"],
+                    "visual_plan": "Keep current visuals.",
+                    "broll_query": "legacy",
+                    "narration_text": "Legacy string false pending recommendation.",
+                    "review_required": False,
+                    "cleanup_decision": "keep",
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [
+                {
+                    "recommendation_id": "rec_legacy_false_pending",
+                    "target_segment_id": "seg_001",
+                    "recommendation_type": RecommendationType.BROLL.value,
+                    "selected_asset_id": "asset_broll_001",
+                    "score": 0.88,
+                    "reason": "Legacy string false pending recommendation.",
+                    "auto_apply_allowed": "false",
+                    "review_required": "false",
+                    "decision_state": "pending",
+                    "payload": {},
+                    "created_at": "2026-07-04T00:00:00+00:00",
+                    "provider_trace": build_provider_trace(final_provider="heuristic_fallback"),
+                }
+            ],
+        },
+    )
+    timeline_job = store.create_job(
+        project_id=project.project_id,
+        job_type=JobType.TIMELINE_BUILD,
+        input_ref="segment_analysis_job_001",
+        status=JobStatus.SUCCEEDED,
+    )
+    store.update_job(
+        project_id=project.project_id,
+        job_id=timeline_job["job_id"],
+        status=JobStatus.SUCCEEDED,
+        output_ref=timeline["timeline_id"],
+    )
+
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+
+    response = client.get(f"/api/projects/{project.project_id}/timelines/{timeline_job['job_id']}")
+
+    assert response.status_code == 200
+    assert response.json()["timeline"]["pending_recommendations"] == [
+        {
+            "recommendation_id": "rec_legacy_false_pending",
+            "target_segment_id": "seg_001",
+            "recommendation_type": RecommendationType.BROLL.value,
+            "selected_asset_id": "asset_broll_001",
+            "score": 0.88,
+            "reason": "Legacy string false pending recommendation.",
+            "auto_apply_allowed": False,
+            "review_required": False,
+            "decision_state": "pending",
+            "payload": {},
+            "created_at": "2026-07-04T00:00:00+00:00",
+            "provider_trace": build_provider_trace(final_provider="heuristic_fallback"),
+        }
+    ]
+
+
+def test_partial_regeneration_result_normalizes_legacy_string_false_pending_recommendation_fields(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Legacy String False Partial Regeneration Result Project")
+    source_timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "transcript_text": "Legacy string false partial regeneration recommendation.",
+                    "script_text": "Legacy string false partial regeneration recommendation.",
+                    "summary": "Legacy string false partial regeneration recommendation.",
+                    "keywords": ["legacy"],
+                    "visual_plan": "Keep current visuals.",
+                    "broll_query": "legacy",
+                    "narration_text": "Legacy string false partial regeneration recommendation.",
+                    "review_required": False,
+                    "cleanup_decision": "keep",
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+        },
+    )
+    source_timeline_job = store.create_job(
+        project_id=project.project_id,
+        job_type=JobType.TIMELINE_BUILD,
+        input_ref="segment_analysis_job_001",
+        status=JobStatus.SUCCEEDED,
+    )
+    store.update_job(
+        project_id=project.project_id,
+        job_id=source_timeline_job["job_id"],
+        status=JobStatus.SUCCEEDED,
+        output_ref=source_timeline["timeline_id"],
+    )
+    persisted_source_timeline = store.get_timeline_run(
+        project_id=project.project_id,
+        timeline_id=source_timeline["timeline_id"],
+    )
+
+    partial_timeline = {
+        "timeline_id": "timeline_candidate_001",
+        "project_id": project.project_id,
+        "output_mode": "review",
+        "version": "v001",
+        "narration_source_uri": f"local://projects/{project.project_id}/assets/narration.wav",
+        "tracks": persisted_source_timeline["tracks"],
+        "segments": persisted_source_timeline["segments"],
+        "review_flags": [],
+        "applied_recommendations": [],
+        "pending_recommendations": [
+            {
+                "recommendation_id": "rec_legacy_false_partial_pending",
+                "target_segment_id": "seg_001",
+                "recommendation_type": RecommendationType.BROLL.value,
+                "selected_asset_id": "asset_broll_001",
+                "score": 0.88,
+                "reason": "Legacy string false partial regeneration recommendation.",
+                "auto_apply_allowed": "false",
+                "review_required": "false",
+                "decision_state": "pending",
+                "payload": {},
+                "created_at": "2026-07-04T00:00:00+00:00",
+                "provider_trace": build_provider_trace(final_provider="heuristic_fallback"),
+            }
+        ],
+        "recommendation_decisions": {},
+        "export_overlays": [],
+        "review_status": "blocked",
+    }
+    partial_payload = store.save_partial_regeneration_run(
+        project_id=project.project_id,
+        payload={
+            "source_timeline_id": source_timeline["timeline_id"],
+            "timeline_id": partial_timeline["timeline_id"],
+            "session_id": "session_001",
+            "segment_ids": ["seg_001"],
+            "fields": ["caption"],
+            "downstream_steps": ["caption_refresh", "timeline_build"],
+            "regenerated_segments": [],
+            "request": {"segment_ids": ["seg_001"], "fields": ["caption"]},
+            "timeline": partial_timeline,
+            "rerun_jobs": [],
+        },
+    )
+    partial_job = store.create_job(
+        project_id=project.project_id,
+        job_type=JobType.PARTIAL_REGENERATION,
+        input_ref="session_001",
+        status=JobStatus.SUCCEEDED,
+    )
+    store.update_job(
+        project_id=project.project_id,
+        job_id=partial_job["job_id"],
+        status=JobStatus.SUCCEEDED,
+        output_ref=partial_payload["partial_regeneration_id"],
+    )
+
+    def fake_get_review_state(self, *, project_id: str, timeline_id: str) -> dict[str, object]:
+        del self, project_id, timeline_id
+        return {"status": "draft"}
+
+    monkeypatch.setattr(LocalProjectStore, "get_review_state", fake_get_review_state)
+
+    client = TestClient(create_app(projects_root=tmp_path))
+    response = client.get(f"/api/projects/{project.project_id}/partial-regenerations/{partial_job['job_id']}")
+
+    assert response.status_code == 200
+    assert response.json()["timeline"]["pending_recommendations"] == [
+        {
+            "recommendation_id": "rec_legacy_false_partial_pending",
+            "target_segment_id": "seg_001",
+            "recommendation_type": RecommendationType.BROLL.value,
+            "selected_asset_id": "asset_broll_001",
+            "score": 0.88,
+            "reason": "Legacy string false partial regeneration recommendation.",
+            "auto_apply_allowed": False,
+            "review_required": False,
+            "decision_state": "pending",
+            "payload": {},
+            "created_at": "2026-07-04T00:00:00+00:00",
+            "provider_trace": build_provider_trace(final_provider="heuristic_fallback"),
+        }
+    ]
+
+
+def test_partial_regeneration_result_fills_default_provider_trace_for_applied_recommendation(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Partial Regeneration Applied Recommendation Default Trace Project")
+    source_timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "transcript_text": "Applied recommendation default trace.",
+                    "script_text": "Applied recommendation default trace.",
+                    "summary": "Applied recommendation default trace.",
+                    "keywords": ["applied"],
+                    "visual_plan": "Keep current visuals.",
+                    "broll_query": "applied",
+                    "narration_text": "Applied recommendation default trace.",
+                    "review_required": False,
+                    "cleanup_decision": "keep",
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+        },
+    )
+    source_timeline_job = store.create_job(
+        project_id=project.project_id,
+        job_type=JobType.TIMELINE_BUILD,
+        input_ref="segment_analysis_job_001",
+        status=JobStatus.SUCCEEDED,
+    )
+    store.update_job(
+        project_id=project.project_id,
+        job_id=source_timeline_job["job_id"],
+        status=JobStatus.SUCCEEDED,
+        output_ref=source_timeline["timeline_id"],
+    )
+    persisted_source_timeline = store.get_timeline_run(
+        project_id=project.project_id,
+        timeline_id=source_timeline["timeline_id"],
+    )
+
+    partial_timeline = {
+        "timeline_id": "timeline_candidate_001",
+        "project_id": project.project_id,
+        "output_mode": "review",
+        "version": "v001",
+        "narration_source_uri": f"local://projects/{project.project_id}/assets/narration.wav",
+        "tracks": persisted_source_timeline["tracks"],
+        "segments": persisted_source_timeline["segments"],
+        "review_flags": [],
+        "applied_recommendations": [
+            {
+                "recommendation_id": "rec_applied_missing_trace",
+                "target_segment_id": "seg_001",
+                "recommendation_type": RecommendationType.BROLL.value,
+                "selected_asset_id": "asset_broll_001",
+                "score": 0.88,
+                "reason": "Applied recommendation without provider trace.",
+                "auto_apply_allowed": True,
+                "review_required": False,
+                "decision_state": "approved",
+                "payload": {},
+                "created_at": "2026-07-04T00:00:00+00:00",
+            }
+        ],
+        "pending_recommendations": [],
+        "recommendation_decisions": {},
+        "export_overlays": [],
+        "review_status": "approved",
+    }
+    partial_payload = store.save_partial_regeneration_run(
+        project_id=project.project_id,
+        payload={
+            "source_timeline_id": source_timeline["timeline_id"],
+            "timeline_id": partial_timeline["timeline_id"],
+            "session_id": "session_001",
+            "segment_ids": ["seg_001"],
+            "fields": ["caption"],
+            "downstream_steps": ["caption_refresh", "timeline_build"],
+            "regenerated_segments": [],
+            "request": {"segment_ids": ["seg_001"], "fields": ["caption"]},
+            "timeline": partial_timeline,
+            "rerun_jobs": [],
+        },
+    )
+    partial_job = store.create_job(
+        project_id=project.project_id,
+        job_type=JobType.PARTIAL_REGENERATION,
+        input_ref="session_001",
+        status=JobStatus.SUCCEEDED,
+    )
+    store.update_job(
+        project_id=project.project_id,
+        job_id=partial_job["job_id"],
+        status=JobStatus.SUCCEEDED,
+        output_ref=partial_payload["partial_regeneration_id"],
+    )
+
+    def fake_get_review_state(self, *, project_id: str, timeline_id: str) -> dict[str, object]:
+        del self, project_id, timeline_id
+        return {"status": "approved"}
+
+    monkeypatch.setattr(LocalProjectStore, "get_review_state", fake_get_review_state)
+
+    client = TestClient(create_app(projects_root=tmp_path))
+    response = client.get(f"/api/projects/{project.project_id}/partial-regenerations/{partial_job['job_id']}")
+
+    assert response.status_code == 200
+    assert response.json()["timeline"]["applied_recommendations"] == [
+        {
+            "recommendation_id": "rec_applied_missing_trace",
+            "target_segment_id": "seg_001",
+            "recommendation_type": RecommendationType.BROLL.value,
+            "selected_asset_id": "asset_broll_001",
+            "score": 0.88,
+            "reason": "Applied recommendation without provider trace.",
+            "auto_apply_allowed": True,
+            "review_required": False,
+            "decision_state": "approved",
+            "payload": {},
+            "created_at": "2026-07-04T00:00:00+00:00",
+            "provider_trace": build_provider_trace(final_provider="rule_based_fallback"),
+        }
+    ]
 
 
 def _single_segment_transcribe(self, request):  # noqa: ANN001
@@ -2527,6 +3873,91 @@ def test_review_snapshot_persists_operator_guidance_for_repeated_reads(
     assert len(local_provider.calls) == 4
 
 
+def test_review_snapshot_fills_default_provider_trace_for_persisted_operator_guidance(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Persisted Guidance Default Trace Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 1.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "start_sec": 0.0,
+                    "end_sec": 1.0,
+                    "transcript_text": "Persisted review guidance without provider trace.",
+                    "script_text": "Persisted review guidance without provider trace.",
+                    "summary": "Persisted review guidance without provider trace.",
+                    "keywords": ["guidance"],
+                    "visual_plan": "Keep current visuals.",
+                    "broll_query": "guidance",
+                    "narration_text": "Persisted review guidance without provider trace.",
+                    "review_required": False,
+                    "cleanup_decision": "keep",
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+        },
+    )
+    store.save_review_state(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        status="draft",
+    )
+    store.save_operator_guidance(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        operator_guidance={
+            "summary": "Persisted legacy guidance without trace.",
+            "action_items": ["Review the current draft before output."],
+        },
+    )
+    timeline_job = store.create_job(
+        project_id=project.project_id,
+        job_type=JobType.TIMELINE_BUILD,
+        input_ref="segment_analysis_job_001",
+        status=JobStatus.SUCCEEDED,
+    )
+    store.update_job(
+        project_id=project.project_id,
+        job_id=timeline_job["job_id"],
+        status=JobStatus.SUCCEEDED,
+        output_ref=timeline["timeline_id"],
+    )
+
+    client = TestClient(create_app(projects_root=tmp_path))
+    review_snapshot = client.get(f"/api/projects/{project.project_id}/review-snapshots/{timeline_job['job_id']}")
+
+    assert review_snapshot.status_code == 200
+    payload = review_snapshot.json()
+    assert payload["operator_guidance"] == {
+        "summary": "Persisted legacy guidance without trace.",
+        "action_items": ["Review the current draft before output."],
+        "provider_trace": build_provider_trace(final_provider="heuristic_fallback"),
+    }
+
+
 def test_review_snapshot_invalidates_persisted_guidance_when_review_status_changes(
     tmp_path: Path,
     monkeypatch,
@@ -4515,6 +5946,422 @@ def test_output_jobs_ignore_stale_non_bool_segment_review_required_on_approved_t
     assert review_snapshot.json()["review_status"] == "approved"
     assert timeline_result.json()["timeline"]["review_flags"] == []
     assert review_snapshot.json()["review_flags"] == []
+
+
+def test_output_jobs_ignore_approved_decision_state_entries_left_in_pending_recommendations(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Approved State Stale Pending Decision Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 1.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [
+                {
+                    "recommendation_id": "rec_tts_seg_001",
+                    "target_segment_id": "seg_001",
+                    "recommendation_type": "tts_replacement",
+                    "selected_asset_id": "asset_tts_001",
+                    "score": 1.0,
+                    "reason": "Already approved recommendation leaked into pending recommendations.",
+                    "auto_apply_allowed": True,
+                    "review_required": False,
+                    "decision_state": "approved",
+                    "payload": {
+                        "selected_asset_uri": (
+                            f"local://projects/{project.project_id}/assets/generated/asset_tts_001.wav"
+                        )
+                    },
+                    "created_at": "2026-07-04T00:00:00+00:00",
+                    "provider_trace": build_provider_trace(final_provider="rule_based_fallback"),
+                }
+            ],
+        },
+    )
+    store.save_review_state(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        status="approved",
+    )
+    timeline_job = store.create_job(
+        project_id=project.project_id,
+        job_type=JobType.TIMELINE_BUILD,
+        input_ref="segment_analysis_job_001",
+        status=JobStatus.SUCCEEDED,
+    )
+    store.update_job(
+        project_id=project.project_id,
+        job_id=timeline_job["job_id"],
+        status=JobStatus.SUCCEEDED,
+        output_ref=timeline["timeline_id"],
+    )
+
+    client = TestClient(create_app(projects_root=tmp_path))
+    subtitle_response = client.post(
+        f"/api/projects/{project.project_id}/jobs/subtitle-render",
+        json={"timeline_job_id": timeline_job["job_id"]},
+    )
+    preview_response = client.post(
+        f"/api/projects/{project.project_id}/jobs/preview-render",
+        json={"timeline_job_id": timeline_job["job_id"]},
+    )
+    export_response = client.post(
+        f"/api/projects/{project.project_id}/jobs/capcut-export",
+        json={"timeline_job_id": timeline_job["job_id"]},
+    )
+
+    assert subtitle_response.status_code == 202
+    assert preview_response.status_code == 202
+    assert export_response.status_code == 202
+
+    subtitle_result = client.get(
+        f"/api/projects/{project.project_id}/subtitles/{subtitle_response.json()['job_id']}"
+    )
+    preview_result = client.get(
+        f"/api/projects/{project.project_id}/previews/{preview_response.json()['job_id']}"
+    )
+    export_result = client.get(
+        f"/api/projects/{project.project_id}/exports/{export_response.json()['job_id']}"
+    )
+    timeline_result = client.get(f"/api/projects/{project.project_id}/timelines/{timeline_job['job_id']}")
+    review_snapshot = client.get(
+        f"/api/projects/{project.project_id}/review-snapshots/{timeline_job['job_id']}"
+    )
+
+    assert subtitle_result.status_code == 200
+    assert preview_result.status_code == 200
+    assert export_result.status_code == 200
+    assert timeline_result.status_code == 200
+    assert review_snapshot.status_code == 200
+    assert timeline_result.json()["timeline"]["review_status"] == "approved"
+    assert review_snapshot.json()["review_status"] == "approved"
+    assert timeline_result.json()["timeline"]["pending_recommendations"] == []
+    assert review_snapshot.json()["pending_recommendations"] == []
+
+
+def test_output_jobs_ignore_legacy_applied_like_entries_left_in_pending_recommendations(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Legacy Applied Like Pending Recommendation Output Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 1.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [
+                {
+                    "recommendation_id": "rec_tts_seg_001",
+                    "target_segment_id": "seg_001",
+                    "recommendation_type": "tts_replacement",
+                    "selected_asset_id": "asset_tts_001",
+                    "score": 1.0,
+                    "reason": "Legacy applied-like recommendation leaked into pending recommendations.",
+                    "auto_apply_allowed": "true",
+                    "review_required": "false",
+                    "decision_state": None,
+                    "payload": {
+                        "selected_asset_uri": (
+                            f"local://projects/{project.project_id}/assets/generated/asset_tts_001.wav"
+                        )
+                    },
+                    "created_at": "2026-07-04T00:00:00+00:00",
+                    "provider_trace": build_provider_trace(final_provider="rule_based_fallback"),
+                }
+            ],
+        },
+    )
+    store.save_review_state(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        status="approved",
+    )
+    timeline_job = store.create_job(
+        project_id=project.project_id,
+        job_type=JobType.TIMELINE_BUILD,
+        input_ref="segment_analysis_job_001",
+        status=JobStatus.SUCCEEDED,
+    )
+    store.update_job(
+        project_id=project.project_id,
+        job_id=timeline_job["job_id"],
+        status=JobStatus.SUCCEEDED,
+        output_ref=timeline["timeline_id"],
+    )
+
+    client = TestClient(create_app(projects_root=tmp_path))
+    subtitle_response = client.post(
+        f"/api/projects/{project.project_id}/jobs/subtitle-render",
+        json={"timeline_job_id": timeline_job["job_id"]},
+    )
+    preview_response = client.post(
+        f"/api/projects/{project.project_id}/jobs/preview-render",
+        json={"timeline_job_id": timeline_job["job_id"]},
+    )
+    export_response = client.post(
+        f"/api/projects/{project.project_id}/jobs/capcut-export",
+        json={"timeline_job_id": timeline_job["job_id"]},
+    )
+
+    assert subtitle_response.status_code == 202
+    assert preview_response.status_code == 202
+    assert export_response.status_code == 202
+
+
+def test_review_snapshot_api_reclassifies_pending_like_entry_misbucketed_into_applied_recommendations(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Applied Bucket Pending Like Review Snapshot Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 1.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [
+                {
+                    "recommendation_id": "rec_tts_seg_001",
+                    "target_segment_id": "seg_001",
+                    "recommendation_type": "tts_replacement",
+                    "selected_asset_id": "asset_tts_001",
+                    "score": 1.0,
+                    "reason": "Pending-like recommendation leaked into applied recommendations.",
+                    "auto_apply_allowed": "false",
+                    "review_required": "true",
+                    "decision_state": None,
+                    "payload": {
+                        "selected_asset_uri": (
+                            f"local://projects/{project.project_id}/assets/generated/asset_tts_001.wav"
+                        )
+                    },
+                    "created_at": "2026-07-04T00:00:00+00:00",
+                    "provider_trace": build_provider_trace(final_provider="rule_based_fallback"),
+                }
+            ],
+            "pending_recommendations": [],
+        },
+    )
+    store.save_review_state(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        status="approved",
+    )
+    timeline_job = store.create_job(
+        project_id=project.project_id,
+        job_type=JobType.TIMELINE_BUILD,
+        input_ref="segment_analysis_job_001",
+        status=JobStatus.SUCCEEDED,
+    )
+    store.update_job(
+        project_id=project.project_id,
+        job_id=timeline_job["job_id"],
+        status=JobStatus.SUCCEEDED,
+        output_ref=timeline["timeline_id"],
+    )
+
+    client = TestClient(create_app(projects_root=tmp_path))
+    response = client.get(f"/api/projects/{project.project_id}/review-snapshots/{timeline_job['job_id']}")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["review_status"] == "blocked"
+    assert payload["applied_recommendations"] == []
+    assert [item["recommendation_id"] for item in payload["pending_recommendations"]] == [
+        "rec_tts_seg_001"
+    ]
+
+
+def test_timeline_api_reclassifies_pending_like_entry_misbucketed_into_applied_recommendations(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Applied Bucket Pending Like Timeline API Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 1.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [
+                {
+                    "recommendation_id": "rec_tts_seg_001",
+                    "target_segment_id": "seg_001",
+                    "recommendation_type": "tts_replacement",
+                    "selected_asset_id": "asset_tts_001",
+                    "score": 1.0,
+                    "reason": "Pending-like recommendation leaked into applied recommendations.",
+                    "auto_apply_allowed": "false",
+                    "review_required": "true",
+                    "decision_state": None,
+                    "payload": {
+                        "selected_asset_uri": (
+                            f"local://projects/{project.project_id}/assets/generated/asset_tts_001.wav"
+                        )
+                    },
+                    "created_at": "2026-07-04T00:00:00+00:00",
+                    "provider_trace": build_provider_trace(final_provider="rule_based_fallback"),
+                }
+            ],
+            "pending_recommendations": [],
+        },
+    )
+    store.save_review_state(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        status="approved",
+    )
+    timeline_job = store.create_job(
+        project_id=project.project_id,
+        job_type=JobType.TIMELINE_BUILD,
+        input_ref="segment_analysis_job_001",
+        status=JobStatus.SUCCEEDED,
+    )
+    store.update_job(
+        project_id=project.project_id,
+        job_id=timeline_job["job_id"],
+        status=JobStatus.SUCCEEDED,
+        output_ref=timeline["timeline_id"],
+    )
+
+    client = TestClient(create_app(projects_root=tmp_path))
+    response = client.get(f"/api/projects/{project.project_id}/timelines/{timeline_job['job_id']}")
+
+    assert response.status_code == 200
+    payload = response.json()["timeline"]
+    assert payload["review_status"] == "blocked"
+    assert payload["applied_recommendations"] == []
+    assert [item["recommendation_id"] for item in payload["pending_recommendations"]] == [
+        "rec_tts_seg_001"
+    ]
+
+
+def test_timeline_api_filters_unknown_type_entry_misbucketed_into_applied_recommendations(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Timeline API Unknown Applied Recommendation Surface Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [],
+            "review_flags": [],
+            "applied_recommendations": [
+                {
+                    "recommendation_id": "rec_unknown_applied_surface",
+                    "target_segment_id": "seg_001",
+                    "recommendation_type": "legacy_overlay_pick",
+                    "selected_asset_id": "asset_overlay_001",
+                    "score": 0.5,
+                    "reason": "Unknown stale recommendation should not remain on applied surface.",
+                    "auto_apply_allowed": True,
+                    "review_required": False,
+                    "decision_state": "approved",
+                    "payload": {},
+                    "created_at": "2026-07-04T00:00:00+00:00",
+                    "provider_trace": build_provider_trace(final_provider="rule_based_fallback"),
+                }
+            ],
+            "pending_recommendations": [],
+        },
+    )
+    store.save_review_state(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        status="approved",
+    )
+    timeline_job = store.create_job(
+        project_id=project.project_id,
+        job_type=JobType.TIMELINE_BUILD,
+        input_ref="segment_analysis_job_001",
+        status=JobStatus.SUCCEEDED,
+    )
+    store.update_job(
+        project_id=project.project_id,
+        job_id=timeline_job["job_id"],
+        status=JobStatus.SUCCEEDED,
+        output_ref=timeline["timeline_id"],
+    )
+
+    client = TestClient(create_app(projects_root=tmp_path))
+    response = client.get(f"/api/projects/{project.project_id}/timelines/{timeline_job['job_id']}")
+
+    assert response.status_code == 200
+    payload = response.json()["timeline"]
+    assert payload["review_status"] == "approved"
+    assert payload["applied_recommendations"] == []
 
 
 def test_approved_review_state_still_blocks_outputs_when_only_pending_recommendations_remain(
@@ -7536,6 +9383,124 @@ def test_review_snapshot_api_approve_rolls_back_timeline_and_recommendation_when
     assert recommendation_row == (0, 1, None)
 
 
+def test_review_snapshot_api_approve_rollback_normalizes_legacy_string_false_recommendation_fields(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    timeline_result = client.get(f"/api/projects/{project_id}/timelines/{timeline_job_id}")
+    timeline_payload = timeline_result.json()["timeline"]
+    timeline_path = (
+        tmp_path
+        / "projects"
+        / project_id
+        / "timelines"
+        / f'{timeline_payload["timeline_id"]}.json'
+    )
+    legacy_candidate = {
+        "recommendation_id": "rec_broll_review_rollback_legacy_false_002",
+        "target_segment_id": "seg_002",
+        "recommendation_type": "broll",
+        "selected_asset_id": "asset_broll_review_rollback_legacy_false_002",
+        "score": 0.88,
+        "reason": "Legacy string false candidate for rollback normalization.",
+        "auto_apply_allowed": "false",
+        "review_required": "false",
+        "decision_state": "pending",
+        "payload": {"tags": ["team", "meeting"]},
+        "created_at": "2026-07-04T00:00:00+00:00",
+    }
+    persisted_timeline = json.loads(timeline_path.read_text(encoding="utf-8"))
+    persisted_timeline["applied_recommendations"] = []
+    persisted_timeline["pending_recommendations"] = [legacy_candidate]
+    persisted_timeline["review_flags"] = [
+        {
+            "code": "broll_review_required",
+            "segment_id": "seg_002",
+            "message": "Operator must confirm the B-roll pick before approval.",
+        }
+    ]
+    timeline_path.write_text(json.dumps(persisted_timeline, indent=2), encoding="utf-8")
+
+    database_path = tmp_path / "projects" / project_id / "db" / "project.sqlite"
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute("DELETE FROM recommendations")
+        connection.execute(
+            """
+            INSERT INTO recommendations (
+                recommendation_id,
+                project_id,
+                target_segment_id,
+                recommendation_type,
+                selected_asset_id,
+                score,
+                reason,
+                auto_apply_allowed,
+                review_required,
+                decision_state,
+                payload_json,
+                created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                legacy_candidate["recommendation_id"],
+                project_id,
+                legacy_candidate["target_segment_id"],
+                legacy_candidate["recommendation_type"],
+                legacy_candidate["selected_asset_id"],
+                legacy_candidate["score"],
+                legacy_candidate["reason"],
+                "false",
+                "false",
+                "pending",
+                json.dumps(legacy_candidate["payload"], ensure_ascii=True),
+                legacy_candidate["created_at"],
+            ),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    def fail_save_review_state(
+        self,
+        *,
+        project_id: str,
+        timeline_id: str,
+        status: str,
+    ) -> dict[str, object]:
+        del self, project_id, timeline_id, status
+        raise OSError("review state persistence offline")
+
+    monkeypatch.setattr(LocalProjectStore, "save_review_state", fail_save_review_state)
+
+    with pytest.warns(UserWarning, match="stage=review_state"):
+        approve_response = client.post(
+            f"/api/projects/{project_id}/review-snapshots/{timeline_job_id}/recommendations/"
+            "rec_broll_review_rollback_legacy_false_002/approve"
+        )
+
+    assert approve_response.status_code == 500
+
+    connection = sqlite3.connect(database_path)
+    try:
+        recommendation_row = connection.execute(
+            """
+            SELECT auto_apply_allowed, review_required, decision_state
+            FROM recommendations
+            WHERE recommendation_id = ?
+            """,
+            ("rec_broll_review_rollback_legacy_false_002",),
+        ).fetchone()
+    finally:
+        connection.close()
+
+    assert recommendation_row == (0, 0, "pending")
+
+
 def test_review_snapshot_api_reject_rolls_back_timeline_and_recommendation_when_review_state_save_fails(
     tmp_path: Path,
     monkeypatch,
@@ -7656,6 +9621,8 @@ def test_review_snapshot_api_reject_rolls_back_timeline_and_recommendation_when_
     assert restored_timeline["review_flags"] == original_timeline["review_flags"]
     assert restored_timeline["recommendation_decisions"] == original_timeline.get("recommendation_decisions")
     assert recommendation_row == (0, 1, None)
+
+
 
 
 def test_review_snapshot_api_warns_when_timeline_rollback_fails(
@@ -12408,6 +14375,92 @@ def test_editing_session_api_marks_preflight_blocked_when_source_timeline_has_pe
     ]
 
 
+def test_editing_session_api_marks_preflight_blocked_when_source_timeline_has_misbucketed_applied_pending_like_recommendation(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Source Applied Bucket Pending Like Recommendation Preflight Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [
+                {
+                    "recommendation_id": "rec_tts_review_009",
+                    "target_segment_id": "seg_009",
+                    "recommendation_type": "tts_replacement",
+                    "selected_asset_id": "asset_tts_review_009",
+                    "score": 0.93,
+                    "reason": "Pending-like recommendation leaked into applied bucket.",
+                    "auto_apply_allowed": "false",
+                    "review_required": "true",
+                    "decision_state": None,
+                    "payload": {},
+                    "created_at": "2026-06-29T00:00:00+00:00",
+                }
+            ],
+            "pending_recommendations": [],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Stable caption",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration/preflight",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["caption"],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["predicted_review_status_after_rerun"] == "blocked"
+    assert payload["prediction_reasons"] == [
+        "source timeline already has unresolved review blockers that rerun will preserve",
+    ]
+
+
 def test_editing_session_api_normalizes_stale_source_pending_recommendations_shape_to_draft_prediction(
     tmp_path: Path,
 ) -> None:
@@ -12792,6 +14845,188 @@ def test_editing_session_api_filters_unknown_type_source_pending_recommendation_
     assert payload["predicted_review_status_after_rerun"] == "draft"
     assert payload["prediction_reasons"] == []
     assert before_jobs == after_jobs
+
+
+def test_editing_session_api_filters_approved_decision_state_source_pending_recommendation_from_preflight_prediction(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(
+        name="Approved Decision State Source Pending Recommendation Preflight Project"
+    )
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [
+                {
+                    "recommendation_id": "rec_stale_approved",
+                    "target_segment_id": "seg_001",
+                    "recommendation_type": "tts_replacement",
+                    "selected_asset_id": "asset_tts_001",
+                    "score": 0.87,
+                    "reason": "Already approved recommendation leaked into pending recommendations.",
+                    "auto_apply_allowed": True,
+                    "review_required": False,
+                    "decision_state": "approved",
+                    "payload": {
+                        "selected_asset_uri": (
+                            f"local://projects/{project.project_id}/assets/generated/asset_tts_001.wav"
+                        )
+                    },
+                    "created_at": "2026-07-04T00:00:00+00:00",
+                    "provider_trace": build_provider_trace(final_provider="rule_based_fallback"),
+                }
+            ],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Stable caption",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration/preflight",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["caption"],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["predicted_review_status_after_rerun"] == "draft"
+    assert payload["prediction_reasons"] == []
+
+
+def test_editing_session_api_filters_legacy_applied_like_source_pending_recommendation_from_preflight_prediction(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(
+        name="Legacy Applied Like Source Pending Recommendation Preflight Project"
+    )
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [
+                {
+                    "recommendation_id": "rec_legacy_applied_like",
+                    "target_segment_id": "seg_001",
+                    "recommendation_type": "tts_replacement",
+                    "selected_asset_id": "asset_tts_legacy_applied_like",
+                    "score": 0.87,
+                    "reason": "Legacy applied-like recommendation should not block preflight prediction.",
+                    "auto_apply_allowed": "true",
+                    "review_required": "false",
+                    "decision_state": None,
+                    "payload": {
+                        "selected_asset_uri": (
+                            f"local://projects/{project.project_id}/assets/generated/asset_tts_legacy_applied_like.wav"
+                        )
+                    },
+                    "created_at": "2026-07-04T00:00:00+00:00",
+                    "provider_trace": build_provider_trace(final_provider="rule_based_fallback"),
+                }
+            ],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Stable caption",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration/preflight",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["caption"],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["predicted_review_status_after_rerun"] == "draft"
+    assert payload["prediction_reasons"] == []
 
 
 def test_editing_session_api_filters_nested_target_segment_id_source_pending_recommendation_from_preflight_prediction(

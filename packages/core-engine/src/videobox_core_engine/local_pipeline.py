@@ -64,12 +64,16 @@ VALID_RUNTIME_BLOCKING_REVIEW_FLAG_CODES = {
 }
 
 
-def _normalize_runtime_review_required(value: object) -> bool:
+def _normalize_runtime_boolish(value: object) -> bool:
     if isinstance(value, str):
         return value.strip().lower() not in {"", "0", "false", "no", "off"}
     if isinstance(value, bool):
         return value
     return False
+
+
+def _normalize_runtime_review_required(value: object) -> bool:
+    return _normalize_runtime_boolish(value)
 
 
 def _normalize_runtime_cut_action(value: object) -> str:
@@ -122,6 +126,13 @@ def _is_runtime_blocking_pending_recommendation(item: object) -> bool:
     recommendation_id = item.get("recommendation_id")
     target_segment_id = item.get("target_segment_id")
     recommendation_type = item.get("recommendation_type")
+    decision_state = str(item.get("decision_state") or "").strip().lower()
+    if decision_state and decision_state != "pending":
+        return False
+    if _normalize_runtime_boolish(item.get("auto_apply_allowed", False)) and not _normalize_runtime_boolish(
+        item.get("review_required", False)
+    ):
+        return False
     return (
         isinstance(recommendation_id, str)
         and bool(recommendation_id.strip())
@@ -900,6 +911,19 @@ class LocalPipelineRunner:
         )
         review_flags = self._normalized_timeline_review_flags(timeline)
         blocker_review_flags, pending_recommendations = self._normalized_timeline_blockers(timeline)
+        applied_recommendations = timeline.get("applied_recommendations", [])
+        if not isinstance(applied_recommendations, list):
+            applied_recommendations = []
+        else:
+            applied_recommendations = [
+                item
+                for item in applied_recommendations
+                if isinstance(item, dict)
+                and str(item.get("recommendation_type") or "").strip()
+                in VALID_RESTORED_RECOMMENDATION_TYPES
+                and not _is_runtime_blocking_pending_recommendation(item)
+            ]
+        timeline["applied_recommendations"] = applied_recommendations
         timeline["review_flags"] = review_flags
         timeline["pending_recommendations"] = pending_recommendations
         timeline["review_status"] = (
@@ -1183,7 +1207,9 @@ class LocalPipelineRunner:
             timeline_applied_recommendations = []
         else:
             timeline_applied_recommendations = [
-                item for item in timeline_applied_recommendations if isinstance(item, dict)
+                item
+                for item in timeline_applied_recommendations
+                if isinstance(item, dict) and not _is_runtime_blocking_pending_recommendation(item)
             ]
         timeline_pending_recommendations = timeline.get("pending_recommendations", [])
         if not isinstance(timeline_pending_recommendations, list):
@@ -1712,8 +1738,15 @@ class LocalPipelineRunner:
             for flag in self._normalized_timeline_review_flags(timeline)
             if str(flag.get("code") or "").strip() in VALID_RUNTIME_BLOCKING_REVIEW_FLAG_CODES
         ]
+        recommendation_blocker_sources: list[Any] = []
+        pending_recommendations = timeline.get("pending_recommendations", [])
+        if isinstance(pending_recommendations, list):
+            recommendation_blocker_sources.extend(pending_recommendations)
+        applied_recommendations = timeline.get("applied_recommendations", [])
+        if isinstance(applied_recommendations, list):
+            recommendation_blocker_sources.extend(applied_recommendations)
         normalized_pending_recommendations = _normalized_runtime_pending_recommendations(
-            timeline.get("pending_recommendations", [])
+            recommendation_blocker_sources
         )
         return review_flags, normalized_pending_recommendations
 
@@ -1884,8 +1917,8 @@ class LocalPipelineRunner:
                     WHERE recommendation_id = ? AND project_id = ?
                     """,
                     (
-                        1 if bool(recommendation.get("auto_apply_allowed", False)) else 0,
-                        1 if bool(recommendation.get("review_required", False)) else 0,
+                        1 if _normalize_runtime_boolish(recommendation.get("auto_apply_allowed", False)) else 0,
+                        1 if _normalize_runtime_boolish(recommendation.get("review_required", False)) else 0,
                         recommendation.get("decision_state"),
                         str(recommendation["recommendation_id"]),
                         project_id,

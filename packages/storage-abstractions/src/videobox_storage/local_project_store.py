@@ -18,6 +18,66 @@ from videobox_core_engine.provider_trace import build_provider_trace
 from videobox_storage.sqlite_schema import PROJECT_SCHEMA_STATEMENTS
 
 
+def _normalize_boolish(value: object) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() not in {"", "0", "false", "no", "off"}
+    return bool(value)
+
+
+VALID_STORE_BLOCKING_REVIEW_FLAG_CODES = {
+    "segment_review_required",
+    "broll_review_required",
+    "tts_replacement_review_required",
+}
+VALID_STORE_BLOCKING_RECOMMENDATION_TYPES = {
+    RecommendationType.TTS_REPLACEMENT.value,
+    RecommendationType.BROLL.value,
+    RecommendationType.BGM.value,
+    RecommendationType.OVERLAY.value,
+}
+
+
+def _is_store_supported_recommendation_type(item: object) -> bool:
+    if not isinstance(item, dict):
+        return False
+    return str(item.get("recommendation_type") or "").strip() in VALID_STORE_BLOCKING_RECOMMENDATION_TYPES
+
+
+def _is_store_blocking_review_flag(flag: object) -> bool:
+    if not isinstance(flag, dict):
+        return False
+    code = flag.get("code")
+    segment_id = flag.get("segment_id")
+    return (
+        isinstance(code, str)
+        and code.strip() in VALID_STORE_BLOCKING_REVIEW_FLAG_CODES
+        and isinstance(segment_id, str)
+        and bool(segment_id.strip())
+    )
+
+
+def _is_store_blocking_pending_recommendation(item: object) -> bool:
+    if not isinstance(item, dict):
+        return False
+    recommendation_id = item.get("recommendation_id")
+    target_segment_id = item.get("target_segment_id")
+    recommendation_type = item.get("recommendation_type")
+    decision_state = str(item.get("decision_state") or "").strip().lower()
+    if decision_state and decision_state != "pending":
+        return False
+    if _normalize_boolish(item.get("auto_apply_allowed", False)) and not _normalize_boolish(
+        item.get("review_required", False)
+    ):
+        return False
+    return (
+        isinstance(recommendation_id, str)
+        and bool(recommendation_id.strip())
+        and isinstance(target_segment_id, str)
+        and bool(target_segment_id.strip())
+        and str(recommendation_type or "").strip() in VALID_STORE_BLOCKING_RECOMMENDATION_TYPES
+    )
+
+
 class LocalProjectStore:
     def __init__(self, projects_root: Path) -> None:
         self.projects_root = Path(projects_root)
@@ -270,7 +330,7 @@ class LocalProjectStore:
                     segment.get("source_asset_id"),
                     segment.get("confidence"),
                     segment.get("cleanup_decision"),
-                    1 if segment.get("review_required") else 0,
+                    1 if _normalize_boolish(segment.get("review_required")) else 0,
                     json.dumps(segment_metadata, ensure_ascii=True),
                 ),
             )
@@ -311,8 +371,12 @@ class LocalProjectStore:
                 "selected_asset_id": record.selected_asset_id,
                 "score": record.score,
                 "reason": record.reason,
-                "auto_apply_allowed": bool(item.get("auto_apply_allowed", record.auto_apply_allowed)),
-                "review_required": bool(item.get("review_required", record.review_required)),
+                "auto_apply_allowed": _normalize_boolish(
+                    item.get("auto_apply_allowed", record.auto_apply_allowed)
+                ),
+                "review_required": _normalize_boolish(
+                    item.get("review_required", record.review_required)
+                ),
                 "payload": item.get("payload", record.payload or {}),
                 "created_at": record.created_at.isoformat(),
             }
@@ -421,9 +485,24 @@ class LocalProjectStore:
                 payload["created_at"],
             ),
         )
+        recommendation_blocker_sources: list[dict[str, Any]] = []
+        for collection_key in ("pending_recommendations", "applied_recommendations"):
+            collection = payload.get(collection_key)
+            if isinstance(collection, list):
+                recommendation_blocker_sources.extend(
+                    item for item in collection if isinstance(item, dict)
+                )
+        has_pending_like_recommendation = any(
+            _is_store_blocking_pending_recommendation(item)
+            for item in recommendation_blocker_sources
+        )
+        review_flags = payload.get("review_flags")
+        has_blocking_review_flag = isinstance(review_flags, list) and any(
+            _is_store_blocking_review_flag(flag) for flag in review_flags
+        )
         initial_review_status = (
             "blocked"
-            if payload.get("review_flags") or payload.get("pending_recommendations")
+            if has_blocking_review_flag or has_pending_like_recommendation
             else "draft"
         )
         self.save_review_state(
@@ -1237,7 +1316,7 @@ class LocalProjectStore:
         items: list[dict[str, Any]] = []
         for row in rows:
             payload = dict(row)
-            payload["review_required"] = bool(payload["review_required"])
+            payload["review_required"] = _normalize_boolish(payload["review_required"])
             payload["metadata"] = self._json_object(payload.pop("metadata_json"))
             payload["provider_trace"] = payload["metadata"].get("provider_trace") or build_provider_trace(
                 final_provider="heuristic_fallback"
@@ -1262,8 +1341,8 @@ class LocalProjectStore:
         items: list[dict[str, Any]] = []
         for row in rows:
             payload = dict(row)
-            payload["auto_apply_allowed"] = bool(payload["auto_apply_allowed"])
-            payload["review_required"] = bool(payload["review_required"])
+            payload["auto_apply_allowed"] = _normalize_boolish(payload["auto_apply_allowed"])
+            payload["review_required"] = _normalize_boolish(payload["review_required"])
             payload["decision_state"] = self._normalize_recommendation_decision_state(payload)
             payload["payload"] = self._json_object(payload.pop("payload_json"))
             payload["provider_trace"] = payload["payload"].get("provider_trace") or build_provider_trace(
@@ -1540,14 +1619,48 @@ class LocalProjectStore:
         timeline_pending_recommendations: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         if timeline_applied_recommendations is not None or timeline_pending_recommendations is not None:
+            applied_candidates: list[dict[str, Any]] = []
+            for item in timeline_applied_recommendations or []:
+                decision_state = self._normalize_recommendation_decision_state(item)
+                applied_candidates.append(
+                    self._review_snapshot_recommendation_payload(
+                        item,
+                        fallback_decision_state=decision_state,
+                    )
+                )
+            pending_candidates: list[dict[str, Any]] = []
+            for item in timeline_pending_recommendations or []:
+                decision_state = self._normalize_recommendation_decision_state(item)
+                pending_candidates.append(
+                    self._review_snapshot_recommendation_payload(
+                        item,
+                        fallback_decision_state=decision_state,
+                    )
+                )
             applied = [
-                self._review_snapshot_recommendation_payload(item, fallback_decision_state="approved")
-                for item in timeline_applied_recommendations or []
+                item
+                for item in applied_candidates
+                if str(item.get("decision_state") or "") == "approved"
+                and _is_store_supported_recommendation_type(item)
             ]
+            applied.extend(
+                item
+                for item in pending_candidates
+                if str(item.get("decision_state") or "") == "approved"
+                and _is_store_supported_recommendation_type(item)
+            )
             pending = [
-                self._review_snapshot_recommendation_payload(item, fallback_decision_state="pending")
-                for item in timeline_pending_recommendations or []
+                item
+                for item in applied_candidates
+                if str(item.get("decision_state") or "") == "pending"
+                and _is_store_blocking_pending_recommendation(item)
             ]
+            pending.extend(
+                item
+                for item in pending_candidates
+                if str(item.get("decision_state") or "") == "pending"
+                and _is_store_blocking_pending_recommendation(item)
+            )
         else:
             normalized_recommendations = [
                 self._review_snapshot_recommendation_payload(item)
@@ -1557,20 +1670,30 @@ class LocalProjectStore:
                 item
                 for item in normalized_recommendations
                 if str(item.get("decision_state") or "") == "approved"
+                and _is_store_supported_recommendation_type(item)
             ]
             pending = [
                 item
                 for item in normalized_recommendations
                 if str(item.get("decision_state") or "") == "pending"
+                and _is_store_blocking_pending_recommendation(item)
             ]
-        if timeline_id:
+        has_blocking_review_flag = any(
+            _is_store_blocking_review_flag(flag) for flag in timeline_review_flags
+        )
+        has_blocking_pending_recommendation = any(
+            _is_store_blocking_pending_recommendation(item) for item in pending
+        )
+        if has_blocking_review_flag or has_blocking_pending_recommendation:
+            review_status = "blocked"
+        elif timeline_id:
             try:
                 review_status = self.get_review_state(
                     project_id=project_id,
                     timeline_id=str(timeline_id),
                 )["status"]
             except KeyError:
-                review_status = "blocked" if timeline_review_flags or pending else "draft"
+                review_status = "draft"
         else:
             review_status = "blocked"
         return {
@@ -2086,7 +2209,7 @@ class LocalProjectStore:
             connection.execute("ALTER TABLE recommendations ADD COLUMN decision_state TEXT")
 
     def _derive_recommendation_decision_state(self, recommendation: dict[str, Any]) -> str:
-        if bool(recommendation.get("auto_apply_allowed")) and not bool(
+        if _normalize_boolish(recommendation.get("auto_apply_allowed")) and not _normalize_boolish(
             recommendation.get("review_required")
         ):
             return "approved"

@@ -467,12 +467,45 @@
 - unknown dict-shaped `review_flag.code`는 approved timeline output gating blocker로 오판하지 않고 canonical review flag code만 blocker로 유지하는 계약
 - approved timeline의 persisted duplicate `review_flags`도 output blocker detail에서 code/segment 기준으로 dedupe되어 같은 blocker가 중복 노출되지 않는 계약
 - approved timeline의 persisted duplicate `pending_recommendations`도 output blocker detail에서 recommendation id / target segment / recommendation type 기준으로 dedupe되어 같은 blocker가 중복 노출되지 않는 계약
+- approved timeline의 persisted `pending_recommendations`에 `decision_state=approved/rejected` stale entry가 남아 있어도 unresolved blocker로 오판하지 않고 API read path / subtitle / preview / export에서 무시하는 계약
+- approved timeline의 persisted `pending_recommendations`에 `auto_apply_allowed="true"` / `review_required="false"` legacy applied-like entry가 `decision_state` 없이 남아 있어도 unresolved blocker로 오판하지 않고 subtitle / preview / export에서 무시하는 계약
+- timeline build도 recommendation의 `review_required="false"` 같은 legacy string false shape를 review blocker/pending recommendation으로 오판하지 않고 applied recommendation truth를 유지하는 계약
+- recommendation 저장 write path도 `review_required="false"` 같은 legacy string false shape를 blocker truth로 굳히지 않고 persisted recommendation / DB row / downstream timeline build에 같은 canonical false를 넘기는 계약
+- recommendation read path도 legacy DB text `"false"` shape를 truthy blocker로 오판하지 않고 API read truth / review snapshot / downstream normalization에 같은 canonical false를 넘기는 계약
+- editing session 생성 read path도 legacy segment row의 `review_required="false"` shape를 truthy review blocker로 오판하지 않고 session segment / preflight targeted segment에 같은 canonical false를 넘기는 계약
+- segment analysis 저장 write path도 incoming segment의 `review_required="false"` shape를 truthy review-required로 굳히지 않고 persisted segment row / editing session / preflight targeted segment에 같은 canonical false를 넘기는 계약
+- timeline/review response read path도 legacy recommendation payload의 `auto_apply_allowed="false"` / `review_required="false"` shape를 truthy recommendation state로 오판하지 않고 API response / review snapshot / partial regeneration result에 같은 canonical false를 넘기는 계약
+- review recommendation rollback persistence도 downstream failure 후 legacy recommendation payload의 `auto_apply_allowed="false"` / `review_required="false"` shape를 truthy DB row로 되돌리지 않고 canonical false로 복구하는 계약
+- preview renderer의 TTS applied recommendation read path도 legacy recommendation payload의 `auto_apply_allowed="true"` / `review_required="false"` shape를 truthy blocker로 오판하지 않고 selected narration source를 유지하는 계약
+- review snapshot fallback decision-state 유도도 legacy recommendation payload의 `auto_apply_allowed="true"` / `review_required="false"` shape를 pending blocker로 오판하지 않고 applied recommendation truth를 유지하는 계약
+- review snapshot builder의 direct `timeline_pending_recommendations` override 입력도 legacy recommendation payload의 `auto_apply_allowed="true"` / `review_required="false"` shape를 pending blocker로 오판하지 않고 applied recommendation truth를 유지하는 계약
+- review snapshot builder의 direct `timeline_applied_recommendations` override 입력도 legacy recommendation payload의 `auto_apply_allowed="false"` / `review_required="true"` shape를 applied recommendation으로 오판하지 않고 pending blocker truth로 재분류하는 계약
+- review snapshot API read path도 pending-like legacy recommendation이 stale하게 `applied_recommendations` bucket에 들어 있어도 pending blocker truth와 `review_status=blocked`를 유지하고 duplicate blocker를 만들지 않는 계약
+- timeline API read path도 pending-like legacy recommendation이 stale하게 `applied_recommendations` bucket에 들어 있어도 pending blocker truth와 `review_status=blocked`를 유지하고 applied surface를 clean하게 정리하는 계약
+- timeline API read path도 unknown / non-blocking `applied_recommendations` stale entry를 canonical supported recommendation type이 아니면 applied surface에 남기지 않고 clean하게 정리하는 계약
+- timeline persistence initial review state도 pending-like legacy recommendation이 stale하게 `applied_recommendations` bucket에 들어 있어도 `draft`로 저장하지 않고 `blocked` truth를 유지하는 계약
+- timeline persistence initial review state도 unknown / non-blocking `pending_recommendations` shape 하나만으로 `blocked`를 저장하지 않고 canonical blocking pending recommendation이 없으면 `draft` truth를 유지하는 계약
+- timeline persistence initial review state도 stale non-list / non-blocking `review_flags` shape 하나만으로 `blocked`를 저장하지 않고 canonical blocking review flag가 없으면 `draft` truth를 유지하는 계약
+- review snapshot direct helper도 pending override나 blocker flag가 존재하면 persisted approved status를 그대로 우선하지 않고 `review_status=blocked` truth를 유지하는 계약
+- review snapshot direct helper도 unknown / non-blocking `timeline_review_flags` shape 하나만으로 persisted approved status를 `blocked`로 다시 뒤집지 않고 canonical blocking review flag가 없으면 approved truth를 유지하는 계약
+- review snapshot direct helper도 unknown / non-blocking `timeline_pending_recommendations` shape 하나만으로 persisted approved status를 `blocked`로 다시 뒤집지 않고 canonical blocking pending recommendation이 없으면 approved truth를 유지하는 계약
+- review snapshot direct helper도 unknown / non-blocking `timeline_pending_recommendations` shape를 `pending_recommendations` surface에 blocker처럼 남기지 않고 canonical blocking pending recommendation만 surface에 유지하는 계약
+- review snapshot direct helper도 unknown / non-blocking `timeline_applied_recommendations` stale entry를 canonical supported recommendation type이 아니면 applied surface에 남기지 않고 clean하게 정리하는 계약
+- timeline builder도 unknown / non-blocking recommendation stale entry를 canonical supported recommendation type이 아니면 applied/pending surface와 review flag flow에 반입하지 않고 clean하게 정리하는 계약
+- timeline builder의 review snapshot direct dict 입력면도 unknown / non-blocking recommendation stale entry를 canonical supported recommendation type이 아니면 applied/pending surface에 반입하지 않고 clean하게 정리하는 계약
+- timeline builder의 review snapshot direct dict 입력면도 legacy recommendation payload의 `auto_apply_allowed="true"` / `review_required="false"` shape를 pending blocker로 오판하지 않고 applied recommendation truth를 유지하는 계약
+- review guidance prompt의 segment attention 계산도 legacy segment payload의 `review_required="false"` shape를 attention-required segment로 오판하지 않고 실제 review-required segment만 포함하는 계약
 - partial regeneration preflight는 editing session 내부에 같은 `segment_id`가 중복 저장된 stale shape여도 targeted segment preview에서 first-seen segment를 유지하고 뒤의 stale duplicate가 canonical 값을 덮어쓰지 않는 계약
+- partial regeneration preflight도 source timeline의 `pending_recommendations`에 `decision_state=approved/rejected` stale entry가 남아 있어도 unresolved blocker prediction으로 오판하지 않고 `draft` prediction을 유지하는 계약
+- partial regeneration preflight도 source timeline의 `pending_recommendations`에 `auto_apply_allowed="true"` / `review_required="false"` legacy applied-like entry가 `decision_state` 없이 남아 있어도 unresolved blocker prediction으로 오판하지 않고 `draft` prediction을 유지하는 계약
+- partial regeneration preflight도 source timeline의 `applied_recommendations`에 `auto_apply_allowed="false"` / `review_required="true"` pending-like legacy entry가 잘못 들어 있어도 unresolved blocker prediction으로 복원해 `blocked` prediction을 유지하는 계약
 - partial regeneration candidate timeline도 provider-trace audit의 `timeline_id + include_upstream=true` filter에서 source lineage를 잃지 않고 segment analysis / recommendation upstream entry를 같이 보여주는 계약
 - partial regeneration candidate timeline의 provider-trace `review_guidance` audit entry도 source job truth를 잃지 않고 `partial_regeneration_job_*`에 연결되는 계약
 - partial regeneration candidate timeline의 provider-trace `review_guidance` audit entry도 `partial_regeneration_job_*`의 job type truth를 유지하는 계약
 - partial regeneration candidate timeline의 provider-trace `review_guidance_attempt` audit entry도 `partial_regeneration_job_*`의 job type / job id / source job id truth를 유지하는 계약
 - partial regeneration candidate timeline의 provider-trace `review_guidance_attempt` audit entry도 `partial_regeneration_job_*`의 `finished_at` truth를 유지하는 계약
+- partial regeneration result read path도 applied recommendation의 `provider_trace`가 빠진 legacy shape를 그대로 API validation error로 흘리지 않고 fallback trace를 채운 canonical response로 유지하는 계약
+- review snapshot read path도 persisted `operator_guidance`의 `provider_trace`가 빠진 legacy shape를 그대로 API validation error로 흘리지 않고 guidance-specific fallback trace를 채운 canonical response로 유지하는 계약
 - partial regeneration candidate timeline의 provider-trace `subtitle_render` audit entry도 persisted subtitle artifact의 `created_at` truth를 유지하는 계약
 - partial regeneration candidate timeline의 provider-trace `preview_render` audit entry도 persisted preview artifact의 `created_at` truth를 유지하는 계약
 - partial regeneration candidate timeline의 provider-trace `capcut_export` audit entry도 persisted export artifact의 `created_at` truth를 유지하는 계약
@@ -490,11 +523,11 @@
 - helper `frontend-focused` gate `2 passed`
 - review-action backend focused slice `6 passed`
 - current-focused helper backend output-gating slice `24 passed`
-- current-focused helper backend preflight slice `55 passed`
+- current-focused helper backend preflight slice `58 passed`
 - current-focused helper frontend preflight slice `25 passed`
 - speed-up helper `current-focused-parallel`
   - backend output-gating `24 passed`
-  - backend preflight `55 passed`
+  - backend preflight `58 passed`
   - frontend preflight `25 passed`
 - Task 2 candidate timeline exact regression `1 passed`
 - Task 2 frontend candidate routing exact regression `1 passed`
@@ -529,7 +562,78 @@
   - `1 passed`
 - partial regeneration candidate failed subtitle_render audit filter regression
   - `1 passed`
+- approved timeline stale pending decision-state output gating regression
+  - `1 passed`
+- output gating legacy applied-like pending recommendation regression
+  - `1 passed`
+- partial regeneration preflight stale pending decision-state prediction regression
+  - `1 passed`
+- timeline builder string false recommendation review_required regression
+  - `1 passed`
+- recommendation store string false review_required regression
+  - `1 passed`
+- recommendation read path legacy string false regression
+  - `1 passed`
+- editing session legacy string false segment review_required regression
+  - `1 passed`
+- segment analysis write path string false segment review_required regression
+  - `1 passed`
+- timeline API legacy string false pending recommendation response regression
+  - `1 passed`
+- approve rollback legacy string false recommendation fields regression
+  - `1 passed`
+- preview renderer string false TTS recommendation review_required regression
+  - `1 passed`
+- review snapshot fallback legacy string false recommendation decision-state regression
+  - `1 passed`
+- review snapshot pending override legacy applied-like recommendation regression
+  - `1 passed`
+- review snapshot applied override legacy pending-like recommendation regression
+  - `1 passed`
+- review snapshot API misbucketed applied pending-like recommendation regression
+  - `1 passed`
+- timeline API misbucketed applied pending-like recommendation regression
+  - `1 passed`
+- timeline persistence misbucketed applied pending-like recommendation regression
+  - `1 passed`
+- timeline persistence stale non-list review flags initial status regression
+  - `1 passed`
+- timeline persistence unknown pending recommendation initial status regression
+  - `1 passed`
+- timeline API unknown applied recommendation surface regression
+  - `1 passed`
+- review snapshot helper unknown applied recommendation surface regression
+  - `1 passed`
+- timeline builder unknown applied recommendation surface regression
+  - `1 passed`
+- timeline builder review snapshot unknown applied recommendation surface regression
+  - `1 passed`
+- partial regeneration result applied recommendation default provider trace regression
+  - `1 passed`
+- review snapshot persisted operator guidance default provider trace regression
+  - `1 passed`
+- review snapshot helper persisted-approved pending-override status regression
+  - `1 passed`
+- review snapshot helper unknown review flag approved-status regression
+  - `1 passed`
+- review snapshot helper unknown pending recommendation approved-status regression
+  - `1 passed`
+- review snapshot helper unknown pending recommendation surface regression
+  - `1 passed`
+- timeline builder review snapshot legacy string false recommendation fields regression
+  - `1 passed`
+- review guidance string false segment review_required regression
+  - `1 passed`
+- preflight legacy applied-like pending recommendation prediction regression
+  - `1 passed`
+- preflight misbucketed applied pending-like recommendation regression
+  - `1 passed`
 - provider-trace audit focused slice `39 passed`
+- helper backend preflight slice `57 passed`
+- current-focused-parallel
+  - backend output-gating `24 passed`
+  - backend preflight `57 passed`
+  - frontend preflight `25 passed`
 - full backend regression `346 passed`
 - frontend build 성공
 
