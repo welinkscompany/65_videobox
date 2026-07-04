@@ -190,6 +190,8 @@ class LocalFirstOutputOperatorCopyBuilder(OutputOperatorCopyBuilder):
         ]
         prompt_review_flags = []
         for flag in review_flags:
+            if not isinstance(flag, dict):
+                continue
             prompt_flag = dict(flag)
             if "code" in prompt_flag:
                 prompt_flag["code"] = _canonical_review_flag_code(prompt_flag.get("code"))
