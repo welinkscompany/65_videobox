@@ -6,6 +6,7 @@ from typing import Any, Protocol
 from videobox_core_engine.gemini_runtime import GeminiStructuredGenerationError
 from videobox_core_engine.local_first_runtime import LocalFirstStructuredGenerationError
 from videobox_core_engine.provider_trace import build_provider_trace, response_provider_trace, with_final_provider
+from videobox_domain_models.recommendations import RecommendationType
 from videobox_provider_interfaces.llm import LLMProviderError, LLMTaskType
 
 
@@ -32,6 +33,14 @@ def _canonical_review_flag_code(value: object) -> str:
 def _canonical_review_flag_message(value: object) -> str:
     message = str(value or "").strip()
     return message or "Operator review required before approval or output."
+
+
+VALID_PROMPT_RECOMMENDATION_TYPES = {
+    RecommendationType.TTS_REPLACEMENT.value,
+    RecommendationType.BROLL.value,
+    RecommendationType.BGM.value,
+    RecommendationType.OVERLAY.value,
+}
 
 
 class StructuredOutputCopyRuntime(Protocol):
@@ -203,15 +212,19 @@ class LocalFirstOutputOperatorCopyBuilder(OutputOperatorCopyBuilder):
         for item in pending_recommendations:
             if not isinstance(item, dict):
                 continue
+            recommendation_id = str(item.get("recommendation_id") or "").strip()
+            target_segment_id = str(item.get("target_segment_id") or "").strip()
+            recommendation_type = _canonical_recommendation_type(item.get("recommendation_type"))
+            if (
+                not recommendation_id
+                or not target_segment_id
+                or recommendation_type not in VALID_PROMPT_RECOMMENDATION_TYPES
+            ):
+                continue
             prompt_row = dict(item)
-            if "recommendation_id" in prompt_row:
-                prompt_row["recommendation_id"] = str(prompt_row.get("recommendation_id") or "").strip()
-            if "recommendation_type" in prompt_row:
-                prompt_row["recommendation_type"] = _canonical_recommendation_type(
-                    prompt_row.get("recommendation_type")
-                )
-            if "target_segment_id" in prompt_row:
-                prompt_row["target_segment_id"] = str(prompt_row.get("target_segment_id") or "").strip()
+            prompt_row["recommendation_id"] = recommendation_id
+            prompt_row["recommendation_type"] = recommendation_type
+            prompt_row["target_segment_id"] = target_segment_id
             if "reason" in prompt_row:
                 prompt_row["reason"] = str(prompt_row.get("reason") or "").strip()
             if "selected_asset_id" in prompt_row:

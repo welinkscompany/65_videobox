@@ -6039,3 +6039,38 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - 장기 우선순위 queue는 유지
 - 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
 - exact failing test 1개로만 다시 시작한다
+
+## 150. 2026-07-05 output operator copy ignores stale minimal pending recommendation prompt entry closeout
+
+이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `review/output gating`과 가장 가까운 output operator copy prompt의 stale minimal-dict `pending_recommendations` 입력 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/core-engine/src/videobox_core_engine/output_operator_copy.py`의 `_build_prompt(...)`는 dict 여부만 통과하면 prompt `pending_recommendations`에 그대로 올리고 있어, `recommendation_id`나 `target_segment_id`, canonical `recommendation_type` 없이 남은 stale minimal-dict entry도 valid recommendation처럼 operator prompt에 섞여 들어가고 있었다
+- strict TDD로 `test_output_operator_copy_builder_ignores_minimal_dict_pending_recommendations_in_prompt` exact regression을 먼저 추가했고, 실제로 stale `rec_stale_minimal` entry가 prompt 본문에 그대로 남는 RED를 확인했다
+- 최소 수정으로 prompt `pending_recommendations` summary를 만들 때 canonical `recommendation_id`, `target_segment_id`, supported `recommendation_type`가 모두 있는 entry만 유지하도록 좁혀, stale minimal-dict input은 건너뛰고 valid recommendation surface만 남기게 정리했다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 output operator copy prompt의 stale minimal pending-recommendation 입력 경계 한 점만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 failed` 확인 후 `1 passed`
+- focused verification
+  - backend output-gating `24 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - output operator copy prompt의 stale minimal pending-recommendation input 한 점 수정이라 exact + focused evidence가 가장 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. output operator copy prompt가 `recommendation_id`나 `target_segment_id` 없이 남은 stale minimal-dict `pending_recommendations` entry를 valid recommendation처럼 노출하지 않는다
+2. preview/export guidance prompt는 canonical recommendation identity와 supported type을 가진 valid pending recommendation surface만 유지한다
+3. review/output gating 인접 prompt surface가 stale non-dict input 방어 다음 단계까지 같은 방향으로 정렬됐다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다

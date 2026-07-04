@@ -1286,6 +1286,36 @@ def test_output_operator_copy_builder_ignores_non_dict_pending_recommendations_i
     assert "'reason': 'Select narration asset'" in prompt
 
 
+def test_output_operator_copy_builder_ignores_minimal_dict_pending_recommendations_in_prompt() -> None:
+    builder = LocalFirstOutputOperatorCopyBuilder(runtime_service=object())
+
+    prompt = builder._build_prompt(
+        timeline={
+            "timeline_id": "timeline_001",
+            "review_status": "approved",
+            "tracks": [],
+            "review_flags": [],
+            "pending_recommendations": [
+                {"recommendation_id": "rec_stale_minimal"},
+                {
+                    "recommendation_id": "rec_001",
+                    "recommendation_type": "tts_replacement",
+                    "target_segment_id": "seg_001",
+                    "reason": "Select narration asset",
+                },
+            ],
+        },
+        output_target="preview_render",
+        subtitle_file_uri=None,
+    )
+
+    assert "rec_stale_minimal" not in prompt
+    assert "'recommendation_id': 'rec_001'" in prompt
+    assert "'recommendation_type': 'tts_replacement'" in prompt
+    assert "'target_segment_id': 'seg_001'" in prompt
+    assert "'reason': 'Select narration asset'" in prompt
+
+
 def test_review_guidance_builder_ignores_string_false_segment_review_required() -> None:
     builder = LocalFirstReviewGuidanceBuilder(runtime_service=object())
 
