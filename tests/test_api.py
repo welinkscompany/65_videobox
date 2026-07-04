@@ -17076,6 +17076,90 @@ def test_editing_session_api_matches_trimmed_session_segment_ids_when_running_pa
     ]
 
 
+def test_editing_session_api_replaces_trimmed_stale_applied_tts_recommendation_when_running_partial_regeneration(
+    tmp_path: Path,
+) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    replacement_audio = tmp_path / "partial-regeneration-trimmed-tts.wav"
+    replacement_audio.write_bytes(b"tts replacement wav")
+    replacement_asset_id = client.post(
+        f"/api/projects/{project_id}/assets/narration-audio",
+        json={"source_path": str(replacement_audio)},
+    ).json()["asset_id"]
+
+    timeline_result = client.get(f"/api/projects/{project_id}/timelines/{timeline_job_id}")
+    timeline_payload = timeline_result.json()["timeline"]
+    timeline_path = (
+        tmp_path
+        / "projects"
+        / project_id
+        / "timelines"
+        / f'{timeline_payload["timeline_id"]}.json'
+    )
+    stale_selected_asset_uri = (
+        f"local://projects/{project_id}/assets/generated/stale_trimmed_tts.wav"
+    )
+    persisted_timeline = json.loads(timeline_path.read_text(encoding="utf-8"))
+    persisted_timeline["applied_recommendations"] = [
+        {
+            "recommendation_id": "rec_trimmed_stale_tts",
+            "target_segment_id": "seg_001",
+            "recommendation_type": " tts_replacement ",
+            "selected_asset_id": "asset_stale_tts",
+            "score": 1.0,
+            "reason": "Stale trimmed TTS recommendation should be replaced by refresh.",
+            "auto_apply_allowed": True,
+            "review_required": False,
+            "payload": {
+                "selected_asset_uri": stale_selected_asset_uri,
+            },
+            "created_at": "2026-07-04T00:00:00+00:00",
+        }
+    ]
+    persisted_timeline["pending_recommendations"] = []
+    persisted_timeline["review_flags"] = []
+    timeline_path.write_text(json.dumps(persisted_timeline, indent=2), encoding="utf-8")
+
+    create_response = client.post(
+        f"/api/projects/{project_id}/editing-sessions",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    session_id = create_response.json()["session_id"]
+
+    client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/tts-replacement",
+        json={"recommendation_id": "rec_manual_tts_seg_001", "asset_id": replacement_asset_id},
+    )
+
+    response = client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/partial-regeneration",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["tts_replacement"],
+        },
+    )
+
+    assert response.status_code == 202
+    payload = response.json()
+    result_response = client.get(
+        f"/api/projects/{project_id}/partial-regenerations/{payload['job_id']}",
+    )
+
+    assert result_response.status_code == 200
+    result_payload = result_response.json()
+    narration_track = next(
+        track for track in result_payload["timeline"]["tracks"] if track["track_type"] == "narration"
+    )
+    assert narration_track["clips"][0]["asset_uri"] != stale_selected_asset_uri
+    assert narration_track["clips"][0]["asset_uri"].endswith("/inputs/narration/partial-regeneration-trimmed-tts.wav")
+    assert [item["recommendation_id"] for item in result_payload["timeline"]["applied_recommendations"]] == [
+        "rec_manual_tts_seg_001"
+    ]
+
+
 def test_editing_session_api_filters_unknown_overlay_type_when_running_partial_regeneration(
     tmp_path: Path,
 ) -> None:
