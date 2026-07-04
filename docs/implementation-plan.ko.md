@@ -484,6 +484,7 @@
 - pending recommendation approve/reject는 persisted pending recommendation의 `recommendation_id`에 whitespace가 섞인 stale timeline shape여도 mutation 뒤 persisted `applied_recommendations` surface에는 canonical recommendation id만 남기는 계약
 - pending recommendation approve/reject는 persisted pending recommendation의 `target_segment_id`에 whitespace가 섞인 stale timeline shape여도 review flag cleanup이 canonical target segment 기준으로 동작해 stale blocker를 남기지 않는 계약
 - pending `tts_replacement` approve 뒤 `applied_recommendations` read path는 `decision_state=approved`와 `recommendation_type=tts_replacement`를 approve 응답, timeline, review snapshot에서 일관되게 유지하는 계약
+- recommendation response normalization helper도 legacy/mixed-case `decision_state` shape를 raw casing 그대로 노출하지 않고 canonical lowercase surface로 정리해 approve/timeline/review snapshot read truth를 일관되게 유지하는 계약
 - last pending `tts_replacement` approve 뒤에도 다른 segment의 `review_required=true` truth가 남아 있으면 persisted timeline `review_flags`가 synthetic `segment_review_required` blocker를 다시 써서 output gating과 review snapshot truth를 유지하는 계약
 - approved timeline이라도 snapshot blocker 컬렉션이 비어 있는 상태에서 segment-level `review_required=true`가 남아 있으면 subtitle / preview / export를 계속 막는 output gating 계약
 - approved timeline의 stale non-bool `segment.review_required` shape는 synthetic output blocker로 오판하지 않고 canonical bool/string 값만 review-required blocker로 인정하는 계약

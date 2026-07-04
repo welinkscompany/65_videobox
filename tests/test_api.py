@@ -8,7 +8,11 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from videobox_api.main import _build_preflight_review_prediction, create_app
+from videobox_api.main import (
+    _build_preflight_review_prediction,
+    _normalize_recommendations_for_response,
+    create_app,
+)
 from videobox_api.orchestration import LocalFirstRuntimeService
 from videobox_core_engine.local_first_runtime import LocalFirstStructuredGenerationError
 from videobox_core_engine.local_pipeline import LocalPipelineRunner
@@ -125,6 +129,29 @@ def test_preflight_review_prediction_ignores_string_false_targeted_segment_revie
 
     assert predicted_status == "draft"
     assert reasons == []
+
+
+def test_recommendation_response_normalization_canonicalizes_mixed_case_decision_state() -> None:
+    recommendations = _normalize_recommendations_for_response(
+        [
+            {
+                "recommendation_id": "rec_001",
+                "target_segment_id": "seg_001",
+                "recommendation_type": "tts_replacement",
+                "selected_asset_id": "asset_tts_001",
+                "score": 0.91,
+                "reason": "Approved TTS replacement.",
+                "auto_apply_allowed": True,
+                "review_required": False,
+                "decision_state": " Approved ",
+                "payload": {},
+                "created_at": "2026-07-04T00:00:00+00:00",
+                "provider_trace": build_provider_trace(final_provider="rule_based_fallback"),
+            }
+        ]
+    )
+
+    assert recommendations[0]["decision_state"] == "approved"
 
 
 def test_timeline_builder_treats_string_false_recommendation_review_required_as_false() -> None:

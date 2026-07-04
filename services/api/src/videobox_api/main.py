@@ -858,7 +858,7 @@ def _normalize_recommendations_for_response(value: object) -> list[dict[str, obj
                 "review_required": _normalize_boolish_response(
                     item.get("review_required", False)
                 ),
-                "decision_state": str(item.get("decision_state") or "").strip() or None,
+                "decision_state": str(item.get("decision_state") or "").strip().lower() or None,
                 "payload": payload if isinstance(payload, dict) else {},
                 "created_at": str(item.get("created_at") or "").strip() or "unknown",
                 "provider_trace": _normalize_provider_trace_response(item.get("provider_trace")),
