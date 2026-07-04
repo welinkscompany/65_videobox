@@ -1084,6 +1084,37 @@ def test_store_save_timeline_run_ignores_stale_nonlist_review_flags_when_setting
     assert review_state["status"] == "draft"
 
 
+def test_store_save_timeline_run_marks_mixed_case_review_flag_as_blocked_initial_status(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Timeline Save Mixed Case Review Flag Initial Status Project")
+
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [],
+            "review_flags": [
+                {
+                    "code": " TTS_REPLACEMENT_REVIEW_REQUIRED ",
+                    "segment_id": "seg_001",
+                }
+            ],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+        },
+    )
+
+    review_state = store.get_review_state(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+    )
+
+    assert review_state["status"] == "blocked"
+
+
 def test_store_save_timeline_run_ignores_unknown_pending_recommendation_when_setting_initial_status(
     tmp_path: Path,
 ) -> None:

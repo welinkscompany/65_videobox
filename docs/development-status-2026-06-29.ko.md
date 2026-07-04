@@ -3829,3 +3829,40 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - 장기 우선순위 queue는 유지
 - 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
 - exact failing test 1개로만 다시 시작한다
+
+## 102. 2026-07-04 timeline persistence mixed-case review flag initial status closeout
+
+이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `review/output gating`에 가장 가까운 timeline persistence initial review-state 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/storage-abstractions/src/videobox_storage/local_project_store.py`의 `_is_store_blocking_review_flag(...)`는 `review_flags.code`를 `strip()`만 한 채 `VALID_STORE_BLOCKING_REVIEW_FLAG_CODES`와 비교하고 있어, `" TTS_REPLACEMENT_REVIEW_REQUIRED "` 같은 mixed-case stale blocker code를 store-level blocker로 인식하지 못하고 있었다
+- 그 결과 timeline 저장 시 initial review state가 `blocked`가 아니라 `draft`로 저장되는 실제 계약 누수가 있었다
+- strict TDD로 `test_store_save_timeline_run_marks_mixed_case_review_flag_as_blocked_initial_status` exact regression을 먼저 추가했고, 실제로 `review_state["status"] == "draft"` RED를 확인했다
+- 최소 수정으로 store helper에 `_canonical_review_flag_code(...)`를 추가하고 blocking review flag 판정이 lowercase code 기준을 쓰도록 맞춰, mixed-case stale review flag code도 canonical blocker로 인식하게 했다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 timeline persistence initial review-state 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 failed` 확인 후 `1 passed`
+- focused verification
+  - timeline persistence initial-status family exact
+  - 결과: `4 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - store-level review flag blocker 판정 helper 한 점 수정이라 exact + 인접 initial-status family evidence가 가장 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. timeline persistence initial review state가 mixed-case stale `review_flags.code` blocker도 canonical lowercase code 기준으로 `blocked`로 저장한다
+2. 저장 직후 review state truth가 output/preflight 쪽 mixed-case review flag canonicalization 흐름과 더 가까워졌다
+3. stale non-list review flag 무시와 unknown pending recommendation 무시 계약은 그대로 유지된다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다

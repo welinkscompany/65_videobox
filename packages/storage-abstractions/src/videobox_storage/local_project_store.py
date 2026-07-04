@@ -28,6 +28,10 @@ def _canonical_recommendation_type(value: object) -> str:
     return str(value or "").strip().lower()
 
 
+def _canonical_review_flag_code(value: object) -> str:
+    return str(value or "").strip().lower()
+
+
 VALID_STORE_BLOCKING_REVIEW_FLAG_CODES = {
     "segment_review_required",
     "broll_review_required",
@@ -54,7 +58,7 @@ def _is_store_blocking_review_flag(flag: object) -> bool:
     segment_id = flag.get("segment_id")
     return (
         isinstance(code, str)
-        and code.strip() in VALID_STORE_BLOCKING_REVIEW_FLAG_CODES
+        and _canonical_review_flag_code(code) in VALID_STORE_BLOCKING_REVIEW_FLAG_CODES
         and isinstance(segment_id, str)
         and bool(segment_id.strip())
     )

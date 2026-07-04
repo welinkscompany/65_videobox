@@ -523,6 +523,7 @@
 - timeline persistence initial review state도 pending-like legacy recommendation이 stale하게 `applied_recommendations` bucket에 들어 있어도 `draft`로 저장하지 않고 `blocked` truth를 유지하는 계약
 - timeline persistence initial review state도 unknown / non-blocking `pending_recommendations` shape 하나만으로 `blocked`를 저장하지 않고 canonical blocking pending recommendation이 없으면 `draft` truth를 유지하는 계약
 - timeline persistence initial review state도 stale non-list / non-blocking `review_flags` shape 하나만으로 `blocked`를 저장하지 않고 canonical blocking review flag가 없으면 `draft` truth를 유지하는 계약
+- timeline persistence initial review state도 mixed-case stale `review_flags.code` blocker가 남아 있으면 canonical lowercase code 기준으로 `blocked` truth를 유지하는 계약
 - review snapshot direct helper도 pending override나 blocker flag가 존재하면 persisted approved status를 그대로 우선하지 않고 `review_status=blocked` truth를 유지하는 계약
 - review snapshot direct helper도 unknown / non-blocking `timeline_review_flags` shape 하나만으로 persisted approved status를 `blocked`로 다시 뒤집지 않고 canonical blocking review flag가 없으면 approved truth를 유지하는 계약
 - review snapshot direct helper도 unknown / non-blocking `timeline_pending_recommendations` shape 하나만으로 persisted approved status를 `blocked`로 다시 뒤집지 않고 canonical blocking pending recommendation이 없으면 approved truth를 유지하는 계약
