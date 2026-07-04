@@ -9,6 +9,10 @@ from videobox_core_engine.provider_trace import build_provider_trace, response_p
 from videobox_provider_interfaces.llm import LLMProviderError, LLMTaskType
 
 
+def _canonical_review_status(value: object) -> str:
+    return str(value or "approved").strip().lower() or "approved"
+
+
 class StructuredOutputCopyRuntime(Protocol):
     def generate_structured(
         self,
@@ -167,7 +171,7 @@ class LocalFirstOutputOperatorCopyBuilder(OutputOperatorCopyBuilder):
             "Write concise operator-facing output guidance for this approved video timeline.\n"
             f"Output target: {target_label}\n"
             f"Timeline id: {timeline.get('timeline_id')}\n"
-            f"Review status: {timeline.get('review_status', 'approved')}\n"
+            f"Review status: {_canonical_review_status(timeline.get('review_status', 'approved'))}\n"
             f"Subtitle attached: {'yes' if subtitle_file_uri else 'no'}\n"
             f"Track summary: {track_summary}\n"
             f"Review flags: {review_flags}\n"

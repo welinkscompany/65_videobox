@@ -17,6 +17,7 @@ from videobox_api.main import (
 from videobox_api.orchestration import LocalFirstRuntimeService
 from videobox_core_engine.local_first_runtime import LocalFirstStructuredGenerationError
 from videobox_core_engine.local_pipeline import LocalPipelineRunner
+from videobox_core_engine.output_operator_copy import LocalFirstOutputOperatorCopyBuilder
 from videobox_core_engine.preview_renderer import PreviewRenderer
 from videobox_core_engine.provider_trace import build_provider_trace
 from videobox_core_engine.review_guidance import LocalFirstReviewGuidanceBuilder
@@ -730,6 +731,25 @@ def test_preview_renderer_canonicalizes_mixed_case_review_status_surface() -> No
 
     assert "Review status: approved" in payload["player_html"]
     assert "Review status:  APPROVED " not in payload["player_html"]
+
+
+def test_output_operator_copy_builder_canonicalizes_mixed_case_review_status_in_prompt() -> None:
+    builder = LocalFirstOutputOperatorCopyBuilder(runtime_service=object())
+
+    prompt = builder._build_prompt(
+        timeline={
+            "timeline_id": "timeline_001",
+            "review_status": " APPROVED ",
+            "tracks": [],
+            "review_flags": [],
+            "pending_recommendations": [],
+        },
+        output_target="preview_render",
+        subtitle_file_uri=None,
+    )
+
+    assert "Review status: approved" in prompt
+    assert "Review status:  APPROVED " not in prompt
 
 
 def test_review_guidance_builder_ignores_string_false_segment_review_required() -> None:

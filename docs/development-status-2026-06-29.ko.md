@@ -437,6 +437,42 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
 - exact failing test 1개로만 다시 시작한다
 
+## 118. 2026-07-04 output operator copy mixed-case review status prompt closeout
+
+이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `review/output gating`과 바로 이어지는 operator copy prompt surface 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/core-engine/src/videobox_core_engine/output_operator_copy.py`의 `_build_prompt(...)`는 operator-facing preview/export guidance prompt에 `timeline["review_status"]`를 raw 문자열 그대로 넣고 있어, legacy `" APPROVED "` 같은 mixed-case stale shape가 runtime/operator copy 입력 surface에 그대로 남고 있었다
+- strict TDD로 `test_output_operator_copy_builder_canonicalizes_mixed_case_review_status_in_prompt` exact regression을 먼저 추가했고, 실제로 prompt가 `Review status:  APPROVED `를 그대로 담는 RED를 확인했다
+- 최소 수정으로 output operator copy builder에 review status canonical helper를 추가해 `strip().lower()` 기준으로 정리하고, prompt surface가 canonical lowercase status를 유지하게 맞췄다
+- 이번 수정은 editing-session SSOT, review/output rules, TTS approval/output truth, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 operator copy prompt surface 한 점만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 failed` 확인 후 `1 passed`
+- focused verification
+  - operator copy / preview review-status 인접 exact
+  - 결과: `4 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - operator copy prompt의 review-status canonicalization 한 점 수정이라 exact + output guidance 인접 evidence가 가장 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. output operator copy builder가 legacy mixed-case `review_status`도 canonical lowercase 상태로 prompt에 반영한다
+2. preview/export guidance prompt가 raw stale review status 문자열을 그대로 runtime 입력으로 넘기지 않는다
+3. operator copy prompt surface가 output gating/readiness와 preview visible status의 canonical status 기준과 더 가까워졌다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
 ## 82. 2026-07-04 recommendation row trimmed broll provider trace closeout
 
 이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `review/output gating`에 가장 가까운 recommendation row read-path의 작은 stale-shape 경계 1개만 다시 닫았다.
