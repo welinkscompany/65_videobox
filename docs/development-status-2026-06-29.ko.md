@@ -260,6 +260,29 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 
 - 장기 우선순위 queue는 유지
 - 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+
+## 107. 2026-07-04 output blocker detail trimmed pending identity closeout
+
+이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `review/output gating`에 가장 가까운 output blocker detail surface의 stale whitespace pending recommendation identity 경계 1개만 다시 닫았다.
+
+핵심 변경
+
+- strict TDD로 `test_output_blocker_detail_trims_pending_recommendation_identity_fields` exact regression을 먼저 추가했고, 실제로 preview render 차단 detail이 `tts_replacement: rec_tts_seg_001 @ seg_001 `처럼 raw whitespace를 노출하는 RED를 확인했다
+- 최소 수정으로 `packages/core-engine/src/videobox_core_engine/local_pipeline.py`의 `_normalized_runtime_pending_recommendations(...)`가 dedupe key만 trim하던 상태에서 blocker surface에 쓰는 `recommendation_id`, `target_segment_id`도 trim된 값으로 다시 써 주도록 좁혔다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 output blocker detail surface 한 점만 좁게 수정했다
+
+검증
+
+- exact regression
+  - `py -m pytest tests/test_api.py -q -k "test_output_blocker_detail_trims_pending_recommendation_identity_fields" -vv`
+- focused verification
+  - `py -m pytest tests/test_api.py -q -k "test_output_blocker_detail_trims_pending_recommendation_identity_fields or test_output_blocker_detail_canonicalizes_mixed_case_pending_recommendation_type or test_output_blockers_deduplicate_repeated_persisted_pending_recommendation_entries or test_output_gating_blocks_mixed_case_review_flag_code_on_approved_timeline or test_approved_review_state_still_blocks_outputs_when_only_pending_recommendations_remain or test_approving_one_of_multiple_pending_recommendations_keeps_output_blocked_by_remaining_detail" -vv`
+  - 결과 `6 passed`
+
+남은 상태
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
 - exact failing test 1개로만 다시 시작한다
 
 ## 39. 2026-07-04 rule based music recommender string false segment review_required closeout
