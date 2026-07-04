@@ -163,7 +163,7 @@ def _normalized_runtime_pending_recommendations(items: object) -> list[dict[str,
         pending_key = (
             str(normalized_item.get("recommendation_id") or "").strip(),
             str(normalized_item.get("target_segment_id") or "").strip(),
-            str(normalized_item.get("recommendation_type") or "").strip(),
+            _canonical_runtime_recommendation_type(normalized_item.get("recommendation_type")),
         )
         if pending_key in existing_pending_keys:
             continue
@@ -2153,7 +2153,7 @@ class LocalPipelineRunner:
             (
                 str(item.get("recommendation_id") or "").strip(),
                 str(item.get("target_segment_id") or "").strip(),
-                str(item.get("recommendation_type") or "").strip(),
+                _canonical_runtime_recommendation_type(item.get("recommendation_type")),
             )
             for item in timeline_payload["pending_recommendations"]
             if isinstance(item, dict)
@@ -2162,7 +2162,7 @@ class LocalPipelineRunner:
             pending_key = (
                 str(item.get("recommendation_id") or "").strip(),
                 str(item.get("target_segment_id") or "").strip(),
-                str(item.get("recommendation_type") or "").strip(),
+                _canonical_runtime_recommendation_type(item.get("recommendation_type")),
             )
             if pending_key in existing_pending_keys:
                 continue
