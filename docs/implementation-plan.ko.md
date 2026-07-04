@@ -556,6 +556,7 @@
 - partial regeneration runtime도 preflight와 마찬가지로 nested dict `target_segment_id`가 섞인 stale source `pending_recommendations`를 blocker recommendation으로 복원하지 않고 clean scope rerun result의 `review_status/pending_recommendations/review_flags`를 `draft/[]/[]`로 유지하는 계약
 - partial regeneration runtime도 preflight와 마찬가지로 nested dict `segment_id`가 섞인 stale source `review_flags`를 blocker review flag로 복원하지 않고 clean scope rerun result의 `review_status/review_flags/pending_recommendations`를 `draft/[]/[]`로 유지하는 계약
 - partial regeneration runtime도 preflight와 마찬가지로 valid source `review_flags.code/segment_id` blocker를 candidate timeline 결과에 복원해 clean scope가 아니면 `review_status=blocked`와 canonical review flag message를 유지하는 계약
+- partial regeneration runtime도 preflight와 마찬가지로 mixed-case stale source `review_flags.code` blocker를 candidate timeline 결과에 복원할 때 canonical lowercase code 기준으로 `review_status=blocked`와 review flag surface truth를 유지하는 계약
 - partial regeneration runtime도 preflight와 마찬가지로 valid source `pending_recommendations` blocker를 candidate timeline 결과에 복원할 때 missing `provider_trace`를 default fallback trace로 canonicalize해 result API validation error 없이 `review_status=blocked`와 blocker detail을 유지하는 계약
 - partial regeneration runtime도 source timeline의 duplicate `pending_recommendations`가 legacy/mixed-case `recommendation_type` 차이만 있는 stale shape여도 canonical lowercase type 기준으로 dedupe해 blocker detail과 `review_status=blocked` truth를 한 번만 유지하는 계약
 

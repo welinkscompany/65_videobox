@@ -2036,12 +2036,15 @@ class LocalPipelineRunner:
         source_review_flags = [
             {
                 **deepcopy(flag),
+                "code": _canonical_runtime_review_flag_code(flag.get("code")),
+                "segment_id": str(flag.get("segment_id") or "").strip(),
                 "message": str(flag.get("message") or "").strip()
                 or "Operator review required before approval or output.",
             }
             for flag in source_timeline.get("review_flags", [])
             if _is_runtime_blocking_review_flag(flag)
-            and str(flag.get("code") or "").strip() in VALID_RUNTIME_BLOCKING_REVIEW_FLAG_CODES
+            and _canonical_runtime_review_flag_code(flag.get("code"))
+            in VALID_RUNTIME_BLOCKING_REVIEW_FLAG_CODES
         ]
 
         state = {
@@ -2147,7 +2150,7 @@ class LocalPipelineRunner:
         }
         existing_review_flag_keys = {
             (
-                str(item.get("code") or "").strip(),
+                _canonical_runtime_review_flag_code(item.get("code")),
                 str(item.get("segment_id") or "").strip(),
             )
             for item in timeline_payload["review_flags"]
@@ -2155,7 +2158,7 @@ class LocalPipelineRunner:
         }
         for flag in source_review_flags:
             review_flag_key = (
-                str(flag.get("code") or "").strip(),
+                _canonical_runtime_review_flag_code(flag.get("code")),
                 str(flag.get("segment_id") or "").strip(),
             )
             if review_flag_key in existing_review_flag_keys:
