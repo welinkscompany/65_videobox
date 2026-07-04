@@ -20,6 +20,12 @@ def _tokenize(text: str) -> set[str]:
     return {token.strip(".,!?").lower() for token in text.split() if token.strip(".,!?")}
 
 
+def _normalize_boolish(value: object) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() not in {"", "0", "false", "no", "off"}
+    return bool(value)
+
+
 class StructuredRecommendationRuntime(Protocol):
     def generate_structured(
         self,
@@ -176,7 +182,7 @@ class RuleBasedMusicRecommender(RecommendationProvider):
             elif "office" in text or "overview" in text:
                 mood = "clean documentary pulse"
                 score = 0.74
-            elif "restart" in text or bool(segment.get("review_required")):
+            elif "restart" in text or _normalize_boolish(segment.get("review_required")):
                 mood = "light neutral bed"
                 score = 0.61
             results.append(

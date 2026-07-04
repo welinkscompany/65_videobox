@@ -262,6 +262,41 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
 - exact failing test 1개로만 다시 시작한다
 
+## 39. 2026-07-04 rule based music recommender string false segment review_required closeout
+
+이번 후속 작업에서는 queue 1~3의 직접 출력/사전검증 경계가 대부분 닫힌 상태에서, 계획서 5번의 작은 evidence gap에 해당하는 recommendation generation 경계 1개를 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/core-engine/src/videobox_core_engine/recommenders.py`의 `RuleBasedMusicRecommender`는 segment payload의 `review_required`를 raw truthiness로 읽고 있어, legacy string false shape인 `review_required="false"`를 truthy로 오판해 실제 review blocker가 없는 segment도 `"light neutral bed"` branch로 보내고 있었다
+- strict TDD로 `test_rule_based_music_recommender_ignores_string_false_segment_review_required` exact regression을 먼저 추가했고, 실제로 `"Quarterly finance summary"` segment가 기대한 `"focused corporate"`가 아니라 `"light neutral bed"` reason으로 내려가는 RED를 확인했다
+- 최소 수정으로 recommender에도 bool-ish normalization helper를 추가해 segment `review_required`를 canonical bool로 해석하도록 맞춰, false-like string shape가 neutral-bed fallback branch를 잘못 타지 않게 했다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 recommendation generation 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 passed`
+- focused verification
+  - `tests/test_recommendations.py` `3 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - rule-based music recommender의 bool-ish normalization 한 점 수정이라 exact + file-focused evidence가 가장 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. rule-based music recommender가 legacy string false `review_required="false"`를 truthy review blocker로 오판하지 않음
+2. review blocker가 없는 일반 segment는 neutral-bed fallback이 아니라 기본 music mood branch를 유지함
+3. recommendation generation의 bool-ish false 해석이 다른 read/write normalization 규칙과 더 가까워짐
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
 ## 38. 2026-07-04 capcut export string false tts review_required closeout
 
 이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, 방금 닫은 CapCut export trimmed type 경계와 같은 출력 family에서 `TTS approval/output`에 바로 닿는 legacy bool-shape 경계 1개를 다시 닫았다.

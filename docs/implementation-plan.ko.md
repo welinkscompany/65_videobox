@@ -471,6 +471,7 @@
 - preview renderer도 applied recommendation의 `recommendation_type`에 whitespace가 섞인 stale TTS shape여도 canonical recommendation type 기준으로 selected narration source를 유지하는 계약
 - CapCut export adapter도 applied recommendation의 `recommendation_type`에 whitespace가 섞인 stale TTS shape여도 canonical recommendation type 기준으로 segment-level narration source override를 유지하는 계약
 - CapCut export adapter도 applied recommendation의 `auto_apply_allowed="true"` / `review_required="false"` legacy string false shape를 canonical bool로 해석해 segment-level narration source override를 유지하는 계약
+- rule-based music recommender도 segment payload의 `review_required="false"` legacy string false shape를 canonical bool로 해석해 실제 review blocker가 없는 segment를 neutral-bed fallback branch로 오판하지 않는 계약
 - partial regeneration runtime의 `tts_refresh`도 source timeline `applied_recommendations`에 whitespace가 섞인 stale approved `recommendation_type`이 남아 있어도 canonical recommendation type 기준으로 기존 recommendation을 교체해 새 manual TTS selection truth를 유지하는 계약
 - partial regeneration runtime의 `broll_refresh`도 source timeline `applied_recommendations`에 whitespace가 섞인 stale approved `recommendation_type`이 남아 있어도 canonical recommendation type 기준으로 기존 recommendation을 교체해 새 manual B-roll selection truth를 유지하는 계약
 - partial regeneration runtime의 `music_refresh`도 source timeline `applied_recommendations`에 whitespace가 섞인 stale approved `recommendation_type`이 남아 있어도 canonical recommendation type 기준으로 기존 recommendation을 교체해 새 manual BGM selection truth를 유지하는 계약

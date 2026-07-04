@@ -83,3 +83,28 @@ def test_save_recommendation_run_persists_json_and_rows(tmp_path: Path) -> None:
         connection.close()
 
     assert row_count == 2
+
+
+def test_rule_based_music_recommender_ignores_string_false_segment_review_required() -> None:
+    from videobox_core_engine.recommenders import RuleBasedMusicRecommender
+    from videobox_provider_interfaces.recommenders import RecommendationRequest
+
+    recommender = RuleBasedMusicRecommender()
+
+    candidates = recommender.recommend(
+        RecommendationRequest(
+            project_id="project_001",
+            recommendation_type=RecommendationType.BGM,
+            segments=[
+                {
+                    "segment_id": "seg_001",
+                    "text": "Quarterly finance summary",
+                    "review_required": "false",
+                }
+            ],
+            assets=[],
+        )
+    )
+
+    assert candidates[0].reason == "Suggested music mood for this segment: focused corporate."
+    assert candidates[0].score == 0.66
