@@ -182,6 +182,8 @@ class LocalFirstOutputOperatorCopyBuilder(OutputOperatorCopyBuilder):
                 prompt_row["recommendation_type"] = _canonical_recommendation_type(
                     prompt_row.get("recommendation_type")
                 )
+            if "target_segment_id" in prompt_row:
+                prompt_row["target_segment_id"] = str(prompt_row.get("target_segment_id") or "").strip()
             pending_summary.append(prompt_row)
         return (
             "Write concise operator-facing output guidance for this approved video timeline.\n"
