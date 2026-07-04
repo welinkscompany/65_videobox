@@ -190,6 +190,8 @@ class LocalFirstOutputOperatorCopyBuilder(OutputOperatorCopyBuilder):
                 prompt_flag["code"] = _canonical_review_flag_code(prompt_flag.get("code"))
             if "segment_id" in prompt_flag:
                 prompt_flag["segment_id"] = str(prompt_flag.get("segment_id") or "").strip()
+            if "message" in prompt_flag:
+                prompt_flag["message"] = str(prompt_flag.get("message") or "").strip()
             prompt_review_flags.append(prompt_flag)
         pending_summary = []
         for item in pending_recommendations:
