@@ -988,6 +988,27 @@ def test_review_guidance_builder_trims_pending_recommendation_target_segment_id_
     assert "'target_segment_id': ' seg_001 '" not in prompt
 
 
+def test_review_guidance_builder_canonicalizes_mixed_case_review_flag_code_in_prompt() -> None:
+    builder = LocalFirstReviewGuidanceBuilder(runtime_service=object())
+
+    prompt = builder._build_prompt(
+        review_snapshot={
+            "review_status": "blocked",
+            "review_flags": [
+                {
+                    "code": " TTS_REPLACEMENT_REVIEW_REQUIRED ",
+                    "segment_id": "seg_001",
+                }
+            ],
+            "pending_recommendations": [],
+            "segments": [],
+        }
+    )
+
+    assert "'code': 'tts_replacement_review_required'" in prompt
+    assert "'code': ' TTS_REPLACEMENT_REVIEW_REQUIRED '" not in prompt
+
+
 def test_heuristic_review_guidance_builder_canonicalizes_mixed_case_approved_review_status() -> None:
     builder = HeuristicReviewGuidanceBuilder()
 

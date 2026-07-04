@@ -25,6 +25,10 @@ def _canonical_recommendation_type(value: object) -> str:
     return str(value or "").strip().lower()
 
 
+def _canonical_review_flag_code(value: object) -> str:
+    return str(value or "").strip().lower()
+
+
 class StructuredReviewGuidanceRuntime(Protocol):
     def generate_structured(
         self,
@@ -180,7 +184,7 @@ class LocalFirstReviewGuidanceBuilder(ReviewGuidanceBuilder):
             f"Flag count: {len(review_flags)}\n"
             f"Pending recommendation count: {len(pending_recommendations)}\n"
             f"Segments needing attention: {self._segments_needing_attention(segments)}\n"
-            f"Review flags: {review_flags}\n"
+            f"Review flags: {self._prompt_review_flags(review_flags)}\n"
             f"Pending recommendations: {self._prompt_pending_recommendations(pending_recommendations)}\n"
             "Return a short summary and a list of concrete next action items."
         )
@@ -192,6 +196,17 @@ class LocalFirstReviewGuidanceBuilder(ReviewGuidanceBuilder):
             if _normalize_boolish(segment.get("review_required"))
             and str(segment.get("segment_id") or "").strip()
         ]
+
+    def _prompt_review_flags(
+        self,
+        review_flags: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        prompt_rows: list[dict[str, Any]] = []
+        for flag in review_flags:
+            prompt_row = dict(flag)
+            prompt_row["code"] = _canonical_review_flag_code(prompt_row.get("code"))
+            prompt_rows.append(prompt_row)
+        return prompt_rows
 
     def _prompt_pending_recommendations(
         self,
