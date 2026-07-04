@@ -2381,7 +2381,7 @@ class LocalPipelineRunner:
         preserved_overlays = [
             overlay
             for overlay in existing_overlays
-            if str(overlay.get("segment_id") or "") not in target_segment_ids
+            if str(overlay.get("segment_id") or "").strip() not in target_segment_ids
             and _is_valid_runtime_overlay(overlay)
         ]
         refreshed_overlays: list[dict[str, Any]] = []
@@ -2406,7 +2406,7 @@ class LocalPipelineRunner:
                     [
                         overlay
                         for overlay in existing_overlays
-                        if str(overlay.get("segment_id") or "") == segment_id
+                        if str(overlay.get("segment_id") or "").strip() == segment_id
                         and str(overlay.get("overlay_type") or "") not in targeted_overlay_types
                         and _is_valid_runtime_overlay(overlay)
                     ]
@@ -2423,7 +2423,7 @@ class LocalPipelineRunner:
                     (
                         existing
                         for existing in existing_overlays
-                        if str(existing.get("segment_id") or "") == segment_id
+                        if str(existing.get("segment_id") or "").strip() == segment_id
                         and str(existing.get("overlay_type") or "") == str(overlay.get("overlay_type") or "")
                     ),
                     {},

@@ -19159,6 +19159,114 @@ def test_editing_session_api_preserves_canonical_table_overlay_when_running_part
     ]
 
 
+def test_editing_session_api_replaces_trimmed_segment_id_existing_overlay_when_running_full_overlay_refresh(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(
+        name="Trimmed Existing Overlay Runtime Project"
+    )
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "segments": [],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+            "export_overlays": [
+                {
+                    "segment_id": " seg_001 ",
+                    "overlay_type": "hook_title",
+                    "text": "stale hook title should be replaced",
+                    "start_sec": 0.0,
+                    "end_sec": 1.0,
+                }
+            ],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Overlay refresh caption",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [
+                        {
+                            "overlay_type": "image_card",
+                            "asset_id": "asset_image_001",
+                            "text": "fresh image card",
+                        }
+                    ],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["visual_overlay"],
+        },
+    )
+
+    assert response.status_code == 202
+    payload = response.json()
+    result_response = client.get(
+        f"/api/projects/{project.project_id}/partial-regenerations/{payload['job_id']}",
+    )
+    assert result_response.status_code == 200
+    result_payload = result_response.json()
+    timeline_path = (
+        tmp_path
+        / "projects"
+        / project.project_id
+        / "timelines"
+        / f'{result_payload["timeline_id"]}.json'
+    )
+    persisted_timeline = json.loads(timeline_path.read_text(encoding="utf-8"))
+    assert persisted_timeline["export_overlays"] == [
+        {
+            "segment_id": "seg_001",
+            "overlay_type": "image_card",
+            "asset_id": "asset_image_001",
+            "text": "fresh image card",
+            "start_sec": 0.0,
+            "end_sec": 2.0,
+        }
+    ]
+
+
 def test_editing_session_api_does_not_preserve_unknown_existing_overlay_type_on_targeted_overlay_rerun(
     tmp_path: Path,
 ) -> None:
