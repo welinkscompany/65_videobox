@@ -262,6 +262,42 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
 - exact failing test 1개로만 다시 시작한다
 
+## 35. 2026-07-04 partial regeneration trimmed stale applied bgm replacement closeout
+
+이번 후속 작업에서는 장기 우선순위 queue를 유지하되, 이미 닫은 TTS/B-roll trim family와 같은 자리에서 `local_pipeline` partial regeneration output path에 남아 있던 가장 작은 BGM 경계 1개를 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- partial regeneration runtime의 `music_refresh`는 source timeline `applied_recommendations`에 whitespace가 섞인 stale approved `recommendation_type=" bgm "`가 남아 있으면 기존 applied recommendation을 제거하지 못해 stale music clip과 새 manual music clip을 함께 남기고 있었다
+- strict TDD로 `test_editing_session_api_replaces_trimmed_stale_applied_bgm_recommendation_when_running_partial_regeneration` exact regression을 먼저 추가했고, 실제로 bgm track 첫 clip이 `music_manual_001`이 아니라 stale `music_stale_001`로 남고 manual clip이 뒤에 추가되는 RED를 확인했다
+- 원인은 `packages/core-engine/src/videobox_core_engine/local_pipeline.py`의 `_execute_partial_regeneration_music_refresh_step(...)`가 stale applied recommendation 제거 시 `recommendation_type` 비교에 `strip()`을 쓰지 않던 점이었다
+- 최소 수정으로 `music_refresh`도 TTS/B-roll과 같은 canonical trim 비교를 사용하도록 맞춰, manual music override가 stale whitespace recommendation type을 덮어쓰는 runtime truth를 유지하게 했다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 partial regeneration music replacement 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 passed`
+- output-gating focused slice
+  - `3 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - 같은 trim family의 `music_refresh` 한 점 수정이라 exact + family-focused evidence가 가장 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. partial regeneration runtime의 `tts_refresh`가 stale trimmed applied TTS recommendation을 manual selection truth로 교체함
+2. partial regeneration runtime의 `broll_refresh`가 stale trimmed applied B-roll recommendation을 manual selection truth로 교체함
+3. partial regeneration runtime의 `music_refresh`도 stale trimmed applied BGM recommendation을 manual selection truth로 교체함
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
 ## 57. 2026-07-04 review snapshot helper unknown pending recommendation surface closeout
 
 이번 후속 작업에서는 direct review-snapshot helper의 stale recommendation family를 한 단계 더 좁혀, unknown legacy pending recommendation이 status는 막지 않더라도 `pending_recommendations` surface에는 blocker처럼 남는 가장 작은 경계 1개만 다시 닫았다.

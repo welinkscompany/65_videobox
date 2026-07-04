@@ -2292,7 +2292,7 @@ class LocalPipelineRunner:
             item
             for item in state["recommendations"]
             if not (
-                str(item.get("recommendation_type") or "") == RecommendationType.BGM.value
+                str(item.get("recommendation_type") or "").strip() == RecommendationType.BGM.value
                 and str(item.get("target_segment_id") or "") in target_segment_ids
             )
         ]

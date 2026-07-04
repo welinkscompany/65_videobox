@@ -470,6 +470,7 @@
 - timeline builder도 approved recommendation의 `recommendation_type`에 whitespace가 섞인 stale shape여도 canonical recommendation type 기준으로 narration/B-roll/BGM clip 반영 분기를 유지해 timeline/output truth를 일관되게 유지하는 계약
 - partial regeneration runtime의 `tts_refresh`도 source timeline `applied_recommendations`에 whitespace가 섞인 stale approved `recommendation_type`이 남아 있어도 canonical recommendation type 기준으로 기존 recommendation을 교체해 새 manual TTS selection truth를 유지하는 계약
 - partial regeneration runtime의 `broll_refresh`도 source timeline `applied_recommendations`에 whitespace가 섞인 stale approved `recommendation_type`이 남아 있어도 canonical recommendation type 기준으로 기존 recommendation을 교체해 새 manual B-roll selection truth를 유지하는 계약
+- partial regeneration runtime의 `music_refresh`도 source timeline `applied_recommendations`에 whitespace가 섞인 stale approved `recommendation_type`이 남아 있어도 canonical recommendation type 기준으로 기존 recommendation을 교체해 새 manual BGM selection truth를 유지하는 계약
 - pending recommendation approve/reject는 persisted recommendation review flag의 `segment_id`에 whitespace가 섞인 stale timeline shape여도 trimmed target segment 기준으로 같은 flag를 정리해 stale blocker를 남기지 않는 계약
 - pending recommendation approve/reject는 persisted recommendation review flag의 `code`에 whitespace가 섞인 stale timeline shape여도 canonical review flag code 기준으로 같은 flag를 정리해 stale blocker를 남기지 않는 계약
 - pending recommendation approve/reject는 persisted pending recommendation의 `recommendation_id`에 whitespace가 섞인 stale timeline shape여도 route의 canonical recommendation id 기준으로 같은 recommendation을 선택해 decision mutation을 적용하는 계약
