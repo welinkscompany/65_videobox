@@ -985,6 +985,33 @@ def test_output_operator_copy_builder_trims_pending_recommendation_reason_in_pro
     assert "'reason': ' Select narration asset '" not in prompt
 
 
+def test_output_operator_copy_builder_trims_pending_recommendation_selected_asset_id_in_prompt() -> None:
+    builder = LocalFirstOutputOperatorCopyBuilder(runtime_service=object())
+
+    prompt = builder._build_prompt(
+        timeline={
+            "timeline_id": "timeline_001",
+            "review_status": "approved",
+            "tracks": [],
+            "review_flags": [],
+            "pending_recommendations": [
+                {
+                    "recommendation_id": "rec_001",
+                    "recommendation_type": "tts_replacement",
+                    "target_segment_id": "seg_001",
+                    "selected_asset_id": " asset_tts_001 ",
+                    "reason": "Select narration asset",
+                }
+            ],
+        },
+        output_target="preview_render",
+        subtitle_file_uri=None,
+    )
+
+    assert "'selected_asset_id': 'asset_tts_001'" in prompt
+    assert "'selected_asset_id': ' asset_tts_001 '" not in prompt
+
+
 def test_review_guidance_builder_ignores_string_false_segment_review_required() -> None:
     builder = LocalFirstReviewGuidanceBuilder(runtime_service=object())
 
