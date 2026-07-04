@@ -500,6 +500,50 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
 - exact failing test 1개로만 다시 시작한다
 
+## 87. 2026-07-04 preview renderer mixed-case tts recommendation type closeout
+
+이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `TTS approval/output`에 가장 가까운 preview renderer의 mixed-case recommendation type 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/core-engine/src/videobox_core_engine/preview_renderer.py`는 applied recommendation의 `recommendation_type`을 raw `strip()` 기준으로만 비교하고 있어, mixed-case `TTS_REPLACEMENT` shape를 approved TTS override로 인식하지 못하고 preview HTML에 original narration source를 계속 노출하고 있었다
+- strict TDD로 `test_preview_renderer_matches_mixed_case_tts_recommendation_type_for_narration_source` exact regression을 먼저 추가했고, 실제로 preview HTML이 `tts_selected.wav`가 아니라 original narration source를 노출하는 RED를 확인했다
+- 원인은 preview renderer의 TTS applied-segment 판정이 trimmed whitespace는 처리해도 recommendation type casing canonicalization은 하지 않던 점이었다
+- 최소 수정으로 preview renderer에 recommendation type `strip().lower()` canonicalization helper를 추가해, mixed-case `TTS_REPLACEMENT`도 canonical TTS override로 인식하게 맞췄다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 preview/TTS read truth 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 passed`
+- focused verification
+  - `py -m pytest tests/test_api.py -q -k "test_preview_renderer_matches_mixed_case_tts_recommendation_type_for_narration_source or test_preview_renderer_matches_trimmed_tts_recommendation_type_for_narration_source or test_preview_renderer_treats_string_false_tts_recommendation_review_required_as_false"`
+  - 결과: `3 passed`
+  - `./scripts/dev-fast-path.ps1 -Mode output-gating -BackendPattern "matches_mixed_case_tts_recommendation_type_for_narration_source or matches_trimmed_tts_recommendation_type_for_narration_source or string_false_tts_recommendation_review_required_as_false"`
+  - 결과: `3 passed`
+  - `./scripts/dev-fast-path.ps1 -Mode current-focused-parallel`
+  - 결과:
+    - backend output-gating `24 passed`
+    - backend preflight `57 passed`
+    - frontend preflight `25 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - preview renderer의 mixed-case TTS type canonicalization 한 점 수정이라 exact + output-focused + current-focused-parallel evidence가 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. preview renderer가 mixed-case `TTS_REPLACEMENT` shape도 canonical TTS override로 인식한다
+2. preview HTML narration source가 mixed-case type에서도 selected TTS source를 유지한다
+3. preview/TTS read truth가 trimmed type / bool-ish normalization 규칙과 같은 canonical lowercase type 기준을 사용한다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
 ## 38. 2026-07-04 capcut export string false tts review_required closeout
 
 이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, 방금 닫은 CapCut export trimmed type 경계와 같은 출력 family에서 `TTS approval/output`에 바로 닿는 legacy bool-shape 경계 1개를 다시 닫았다.
