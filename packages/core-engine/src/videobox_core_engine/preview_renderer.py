@@ -20,6 +20,10 @@ def _canonical_review_status(value: object) -> str:
     return str(value or "approved").strip().lower() or "approved"
 
 
+def _canonical_track_type(value: object) -> str:
+    return str(value or "").strip().lower()
+
+
 class PreviewRenderer:
     def build_preview_payload(
         self,
@@ -70,7 +74,7 @@ class PreviewRenderer:
                 "</li>"
             )
             for track in tracks
-            if track.get("track_type") == "narration"
+            if _canonical_track_type(track.get("track_type")) == "narration"
             for clip in track.get("clips", [])
         )
         return f"""<!doctype html>

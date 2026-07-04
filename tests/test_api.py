@@ -770,6 +770,38 @@ def test_preview_renderer_canonicalizes_mixed_case_review_status_surface() -> No
     assert "Review status:  APPROVED " not in payload["player_html"]
 
 
+def test_preview_renderer_matches_mixed_case_narration_track_type_for_narration_source() -> None:
+    renderer = PreviewRenderer()
+
+    payload = renderer.build_preview_payload(
+        project_id="project_001",
+        timeline={
+            "timeline_id": "timeline_001",
+            "review_status": "approved",
+            "narration_source_uri": "local://projects/project_001/assets/narration_original.wav",
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": " NARRATION ",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": "local://projects/project_001/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 1.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "applied_recommendations": [],
+        },
+    )
+
+    assert "seg_001: local://projects/project_001/assets/narration_original.wav" in payload["player_html"]
+
+
 def test_output_operator_copy_builder_canonicalizes_mixed_case_review_status_in_prompt() -> None:
     builder = LocalFirstOutputOperatorCopyBuilder(runtime_service=object())
 
