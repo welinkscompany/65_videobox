@@ -86,6 +86,28 @@ def _is_store_blocking_pending_recommendation(item: object) -> bool:
     )
 
 
+def _normalize_review_flag_payloads(value: object) -> list[dict[str, str]]:
+    if not isinstance(value, list):
+        return []
+    normalized: list[dict[str, str]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        code = _canonical_review_flag_code(item.get("code"))
+        segment_id = str(item.get("segment_id") or "").strip()
+        if not code or not segment_id:
+            continue
+        message = str(item.get("message") or "").strip()
+        normalized.append(
+            {
+                "code": code,
+                "segment_id": segment_id,
+                "message": message or "Operator review required before approval or output.",
+            }
+        )
+    return normalized
+
+
 class LocalProjectStore:
     def __init__(self, projects_root: Path) -> None:
         self.projects_root = Path(projects_root)
@@ -1717,6 +1739,7 @@ class LocalProjectStore:
                 review_status = "draft"
         else:
             review_status = "blocked"
+        normalized_review_flags = _normalize_review_flag_payloads(timeline_review_flags)
         return {
             "project_id": project_id,
             "timeline_id": timeline_id,
@@ -1724,7 +1747,7 @@ class LocalProjectStore:
             "segments": segments,
             "applied_recommendations": applied,
             "pending_recommendations": pending,
-            "review_flags": timeline_review_flags,
+            "review_flags": normalized_review_flags,
         }
 
     def _review_snapshot_recommendation_payload(

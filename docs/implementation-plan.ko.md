@@ -526,6 +526,7 @@
 - timeline persistence initial review state도 mixed-case stale `review_flags.code` blocker가 남아 있으면 canonical lowercase code 기준으로 `blocked` truth를 유지하는 계약
 - review snapshot direct helper도 pending override나 blocker flag가 존재하면 persisted approved status를 그대로 우선하지 않고 `review_status=blocked` truth를 유지하는 계약
 - review snapshot direct helper도 unknown / non-blocking `timeline_review_flags` shape 하나만으로 persisted approved status를 `blocked`로 다시 뒤집지 않고 canonical blocking review flag가 없으면 approved truth를 유지하는 계약
+- review snapshot direct helper도 mixed-case stale `timeline_review_flags.code` blocker를 raw casing 그대로 남기지 않고 canonical lowercase code / trimmed segment / default message surface로 정리하면서 `review_status=blocked` truth를 유지하는 계약
 - review snapshot direct helper도 unknown / non-blocking `timeline_pending_recommendations` shape 하나만으로 persisted approved status를 `blocked`로 다시 뒤집지 않고 canonical blocking pending recommendation이 없으면 approved truth를 유지하는 계약
 - review snapshot direct helper도 unknown / non-blocking `timeline_pending_recommendations` shape를 `pending_recommendations` surface에 blocker처럼 남기지 않고 canonical blocking pending recommendation만 surface에 유지하는 계약
 - review snapshot direct helper도 inline `recommendation_type`가 빠진 direct recommendation 입력이면 persisted recommendation row에서 유일하게 매칭되는 canonical type을 복원해 applied/pending split truth를 유지하는 계약

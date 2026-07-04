@@ -152,6 +152,35 @@ def test_review_snapshot_uses_trimmed_broll_type_for_default_provider_trace(
     assert snapshot["applied_recommendations"][0]["provider_trace"]["final_provider"] == "heuristic_fallback"
 
 
+def test_review_snapshot_canonicalizes_mixed_case_review_flag_code(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Review Snapshot Mixed Case Review Flag Project")
+
+    snapshot = store.build_review_snapshot(
+        project_id=project.project_id,
+        timeline_id="timeline_001",
+        segments=[],
+        recommendations=[],
+        timeline_review_flags=[
+            {
+                "code": " TTS_REPLACEMENT_REVIEW_REQUIRED ",
+                "segment_id": " seg_001 ",
+            }
+        ],
+    )
+
+    assert snapshot["review_status"] == "blocked"
+    assert snapshot["review_flags"] == [
+        {
+            "code": "tts_replacement_review_required",
+            "segment_id": "seg_001",
+            "message": "Operator review required before approval or output.",
+        }
+    ]
+
+
 def test_timeline_builder_applies_trimmed_tts_replacement_type_to_narration_clip() -> None:
     timeline = TimelineBuilder().build(
         project_id="project_001",
