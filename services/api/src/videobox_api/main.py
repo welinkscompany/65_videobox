@@ -622,7 +622,8 @@ def _build_targeted_segments(
 
     targeted_segments: list[dict[str, object]] = []
     for segment_id in segment_ids:
-        segment = segment_lookup.get(str(segment_id or ""))
+        normalized_segment_id = str(segment_id or "").strip()
+        segment = segment_lookup.get(normalized_segment_id)
         if not isinstance(segment, dict):
             continue
         cut_action = str(segment.get("cut_action") or "keep")
@@ -672,7 +673,7 @@ def _build_targeted_segments(
                 tts_replacement = None
         targeted_segments.append(
             {
-                "segment_id": segment_id,
+                "segment_id": normalized_segment_id,
                 "caption_text": str(segment.get("caption_text") or ""),
                 "cut_action": cut_action,
                 "review_required": bool(review_required),

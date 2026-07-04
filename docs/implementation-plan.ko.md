@@ -538,6 +538,7 @@
 - timeline builder의 review snapshot direct dict 입력면도 legacy recommendation payload의 `auto_apply_allowed="true"` / `review_required="false"` shape를 pending blocker로 오판하지 않고 applied recommendation truth를 유지하는 계약
 - review guidance prompt의 segment attention 계산도 legacy segment payload의 `review_required="false"` shape를 attention-required segment로 오판하지 않고 실제 review-required segment만 포함하는 계약
 - partial regeneration preflight는 editing session 내부에 같은 `segment_id`가 중복 저장된 stale shape여도 targeted segment preview에서 first-seen segment를 유지하고 뒤의 stale duplicate가 canonical 값을 덮어쓰지 않는 계약
+- partial regeneration preflight targeted-segment helper도 request `segment_ids`에 whitespace가 섞인 stale shape여도 canonical trimmed segment id 기준으로 session segment를 매칭하고 response surface에도 trimmed segment id를 유지하는 계약
 - partial regeneration preflight prediction helper도 targeted segment payload의 legacy `review_required="false"` shape를 raw truthiness blocker로 오판하지 않고 canonical false 기준으로 `draft` prediction을 유지하는 계약
 - partial regeneration preflight도 source timeline의 `pending_recommendations`에 `decision_state=approved/rejected` stale entry가 남아 있어도 unresolved blocker prediction으로 오판하지 않고 `draft` prediction을 유지하는 계약
 - partial regeneration preflight도 source timeline의 `pending_recommendations`에 `auto_apply_allowed="true"` / `review_required="false"` legacy applied-like entry가 `decision_state` 없이 남아 있어도 unresolved blocker prediction으로 오판하지 않고 `draft` prediction을 유지하는 계약

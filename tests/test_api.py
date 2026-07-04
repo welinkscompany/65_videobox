@@ -132,6 +132,41 @@ def test_preflight_review_prediction_ignores_string_false_targeted_segment_revie
     assert reasons == []
 
 
+def test_build_targeted_segments_matches_trimmed_request_segment_ids() -> None:
+    from videobox_api.main import _build_targeted_segments
+
+    targeted_segments = _build_targeted_segments(
+        {
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Office overview.",
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ]
+        },
+        [" seg_001 "],
+    )
+
+    assert targeted_segments == [
+        {
+            "segment_id": "seg_001",
+            "caption_text": "Office overview.",
+            "cut_action": "keep",
+            "review_required": False,
+            "broll_override": None,
+            "visual_overlays": [],
+            "music_override": None,
+            "tts_replacement": None,
+        }
+    ]
+
+
 def test_recommendation_response_normalization_canonicalizes_mixed_case_decision_state() -> None:
     recommendations = _normalize_recommendations_for_response(
         [

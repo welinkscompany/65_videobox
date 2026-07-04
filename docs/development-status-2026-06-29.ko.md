@@ -3939,3 +3939,40 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - 장기 우선순위 queue는 유지
 - 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
 - exact failing test 1개로만 다시 시작한다
+
+## 105. 2026-07-04 preflight request trimmed segment id closeout
+
+이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `preflight contract`에 가장 가까운 targeted-segment request normalization 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `services/api/src/videobox_api/main.py`의 `_build_targeted_segments(...)`는 session 쪽 `segment_id`는 trim해서 lookup table을 만들지만, request `segment_ids`는 raw 문자열 그대로 조회하고 response `segment_id` surface에도 raw 값을 다시 쓰고 있었다
+- 그 결과 `" seg_001 "` 같은 whitespace stale request segment id를 가진 preflight/partial-regeneration request는 기존 session segment를 놓치고 targeted segment preview를 비우거나 raw id를 그대로 surface할 수 있는 실제 계약 누수가 있었다
+- strict TDD로 `test_build_targeted_segments_matches_trimmed_request_segment_ids` exact regression을 먼저 추가했고, 실제로 helper가 `[]`를 반환한 RED를 확인했다
+- 첫 최소 수정 뒤 같은 exact test에서 returned `segment_id`가 raw `" seg_001 "`로 남는 두 번째 RED를 확인했고, helper가 request segment id도 `strip()` 기준으로 lookup하고 returned surface에도 canonical trimmed id를 쓰도록 맞춰 GREEN으로 닫았다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 preflight targeted-segment helper 한 점만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 failed` 확인 후 중간 RED 1회 추가 확인 후 `1 passed`
+- focused verification
+  - preflight targeted-segment helper 인접 exact
+  - 결과: `5 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - request segment id trim과 returned surface canonicalization 두 줄 수정이라 exact + helper-adjacent focused evidence가 가장 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. preflight targeted-segment helper가 whitespace가 섞인 request `segment_ids`도 canonical trimmed id 기준으로 session segment와 매칭한다
+2. helper returned `targeted_segments[].segment_id`가 raw request id가 아니라 canonical trimmed id를 유지한다
+3. preflight scope request surface와 session segment lookup 기준이 같은 trimmed segment id 규칙을 사용한다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
