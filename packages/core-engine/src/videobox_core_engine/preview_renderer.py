@@ -16,6 +16,10 @@ def _canonical_recommendation_type(value: object) -> str:
     return str(value or "").strip().lower()
 
 
+def _canonical_review_status(value: object) -> str:
+    return str(value or "approved").strip().lower() or "approved"
+
+
 class PreviewRenderer:
     def build_preview_payload(
         self,
@@ -45,7 +49,7 @@ class PreviewRenderer:
 
     def _build_player_html(self, *, project_id: str, timeline: dict[str, Any]) -> str:
         tracks = timeline.get("tracks", [])
-        review_status = timeline.get("review_status", "approved")
+        review_status = _canonical_review_status(timeline.get("review_status", "approved"))
         tts_segments = {
             str(item.get("target_segment_id") or "").strip()
             for item in timeline.get("applied_recommendations", [])

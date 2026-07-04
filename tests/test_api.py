@@ -699,6 +699,39 @@ def test_preview_renderer_matches_mixed_case_tts_recommendation_type_for_narrati
     assert "local://projects/project_001/assets/narration_original.wav" not in payload["player_html"]
 
 
+def test_preview_renderer_canonicalizes_mixed_case_review_status_surface() -> None:
+    renderer = PreviewRenderer()
+
+    payload = renderer.build_preview_payload(
+        project_id="project_001",
+        timeline={
+            "timeline_id": "timeline_001",
+            "review_status": " APPROVED ",
+            "narration_source_uri": "local://projects/project_001/assets/narration_original.wav",
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": "local://projects/project_001/assets/narration_original.wav",
+                            "start_sec": 0.0,
+                            "end_sec": 1.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "applied_recommendations": [],
+        },
+    )
+
+    assert "Review status: approved" in payload["player_html"]
+    assert "Review status:  APPROVED " not in payload["player_html"]
+
+
 def test_review_guidance_builder_ignores_string_false_segment_review_required() -> None:
     builder = LocalFirstReviewGuidanceBuilder(runtime_service=object())
 
