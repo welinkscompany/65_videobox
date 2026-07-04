@@ -47,7 +47,7 @@ class PreviewRenderer:
         tracks = timeline.get("tracks", [])
         review_status = timeline.get("review_status", "approved")
         tts_segments = {
-            str(item.get("target_segment_id") or "")
+            str(item.get("target_segment_id") or "").strip()
             for item in timeline.get("applied_recommendations", [])
             if isinstance(item, dict)
             and _canonical_recommendation_type(item.get("recommendation_type")) == "tts_replacement"

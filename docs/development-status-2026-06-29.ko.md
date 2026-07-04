@@ -261,6 +261,31 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - 장기 우선순위 queue는 유지
 - 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
 
+## 108. 2026-07-04 TTS output trimmed target segment id closeout
+
+이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `TTS approval/output`에 가장 가까운 output consumer family에서 applied TTS recommendation의 stale whitespace `target_segment_id` 경계 1개만 다시 닫았다.
+
+핵심 변경
+
+- strict TDD로 `test_capcut_export_adapter_matches_trimmed_tts_target_segment_id_for_segment_level_narration_sources` exact regression을 먼저 추가했고, 실제로 voiceover 첫 segment `source_uri`가 generated TTS asset이 아니라 original narration source로 남는 RED를 확인했다
+- 최소 수정으로 `packages/capcut-export/src/videobox_capcut_export/adapter.py`의 narration override segment set과 같은 규칙을 쓰는 `packages/core-engine/src/videobox_core_engine/preview_renderer.py`의 TTS segment set 모두 `str(...).strip()` 기준으로 맞췄다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 preview/export TTS target-segment matching 한 점만 좁게 수정했다
+
+검증
+
+- exact regression
+  - `py -m pytest tests/test_preview_export.py -q -k "test_capcut_export_adapter_matches_trimmed_tts_target_segment_id_for_segment_level_narration_sources" -vv`
+- focused verification
+  - `py -m pytest tests/test_preview_export.py -q -k "test_capcut_export_adapter_matches_trimmed_tts_target_segment_id_for_segment_level_narration_sources or test_capcut_export_adapter_uses_segment_level_narration_sources_for_approved_tts_replacement or test_capcut_export_adapter_matches_trimmed_tts_recommendation_type_for_segment_level_narration_sources or test_capcut_export_adapter_matches_mixed_case_tts_recommendation_type_for_segment_level_narration_sources or test_capcut_export_adapter_treats_string_false_tts_review_required_as_false_for_segment_level_narration_sources" -vv`
+  - 결과 `5 passed`
+  - `py -m pytest tests/test_api.py -q -k "test_preview_renderer_treats_string_false_tts_recommendation_review_required_as_false or test_preview_renderer_matches_trimmed_tts_recommendation_type_for_narration_source or test_preview_renderer_matches_trimmed_tts_target_segment_id_for_narration_source or test_preview_renderer_matches_mixed_case_tts_recommendation_type_for_narration_source" -vv`
+  - 결과 `4 passed`
+
+남은 상태
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+
 ## 107. 2026-07-04 output blocker detail trimmed pending identity closeout
 
 이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `review/output gating`에 가장 가까운 output blocker detail surface의 stale whitespace pending recommendation identity 경계 1개만 다시 닫았다.

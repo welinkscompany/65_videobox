@@ -38,7 +38,7 @@ class CapCutExportAdapter:
                 subtitle_file_uri=subtitle_file_uri,
                 export_overlays=timeline.get("export_overlays", []),
                 narration_override_segments={
-                    str(item.get("target_segment_id") or "")
+                    str(item.get("target_segment_id") or "").strip()
                     for item in timeline.get("applied_recommendations", [])
                     if isinstance(item, dict)
                     and _canonical_recommendation_type(item.get("recommendation_type")) == "tts_replacement"
