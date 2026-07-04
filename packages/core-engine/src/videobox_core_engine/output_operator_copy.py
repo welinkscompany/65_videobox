@@ -199,9 +199,12 @@ class LocalFirstOutputOperatorCopyBuilder(OutputOperatorCopyBuilder):
         for track in tracks:
             if not isinstance(track, dict):
                 continue
+            track_type = _canonical_track_type(track.get("track_type"))
+            if not track_type:
+                continue
             track_summary.append(
                 {
-                    "track_type": _canonical_track_type(track.get("track_type")),
+                    "track_type": track_type,
                     "clip_count": len(track.get("clips", [])),
                 }
             )
