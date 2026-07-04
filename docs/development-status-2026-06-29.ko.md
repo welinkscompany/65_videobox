@@ -3718,3 +3718,40 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - 장기 우선순위 queue는 유지
 - 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
 - exact failing test 1개로만 다시 시작한다
+
+## 99. 2026-07-04 preflight mixed-case source review flag code closeout
+
+이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `preflight contract`에 가장 가까운 source review flag code canonicalization 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `services/api/src/videobox_api/main.py`의 `_build_preflight_review_prediction(...)`는 source `review_flags.code`를 `strip()`만 한 채 `VALID_PREVIEW_REVIEW_FLAG_CODES`와 비교하고 있어, `" TTS_REPLACEMENT_REVIEW_REQUIRED "` 같은 mixed-case stale blocker code를 unresolved blocker로 복원하지 못하고 있었다
+- 그 결과 source timeline에 review blocker가 남아 있어도 preflight prediction이 `blocked`가 아니라 `draft`로 흘러, rerun 전 read-only prediction contract가 output gating truth와 어긋나고 있었다
+- strict TDD로 `test_editing_session_api_marks_preflight_blocked_when_source_review_flag_has_mixed_case_valid_code` exact regression을 먼저 추가했고, 실제로 mixed-case stale source review flag가 있는 preflight response가 `draft`를 반환하는 RED를 확인했다
+- 최소 수정으로 preflight helper에 `_canonical_preview_review_flag_code(...)`를 추가하고 source review flag filter가 lowercase code 기준을 쓰도록 맞춰, mixed-case stale blocker code도 canonical preview blocker code 기준으로 `blocked` prediction을 유지하게 했다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 preflight source review flag code 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 failed` 확인 후 `1 passed`
+- focused verification
+  - `./scripts/dev-fast-path.ps1 -Mode preflight-backend`
+  - 결과: `58 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - preflight helper의 review flag code canonicalization 한 점 수정이라 exact + preflight-backend focused evidence가 가장 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. partial regeneration preflight가 mixed-case stale source `review_flags.code`도 canonical lowercase blocker code 기준으로 복원한다
+2. source blocker가 남아 있으면 preflight prediction이 `draft`로 풀리지 않고 `blocked` truth를 유지한다
+3. preflight prediction의 review flag code 판정이 output gating 쪽 canonical blocker code 규칙과 더 가까워졌다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다

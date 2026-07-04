@@ -38,6 +38,10 @@ VALID_PREVIEW_REVIEW_FLAG_CODES = {
 }
 
 
+def _canonical_preview_review_flag_code(value: object) -> str:
+    return str(value or "").strip().lower()
+
+
 class CreateProjectRequest(BaseModel):
     name: str = Field(min_length=1)
 
@@ -718,7 +722,8 @@ def _build_preflight_review_prediction(
             if (
                 isinstance(flag, dict)
                 and isinstance(flag.get("code"), str)
-                and flag.get("code").strip() in VALID_PREVIEW_REVIEW_FLAG_CODES
+                and _canonical_preview_review_flag_code(flag.get("code"))
+                in VALID_PREVIEW_REVIEW_FLAG_CODES
                 and isinstance(flag.get("segment_id"), str)
                 and flag.get("segment_id").strip()
             )

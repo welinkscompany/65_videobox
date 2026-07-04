@@ -15546,6 +15546,83 @@ def test_editing_session_api_marks_preflight_blocked_when_source_review_flag_has
     ]
 
 
+def test_editing_session_api_marks_preflight_blocked_when_source_review_flag_has_mixed_case_valid_code(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Mixed Case Source Review Flag Preflight Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [
+                {
+                    "code": " TTS_REPLACEMENT_REVIEW_REQUIRED ",
+                    "segment_id": "seg_009",
+                }
+            ],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Stable caption",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration/preflight",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["caption"],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["predicted_review_status_after_rerun"] == "blocked"
+    assert payload["prediction_reasons"] == [
+        "source timeline already has unresolved review blockers that rerun will preserve",
+    ]
+
+
 def test_editing_session_api_filters_nested_segment_id_source_review_flag_entries_from_preflight_prediction(
     tmp_path: Path,
 ) -> None:

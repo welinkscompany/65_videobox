@@ -539,6 +539,7 @@
 - partial regeneration preflight도 source timeline의 `pending_recommendations`에 `auto_apply_allowed="true"` / `review_required="false"` legacy applied-like entry가 `decision_state` 없이 남아 있어도 unresolved blocker prediction으로 오판하지 않고 `draft` prediction을 유지하는 계약
 - partial regeneration preflight도 source timeline의 `applied_recommendations`에 `auto_apply_allowed="false"` / `review_required="true"` pending-like legacy entry가 잘못 들어 있어도 unresolved blocker prediction으로 복원해 `blocked` prediction을 유지하는 계약
 - partial regeneration preflight도 source timeline의 `pending_recommendations`에 legacy/mixed-case `recommendation_type` blocker가 남아 있어도 canonical lowercase type 기준으로 unresolved blocker prediction을 유지해 `blocked` prediction truth를 잃지 않는 계약
+- partial regeneration preflight도 source timeline의 stale mixed-case `review_flags.code` blocker가 남아 있어도 canonical lowercase code 기준으로 unresolved blocker prediction을 유지해 `blocked` prediction truth를 잃지 않는 계약
 - partial regeneration candidate timeline도 provider-trace audit의 `timeline_id + include_upstream=true` filter에서 source lineage를 잃지 않고 segment analysis / recommendation upstream entry를 같이 보여주는 계약
 - partial regeneration candidate timeline의 provider-trace `review_guidance` audit entry도 source job truth를 잃지 않고 `partial_regeneration_job_*`에 연결되는 계약
 - partial regeneration candidate timeline의 provider-trace `review_guidance` audit entry도 `partial_regeneration_job_*`의 job type truth를 유지하는 계약
