@@ -11,6 +11,10 @@ def _normalize_boolish(value: object) -> bool:
     return False
 
 
+def _canonical_recommendation_type(value: object) -> str:
+    return str(value or "").strip().lower()
+
+
 class CapCutExportAdapter:
     def build_payload(
         self,
@@ -37,7 +41,7 @@ class CapCutExportAdapter:
                     str(item.get("target_segment_id") or "")
                     for item in timeline.get("applied_recommendations", [])
                     if isinstance(item, dict)
-                    and str(item.get("recommendation_type") or "").strip() == "tts_replacement"
+                    and _canonical_recommendation_type(item.get("recommendation_type")) == "tts_replacement"
                     and _normalize_boolish(item.get("auto_apply_allowed"))
                     and not _normalize_boolish(item.get("review_required"))
                 },

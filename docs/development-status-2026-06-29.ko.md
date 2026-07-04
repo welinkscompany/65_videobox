@@ -538,6 +538,48 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 2. preview HTML narration source가 mixed-case type에서도 selected TTS source를 유지한다
 3. preview/TTS read truth가 trimmed type / bool-ish normalization 규칙과 같은 canonical lowercase type 기준을 사용한다
 
+## 88. 2026-07-04 capcut export mixed-case tts recommendation type closeout
+
+이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `TTS approval/output`에 바로 닿는 CapCut export adapter의 mixed-case recommendation type 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/capcut-export/src/videobox_capcut_export/adapter.py`는 applied recommendation의 `recommendation_type`을 raw `strip()` 기준으로만 비교하고 있어, mixed-case `TTS_REPLACEMENT` shape를 approved TTS override로 인식하지 못하고 CapCut voiceover track 첫 segment에 original narration source를 계속 남기고 있었다
+- strict TDD로 `test_capcut_export_adapter_matches_mixed_case_tts_recommendation_type_for_segment_level_narration_sources` exact regression을 먼저 추가했고, 실제로 voiceover 첫 segment `source_uri`가 generated TTS asset이 아니라 original narration source로 남는 RED를 확인했다
+- 원인은 CapCut export adapter의 narration override segment 계산이 trimmed whitespace는 처리해도 recommendation type casing canonicalization은 하지 않던 점이었다
+- 최소 수정으로 adapter에 recommendation type `strip().lower()` canonicalization helper를 추가해, mixed-case `TTS_REPLACEMENT`도 canonical TTS override로 인식하게 맞췄다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 CapCut export TTS read truth 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 passed`
+- focused verification
+  - `py -m pytest tests/test_preview_export.py -q -k "test_capcut_export_adapter_matches_mixed_case_tts_recommendation_type_for_segment_level_narration_sources or test_capcut_export_adapter_matches_trimmed_tts_recommendation_type_for_segment_level_narration_sources or test_capcut_export_adapter_treats_string_false_tts_review_required_as_false_for_segment_level_narration_sources"`
+  - 결과: `3 passed`
+- broader fast-path verification
+  - `./scripts/dev-fast-path.ps1 -Mode current-focused-parallel`
+  - 결과:
+    - backend output-gating `24 passed`
+    - backend preflight `57 passed`
+    - frontend preflight `25 passed`
+- helper override note
+  - `./scripts/dev-fast-path.ps1 -Mode output-gating -BackendPattern "matches_mixed_case_tts_recommendation_type_for_segment_level_narration_sources or matches_trimmed_tts_recommendation_type_for_segment_level_narration_sources or string_false_tts_review_required_as_false_for_segment_level_narration_sources"`
+  - 결과: `279 deselected`
+  - 판단:
+    - 이번 exact 이름들은 현재 helper의 backend lane 수집 범위와 맞지 않아 direct focused pytest가 더 직접적인 evidence였다
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - CapCut export adapter의 mixed-case type canonicalization 한 점 수정이라 exact + family-focused + current-focused-parallel evidence가 직접적이다
+    - latest full broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. CapCut export adapter가 mixed-case `TTS_REPLACEMENT` shape도 canonical TTS override로 인식한다
+2. CapCut voiceover track source가 mixed-case type에서도 selected narration source를 유지한다
+3. CapCut export TTS read truth가 preview renderer / trimmed type / bool-ish normalization 규칙과 같은 canonical lowercase type 기준을 사용한다
+
 현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
 
 - 장기 우선순위 queue는 유지
