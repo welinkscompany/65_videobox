@@ -156,6 +156,9 @@ def _normalized_runtime_pending_recommendations(items: object) -> list[dict[str,
             continue
         normalized_item = {
             **deepcopy(item),
+            "recommendation_type": _canonical_runtime_recommendation_type(
+                item.get("recommendation_type")
+            ),
             "provider_trace": item.get("provider_trace")
             if isinstance(item.get("provider_trace"), dict)
             else build_provider_trace(final_provider="rule_based_fallback"),

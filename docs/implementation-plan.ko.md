@@ -501,6 +501,7 @@
 - unknown dict-shaped `review_flag.code`는 approved timeline output gating blocker로 오판하지 않고 canonical review flag code만 blocker로 유지하는 계약
 - approved timeline의 persisted duplicate `review_flags`도 output blocker detail에서 code/segment 기준으로 dedupe되어 같은 blocker가 중복 노출되지 않는 계약
 - approved timeline의 persisted duplicate `pending_recommendations`도 output blocker detail에서 recommendation id / target segment / recommendation type 기준으로 dedupe되어 같은 blocker가 중복 노출되지 않는 계약
+- approved timeline의 stale mixed-case `pending_recommendations.recommendation_type`도 output blocker detail에서 raw casing을 그대로 노출하지 않고 canonical lowercase type 기준으로 surface를 유지하는 계약
 - approved timeline의 persisted `pending_recommendations`에 `decision_state=approved/rejected` stale entry가 남아 있어도 unresolved blocker로 오판하지 않고 API read path / subtitle / preview / export에서 무시하는 계약
 - approved timeline의 persisted `pending_recommendations`에 `auto_apply_allowed="true"` / `review_required="false"` legacy applied-like entry가 `decision_state` 없이 남아 있어도 unresolved blocker로 오판하지 않고 subtitle / preview / export에서 무시하는 계약
 - timeline build도 recommendation의 `review_required="false"` 같은 legacy string false shape를 review blocker/pending recommendation으로 오판하지 않고 applied recommendation truth를 유지하는 계약
