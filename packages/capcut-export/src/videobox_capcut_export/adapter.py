@@ -15,6 +15,10 @@ def _canonical_recommendation_type(value: object) -> str:
     return str(value or "").strip().lower()
 
 
+def _canonical_track_type(value: object) -> str:
+    return str(value or "").strip().lower()
+
+
 class CapCutExportAdapter:
     def build_payload(
         self,
@@ -64,7 +68,7 @@ class CapCutExportAdapter:
         deferred_audio_tracks: list[dict[str, Any]] = []
 
         for track in tracks:
-            track_type = str(track.get("track_type") or "")
+            track_type = _canonical_track_type(track.get("track_type"))
             if track_type == "narration":
                 capcut_tracks.append(
                     self._build_clip_track(

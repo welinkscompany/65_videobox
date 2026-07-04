@@ -776,6 +776,41 @@ def test_capcut_export_adapter_treats_string_false_tts_review_required_as_false_
     ]
 
 
+def test_capcut_export_adapter_matches_mixed_case_narration_track_type_for_voiceover_track() -> None:
+    adapter = CapCutExportAdapter()
+
+    payload = adapter.build_payload(
+        project_id="project_123",
+        timeline={
+            "timeline_id": "timeline_001",
+            "narration_source_uri": "local://projects/project_123/inputs/narration/source.wav",
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": " NARRATION ",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": "local://projects/project_123/assets/generated/asset_tts_001.wav",
+                            "start_sec": 0.0,
+                            "end_sec": 1.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [],
+        },
+    )
+
+    voiceover_track = next(track for track in payload["capcut_tracks"] if track["track_name"] == "voiceover")
+
+    assert [segment["source_uri"] for segment in voiceover_track["segments"]] == [
+        "local://projects/project_123/inputs/narration/source.wav"
+    ]
+
+
 class FailingPreviewRenderer:
     def build_preview_payload(self, *, project_id: str, timeline: dict[str, object]) -> dict[str, object]:
         raise RuntimeError("preview renderer exploded")
