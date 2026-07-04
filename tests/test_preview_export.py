@@ -379,6 +379,66 @@ def test_capcut_export_adapter_uses_segment_level_narration_sources_for_approved
     ]
 
 
+def test_capcut_export_adapter_matches_trimmed_tts_recommendation_type_for_segment_level_narration_sources() -> None:
+    adapter = CapCutExportAdapter()
+
+    payload = adapter.build_payload(
+        project_id="project_123",
+        timeline={
+            "timeline_id": "timeline_001",
+            "narration_source_uri": "local://projects/project_123/inputs/narration/source.wav",
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": "local://projects/project_123/assets/generated/asset_tts_001.wav",
+                            "start_sec": 0.0,
+                            "end_sec": 1.0,
+                            "clip_type": "narration",
+                        },
+                        {
+                            "clip_id": "clip_narration_002",
+                            "segment_id": "seg_002",
+                            "asset_uri": "local://projects/project_123/segments/seg_002",
+                            "start_sec": 1.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        },
+                    ],
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [
+                {
+                    "recommendation_id": "rec_tts_seg_001",
+                    "target_segment_id": "seg_001",
+                    "recommendation_type": " tts_replacement ",
+                    "selected_asset_id": "asset_tts_001",
+                    "score": 1.0,
+                    "reason": "Approved trimmed narration replacement.",
+                    "auto_apply_allowed": True,
+                    "review_required": False,
+                    "payload": {
+                        "selected_asset_uri": "local://projects/project_123/assets/generated/asset_tts_001.wav"
+                    },
+                }
+            ],
+            "pending_recommendations": [],
+        },
+    )
+
+    voiceover_track = next(track for track in payload["capcut_tracks"] if track["track_name"] == "voiceover")
+
+    assert [segment["source_uri"] for segment in voiceover_track["segments"]] == [
+        "local://projects/project_123/assets/generated/asset_tts_001.wav",
+        "local://projects/project_123/inputs/narration/source.wav",
+    ]
+
+
 class FailingPreviewRenderer:
     def build_preview_payload(self, *, project_id: str, timeline: dict[str, object]) -> dict[str, object]:
         raise RuntimeError("preview renderer exploded")

@@ -262,6 +262,43 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
 - exact failing test 1개로만 다시 시작한다
 
+## 37. 2026-07-04 capcut export trimmed tts recommendation type closeout
+
+이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, 방금 닫은 preview renderer와 같은 출력 family에서 `TTS approval/output`에 가장 가까운 CapCut export adapter의 trimmed recommendation type regression 1개를 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/capcut-export/src/videobox_capcut_export/adapter.py`는 applied recommendation의 `recommendation_type` 비교에 raw equality를 쓰고 있어, `" tts_replacement "`처럼 whitespace가 섞인 stale approved shape를 narration override segment로 인식하지 못하고 CapCut voiceover track 첫 segment를 original narration source로 유지하고 있었다
+- strict TDD로 `test_capcut_export_adapter_matches_trimmed_tts_recommendation_type_for_segment_level_narration_sources` exact regression을 먼저 추가했고, 실제로 export manifest의 first `voiceover` segment가 generated TTS source가 아니라 original narration source로 내려가는 RED를 확인했다
+- 최소 수정으로 CapCut export adapter의 narration override segment 판정도 `recommendation_type.strip() == "tts_replacement"` 기준을 사용하도록 맞춰, stale whitespace type shape여도 segment-level narration source override truth를 유지하게 했다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 export output 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 passed`
+- focused verification
+  - `tests/test_preview_export.py` focused `2 passed`
+  - `tests/test_api.py` export/preview flow focused `1 passed`
+  - helper output-gating override `1 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - CapCut export adapter의 trimmed recommendation-type 한 점 수정이라 exact + family-focused evidence가 가장 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. preview renderer가 whitespace가 섞인 stale approved `tts_replacement` type도 canonical TTS override로 인식함
+2. CapCut export adapter도 whitespace가 섞인 stale approved `tts_replacement` type을 canonical TTS override로 인식함
+3. preview/export output이 approved TTS selection truth를 같은 기준으로 유지함
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
 ## 36. 2026-07-04 preview renderer trimmed tts recommendation type closeout
 
 이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `TTS approval/output`에 가장 가까운 실제 출력 경계로 남아 있던 preview renderer의 trimmed recommendation type regression 1개를 다시 닫았다.

@@ -29,7 +29,7 @@ class CapCutExportAdapter:
                     str(item.get("target_segment_id") or "")
                     for item in timeline.get("applied_recommendations", [])
                     if isinstance(item, dict)
-                    and str(item.get("recommendation_type") or "") == "tts_replacement"
+                    and str(item.get("recommendation_type") or "").strip() == "tts_replacement"
                     and bool(item.get("auto_apply_allowed"))
                     and not bool(item.get("review_required"))
                 },
