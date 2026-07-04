@@ -1567,6 +1567,31 @@ def test_heuristic_review_guidance_builder_defaults_missing_review_flag_message(
     ]
 
 
+def test_heuristic_review_guidance_builder_defaults_missing_pending_recommendation_reason() -> None:
+    builder = HeuristicReviewGuidanceBuilder()
+
+    guidance = builder.build(
+        project_id="project_001",
+        review_snapshot={
+            "review_status": "blocked",
+            "review_flags": [],
+            "pending_recommendations": [
+                {
+                    "recommendation_id": "rec_001",
+                    "recommendation_type": "tts_replacement",
+                    "target_segment_id": "seg_001",
+                }
+            ],
+            "segments": [],
+        },
+    )
+
+    assert guidance["summary"] == "Review is blocked until the flagged items are resolved."
+    assert guidance["action_items"] == [
+        "Operator review required before approval or output."
+    ]
+
+
 def test_heuristic_review_guidance_builder_canonicalizes_mixed_case_approved_review_status() -> None:
     builder = HeuristicReviewGuidanceBuilder()
 

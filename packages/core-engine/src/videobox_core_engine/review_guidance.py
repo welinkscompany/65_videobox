@@ -79,11 +79,17 @@ class HeuristicReviewGuidanceBuilder(ReviewGuidanceBuilder):
                     continue
                 if _canonical_review_flag_code(flag.get("code")) and str(flag.get("segment_id") or "").strip():
                     action_items.append(_canonical_review_flag_message(flag.get("message")))
-            action_items.extend(
-                str(item.get("reason", "")).strip()
-                for item in pending_recommendations
-                if str(item.get("reason", "")).strip()
-            )
+            for item in pending_recommendations:
+                reason = str(item.get("reason", "")).strip()
+                if reason:
+                    action_items.append(reason)
+                    continue
+                if (
+                    str(item.get("recommendation_id") or "").strip()
+                    and str(item.get("target_segment_id") or "").strip()
+                    and _canonical_recommendation_type(item.get("recommendation_type"))
+                ):
+                    action_items.append("Operator review required before approval or output.")
             if not action_items:
                 action_items.append("Resolve review blockers before approval.")
             return {
