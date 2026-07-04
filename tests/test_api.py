@@ -882,6 +882,31 @@ def test_output_operator_copy_builder_canonicalizes_mixed_case_review_status_in_
     assert "Review status:  APPROVED " not in prompt
 
 
+def test_output_operator_copy_builder_canonicalizes_mixed_case_track_type_in_prompt() -> None:
+    builder = LocalFirstOutputOperatorCopyBuilder(runtime_service=object())
+
+    prompt = builder._build_prompt(
+        timeline={
+            "timeline_id": "timeline_001",
+            "review_status": "approved",
+            "tracks": [
+                {
+                    "track_id": "track_001",
+                    "track_type": " NARRATION ",
+                    "clips": [{"clip_id": "clip_001"}],
+                }
+            ],
+            "review_flags": [],
+            "pending_recommendations": [],
+        },
+        output_target="preview_render",
+        subtitle_file_uri=None,
+    )
+
+    assert "'track_type': 'narration'" in prompt
+    assert "'track_type': ' NARRATION '" not in prompt
+
+
 def test_review_guidance_builder_ignores_string_false_segment_review_required() -> None:
     builder = LocalFirstReviewGuidanceBuilder(runtime_service=object())
 

@@ -13,6 +13,10 @@ def _canonical_review_status(value: object) -> str:
     return str(value or "approved").strip().lower() or "approved"
 
 
+def _canonical_track_type(value: object) -> str:
+    return str(value or "").strip().lower()
+
+
 class StructuredOutputCopyRuntime(Protocol):
     def generate_structured(
         self,
@@ -162,7 +166,7 @@ class LocalFirstOutputOperatorCopyBuilder(OutputOperatorCopyBuilder):
         target_label = "preview" if output_target == "preview_render" else "capcut export"
         track_summary = [
             {
-                "track_type": track.get("track_type"),
+                "track_type": _canonical_track_type(track.get("track_type")),
                 "clip_count": len(track.get("clips", [])),
             }
             for track in tracks

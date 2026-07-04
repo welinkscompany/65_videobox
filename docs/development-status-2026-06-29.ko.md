@@ -653,6 +653,42 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
 - exact failing test 1개로만 다시 시작한다
 
+## 127. 2026-07-04 output operator copy mixed-case track type prompt closeout
+
+이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `review/output gating`과 바로 이어지는 operator copy `track summary` prompt surface 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/core-engine/src/videobox_core_engine/output_operator_copy.py`의 `_build_prompt(...)`는 operator-facing preview/export guidance prompt에서 `track_summary`의 `track_type`을 raw 문자열 그대로 넣고 있어, legacy `" NARRATION "` 같은 mixed-case stale shape가 runtime/operator copy 입력 surface에 그대로 남고 있었다
+- strict TDD로 `test_output_operator_copy_builder_canonicalizes_mixed_case_track_type_in_prompt` exact regression을 먼저 추가했고, 실제로 prompt가 `{'track_type': ' NARRATION '}`를 그대로 담는 RED를 확인했다
+- 최소 수정으로 output operator copy builder에 track type canonical helper를 추가해 `strip().lower()` 기준으로 정리하고, prompt의 `track_summary` surface가 canonical lowercase track type을 유지하게 맞췄다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 operator copy prompt의 track summary surface 한 점만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 failed` 확인 후 `1 passed`
+- focused verification
+  - operator copy / preview / review guidance 인접 exact
+  - 결과: `4 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - operator copy prompt의 track-type canonicalization 한 점 수정이라 exact + 인접 prompt/output surface evidence가 가장 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. output operator copy builder가 legacy mixed-case `track_type`도 canonical lowercase track type으로 prompt에 반영한다
+2. preview/export guidance prompt가 raw stale track type 문자열을 그대로 runtime 입력으로 넘기지 않는다
+3. operator copy prompt의 track summary surface가 preview visible track summary와 더 같은 canonical track-type 기준을 사용한다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
 ## 120. 2026-07-04 review approval mixed-case review flag cleanup closeout
 
 이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `review/output gating`과 바로 이어지는 review recommendation approve cleanup 경계 1개만 다시 닫았다.
