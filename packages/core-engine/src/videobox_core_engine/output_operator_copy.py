@@ -178,6 +178,8 @@ class LocalFirstOutputOperatorCopyBuilder(OutputOperatorCopyBuilder):
         pending_summary = []
         for item in pending_recommendations:
             prompt_row = dict(item)
+            if "recommendation_id" in prompt_row:
+                prompt_row["recommendation_id"] = str(prompt_row.get("recommendation_id") or "").strip()
             if "recommendation_type" in prompt_row:
                 prompt_row["recommendation_type"] = _canonical_recommendation_type(
                     prompt_row.get("recommendation_type")

@@ -770,6 +770,7 @@
 - output operator copy prompt의 `pending_recommendations.target_segment_id` surface도 whitespace stale segment id를 trim 기준으로 정리해 preview/export guidance prompt가 review guidance 및 output truth와 같은 canonical segment id 기준을 유지하게 정리했다
 - output operator copy prompt의 `pending_recommendations.reason` surface도 whitespace stale reason을 trim 기준으로 정리해 preview/export guidance prompt가 review guidance 및 output truth와 같은 canonical recommendation reason 기준을 유지하게 정리했다
 - output operator copy prompt의 `pending_recommendations.selected_asset_id` surface도 whitespace stale asset id를 trim 기준으로 정리해 preview/export guidance prompt가 review guidance 및 TTS/output truth와 같은 canonical selected asset id 기준을 유지하게 정리했다
+- output operator copy prompt의 `pending_recommendations.recommendation_id` surface도 whitespace stale recommendation id를 trim 기준으로 정리해 preview/export guidance prompt가 approve/output 쪽 canonical recommendation identity 기준을 유지하게 정리했다
 
 단, 2026-07-03 기준 `2일 내 1차 데모 완성` 실행 레일은 위 장기 우선순위를 그대로 넓게 다 가져가지 않는다.
 즉시 실행 기준은 `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`를 따른다.
