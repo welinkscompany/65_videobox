@@ -6,6 +6,10 @@ from typing import Any
 from videobox_core_engine.provider_trace import build_provider_trace
 
 
+def _canonical_recommendation_type(value: object) -> str:
+    return str(value or "").strip().lower()
+
+
 def extract_pending_recommendation_decision(
     *,
     timeline: dict[str, Any],
@@ -32,7 +36,8 @@ def extract_pending_recommendation_decision(
             ) or build_provider_trace(
                 final_provider=(
                     "heuristic_fallback"
-                    if str(decided_recommendation.get("recommendation_type") or "").strip() == "broll"
+                    if _canonical_recommendation_type(decided_recommendation.get("recommendation_type"))
+                    == "broll"
                     else "rule_based_fallback"
                 )
             )
@@ -76,7 +81,7 @@ def should_keep_review_flag(
     ):
         return True
     return any(
-        str(item.get("recommendation_type") or "").strip()
+        _canonical_recommendation_type(item.get("recommendation_type"))
         == recommendation_flag_code.removesuffix("_review_required")
         and str(item.get("target_segment_id") or "").strip() == target_segment_id
         for item in remaining_pending
@@ -90,7 +95,7 @@ def filtered_review_flags_after_recommendation_decision(
     remaining_pending: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     recommendation_flag_code = (
-        f"{str(decided_recommendation.get('recommendation_type') or '').strip()}_review_required"
+        f"{_canonical_recommendation_type(decided_recommendation.get('recommendation_type'))}_review_required"
     )
     target_segment_id = str(decided_recommendation.get("target_segment_id") or "").strip()
     return [
@@ -111,7 +116,7 @@ def apply_approved_recommendation_to_timeline(
     timeline: dict[str, Any],
     decided_recommendation: dict[str, Any],
 ) -> None:
-    if str(decided_recommendation.get("recommendation_type") or "").strip() != "tts_replacement":
+    if _canonical_recommendation_type(decided_recommendation.get("recommendation_type")) != "tts_replacement":
         return
     payload = decided_recommendation.get("payload")
     if not isinstance(payload, dict):

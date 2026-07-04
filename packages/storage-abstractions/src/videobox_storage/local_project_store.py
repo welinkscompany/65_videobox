@@ -24,6 +24,10 @@ def _normalize_boolish(value: object) -> bool:
     return bool(value)
 
 
+def _canonical_recommendation_type(value: object) -> str:
+    return str(value or "").strip().lower()
+
+
 VALID_STORE_BLOCKING_REVIEW_FLAG_CODES = {
     "segment_review_required",
     "broll_review_required",
@@ -40,7 +44,7 @@ VALID_STORE_BLOCKING_RECOMMENDATION_TYPES = {
 def _is_store_supported_recommendation_type(item: object) -> bool:
     if not isinstance(item, dict):
         return False
-    return str(item.get("recommendation_type") or "").strip() in VALID_STORE_BLOCKING_RECOMMENDATION_TYPES
+    return _canonical_recommendation_type(item.get("recommendation_type")) in VALID_STORE_BLOCKING_RECOMMENDATION_TYPES
 
 
 def _is_store_blocking_review_flag(flag: object) -> bool:
@@ -74,7 +78,7 @@ def _is_store_blocking_pending_recommendation(item: object) -> bool:
         and bool(recommendation_id.strip())
         and isinstance(target_segment_id, str)
         and bool(target_segment_id.strip())
-        and str(recommendation_type or "").strip() in VALID_STORE_BLOCKING_RECOMMENDATION_TYPES
+        and _canonical_recommendation_type(recommendation_type) in VALID_STORE_BLOCKING_RECOMMENDATION_TYPES
     )
 
 
@@ -1347,7 +1351,7 @@ class LocalProjectStore:
             payload["payload"] = self._json_object(payload.pop("payload_json"))
             payload["provider_trace"] = payload["payload"].get("provider_trace") or build_provider_trace(
                 final_provider="heuristic_fallback"
-                if str(payload["recommendation_type"] or "").strip() == RecommendationType.BROLL.value
+                if _canonical_recommendation_type(payload["recommendation_type"]) == RecommendationType.BROLL.value
                 else "rule_based_fallback"
             )
             items.append(payload)
@@ -1733,7 +1737,8 @@ class LocalProjectStore:
         ) or build_provider_trace(
             final_provider=(
                 "heuristic_fallback"
-                if str(payload.get("recommendation_type") or "").strip() == RecommendationType.BROLL.value
+                if _canonical_recommendation_type(payload.get("recommendation_type"))
+                == RecommendationType.BROLL.value
                 else "rule_based_fallback"
             )
         )

@@ -72,6 +72,10 @@ def _normalize_runtime_boolish(value: object) -> bool:
     return False
 
 
+def _canonical_runtime_recommendation_type(value: object) -> str:
+    return str(value or "").strip().lower()
+
+
 def _normalize_runtime_review_required(value: object) -> bool:
     return _normalize_runtime_boolish(value)
 
@@ -138,7 +142,7 @@ def _is_runtime_blocking_pending_recommendation(item: object) -> bool:
         and bool(recommendation_id.strip())
         and isinstance(target_segment_id, str)
         and bool(target_segment_id.strip())
-        and str(recommendation_type or "").strip() in VALID_RESTORED_RECOMMENDATION_TYPES
+        and _canonical_runtime_recommendation_type(recommendation_type) in VALID_RESTORED_RECOMMENDATION_TYPES
     )
 
 
@@ -919,7 +923,7 @@ class LocalPipelineRunner:
                 item
                 for item in applied_recommendations
                 if isinstance(item, dict)
-                and str(item.get("recommendation_type") or "").strip()
+                and _canonical_runtime_recommendation_type(item.get("recommendation_type"))
                 in VALID_RESTORED_RECOMMENDATION_TYPES
                 and not _is_runtime_blocking_pending_recommendation(item)
             ]

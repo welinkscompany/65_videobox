@@ -456,6 +456,50 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
 - exact failing test 1개로만 다시 시작한다
 
+## 86. 2026-07-04 approve/read path mixed-case broll recommendation type closeout
+
+이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `review/output gating`에 가장 가까운 approve mutation과 downstream read path 사이의 mixed-case recommendation type 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/core-engine/src/videobox_core_engine/review_action_mutations.py`, `packages/core-engine/src/videobox_core_engine/local_pipeline.py`, `packages/storage-abstractions/src/videobox_storage/local_project_store.py`는 mixed-case `recommendation_type`을 raw `strip()` 기준으로만 비교하고 있어, pending `BROLL` approve 뒤 applied recommendation이 review snapshot / refreshed timeline surface에서 빠지거나 fallback `provider_trace`가 `rule_based_fallback`으로 틀어질 수 있었다
+- strict TDD로 `test_review_snapshot_api_approve_broll_uses_mixed_case_recommendation_type_for_provider_trace_fallback` exact regression을 먼저 추가했고, 실제로 approve 응답의 `applied_recommendations`가 비어 있는 RED를 확인했다
+- 원인은 approve mutation의 fallback trace 선택, runtime timeline hydration의 supported-type 판정, store review snapshot/read path의 supported-type 및 fallback trace 판정이 모두 mixed-case canonicalization 없이 따로 비교하던 점이었다
+- 최소 수정으로 세 경로에 recommendation type `strip().lower()` canonicalization helper를 추가해, mixed-case `BROLL`도 approve 이후 canonical B-roll type으로 판정되도록 맞췄다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 approve/read path의 mixed-case recommendation type 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 passed`
+- focused verification
+  - `py -m pytest tests/test_api.py -q -k "test_review_snapshot_api_approve_broll_uses_mixed_case_recommendation_type_for_provider_trace_fallback or test_review_snapshot_api_approve_broll_uses_trimmed_recommendation_type_for_provider_trace_fallback or test_recommendation_response_normalization_canonicalizes_mixed_case_recommendation_type"`
+  - 결과: `3 passed`
+  - `./scripts/dev-fast-path.ps1 -Mode output-gating -BackendPattern "approve_broll_uses_mixed_case_recommendation_type_for_provider_trace_fallback or approve_broll_uses_trimmed_recommendation_type_for_provider_trace_fallback or canonicalizes_mixed_case_recommendation_type"`
+  - 결과: `3 passed`
+  - `./scripts/dev-fast-path.ps1 -Mode current-focused-parallel`
+  - 결과:
+    - backend output-gating `24 passed`
+    - backend preflight `57 passed`
+    - frontend preflight `25 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - approve mutation + runtime hydration + store read path의 mixed-case canonicalization 경계는 exact + output-focused + current-focused-parallel evidence가 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. pending `BROLL` approve도 mixed-case recommendation type shape를 canonical B-roll type으로 판정한다
+2. approve 응답과 refreshed timeline read path가 같은 applied recommendation surface를 유지한다
+3. mixed-case type에서도 fallback provider trace가 B-roll 기준 `heuristic_fallback`으로 일관되게 유지된다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
 ## 38. 2026-07-04 capcut export string false tts review_required closeout
 
 이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, 방금 닫은 CapCut export trimmed type 경계와 같은 출력 family에서 `TTS approval/output`에 바로 닿는 legacy bool-shape 경계 1개를 다시 닫았다.
