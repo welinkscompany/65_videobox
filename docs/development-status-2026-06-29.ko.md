@@ -580,6 +580,36 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 2. CapCut voiceover track source가 mixed-case type에서도 selected narration source를 유지한다
 3. CapCut export TTS read truth가 preview renderer / trimmed type / bool-ish normalization 규칙과 같은 canonical lowercase type 기준을 사용한다
 
+## 89. 2026-07-04 development operating rules promoted to top-level plan closeout
+
+이번 후속 작업에서는 기능 slice를 넓히지 않고, 직전에 fast-path SSOT에 저장한 개발 운영 규정을 실제 프로젝트 개발 최상위 문서에도 연결하는 문서 경계 1개만 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `docs/development-fast-path.ko.md`의 `## 10. 고정 운영 규정`에는 운영 규정이 들어갔지만, 최상위 구현 계획서인 `docs/implementation-plan.ko.md` 상단에는 그 규정이 프로젝트 전역 기본값이라는 연결 고리가 아직 직접 적혀 있지 않았다
+- 이 상태로 두면 다음 turn에 구현 계획서만 먼저 읽는 흐름에서 운영 규정이 최상위 기준으로 보이지 않을 수 있었다
+- 최소 수정으로 `docs/implementation-plan.ko.md` 상단에 `docs/development-fast-path.ko.md ## 10`을 프로젝트 전역 개발 운영 규정으로 적용한다는 문장을 추가해, 계획서 실행 규칙과 운영 규정의 우선순위를 같은 입구에서 바로 확인할 수 있게 맞췄다
+- 이번 수정은 기능 동작, 테스트 경로, SSOT 계약을 건드리지 않고 문서 상위 규칙 연결만 좁게 정리했다
+
+이번 turn의 verification은 아래와 같다.
+
+- `git status --short --branch`
+  - clean branch 확인
+- `git log -5 --oneline`
+  - 직전 운영 규정 반영 커밋 확인
+- SSOT 확인
+  - `docs/implementation-plan.ko.md`
+  - `docs/development-status-2026-06-29.ko.md`
+  - `docs/development-fast-path.ko.md`
+- diff 확인
+  - 구현 계획서 상단 연결과 상태 문서 기록, closeout 문서 외 불필요한 변경이 없는지 확인
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. 개발 운영 규정이 fast-path 문서뿐 아니라 최상위 구현 계획서 입구에서도 바로 보인다
+2. 이후 turn에서 계획서 우선 진입 시에도 운영 규정의 전역 적용 범위를 놓치지 않는다
+3. 기능 slice와 운영 규정 SSOT의 문서 우선순위가 더 분명해졌다
+
 현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
 
 - 장기 우선순위 queue는 유지
