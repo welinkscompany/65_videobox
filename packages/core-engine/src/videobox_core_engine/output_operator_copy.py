@@ -192,6 +192,13 @@ class LocalFirstOutputOperatorCopyBuilder(OutputOperatorCopyBuilder):
                 prompt_row["selected_asset_id"] = str(prompt_row.get("selected_asset_id") or "").strip()
             if "created_at" in prompt_row:
                 prompt_row["created_at"] = str(prompt_row.get("created_at") or "").strip()
+            payload = prompt_row.get("payload")
+            if isinstance(payload, dict) and "selected_asset_uri" in payload:
+                normalized_payload = dict(payload)
+                normalized_payload["selected_asset_uri"] = str(
+                    normalized_payload.get("selected_asset_uri") or ""
+                ).strip()
+                prompt_row["payload"] = normalized_payload
             pending_summary.append(prompt_row)
         return (
             "Write concise operator-facing output guidance for this approved video timeline.\n"
