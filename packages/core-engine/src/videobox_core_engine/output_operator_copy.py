@@ -21,6 +21,10 @@ def _canonical_recommendation_type(value: object) -> str:
     return str(value or "").strip().lower()
 
 
+def _canonical_decision_state(value: object) -> str:
+    return str(value or "").strip().lower()
+
+
 class StructuredOutputCopyRuntime(Protocol):
     def generate_structured(
         self,
@@ -192,6 +196,8 @@ class LocalFirstOutputOperatorCopyBuilder(OutputOperatorCopyBuilder):
                 prompt_row["selected_asset_id"] = str(prompt_row.get("selected_asset_id") or "").strip()
             if "created_at" in prompt_row:
                 prompt_row["created_at"] = str(prompt_row.get("created_at") or "").strip()
+            if "decision_state" in prompt_row:
+                prompt_row["decision_state"] = _canonical_decision_state(prompt_row.get("decision_state"))
             payload = prompt_row.get("payload")
             if isinstance(payload, dict) and "selected_asset_uri" in payload:
                 normalized_payload = dict(payload)
