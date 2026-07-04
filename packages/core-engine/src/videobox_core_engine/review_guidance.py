@@ -205,6 +205,8 @@ class LocalFirstReviewGuidanceBuilder(ReviewGuidanceBuilder):
         for flag in review_flags:
             prompt_row = dict(flag)
             prompt_row["code"] = _canonical_review_flag_code(prompt_row.get("code"))
+            if "segment_id" in prompt_row:
+                prompt_row["segment_id"] = str(prompt_row.get("segment_id") or "").strip()
             prompt_rows.append(prompt_row)
         return prompt_rows
 
