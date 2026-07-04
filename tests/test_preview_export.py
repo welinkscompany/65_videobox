@@ -989,5 +989,5 @@ def test_recommendation_run_accepts_mixed_case_recommendation_type(tmp_path: Pat
         recommendation_type=RecommendationType.BROLL,
     )
 
-    assert loaded_run["recommendation_type"] == " BROLL "
+    assert loaded_run["recommendation_type"] == "broll"
     assert loaded_run["recommendations"][0]["provider_trace"]["final_provider"] == "heuristic_fallback"

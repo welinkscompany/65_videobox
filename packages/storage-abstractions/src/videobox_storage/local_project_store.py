@@ -1416,6 +1416,7 @@ class LocalProjectStore:
         payload = json.loads(file_path.read_text(encoding="utf-8"))
         if _canonical_recommendation_type(payload.get("recommendation_type")) != recommendation_type.value:
             raise KeyError(f"Recommendation run type mismatch: {recommendation_run_id}")
+        payload["recommendation_type"] = _canonical_recommendation_type(payload.get("recommendation_type"))
         fallback_provider = (
             "heuristic_fallback"
             if recommendation_type == RecommendationType.BROLL

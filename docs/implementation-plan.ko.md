@@ -1,7 +1,7 @@
 # VideoBox 실행용 구현 계획서
 
 > 현재 worktree 기준 구현 상태와 next slice 판단은 `## 12. 2026-07-01 현재 구현 체크포인트`와 `## 13. 다음 실제 작업`을 우선 적용한다. 그 외 상위 milestone/범위/순서 섹션은 제품·구현 계획의 기준을 설명하는 문서다.
-> 개발 운영 상위 규칙은 `docs/development-fast-path.ko.md`의 `## 10. 고정 운영 규정`을 프로젝트 전역 기본값으로 적용한다. 즉, 이 계획서를 실행할 때의 작업 우선순위, 선택적 TDD/서브에이전트/리뷰 사용, 표준 검증 경로, hot path 구분, 커밋/푸시, 진행률 보고, turn closeout 형식은 해당 규정을 따른다.
+> 개발 운영 상위 규칙은 저장소 루트 `AGENTS.md`와 `docs/development-fast-path.ko.md`의 `## 10. 고정 운영 규정`을 프로젝트 전역 기본값으로 적용한다. 즉, 이 계획서를 실행할 때의 작업 우선순위, 선택적 TDD/서브에이전트/리뷰 사용, 표준 검증 경로, hot path 구분, 커밋/푸시, 진행률 보고, turn closeout 형식은 해당 규정을 따른다.
 
 ## 1. 목적
 
@@ -470,7 +470,7 @@
 - pending recommendation approve는 persisted recommendation의 `recommendation_type`에 whitespace가 섞이고 `provider_trace`가 비어 있는 stale shape여도 canonical recommendation type 기준으로 fallback provider trace를 채워 approve response와 persisted applied recommendation trace를 일관되게 유지하는 계약
 - review snapshot helper read path도 persisted/applied recommendation의 `recommendation_type`에 whitespace가 섞이고 `provider_trace`가 비어 있는 stale shape여도 canonical recommendation type 기준으로 fallback provider trace를 채워 review snapshot applied recommendation trace를 일관되게 유지하는 계약
 - recommendation row read path도 persisted recommendation row의 `recommendation_type`에 whitespace가 섞이고 `provider_trace`가 비어 있는 stale shape여도 canonical recommendation type 기준으로 fallback provider trace를 채워 downstream review/output read truth를 일관되게 유지하는 계약
-- recommendation run read path도 saved recommendation run JSON의 top-level `recommendation_type`이 legacy/mixed-case stale shape여도 canonical lowercase type 기준으로 artifact read truth를 유지해 recommendation result/output build 경로를 끊지 않는 계약
+- recommendation run read path도 saved recommendation run JSON의 top-level `recommendation_type`이 legacy/mixed-case stale shape여도 canonical lowercase type 기준으로 artifact read truth와 returned response surface를 유지해 recommendation result/output build 경로를 끊지 않는 계약
 - timeline builder도 approved recommendation의 `recommendation_type`에 whitespace가 섞인 stale shape여도 canonical recommendation type 기준으로 narration/B-roll/BGM clip 반영 분기를 유지해 timeline/output truth를 일관되게 유지하는 계약
 - timeline builder도 approved recommendation의 legacy/mixed-case `recommendation_type` shape를 raw casing 그대로 비교하지 않고 canonical lowercase type 기준으로 narration/B-roll/BGM clip 반영 분기를 유지해 timeline/output truth를 일관되게 유지하는 계약
 - preview renderer도 applied recommendation의 `recommendation_type`에 whitespace가 섞인 stale TTS shape여도 canonical recommendation type 기준으로 selected narration source를 유지하는 계약

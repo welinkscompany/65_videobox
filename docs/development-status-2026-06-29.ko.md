@@ -3572,3 +3572,75 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - 장기 우선순위 queue는 유지
 - 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
 - exact failing test 1개로만 다시 시작한다
+
+## 95. 2026-07-04 recommendation run mixed-case type surface closeout
+
+이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, 방금 닫은 recommendation run read-path 경계와 같은 가족 안에서 returned surface canonicalization 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/storage-abstractions/src/videobox_storage/local_project_store.py`의 `get_recommendation_run(...)`는 mixed-case stale top-level `recommendation_type`을 더 이상 read failure로 막지는 않았지만, returned payload에는 `" BROLL "` 같은 raw casing을 그대로 남기고 있었다
+- strict TDD로 `test_recommendation_run_accepts_mixed_case_recommendation_type`의 기대값을 canonical `"broll"` surface로 강화했고, 실제로 `loaded_run["recommendation_type"] == " BROLL "` RED를 확인했다
+- 원인은 loader가 type validation에서는 canonical comparison을 이미 쓰고 있으면서도, 반환 payload에는 canonicalized type을 다시 쓰지 않던 점이었다
+- 최소 수정으로 accepted type을 returned payload에도 `_canonical_recommendation_type(...)` 결과로 다시 넣어, recommendation run read-path의 artifact truth와 surface truth를 같은 lowercase 기준으로 맞췄다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 recommendation run read family의 type surface 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 failed` 확인 후 `1 passed`
+- focused verification
+  - recommendation run read family exact `2 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - loader returned surface canonicalization 한 줄 수정이라 exact + 인접 read-path exact evidence가 가장 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. recommendation run read path가 mixed-case stale top-level `recommendation_type`도 canonical lowercase type 기준으로 읽는다
+2. returned payload surface도 raw casing이 아니라 canonical lowercase type을 유지한다
+3. recommendation run type surface와 provider-trace backfill read-path가 같은 artifact read 경계에서 함께 유지된다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
+## 96. 2026-07-04 top-level AGENTS instruction promotion closeout
+
+이번 후속 작업에서는 이미 문서 SSOT에 저장된 운영 규정을 저장소 최상위에서도 바로 보이게 해야 한다는 요구에 맞춰, 중복 없이 연결되는 top-level instruction 경계만 좁게 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- 현재 브랜치의 개발 운영 규정 본문은 `docs/development-fast-path.ko.md`의 `## 10. 고정 운영 규정`에 있지만, 저장소 루트에는 이를 바로 가리키는 `AGENTS.md`가 없어서 최상위 진입점이 비어 있었다
+- 사용자가 제시한 `AGENTS.md` 원칙은 기존 운영 규정과 충돌하기보다, 정확성 우선, 리스크 공개, 관련 없는 변경 금지, 검증 전 완료 금지 같은 상위 태도를 더 분명하게 만드는 역할에 가깝다
+- 그래서 같은 규정을 여러 문서에 복제하지 않고, 루트 `AGENTS.md`는 최상위 지침 요약과 SSOT 링크 역할만 맡기고 authoritative 운영 본문은 계속 fast-path 문서에 두는 편이 drift를 줄이는 가장 작은 수정이었다
+- 구현 계획서 상단과 fast-path 규정 섹션도 루트 `AGENTS.md`를 함께 참조하도록 좁게 연결해, 다음 turn부터는 계획서만 읽어도 최상위 지침이 빠지지 않게 맞췄다
+
+이번 turn의 verification은 아래와 같다.
+
+- 상태 확인
+  - `git status --short --branch`
+- 최근 closeout 확인
+  - `git log -5 --oneline`
+- SSOT 재확인
+  - `docs/implementation-plan.ko.md`
+  - `docs/development-status-2026-06-29.ko.md`
+  - `docs/development-fast-path.ko.md`
+- diff 확인
+  - 루트 `AGENTS.md` 추가와 상위 SSOT 링크 수정만 들어갔는지 확인
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. 저장소 최상위에서도 개발 운영 지침을 바로 읽을 수 있다
+2. 운영 규정 본문은 fast-path SSOT에 두고, 루트 `AGENTS.md`는 링크형 상위 진입점으로 유지한다
+3. 구현 계획서와 fast-path 문서가 같은 top-level instruction을 함께 참조한다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
