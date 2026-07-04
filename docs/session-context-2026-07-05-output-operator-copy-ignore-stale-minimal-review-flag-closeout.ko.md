@@ -1,0 +1,61 @@
+# VideoBox 세션 컨텍스트
+
+작성일:
+
+- 2026-07-05
+
+주제:
+
+- output operator copy ignore stale minimal review flag closeout
+
+## 1. 이번 turn에서 실제로 끝낸 것
+
+- output operator copy prompt가 stale minimal-dict `review_flags` entry를 valid blocker처럼 안내문에 섞어 넣던 경계 1개를 닫았습니다
+- exact regression 1개로 RED를 먼저 확인한 뒤, supported blocker `code`와 canonical `segment_id`가 모두 있는 entry만 prompt에 남기도록 최소 수정만 넣었습니다
+- focused verification은 `output-gating`까지만 다시 돌려 이번 경계가 review/output gating 기준을 깨지 않는지 확인했습니다
+
+## 2. 이번 turn의 핵심 판단
+
+- 이번 경계는 preview/export용 operator prompt가 실제 blocker truth보다 더 넓은 junk review flag entry를 노출하는 문제라, `review/output gating`에 가장 가까운 작은 남은 경계로 판단했습니다
+- 직전 slice에서 minimal pending recommendation junk를 막았으므로, 이번에는 같은 prompt surface의 minimal review flag junk를 맞춰 주는 편이 가장 자연스러웠습니다
+- 범위를 더 넓혀 review flag payload 전체 규칙을 다시 잡을 수도 있었지만, 이번 turn은 exact RED가 나온 minimal-dict stale entry만 막는 쪽이 더 정확했습니다
+
+## 3. 이번 turn의 변경 범위
+
+- `packages/core-engine/src/videobox_core_engine/output_operator_copy.py`
+  - prompt `review_flags` summary에서 supported blocker `code`와 canonical `segment_id`가 없는 entry를 건너뛰도록 수정
+- `tests/test_api.py`
+  - `test_output_operator_copy_builder_ignores_minimal_dict_review_flags_in_prompt` 추가
+- SSOT 문서 업데이트
+  - `docs/implementation-plan.ko.md`
+  - `docs/development-status-2026-06-29.ko.md`
+
+## 4. 이번 turn의 verification
+
+- exact regression
+  - `py -m pytest tests/test_api.py -q -k "test_output_operator_copy_builder_ignores_minimal_dict_review_flags_in_prompt" -vv`
+  - RED `1 failed` 확인 후 GREEN `1 passed`
+- focused verification
+  - `./scripts/dev-fast-path.ps1 -Mode output-gating`
+    - `24 passed, 321 deselected`
+- broader verification
+  - 실행하지 않음
+
+## 5. 쉽게 말한 현재 개발상황
+
+- 이번에는 output 안내문이 세그먼트 정보도 없는 낡은 blocker 조각까지 진짜 review blocker처럼 보여주던 부분만 작게 막았습니다
+- 이제 진짜 세그먼트와 연결된 blocker만 안내문에 남고, 껍데기만 남은 오래된 flag는 조용히 건너뜁니다
+
+## 6. 다음 세션 첫 시작점
+
+1. 장기 queue는 그대로 유지합니다
+2. 다음 작업은 다시 `docs/implementation-plan.ko.md`의 `## 13. 다음 실제 작업` 기준으로 후보를 2~3개로 좁힙니다
+3. 그중 `review/output gating`, `TTS approval/output`, `preflight contract`에 가장 가까운 exact regression 1개만 골라 RED 1개로 시작합니다
+
+## 7. closeout judgment
+
+- session progress 저장: 완료
+- SSOT 업데이트: 완료
+  - `docs/implementation-plan.ko.md`
+  - `docs/development-status-2026-06-29.ko.md`
+- AK-Wiki promotion judgment: 보류

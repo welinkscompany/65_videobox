@@ -1256,6 +1256,34 @@ def test_output_operator_copy_builder_ignores_non_dict_review_flags_in_prompt() 
     assert "'message': 'Review narration replacement'" in prompt
 
 
+def test_output_operator_copy_builder_ignores_minimal_dict_review_flags_in_prompt() -> None:
+    builder = LocalFirstOutputOperatorCopyBuilder(runtime_service=object())
+
+    prompt = builder._build_prompt(
+        timeline={
+            "timeline_id": "timeline_001",
+            "review_status": "approved",
+            "tracks": [],
+            "review_flags": [
+                {"code": "segment_review_required"},
+                {
+                    "code": "tts_replacement_review_required",
+                    "segment_id": "seg_001",
+                    "message": "Review narration replacement",
+                },
+            ],
+            "pending_recommendations": [],
+        },
+        output_target="preview_render",
+        subtitle_file_uri=None,
+    )
+
+    assert "'code': 'segment_review_required'" not in prompt
+    assert "'code': 'tts_replacement_review_required'" in prompt
+    assert "'segment_id': 'seg_001'" in prompt
+    assert "'message': 'Review narration replacement'" in prompt
+
+
 def test_output_operator_copy_builder_ignores_non_dict_pending_recommendations_in_prompt() -> None:
     builder = LocalFirstOutputOperatorCopyBuilder(runtime_service=object())
 

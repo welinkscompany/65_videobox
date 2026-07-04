@@ -42,6 +42,11 @@ VALID_PROMPT_RECOMMENDATION_TYPES = {
     RecommendationType.OVERLAY.value,
 }
 
+VALID_PROMPT_REVIEW_FLAG_CODES = {
+    "segment_review_required",
+    "tts_replacement_review_required",
+}
+
 
 class StructuredOutputCopyRuntime(Protocol):
     def generate_structured(
@@ -201,11 +206,13 @@ class LocalFirstOutputOperatorCopyBuilder(OutputOperatorCopyBuilder):
         for flag in review_flags:
             if not isinstance(flag, dict):
                 continue
+            code = _canonical_review_flag_code(flag.get("code"))
+            segment_id = str(flag.get("segment_id") or "").strip()
+            if code not in VALID_PROMPT_REVIEW_FLAG_CODES or not segment_id:
+                continue
             prompt_flag = dict(flag)
-            if "code" in prompt_flag:
-                prompt_flag["code"] = _canonical_review_flag_code(prompt_flag.get("code"))
-            if "segment_id" in prompt_flag:
-                prompt_flag["segment_id"] = str(prompt_flag.get("segment_id") or "").strip()
+            prompt_flag["code"] = code
+            prompt_flag["segment_id"] = segment_id
             prompt_flag["message"] = _canonical_review_flag_message(prompt_flag.get("message"))
             prompt_review_flags.append(prompt_flag)
         pending_summary = []
