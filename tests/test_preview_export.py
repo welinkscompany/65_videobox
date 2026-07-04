@@ -319,6 +319,54 @@ def test_capcut_export_adapter_keeps_multiple_broll_clips_when_source_duration_m
     assert broll_segments[1]["planned_end_sec"] == 2.0
 
 
+def test_capcut_export_adapter_groups_trimmed_broll_segment_ids_into_one_window() -> None:
+    adapter = CapCutExportAdapter()
+
+    payload = adapter.build_payload(
+        project_id="project_123",
+        timeline={
+            "timeline_id": "timeline_001",
+            "tracks": [
+                {
+                    "track_id": "broll_overlay",
+                    "track_type": "broll",
+                    "clips": [
+                        {
+                            "clip_id": "clip_broll_001",
+                            "segment_id": " seg_001 ",
+                            "asset_uri": "local://projects/project_123/assets/asset_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "broll",
+                            "recommendation_id": "broll_rec_001",
+                            "source_duration_sec": 0.75,
+                        },
+                        {
+                            "clip_id": "clip_broll_002",
+                            "segment_id": "seg_001",
+                            "asset_uri": "local://projects/project_123/assets/asset_002",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "broll",
+                            "recommendation_id": "broll_rec_002",
+                            "source_duration_sec": 1.5,
+                        },
+                    ],
+                }
+            ],
+            "review_flags": [],
+        },
+    )
+
+    broll_segments = payload["capcut_tracks"][0]["segments"]
+
+    assert [segment["segment_id"] for segment in broll_segments] == ["seg_001", "seg_001"]
+    assert broll_segments[0]["planned_start_sec"] == 0.0
+    assert broll_segments[0]["planned_end_sec"] == 0.75
+    assert broll_segments[1]["planned_start_sec"] == 0.75
+    assert broll_segments[1]["planned_end_sec"] == 2.0
+
+
 def test_capcut_export_adapter_uses_segment_level_narration_sources_for_approved_tts_replacement() -> None:
     adapter = CapCutExportAdapter()
 

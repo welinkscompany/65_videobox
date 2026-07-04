@@ -183,7 +183,7 @@ class CapCutExportAdapter:
         segments = []
         clips_by_segment: dict[str, list[dict[str, Any]]] = {}
         for clip in track.get("clips", []):
-            segment_id = str(clip.get("segment_id") or "")
+            segment_id = str(clip.get("segment_id") or "").strip()
             clips_by_segment.setdefault(segment_id, []).append(clip)
 
         segment_windows = sorted(
