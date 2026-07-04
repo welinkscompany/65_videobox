@@ -2263,7 +2263,7 @@ class LocalPipelineRunner:
             if not (
                 _canonical_runtime_recommendation_type(item.get("recommendation_type"))
                 == RecommendationType.BROLL.value
-                and str(item.get("target_segment_id") or "") in target_segment_ids
+                and str(item.get("target_segment_id") or "").strip() in target_segment_ids
             )
         ]
         manual_segment_ids: set[str] = set()
