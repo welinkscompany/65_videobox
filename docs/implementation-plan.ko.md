@@ -765,6 +765,7 @@
 - review guidance prompt의 `pending_recommendations.selected_asset_id` surface도 whitespace stale asset id를 trim 기준으로 정리해 operator guidance prompt가 API response 쪽 canonical selected asset id 기준과 같은 방향을 유지하게 정리했다
 - review guidance prompt의 `pending_recommendations.recommendation_id` surface도 whitespace stale recommendation id를 trim 기준으로 정리해 operator guidance prompt가 approve/output 쪽 canonical recommendation identity 기준과 같은 방향을 유지하게 정리했다
 - review guidance prompt의 `pending_recommendations.created_at` surface도 whitespace stale created_at 값을 trim 기준으로 정리해 operator guidance prompt가 approve/output 쪽 recommendation metadata truth와 같은 방향을 유지하게 정리했다
+- review guidance prompt의 `pending_recommendations.payload.selected_asset_uri` surface도 whitespace stale asset uri를 trim 기준으로 정리해 operator guidance prompt가 TTS approval/output 쪽 canonical selected asset uri 기준과 같은 방향을 유지하게 정리했다
 
 단, 2026-07-03 기준 `2일 내 1차 데모 완성` 실행 레일은 위 장기 우선순위를 그대로 넓게 다 가져가지 않는다.
 즉시 실행 기준은 `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`를 따른다.

@@ -1172,6 +1172,36 @@ def test_review_guidance_builder_trims_pending_recommendation_created_at_in_prom
     assert "'created_at': ' 2026-07-04T00:00:00+00:00 '" not in prompt
 
 
+def test_review_guidance_builder_trims_pending_recommendation_selected_asset_uri_in_prompt() -> None:
+    builder = LocalFirstReviewGuidanceBuilder(runtime_service=object())
+
+    prompt = builder._build_prompt(
+        review_snapshot={
+            "review_status": "blocked",
+            "review_flags": [],
+            "pending_recommendations": [
+                {
+                    "recommendation_id": "rec_001",
+                    "recommendation_type": "tts_replacement",
+                    "target_segment_id": "seg_001",
+                    "selected_asset_id": "asset_tts_001",
+                    "payload": {
+                        "selected_asset_uri": " local://projects/project_001/assets/generated/asset_tts_001.wav "
+                    },
+                    "reason": "Select narration asset",
+                }
+            ],
+            "segments": [],
+        }
+    )
+
+    assert "'selected_asset_uri': 'local://projects/project_001/assets/generated/asset_tts_001.wav'" in prompt
+    assert (
+        "'selected_asset_uri': ' local://projects/project_001/assets/generated/asset_tts_001.wav '"
+        not in prompt
+    )
+
+
 def test_heuristic_review_guidance_builder_canonicalizes_mixed_case_approved_review_status() -> None:
     builder = HeuristicReviewGuidanceBuilder()
 

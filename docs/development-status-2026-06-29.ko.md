@@ -5306,3 +5306,39 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - 장기 우선순위 queue는 유지
 - 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
 - exact failing test 1개로만 다시 시작한다
+
+## 139. 2026-07-04 review guidance pending selected asset uri prompt closeout
+
+이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `TTS approval/output`과 바로 이어지는 review guidance prompt의 `pending_recommendations.payload.selected_asset_uri` surface 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/core-engine/src/videobox_core_engine/review_guidance.py`의 `_prompt_pending_recommendations(...)`는 top-level `recommendation_type`, `target_segment_id`, `reason`, `decision_state`, `selected_asset_id`, `recommendation_id`, `created_at`는 이미 canonicalize하고 있었지만 nested `payload.selected_asset_uri`는 raw 문자열 그대로 두고 있어, whitespace stale asset uri가 operator guidance prompt에 그대로 노출되고 있었다
+- strict TDD로 `test_review_guidance_builder_trims_pending_recommendation_selected_asset_uri_in_prompt` exact regression을 먼저 추가했고, 실제로 prompt가 raw `'selected_asset_uri': ' local://projects/project_001/assets/generated/asset_tts_001.wav '`를 그대로 포함하는 RED를 확인했다
+- 최소 수정으로 `_prompt_pending_recommendations(...)` 안에서 dict `payload.selected_asset_uri`도 `str(...).strip()` 기준으로 trim하도록 맞춰, review guidance prompt의 selected-asset-uri surface가 TTS approval/output 쪽 canonical selected asset uri 기준과 같은 방향을 유지하게 정리했다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 review guidance prompt의 nested selected-asset-uri surface 한 점만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 failed` 확인 후 `1 passed`
+- focused verification
+  - review guidance prompt 인접 exact
+  - 결과: `13 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - review guidance prompt nested selected-asset-uri trim 한 점 수정이라 exact + focused evidence가 가장 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. review guidance prompt가 whitespace stale `pending_recommendations.payload.selected_asset_uri`도 trimmed asset uri로 surface한다
+2. operator guidance prompt가 raw padded selected asset uri 문자열을 그대로 노출하지 않는다
+3. review guidance prompt의 selected-asset-uri surface가 TTS approval/output 쪽 canonical asset uri 기준과 더 같은 방향을 사용한다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
