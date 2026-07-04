@@ -760,6 +760,7 @@
 - review guidance prompt의 `review_flags.code` surface도 legacy `" TTS_REPLACEMENT_REVIEW_REQUIRED "` 같은 mixed-case stale code를 canonical lowercase code로 정리해 operator guidance prompt가 review/output gating의 canonical review-flag 기준과 같은 방향을 유지하게 정리했다
 - review guidance prompt의 `review_flags.segment_id` surface도 whitespace stale `segment_id`를 trim 기준으로 정리해 operator guidance prompt가 review/output gating과 preflight/runtime 쪽 canonical segment id 기준과 같은 방향을 유지하게 정리했다
 - review guidance prompt의 `review_flags.message` surface도 whitespace stale `message`를 trim 기준으로 정리해 operator guidance prompt가 API response 쪽 canonical blocker message 기준과 같은 방향을 유지하게 정리했다
+- review guidance prompt의 message 없는 `review_flags` surface도 canonical default blocker message를 채워 operator guidance prompt가 review/output gating과 API response 쪽 default message 기준을 유지하게 정리했다
 - review guidance prompt의 `pending_recommendations.reason` surface도 whitespace stale `reason`을 trim 기준으로 정리해 operator guidance prompt가 API response 쪽 canonical recommendation reason 기준과 같은 방향을 유지하게 정리했다
 - review guidance prompt의 `pending_recommendations.decision_state` surface도 legacy `" Approved "` 같은 mixed-case stale decision state를 canonical lowercase로 정리해 operator guidance prompt가 API response 쪽 canonical decision-state 기준과 같은 방향을 유지하게 정리했다
 - review guidance prompt의 `pending_recommendations.selected_asset_id` surface도 whitespace stale asset id를 trim 기준으로 정리해 operator guidance prompt가 API response 쪽 canonical selected asset id 기준과 같은 방향을 유지하게 정리했다

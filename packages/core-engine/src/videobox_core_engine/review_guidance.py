@@ -29,6 +29,11 @@ def _canonical_review_flag_code(value: object) -> str:
     return str(value or "").strip().lower()
 
 
+def _canonical_review_flag_message(value: object) -> str:
+    message = str(value or "").strip()
+    return message or "Operator review required before approval or output."
+
+
 class StructuredReviewGuidanceRuntime(Protocol):
     def generate_structured(
         self,
@@ -207,8 +212,7 @@ class LocalFirstReviewGuidanceBuilder(ReviewGuidanceBuilder):
             prompt_row["code"] = _canonical_review_flag_code(prompt_row.get("code"))
             if "segment_id" in prompt_row:
                 prompt_row["segment_id"] = str(prompt_row.get("segment_id") or "").strip()
-            if "message" in prompt_row:
-                prompt_row["message"] = str(prompt_row.get("message") or "").strip()
+            prompt_row["message"] = _canonical_review_flag_message(prompt_row.get("message"))
             prompt_rows.append(prompt_row)
         return prompt_rows
 
