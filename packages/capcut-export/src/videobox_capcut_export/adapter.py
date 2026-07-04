@@ -3,6 +3,14 @@ from __future__ import annotations
 from typing import Any
 
 
+def _normalize_boolish(value: object) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() not in {"", "0", "false", "no", "off"}
+    if isinstance(value, bool):
+        return value
+    return False
+
+
 class CapCutExportAdapter:
     def build_payload(
         self,
@@ -30,8 +38,8 @@ class CapCutExportAdapter:
                     for item in timeline.get("applied_recommendations", [])
                     if isinstance(item, dict)
                     and str(item.get("recommendation_type") or "").strip() == "tts_replacement"
-                    and bool(item.get("auto_apply_allowed"))
-                    and not bool(item.get("review_required"))
+                    and _normalize_boolish(item.get("auto_apply_allowed"))
+                    and not _normalize_boolish(item.get("review_required"))
                 },
             ),
             "notes": [

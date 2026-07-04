@@ -849,7 +849,6 @@ def test_store_build_review_snapshot_filters_unknown_applied_recommendation_from
 
     assert snapshot["applied_recommendations"] == []
 
-
 def test_store_save_timeline_run_marks_misbucketed_applied_pending_like_recommendation_as_blocked(
     tmp_path: Path,
 ) -> None:
