@@ -777,6 +777,7 @@
 - output operator copy prompt의 `review_flags.code` surface도 legacy `" TTS_REPLACEMENT_REVIEW_REQUIRED "` 같은 mixed-case stale code를 canonical lowercase로 정리해 preview/export guidance prompt가 review/output gating의 canonical review-flag 기준과 같은 방향을 유지하게 정리했다
 - output operator copy prompt의 `review_flags.segment_id` surface도 whitespace stale `segment_id`를 trim 기준으로 정리해 preview/export guidance prompt가 review/output gating과 preflight/runtime 쪽 canonical segment id 기준과 같은 방향을 유지하게 정리했다
 - output operator copy prompt의 `review_flags.message` surface도 whitespace stale `message`를 trim 기준으로 정리해 preview/export guidance prompt가 review/output gating과 API response 쪽 canonical blocker message 기준과 같은 방향을 유지하게 정리했다
+- output operator copy prompt의 message 없는 `review_flags` surface도 canonical default blocker message를 채워 preview/export guidance prompt가 review/output gating과 API response 쪽 default message 기준을 유지하게 정리했다
 
 단, 2026-07-03 기준 `2일 내 1차 데모 완성` 실행 레일은 위 장기 우선순위를 그대로 넓게 다 가져가지 않는다.
 즉시 실행 기준은 `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`를 따른다.

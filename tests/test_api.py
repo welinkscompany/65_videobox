@@ -1205,6 +1205,29 @@ def test_output_operator_copy_builder_trims_review_flag_message_in_prompt() -> N
     assert "'message': ' Review narration replacement '" not in prompt
 
 
+def test_output_operator_copy_builder_defaults_review_flag_message_in_prompt() -> None:
+    builder = LocalFirstOutputOperatorCopyBuilder(runtime_service=object())
+
+    prompt = builder._build_prompt(
+        timeline={
+            "timeline_id": "timeline_001",
+            "review_status": "approved",
+            "tracks": [],
+            "review_flags": [
+                {
+                    "code": "tts_replacement_review_required",
+                    "segment_id": "seg_001",
+                }
+            ],
+            "pending_recommendations": [],
+        },
+        output_target="preview_render",
+        subtitle_file_uri=None,
+    )
+
+    assert "'message': 'Operator review required before approval or output.'" in prompt
+
+
 def test_review_guidance_builder_ignores_string_false_segment_review_required() -> None:
     builder = LocalFirstReviewGuidanceBuilder(runtime_service=object())
 
