@@ -3536,3 +3536,39 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - 장기 우선순위 queue는 유지
 - 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
 - exact failing test 1개로만 다시 시작한다
+
+## 94. 2026-07-04 recommendation run mixed-case type read closeout
+
+이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `review/output gating`에 가장 가까운 recommendation artifact read-path 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/storage-abstractions/src/videobox_storage/local_project_store.py`의 `get_recommendation_run(...)`는 saved recommendation run JSON의 top-level `recommendation_type`을 raw 문자열로 비교하고 있어, `" BROLL "` 같은 stale mixed-case shape가 들어오면 artifact read가 바로 `Recommendation run type mismatch`로 실패하고 있었다
+- strict TDD로 `test_recommendation_run_accepts_mixed_case_recommendation_type` exact regression을 먼저 추가했고, 실제로 `store.get_recommendation_run(...)`가 `KeyError`를 던지는 RED를 확인했다
+- 원인은 recommendation run loader가 row/review snapshot/timeline 쪽에서 이미 맞춘 canonical recommendation type 비교를 file-level recommendation run read path에는 재사용하지 않던 점이었다
+- 최소 수정으로 loader의 type 검증도 `_canonical_recommendation_type(...)`를 재사용하게 맞춰, mixed-case stale recommendation run artifact도 canonical lowercase type 기준으로 계속 읽히게 했다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 recommendation run read-path의 mixed-case type 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 failed` 확인 후 `1 passed`
+- focused verification
+  - recommendation run read family exact `2 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - recommendation run loader의 file-level type 비교 한 줄 수정이라 exact + 인접 read-path exact evidence가 가장 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. recommendation run read path가 mixed-case stale top-level `recommendation_type`도 canonical lowercase type 기준으로 허용한다
+2. recommendation result/output build 경로가 stale artifact type casing 때문에 바로 끊기지 않는다
+3. recommendation run type 허용과 provider-trace backfill read-path가 같은 artifact read 경계에서 함께 유지된다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다

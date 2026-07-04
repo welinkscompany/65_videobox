@@ -950,3 +950,44 @@ def test_recommendation_run_provider_trace_backfill_tolerates_non_object_payload
     )
 
     assert loaded_run["recommendations"][0]["provider_trace"]["final_provider"] == "heuristic_fallback"
+
+
+def test_recommendation_run_accepts_mixed_case_recommendation_type(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Recommendation Mixed Case Type Project")
+    run = store.save_recommendation_run(
+        project_id=project.project_id,
+        recommendation_type=RecommendationType.BROLL,
+        source_job_id="segment_analysis_job_001",
+        recommendations=[
+            {
+                "target_segment_id": "seg_001",
+                "selected_asset_id": "asset_001",
+                "score": 0.8,
+                "reason": "Matched keywords: office",
+                "auto_apply_allowed": True,
+                "review_required": False,
+                "payload": {"matched_tags": ["office"]},
+            }
+        ],
+    )
+    run_path = (
+        tmp_path
+        / "projects"
+        / project.project_id
+        / "analysis"
+        / "recommendations"
+        / f"{run['recommendation_run_id']}.json"
+    )
+    payload = json.loads(run_path.read_text(encoding="utf-8"))
+    payload["recommendation_type"] = " BROLL "
+    run_path.write_text(json.dumps(payload, indent=2, ensure_ascii=True), encoding="utf-8")
+
+    loaded_run = store.get_recommendation_run(
+        project_id=project.project_id,
+        recommendation_run_id=run["recommendation_run_id"],
+        recommendation_type=RecommendationType.BROLL,
+    )
+
+    assert loaded_run["recommendation_type"] == " BROLL "
+    assert loaded_run["recommendations"][0]["provider_trace"]["final_provider"] == "heuristic_fallback"

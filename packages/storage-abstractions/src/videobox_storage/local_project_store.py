@@ -1414,7 +1414,7 @@ class LocalProjectStore:
         if not file_path.exists():
             raise KeyError(f"Recommendation run not found: {recommendation_run_id}")
         payload = json.loads(file_path.read_text(encoding="utf-8"))
-        if payload["recommendation_type"] != recommendation_type.value:
+        if _canonical_recommendation_type(payload.get("recommendation_type")) != recommendation_type.value:
             raise KeyError(f"Recommendation run type mismatch: {recommendation_run_id}")
         fallback_provider = (
             "heuristic_fallback"
