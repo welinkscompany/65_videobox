@@ -226,5 +226,7 @@ class LocalFirstReviewGuidanceBuilder(ReviewGuidanceBuilder):
                 prompt_row["target_segment_id"] = str(prompt_row.get("target_segment_id") or "").strip()
             if "reason" in prompt_row:
                 prompt_row["reason"] = str(prompt_row.get("reason") or "").strip()
+            if "decision_state" in prompt_row:
+                prompt_row["decision_state"] = str(prompt_row.get("decision_state") or "").strip().lower()
             prompt_rows.append(prompt_row)
         return prompt_rows
