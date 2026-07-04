@@ -6029,6 +6029,71 @@ def test_approved_review_state_still_blocks_outputs_when_only_review_flags_remai
     assert not list((project_root / "subtitles").glob("subtitle_*.srt"))
 
 
+def test_output_gating_blocks_mixed_case_review_flag_code_on_approved_timeline(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Approved State Mixed Case Review Flag Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 1.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [
+                {
+                    "code": " TTS_REPLACEMENT_REVIEW_REQUIRED ",
+                    "segment_id": "seg_001",
+                    "message": "Approved TTS replacement is still required before output.",
+                }
+            ],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+        },
+    )
+    store.save_review_state(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        status="approved",
+    )
+    timeline_job = store.create_job(
+        project_id=project.project_id,
+        job_type=JobType.TIMELINE_BUILD,
+        input_ref="segment_analysis_job_001",
+        status=JobStatus.SUCCEEDED,
+    )
+    store.update_job(
+        project_id=project.project_id,
+        job_id=timeline_job["job_id"],
+        status=JobStatus.SUCCEEDED,
+        output_ref=timeline["timeline_id"],
+    )
+
+    client = TestClient(create_app(projects_root=tmp_path))
+    preview_response = client.post(
+        f"/api/projects/{project.project_id}/jobs/preview-render",
+        json={"timeline_job_id": timeline_job["job_id"]},
+    )
+
+    assert preview_response.status_code == 400
+    assert "tts_replacement_review_required@seg_001" in preview_response.json()["detail"]
+
+
 def test_output_jobs_ignore_unknown_dict_shaped_review_flag_on_approved_timeline(tmp_path: Path) -> None:
     store = LocalProjectStore(tmp_path)
     project = store.bootstrap_project(name="Approved State Unknown Review Flag Project")

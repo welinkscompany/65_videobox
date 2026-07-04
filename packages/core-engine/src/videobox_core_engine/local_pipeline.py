@@ -80,6 +80,10 @@ def _normalize_runtime_review_required(value: object) -> bool:
     return _normalize_runtime_boolish(value)
 
 
+def _canonical_runtime_review_flag_code(value: object) -> str:
+    return str(value or "").strip().lower()
+
+
 def _normalize_runtime_cut_action(value: object) -> str:
     cut_action = str(value or "keep")
     if cut_action not in {"keep", "remove", "trim"}:
@@ -1743,7 +1747,7 @@ class LocalPipelineRunner:
         review_flags = [
             flag
             for flag in self._normalized_timeline_review_flags(timeline)
-            if str(flag.get("code") or "").strip() in VALID_RUNTIME_BLOCKING_REVIEW_FLAG_CODES
+            if _canonical_runtime_review_flag_code(flag.get("code")) in VALID_RUNTIME_BLOCKING_REVIEW_FLAG_CODES
         ]
         recommendation_blocker_sources: list[Any] = []
         pending_recommendations = timeline.get("pending_recommendations", [])
@@ -1768,13 +1772,19 @@ class LocalPipelineRunner:
             for flag in review_flags:
                 if not _is_runtime_blocking_review_flag(flag):
                     continue
-                code = str(flag.get("code") or "").strip()
+                code = _canonical_runtime_review_flag_code(flag.get("code"))
                 segment_id = str(flag.get("segment_id") or "").strip()
                 review_flag_key = (code, segment_id)
                 if review_flag_key in existing_review_flag_keys:
                     continue
                 existing_review_flag_keys.add(review_flag_key)
-                normalized_review_flags.append(flag)
+                normalized_review_flags.append(
+                    {
+                        **flag,
+                        "code": code,
+                        "segment_id": segment_id,
+                    }
+                )
 
         for segment in timeline.get("segments", []):
             if not isinstance(segment, dict):
