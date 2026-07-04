@@ -461,6 +461,7 @@
 - pending `tts_replacement` approve는 `payload.selected_asset_uri`가 비어 있는 stale recommendation shape를 승인 상태로 통과시키지 않고 즉시 거부하는 계약
 - pending `tts_replacement` approve는 `target_segment_id`에 대응하는 narration clip이 없는 stale timeline shape도 승인 상태로 통과시키지 않고 즉시 거부하는 계약
 - pending `tts_replacement` approve는 persisted narration clip의 `segment_id`에 whitespace가 섞인 stale timeline shape여도 trimmed target segment 기준으로 같은 clip을 매칭해 승인된 `selected_asset_uri`를 반영하는 계약
+- pending `tts_replacement` approve는 persisted recommendation의 `recommendation_type`에 whitespace가 섞인 stale shape여도 canonical TTS type 기준으로 narration clip 반영을 계속 수행하는 계약
 - pending recommendation approve/reject는 persisted recommendation review flag의 `segment_id`에 whitespace가 섞인 stale timeline shape여도 trimmed target segment 기준으로 같은 flag를 정리해 stale blocker를 남기지 않는 계약
 - pending recommendation approve/reject는 persisted recommendation review flag의 `code`에 whitespace가 섞인 stale timeline shape여도 canonical review flag code 기준으로 같은 flag를 정리해 stale blocker를 남기지 않는 계약
 - pending recommendation approve/reject는 persisted pending recommendation의 `recommendation_id`에 whitespace가 섞인 stale timeline shape여도 route의 canonical recommendation id 기준으로 같은 recommendation을 선택해 decision mutation을 적용하는 계약
@@ -644,6 +645,8 @@
 - review snapshot split without inline recommendation type regression
   - `1 passed`
 - review timeline import-cycle collection regression
+  - `1 passed`
+- review snapshot approve trimmed recommendation type regression
   - `1 passed`
 - review snapshot helper persisted-approved pending-override status regression
   - `1 passed`

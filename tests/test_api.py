@@ -9650,6 +9650,106 @@ def test_review_snapshot_api_approve_tts_replacement_matches_trimmed_target_narr
     assert seg_002_clip["asset_uri"] == target_candidate["payload"]["selected_asset_uri"]
 
 
+def test_review_snapshot_api_approve_tts_replacement_matches_trimmed_recommendation_type(
+    tmp_path: Path,
+) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    timeline_result = client.get(f"/api/projects/{project_id}/timelines/{timeline_job_id}")
+    timeline_payload = timeline_result.json()["timeline"]
+    timeline_path = (
+        tmp_path
+        / "projects"
+        / project_id
+        / "timelines"
+        / f'{timeline_payload["timeline_id"]}.json'
+    )
+    target_candidate = {
+        "recommendation_id": "rec_tts_review_trimmed_type",
+        "target_segment_id": "seg_002",
+        "recommendation_type": " tts_replacement ",
+        "selected_asset_id": "asset_tts_review_trimmed_type",
+        "score": 0.94,
+        "reason": "Operator approved the regenerated narration take.",
+        "auto_apply_allowed": False,
+        "review_required": True,
+        "payload": {
+            "selected_asset_uri": (
+                f"local://projects/{project_id}/assets/generated/asset_tts_review_trimmed_type.wav"
+            )
+        },
+        "created_at": "2026-07-04T00:00:00+00:00",
+        "provider_trace": build_provider_trace(final_provider="rule_based_fallback"),
+    }
+    persisted_timeline = json.loads(timeline_path.read_text(encoding="utf-8"))
+    persisted_timeline["applied_recommendations"] = []
+    persisted_timeline["pending_recommendations"] = [target_candidate]
+    persisted_timeline["review_flags"] = [
+        {
+            "code": "tts_replacement_review_required",
+            "segment_id": "seg_002",
+            "message": "Operator must confirm the TTS replacement before approval.",
+        }
+    ]
+    timeline_path.write_text(json.dumps(persisted_timeline, indent=2), encoding="utf-8")
+
+    database_path = tmp_path / "projects" / project_id / "db" / "project.sqlite"
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute("DELETE FROM recommendations")
+        connection.execute(
+            """
+            INSERT INTO recommendations (
+                recommendation_id,
+                project_id,
+                target_segment_id,
+                recommendation_type,
+                selected_asset_id,
+                score,
+                reason,
+                auto_apply_allowed,
+                review_required,
+                payload_json,
+                created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                target_candidate["recommendation_id"],
+                project_id,
+                target_candidate["target_segment_id"],
+                target_candidate["recommendation_type"],
+                target_candidate["selected_asset_id"],
+                target_candidate["score"],
+                target_candidate["reason"],
+                0,
+                1,
+                json.dumps(target_candidate["payload"], ensure_ascii=True),
+                target_candidate["created_at"],
+            ),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    approve_response = client.post(
+        f"/api/projects/{project_id}/review-snapshots/{timeline_job_id}/recommendations/"
+        "rec_tts_review_trimmed_type/approve"
+    )
+
+    assert approve_response.status_code == 200
+    refreshed_timeline = client.get(f"/api/projects/{project_id}/timelines/{timeline_job_id}")
+    assert refreshed_timeline.status_code == 200
+    refreshed_narration_track = next(
+        track for track in refreshed_timeline.json()["timeline"]["tracks"] if track["track_type"] == "narration"
+    )
+    seg_002_clip = next(
+        clip for clip in refreshed_narration_track["clips"] if clip["segment_id"] == "seg_002"
+    )
+    assert seg_002_clip["asset_uri"] == target_candidate["payload"]["selected_asset_uri"]
+
+
 def test_review_snapshot_api_rejects_tts_approval_without_matching_target_narration_clip(
     tmp_path: Path,
 ) -> None:

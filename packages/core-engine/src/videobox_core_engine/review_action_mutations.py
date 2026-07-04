@@ -111,7 +111,7 @@ def apply_approved_recommendation_to_timeline(
     timeline: dict[str, Any],
     decided_recommendation: dict[str, Any],
 ) -> None:
-    if str(decided_recommendation.get("recommendation_type") or "") != "tts_replacement":
+    if str(decided_recommendation.get("recommendation_type") or "").strip() != "tts_replacement":
         return
     payload = decided_recommendation.get("payload")
     if not isinstance(payload, dict):
