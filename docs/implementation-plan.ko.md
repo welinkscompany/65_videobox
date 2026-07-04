@@ -471,6 +471,7 @@
 - review snapshot helper read path도 persisted/applied recommendation의 `recommendation_type`에 whitespace가 섞이고 `provider_trace`가 비어 있는 stale shape여도 canonical recommendation type 기준으로 fallback provider trace를 채워 review snapshot applied recommendation trace를 일관되게 유지하는 계약
 - recommendation row read path도 persisted recommendation row의 `recommendation_type`에 whitespace가 섞이고 `provider_trace`가 비어 있는 stale shape여도 canonical recommendation type 기준으로 fallback provider trace를 채워 downstream review/output read truth를 일관되게 유지하는 계약
 - timeline builder도 approved recommendation의 `recommendation_type`에 whitespace가 섞인 stale shape여도 canonical recommendation type 기준으로 narration/B-roll/BGM clip 반영 분기를 유지해 timeline/output truth를 일관되게 유지하는 계약
+- timeline builder도 approved recommendation의 legacy/mixed-case `recommendation_type` shape를 raw casing 그대로 비교하지 않고 canonical lowercase type 기준으로 narration/B-roll/BGM clip 반영 분기를 유지해 timeline/output truth를 일관되게 유지하는 계약
 - preview renderer도 applied recommendation의 `recommendation_type`에 whitespace가 섞인 stale TTS shape여도 canonical recommendation type 기준으로 selected narration source를 유지하는 계약
 - preview renderer도 applied recommendation의 legacy/mixed-case `recommendation_type` TTS shape를 raw casing 그대로 비교하지 않고 canonical lowercase type 기준으로 selected narration source를 유지하는 계약
 - CapCut export adapter도 applied recommendation의 `recommendation_type`에 whitespace가 섞인 stale TTS shape여도 canonical recommendation type 기준으로 segment-level narration source override를 유지하는 계약

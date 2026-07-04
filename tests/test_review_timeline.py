@@ -189,3 +189,42 @@ def test_timeline_builder_applies_trimmed_tts_replacement_type_to_narration_clip
     assert narration_track.clips[0].asset_uri == (
         "local://projects/project_001/assets/generated/asset_tts_001.wav"
     )
+
+
+def test_timeline_builder_applies_mixed_case_tts_replacement_type_to_narration_clip() -> None:
+    timeline = TimelineBuilder().build(
+        project_id="project_001",
+        narration_source_uri="local://projects/project_001/inputs/narration/source.wav",
+        segments=[
+            {
+                "segment_id": "seg_001",
+                "text": "Narration segment",
+                "start_sec": 0.0,
+                "end_sec": 1.0,
+                "confidence": 1.0,
+                "review_required": False,
+                "cleanup_decision": "keep",
+            }
+        ],
+        recommendations=[
+            {
+                "recommendation_id": "rec_mixed_case_tts_type",
+                "target_segment_id": "seg_001",
+                "recommendation_type": " TTS_REPLACEMENT ",
+                "selected_asset_id": "asset_tts_001",
+                "score": 1.0,
+                "reason": "Approved mixed-case TTS replacement.",
+                "auto_apply_allowed": True,
+                "review_required": False,
+                "payload": {
+                    "selected_asset_uri": "local://projects/project_001/assets/generated/asset_tts_001.wav"
+                },
+                "created_at": "2026-07-04T00:00:00+00:00",
+            }
+        ],
+    )
+
+    narration_track = next(track for track in timeline.tracks if track.track_type == "narration")
+    assert narration_track.clips[0].asset_uri == (
+        "local://projects/project_001/assets/generated/asset_tts_001.wav"
+    )

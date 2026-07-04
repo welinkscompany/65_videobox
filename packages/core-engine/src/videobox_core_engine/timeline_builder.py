@@ -19,6 +19,10 @@ def _normalize_boolish(value: object) -> bool:
     return bool(value)
 
 
+def _canonical_recommendation_type(value: object) -> str:
+    return str(value or "").strip().lower()
+
+
 SUPPORTED_TIMELINE_RECOMMENDATION_TYPES = {
     RecommendationType.TTS_REPLACEMENT.value,
     RecommendationType.BROLL.value,
@@ -45,7 +49,7 @@ class TimelineBuilder:
         normalized_recommendations = [
             recommendation
             for recommendation in normalized_recommendations
-            if str(recommendation.get("recommendation_type") or "").strip()
+            if _canonical_recommendation_type(recommendation.get("recommendation_type"))
             in SUPPORTED_TIMELINE_RECOMMENDATION_TYPES
         ]
         applied_recommendations: list[dict[str, object]] = []
@@ -76,7 +80,7 @@ class TimelineBuilder:
             segment_id = str(segment["segment_id"])
             narration_asset_uri = f"local://projects/{project_id}/segments/{segment_id}"
             for recommendation in by_segment.get(segment_id, []):
-                rec_type = str(recommendation.get("recommendation_type") or "").strip()
+                rec_type = _canonical_recommendation_type(recommendation.get("recommendation_type"))
                 if (
                     rec_type == "tts_replacement"
                     and bool(recommendation.get("auto_apply_allowed"))
@@ -110,7 +114,7 @@ class TimelineBuilder:
             for recommendation in by_segment.get(segment_id, []):
                 if bool(recommendation.get("auto_apply_allowed")) and not bool(recommendation.get("review_required")):
                     applied_recommendations.append(recommendation)
-                    rec_type = str(recommendation.get("recommendation_type") or "").strip()
+                    rec_type = _canonical_recommendation_type(recommendation.get("recommendation_type"))
                     if rec_type == "broll" and recommendation.get("selected_asset_id"):
                         broll_clips.append(
                             TimelineClip(
@@ -208,7 +212,7 @@ class TimelineBuilder:
         normalized_recommendations = [
             recommendation
             for recommendation in normalized_recommendations
-            if str(recommendation.get("recommendation_type") or "").strip()
+            if _canonical_recommendation_type(recommendation.get("recommendation_type"))
             in SUPPORTED_TIMELINE_RECOMMENDATION_TYPES
         ]
         applied_recommendations = [

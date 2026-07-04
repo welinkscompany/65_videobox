@@ -610,6 +610,57 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 2. 이후 turn에서 계획서 우선 진입 시에도 운영 규정의 전역 적용 범위를 놓치지 않는다
 3. 기능 slice와 운영 규정 SSOT의 문서 우선순위가 더 분명해졌다
 
+## 90. 2026-07-04 timeline builder mixed-case tts recommendation type closeout
+
+이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `TTS approval/output`에 가장 가까운 `timeline_builder`의 mixed-case recommendation type 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/core-engine/src/videobox_core_engine/timeline_builder.py`는 recommendation type을 raw `strip()` 기준으로만 비교하고 있어, mixed-case `TTS_REPLACEMENT` shape를 supported recommendation으로 유지하면서도 narration clip 반영 분기에서는 승인된 TTS override로 인식하지 못하고 있었다
+- strict TDD로 `test_timeline_builder_applies_mixed_case_tts_replacement_type_to_narration_clip` exact regression을 먼저 추가했고, 실제로 narration clip `asset_uri`가 generated TTS asset이 아니라 original segment URI로 남는 RED를 확인했다
+- 원인은 supported-type 필터와 narration/B-roll/BGM clip 반영 분기가 whitespace trim까지만 하고 recommendation type casing canonicalization은 하지 않던 점이었다
+- 최소 수정으로 `timeline_builder`에 recommendation type `strip().lower()` helper를 추가하고 supported-type 판정과 narration/B-roll/BGM clip 반영 분기에 재사용해, mixed-case `TTS_REPLACEMENT`도 canonical TTS override로 인식하게 맞췄다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 timeline builder TTS read truth 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 passed`
+- focused verification
+  - `py -m pytest tests/test_review_timeline.py -q -k "test_timeline_builder_applies_mixed_case_tts_replacement_type_to_narration_clip or test_timeline_builder_applies_trimmed_tts_replacement_type_to_narration_clip or test_review_snapshot_uses_trimmed_broll_type_for_default_provider_trace"`
+  - 결과: `3 passed`
+- helper override note
+  - `./scripts/dev-fast-path.ps1 -Mode output-gating -BackendPattern "timeline_builder_applies_mixed_case_tts_replacement_type_to_narration_clip or timeline_builder_applies_trimmed_tts_replacement_type_to_narration_clip or review_snapshot_uses_trimmed_broll_type_for_default_provider_trace"`
+  - 결과: `279 deselected`
+  - 판단:
+    - 이번 exact 이름들은 helper backend lane 기본 수집 범위와 맞지 않아 direct focused pytest가 더 직접적인 evidence였다
+- broader fast-path verification
+  - `./scripts/dev-fast-path.ps1 -Mode current-focused-parallel`
+  - 첫 실행:
+    - backend output-gating `1 failed`
+    - backend preflight `1 failed`
+    - 같은 `_create_timeline_review_project()` setup에서 `broll-recommendation` 응답이 `job_id`를 주지 못하는 비결정성 실패
+  - 단일 exact 재검증:
+    - `py -m pytest tests/test_api.py -q -k "test_approving_one_of_multiple_pending_recommendations_keeps_output_blocked_by_remaining_detail" -vv`
+    - 결과: `1 passed`
+  - 두 번째 `current-focused-parallel` 재실행:
+    - backend output-gating `24 passed`
+    - backend preflight `57 passed`
+    - frontend preflight `25 passed`
+  - 판단:
+    - 첫 실패는 이번 수정의 직접 회귀라기보다 병렬 helper 실행의 일시적 비결정성으로 봤고, exact 재검증과 helper 재실행으로 현재 slice 기준 green을 다시 확인했다
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - timeline builder mixed-case type canonicalization 한 점 수정이라 exact + 인접 focused + current-focused-parallel evidence가 직접적이다
+    - latest full broader baseline은 기존 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. timeline builder가 mixed-case `TTS_REPLACEMENT` shape도 canonical TTS override로 인식한다
+2. narration clip `asset_uri`가 mixed-case type에서도 selected TTS source를 유지한다
+3. timeline builder의 recommendation type 판정이 preview renderer / CapCut export / trimmed type canonicalization 규칙과 같은 canonical lowercase type 기준을 사용한다
+
 현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
 
 - 장기 우선순위 queue는 유지
