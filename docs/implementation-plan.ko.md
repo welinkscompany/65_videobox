@@ -464,6 +464,7 @@
 - pending `tts_replacement` approve는 persisted recommendation의 `recommendation_type`에 whitespace가 섞인 stale shape여도 canonical TTS type 기준으로 narration clip 반영을 계속 수행하는 계약
 - pending recommendation approve는 persisted recommendation의 `recommendation_type`에 whitespace가 섞이고 `provider_trace`가 비어 있는 stale shape여도 canonical recommendation type 기준으로 fallback provider trace를 채워 approve response와 persisted applied recommendation trace를 일관되게 유지하는 계약
 - review snapshot helper read path도 persisted/applied recommendation의 `recommendation_type`에 whitespace가 섞이고 `provider_trace`가 비어 있는 stale shape여도 canonical recommendation type 기준으로 fallback provider trace를 채워 review snapshot applied recommendation trace를 일관되게 유지하는 계약
+- timeline builder도 approved recommendation의 `recommendation_type`에 whitespace가 섞인 stale shape여도 canonical recommendation type 기준으로 narration/B-roll/BGM clip 반영 분기를 유지해 timeline/output truth를 일관되게 유지하는 계약
 - pending recommendation approve/reject는 persisted recommendation review flag의 `segment_id`에 whitespace가 섞인 stale timeline shape여도 trimmed target segment 기준으로 같은 flag를 정리해 stale blocker를 남기지 않는 계약
 - pending recommendation approve/reject는 persisted recommendation review flag의 `code`에 whitespace가 섞인 stale timeline shape여도 canonical review flag code 기준으로 같은 flag를 정리해 stale blocker를 남기지 않는 계약
 - pending recommendation approve/reject는 persisted pending recommendation의 `recommendation_id`에 whitespace가 섞인 stale timeline shape여도 route의 canonical recommendation id 기준으로 같은 recommendation을 선택해 decision mutation을 적용하는 계약

@@ -496,6 +496,27 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
 - exact failing test 1개로만 다시 시작한다
 
+## 79. 2026-07-04 timeline builder trimmed approved recommendation type closeout
+
+이번 후속 작업에서는 방금 닫은 review snapshot helper trim family를 timeline builder 본체까지 이어, approved recommendation clip 반영 분기에 남아 있던 whitespace recommendation type 경계 1개만 다시 닫았다.
+
+- `packages/core-engine/src/videobox_core_engine/timeline_builder.py`는 recommendation type 지원 여부 필터에서는 이미 `strip()`을 쓰고 있었지만, 실제 narration/B-roll/BGM clip 반영 분기에서는 raw `recommendation_type` 비교를 써 `" tts_replacement "` stale shape를 approved recommendation으로 유지하면서도 narration clip 반영은 놓치고 있었다
+- strict TDD로 `test_timeline_builder_applies_trimmed_tts_replacement_type_to_narration_clip` exact regression을 먼저 추가했고, 실제로 narration clip `asset_uri`가 source segment URI로 남는 RED를 확인했다
+- 최소 수정으로 timeline builder 내부의 approved recommendation type 분기도 canonical trimmed type 기준으로 비교하게 맞춰, whitespace가 섞인 approved recommendation도 narration/B-roll/BGM clip 반영 truth를 유지하게 했다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 timeline builder approved recommendation type 분기 경계만 좁게 수정했다
+
+검증:
+
+- exact regression
+  - `pytest tests/test_review_timeline.py -k "timeline_builder_applies_trimmed_tts_replacement_type_to_narration_clip"` -> `1 passed`
+- output-gating focused slice
+  - `./scripts/dev-fast-path.ps1 -Mode output-gating -BackendPattern "timeline_builder_applies_trimmed_tts_replacement_type_to_narration_clip or trimmed_broll_type_for_default_provider_trace or review_snapshot_api_approve_tts_replacement_matches_trimmed_recommendation_type or review_snapshot_api_approve_tts_replacement_surfaces_approved_decision_state_in_read_paths"` -> `2 passed`
+
+남은 판단:
+
+- broader verification은 이번 수정이 timeline builder의 approved recommendation type 비교 2줄에 국한되고 exact + focused evidence가 직접적이라 아직 재실행하지 않았다
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+
 ## 78. 2026-07-04 review snapshot trimmed provider-trace fallback recommendation type closeout
 
 이번 후속 작업에서는 approve mutation 쪽에서 막 닫은 trimmed provider-trace fallback family를 review snapshot helper read path까지 이어, 같은 stale whitespace recommendation type 경계 1개만 다시 닫았다.

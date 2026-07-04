@@ -76,8 +76,9 @@ class TimelineBuilder:
             segment_id = str(segment["segment_id"])
             narration_asset_uri = f"local://projects/{project_id}/segments/{segment_id}"
             for recommendation in by_segment.get(segment_id, []):
+                rec_type = str(recommendation.get("recommendation_type") or "").strip()
                 if (
-                    str(recommendation.get("recommendation_type") or "") == "tts_replacement"
+                    rec_type == "tts_replacement"
                     and bool(recommendation.get("auto_apply_allowed"))
                     and not bool(recommendation.get("review_required"))
                 ):
@@ -109,7 +110,7 @@ class TimelineBuilder:
             for recommendation in by_segment.get(segment_id, []):
                 if bool(recommendation.get("auto_apply_allowed")) and not bool(recommendation.get("review_required")):
                     applied_recommendations.append(recommendation)
-                    rec_type = str(recommendation["recommendation_type"])
+                    rec_type = str(recommendation.get("recommendation_type") or "").strip()
                     if rec_type == "broll" and recommendation.get("selected_asset_id"):
                         broll_clips.append(
                             TimelineClip(
