@@ -788,6 +788,107 @@ def test_heuristic_review_guidance_builder_canonicalizes_mixed_case_approved_rev
     ]
 
 
+def test_local_pipeline_review_snapshot_reuses_persisted_guidance_for_mixed_case_approved_status(
+    monkeypatch,
+) -> None:
+    persisted_guidance = {
+        "summary": "Persisted approved guidance.",
+        "action_items": ["Generate outputs from the approved timeline."],
+        "provider_trace": build_provider_trace(final_provider="heuristic_fallback"),
+    }
+
+    class _FakeStore:
+        def get_job(self, *, project_id: str, job_id: str) -> dict[str, object]:
+            assert project_id == "project_001"
+            assert job_id == "timeline_job_001"
+            return {"job_id": job_id, "job_type": JobType.TIMELINE_BUILD.value, "output_ref": "timeline_001"}
+
+        def list_segments(self, *, project_id: str) -> list[dict[str, object]]:
+            assert project_id == "project_001"
+            return []
+
+        def build_review_snapshot(
+            self,
+            *,
+            project_id: str,
+            timeline_id: str,
+            segments: list[dict[str, object]],
+            timeline_applied_recommendations: list[dict[str, object]],
+            timeline_pending_recommendations: list[dict[str, object]],
+            timeline_review_flags: list[dict[str, object]],
+        ) -> dict[str, object]:
+            assert project_id == "project_001"
+            assert timeline_id == "timeline_001"
+            assert segments == []
+            assert timeline_applied_recommendations == []
+            assert timeline_pending_recommendations == []
+            assert timeline_review_flags == []
+            return {
+                "project_id": project_id,
+                "timeline_id": timeline_id,
+                "review_status": "approved",
+                "segments": [],
+                "applied_recommendations": [],
+                "pending_recommendations": [],
+                "review_flags": [],
+            }
+
+        def get_review_state(self, *, project_id: str, timeline_id: str) -> dict[str, object]:
+            assert project_id == "project_001"
+            assert timeline_id == "timeline_001"
+            return {"status": "approved"}
+
+        def get_persisted_operator_guidance(
+            self,
+            *,
+            project_id: str,
+            timeline_id: str,
+        ) -> dict[str, object]:
+            assert project_id == "project_001"
+            assert timeline_id == "timeline_001"
+            return persisted_guidance
+
+        def save_operator_guidance(
+            self,
+            *,
+            project_id: str,
+            timeline_id: str,
+            operator_guidance: dict[str, object],
+        ) -> None:
+            raise AssertionError("Persisted guidance should have been reused without saving.")
+
+    class _FailingGuidanceBuilder:
+        def build(self, *, project_id: str, review_snapshot: dict[str, object]) -> dict[str, object]:
+            del project_id, review_snapshot
+            raise AssertionError("Persisted guidance should have been reused without rebuilding.")
+
+    runner = LocalPipelineRunner(
+        store=_FakeStore(),  # type: ignore[arg-type]
+        review_guidance_builder=_FailingGuidanceBuilder(),  # type: ignore[arg-type]
+    )
+
+    monkeypatch.setattr(
+        runner,
+        "get_timeline_result",
+        lambda *, project_id, job_id: {
+            "job_id": job_id,
+            "status": JobStatus.SUCCEEDED.value,
+            "timeline": {
+                "timeline_id": "timeline_001",
+                "review_status": " APPROVED ",
+                "applied_recommendations": [],
+                "pending_recommendations": [],
+                "review_flags": [],
+            },
+        },
+    )
+
+    snapshot = runner.get_review_snapshot(project_id="project_001", job_id="timeline_job_001")
+
+    assert snapshot["review_status"] == " APPROVED "
+    assert snapshot["operator_guidance"] == persisted_guidance
+
+
 def test_store_save_recommendation_run_treats_string_false_review_required_as_false(
     tmp_path: Path,
 ) -> None:

@@ -545,6 +545,42 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
 - exact failing test 1개로만 다시 시작한다
 
+## 121. 2026-07-04 review snapshot persisted guidance mixed-case approved status reuse closeout
+
+이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `review/output gating`과 바로 이어지는 review snapshot persisted guidance 재사용 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/core-engine/src/videobox_core_engine/local_pipeline.py`의 `get_review_snapshot(...)`는 timeline 쪽 `review_status`와 persisted review state를 raw 문자열로 직접 비교하고 있어, legacy `" APPROVED "` 같은 mixed-case stale status면 같은 승인 상태여도 persisted operator guidance를 재사용하지 못하고 다시 생성 경로로 빠지고 있었다
+- strict TDD로 `test_local_pipeline_review_snapshot_reuses_persisted_guidance_for_mixed_case_approved_status` exact regression을 먼저 추가했고, 실제로 persisted guidance를 바로 돌려주지 않고 review guidance builder를 다시 호출하는 RED를 확인했다
+- 최소 수정으로 local pipeline에 runtime review status canonical helper를 추가하고, persisted guidance reuse/save 조건 비교를 `strip().lower()` 기준으로 맞췄다
+- 이번 수정은 editing-session SSOT, review/output rules, TTS approval/output truth, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 review snapshot guidance reuse의 status 비교 한 점만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 failed` 확인 후 `1 passed`
+- focused verification
+  - persisted guidance / review-status 인접 exact
+  - 결과: `4 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - review snapshot persisted guidance reuse의 mixed-case approved status 비교 한 점 수정이라 exact + guidance reuse 인접 evidence가 가장 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. review snapshot이 legacy mixed-case `review_status`도 canonical lowercase 승인 상태로 비교해 persisted guidance를 재사용한다
+2. 같은 승인 상태인데 raw casing 차이 때문에 operator guidance를 불필요하게 다시 만들지 않는다
+3. review guidance fallback, operator copy prompt, persisted guidance reuse가 review-status 비교에서 더 같은 기준을 사용한다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
 ## 82. 2026-07-04 recommendation row trimmed broll provider trace closeout
 
 이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `review/output gating`에 가장 가까운 recommendation row read-path의 작은 stale-shape 경계 1개만 다시 닫았다.

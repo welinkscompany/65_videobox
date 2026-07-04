@@ -742,6 +742,7 @@
 - preview renderer의 `review_status` HTML surface도 legacy `" APPROVED "` 같은 mixed-case stale shape를 canonical lowercase 상태로 정리해 visible output surface가 output gating/readiness truth와 같은 기준을 유지하게 정리했다
 - output operator copy builder의 prompt `review_status` surface도 legacy `" APPROVED "` 같은 mixed-case stale shape를 canonical lowercase 상태로 정리해 preview/export guidance prompt가 output gating/readiness truth와 같은 기준을 유지하게 정리했다
 - heuristic/local review guidance도 legacy `" APPROVED "` 같은 mixed-case stale `review_status`를 canonical lowercase 승인 상태로 정리해 blocker가 없을 때 `승인 대기`가 아니라 approved output guidance truth를 유지하게 정리했다
+- review snapshot의 persisted operator guidance 재사용 조건도 legacy `" APPROVED "` 같은 mixed-case stale `review_status`를 canonical lowercase 승인 상태로 비교해, 같은 승인 상태인데도 guidance를 불필요하게 다시 생성하지 않게 정리했다
 - preview renderer도 whitespace stale narration clip `segment_id`를 trimmed TTS recommendation과 같은 기준으로 맞춰 approved narration source가 preview에 정확히 반영되게 정리했다
 - preview renderer의 narration sources HTML surface도 narration clip `segment_id`를 trim 기준으로 맞춰 approved TTS preview surface가 canonical segment id를 유지하게 정리했다
 - CapCut export adapter도 whitespace stale narration clip `segment_id`를 trimmed TTS recommendation과 같은 기준으로 맞춰 approved narration source가 export에 정확히 반영되게 정리했다

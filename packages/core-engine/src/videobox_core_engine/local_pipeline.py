@@ -84,6 +84,10 @@ def _canonical_runtime_review_flag_code(value: object) -> str:
     return str(value or "").strip().lower()
 
 
+def _canonical_runtime_review_status(value: object) -> str:
+    return str(value or "draft").strip().lower() or "draft"
+
+
 def _normalize_runtime_cut_action(value: object) -> str:
     cut_action = str(value or "keep")
     if cut_action not in {"keep", "remove", "trim"}:
@@ -1251,6 +1255,7 @@ class LocalPipelineRunner:
             timeline_review_flags=timeline_review_flags,
         )
         snapshot["review_status"] = timeline["review_status"]
+        current_review_status = _canonical_runtime_review_status(timeline["review_status"])
         persisted_review_status = self.store.get_review_state(
             project_id=project_id,
             timeline_id=str(timeline["timeline_id"]),
@@ -1259,14 +1264,14 @@ class LocalPipelineRunner:
             project_id=project_id,
             timeline_id=str(timeline["timeline_id"]),
         )
-        if persisted_operator_guidance is not None and timeline["review_status"] == persisted_review_status:
+        if persisted_operator_guidance is not None and current_review_status == persisted_review_status:
             snapshot["operator_guidance"] = persisted_operator_guidance
             return snapshot
         snapshot["operator_guidance"] = self.review_guidance_builder.build(
             project_id=project_id,
             review_snapshot=snapshot,
         )
-        if timeline["review_status"] != persisted_review_status:
+        if current_review_status != persisted_review_status:
             return snapshot
         try:
             self.store.save_operator_guidance(
