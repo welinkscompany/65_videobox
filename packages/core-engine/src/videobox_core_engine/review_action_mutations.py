@@ -17,11 +17,12 @@ def extract_pending_recommendation_decision(
     decided_recommendation: dict[str, Any] | None = None
     remaining_pending: list[dict[str, Any]] = []
     for item in pending_recommendations:
-        if str(item.get("recommendation_id") or "") != recommendation_id:
+        if str(item.get("recommendation_id") or "").strip() != recommendation_id:
             remaining_pending.append(item)
             continue
         original_recommendation = deepcopy(item)
         decided_recommendation = deepcopy(item)
+        decided_recommendation["recommendation_id"] = recommendation_id
         if decision == "approved":
             decided_recommendation["auto_apply_allowed"] = True
             decided_recommendation["review_required"] = False
@@ -49,7 +50,7 @@ def timeline_recommendation_decisions(
     existing = timeline.get("recommendation_decisions")
     normalized = (
         {
-            str(key): str(value)
+            str(key).strip(): str(value).strip()
             for key, value in existing.items()
             if str(key).strip() and str(value).strip()
         }
@@ -67,15 +68,17 @@ def should_keep_review_flag(
     target_segment_id: str,
     remaining_pending: list[dict[str, Any]],
 ) -> bool:
+    flag_code = str(flag.get("code") or "").strip()
+    flag_segment_id = str(flag.get("segment_id") or "").strip()
     if not (
-        str(flag.get("code") or "") == recommendation_flag_code
-        and str(flag.get("segment_id") or "") == target_segment_id
+        flag_code == recommendation_flag_code
+        and flag_segment_id == target_segment_id
     ):
         return True
     return any(
         str(item.get("recommendation_type") or "").strip()
         == recommendation_flag_code.removesuffix("_review_required")
-        and str(item.get("target_segment_id") or "") == target_segment_id
+        and str(item.get("target_segment_id") or "").strip() == target_segment_id
         for item in remaining_pending
     )
 
@@ -89,7 +92,7 @@ def filtered_review_flags_after_recommendation_decision(
     recommendation_flag_code = (
         f"{str(decided_recommendation.get('recommendation_type') or '').strip()}_review_required"
     )
-    target_segment_id = str(decided_recommendation.get("target_segment_id") or "")
+    target_segment_id = str(decided_recommendation.get("target_segment_id") or "").strip()
     return [
         flag
         for flag in deepcopy(timeline.get("review_flags", []))
@@ -127,7 +130,7 @@ def apply_approved_recommendation_to_timeline(
         if not isinstance(clips, list):
             continue
         for clip in clips:
-            if str(clip.get("segment_id") or "") == target_segment_id:
+            if str(clip.get("segment_id") or "").strip() == target_segment_id:
                 matched_clip = True
                 clip["asset_uri"] = selected_asset_uri
     if not matched_clip:

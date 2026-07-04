@@ -1796,9 +1796,18 @@ class LocalPipelineRunner:
         recommendation_id: str,
         decision: str,
     ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
-        original_timeline = deepcopy(
-            self.get_timeline_result(project_id=project_id, job_id=timeline_job_id)["timeline"]
-        )
+        job = self.store.get_job(project_id=project_id, job_id=timeline_job_id)
+        if str(job.get("job_type")) == JobType.PARTIAL_REGENERATION.value:
+            original_timeline = deepcopy(
+                self.store.get_partial_regeneration_run(
+                    project_id=project_id,
+                    partial_regeneration_id=str(job["output_ref"]),
+                )["timeline"]
+            )
+        else:
+            original_timeline = deepcopy(
+                self.store.get_timeline_run(project_id=project_id, timeline_id=job["output_ref"])
+            )
         timeline = deepcopy(original_timeline)
         original_review_state = self.store.get_review_state(
             project_id=project_id,
@@ -1853,6 +1862,9 @@ class LocalPipelineRunner:
         original_review_status: str,
     ) -> None:
         try:
+            review_flags, pending_recommendations = self._normalized_timeline_blockers(timeline)
+            timeline["review_flags"] = review_flags
+            timeline["pending_recommendations"] = pending_recommendations
             self.store.update_timeline_run(
                 project_id=project_id,
                 timeline_id=str(timeline["timeline_id"]),
@@ -1865,9 +1877,6 @@ class LocalPipelineRunner:
                 review_required=review_required,
                 decision_state=decision_state,
             )
-            review_flags, pending_recommendations = self._normalized_timeline_blockers(timeline)
-            timeline["review_flags"] = review_flags
-            timeline["pending_recommendations"] = pending_recommendations
             status = "blocked" if review_flags or pending_recommendations else "draft"
             self.store.save_review_state(
                 project_id=project_id,

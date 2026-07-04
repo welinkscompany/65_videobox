@@ -496,6 +496,405 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
 - exact failing test 1개로만 다시 시작한다
 
+## 75. 2026-07-04 review timeline import-cycle closeout
+
+이번 후속 작업에서는 이미 닫힌 review snapshot split/output gating 경계를 다시 넓히지 않고, 그 검증 자체를 막고 있던 import-cycle collection 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `tests/test_review_timeline.py::test_review_snapshot_splits_applied_and_pending_recommendations`는 현재 worktree에서 `videobox_storage.local_project_store -> videobox_core_engine.provider_trace` import 경로가 package-level eager import chain을 타면서 `LocalProjectStore` circular import collection error로 막히고 있었다
+- strict TDD로 위 exact를 그대로 RED로 확인했고, 실제로 assertion failure가 아니라 `ImportError: cannot import name 'LocalProjectStore' from partially initialized module ...` collection error가 났다
+- 원인은 `packages/core-engine/src/videobox_core_engine/__init__.py`가 `LocalPipelineRunner` 등 heavy module을 package import 시점에 eager import하고 있어, provider_trace 하나만 읽어도 local pipeline과 gemini runtime까지 같이 올라가던 점이었다
+- 최소 수정으로 package root를 lazy export `__getattr__` 기반으로 바꿔 `videobox_core_engine.provider_trace` 같은 direct submodule import가 heavy eager import chain을 타지 않도록 맞췄다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 test collection/import boundary만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 passed`
+- direct helper file
+  - `2 passed`
+- output-gating focused slice
+  - `40 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - package import-cycle 한 점에 국한된 수정이라 exact + direct helper file + review-snapshot focused evidence가 더 직접적이다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. `tests/test_review_timeline.py`가 review snapshot helper exact를 다시 collection error 없이 수집하고 실행한다
+2. `videobox_core_engine.provider_trace` import가 package root eager import 때문에 local pipeline/gemini runtime circular chain으로 번지지 않는다
+3. review snapshot helper exact와 output-gating review-snapshot lane을 현재 worktree에서도 다시 직접 검증할 수 있다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
+## 74. 2026-07-04 review snapshot split without inline recommendation type closeout
+
+이번 후속 작업에서는 이미 닫힌 stale pending/provider-trace/string-false 경계를 다시 넓히지 않고, review snapshot helper의 direct recommendation input applied/pending split 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `tests/test_review_timeline.py::test_review_snapshot_splits_applied_and_pending_recommendations`는 현재 worktree에서 import collection error가 먼저 발생해 exact RED로 쓰기 어려웠고, 실제 경계는 `packages/storage-abstractions/src/videobox_storage/local_project_store.py`의 `build_review_snapshot(...)` direct recommendations 분기였다
+- strict TDD로 같은 helper 로직을 `tests/test_api.py::test_store_build_review_snapshot_splits_applied_and_pending_recommendations_without_inline_type` exact regression으로 먼저 RED로 확인했고, 실제로 `applied_recommendations == []` 실패가 났다
+- 원인은 direct recommendation 입력에 inline `recommendation_type`가 빠져 있으면 helper가 canonical recommendation type truth를 잃은 채 supported-type filter에서 그대로 버리던 점이었다
+- 최소 수정으로 direct recommendations 분기에서 missing inline type이 있을 때만 persisted recommendation rows를 읽고, target segment / selected asset / reason / score가 유일하게 맞는 경우에만 canonical `recommendation_type`을 복원하도록 좁혀, applied/pending split truth를 다시 유지하게 맞췄다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 review snapshot helper direct-input recommendation type truth 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 passed`
+- output-gating focused slice
+  - `40 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - review snapshot helper direct-input type hydration 한 점에 국한된 수정이라 exact + review-snapshot focused evidence가 더 직접적이다
+    - `tests/test_review_timeline.py` collection error는 별도 next slice에서 다시 다루는 편이 정확하다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. review snapshot direct helper가 inline `recommendation_type`가 비어 있는 historical recommendation 입력도 persisted truth와 유일하게 매칭되면 applied/pending split을 유지한다
+2. direct helper applied/pending surface truth와 persisted recommendation row truth가 다시 어긋나지 않는다
+3. missing type 복원은 유일 매칭일 때만 수행돼 unknown stale recommendation surface를 다시 넓히지 않는다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
+## 73. 2026-07-04 approve persists remaining segment review-required blocker closeout
+
+이번 후속 작업에서는 이미 닫힌 whitespace/provider-trace/rollback 경계를 다시 넓히지 않고, broader verification에서 실제로 드러난 `TTS approval/output` persisted blocker 누수 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/core-engine/src/videobox_core_engine/local_pipeline.py`의 `_persist_pending_recommendation_decision(...)`는 approve mutation timeline을 먼저 저장한 뒤 synthetic blocker를 다시 계산하고 있어, last pending `tts_replacement` approve 뒤 다른 segment의 `review_required=true` truth가 persisted timeline `review_flags`에는 다시 쓰이지 않고 있었다
+- strict TDD로 `test_approving_last_pending_tts_replacement_persists_remaining_segment_review_required_blocker` exact regression을 먼저 RED로 확인했고, 실제로 approve 뒤 persisted timeline `review_flags == []` 실패가 났다
+- 원인은 normalized blocker 재계산 시점이 timeline persist보다 늦어 최종 `segment_review_required` synthetic flag가 저장 파일에 반영되지 않던 점이었다
+- 최소 수정으로 `_persist_pending_recommendation_decision(...)`가 timeline persist 전에 normalized `review_flags` / `pending_recommendations`를 먼저 계산해 payload에 반영하도록 순서를 좁혀, approve 뒤 남아 있는 segment-level blocker truth도 persisted timeline에 그대로 쓰이게 맞췄다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 TTS approve persisted-blocker truth 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 passed`
+- output-gating focused slice
+  - `24 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - persisted blocker write-order 한 점에 국한된 수정이라 exact + output-gating focused evidence가 더 직접적이다
+    - broader에서 남아 있던 다른 실제 실패는 다음 slice에서 별도로 exact RED부터 다시 다루는 편이 더 정확하다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. last pending `tts_replacement` approve 뒤에도 다른 segment의 `review_required=true` truth가 persisted timeline `review_flags`에 synthetic `segment_review_required` blocker로 다시 남는다
+2. approve mutation의 persisted timeline truth와 output gating / review snapshot blocker truth가 다시 어긋나지 않는다
+3. TTS approval persistence가 final blocker normalization 순서를 기준으로 같은 저장 진실을 유지한다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
+## 72. 2026-07-04 approve rollback raw persisted timeline closeout
+
+이번 후속 작업에서는 새로운 approval/output stale-shape slice를 더 열지 않고, 누적 변경 검증 중 드러난 review-action rollback 회귀 1개를 먼저 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/core-engine/src/videobox_core_engine/local_pipeline.py`의 `_prepare_pending_recommendation_decision(...)`는 rollback용 `original_timeline`을 raw persisted timeline이 아니라 `get_timeline_result(...)`의 hydrated response shape에서 가져오고 있어, review state 저장 실패 후 rollback이 실행되면 provider trace가 없는 pending recommendation까지 hydrated shape로 다시 저장하고 있었다
+- 기존 exact regression `test_review_snapshot_api_approve_rolls_back_timeline_and_recommendation_when_review_state_save_fails`를 다시 RED로 확인했고, 실제로 rollback 뒤 persisted `pending_recommendations`가 original raw timeline과 달라지는 실패가 났다
+- 원인은 rollback source timeline이 API read-path hydration을 이미 거친 객체였다는 점이었다
+- 최소 수정으로 pending recommendation decision 준비 단계는 job type에 따라 store의 raw timeline payload만 직접 읽어 rollback source로 보관하도록 좁혀, downstream failure 후 timeline rollback이 original persisted shape를 그대로 복구하게 맞췄다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 review-action rollback raw-timeline restoration 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 passed`
+- paired rollback regression
+  - `1 passed`
+- review-action backend focused slice
+  - `7 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - rollback source timeline 한 점에 국한된 수정이라 exact + paired exact + review-action focused evidence가 더 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. approve rollback이 raw persisted timeline shape를 hydrated response shape로 오염시키지 않는다
+2. 같은 rollback source 수정으로 reject rollback도 original pending/applied/review-flag truth를 그대로 복구한다
+3. review-action rollback hardening이 response hydration 규칙과 분리된 raw persistence truth를 유지한다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
+## 71. 2026-07-04 approve trimmed target segment id blocker cleanup closeout
+
+이번 후속 작업에서는 방금 닫은 approval/output applied recommendation id canonicalization 경계를 다시 넓히지 않고, 같은 helper 안에 남아 있던 `target_segment_id` whitespace stale shape로 인한 blocker cleanup 비대칭 1개만 다시 좁혀 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/core-engine/src/videobox_core_engine/review_action_mutations.py`의 review flag cleanup은 `should_keep_review_flag(...)` 내부 비교는 trim 기준으로 맞춰졌지만, 그 앞단 `filtered_review_flags_after_recommendation_decision(...)`가 `decided_recommendation.target_segment_id`를 raw로 유지하고 있어 whitespace가 섞인 stale pending recommendation이면 last pending approve 뒤에도 blocker가 남고 있었다
+- strict TDD로 `test_approving_last_pending_recommendation_removes_blocker_with_trimmed_target_segment_id` exact regression을 먼저 추가했고, 실제로 approve 응답의 `review_status`가 `draft`가 아니라 `blocked`로 남는 RED를 확인했다
+- 원인은 cleanup helper가 `target_segment_id`를 trim하지 않고 recommendation flag key를 계산하던 점이었다
+- 최소 수정으로 review flag cleanup helper의 `target_segment_id`도 trim해서 canonical target segment 기준으로 비교하도록 좁혀, stale whitespace target segment shape여도 blocker cleanup이 같은 기준으로 동작하게 맞췄다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 approval/output target-segment blocker-cleanup 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 passed`
+- output-gating focused slice
+  - `24 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - target segment blocker cleanup trim 한 점에 국한된 수정이라 exact + focused evidence가 더 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. approve/reject review-flag cleanup이 whitespace가 섞인 persisted `target_segment_id`도 canonical target segment로 식별한다
+2. stale trimmed target segment id 때문에 last pending approve 뒤 `review_status=blocked`가 남지 않는다
+3. approval/output helper의 trim stale-shape family가 selection, decision-map, applied surface, blocker cleanup에서 같은 canonical segment/id 기준을 사용한다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
+## 70. 2026-07-04 approve trimmed persisted applied recommendation id closeout
+
+이번 후속 작업에서는 방금 닫은 approval/output decision-map stale-key cleanup 경계를 다시 넓히지 않고, 같은 helper 안에 남아 있던 persisted `applied_recommendations` recommendation id canonicalization 1개만 다시 좁혀 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/core-engine/src/videobox_core_engine/review_action_mutations.py`의 pending recommendation decision extraction은 route의 canonical id로 대상을 찾더라도, `decided_recommendation` 자체에는 source pending item의 whitespace `recommendation_id`를 그대로 남겨 persisted `applied_recommendations` surface가 stale id를 보존하고 있었다
+- strict TDD로 `test_approving_last_pending_recommendation_persists_canonical_trimmed_recommendation_id` exact regression을 먼저 추가했고, 실제로 approve 뒤 persisted `applied_recommendations[0].recommendation_id`가 whitespace id 그대로 남는 RED를 확인했다
+- 원인은 `extract_pending_recommendation_decision(...)`가 matched recommendation을 deepcopy한 뒤 canonical route id로 `recommendation_id`를 덮어쓰지 않던 점이었다
+- 최소 수정으로 matched `decided_recommendation`의 `recommendation_id`를 route의 canonical id로 즉시 정규화해, persisted applied recommendation surface도 selection truth와 같은 canonical id를 유지하게 맞췄다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 approval/output applied-recommendation id canonicalization 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 passed`
+- output-gating focused slice
+  - `24 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - applied recommendation id canonicalization 한 점에 국한된 수정이라 exact + focused evidence가 더 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. approve/reject selection이 canonical route id를 찾으면 persisted `applied_recommendations` surface도 같은 canonical id를 유지한다
+2. stale trimmed pending recommendation id 때문에 applied recommendation surface가 whitespace id를 다시 노출하지 않는다
+3. approval/output helper의 trim stale-shape family가 selection, decision-map, applied surface까지 같은 canonical id 기준을 사용한다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
+## 69. 2026-07-04 approve trimmed recommendation decision key closeout
+
+이번 후속 작업에서는 방금 닫은 approval/output recommendation-id trim selection 경계를 다시 넓히지 않고, 같은 helper 안에 남아 있던 `recommendation_decisions` stale key cleanup 1개만 다시 좁혀 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/core-engine/src/videobox_core_engine/review_action_mutations.py`의 `timeline_recommendation_decisions(...)`는 whitespace가 섞인 persisted decision key를 필터링만 하고 canonical key로 정규화하지 않아, 같은 recommendation approve 뒤에도 stale key와 canonical key가 동시에 남고 있었다
+- strict TDD로 `test_approving_last_pending_recommendation_rewrites_trimmed_recommendation_decision_key` exact regression을 먼저 추가했고, 실제로 approve 뒤 `recommendation_decisions`에 stale whitespace key가 그대로 남는 RED를 확인했다
+- 원인은 `timeline_recommendation_decisions(...)`가 기존 dict를 복사할 때 `str(key)` / `str(value)`를 그대로 보존하던 점이었다
+- 최소 수정으로 decision map normalization도 key/value를 trim해서 보관하도록 좁혀, stale whitespace key가 canonical recommendation id key 하나로 정리되게 맞췄다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 approval/output decision-map stale-key cleanup 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 passed`
+- output-gating focused slice
+  - `24 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - recommendation decision-key trim 한 점에 국한된 수정이라 exact + focused evidence가 더 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. approve/reject decision map이 whitespace가 섞인 persisted key도 canonical recommendation id key 하나로 정리한다
+2. stale trimmed decision key 때문에 같은 recommendation decision이 중복 key로 남지 않는다
+3. approval/output helper의 trim stale-shape family가 selection, review-flag cleanup, decision-map cleanup에서 같은 기준을 사용한다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
+## 68. 2026-07-04 approve trimmed recommendation id closeout
+
+이번 후속 작업에서는 방금 닫은 review-flag cleanup trim family를 다시 넓히지 않고, 같은 approval/output decision-selection helper 안에 남아 있던 `recommendation_id` whitespace stale shape 1개만 다시 좁혀 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/core-engine/src/videobox_core_engine/review_action_mutations.py`의 pending recommendation selection은 route에서 받은 canonical `recommendation_id`와 persisted pending entry의 `recommendation_id`를 raw 문자열로 비교하고 있어 whitespace가 섞인 stale pending entry를 같은 recommendation으로 찾지 못하고 있었다
+- strict TDD로 `test_approving_last_pending_recommendation_matches_trimmed_recommendation_id` exact regression을 먼저 추가했고, 실제로 approve 응답이 `404`로 떨어지는 RED를 확인했다
+- 원인은 `extract_pending_recommendation_decision(...)`가 `item["recommendation_id"]`를 trim하지 않고 route id와 직접 비교하던 점이었다
+- 최소 수정으로 pending recommendation selection이 persisted `recommendation_id`도 trim해서 route의 canonical recommendation id와 비교하도록 좁혀, stale whitespace id shape여도 approve/reject mutation이 같은 recommendation에 적용되게 맞췄다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 approval/output recommendation-selection stale-shape 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 passed`
+- output-gating focused slice
+  - `24 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - approve/reject recommendation-id trim 한 점에 국한된 수정이라 exact + focused evidence가 더 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. approve/reject recommendation selection이 whitespace가 섞인 persisted `recommendation_id`도 같은 recommendation으로 식별한다
+2. stale trimmed recommendation id 때문에 approve/reject가 `404`로 떨어지지 않는다
+3. approval/output decision-selection helper가 `recommendation_id`, `review_flag.code`, `review_flag.segment_id` 모두 같은 trim 기준을 사용한다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
+## 67. 2026-07-04 approve trimmed review flag code closeout
+
+이번 후속 작업에서는 방금 닫은 review-flag `segment_id` trim cleanup 경계를 다시 넓히지 않고, 같은 approval/output cleanup helper 안에 남아 있던 `review_flag.code` whitespace stale shape 1개만 다시 좁혀 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/core-engine/src/videobox_core_engine/review_action_mutations.py`의 review flag 정리 로직은 `segment_id` trim은 맞춰졌지만 persisted review flag의 `code`는 raw 문자열로 비교하고 있어 whitespace가 섞인 stale canonical flag code를 같은 blocker로 인식하지 못한 채 남기고 있었다
+- strict TDD로 `test_approving_last_pending_recommendation_removes_trimmed_review_flag_code_for_same_segment` exact regression을 먼저 추가했고, 실제로 approve 응답의 `review_status`가 `draft`가 아니라 `blocked`로 남는 RED를 확인했다
+- 원인은 `should_keep_review_flag(...)`가 `flag.code`를 trim하지 않고 `recommendation_flag_code`와 직접 비교하던 점이었다
+- 최소 수정으로 review flag keep 판정이 `code`도 trim해서 비교하도록 좁혀, stale whitespace canonical review flag code가 approve/reject 뒤 blocker로 남지 않게 맞췄다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 approval/output review-flag code cleanup stale-shape 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 passed`
+- output-gating focused slice
+  - `24 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - approve/reject review-flag code trim 한 점에 국한된 수정이라 exact + focused evidence가 더 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. approve/reject review-flag cleanup이 whitespace가 섞인 persisted canonical `code`도 같은 blocker flag로 식별한다
+2. stale trimmed review flag code 때문에 last pending approve 뒤 `review_status=blocked`가 남지 않는다
+3. approval/output review-flag cleanup helper가 `code`와 `segment_id` 모두 같은 trim 기준을 사용한다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
+## 66. 2026-07-04 approve trimmed review flag segment id closeout
+
+이번 후속 작업에서는 방금 닫은 TTS approve clip-match stale shape를 다시 넓히지 않고, 같은 approval/output 경계 안에서 persisted review flag 정리 비대칭 1개만 다시 좁혀 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/core-engine/src/videobox_core_engine/review_action_mutations.py`의 review flag 정리 로직은 recommendation 쪽 `target_segment_id`와 달리 persisted review flag의 `segment_id`를 raw 문자열로 비교하고 있어 whitespace가 섞인 stale review flag를 같은 세그먼트 blocker로 인식한 채 남기고 있었다
+- strict TDD로 `test_approving_last_pending_recommendation_removes_trimmed_review_flag_for_same_segment` exact regression을 먼저 추가했고, 실제로 approve 응답의 `review_status`가 `draft`가 아니라 `blocked`로 남는 RED를 확인했다
+- 원인은 `should_keep_review_flag(...)`가 `flag.segment_id`와 remaining pending recommendation의 `target_segment_id`를 trim하지 않고 비교하던 점이었다
+- 최소 수정으로 review flag keep 판정도 양쪽 `segment_id`를 trim해서 비교하도록 좁혀, stale whitespace review flag가 approve/reject 뒤 blocker로 남지 않게 맞췄다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 approval/output review-flag cleanup stale-shape 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 passed`
+- output-gating focused slice
+  - `24 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - approve/reject review-flag segment-id trim 한 점에 국한된 수정이라 exact + focused evidence가 더 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. approve/reject review-flag cleanup이 whitespace가 섞인 persisted `segment_id`도 같은 세그먼트 flag로 식별한다
+2. stale trimmed review flag 때문에 last pending approve 뒤 `review_status=blocked`가 남지 않는다
+3. approval/output review-flag cleanup truth가 방금 닫은 clip-match trim truth와 같은 stale-shape 기준을 사용한다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
+## 65. 2026-07-04 review snapshot approve trimmed target narration clip segment id closeout
+
+이번 후속 작업에서는 just-closed provider-trace/read-contract family를 다시 넓히지 않고, `TTS approval/output` 경계에서 persisted timeline stale shape 1개만 다시 좁혀 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/core-engine/src/videobox_core_engine/review_action_mutations.py`의 TTS approve mutation은 recommendation 쪽 `target_segment_id`는 trim해서 읽지만, narration clip 쪽 `segment_id`는 raw 문자열로 비교하고 있어 whitespace가 섞인 persisted clip을 target clip으로 찾지 못했다
+- strict TDD로 `test_review_snapshot_api_approve_tts_replacement_matches_trimmed_target_narration_clip_segment_id` exact regression을 먼저 추가했고, 실제로 approve 응답이 `400`으로 떨어지는 RED를 확인했다
+- 원인은 approve mutation의 target narration clip match가 `str(clip.get("segment_id") or "") == target_segment_id` raw 비교에 머물러 있던 점이었다
+- 최소 수정으로 approved TTS replacement가 narration clip `segment_id`도 trim해서 target segment와 비교하도록 좁혀, stale whitespace clip shape여도 기존 approve truth와 같은 clip을 업데이트하게 맞췄다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 TTS approve clip-match stale-shape 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 passed`
+- output-gating focused slice
+  - `24 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - TTS approve clip-match trim 한 점에 국한된 수정이라 exact + focused evidence가 더 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. TTS approve mutation이 whitespace가 섞인 persisted narration clip `segment_id`도 target clip으로 매칭한다
+2. stale clip segment-id shape 때문에 approved `selected_asset_uri` 반영이 `400`으로 막히지 않는다
+3. TTS approve mutation truth가 preflight/runtime의 trimmed segment-id handling 방향과 더 이상 어긋나지 않는다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
 ## 64. 2026-07-04 review snapshot persisted operator guidance default provider trace closeout
 
 이번 후속 작업에서는 partial regeneration result response fallback 경계를 다시 넓히지 않고, 같은 review/output read-contract 축의 바로 인접면인 persisted `operator_guidance` legacy shape 1개만 다시 닫았다.

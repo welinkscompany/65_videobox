@@ -455,11 +455,20 @@
 - reject explicit decision-state persistence contract
 - timeline-local review snapshot truth 보존
 - review-action rollback hardening과 warning surface
+- review-action rollback도 downstream failure 후 raw persisted timeline shape를 hydrated response shape로 덮어쓰지 않고 pending/applied/review-flag truth를 그대로 복구하는 계약
 - pending `tts_replacement` approve 시 target narration track clip `asset_uri`를 승인된 `selected_asset_uri`로 반영하는 계약
 - pending `tts_replacement` approve 시 같은 target segment를 가리키는 duplicate narration clip이 있어도 target narration clip 전체의 `asset_uri`를 승인된 `selected_asset_uri`로 동기화하는 계약
 - pending `tts_replacement` approve는 `payload.selected_asset_uri`가 비어 있는 stale recommendation shape를 승인 상태로 통과시키지 않고 즉시 거부하는 계약
 - pending `tts_replacement` approve는 `target_segment_id`에 대응하는 narration clip이 없는 stale timeline shape도 승인 상태로 통과시키지 않고 즉시 거부하는 계약
+- pending `tts_replacement` approve는 persisted narration clip의 `segment_id`에 whitespace가 섞인 stale timeline shape여도 trimmed target segment 기준으로 같은 clip을 매칭해 승인된 `selected_asset_uri`를 반영하는 계약
+- pending recommendation approve/reject는 persisted recommendation review flag의 `segment_id`에 whitespace가 섞인 stale timeline shape여도 trimmed target segment 기준으로 같은 flag를 정리해 stale blocker를 남기지 않는 계약
+- pending recommendation approve/reject는 persisted recommendation review flag의 `code`에 whitespace가 섞인 stale timeline shape여도 canonical review flag code 기준으로 같은 flag를 정리해 stale blocker를 남기지 않는 계약
+- pending recommendation approve/reject는 persisted pending recommendation의 `recommendation_id`에 whitespace가 섞인 stale timeline shape여도 route의 canonical recommendation id 기준으로 같은 recommendation을 선택해 decision mutation을 적용하는 계약
+- pending recommendation approve/reject는 persisted `recommendation_decisions`에 whitespace가 섞인 stale key가 남아 있어도 canonical recommendation id key 하나로 정리해 같은 recommendation decision이 중복 key로 남지 않는 계약
+- pending recommendation approve/reject는 persisted pending recommendation의 `recommendation_id`에 whitespace가 섞인 stale timeline shape여도 mutation 뒤 persisted `applied_recommendations` surface에는 canonical recommendation id만 남기는 계약
+- pending recommendation approve/reject는 persisted pending recommendation의 `target_segment_id`에 whitespace가 섞인 stale timeline shape여도 review flag cleanup이 canonical target segment 기준으로 동작해 stale blocker를 남기지 않는 계약
 - pending `tts_replacement` approve 뒤 `applied_recommendations` read path는 `decision_state=approved`와 `recommendation_type=tts_replacement`를 approve 응답, timeline, review snapshot에서 일관되게 유지하는 계약
+- last pending `tts_replacement` approve 뒤에도 다른 segment의 `review_required=true` truth가 남아 있으면 persisted timeline `review_flags`가 synthetic `segment_review_required` blocker를 다시 써서 output gating과 review snapshot truth를 유지하는 계약
 - approved timeline이라도 snapshot blocker 컬렉션이 비어 있는 상태에서 segment-level `review_required=true`가 남아 있으면 subtitle / preview / export를 계속 막는 output gating 계약
 - approved timeline의 stale non-bool `segment.review_required` shape는 synthetic output blocker로 오판하지 않고 canonical bool/string 값만 review-required blocker로 인정하는 계약
 - 위 segment-level `review_required` blocker는 API read path와 review snapshot에서 같은 synthetic flag로 반영돼 review 상태/출력 상태가 서로 어긋나지 않도록 유지하는 계약
@@ -490,7 +499,9 @@
 - review snapshot direct helper도 unknown / non-blocking `timeline_review_flags` shape 하나만으로 persisted approved status를 `blocked`로 다시 뒤집지 않고 canonical blocking review flag가 없으면 approved truth를 유지하는 계약
 - review snapshot direct helper도 unknown / non-blocking `timeline_pending_recommendations` shape 하나만으로 persisted approved status를 `blocked`로 다시 뒤집지 않고 canonical blocking pending recommendation이 없으면 approved truth를 유지하는 계약
 - review snapshot direct helper도 unknown / non-blocking `timeline_pending_recommendations` shape를 `pending_recommendations` surface에 blocker처럼 남기지 않고 canonical blocking pending recommendation만 surface에 유지하는 계약
+- review snapshot direct helper도 inline `recommendation_type`가 빠진 direct recommendation 입력이면 persisted recommendation row에서 유일하게 매칭되는 canonical type을 복원해 applied/pending split truth를 유지하는 계약
 - review snapshot direct helper도 unknown / non-blocking `timeline_applied_recommendations` stale entry를 canonical supported recommendation type이 아니면 applied surface에 남기지 않고 clean하게 정리하는 계약
+- review snapshot helper/store import 경로도 `videobox_core_engine.provider_trace` read 때문에 package-level eager import cycle에 걸리지 않고 direct store/timeline helper tests를 계속 수집할 수 있는 계약
 - timeline builder도 unknown / non-blocking recommendation stale entry를 canonical supported recommendation type이 아니면 applied/pending surface와 review flag flow에 반입하지 않고 clean하게 정리하는 계약
 - timeline builder의 review snapshot direct dict 입력면도 unknown / non-blocking recommendation stale entry를 canonical supported recommendation type이 아니면 applied/pending surface에 반입하지 않고 clean하게 정리하는 계약
 - timeline builder의 review snapshot direct dict 입력면도 legacy recommendation payload의 `auto_apply_allowed="true"` / `review_required="false"` shape를 pending blocker로 오판하지 않고 applied recommendation truth를 유지하는 계약
@@ -611,6 +622,28 @@
 - partial regeneration result applied recommendation default provider trace regression
   - `1 passed`
 - review snapshot persisted operator guidance default provider trace regression
+  - `1 passed`
+- review snapshot approve trimmed target narration clip segment id regression
+  - `1 passed`
+- approve trimmed review flag segment id regression
+  - `1 passed`
+- approve trimmed review flag code regression
+  - `1 passed`
+- approve trimmed recommendation id regression
+  - `1 passed`
+- approve trimmed recommendation decision key regression
+  - `1 passed`
+- approve trimmed persisted applied recommendation id regression
+  - `1 passed`
+- approve trimmed target segment id blocker cleanup regression
+  - `1 passed`
+- approve rollback raw persisted timeline regression
+  - `1 passed`
+- approve persists remaining segment review-required blocker regression
+  - `1 passed`
+- review snapshot split without inline recommendation type regression
+  - `1 passed`
+- review timeline import-cycle collection regression
   - `1 passed`
 - review snapshot helper persisted-approved pending-override status regression
   - `1 passed`

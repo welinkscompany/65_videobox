@@ -1662,8 +1662,20 @@ class LocalProjectStore:
                 and _is_store_blocking_pending_recommendation(item)
             )
         else:
+            recommendation_rows: list[dict[str, Any]] = []
+            if any(
+                isinstance(item, dict)
+                and not str(item.get("recommendation_type") or "").strip()
+                for item in recommendations or []
+            ):
+                recommendation_rows = self.list_recommendation_rows(project_id=project_id)
             normalized_recommendations = [
-                self._review_snapshot_recommendation_payload(item)
+                self._review_snapshot_recommendation_payload(
+                    self._hydrate_review_snapshot_recommendation_type(
+                        recommendation=item,
+                        recommendation_rows=recommendation_rows,
+                    )
+                )
                 for item in recommendations or []
             ]
             applied = [
@@ -1725,6 +1737,31 @@ class LocalProjectStore:
                 else "rule_based_fallback"
             )
         )
+        return payload
+
+    def _hydrate_review_snapshot_recommendation_type(
+        self,
+        *,
+        recommendation: dict[str, Any],
+        recommendation_rows: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        payload = deepcopy(recommendation)
+        if str(payload.get("recommendation_type") or "").strip():
+            return payload
+
+        matched_types = {
+            str(row.get("recommendation_type") or "").strip()
+            for row in recommendation_rows
+            if isinstance(row, dict)
+            and str(row.get("target_segment_id") or "").strip()
+            == str(payload.get("target_segment_id") or "").strip()
+            and str(row.get("selected_asset_id") or "").strip()
+            == str(payload.get("selected_asset_id") or "").strip()
+            and str(row.get("reason") or "").strip() == str(payload.get("reason") or "").strip()
+            and float(row.get("score") or 0.0) == float(payload.get("score") or 0.0)
+        }
+        if len(matched_types) == 1:
+            payload["recommendation_type"] = next(iter(matched_types))
         return payload
 
     def get_provider_trace_audit(
