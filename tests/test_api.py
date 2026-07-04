@@ -16115,6 +16115,97 @@ def test_editing_session_api_filters_unknown_type_source_pending_recommendation_
     assert before_jobs == after_jobs
 
 
+def test_editing_session_api_preserves_mixed_case_source_pending_recommendation_type_in_preflight_prediction(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(
+        name="Mixed Case Source Pending Recommendation Preflight Project"
+    )
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [
+                {
+                    "recommendation_id": "rec_stale_mixed_case_tts_type",
+                    "target_segment_id": "seg_009",
+                    "recommendation_type": " TTS_REPLACEMENT ",
+                    "selected_asset_id": "asset_tts_review_009",
+                    "score": 0.93,
+                    "reason": "Awaiting operator approval.",
+                    "auto_apply_allowed": False,
+                    "review_required": True,
+                    "payload": {},
+                    "created_at": "2026-06-29T00:00:00+00:00",
+                    "provider_trace": build_provider_trace(final_provider="rule_based_fallback"),
+                }
+            ],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Stable caption",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    before_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration/preflight",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["caption"],
+        },
+    )
+    after_jobs = client.get(f"/api/projects/{project.project_id}/jobs").json()["jobs"]
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["predicted_review_status_after_rerun"] == "blocked"
+    assert payload["prediction_reasons"] == [
+        "source timeline already has unresolved review blockers that rerun will preserve"
+    ]
+    assert before_jobs == after_jobs
+
+
 def test_editing_session_api_filters_approved_decision_state_source_pending_recommendation_from_preflight_prediction(
     tmp_path: Path,
 ) -> None:
