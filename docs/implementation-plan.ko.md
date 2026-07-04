@@ -732,6 +732,7 @@
 
 2026-07-04 최신 누적 메모:
 
+- review snapshot의 blocked persisted operator guidance 재사용도 blocker surface 기반 hidden reuse key로 좁혀, legacy no-key guidance나 다른 blocker를 기준으로 저장된 stale guidance가 현재 `review_flags`/pending blocker truth를 덮어쓰지 않게 정리했다
 - partial regeneration `music_refresh`가 whitespace stale source `segment_id`를 가진 segment도 다시 선택하도록 `local_pipeline` source-segment match를 trim 기준으로 맞췄다
 - 같은 slice에서 `timeline_builder` dict segment payload도 `segment_id`를 trim해 refreshed recommendation과 segment lookup이 서로 다른 id 기준으로 어긋나지 않게 정리했다
 - partial regeneration `overlay_refresh`도 whitespace stale existing overlay `segment_id`를 targeted full refresh 범위에서 정확히 교체하도록 overlay segment match를 trim 기준으로 맞췄다

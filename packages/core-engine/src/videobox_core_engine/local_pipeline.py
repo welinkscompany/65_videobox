@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
+import json
 import warnings
 
 from videobox_capcut_export import CapCutExportAdapter
@@ -93,6 +94,62 @@ def _normalize_runtime_cut_action(value: object) -> str:
     if cut_action not in {"keep", "remove", "trim"}:
         return "keep"
     return cut_action
+
+
+def _build_review_guidance_reuse_key(review_snapshot: dict[str, Any]) -> str | None:
+    if _canonical_runtime_review_status(review_snapshot.get("review_status")) != "blocked":
+        return None
+
+    review_flags: list[dict[str, str]] = []
+    for item in review_snapshot.get("review_flags", []):
+        if not isinstance(item, dict):
+            continue
+        review_flags.append(
+            {
+                "code": _canonical_runtime_review_flag_code(item.get("code")),
+                "segment_id": str(item.get("segment_id") or "").strip(),
+                "message": str(item.get("message") or "").strip(),
+            }
+        )
+    review_flags.sort(key=lambda item: (item["code"], item["segment_id"], item["message"]))
+
+    pending_recommendations: list[dict[str, str]] = []
+    for item in review_snapshot.get("pending_recommendations", []):
+        if not isinstance(item, dict):
+            continue
+        payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
+        pending_recommendations.append(
+            {
+                "recommendation_id": str(item.get("recommendation_id") or "").strip(),
+                "target_segment_id": str(item.get("target_segment_id") or "").strip(),
+                "recommendation_type": _canonical_runtime_recommendation_type(
+                    item.get("recommendation_type")
+                ),
+                "reason": str(item.get("reason") or "").strip(),
+                "selected_asset_id": str(item.get("selected_asset_id") or "").strip(),
+                "selected_asset_uri": str(payload.get("selected_asset_uri") or "").strip(),
+            }
+        )
+    pending_recommendations.sort(
+        key=lambda item: (
+            item["recommendation_id"],
+            item["target_segment_id"],
+            item["recommendation_type"],
+            item["reason"],
+            item["selected_asset_id"],
+            item["selected_asset_uri"],
+        )
+    )
+
+    return json.dumps(
+        {
+            "review_status": "blocked",
+            "review_flags": review_flags,
+            "pending_recommendations": pending_recommendations,
+        },
+        ensure_ascii=True,
+        sort_keys=True,
+    )
 
 
 def _is_valid_runtime_overlay(overlay: object) -> bool:
@@ -1256,6 +1313,7 @@ class LocalPipelineRunner:
         )
         snapshot["review_status"] = timeline["review_status"]
         current_review_status = _canonical_runtime_review_status(timeline["review_status"])
+        current_operator_guidance_reuse_key = _build_review_guidance_reuse_key(snapshot)
         persisted_review_status = self.store.get_review_state(
             project_id=project_id,
             timeline_id=str(timeline["timeline_id"]),
@@ -1264,7 +1322,26 @@ class LocalPipelineRunner:
             project_id=project_id,
             timeline_id=str(timeline["timeline_id"]),
         )
-        if persisted_operator_guidance is not None and current_review_status == persisted_review_status:
+        persisted_operator_guidance_reuse_key = None
+        get_operator_guidance_reuse_key = getattr(
+            self.store,
+            "get_operator_guidance_reuse_key",
+            None,
+        )
+        if callable(get_operator_guidance_reuse_key):
+            persisted_operator_guidance_reuse_key = get_operator_guidance_reuse_key(
+                project_id=project_id,
+                timeline_id=str(timeline["timeline_id"]),
+            )
+        should_reuse_persisted_guidance = (
+            persisted_operator_guidance is not None and current_review_status == persisted_review_status
+        )
+        if should_reuse_persisted_guidance and current_review_status == "blocked":
+            should_reuse_persisted_guidance = (
+                current_operator_guidance_reuse_key is not None
+                and persisted_operator_guidance_reuse_key == current_operator_guidance_reuse_key
+            )
+        if should_reuse_persisted_guidance:
             snapshot["operator_guidance"] = persisted_operator_guidance
             return snapshot
         snapshot["operator_guidance"] = self.review_guidance_builder.build(
@@ -1289,6 +1366,21 @@ class LocalPipelineRunner:
                 error_message=str(exc),
             )
             raise
+        if current_operator_guidance_reuse_key is not None:
+            save_operator_guidance_reuse_key = getattr(
+                self.store,
+                "save_operator_guidance_reuse_key",
+                None,
+            )
+            if callable(save_operator_guidance_reuse_key):
+                try:
+                    save_operator_guidance_reuse_key(
+                        project_id=project_id,
+                        timeline_id=str(timeline["timeline_id"]),
+                        reuse_key=current_operator_guidance_reuse_key,
+                    )
+                except Exception:
+                    pass
         return snapshot
 
     def get_review_snapshot_result(self, *, project_id: str, job_id: str) -> dict[str, Any]:

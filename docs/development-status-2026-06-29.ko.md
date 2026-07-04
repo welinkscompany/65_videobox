@@ -5921,3 +5921,43 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - 장기 우선순위 queue는 유지
 - 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
 - exact failing test 1개로만 다시 시작한다
+
+## 147. 2026-07-05 review snapshot legacy blocked guidance reuse closeout
+
+이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `review/output gating`에 가장 가까운 `blocked` review snapshot guidance 재사용 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/core-engine/src/videobox_core_engine/local_pipeline.py`의 `get_review_snapshot(...)`는 persisted `operator_guidance`가 있고 canonical `review_status`만 같으면 그대로 재사용하고 있어, `blocked` 상태에서 blocker surface가 달라져도 legacy guidance를 그대로 노출하고 있었다
+- strict TDD로 `test_review_snapshot_ignores_legacy_blocked_persisted_guidance_when_blocker_surface_changes` exact regression을 먼저 추가했고, 실제로 stale `"Legacy blocked guidance."`가 그대로 반환되는 RED를 확인했다
+- 최소 수정으로 blocked snapshot에 한해 canonical `review_flags`/pending blocker surface 기반 hidden reuse key를 만들고, `packages/storage-abstractions/src/videobox_storage/local_project_store.py`에 `_operator_guidance_reuse_key`를 저장해 같은 blocked 상태라도 blocker surface가 바뀌면 guidance를 다시 계산하도록 맞췄다
+- legacy blocked guidance처럼 reuse key가 없는 persisted guidance는 blocked 상태에서 더 이상 자동 재사용하지 않지만, 기존 `draft/approved` guidance 재사용 계약은 그대로 유지했다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 blocked guidance 재사용 조건 한 점만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 failed` 확인 후 `1 passed`
+- focused verification
+  - backend output-gating `24 passed`
+  - current-focused-parallel
+    - backend output-gating `24 passed`
+    - backend preflight `59 passed`
+    - frontend preflight `25 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - review snapshot blocked guidance 재사용 조건 한 점 수정이라 exact + focused evidence가 가장 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. review snapshot이 legacy blocked persisted guidance를 blocker surface가 달라진 상태에서 그대로 재사용하지 않는다
+2. blocked guidance 재사용은 같은 `review_status`뿐 아니라 같은 canonical blocker surface일 때만 허용된다
+3. legacy no-key blocked guidance는 stale blocker truth를 덮어쓰지 않고 현재 `review_flags`/pending blocker 기준 guidance를 다시 만든다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다

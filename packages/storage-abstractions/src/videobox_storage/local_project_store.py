@@ -1489,6 +1489,18 @@ class LocalProjectStore:
         operator_guidance = timeline_payload.get("operator_guidance")
         return operator_guidance if isinstance(operator_guidance, dict) else None
 
+    def get_operator_guidance_reuse_key(
+        self,
+        *,
+        project_id: str,
+        timeline_id: str,
+    ) -> str | None:
+        timeline_payload = self.get_timeline_run(project_id=project_id, timeline_id=timeline_id)
+        reuse_key = timeline_payload.get("_operator_guidance_reuse_key")
+        if not isinstance(reuse_key, str):
+            return None
+        return reuse_key or None
+
     def save_operator_guidance(
         self,
         *,
@@ -1516,6 +1528,23 @@ class LocalProjectStore:
             pass
         return operator_guidance
 
+    def save_operator_guidance_reuse_key(
+        self,
+        *,
+        project_id: str,
+        timeline_id: str,
+        reuse_key: str,
+    ) -> str:
+        file_path = self._timeline_file_path(project_id=project_id, timeline_id=timeline_id)
+        payload = json.loads(file_path.read_text(encoding="utf-8"))
+        normalized_reuse_key = str(reuse_key or "").strip()
+        if normalized_reuse_key:
+            payload["_operator_guidance_reuse_key"] = normalized_reuse_key
+        else:
+            payload.pop("_operator_guidance_reuse_key", None)
+        file_path.write_text(json.dumps(payload, indent=2, ensure_ascii=True), encoding="utf-8")
+        return normalized_reuse_key
+
     def save_provider_trace_audit_event(self, *, project_id: str, event: dict[str, Any]) -> dict[str, Any]:
         payload = dict(event)
         payload.setdefault("created_at", self._now_iso())
@@ -1539,9 +1568,10 @@ class LocalProjectStore:
     def clear_operator_guidance(self, *, project_id: str, timeline_id: str) -> None:
         file_path = self._timeline_file_path(project_id=project_id, timeline_id=timeline_id)
         payload = json.loads(file_path.read_text(encoding="utf-8"))
-        if "operator_guidance" not in payload:
+        if "operator_guidance" not in payload and "_operator_guidance_reuse_key" not in payload:
             return
         payload.pop("operator_guidance", None)
+        payload.pop("_operator_guidance_reuse_key", None)
         file_path.write_text(json.dumps(payload, indent=2, ensure_ascii=True), encoding="utf-8")
 
     def get_preview_run(self, *, project_id: str, preview_id: str) -> dict[str, Any]:

@@ -5702,6 +5702,91 @@ def test_review_snapshot_ignores_persisted_approved_guidance_when_synthetic_segm
     ]
 
 
+def test_review_snapshot_ignores_legacy_blocked_persisted_guidance_when_blocker_surface_changes(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Legacy Blocked Guidance Reuse Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 1.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "segments": [],
+            "review_flags": [
+                {
+                    "code": "tts_replacement_review_required",
+                    "segment_id": "seg_002",
+                    "message": "Review the current seg_002 blocker before output.",
+                }
+            ],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+        },
+    )
+    store.save_review_state(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        status="blocked",
+    )
+    store.save_operator_guidance(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        operator_guidance={
+            "summary": "Legacy blocked guidance.",
+            "action_items": ["Review the old seg_001 blocker before output."],
+            "provider_trace": build_provider_trace(final_provider="heuristic_fallback"),
+        },
+    )
+    timeline_job = store.create_job(
+        project_id=project.project_id,
+        job_type=JobType.TIMELINE_BUILD,
+        input_ref="segment_analysis_job_001",
+        status=JobStatus.SUCCEEDED,
+    )
+    store.update_job(
+        project_id=project.project_id,
+        job_id=timeline_job["job_id"],
+        status=JobStatus.SUCCEEDED,
+        output_ref=timeline["timeline_id"],
+    )
+
+    client = TestClient(create_app(projects_root=tmp_path))
+    review_snapshot = client.get(f"/api/projects/{project.project_id}/review-snapshots/{timeline_job['job_id']}")
+
+    assert review_snapshot.status_code == 200
+    payload = review_snapshot.json()
+    assert payload["review_status"] == "blocked"
+    assert payload["review_flags"] == [
+        {
+            "code": "tts_replacement_review_required",
+            "segment_id": "seg_002",
+            "message": "Review the current seg_002 blocker before output.",
+        }
+    ]
+    assert payload["operator_guidance"]["summary"] != "Legacy blocked guidance."
+    assert payload["operator_guidance"]["action_items"] != [
+        "Review the old seg_001 blocker before output."
+    ]
+    assert any("seg_002" in item for item in payload["operator_guidance"]["action_items"])
+
+
 def test_review_snapshot_falls_back_to_gemini_when_local_fails(
     tmp_path: Path,
     monkeypatch,
