@@ -738,6 +738,7 @@
 - partial regeneration `segment_refresh`도 whitespace stale source segment `segment_id`를 trimmed request/session id와 같은 기준으로 맞춰 caption/cut-action rerun이 정확히 적용되게 정리했다
 - partial regeneration `segment_refresh`도 stale source `cleanup_decision`을 runtime cut-action canonical 값으로 정리해 caption-only rerun에서도 invalid cut state가 그대로 남지 않게 정리했다
 - output gating / output readiness read path도 legacy `review_approvals.status=" APPROVED "` 같은 mixed-case stale shape를 canonical lowercase 승인 상태로 정리해 blocker가 없으면 preview/subtitle/export를 다시 막지 않게 정리했다
+- review recommendation approve cleanup도 legacy mixed-case `review_flags.code=" BROLL_REVIEW_REQUIRED "` 같은 stale shape를 canonical lowercase code 기준으로 지워, 마지막 pending recommendation 승인 뒤 output blocker가 잘못 남지 않게 정리했다
 - preview renderer의 `review_status` HTML surface도 legacy `" APPROVED "` 같은 mixed-case stale shape를 canonical lowercase 상태로 정리해 visible output surface가 output gating/readiness truth와 같은 기준을 유지하게 정리했다
 - output operator copy builder의 prompt `review_status` surface도 legacy `" APPROVED "` 같은 mixed-case stale shape를 canonical lowercase 상태로 정리해 preview/export guidance prompt가 output gating/readiness truth와 같은 기준을 유지하게 정리했다
 - heuristic/local review guidance도 legacy `" APPROVED "` 같은 mixed-case stale `review_status`를 canonical lowercase 승인 상태로 정리해 blocker가 없을 때 `승인 대기`가 아니라 approved output guidance truth를 유지하게 정리했다

@@ -10,6 +10,10 @@ def _canonical_recommendation_type(value: object) -> str:
     return str(value or "").strip().lower()
 
 
+def _canonical_review_flag_code(value: object) -> str:
+    return str(value or "").strip().lower()
+
+
 def extract_pending_recommendation_decision(
     *,
     timeline: dict[str, Any],
@@ -73,7 +77,7 @@ def should_keep_review_flag(
     target_segment_id: str,
     remaining_pending: list[dict[str, Any]],
 ) -> bool:
-    flag_code = str(flag.get("code") or "").strip()
+    flag_code = _canonical_review_flag_code(flag.get("code"))
     flag_segment_id = str(flag.get("segment_id") or "").strip()
     if not (
         flag_code == recommendation_flag_code
