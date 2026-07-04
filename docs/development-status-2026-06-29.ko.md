@@ -402,6 +402,45 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
 - exact failing test 1개로만 다시 시작한다
 
+## 148. 2026-07-04 output operator copy review flag code prompt closeout
+
+이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `review/output gating`과 가장 가까운 output operator copy prompt의 `review_flags.code` surface 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/core-engine/src/videobox_core_engine/output_operator_copy.py`의 `_build_prompt(...)`는 직전 slice들로 `pending_recommendations` 주요 surface는 대부분 정리됐지만 `review_flags`는 여전히 raw list 그대로 prompt에 넣고 있어, mixed-case stale `review_flags.code`가 preview/export operator guidance prompt에 그대로 노출되고 있었다
+- strict TDD로 `test_output_operator_copy_builder_canonicalizes_review_flag_code_in_prompt` exact regression을 먼저 추가했고, 실제로 prompt가 raw `'code': ' TTS_REPLACEMENT_REVIEW_REQUIRED '`를 그대로 포함하는 RED를 확인했다
+- 최소 수정으로 prompt용 `review_flags` summary를 따로 만들고 `code`만 canonical lowercase로 정리하도록 맞춰, output operator copy prompt의 review-flag-code surface가 review/output gating 쪽 canonical review-flag 기준을 유지하게 정리했다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 output operator copy prompt의 review-flag-code surface 한 점만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 failed` 확인 후 `1 passed`
+- focused verification
+  - backend output-gating `24 passed`
+  - current-focused-parallel
+    - backend output-gating `24 passed`
+    - backend preflight `59 passed`
+    - frontend preflight `25 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - output operator copy prompt review-flag-code canonicalization 한 점 수정이라 exact + focused evidence가 가장 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. output operator copy prompt가 mixed-case stale `review_flags.code`도 canonical lowercase code로 surface한다
+2. preview/export guidance prompt가 raw padded review-flag code 문자열을 그대로 노출하지 않는다
+3. output operator copy prompt의 review-flag-code surface가 review/output gating truth와 더 같은 방향을 사용한다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
 ## 147. 2026-07-04 output operator copy pending decision state prompt closeout
 
 이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `review/output gating`과 `TTS approval/output` 사이에서 가장 인접한 output operator copy prompt의 `pending_recommendations.decision_state` surface 경계 1개만 다시 닫았다.

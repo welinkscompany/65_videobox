@@ -25,6 +25,10 @@ def _canonical_decision_state(value: object) -> str:
     return str(value or "").strip().lower()
 
 
+def _canonical_review_flag_code(value: object) -> str:
+    return str(value or "").strip().lower()
+
+
 class StructuredOutputCopyRuntime(Protocol):
     def generate_structured(
         self,
@@ -179,6 +183,12 @@ class LocalFirstOutputOperatorCopyBuilder(OutputOperatorCopyBuilder):
             }
             for track in tracks
         ]
+        prompt_review_flags = []
+        for flag in review_flags:
+            prompt_flag = dict(flag)
+            if "code" in prompt_flag:
+                prompt_flag["code"] = _canonical_review_flag_code(prompt_flag.get("code"))
+            prompt_review_flags.append(prompt_flag)
         pending_summary = []
         for item in pending_recommendations:
             prompt_row = dict(item)
@@ -213,7 +223,7 @@ class LocalFirstOutputOperatorCopyBuilder(OutputOperatorCopyBuilder):
             f"Review status: {_canonical_review_status(timeline.get('review_status', 'approved'))}\n"
             f"Subtitle attached: {'yes' if subtitle_file_uri else 'no'}\n"
             f"Track summary: {track_summary}\n"
-            f"Review flags: {review_flags}\n"
+            f"Review flags: {prompt_review_flags}\n"
             f"Pending recommendations: {pending_summary}\n"
             "Return a short summary and concrete action items for the operator."
         )
