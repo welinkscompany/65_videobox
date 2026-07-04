@@ -351,6 +351,43 @@ def test_timeline_builder_review_snapshot_treats_string_false_recommendation_fie
     assert snapshot["pending_recommendations"] == []
 
 
+def test_timeline_builder_canonicalizes_mixed_case_applied_recommendation_type_surface() -> None:
+    builder = TimelineBuilder()
+
+    timeline = builder.build(
+        project_id="project_001",
+        segments=[
+            {
+                "segment_id": "seg_001",
+                "text": "Office overview.",
+                "start_sec": 0.0,
+                "end_sec": 1.0,
+                "confidence": 0.99,
+                "review_required": False,
+                "cleanup_decision": "keep",
+            }
+        ],
+        recommendations=[
+            {
+                "recommendation_id": "rec_tts_001",
+                "target_segment_id": "seg_001",
+                "recommendation_type": " TTS_REPLACEMENT ",
+                "selected_asset_id": "asset_tts_001",
+                "score": 0.91,
+                "reason": "Approved TTS replacement.",
+                "auto_apply_allowed": True,
+                "review_required": False,
+                "payload": {
+                    "selected_asset_uri": "local://projects/project_001/assets/tts_selected.wav"
+                },
+                "created_at": "2026-07-04T00:00:00+00:00",
+            }
+        ],
+    )
+
+    assert timeline.applied_recommendations[0]["recommendation_type"] == "tts_replacement"
+
+
 def test_timeline_builder_filters_unknown_applied_recommendation_from_surface() -> None:
     builder = TimelineBuilder()
 

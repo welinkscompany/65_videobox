@@ -197,6 +197,7 @@ class TimelineBuilder:
             }
         payload = dict(recommendation)
         payload["target_segment_id"] = str(payload.get("target_segment_id") or "").strip()
+        payload["recommendation_type"] = _canonical_recommendation_type(payload.get("recommendation_type"))
         payload["auto_apply_allowed"] = _normalize_boolish(payload.get("auto_apply_allowed", False))
         payload["review_required"] = _normalize_boolish(payload.get("review_required", False))
         return payload
