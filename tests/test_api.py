@@ -167,6 +167,59 @@ def test_build_targeted_segments_matches_trimmed_request_segment_ids() -> None:
     ]
 
 
+def test_partial_regeneration_helper_matches_trimmed_source_segment_ids() -> None:
+    class _FakeStore:
+        def list_segments(self, *, project_id: str) -> list[dict[str, object]]:
+            assert project_id == "project_001"
+            return [
+                {
+                    "segment_id": " seg_001 ",
+                    "text": "Source segment with padded id.",
+                    "start_sec": 0.0,
+                    "end_sec": 1.0,
+                    "confidence": 0.99,
+                    "review_required": False,
+                    "cleanup_decision": "keep",
+                }
+            ]
+
+    runner = LocalPipelineRunner(store=_FakeStore())  # type: ignore[arg-type]
+
+    segments = runner._segments_for_timeline(
+        project_id="project_001",
+        timeline={
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": "local://projects/project_001/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 1.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+
+    assert segments == [
+        {
+            "segment_id": " seg_001 ",
+            "text": "Source segment with padded id.",
+            "start_sec": 0.0,
+            "end_sec": 1.0,
+            "confidence": 0.99,
+            "review_required": False,
+            "cleanup_decision": "keep",
+        }
+    ]
+
+
 def test_recommendation_response_normalization_canonicalizes_mixed_case_decision_state() -> None:
     recommendations = _normalize_recommendations_for_response(
         [

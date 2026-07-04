@@ -1983,7 +1983,11 @@ class LocalPipelineRunner:
         timeline: dict[str, Any],
     ) -> list[dict[str, Any]]:
         all_segments = self.store.list_segments(project_id=project_id)
-        segment_lookup = {str(segment.get("segment_id")): segment for segment in all_segments}
+        segment_lookup = {
+            str(segment.get("segment_id") or "").strip(): segment
+            for segment in all_segments
+            if str(segment.get("segment_id") or "").strip()
+        }
         ordered_segment_ids: list[str] = []
         for track in timeline.get("tracks", []):
             for clip in track.get("clips", []):
