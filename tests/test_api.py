@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from videobox_api.main import create_app
+from videobox_api.main import _build_preflight_review_prediction, create_app
 from videobox_api.orchestration import LocalFirstRuntimeService
 from videobox_core_engine.local_first_runtime import LocalFirstStructuredGenerationError
 from videobox_core_engine.local_pipeline import LocalPipelineRunner
@@ -104,6 +104,27 @@ class FailingOutputOperatorCopyBuilder:
                 fallback_reasons=["local_provider_error", "gemini_unavailable"],
             ),
         )
+
+
+def test_preflight_review_prediction_ignores_string_false_targeted_segment_review_required() -> None:
+    predicted_status, reasons = _build_preflight_review_prediction(
+        source_timeline={
+            "review_flags": [],
+            "pending_recommendations": [],
+            "applied_recommendations": [],
+        },
+        targeted_segments=[
+            {
+                "segment_id": "seg_001",
+                "caption_text": "Office overview.",
+                "review_required": "false",
+            }
+        ],
+        fields=["caption"],
+    )
+
+    assert predicted_status == "draft"
+    assert reasons == []
 
 
 def test_timeline_builder_treats_string_false_recommendation_review_required_as_false() -> None:

@@ -755,7 +755,7 @@ def _build_preflight_review_prediction(
         prediction_reasons.append(
             "source timeline already has unresolved review blockers that rerun will preserve"
         )
-    if any(bool(segment.get("review_required")) for segment in targeted_segments):
+    if any(_normalize_boolish_response(segment.get("review_required", False)) for segment in targeted_segments):
         prediction_reasons.append(
             "selected segments already require operator review, so rerun output stays blocked"
         )
