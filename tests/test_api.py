@@ -1543,6 +1543,30 @@ def test_review_guidance_builder_trims_pending_recommendation_selected_asset_uri
     )
 
 
+def test_heuristic_review_guidance_builder_defaults_missing_review_flag_message() -> None:
+    builder = HeuristicReviewGuidanceBuilder()
+
+    guidance = builder.build(
+        project_id="project_001",
+        review_snapshot={
+            "review_status": "blocked",
+            "review_flags": [
+                {
+                    "code": "tts_replacement_review_required",
+                    "segment_id": "seg_001",
+                }
+            ],
+            "pending_recommendations": [],
+            "segments": [],
+        },
+    )
+
+    assert guidance["summary"] == "Review is blocked until the flagged items are resolved."
+    assert guidance["action_items"] == [
+        "Operator review required before approval or output."
+    ]
+
+
 def test_heuristic_review_guidance_builder_canonicalizes_mixed_case_approved_review_status() -> None:
     builder = HeuristicReviewGuidanceBuilder()
 

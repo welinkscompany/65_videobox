@@ -71,11 +71,14 @@ class HeuristicReviewGuidanceBuilder(ReviewGuidanceBuilder):
         review_status = _canonical_review_status(review_snapshot.get("review_status"))
 
         if review_flags or pending_recommendations:
-            action_items = [
-                str(flag.get("message", "")).strip()
-                for flag in review_flags
-                if str(flag.get("message", "")).strip()
-            ]
+            action_items: list[str] = []
+            for flag in review_flags:
+                message = str(flag.get("message", "")).strip()
+                if message:
+                    action_items.append(message)
+                    continue
+                if _canonical_review_flag_code(flag.get("code")) and str(flag.get("segment_id") or "").strip():
+                    action_items.append(_canonical_review_flag_message(flag.get("message")))
             action_items.extend(
                 str(item.get("reason", "")).strip()
                 for item in pending_recommendations
