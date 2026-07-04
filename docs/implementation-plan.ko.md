@@ -768,6 +768,7 @@
 - review guidance prompt의 `pending_recommendations.payload.selected_asset_uri` surface도 whitespace stale asset uri를 trim 기준으로 정리해 operator guidance prompt가 TTS approval/output 쪽 canonical selected asset uri 기준과 같은 방향을 유지하게 정리했다
 - output operator copy prompt의 `pending_recommendations.recommendation_type` surface도 legacy `" TTS_REPLACEMENT "` 같은 mixed-case stale type을 canonical lowercase type으로 정리해 preview/export guidance prompt가 review guidance 및 output truth와 같은 recommendation type 기준을 유지하게 정리했다
 - output operator copy prompt의 `pending_recommendations.target_segment_id` surface도 whitespace stale segment id를 trim 기준으로 정리해 preview/export guidance prompt가 review guidance 및 output truth와 같은 canonical segment id 기준을 유지하게 정리했다
+- output operator copy prompt의 `pending_recommendations.reason` surface도 whitespace stale reason을 trim 기준으로 정리해 preview/export guidance prompt가 review guidance 및 output truth와 같은 canonical recommendation reason 기준을 유지하게 정리했다
 
 단, 2026-07-03 기준 `2일 내 1차 데모 완성` 실행 레일은 위 장기 우선순위를 그대로 넓게 다 가져가지 않는다.
 즉시 실행 기준은 `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`를 따른다.

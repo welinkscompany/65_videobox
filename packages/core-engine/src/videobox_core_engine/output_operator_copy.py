@@ -184,6 +184,8 @@ class LocalFirstOutputOperatorCopyBuilder(OutputOperatorCopyBuilder):
                 )
             if "target_segment_id" in prompt_row:
                 prompt_row["target_segment_id"] = str(prompt_row.get("target_segment_id") or "").strip()
+            if "reason" in prompt_row:
+                prompt_row["reason"] = str(prompt_row.get("reason") or "").strip()
             pending_summary.append(prompt_row)
         return (
             "Write concise operator-facing output guidance for this approved video timeline.\n"
