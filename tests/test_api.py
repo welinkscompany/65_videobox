@@ -802,6 +802,30 @@ def test_preview_renderer_matches_mixed_case_narration_track_type_for_narration_
     assert "seg_001: local://projects/project_001/assets/narration_original.wav" in payload["player_html"]
 
 
+def test_preview_renderer_canonicalizes_mixed_case_track_type_surface() -> None:
+    renderer = PreviewRenderer()
+
+    payload = renderer.build_preview_payload(
+        project_id="project_001",
+        timeline={
+            "timeline_id": "timeline_001",
+            "review_status": "approved",
+            "narration_source_uri": "local://projects/project_001/assets/narration_original.wav",
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": " NARRATION ",
+                    "clips": [],
+                }
+            ],
+            "applied_recommendations": [],
+        },
+    )
+
+    assert "<strong>narration</strong>: 0 clips" in payload["player_html"]
+    assert "<strong> NARRATION </strong>" not in payload["player_html"]
+
+
 def test_output_operator_copy_builder_canonicalizes_mixed_case_review_status_in_prompt() -> None:
     builder = LocalFirstOutputOperatorCopyBuilder(runtime_service=object())
 

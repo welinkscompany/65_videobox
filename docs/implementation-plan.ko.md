@@ -751,6 +751,7 @@
 - CapCut export adapter의 broll sequential-fill grouping도 `segment_id`를 trim 기준으로 맞춰 padded/raw id가 섞인 같은 세그먼트가 하나의 window로 유지되게 정리했다
 - CapCut export adapter도 legacy `" NARRATION "` 같은 mixed-case stale `track_type`를 canonical lowercase track type으로 읽어 approved narration/TTS voiceover track을 놓치지 않게 정리했다
 - preview renderer도 legacy `" NARRATION "` 같은 mixed-case stale `track_type`를 canonical lowercase track type으로 읽어 narration sources surface가 비지 않게 정리했다
+- preview renderer의 track summary HTML surface도 legacy `" NARRATION "` 같은 mixed-case stale `track_type`를 canonical lowercase track type으로 정리해 visible output surface가 raw stale 값을 그대로 노출하지 않게 정리했다
 
 단, 2026-07-03 기준 `2일 내 1차 데모 완성` 실행 레일은 위 장기 우선순위를 그대로 넓게 다 가져가지 않는다.
 즉시 실행 기준은 `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`를 따른다.

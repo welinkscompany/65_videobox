@@ -63,7 +63,7 @@ class PreviewRenderer:
             and not _normalize_boolish(item.get("review_required"))
         }
         track_items = "".join(
-            f"<li><strong>{escape(str(track['track_type']))}</strong>: {len(track.get('clips', []))} clips</li>"
+            f"<li><strong>{escape(_canonical_track_type(track.get('track_type')))}</strong>: {len(track.get('clips', []))} clips</li>"
             for track in tracks
         )
         narration_source_items = "".join(

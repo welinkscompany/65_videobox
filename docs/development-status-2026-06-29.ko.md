@@ -509,6 +509,42 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
 - exact failing test 1개로만 다시 시작한다
 
+## 125. 2026-07-04 preview renderer mixed-case track type surface closeout
+
+이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `review/output gating`과 바로 이어지는 preview visible track summary surface 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/core-engine/src/videobox_core_engine/preview_renderer.py`는 `Track summary` HTML surface에서 `track_type`를 raw 문자열 그대로 출력하고 있어, legacy `" NARRATION "` 같은 mixed-case stale shape가 visible output surface에 그대로 노출되고 있었다
+- strict TDD로 `test_preview_renderer_canonicalizes_mixed_case_track_type_surface` exact regression을 먼저 추가했고, 실제로 preview HTML이 `<strong> NARRATION </strong>`를 그대로 노출하는 RED를 확인했다
+- 최소 수정으로 preview renderer의 track summary surface도 기존 `_canonical_track_type(...)` helper를 재사용하도록 맞춰 `strip().lower()` 기준으로 canonical lowercase type을 출력하게 정리했다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence behavior를 건드리지 않고 preview visible track-type surface 한 점만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 failed` 확인 후 `1 passed`
+- focused verification
+  - preview visible surface 인접 exact
+  - 결과: `7 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - preview renderer track-type visible surface canonicalization 한 점 수정이라 exact + preview 인접 focused evidence가 가장 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. preview renderer가 legacy mixed-case `track_type`도 canonical lowercase type으로 surface한다
+2. preview `Track summary`가 raw stale track type 문자열을 그대로 노출하지 않는다
+3. preview narration source read-path와 preview visible track summary surface가 더 같은 canonical track type 기준을 사용한다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
 ## 118. 2026-07-04 output operator copy mixed-case review status prompt closeout
 
 이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `review/output gating`과 바로 이어지는 operator copy prompt surface 경계 1개만 다시 닫았다.
