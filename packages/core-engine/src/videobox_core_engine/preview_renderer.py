@@ -107,7 +107,7 @@ class PreviewRenderer:
         clip: dict[str, Any],
         tts_segments: set[str],
     ) -> str:
-        segment_id = str(clip.get("segment_id") or "")
+        segment_id = str(clip.get("segment_id") or "").strip()
         if segment_id in tts_segments:
             return str(clip.get("asset_uri") or "")
         return str(timeline.get("narration_source_uri") or clip.get("asset_uri") or "")
