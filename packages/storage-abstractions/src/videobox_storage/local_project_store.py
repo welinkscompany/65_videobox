@@ -1733,7 +1733,7 @@ class LocalProjectStore:
         ) or build_provider_trace(
             final_provider=(
                 "heuristic_fallback"
-                if str(payload.get("recommendation_type") or "") == RecommendationType.BROLL.value
+                if str(payload.get("recommendation_type") or "").strip() == RecommendationType.BROLL.value
                 else "rule_based_fallback"
             )
         )

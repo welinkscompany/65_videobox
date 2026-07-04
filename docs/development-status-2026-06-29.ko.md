@@ -496,6 +496,27 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
 - exact failing test 1개로만 다시 시작한다
 
+## 78. 2026-07-04 review snapshot trimmed provider-trace fallback recommendation type closeout
+
+이번 후속 작업에서는 approve mutation 쪽에서 막 닫은 trimmed provider-trace fallback family를 review snapshot helper read path까지 이어, 같은 stale whitespace recommendation type 경계 1개만 다시 닫았다.
+
+- `packages/storage-abstractions/src/videobox_storage/local_project_store.py`의 `_review_snapshot_recommendation_payload(...)`는 recommendation `provider_trace`가 비어 있으면 recommendation type으로 fallback provider를 고르는데, 여기만 `recommendation_type` trim이 빠져 `" broll "` stale shape가 `rule_based_fallback`으로 잘못 내려가고 있었다
+- strict TDD로 `test_review_snapshot_uses_trimmed_broll_type_for_default_provider_trace` exact regression을 먼저 추가했고, 실제로 review snapshot `applied_recommendations[0].provider_trace.final_provider == "rule_based_fallback"` RED를 확인했다
+- 최소 수정으로 review snapshot helper fallback provider 선택도 `recommendation_type.strip()` 기준으로 비교하게 맞춰, whitespace가 섞인 persisted B-roll recommendation도 review snapshot applied recommendation에서 `heuristic_fallback` trace를 유지하게 했다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 review snapshot helper provider-trace fallback 경계만 좁게 수정했다
+
+검증:
+
+- exact regression
+  - `pytest tests/test_review_timeline.py -k "trimmed_broll_type_for_default_provider_trace"` -> `1 passed`
+- output-gating focused slice
+  - `./scripts/dev-fast-path.ps1 -Mode output-gating -BackendPattern "trimmed_broll_type_for_default_provider_trace or review_snapshot_api_approve_broll_uses_trimmed_recommendation_type_for_provider_trace_fallback or review_snapshot_api_approve_tts_replacement_matches_trimmed_recommendation_type or review_snapshot_api_approve_tts_replacement_surfaces_approved_decision_state_in_read_paths"` -> `3 passed`
+
+남은 판단:
+
+- broader verification은 이번 수정이 review snapshot helper fallback provider 비교 1줄에 국한되고 exact + focused evidence가 직접적이라 아직 재실행하지 않았다
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+
 ## 77. 2026-07-04 approve trimmed provider-trace fallback recommendation type closeout
 
 이번 후속 작업에서는 이미 닫힌 TTS approve mutation과 output gating 경계를 다시 넓히지 않고, approve mutation fallback trace 선택에 남아 있던 recommendation type trim 경계 1개만 다시 닫았다.

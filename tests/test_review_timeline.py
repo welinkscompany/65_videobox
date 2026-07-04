@@ -120,3 +120,32 @@ def test_review_snapshot_splits_applied_and_pending_recommendations(tmp_path: Pa
     assert len(snapshot["pending_recommendations"]) == 1
     assert len(snapshot["review_flags"]) == 2
     assert snapshot["timeline_id"] == "timeline_001"
+
+
+def test_review_snapshot_uses_trimmed_broll_type_for_default_provider_trace(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Review Snapshot Trimmed Trace Project")
+
+    snapshot = store.build_review_snapshot(
+        project_id=project.project_id,
+        timeline_id="timeline_001",
+        segments=[],
+        recommendations=[
+            {
+                "recommendation_id": "rec_trimmed_broll_trace",
+                "target_segment_id": "seg_001",
+                "recommendation_type": " broll ",
+                "selected_asset_id": "asset_001",
+                "score": 0.92,
+                "reason": "Trimmed B-roll type should still keep heuristic fallback.",
+                "auto_apply_allowed": True,
+                "review_required": False,
+                "payload": {"tags": ["office"]},
+            }
+        ],
+        timeline_review_flags=[],
+    )
+
+    assert snapshot["applied_recommendations"][0]["provider_trace"]["final_provider"] == "heuristic_fallback"
