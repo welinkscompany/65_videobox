@@ -961,6 +961,37 @@ def test_output_operator_copy_builder_ignores_minimal_dict_tracks_in_prompt() ->
     assert "'clip_count': 1" in prompt
 
 
+def test_output_operator_copy_builder_ignores_non_list_track_clips_in_prompt() -> None:
+    builder = LocalFirstOutputOperatorCopyBuilder(runtime_service=object())
+
+    prompt = builder._build_prompt(
+        timeline={
+            "timeline_id": "timeline_001",
+            "review_status": "approved",
+            "tracks": [
+                {
+                    "track_id": "track_stale_clips",
+                    "track_type": "narration",
+                    "clips": "stale_clip_container",
+                },
+                {
+                    "track_id": "track_001",
+                    "track_type": "narration",
+                    "clips": [{"clip_id": "clip_001"}],
+                },
+            ],
+            "review_flags": [],
+            "pending_recommendations": [],
+        },
+        output_target="preview_render",
+        subtitle_file_uri=None,
+    )
+
+    assert "'clip_count': 20" not in prompt
+    assert prompt.count("'track_type': 'narration'") == 1
+    assert "'clip_count': 1" in prompt
+
+
 def test_output_operator_copy_builder_canonicalizes_mixed_case_pending_recommendation_type_in_prompt() -> None:
     builder = LocalFirstOutputOperatorCopyBuilder(runtime_service=object())
 

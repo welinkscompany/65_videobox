@@ -202,10 +202,13 @@ class LocalFirstOutputOperatorCopyBuilder(OutputOperatorCopyBuilder):
             track_type = _canonical_track_type(track.get("track_type"))
             if not track_type:
                 continue
+            clips = track.get("clips", [])
+            if not isinstance(clips, list):
+                continue
             track_summary.append(
                 {
                     "track_type": track_type,
-                    "clip_count": len(track.get("clips", [])),
+                    "clip_count": len(clips),
                 }
             )
         prompt_review_flags = []
