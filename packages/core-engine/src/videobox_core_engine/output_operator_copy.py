@@ -201,6 +201,8 @@ class LocalFirstOutputOperatorCopyBuilder(OutputOperatorCopyBuilder):
             prompt_review_flags.append(prompt_flag)
         pending_summary = []
         for item in pending_recommendations:
+            if not isinstance(item, dict):
+                continue
             prompt_row = dict(item)
             if "recommendation_id" in prompt_row:
                 prompt_row["recommendation_id"] = str(prompt_row.get("recommendation_id") or "").strip()
