@@ -1039,6 +1039,34 @@ def test_output_operator_copy_builder_trims_pending_recommendation_id_in_prompt(
     assert "'recommendation_id': ' rec_001 '" not in prompt
 
 
+def test_output_operator_copy_builder_trims_pending_recommendation_created_at_in_prompt() -> None:
+    builder = LocalFirstOutputOperatorCopyBuilder(runtime_service=object())
+
+    prompt = builder._build_prompt(
+        timeline={
+            "timeline_id": "timeline_001",
+            "review_status": "approved",
+            "tracks": [],
+            "review_flags": [],
+            "pending_recommendations": [
+                {
+                    "recommendation_id": "rec_001",
+                    "recommendation_type": "tts_replacement",
+                    "target_segment_id": "seg_001",
+                    "selected_asset_id": "asset_tts_001",
+                    "created_at": " 2026-07-04T00:00:00+00:00 ",
+                    "reason": "Select narration asset",
+                }
+            ],
+        },
+        output_target="preview_render",
+        subtitle_file_uri=None,
+    )
+
+    assert "'created_at': '2026-07-04T00:00:00+00:00'" in prompt
+    assert "'created_at': ' 2026-07-04T00:00:00+00:00 '" not in prompt
+
+
 def test_review_guidance_builder_ignores_string_false_segment_review_required() -> None:
     builder = LocalFirstReviewGuidanceBuilder(runtime_service=object())
 

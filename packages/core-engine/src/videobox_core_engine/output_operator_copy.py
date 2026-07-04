@@ -190,6 +190,8 @@ class LocalFirstOutputOperatorCopyBuilder(OutputOperatorCopyBuilder):
                 prompt_row["reason"] = str(prompt_row.get("reason") or "").strip()
             if "selected_asset_id" in prompt_row:
                 prompt_row["selected_asset_id"] = str(prompt_row.get("selected_asset_id") or "").strip()
+            if "created_at" in prompt_row:
+                prompt_row["created_at"] = str(prompt_row.get("created_at") or "").strip()
             pending_summary.append(prompt_row)
         return (
             "Write concise operator-facing output guidance for this approved video timeline.\n"
