@@ -949,7 +949,9 @@ class LocalProjectStore:
         )
         if row is None:
             raise KeyError(f"Review state not found: {timeline_id}")
-        return dict(row)
+        payload = dict(row)
+        payload["status"] = str(payload.get("status") or "").strip().lower()
+        return payload
 
     def save_subtitle_run(
         self,

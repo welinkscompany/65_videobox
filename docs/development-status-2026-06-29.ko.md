@@ -4477,3 +4477,40 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - 장기 우선순위 queue는 유지
 - 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
 - exact failing test 1개로만 다시 시작한다
+
+## 116. 2026-07-04 output gating mixed-case review approval status closeout
+
+이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `review/output gating`에 가장 가까운 explicit approval read-path 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/core-engine/src/videobox_core_engine/local_pipeline.py`의 `_ensure_timeline_ready_for_output(...)`는 explicit approval 여부를 `store.get_review_state(...)[\"status\"] == \"approved\"`로 직접 비교하고 있는데, `packages/storage-abstractions/src/videobox_storage/local_project_store.py`의 `get_review_state(...)`는 DB의 `review_approvals.status`를 raw 문자열 그대로 반환하고 있었다
+- 그래서 review DB에 legacy `" APPROVED "` 같은 mixed-case stale status가 남아 있으면 blocker가 없어도 preview output gating이 `Timeline requires explicit approval...`로 잘못 막히고 있었다
+- strict TDD로 `test_preview_render_accepts_mixed_case_review_approval_state_without_blockers` exact regression을 먼저 추가했고, 실제로 preview render가 `400`을 반환하는 RED를 확인했다
+- 최소 수정으로 `get_review_state(...)`의 returned `status`를 `strip().lower()` 기준으로 canonicalize해, output readiness read path가 stale approval casing 때문에 subtitle/preview/export를 다시 막지 않게 정리했다
+- 이번 수정은 editing-session SSOT, review/output rules, TTS approval/output truth, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 review approval read path 한 점만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 failed` 확인 후 `1 passed`
+- focused verification
+  - explicit approval / output gating 인접 exact
+  - 결과: `4 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - review approval status read-path canonicalization 한 점 수정이라 exact + output gating 인접 evidence가 가장 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. output gating이 legacy mixed-case `review_approvals.status`도 canonical lowercase 승인 상태로 해석한다
+2. blocker가 없는 timeline은 stale approval casing 때문에 preview/subtitle/export를 다시 막지 않는다
+3. explicit approval read truth가 runtime output gating과 더 같은 canonical status 기준을 사용한다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다

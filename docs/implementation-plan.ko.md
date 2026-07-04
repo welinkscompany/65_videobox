@@ -737,6 +737,7 @@
 - partial regeneration `overlay_refresh`도 whitespace stale existing overlay `segment_id`를 targeted full refresh 범위에서 정확히 교체하도록 overlay segment match를 trim 기준으로 맞췄다
 - partial regeneration `segment_refresh`도 whitespace stale source segment `segment_id`를 trimmed request/session id와 같은 기준으로 맞춰 caption/cut-action rerun이 정확히 적용되게 정리했다
 - partial regeneration `segment_refresh`도 stale source `cleanup_decision`을 runtime cut-action canonical 값으로 정리해 caption-only rerun에서도 invalid cut state가 그대로 남지 않게 정리했다
+- output gating / output readiness read path도 legacy `review_approvals.status=" APPROVED "` 같은 mixed-case stale shape를 canonical lowercase 승인 상태로 정리해 blocker가 없으면 preview/subtitle/export를 다시 막지 않게 정리했다
 - preview renderer도 whitespace stale narration clip `segment_id`를 trimmed TTS recommendation과 같은 기준으로 맞춰 approved narration source가 preview에 정확히 반영되게 정리했다
 - preview renderer의 narration sources HTML surface도 narration clip `segment_id`를 trim 기준으로 맞춰 approved TTS preview surface가 canonical segment id를 유지하게 정리했다
 - CapCut export adapter도 whitespace stale narration clip `segment_id`를 trimmed TTS recommendation과 같은 기준으로 맞춰 approved narration source가 export에 정확히 반영되게 정리했다

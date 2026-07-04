@@ -7247,6 +7247,91 @@ def test_preview_export_and_subtitles_require_explicit_approval_even_without_blo
     assert not list((project_root / "subtitles").glob("subtitle_*.srt"))
 
 
+def test_preview_render_accepts_mixed_case_review_approval_state_without_blockers(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Mixed Case Review Approval Output Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "narration_source_uri": f"local://projects/{project.project_id}/inputs/narration/source.wav",
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 1.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+            "export_overlays": [],
+        },
+    )
+    timeline_job = store.create_job(
+        project_id=project.project_id,
+        job_type=JobType.TIMELINE_BUILD,
+        input_ref="segment_analysis_job_001",
+        status=JobStatus.SUCCEEDED,
+    )
+    store.update_job(
+        project_id=project.project_id,
+        job_id=timeline_job["job_id"],
+        status=JobStatus.SUCCEEDED,
+        output_ref=timeline["timeline_id"],
+    )
+
+    database_path = tmp_path / "projects" / project.project_id / "db" / "project.sqlite"
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute(
+            """
+            INSERT OR REPLACE INTO review_approvals (
+                timeline_id,
+                project_id,
+                status,
+                approved_at,
+                updated_at
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                timeline["timeline_id"],
+                project.project_id,
+                " APPROVED ",
+                "2026-07-04T00:00:00+00:00",
+                "2026-07-04T00:00:00+00:00",
+            ),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    client = TestClient(create_app(projects_root=tmp_path))
+    preview_response = client.post(
+        f"/api/projects/{project.project_id}/jobs/preview-render",
+        json={"timeline_job_id": timeline_job["job_id"]},
+    )
+
+    assert preview_response.status_code == 202
+    preview_result = client.get(
+        f"/api/projects/{project.project_id}/previews/{preview_response.json()['job_id']}"
+    )
+    assert preview_result.status_code == 200
+    assert preview_result.json()["status"] == "succeeded"
+
+
 def test_approved_review_state_still_blocks_outputs_when_segment_review_required_remains_without_snapshot_blockers(
     tmp_path: Path,
 ) -> None:
