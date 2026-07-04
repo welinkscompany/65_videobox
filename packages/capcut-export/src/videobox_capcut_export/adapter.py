@@ -157,7 +157,7 @@ class CapCutExportAdapter:
             segments.append(
                 {
                     "clip_id": str(clip.get("clip_id") or ""),
-                    "segment_id": str(clip.get("segment_id") or ""),
+                    "segment_id": str(clip.get("segment_id") or "").strip(),
                     "source_uri": source_uri,
                     "start_sec": start_sec,
                     "end_sec": end_sec,
