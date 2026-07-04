@@ -20,7 +20,7 @@ from videobox_core_engine.local_pipeline import LocalPipelineRunner
 from videobox_core_engine.output_operator_copy import LocalFirstOutputOperatorCopyBuilder
 from videobox_core_engine.preview_renderer import PreviewRenderer
 from videobox_core_engine.provider_trace import build_provider_trace
-from videobox_core_engine.review_guidance import LocalFirstReviewGuidanceBuilder
+from videobox_core_engine.review_guidance import HeuristicReviewGuidanceBuilder, LocalFirstReviewGuidanceBuilder
 from videobox_core_engine.settings import AutoCutConfig, LocalOpenAICompatibleRuntimeConfig
 from videobox_core_engine.timeline_builder import TimelineBuilder
 from videobox_domain_models.jobs import JobStatus, JobType
@@ -767,6 +767,25 @@ def test_review_guidance_builder_ignores_string_false_segment_review_required() 
             },
         ]
     ) == ["seg_002"]
+
+
+def test_heuristic_review_guidance_builder_canonicalizes_mixed_case_approved_review_status() -> None:
+    builder = HeuristicReviewGuidanceBuilder()
+
+    guidance = builder.build(
+        project_id="project_001",
+        review_snapshot={
+            "review_status": " APPROVED ",
+            "review_flags": [],
+            "pending_recommendations": [],
+            "segments": [],
+        },
+    )
+
+    assert guidance["summary"] == "Timeline review is approved and outputs can be generated."
+    assert guidance["action_items"] == [
+        "Generate subtitles, preview, or export from the approved timeline."
+    ]
 
 
 def test_store_save_recommendation_run_treats_string_false_review_required_as_false(

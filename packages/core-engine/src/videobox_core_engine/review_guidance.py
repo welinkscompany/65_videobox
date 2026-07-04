@@ -17,6 +17,10 @@ def _normalize_boolish(value: object) -> bool:
     return False
 
 
+def _canonical_review_status(value: object) -> str:
+    return str(value or "draft").strip().lower() or "draft"
+
+
 class StructuredReviewGuidanceRuntime(Protocol):
     def generate_structured(
         self,
@@ -51,7 +55,7 @@ class HeuristicReviewGuidanceBuilder(ReviewGuidanceBuilder):
         del project_id
         review_flags = review_snapshot.get("review_flags", [])
         pending_recommendations = review_snapshot.get("pending_recommendations", [])
-        review_status = str(review_snapshot.get("review_status") or "draft")
+        review_status = _canonical_review_status(review_snapshot.get("review_status"))
 
         if review_flags or pending_recommendations:
             action_items = [
@@ -162,7 +166,7 @@ class LocalFirstReviewGuidanceBuilder(ReviewGuidanceBuilder):
             return fallback_guidance
 
     def _build_prompt(self, *, review_snapshot: dict[str, Any]) -> str:
-        review_status = str(review_snapshot.get("review_status") or "draft")
+        review_status = _canonical_review_status(review_snapshot.get("review_status"))
         review_flags = review_snapshot.get("review_flags", [])
         pending_recommendations = review_snapshot.get("pending_recommendations", [])
         segments = review_snapshot.get("segments", [])
