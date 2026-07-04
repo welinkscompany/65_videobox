@@ -460,6 +460,56 @@ def test_store_list_recommendation_rows_treats_legacy_string_false_columns_as_fa
     assert recommendation_rows[0]["review_required"] is False
 
 
+def test_store_list_recommendation_rows_uses_trimmed_broll_type_for_default_provider_trace(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Trimmed Broll Recommendation Row Trace Project")
+    database_path = tmp_path / "projects" / project.project_id / "db" / "project.sqlite"
+
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute(
+            """
+            INSERT INTO recommendations (
+                recommendation_id,
+                project_id,
+                target_segment_id,
+                recommendation_type,
+                selected_asset_id,
+                score,
+                reason,
+                auto_apply_allowed,
+                review_required,
+                decision_state,
+                payload_json,
+                created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "rec_trimmed_broll_trace_row",
+                project.project_id,
+                "seg_001",
+                " broll ",
+                "asset_broll_001",
+                0.88,
+                "Trimmed broll row should still use heuristic fallback trace.",
+                1,
+                0,
+                "approved",
+                json.dumps({}, ensure_ascii=True),
+                "2026-07-04T00:00:00+00:00",
+            ),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    recommendation_rows = store.list_recommendation_rows(project_id=project.project_id)
+
+    assert recommendation_rows[0]["provider_trace"]["final_provider"] == "heuristic_fallback"
+
+
 def test_store_build_review_snapshot_treats_legacy_string_false_recommendation_as_approved(
     tmp_path: Path,
 ) -> None:

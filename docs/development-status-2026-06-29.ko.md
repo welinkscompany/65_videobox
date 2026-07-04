@@ -297,6 +297,48 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
 - exact failing test 1개로만 다시 시작한다
 
+## 82. 2026-07-04 recommendation row trimmed broll provider trace closeout
+
+이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `review/output gating`에 가장 가까운 recommendation row read-path의 작은 stale-shape 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/storage-abstractions/src/videobox_storage/local_project_store.py`의 `list_recommendation_rows(...)`는 persisted row의 `recommendation_type`을 raw 문자열로 비교하고 있어 whitespace가 섞인 stale `broll` row에서 missing `provider_trace` fallback을 `heuristic_fallback`이 아니라 `rule_based_fallback`으로 잘못 채우고 있었다
+- strict TDD로 `test_store_list_recommendation_rows_uses_trimmed_broll_type_for_default_provider_trace` exact regression을 먼저 추가했고, 실제로 `provider_trace.final_provider == "rule_based_fallback"` RED를 확인했다
+- 원인은 recommendation row read path의 default provider-trace 분기가 approve/review snapshot 쪽과 달리 canonical trimmed recommendation type을 재사용하지 않던 점이었다
+- 최소 수정으로 `list_recommendation_rows(...)`의 fallback provider-trace 분기도 `str(payload["recommendation_type"] or "").strip()` 기준으로 비교하도록 좁혀, stale whitespace `broll` row도 기존 review/output truth와 같은 `heuristic_fallback`을 유지하게 맞췄다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 recommendation row read-path의 fallback trace 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 passed`
+- focused verification
+  - `tests/test_api.py`
+    - `test_store_list_recommendation_rows_uses_trimmed_broll_type_for_default_provider_trace`
+    - `test_store_list_recommendation_rows_treats_legacy_string_false_columns_as_false`
+    - 결과: `2 passed`
+  - `tests/test_review_timeline.py`
+    - `test_review_snapshot_uses_trimmed_broll_type_for_default_provider_trace`
+    - 결과: `1 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - recommendation row read-path의 trimmed type comparison 한 점 수정이라 exact + 인접 read-path focused evidence가 더 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. recommendation row read path가 whitespace가 섞인 stale `broll` recommendation type도 canonical B-roll type으로 인식한다
+2. missing `provider_trace` legacy row도 downstream read path에서 `heuristic_fallback` trace를 유지한다
+3. recommendation row read truth와 approve/review snapshot provider-trace fallback truth가 같은 trim 기준을 사용한다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
 ## 38. 2026-07-04 capcut export string false tts review_required closeout
 
 이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, 방금 닫은 CapCut export trimmed type 경계와 같은 출력 family에서 `TTS approval/output`에 바로 닿는 legacy bool-shape 경계 1개를 다시 닫았다.

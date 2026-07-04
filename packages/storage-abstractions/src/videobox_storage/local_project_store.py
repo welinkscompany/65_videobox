@@ -1347,7 +1347,7 @@ class LocalProjectStore:
             payload["payload"] = self._json_object(payload.pop("payload_json"))
             payload["provider_trace"] = payload["payload"].get("provider_trace") or build_provider_trace(
                 final_provider="heuristic_fallback"
-                if payload["recommendation_type"] == RecommendationType.BROLL.value
+                if str(payload["recommendation_type"] or "").strip() == RecommendationType.BROLL.value
                 else "rule_based_fallback"
             )
             items.append(payload)
