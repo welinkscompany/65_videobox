@@ -4405,3 +4405,39 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - 장기 우선순위 queue는 유지
 - 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
 - exact failing test 1개로만 다시 시작한다
+
+## 114. 2026-07-04 partial regeneration segment refresh trimmed source segment id closeout
+
+이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `preflight contract`와 바로 이어지는 partial regeneration `segment_refresh` runtime 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/core-engine/src/videobox_core_engine/local_pipeline.py`의 `_execute_partial_regeneration_segment_refresh_step(...)`는 source segment row의 `segment_id`를 raw 문자열로 비교하고 있어 `" seg_001 "`처럼 whitespace stale source row를 trimmed request/session segment id와 매칭하지 못하고 있었다
+- strict TDD로 `test_editing_session_api_matches_trimmed_source_segment_ids_when_running_partial_regeneration` exact regression을 먼저 추가했고, 실제로 `result_payload["regenerated_segments"] == []` RED를 확인했다
+- 최소 수정으로 `segment_refresh` step의 source segment id도 `strip()` 기준으로 맞추고, regenerated timeline segment surface에도 canonical trimmed id를 다시 써 주어 caption/cut-action rerun 결과가 같은 기준을 유지하게 정리했다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 partial regeneration segment refresh의 source segment id canonicalization 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 failed` 확인 후 `1 passed`
+- focused verification
+  - partial regeneration segment-refresh 인접 exact
+  - 결과: `3 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - segment_refresh source segment-id canonicalization 한 점 수정이라 exact + runtime 인접 evidence가 가장 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. partial regeneration `segment_refresh`가 whitespace stale source segment id도 canonical trimmed id 기준으로 request/session target과 매칭한다
+2. caption/cut-action rerun의 `regenerated_segments`와 downstream timeline segment surface가 raw padded source id 때문에 비어 있거나 어긋나지 않는다
+3. partial regeneration runtime의 segment-refresh 기준이 source segment helper / session segment / downstream timeline 쪽 trimmed id 규칙과 더 가까워졌다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다

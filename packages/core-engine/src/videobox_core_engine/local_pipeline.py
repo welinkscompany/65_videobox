@@ -2219,7 +2219,7 @@ class LocalPipelineRunner:
         regenerated_segments: list[dict[str, Any]] = []
         timeline_segments: list[dict[str, Any]] = []
         for source_segment in state["timeline_segments"]:
-            segment_id = str(source_segment["segment_id"])
+            segment_id = str(source_segment["segment_id"]).strip()
             session_segment = session_segments.get(segment_id)
             caption_text = str(source_segment.get("text") or "")
             cut_action = str(source_segment.get("cleanup_decision") or "keep")
@@ -2242,6 +2242,7 @@ class LocalPipelineRunner:
             timeline_segments.append(
                 {
                     **source_segment,
+                    "segment_id": segment_id,
                     "text": caption_text,
                     "cleanup_decision": cut_action,
                 }
