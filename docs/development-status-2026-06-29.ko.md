@@ -3792,3 +3792,40 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - 장기 우선순위 queue는 유지
 - 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
 - exact failing test 1개로만 다시 시작한다
+
+## 101. 2026-07-04 partial regeneration broll refresh mixed-case applied recommendation closeout
+
+이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `TTS approval/output`에 인접한 partial regeneration runtime applied recommendation refresh 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/core-engine/src/videobox_core_engine/local_pipeline.py`의 `broll_refresh`는 source timeline의 stale applied recommendation을 지울 때 `recommendation_type`을 `strip()`만 한 채 `RecommendationType.BROLL.value`와 비교하고 있어, `" BROLL "` 같은 mixed-case stale shape를 기존 B-roll recommendation으로 인식하지 못하고 있었다
+- 그 결과 manual B-roll override로 partial regeneration을 다시 돌려도 stale applied B-roll clip이 제거되지 않고 새 manual clip과 함께 중복으로 남는 실제 계약 누수가 있었다
+- strict TDD로 `test_editing_session_api_replaces_mixed_case_stale_applied_broll_recommendation_when_running_partial_regeneration` exact regression을 먼저 추가했고, 실제로 stale clip과 manual clip이 함께 남는 RED를 확인했다
+- 최소 수정으로 `broll_refresh`와 같은 가족인 `music_refresh`의 stale recommendation 제거 비교도 `_canonical_runtime_recommendation_type(...)`를 재사용하도록 맞춰, mixed-case stale applied recommendation도 canonical lowercase type 기준으로 기존 recommendation을 교체하게 했다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 partial regeneration refresh family의 mixed-case stale applied recommendation 제거 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 failed` 확인 후 `1 passed`
+- focused verification
+  - partial regeneration applied recommendation refresh family exact
+  - 결과: `3 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - `broll_refresh`/`music_refresh`의 stale removal comparison 두 줄만 바뀐 좁은 수정이라 exact + 인접 family evidence가 가장 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. partial regeneration runtime의 `broll_refresh`가 mixed-case stale applied `recommendation_type`도 기존 B-roll recommendation으로 인식해 교체한다
+2. manual B-roll override rerun 뒤 stale B-roll clip과 새 manual clip이 동시에 남지 않는다
+3. refresh family의 stale applied recommendation 제거 기준이 TTS canonicalization 흐름과 더 가까워졌다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다

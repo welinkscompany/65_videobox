@@ -2253,7 +2253,8 @@ class LocalPipelineRunner:
             item
             for item in state["recommendations"]
             if not (
-                str(item.get("recommendation_type") or "").strip() == RecommendationType.BROLL.value
+                _canonical_runtime_recommendation_type(item.get("recommendation_type"))
+                == RecommendationType.BROLL.value
                 and str(item.get("target_segment_id") or "") in target_segment_ids
             )
         ]
@@ -2312,7 +2313,8 @@ class LocalPipelineRunner:
             item
             for item in state["recommendations"]
             if not (
-                str(item.get("recommendation_type") or "").strip() == RecommendationType.BGM.value
+                _canonical_runtime_recommendation_type(item.get("recommendation_type"))
+                == RecommendationType.BGM.value
                 and str(item.get("target_segment_id") or "") in target_segment_ids
             )
         ]
