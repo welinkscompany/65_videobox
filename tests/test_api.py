@@ -1052,6 +1052,29 @@ def test_review_guidance_builder_trims_review_flag_message_in_prompt() -> None:
     assert "'message': ' Operator review still required. '" not in prompt
 
 
+def test_review_guidance_builder_trims_pending_recommendation_reason_in_prompt() -> None:
+    builder = LocalFirstReviewGuidanceBuilder(runtime_service=object())
+
+    prompt = builder._build_prompt(
+        review_snapshot={
+            "review_status": "blocked",
+            "review_flags": [],
+            "pending_recommendations": [
+                {
+                    "recommendation_id": "rec_001",
+                    "recommendation_type": "tts_replacement",
+                    "target_segment_id": "seg_001",
+                    "reason": " Select narration asset ",
+                }
+            ],
+            "segments": [],
+        }
+    )
+
+    assert "'reason': 'Select narration asset'" in prompt
+    assert "'reason': ' Select narration asset '" not in prompt
+
+
 def test_heuristic_review_guidance_builder_canonicalizes_mixed_case_approved_review_status() -> None:
     builder = HeuristicReviewGuidanceBuilder()
 
