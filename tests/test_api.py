@@ -943,6 +943,28 @@ def test_review_guidance_builder_trims_segment_ids_needing_attention_in_prompt()
     assert "Segments needing attention: [' seg_001 ']" not in prompt
 
 
+def test_review_guidance_builder_canonicalizes_mixed_case_pending_recommendation_type_in_prompt() -> None:
+    builder = LocalFirstReviewGuidanceBuilder(runtime_service=object())
+
+    prompt = builder._build_prompt(
+        review_snapshot={
+            "review_status": "blocked",
+            "review_flags": [],
+            "pending_recommendations": [
+                {
+                    "recommendation_id": "rec_001",
+                    "recommendation_type": " TTS_REPLACEMENT ",
+                    "reason": "Select narration asset",
+                }
+            ],
+            "segments": [],
+        }
+    )
+
+    assert "'recommendation_type': 'tts_replacement'" in prompt
+    assert "'recommendation_type': ' TTS_REPLACEMENT '" not in prompt
+
+
 def test_heuristic_review_guidance_builder_canonicalizes_mixed_case_approved_review_status() -> None:
     builder = HeuristicReviewGuidanceBuilder()
 

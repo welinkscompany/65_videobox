@@ -21,6 +21,10 @@ def _canonical_review_status(value: object) -> str:
     return str(value or "draft").strip().lower() or "draft"
 
 
+def _canonical_recommendation_type(value: object) -> str:
+    return str(value or "").strip().lower()
+
+
 class StructuredReviewGuidanceRuntime(Protocol):
     def generate_structured(
         self,
@@ -177,7 +181,7 @@ class LocalFirstReviewGuidanceBuilder(ReviewGuidanceBuilder):
             f"Pending recommendation count: {len(pending_recommendations)}\n"
             f"Segments needing attention: {self._segments_needing_attention(segments)}\n"
             f"Review flags: {review_flags}\n"
-            f"Pending recommendations: {pending_recommendations}\n"
+            f"Pending recommendations: {self._prompt_pending_recommendations(pending_recommendations)}\n"
             "Return a short summary and a list of concrete next action items."
         )
 
@@ -188,3 +192,16 @@ class LocalFirstReviewGuidanceBuilder(ReviewGuidanceBuilder):
             if _normalize_boolish(segment.get("review_required"))
             and str(segment.get("segment_id") or "").strip()
         ]
+
+    def _prompt_pending_recommendations(
+        self,
+        pending_recommendations: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        prompt_rows: list[dict[str, Any]] = []
+        for item in pending_recommendations:
+            prompt_row = dict(item)
+            prompt_row["recommendation_type"] = _canonical_recommendation_type(
+                prompt_row.get("recommendation_type")
+            )
+            prompt_rows.append(prompt_row)
+        return prompt_rows

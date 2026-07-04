@@ -755,6 +755,7 @@
 - review recommendation approval mutation도 legacy `" NARRATION "` 같은 mixed-case stale `track_type`를 canonical lowercase track type으로 읽어 approved TTS narration clip 적용이 실패하지 않게 정리했다
 - output operator copy builder의 prompt `track summary` surface도 legacy `" NARRATION "` 같은 mixed-case stale `track_type`를 canonical lowercase track type으로 정리해 preview/export guidance prompt가 preview/output visible surface와 같은 기준을 유지하게 정리했다
 - review guidance prompt의 `Segments needing attention` surface도 whitespace stale `segment_id`를 trim 기준으로 정리해 operator guidance prompt가 preflight/runtime 쪽 canonical segment id 기준과 같은 방향을 유지하게 정리했다
+- review guidance prompt의 `pending_recommendations` surface도 legacy `" TTS_REPLACEMENT "` 같은 mixed-case stale `recommendation_type`를 canonical lowercase type으로 정리해 operator guidance prompt가 approved/read-path recommendation type 기준과 같은 방향을 유지하게 정리했다
 
 단, 2026-07-03 기준 `2일 내 1차 데모 완성` 실행 레일은 위 장기 우선순위를 그대로 넓게 다 가져가지 않는다.
 즉시 실행 기준은 `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`를 따른다.
