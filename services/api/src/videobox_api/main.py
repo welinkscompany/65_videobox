@@ -808,7 +808,7 @@ def _normalize_review_flags_for_response(value: object) -> list[dict[str, str]]:
     for item in value:
         if not isinstance(item, dict):
             continue
-        code = str(item.get("code") or "").strip()
+        code = str(item.get("code") or "").strip().lower()
         segment_id = str(item.get("segment_id") or "").strip()
         if not code or not segment_id:
             continue

@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 
 from videobox_api.main import (
     _build_preflight_review_prediction,
+    _normalize_review_flags_for_response,
     _normalize_recommendations_for_response,
     create_app,
 )
@@ -175,6 +176,25 @@ def test_recommendation_response_normalization_canonicalizes_mixed_case_recommen
     )
 
     assert recommendations[0]["recommendation_type"] == "tts_replacement"
+
+
+def test_review_flag_response_normalization_canonicalizes_mixed_case_code() -> None:
+    review_flags = _normalize_review_flags_for_response(
+        [
+            {
+                "code": " TTS_REPLACEMENT_REVIEW_REQUIRED ",
+                "segment_id": " seg_001 ",
+            }
+        ]
+    )
+
+    assert review_flags == [
+        {
+            "code": "tts_replacement_review_required",
+            "segment_id": "seg_001",
+            "message": "Operator review required before approval or output.",
+        }
+    ]
 
 
 def test_timeline_builder_treats_string_false_recommendation_review_required_as_false() -> None:

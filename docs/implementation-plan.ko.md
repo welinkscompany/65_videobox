@@ -493,6 +493,7 @@
 - pending `tts_replacement` approve 뒤 `applied_recommendations` read path는 `decision_state=approved`와 `recommendation_type=tts_replacement`를 approve 응답, timeline, review snapshot에서 일관되게 유지하는 계약
 - recommendation response normalization helper도 legacy/mixed-case `decision_state` shape를 raw casing 그대로 노출하지 않고 canonical lowercase surface로 정리해 approve/timeline/review snapshot read truth를 일관되게 유지하는 계약
 - recommendation response normalization helper도 legacy/mixed-case `recommendation_type` shape를 raw casing 그대로 노출하지 않고 canonical lowercase surface로 정리해 approve/timeline/review snapshot/TTS read truth를 일관되게 유지하는 계약
+- review flag response normalization helper도 legacy/mixed-case `review_flags.code` shape를 raw casing 그대로 노출하지 않고 canonical lowercase code / trimmed segment / default message surface로 정리해 timeline/review response read truth를 일관되게 유지하는 계약
 - pending recommendation approve mutation과 review/timeline read path도 legacy/mixed-case `recommendation_type` shape를 raw casing 그대로 비교하지 않고 canonical lowercase type 기준으로 applied surface / fallback provider trace / review flag cleanup truth를 일관되게 유지하는 계약
 - last pending `tts_replacement` approve 뒤에도 다른 segment의 `review_required=true` truth가 남아 있으면 persisted timeline `review_flags`가 synthetic `segment_review_required` blocker를 다시 써서 output gating과 review snapshot truth를 유지하는 계약
 - approved timeline이라도 snapshot blocker 컬렉션이 비어 있는 상태에서 segment-level `review_required=true`가 남아 있으면 subtitle / preview / export를 계속 막는 output gating 계약

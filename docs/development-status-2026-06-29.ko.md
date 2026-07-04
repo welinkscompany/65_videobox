@@ -3903,3 +3903,39 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - 장기 우선순위 queue는 유지
 - 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
 - exact failing test 1개로만 다시 시작한다
+
+## 104. 2026-07-04 API review flag response mixed-case code closeout
+
+이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `review/output gating`에 가장 가까운 API review-flag response normalization helper 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `services/api/src/videobox_api/main.py`의 `_normalize_review_flags_for_response(...)`는 `review_flags.code`를 `strip()`만 한 채 response surface로 내보내고 있어, `" TTS_REPLACEMENT_REVIEW_REQUIRED "` 같은 mixed-case stale code를 raw casing 그대로 노출하고 있었다
+- strict TDD로 `test_review_flag_response_normalization_canonicalizes_mixed_case_code` exact regression을 먼저 추가했고, 실제로 helper 반환 `review_flags[0]["code"] == "TTS_REPLACEMENT_REVIEW_REQUIRED"` RED를 확인했다
+- 최소 수정으로 response helper가 `code`를 `strip().lower()` 기준으로 canonicalize하도록 맞춰, timeline/review response 경로가 canonical lowercase review flag code를 일관되게 쓰도록 정리했다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 API review-flag response normalization helper 한 점만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 failed` 확인 후 `1 passed`
+- focused verification
+  - API response normalization helper 인접 exact
+  - 결과: `4 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - API helper의 lowercase canonicalization 한 줄 수정이라 exact + helper-adjacent focused evidence가 가장 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. API review flag response helper가 mixed-case stale `review_flags.code`를 raw casing 그대로 노출하지 않는다
+2. helper returned `review_flags`가 canonical lowercase code / trimmed segment id / default message surface를 함께 유지한다
+3. recommendation response helper와 review flag response helper가 timeline/review API normalization에서 같은 canonical surface 규칙을 사용한다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
