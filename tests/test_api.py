@@ -1099,6 +1099,30 @@ def test_review_guidance_builder_canonicalizes_pending_recommendation_decision_s
     assert "'decision_state': ' Approved '" not in prompt
 
 
+def test_review_guidance_builder_trims_pending_recommendation_selected_asset_id_in_prompt() -> None:
+    builder = LocalFirstReviewGuidanceBuilder(runtime_service=object())
+
+    prompt = builder._build_prompt(
+        review_snapshot={
+            "review_status": "blocked",
+            "review_flags": [],
+            "pending_recommendations": [
+                {
+                    "recommendation_id": "rec_001",
+                    "recommendation_type": "tts_replacement",
+                    "target_segment_id": "seg_001",
+                    "selected_asset_id": " asset_tts_001 ",
+                    "reason": "Select narration asset",
+                }
+            ],
+            "segments": [],
+        }
+    )
+
+    assert "'selected_asset_id': 'asset_tts_001'" in prompt
+    assert "'selected_asset_id': ' asset_tts_001 '" not in prompt
+
+
 def test_heuristic_review_guidance_builder_canonicalizes_mixed_case_approved_review_status() -> None:
     builder = HeuristicReviewGuidanceBuilder()
 

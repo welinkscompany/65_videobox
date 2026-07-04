@@ -762,6 +762,7 @@
 - review guidance prompt의 `review_flags.message` surface도 whitespace stale `message`를 trim 기준으로 정리해 operator guidance prompt가 API response 쪽 canonical blocker message 기준과 같은 방향을 유지하게 정리했다
 - review guidance prompt의 `pending_recommendations.reason` surface도 whitespace stale `reason`을 trim 기준으로 정리해 operator guidance prompt가 API response 쪽 canonical recommendation reason 기준과 같은 방향을 유지하게 정리했다
 - review guidance prompt의 `pending_recommendations.decision_state` surface도 legacy `" Approved "` 같은 mixed-case stale decision state를 canonical lowercase로 정리해 operator guidance prompt가 API response 쪽 canonical decision-state 기준과 같은 방향을 유지하게 정리했다
+- review guidance prompt의 `pending_recommendations.selected_asset_id` surface도 whitespace stale asset id를 trim 기준으로 정리해 operator guidance prompt가 API response 쪽 canonical selected asset id 기준과 같은 방향을 유지하게 정리했다
 
 단, 2026-07-03 기준 `2일 내 1차 데모 완성` 실행 레일은 위 장기 우선순위를 그대로 넓게 다 가져가지 않는다.
 즉시 실행 기준은 `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`를 따른다.
