@@ -847,7 +847,7 @@ def _normalize_recommendations_for_response(value: object) -> list[dict[str, obj
             {
                 "recommendation_id": recommendation_id,
                 "target_segment_id": target_segment_id,
-                "recommendation_type": str(item.get("recommendation_type") or "").strip(),
+                "recommendation_type": str(item.get("recommendation_type") or "").strip().lower(),
                 "selected_asset_id": str(item.get("selected_asset_id") or "").strip() or None,
                 "score": score,
                 "reason": str(item.get("reason") or "").strip()

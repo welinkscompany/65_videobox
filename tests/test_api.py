@@ -154,6 +154,29 @@ def test_recommendation_response_normalization_canonicalizes_mixed_case_decision
     assert recommendations[0]["decision_state"] == "approved"
 
 
+def test_recommendation_response_normalization_canonicalizes_mixed_case_recommendation_type() -> None:
+    recommendations = _normalize_recommendations_for_response(
+        [
+            {
+                "recommendation_id": "rec_001",
+                "target_segment_id": "seg_001",
+                "recommendation_type": " TTS_REPLACEMENT ",
+                "selected_asset_id": "asset_tts_001",
+                "score": 0.91,
+                "reason": "Approved TTS replacement.",
+                "auto_apply_allowed": True,
+                "review_required": False,
+                "decision_state": "approved",
+                "payload": {},
+                "created_at": "2026-07-04T00:00:00+00:00",
+                "provider_trace": build_provider_trace(final_provider="rule_based_fallback"),
+            }
+        ]
+    )
+
+    assert recommendations[0]["recommendation_type"] == "tts_replacement"
+
+
 def test_timeline_builder_treats_string_false_recommendation_review_required_as_false() -> None:
     builder = TimelineBuilder()
 
