@@ -661,6 +661,56 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 2. narration clip `asset_uri`가 mixed-case type에서도 selected TTS source를 유지한다
 3. timeline builder의 recommendation type 판정이 preview renderer / CapCut export / trimmed type canonicalization 규칙과 같은 canonical lowercase type 기준을 사용한다
 
+## 91. 2026-07-04 partial regeneration mixed-case stale tts recommendation replacement closeout
+
+이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `TTS approval/output`과 바로 이어지는 partial regeneration runtime의 mixed-case stale TTS recommendation 교체 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/core-engine/src/videobox_core_engine/local_pipeline.py`의 `_execute_partial_regeneration_tts_refresh_step(...)`는 source timeline `applied_recommendations` 정리 시 `recommendation_type`을 raw `strip()` 기준으로만 비교하고 있어, mixed-case `TTS_REPLACEMENT` stale recommendation이 남아 있으면 새 manual TTS selection이 기존 stale asset을 교체하지 못하고 있었다
+- strict TDD로 `test_editing_session_api_replaces_mixed_case_stale_applied_tts_recommendation_when_running_partial_regeneration` exact regression을 먼저 추가했고, 실제로 partial regeneration result narration clip `asset_uri`가 stale mixed-case TTS asset URI 그대로 남는 RED를 확인했다
+- 원인은 runtime `tts_refresh` stale recommendation 제거 분기가 whitespace trim까지만 하고 recommendation type casing canonicalization은 하지 않던 점이었다
+- 최소 수정으로 `tts_refresh` stale recommendation 제거 비교도 기존 runtime helper `_canonical_runtime_recommendation_type(...)`를 재사용하게 맞춰, mixed-case `TTS_REPLACEMENT` stale recommendation도 새 manual TTS selection으로 정상 교체되게 했다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 partial regeneration TTS refresh truth 경계만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 passed`
+- focused adjacency verification
+  - `py -m pytest tests/test_api.py -q -k "test_editing_session_api_replaces_trimmed_stale_applied_tts_recommendation_when_running_partial_regeneration"`
+  - 결과: `1 passed`
+  - `py -m pytest tests/test_review_timeline.py -q -k "test_timeline_builder_applies_mixed_case_tts_replacement_type_to_narration_clip"`
+  - 결과: `1 passed`
+- attempted grouped verification
+  - `py -m pytest tests/test_api.py -q -k "test_editing_session_api_replaces_mixed_case_stale_applied_tts_recommendation_when_running_partial_regeneration or test_editing_session_api_replaces_trimmed_stale_applied_tts_recommendation_when_running_partial_regeneration or test_timeline_builder_applies_mixed_case_tts_replacement_type_to_narration_clip"`
+  - 결과:
+    - mixed-case exact는 pass
+    - `_create_timeline_review_project()` setup 안의 `broll-recommendation` 응답이 `job_id`를 주지 못하는 비결정성 failure가 재발
+- helper note
+  - `./scripts/dev-fast-path.ps1 -Mode output-gating -BackendPattern "replaces_mixed_case_stale_applied_tts_recommendation_when_running_partial_regeneration or replaces_trimmed_stale_applied_tts_recommendation_when_running_partial_regeneration or timeline_builder_applies_mixed_case_tts_replacement_type_to_narration_clip"`
+  - 결과: 인접 테스트에서 같은 `_create_timeline_review_project()` setup 비결정성 failure가 재발
+  - 판단:
+    - 이번 slice의 직접 회귀라기보다 existing helper/setup instability로 봤고, exact + 인접 개별 재검증을 현재 근거로 채택했다
+- broader fast-path verification
+  - `./scripts/dev-fast-path.ps1 -Mode current-focused-parallel`
+  - 결과:
+    - backend output-gating lane와 backend preflight lane에서 같은 `_create_timeline_review_project()` / `broll-recommendation` setup failure가 재현
+    - frontend preflight `25 passed`
+  - 판단:
+    - current-focused helper는 현재 브랜치에 이미 존재하는 setup instability 때문에 이번 turn close 근거로 쓰기 어렵고, 이번 코드 변경의 직접 영향 증거는 exact + 인접 개별 재검증이 더 정확했다
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - partial regeneration runtime mixed-case TTS replacement 한 점 수정이라 exact + adjacency evidence가 직접적이다
+    - 다만 helper/setup instability는 별도 리스크로 남긴다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. partial regeneration runtime `tts_refresh`가 mixed-case `TTS_REPLACEMENT` stale recommendation도 canonical lowercase type 기준으로 제거한다
+2. partial regeneration result narration clip `asset_uri`가 stale mixed-case TTS asset 대신 새 manual TTS source를 유지한다
+3. partial regeneration runtime의 TTS recommendation type 판정이 timeline builder / preview renderer / CapCut export와 같은 canonical lowercase type 기준을 사용한다
+
 현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
 
 - 장기 우선순위 queue는 유지
