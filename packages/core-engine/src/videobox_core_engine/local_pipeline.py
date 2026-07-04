@@ -2222,7 +2222,7 @@ class LocalPipelineRunner:
             segment_id = str(source_segment["segment_id"]).strip()
             session_segment = session_segments.get(segment_id)
             caption_text = str(source_segment.get("text") or "")
-            cut_action = str(source_segment.get("cleanup_decision") or "keep")
+            cut_action = _normalize_runtime_cut_action(source_segment.get("cleanup_decision"))
             if segment_id in target_segment_ids and session_segment is not None:
                 if "caption" in target_fields:
                     caption_text = str(session_segment.get("caption_text") or caption_text)

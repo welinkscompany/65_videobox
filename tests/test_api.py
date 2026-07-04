@@ -18387,6 +18387,106 @@ def test_editing_session_api_matches_trimmed_source_segment_ids_when_running_par
     ]
 
 
+def test_editing_session_api_normalizes_invalid_source_cut_action_when_running_partial_regeneration(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(
+        name="Invalid Source Cut Action Runtime Project"
+    )
+    store.save_segment_analysis(
+        project_id=project.project_id,
+        transcript_id="transcript_001",
+        script_asset_id=None,
+        segments=[
+            {
+                "segment_id": "seg_001",
+                "text": "Original caption from stale source cut action",
+                "start_sec": 0.0,
+                "end_sec": 2.0,
+                "confidence": 0.99,
+                "review_required": False,
+                "cleanup_decision": "stale_invalid_value",
+            }
+        ],
+    )
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 2.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                }
+            ],
+            "segments": [],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Caption updated with stale source cut action",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["caption"],
+        },
+    )
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["status"] == "succeeded"
+    result_response = client.get(
+        f"/api/projects/{project.project_id}/partial-regenerations/{payload['job_id']}",
+    )
+    assert result_response.status_code == 200
+    result_payload = result_response.json()
+    assert result_payload["regenerated_segments"] == [
+        {
+            "segment_id": "seg_001",
+            "caption_text": "Caption updated with stale source cut action",
+            "cut_action": "keep",
+        }
+    ]
+
+
 def test_editing_session_api_replaces_trimmed_stale_applied_tts_recommendation_when_running_partial_regeneration(
     tmp_path: Path,
 ) -> None:
