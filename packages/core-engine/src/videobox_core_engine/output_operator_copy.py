@@ -17,6 +17,10 @@ def _canonical_track_type(value: object) -> str:
     return str(value or "").strip().lower()
 
 
+def _canonical_recommendation_type(value: object) -> str:
+    return str(value or "").strip().lower()
+
+
 class StructuredOutputCopyRuntime(Protocol):
     def generate_structured(
         self,
@@ -171,6 +175,14 @@ class LocalFirstOutputOperatorCopyBuilder(OutputOperatorCopyBuilder):
             }
             for track in tracks
         ]
+        pending_summary = []
+        for item in pending_recommendations:
+            prompt_row = dict(item)
+            if "recommendation_type" in prompt_row:
+                prompt_row["recommendation_type"] = _canonical_recommendation_type(
+                    prompt_row.get("recommendation_type")
+                )
+            pending_summary.append(prompt_row)
         return (
             "Write concise operator-facing output guidance for this approved video timeline.\n"
             f"Output target: {target_label}\n"
@@ -179,6 +191,6 @@ class LocalFirstOutputOperatorCopyBuilder(OutputOperatorCopyBuilder):
             f"Subtitle attached: {'yes' if subtitle_file_uri else 'no'}\n"
             f"Track summary: {track_summary}\n"
             f"Review flags: {review_flags}\n"
-            f"Pending recommendations: {pending_recommendations}\n"
+            f"Pending recommendations: {pending_summary}\n"
             "Return a short summary and concrete action items for the operator."
         )

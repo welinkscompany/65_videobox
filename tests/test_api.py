@@ -907,6 +907,32 @@ def test_output_operator_copy_builder_canonicalizes_mixed_case_track_type_in_pro
     assert "'track_type': ' NARRATION '" not in prompt
 
 
+def test_output_operator_copy_builder_canonicalizes_mixed_case_pending_recommendation_type_in_prompt() -> None:
+    builder = LocalFirstOutputOperatorCopyBuilder(runtime_service=object())
+
+    prompt = builder._build_prompt(
+        timeline={
+            "timeline_id": "timeline_001",
+            "review_status": "approved",
+            "tracks": [],
+            "review_flags": [],
+            "pending_recommendations": [
+                {
+                    "recommendation_id": "rec_001",
+                    "recommendation_type": " TTS_REPLACEMENT ",
+                    "target_segment_id": "seg_001",
+                    "reason": "Select narration asset",
+                }
+            ],
+        },
+        output_target="preview_render",
+        subtitle_file_uri=None,
+    )
+
+    assert "'recommendation_type': 'tts_replacement'" in prompt
+    assert "'recommendation_type': ' TTS_REPLACEMENT '" not in prompt
+
+
 def test_review_guidance_builder_ignores_string_false_segment_review_required() -> None:
     builder = LocalFirstReviewGuidanceBuilder(runtime_service=object())
 
