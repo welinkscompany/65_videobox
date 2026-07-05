@@ -60,6 +60,21 @@ def _has_canonical_pending_recommendation_identity(item: dict[str, Any]) -> bool
     )
 
 
+def _is_prompt_blocking_pending_recommendation(item: object) -> bool:
+    if not isinstance(item, dict):
+        return False
+    if not _has_canonical_pending_recommendation_identity(item):
+        return False
+    decision_state = str(item.get("decision_state") or "").strip().lower()
+    if decision_state and decision_state != "pending":
+        return False
+    if _normalize_boolish(item.get("auto_apply_allowed", False)) and not _normalize_boolish(
+        item.get("review_required", False)
+    ):
+        return False
+    return True
+
+
 def _has_canonical_review_flag_identity(item: dict[str, Any]) -> bool:
     code = _canonical_review_flag_code(item.get("code"))
     segment_id = str(item.get("segment_id") or "").strip()
@@ -106,7 +121,7 @@ class HeuristicReviewGuidanceBuilder(ReviewGuidanceBuilder):
         pending_recommendations = [
             item
             for item in review_snapshot.get("pending_recommendations", [])
-            if isinstance(item, dict) and _has_canonical_pending_recommendation_identity(item)
+            if _is_prompt_blocking_pending_recommendation(item)
         ]
         review_status = _canonical_review_status(review_snapshot.get("review_status"))
 
@@ -276,9 +291,7 @@ class LocalFirstReviewGuidanceBuilder(ReviewGuidanceBuilder):
     ) -> list[dict[str, Any]]:
         prompt_rows: list[dict[str, Any]] = []
         for item in pending_recommendations:
-            if not isinstance(item, dict):
-                continue
-            if not _has_canonical_pending_recommendation_identity(item):
+            if not _is_prompt_blocking_pending_recommendation(item):
                 continue
             prompt_row = dict(item)
             if "recommendation_id" in prompt_row:

@@ -802,6 +802,7 @@
 - review guidance prompt의 `pending_recommendations.created_at` surface도 whitespace stale created_at 값을 trim 기준으로 정리해 operator guidance prompt가 approve/output 쪽 recommendation metadata truth와 같은 방향을 유지하게 정리했다
 - review guidance prompt의 `pending_recommendations.payload.selected_asset_uri` surface도 whitespace stale asset uri를 trim 기준으로 정리해 operator guidance prompt가 TTS approval/output 쪽 canonical selected asset uri 기준과 같은 방향을 유지하게 정리했다
 - review guidance prompt의 `Pending recommendation count`도 raw stale list 길이가 아니라 filtered canonical pending recommendation surface 기준으로 계산하도록 맞춰, unknown junk recommendation이 blocker count를 부풀리지 않게 정리했다
+- heuristic/local review guidance도 `decision_state="approved"`이거나 `auto_apply_allowed=true` / `review_required=false`인 stale applied-like `pending_recommendations` entry를 실제 pending blocker처럼 취급하지 않도록 정리해, approved guidance truth가 output job/read truth와 같은 pending blocker 기준을 유지하게 정리했다
 - review guidance / output operator copy의 canonical review-flag allowlist에도 `broll_review_required`를 포함하도록 맞춰, 실제 B-roll blocker가 approved guidance로 잘못 빠지지 않게 정리했다
 - timeline summary의 `review_flag_count`도 raw stale list 길이가 아니라 canonical blocking review flag 기준으로 계산하도록 맞춰, unknown junk review flag가 persisted summary blocker count를 부풀리지 않게 정리했다
 - timeline summary의 `pending_recommendation_count`도 raw stale list 길이가 아니라 canonical blocking pending recommendation 기준으로 계산하도록 맞춰, unknown junk recommendation이 persisted summary blocker count를 부풀리지 않게 정리했다

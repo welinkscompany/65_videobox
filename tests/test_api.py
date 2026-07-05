@@ -2392,6 +2392,35 @@ def test_heuristic_review_guidance_builder_ignores_unknown_pending_recommendatio
     ]
 
 
+def test_heuristic_review_guidance_builder_ignores_approved_decision_state_pending_recommendation() -> None:
+    builder = HeuristicReviewGuidanceBuilder()
+
+    guidance = builder.build(
+        project_id="project_001",
+        review_snapshot={
+            "review_status": "approved",
+            "review_flags": [],
+            "pending_recommendations": [
+                {
+                    "recommendation_id": "rec_approved",
+                    "recommendation_type": "tts_replacement",
+                    "target_segment_id": "seg_001",
+                    "decision_state": "approved",
+                    "reason": "Already approved recommendation should not block guidance.",
+                    "auto_apply_allowed": True,
+                    "review_required": False,
+                }
+            ],
+            "segments": [],
+        },
+    )
+
+    assert guidance["summary"] == "Timeline review is approved and outputs can be generated."
+    assert guidance["action_items"] == [
+        "Generate subtitles, preview, or export from the approved timeline."
+    ]
+
+
 def test_heuristic_review_guidance_builder_canonicalizes_mixed_case_approved_review_status() -> None:
     builder = HeuristicReviewGuidanceBuilder()
 
