@@ -8177,6 +8177,8 @@ focused 검증 메모:
 - provider trace audit의 candidate lineage는 `test_provider_trace_audit_timeline_filter_include_upstream_supports_partial_regeneration_candidate` 기준으로 계속 동작했고, partial regeneration candidate timeline에서도 upstream trace chain을 잃지 않는 사실을 다시 확인했다
 - frontend/operator 관점에서도 `shows a blocked preflight warning before execution when the rerun preserves existing review blockers`와 `clears resumed candidate restore warnings when the operator changes the rerun target` 2개를 다시 확인해, blocked-warning surface와 resumed-warning cleanup이 현재 UI 기준으로 유지되는 사실을 같이 확인했다
 - provider trace audit의 failed-output / fallback 쪽에서도 `failed segment analysis`, `gemini fallback recommendation`, `missing provider_trace default`, `failed preview render`, `authoritative failed run fallback` 대표 흐름 5개를 다시 확인해, 실패 상황에서도 trace read path가 현재 SSOT에 맞는 lineage와 fallback trace를 유지하는 사실을 같이 확인했다
+- frontend/operator 관점에서 `disables preview and export controls until review blockers are cleared`와 `supports the thin editing flow with session load, regeneration preflight, and partial regeneration delta visibility`도 다시 확인해, 실제 사용 흐름에서 output gating과 thin editor progression이 현재 UI 기준으로 유지되는 사실을 확인했다
+- editing session SSOT / persistence truth 쪽에서도 `caption 저장`, `latest session 복원`, `explanation+tts mutation 저장`, `music override clear` 대표 흐름 4개를 다시 확인해, 편집 세션 저장값과 최신 세션 read path가 현재 backend 기준으로 유지되는 사실을 같이 확인했다
 - 이번 검증은 제품 코드를 더 바꾸지 않고도, 자동 baseline green 이후 실제 마감 검증에 필요한 핵심 흐름 증거를 한 번 더 좁게 확보한 단계다
 
 이번 turn의 verification은 아래와 같다.
@@ -8192,6 +8194,16 @@ focused 검증 메모:
   - `shows a blocked preflight warning before execution when the rerun preserves existing review blockers`
   - `clears resumed candidate restore warnings when the operator changes the rerun target`
   - 결과: `2 passed`
+- phase-b operator-flow frontend verification
+  - `disables preview and export controls until review blockers are cleared`
+  - `supports the thin editing flow with session load, regeneration preflight, and partial regeneration delta visibility`
+  - 결과: `2 passed`
+- phase-b editing-session persistence verification
+  - `test_editing_session_api_can_create_and_patch_caption_override`
+  - `test_editing_session_api_can_fetch_latest_session_by_updated_at`
+  - `test_editing_session_api_can_patch_explanation_and_tts_mutations`
+  - `test_editing_session_api_can_clear_music_override`
+  - 결과: `4 passed`
 - phase-b representative provider-trace failed/fallback verification
   - `test_provider_trace_audit_endpoint_includes_failed_segment_analysis_without_output_ref`
   - `test_provider_trace_audit_endpoint_includes_failed_gemini_fallback_recommendation_run`
@@ -8207,6 +8219,8 @@ focused 검증 메모:
 3. provider trace audit이 candidate timeline upstream lineage를 계속 유지한다는 시스템 검증 근거가 추가됐다
 4. blocked preflight warning과 resumed warning cleanup이 현재 frontend/operator surface 기준으로 다시 확인됐다
 5. provider trace audit failed-output / fallback read path도 현재 backend 기준으로 다시 확인됐다
+6. output gating과 thin editing flow가 현재 frontend/operator 흐름 기준으로 다시 확인됐다
+7. editing session SSOT / persistence truth가 현재 backend 저장/복원 기준으로 다시 확인됐다
 
 현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
 
