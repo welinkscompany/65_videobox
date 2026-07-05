@@ -302,8 +302,7 @@ class LocalFirstReviewGuidanceBuilder(ReviewGuidanceBuilder):
             )
             if "target_segment_id" in prompt_row:
                 prompt_row["target_segment_id"] = str(prompt_row.get("target_segment_id") or "").strip()
-            if "reason" in prompt_row:
-                prompt_row["reason"] = str(prompt_row.get("reason") or "").strip()
+            prompt_row["reason"] = _canonical_review_flag_message(prompt_row.get("reason"))
             if "decision_state" in prompt_row:
                 prompt_row["decision_state"] = str(prompt_row.get("decision_state") or "").strip().lower()
             if "selected_asset_id" in prompt_row:

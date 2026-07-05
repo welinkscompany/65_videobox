@@ -2347,7 +2347,28 @@ def test_review_guidance_builder_trims_pending_recommendation_reason_in_prompt()
     assert "'reason': ' Select narration asset '" not in prompt
 
 
-def test_review_guidance_builder_canonicalizes_pending_recommendation_decision_state_in_prompt() -> None:
+def test_review_guidance_builder_defaults_missing_pending_recommendation_reason_in_prompt() -> None:
+    builder = LocalFirstReviewGuidanceBuilder(runtime_service=object())
+
+    prompt = builder._build_prompt(
+        review_snapshot={
+            "review_status": "blocked",
+            "review_flags": [],
+            "pending_recommendations": [
+                {
+                    "recommendation_id": "rec_001",
+                    "recommendation_type": "tts_replacement",
+                    "target_segment_id": "seg_001",
+                }
+            ],
+            "segments": [],
+        }
+    )
+
+    assert "'reason': 'Operator review required before approval or output.'" in prompt
+
+
+def test_review_guidance_builder_ignores_approved_decision_state_pending_recommendation_in_prompt() -> None:
     builder = LocalFirstReviewGuidanceBuilder(runtime_service=object())
 
     prompt = builder._build_prompt(
@@ -2367,7 +2388,8 @@ def test_review_guidance_builder_canonicalizes_pending_recommendation_decision_s
         }
     )
 
-    assert "'decision_state': 'approved'" in prompt
+    assert "Pending recommendation count: 0" in prompt
+    assert "'decision_state': 'approved'" not in prompt
     assert "'decision_state': ' Approved '" not in prompt
 
 

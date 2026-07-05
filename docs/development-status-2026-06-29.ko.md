@@ -8056,3 +8056,39 @@ focused 검증 메모:
 - 장기 우선순위 queue는 유지
 - 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
 - exact failing test 1개로만 다시 시작한다
+
+## 174. 2026-07-06 review guidance prompt defaults missing pending recommendation reason closeout
+
+이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `review/output gating`과 바로 이어지는 review guidance prompt의 reason 없는 valid `pending_recommendations` surface 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/core-engine/src/videobox_core_engine/review_guidance.py`의 `_prompt_pending_recommendations(...)`는 valid pending recommendation을 prompt row로 옮길 때 `reason`이 있는 경우에만 trim했고, 비어 있거나 없는 경우에는 canonical default blocker message를 채우지 않고 있었다
+- strict TDD로 `test_review_guidance_builder_defaults_missing_pending_recommendation_reason_in_prompt` exact regression을 먼저 추가했고, 실제로 review guidance prompt의 pending recommendation row에 `reason` 필드가 빠진 RED를 확인했다
+- 최소 수정으로 review guidance prompt row가 pending recommendation의 `reason`도 `_canonical_review_flag_message(...)` 기준으로 정리하도록 맞춰, reason 없는 valid blocker도 canonical default blocker message를 surface하게 정리했다
+- focused verification 중 예전 `test_review_guidance_builder_canonicalizes_pending_recommendation_decision_state_in_prompt`가 현재 SSOT와 어긋나 있음을 같이 확인했고, 현재 계약인 applied-like approved entry non-blocking 규칙에 맞게 `test_review_guidance_builder_ignores_approved_decision_state_pending_recommendation_in_prompt`로 정리했다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 review guidance prompt의 pending-recommendation default-reason surface와 인접 stale test mismatch 한 점만 좁게 정리했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 failed` 확인 후 `1 passed`
+- focused verification
+  - review guidance prompt adjacent slice `6 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - review guidance prompt의 pending-recommendation default-reason 한 점 수정이라 exact + adjacent focused evidence가 가장 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. review guidance prompt가 reason 없는 valid `pending_recommendations`에도 canonical default blocker message를 surface한다
+2. operator guidance prompt의 pending blocker reason surface가 heuristic fallback 및 API response 쪽 default blocker 문구 기준과 더 일치하게 정렬됐다
+3. stale approved-like pending entry를 blocker처럼 싣는 예전 test expectation도 현재 SSOT에 맞게 정리됐다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
