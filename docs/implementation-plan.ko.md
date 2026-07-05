@@ -769,6 +769,7 @@
 - CapCut export adapter의 approved TTS voiceover `source_uri` surface도 whitespace stale `asset_uri`를 trim 기준으로 정리해, TTS approval/output export payload surface가 canonical selected narration uri 기준을 유지하게 맞췄다
 - CapCut export adapter의 B-roll `source_uri` surface도 whitespace stale `asset_uri`를 trim 기준으로 정리해, export payload surface가 canonical asset uri 기준을 유지하게 맞췄다
 - CapCut export adapter의 subtitle `source_uri` surface도 whitespace stale subtitle file uri를 trim 기준으로 정리해, export payload surface가 canonical subtitle uri 기준을 유지하게 맞췄다
+- CapCut export adapter의 overlay `track_name` / `overlay_type` surface도 whitespace stale overlay type을 trim 기준으로 정리해, export payload text-track surface가 canonical overlay type 기준을 유지하게 맞췄다
 - subtitle render의 timeline segment order read-path도 `track_type` 없는 stale minimal-dict `tracks` entry를 실제 subtitle source track처럼 읽지 않도록 정리해, approved subtitle output이 canonical track input만 기준으로 세그먼트 순서를 잡게 맞췄다
 - subtitle render의 timeline segment order read-path도 supported set 밖의 stale unknown `track_type`를 subtitle source track처럼 읽지 않도록 정리해, approved subtitle output이 canonical runtime track type만 기준으로 세그먼트 순서를 잡게 맞췄다
 - output operator copy prompt의 track summary도 supported set 밖의 stale unknown `track_type`를 valid runtime track summary처럼 노출하지 않도록 정리해, approved preview/export guidance가 canonical runtime track type만 기준으로 요약을 만들게 맞췄다

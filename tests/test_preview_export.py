@@ -242,6 +242,38 @@ def test_capcut_export_adapter_maps_hook_title_overlay_metadata() -> None:
     ]
 
 
+def test_capcut_export_adapter_trims_overlay_type_surface() -> None:
+    adapter = CapCutExportAdapter()
+
+    payload = adapter.build_payload(
+        project_id="project_123",
+        timeline={
+            "timeline_id": "timeline_001",
+            "tracks": [],
+            "export_overlays": [
+                {
+                    "overlay_type": " hook_title ",
+                    "text": "Start strong",
+                    "start_sec": 0.0,
+                    "end_sec": 1.5,
+                }
+            ],
+            "review_flags": [],
+        },
+    )
+
+    hook_track = next(track for track in payload["capcut_tracks"] if track["track_name"] == "hook_title")
+
+    assert hook_track["segments"] == [
+        {
+            "overlay_type": "hook_title",
+            "text": "Start strong",
+            "start_sec": 0.0,
+            "end_sec": 1.5,
+        }
+    ]
+
+
 def test_capcut_export_adapter_sequentially_fills_broll_segment_windows() -> None:
     adapter = CapCutExportAdapter()
 

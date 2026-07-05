@@ -136,7 +136,7 @@ class CapCutExportAdapter:
         if isinstance(export_overlays, list):
             overlay_segments = [
                 {
-                    "overlay_type": str(item.get("overlay_type") or ""),
+                    "overlay_type": str(item.get("overlay_type") or "").strip(),
                     "text": str(item.get("text") or ""),
                     "start_sec": float(item.get("start_sec") or 0.0),
                     "end_sec": float(item.get("end_sec") or 0.0),
