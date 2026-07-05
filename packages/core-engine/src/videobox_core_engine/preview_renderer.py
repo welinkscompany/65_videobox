@@ -24,6 +24,10 @@ def _canonical_track_type(value: object) -> str:
     return str(value or "").strip().lower()
 
 
+def _canonical_source_uri(value: object) -> str:
+    return str(value or "").strip()
+
+
 VALID_PREVIEW_TRACK_TYPES = {"narration", "broll", "bgm"}
 
 
@@ -141,5 +145,5 @@ class PreviewRenderer:
     ) -> str:
         segment_id = str(clip.get("segment_id") or "").strip()
         if segment_id in tts_segments:
-            return str(clip.get("asset_uri") or "")
-        return str(timeline.get("narration_source_uri") or clip.get("asset_uri") or "")
+            return _canonical_source_uri(clip.get("asset_uri"))
+        return _canonical_source_uri(timeline.get("narration_source_uri") or clip.get("asset_uri"))
