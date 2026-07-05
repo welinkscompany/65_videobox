@@ -6458,6 +6458,45 @@ def test_review_guidance_reuse_key_fills_default_review_flag_message() -> None:
     )
 
 
+def test_review_guidance_reuse_key_fills_default_pending_recommendation_reason() -> None:
+    canonical_snapshot = {
+        "review_status": "blocked",
+        "review_flags": [],
+        "pending_recommendations": [
+            {
+                "recommendation_id": "rec_tts_review_001",
+                "target_segment_id": "seg_001",
+                "recommendation_type": "tts_replacement",
+                "reason": "Operator review required before approval or output.",
+                "selected_asset_id": "asset_tts_001",
+                "payload": {
+                    "selected_asset_uri": "local://projects/project_001/assets/generated/asset_tts_001.wav"
+                },
+            }
+        ],
+    }
+    stale_shape_snapshot = {
+        "review_status": "blocked",
+        "review_flags": [],
+        "pending_recommendations": [
+            {
+                "recommendation_id": " rec_tts_review_001 ",
+                "target_segment_id": " seg_001 ",
+                "recommendation_type": " TTS_REPLACEMENT ",
+                "reason": "   ",
+                "selected_asset_id": " asset_tts_001 ",
+                "payload": {
+                    "selected_asset_uri": " local://projects/project_001/assets/generated/asset_tts_001.wav "
+                },
+            }
+        ],
+    }
+
+    assert _build_review_guidance_reuse_key(stale_shape_snapshot) == _build_review_guidance_reuse_key(
+        canonical_snapshot
+    )
+
+
 def test_review_snapshot_fills_default_provider_trace_for_persisted_operator_guidance(
     tmp_path: Path,
 ) -> None:

@@ -91,6 +91,11 @@ def _canonical_runtime_review_flag_message(value: object) -> str:
     return message or "Operator review required before approval or output."
 
 
+def _canonical_runtime_pending_recommendation_reason(value: object) -> str:
+    reason = str(value or "").strip()
+    return reason or "Operator review required before approval or output."
+
+
 def _canonical_runtime_review_status(value: object) -> str:
     return str(value or "draft").strip().lower() or "draft"
 
@@ -136,7 +141,7 @@ def _build_review_guidance_reuse_key(review_snapshot: dict[str, Any]) -> str | N
         target_segment_id = str(item.get("target_segment_id") or "").strip()
         recommendation_type = _canonical_runtime_recommendation_type(item.get("recommendation_type"))
         payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
-        reason = str(item.get("reason") or "").strip()
+        reason = _canonical_runtime_pending_recommendation_reason(item.get("reason"))
         selected_asset_id = str(item.get("selected_asset_id") or "").strip()
         selected_asset_uri = str(payload.get("selected_asset_uri") or "").strip()
         pending_recommendation_key = (
