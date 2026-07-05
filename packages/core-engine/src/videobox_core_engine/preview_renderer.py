@@ -43,11 +43,12 @@ class PreviewRenderer:
             clips = track.get("clips", [])
             if not isinstance(clips, list):
                 continue
+            valid_clips = [clip for clip in clips if isinstance(clip, dict)]
             promptable_tracks.append(
                 {
                     "track_id": str(track.get("track_id") or "").strip(),
                     "track_type": track_type,
-                    "clips": clips,
+                    "clips": valid_clips,
                 }
             )
         return promptable_tracks
