@@ -58,6 +58,7 @@ VALID_RESTORED_RECOMMENDATION_TYPES = {
     RecommendationType.BGM.value,
     RecommendationType.OVERLAY.value,
 }
+VALID_RUNTIME_TRACK_TYPES = {"narration", "broll", "bgm"}
 VALID_RUNTIME_BLOCKING_REVIEW_FLAG_CODES = {
     "segment_review_required",
     "broll_review_required",
@@ -2110,7 +2111,7 @@ class LocalPipelineRunner:
         for track in timeline.get("tracks", []):
             if not isinstance(track, dict):
                 continue
-            if not _canonical_runtime_track_type(track.get("track_type")):
+            if _canonical_runtime_track_type(track.get("track_type")) not in VALID_RUNTIME_TRACK_TYPES:
                 continue
             clips = track.get("clips", [])
             if not isinstance(clips, list):

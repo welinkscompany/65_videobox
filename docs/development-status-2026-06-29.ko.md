@@ -438,6 +438,43 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
 - exact failing test 1개로만 다시 시작한다
 
+## 158. 2026-07-06 subtitle segment order ignores unknown track type closeout
+
+이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `review/output gating`과 직접 맞닿은 subtitle render segment-order read path의 stale unknown `track_type` 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/core-engine/src/videobox_core_engine/local_pipeline.py`의 `_segments_for_timeline(...)`는 `track_type`이 비어 있지 않기만 하면 subtitle segment order source로 읽고 있어, supported set 밖의 legacy unknown track도 실제 subtitle source track처럼 세그먼트 순서에 끼어들 수 있었다
+- strict TDD로 `test_segments_for_timeline_ignores_unknown_track_type` exact regression을 먼저 추가했고, 실제로 stale `seg_legacy`가 canonical narration segment보다 먼저 subtitle order에 들어오는 RED를 확인했다
+- 최소 수정으로 subtitle segment-order 수집 시 supported runtime track type 집합 `narration/broll/bgm`만 읽도록 좁혀, stale unknown `track_type`는 건너뛰고 valid runtime track input만 subtitle source로 남기게 정리했다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence behavior를 건드리지 않고 subtitle render의 unknown track-type 입력 경계 한 점만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 failed` 확인 후 `1 passed`
+- focused verification
+  - backend output-gating `24 passed`
+  - backend preflight `59 passed`
+  - frontend preflight focused command exit code `0` 확인
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - subtitle segment-order read path의 unknown track-type 경계 한 점 수정이라 exact + focused evidence가 가장 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. subtitle render의 segment order가 supported set 밖의 stale unknown track에 끌려가지 않는다
+2. approved subtitle output은 canonical runtime track type만 기준으로 세그먼트 순서를 잡는다
+3. review/output gating 인접 subtitle read path가 minimal-track hardening 다음 단계까지 같은 기준으로 정렬됐다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
 ## 157. 2026-07-06 subtitle segment order ignores stale minimal track without track type closeout
 
 이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `review/output gating`과 직접 맞닿은 subtitle render segment-order read path의 stale minimal track 경계 1개만 다시 닫았다.
