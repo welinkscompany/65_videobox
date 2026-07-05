@@ -475,6 +475,43 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
 - exact failing test 1개로만 다시 시작한다
 
+## 156. 2026-07-05 capcut export adapter ignores stale non-list track clips closeout
+
+이번 후속 작업에서는 장기 queue를 유지한 채, `TTS approval/output` 인접 export consumer surface에서 preview/output prompt와 같은 stale `tracks[].clips` shape를 아직 더 넓게 믿고 있던 가장 작은 경계 1개를 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/capcut-export/src/videobox_capcut_export/adapter.py`는 mixed-case `track_type`나 trimmed TTS segment matching은 이미 정리돼 있었지만, 여전히 `tracks[].clips`를 list라고 가정하고 raw loop를 돌고 있어 stale 문자열 clip container 하나만 있어도 voiceover export track 생성 중 `AttributeError`로 깨질 수 있었다
+- strict TDD로 `test_capcut_export_adapter_ignores_non_list_track_clips_in_voiceover_surface` exact regression을 먼저 추가했고, 실제로 voiceover track 생성이 문자열 clip entry를 dict처럼 읽다가 RED로 깨지는 것을 확인했다
+- 최소 수정으로 CapCut export adapter에 promptable track filter를 추가해 non-dict track, empty canonical `track_type`, non-list `clips`를 모두 건너뛰고, export consumer가 canonical track input만 넘기도록 맞췄다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence behavior를 건드리지 않고 CapCut export consumer의 stale track read-path 한 점만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `py -m pytest tests/test_preview_export.py -q -k "test_capcut_export_adapter_ignores_non_list_track_clips_in_voiceover_surface" -vv`
+  - 결과 `1 failed` 확인 후 `1 passed`
+- focused verification
+  - `py -m pytest tests/test_preview_export.py -q -k "test_capcut_export_adapter_ignores_non_list_track_clips_in_voiceover_surface or test_capcut_export_adapter_matches_mixed_case_narration_track_type_for_voiceover_track or test_capcut_export_adapter_treats_string_false_tts_review_required_as_false_for_segment_level_narration_sources or test_capcut_export_adapter_matches_trimmed_tts_target_segment_id_for_segment_level_narration_sources or test_capcut_export_adapter_matches_trimmed_narration_clip_segment_id_for_segment_level_narration_sources" -vv`
+  - 결과 `5 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - 이번 수정은 CapCut export adapter의 stale non-list clip filtering 한 점에 한정돼 있어, exact + 같은 export consumer family focused evidence가 가장 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 491 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. CapCut export adapter는 stale non-list `tracks[].clips` 값을 voiceover/audio/video segment source처럼 순회하지 않는다
+2. CapCut export adapter는 stale non-list `tracks[].clips` 때문에 export manifest 생성 중 예외로 깨지지 않는다
+3. preview/output/export 인접 consumer surface가 stale track input을 더 비슷한 기준으로 걸러낸다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
 ## 153. 2026-07-04 heuristic review guidance default review flag message closeout
 
 이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `review/output gating`과 바로 이어지는 heuristic review guidance fallback의 message 없는 `review_flags` default-message surface 경계 1개만 다시 닫았다.

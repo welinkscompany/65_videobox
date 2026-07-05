@@ -811,6 +811,55 @@ def test_capcut_export_adapter_matches_mixed_case_narration_track_type_for_voice
     ]
 
 
+def test_capcut_export_adapter_ignores_non_list_track_clips_in_voiceover_surface() -> None:
+    adapter = CapCutExportAdapter()
+
+    payload = adapter.build_payload(
+        project_id="project_123",
+        timeline={
+            "timeline_id": "timeline_001",
+            "narration_source_uri": "local://projects/project_123/inputs/narration/source.wav",
+            "tracks": [
+                {
+                    "track_id": "track_stale",
+                    "track_type": "narration",
+                    "clips": "stale_clip_container",
+                },
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": "local://projects/project_123/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 1.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                },
+            ],
+            "review_flags": [],
+        },
+    )
+
+    voiceover_track = next(track for track in payload["capcut_tracks"] if track["track_name"] == "voiceover")
+
+    assert voiceover_track["segments"] == [
+        {
+            "clip_id": "clip_narration_001",
+            "segment_id": "seg_001",
+            "source_uri": "local://projects/project_123/inputs/narration/source.wav",
+            "start_sec": 0.0,
+            "end_sec": 1.0,
+            "duration_sec": 1.0,
+            "clip_type": "narration",
+            "recommendation_id": None,
+        }
+    ]
+
+
 class FailingPreviewRenderer:
     def build_preview_payload(self, *, project_id: str, timeline: dict[str, object]) -> dict[str, object]:
         raise RuntimeError("preview renderer exploded")

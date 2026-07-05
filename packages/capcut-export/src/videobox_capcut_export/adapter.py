@@ -20,6 +20,26 @@ def _canonical_track_type(value: object) -> str:
 
 
 class CapCutExportAdapter:
+    def _promptable_tracks(self, timeline: dict[str, Any]) -> list[dict[str, Any]]:
+        promptable_tracks: list[dict[str, Any]] = []
+        for track in timeline.get("tracks", []):
+            if not isinstance(track, dict):
+                continue
+            track_type = _canonical_track_type(track.get("track_type"))
+            if not track_type:
+                continue
+            clips = track.get("clips", [])
+            if not isinstance(clips, list):
+                continue
+            promptable_tracks.append(
+                {
+                    **track,
+                    "track_type": track_type,
+                    "clips": clips,
+                }
+            )
+        return promptable_tracks
+
     def build_payload(
         self,
         *,
@@ -27,7 +47,7 @@ class CapCutExportAdapter:
         timeline: dict[str, Any],
         subtitle_file_uri: str | None = None,
     ) -> dict[str, Any]:
-        tracks = timeline.get("tracks", [])
+        tracks = self._promptable_tracks(timeline)
         return {
             "project_id": project_id,
             "timeline_id": timeline["timeline_id"],
