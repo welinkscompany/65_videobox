@@ -312,3 +312,35 @@ def test_save_timeline_run_summary_ignores_unknown_applied_recommendation_count(
     )
 
     assert fetched["summary"]["applied_recommendation_count"] == 1
+
+
+def test_save_capcut_export_metadata_ignores_unknown_track_count(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="CapCut Export Metadata Count Project")
+
+    saved = store.save_capcut_export(
+        project_id=project.project_id,
+        timeline_id="timeline_001",
+        export_payload={
+            "adapter": "capcut",
+            "tracks": [
+                {
+                    "track_id": "track_legacy",
+                    "track_type": "legacy_overlay",
+                    "clips": [{"clip_id": "clip_legacy_001"}],
+                },
+                {
+                    "track_id": "track_001",
+                    "track_type": "narration",
+                    "clips": [{"clip_id": "clip_001"}],
+                },
+            ],
+        },
+    )
+
+    fetched = store.get_export_run(
+        project_id=project.project_id,
+        export_id=saved["export_id"],
+    )
+
+    assert fetched["metadata"]["track_count"] == 1

@@ -1153,7 +1153,11 @@ class LocalProjectStore:
             {
                 "timeline_id": timeline_id,
                 "adapter": payload.get("adapter"),
-                "track_count": len(payload.get("tracks", [])),
+                "track_count": sum(
+                    1 for track in payload.get("tracks", []) if _is_store_supported_track(track)
+                )
+                if isinstance(payload.get("tracks", []), list)
+                else 0,
             },
             ensure_ascii=True,
         )
