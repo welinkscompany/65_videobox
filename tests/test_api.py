@@ -6363,6 +6363,19 @@ def test_review_guidance_reuse_key_ignores_approved_pending_recommendation_entri
     )
 
 
+def test_review_guidance_reuse_key_returns_none_when_blocked_status_has_no_actual_blockers() -> None:
+    assert (
+        _build_review_guidance_reuse_key(
+            {
+                "review_status": "blocked",
+                "review_flags": [],
+                "pending_recommendations": [],
+            }
+        )
+        is None
+    )
+
+
 def test_review_snapshot_fills_default_provider_trace_for_persisted_operator_guidance(
     tmp_path: Path,
 ) -> None:

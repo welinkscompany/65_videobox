@@ -151,6 +151,9 @@ def _build_review_guidance_reuse_key(review_snapshot: dict[str, Any]) -> str | N
         )
     )
 
+    if not review_flags and not pending_recommendations:
+        return None
+
     return json.dumps(
         {
             "review_status": "blocked",
