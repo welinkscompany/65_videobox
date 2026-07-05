@@ -256,7 +256,7 @@ class CapCutExportAdapter:
                     {
                         "clip_id": str(clip.get("clip_id") or ""),
                         "segment_id": segment_id,
-                        "source_uri": str(clip.get("asset_uri") or ""),
+                        "source_uri": _canonical_source_uri(clip.get("asset_uri")),
                         "start_sec": float(clip.get("start_sec") or 0.0),
                         "end_sec": float(clip.get("end_sec") or 0.0),
                         "planned_start_sec": next_start_sec,
