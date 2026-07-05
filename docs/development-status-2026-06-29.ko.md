@@ -402,6 +402,41 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
 - exact failing test 1개로만 다시 시작한다
 
+## 176. 2026-07-06 capcut export adapter trims overlay text surface closeout
+
+이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, output family 안에서 CapCut export adapter의 overlay text surface 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/capcut-export/src/videobox_capcut_export/adapter.py`는 `export_overlays[].text`를 필터링할 때만 trim 가능 여부를 보고, 실제 segment payload `text`에는 raw 문자열을 그대로 남기고 있어, whitespace가 섞인 stale overlay copy가 export payload의 visible text-track surface에 그대로 노출되고 있었다
+- strict TDD로 `test_capcut_export_adapter_trims_overlay_text_surface` exact regression을 먼저 추가했고, 실제로 overlay segment `text`가 `" Start strong "`처럼 padded/raw 문자열로 남는 RED를 확인했다
+- 최소 수정으로 CapCut export adapter의 overlay text surface도 `strip()` 기준으로 정리해 내보내도록 맞춰, export payload text-track surface가 canonical overlay copy 기준을 유지하게 정리했다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 CapCut export adapter의 overlay text surface 한 점만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 failed` 확인 후 `1 passed`
+- focused verification
+  - backend output-gating `24 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - CapCut export adapter의 overlay text surface 한 점 수정이라 exact + output-gating focused evidence가 가장 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. CapCut export payload의 overlay copy surface가 whitespace stale text도 canonical trimmed text로 노출한다
+2. export payload의 narration/B-roll/subtitle/overlay type/overlay text surface가 같은 trim 기준으로 더 정렬됐다
+3. 실제 overlay 내용은 맞는데 export payload copy만 raw stale 문자열로 보이던 경로가 줄었다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
 ## 175. 2026-07-06 capcut export adapter trims overlay type surface closeout
 
 이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, output family 안에서 CapCut export adapter의 overlay type surface 경계 1개만 다시 닫았다.
