@@ -1815,6 +1815,43 @@ def test_output_operator_copy_builder_ignores_minimal_dict_pending_recommendatio
     assert "'reason': 'Select narration asset'" in prompt
 
 
+def test_output_operator_copy_builder_ignores_approved_decision_state_pending_recommendations_in_prompt() -> None:
+    builder = LocalFirstOutputOperatorCopyBuilder(runtime_service=object())
+
+    prompt = builder._build_prompt(
+        timeline={
+            "timeline_id": "timeline_001",
+            "review_status": "approved",
+            "tracks": [],
+            "review_flags": [],
+            "pending_recommendations": [
+                {
+                    "recommendation_id": "rec_approved",
+                    "recommendation_type": "tts_replacement",
+                    "target_segment_id": "seg_001",
+                    "decision_state": "approved",
+                    "reason": "Already approved and should not appear as pending.",
+                    "auto_apply_allowed": True,
+                    "review_required": False,
+                },
+                {
+                    "recommendation_id": "rec_pending",
+                    "recommendation_type": "tts_replacement",
+                    "target_segment_id": "seg_002",
+                    "decision_state": "pending",
+                    "reason": "Select narration asset",
+                },
+            ],
+        },
+        output_target="preview_render",
+        subtitle_file_uri=None,
+    )
+
+    assert "rec_approved" not in prompt
+    assert "'recommendation_id': 'rec_pending'" in prompt
+    assert "'decision_state': 'pending'" in prompt
+
+
 def test_review_guidance_builder_ignores_string_false_segment_review_required() -> None:
     builder = LocalFirstReviewGuidanceBuilder(runtime_service=object())
 

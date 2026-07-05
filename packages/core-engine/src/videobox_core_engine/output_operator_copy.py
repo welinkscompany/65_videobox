@@ -35,6 +35,12 @@ def _canonical_review_flag_message(value: object) -> str:
     return message or "Operator review required before approval or output."
 
 
+def _normalize_boolish(value: object) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() not in {"", "0", "false", "no", "off"}
+    return bool(value)
+
+
 VALID_PROMPT_RECOMMENDATION_TYPES = {
     RecommendationType.TTS_REPLACEMENT.value,
     RecommendationType.BROLL.value,
@@ -48,6 +54,26 @@ VALID_PROMPT_REVIEW_FLAG_CODES = {
     "broll_review_required",
     "tts_replacement_review_required",
 }
+
+
+def _is_prompt_blocking_pending_recommendation(item: object) -> bool:
+    if not isinstance(item, dict):
+        return False
+    recommendation_id = str(item.get("recommendation_id") or "").strip()
+    target_segment_id = str(item.get("target_segment_id") or "").strip()
+    recommendation_type = _canonical_recommendation_type(item.get("recommendation_type"))
+    decision_state = _canonical_decision_state(item.get("decision_state"))
+    if decision_state and decision_state != "pending":
+        return False
+    if _normalize_boolish(item.get("auto_apply_allowed", False)) and not _normalize_boolish(
+        item.get("review_required", False)
+    ):
+        return False
+    return bool(
+        recommendation_id
+        and target_segment_id
+        and recommendation_type in VALID_PROMPT_RECOMMENDATION_TYPES
+    )
 
 
 class StructuredOutputCopyRuntime(Protocol):
@@ -228,21 +254,12 @@ class LocalFirstOutputOperatorCopyBuilder(OutputOperatorCopyBuilder):
             prompt_review_flags.append(prompt_flag)
         pending_summary = []
         for item in pending_recommendations:
-            if not isinstance(item, dict):
-                continue
-            recommendation_id = str(item.get("recommendation_id") or "").strip()
-            target_segment_id = str(item.get("target_segment_id") or "").strip()
-            recommendation_type = _canonical_recommendation_type(item.get("recommendation_type"))
-            if (
-                not recommendation_id
-                or not target_segment_id
-                or recommendation_type not in VALID_PROMPT_RECOMMENDATION_TYPES
-            ):
+            if not _is_prompt_blocking_pending_recommendation(item):
                 continue
             prompt_row = dict(item)
-            prompt_row["recommendation_id"] = recommendation_id
-            prompt_row["recommendation_type"] = recommendation_type
-            prompt_row["target_segment_id"] = target_segment_id
+            prompt_row["recommendation_id"] = str(prompt_row.get("recommendation_id") or "").strip()
+            prompt_row["recommendation_type"] = _canonical_recommendation_type(prompt_row.get("recommendation_type"))
+            prompt_row["target_segment_id"] = str(prompt_row.get("target_segment_id") or "").strip()
             if "reason" in prompt_row:
                 prompt_row["reason"] = str(prompt_row.get("reason") or "").strip()
             if "selected_asset_id" in prompt_row:
