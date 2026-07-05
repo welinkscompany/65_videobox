@@ -224,3 +224,38 @@ def test_save_timeline_run_summary_ignores_unknown_pending_recommendation_count(
     )
 
     assert fetched["summary"]["pending_recommendation_count"] == 0
+
+
+def test_save_timeline_run_summary_ignores_unknown_track_count(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Timeline Track Summary Count Project")
+
+    saved = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "version": "v001",
+            "tracks": [
+                {
+                    "track_id": "track_legacy",
+                    "track_type": "legacy_overlay",
+                    "clips": [{"clip_id": "clip_legacy_001"}],
+                },
+                {
+                    "track_id": "track_001",
+                    "track_type": "narration",
+                    "clips": [{"clip_id": "clip_001"}],
+                },
+            ],
+            "review_flags": [],
+            "pending_recommendations": [],
+            "applied_recommendations": [],
+        },
+    )
+
+    fetched = store.get_timeline_run(
+        project_id=project.project_id,
+        timeline_id=saved["timeline_id"],
+    )
+
+    assert fetched["summary"]["track_count"] == 1

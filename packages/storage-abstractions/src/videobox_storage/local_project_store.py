@@ -32,11 +32,16 @@ def _canonical_review_flag_code(value: object) -> str:
     return str(value or "").strip().lower()
 
 
+def _canonical_track_type(value: object) -> str:
+    return str(value or "").strip().lower()
+
+
 VALID_STORE_BLOCKING_REVIEW_FLAG_CODES = {
     "segment_review_required",
     "broll_review_required",
     "tts_replacement_review_required",
 }
+VALID_STORE_TRACK_TYPES = {"narration", "broll", "bgm"}
 VALID_STORE_BLOCKING_RECOMMENDATION_TYPES = {
     RecommendationType.TTS_REPLACEMENT.value,
     RecommendationType.BROLL.value,
@@ -49,6 +54,12 @@ def _is_store_supported_recommendation_type(item: object) -> bool:
     if not isinstance(item, dict):
         return False
     return _canonical_recommendation_type(item.get("recommendation_type")) in VALID_STORE_BLOCKING_RECOMMENDATION_TYPES
+
+
+def _is_store_supported_track(item: object) -> bool:
+    if not isinstance(item, dict):
+        return False
+    return _canonical_track_type(item.get("track_type")) in VALID_STORE_TRACK_TYPES
 
 
 def _is_store_blocking_review_flag(flag: object) -> bool:
@@ -109,11 +120,14 @@ def _normalize_review_flag_payloads(value: object) -> list[dict[str, str]]:
 
 
 def _timeline_summary_json(payload: dict[str, Any]) -> str:
+    tracks = payload.get("tracks", [])
     review_flags = payload.get("review_flags", [])
     pending_recommendations = payload.get("pending_recommendations", [])
     return json.dumps(
         {
-            "track_count": len(payload.get("tracks", [])),
+            "track_count": sum(1 for track in tracks if _is_store_supported_track(track))
+            if isinstance(tracks, list)
+            else 0,
             "review_flag_count": sum(
                 1 for flag in review_flags if _is_store_blocking_review_flag(flag)
             )
