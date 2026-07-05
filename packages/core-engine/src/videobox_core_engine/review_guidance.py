@@ -5,6 +5,9 @@ from typing import Any, Protocol
 
 from videobox_core_engine.gemini_runtime import GeminiStructuredGenerationError
 from videobox_core_engine.local_first_runtime import LocalFirstStructuredGenerationError
+from videobox_core_engine.prompt_pending_recommendation import (
+    normalize_prompt_pending_recommendation_row,
+)
 from videobox_core_engine.provider_trace import build_provider_trace, response_provider_trace, with_final_provider
 from videobox_domain_models.recommendations import RecommendationType
 from videobox_provider_interfaces.llm import LLMProviderError, LLMTaskType
@@ -23,6 +26,10 @@ def _canonical_review_status(value: object) -> str:
 
 
 def _canonical_recommendation_type(value: object) -> str:
+    return str(value or "").strip().lower()
+
+
+def _canonical_decision_state(value: object) -> str:
     return str(value or "").strip().lower()
 
 
@@ -65,7 +72,7 @@ def _is_prompt_blocking_pending_recommendation(item: object) -> bool:
         return False
     if not _has_canonical_pending_recommendation_identity(item):
         return False
-    decision_state = str(item.get("decision_state") or "").strip().lower()
+    decision_state = _canonical_decision_state(item.get("decision_state"))
     if decision_state and decision_state != "pending":
         return False
     if _normalize_boolish(item.get("auto_apply_allowed", False)) and not _normalize_boolish(
@@ -73,32 +80,6 @@ def _is_prompt_blocking_pending_recommendation(item: object) -> bool:
     ):
         return False
     return True
-
-
-def _normalize_prompt_pending_recommendation_row(item: dict[str, Any]) -> dict[str, Any]:
-    prompt_row = dict(item)
-    if "recommendation_id" in prompt_row:
-        prompt_row["recommendation_id"] = str(prompt_row.get("recommendation_id") or "").strip()
-    prompt_row["recommendation_type"] = _canonical_recommendation_type(
-        prompt_row.get("recommendation_type")
-    )
-    if "target_segment_id" in prompt_row:
-        prompt_row["target_segment_id"] = str(prompt_row.get("target_segment_id") or "").strip()
-    prompt_row["reason"] = _canonical_review_flag_message(prompt_row.get("reason"))
-    if "decision_state" in prompt_row:
-        prompt_row["decision_state"] = str(prompt_row.get("decision_state") or "").strip().lower()
-    if "selected_asset_id" in prompt_row:
-        prompt_row["selected_asset_id"] = str(prompt_row.get("selected_asset_id") or "").strip()
-    if "created_at" in prompt_row:
-        prompt_row["created_at"] = str(prompt_row.get("created_at") or "").strip()
-    payload = prompt_row.get("payload")
-    if isinstance(payload, dict) and "selected_asset_uri" in payload:
-        normalized_payload = dict(payload)
-        normalized_payload["selected_asset_uri"] = str(
-            normalized_payload.get("selected_asset_uri") or ""
-        ).strip()
-        prompt_row["payload"] = normalized_payload
-    return prompt_row
 
 
 def _has_canonical_review_flag_identity(item: dict[str, Any]) -> bool:
@@ -320,5 +301,12 @@ class LocalFirstReviewGuidanceBuilder(ReviewGuidanceBuilder):
         for item in pending_recommendations:
             if not _is_prompt_blocking_pending_recommendation(item):
                 continue
-            prompt_rows.append(_normalize_prompt_pending_recommendation_row(item))
+            prompt_rows.append(
+                normalize_prompt_pending_recommendation_row(
+                    item,
+                    canonical_recommendation_type=_canonical_recommendation_type,
+                    canonical_reason=_canonical_review_flag_message,
+                    canonical_decision_state=_canonical_decision_state,
+                )
+            )
         return prompt_rows

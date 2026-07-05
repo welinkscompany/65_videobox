@@ -5,6 +5,9 @@ from typing import Any, Protocol
 
 from videobox_core_engine.gemini_runtime import GeminiStructuredGenerationError
 from videobox_core_engine.local_first_runtime import LocalFirstStructuredGenerationError
+from videobox_core_engine.prompt_pending_recommendation import (
+    normalize_prompt_pending_recommendation_row,
+)
 from videobox_core_engine.provider_trace import build_provider_trace, response_provider_trace, with_final_provider
 from videobox_domain_models.recommendations import RecommendationType
 from videobox_provider_interfaces.llm import LLMProviderError, LLMTaskType
@@ -80,28 +83,6 @@ def _is_prompt_blocking_pending_recommendation(item: object) -> bool:
     ):
         return False
     return True
-
-
-def _normalize_prompt_pending_recommendation_row(item: dict[str, Any]) -> dict[str, Any]:
-    prompt_row = dict(item)
-    prompt_row["recommendation_id"] = str(prompt_row.get("recommendation_id") or "").strip()
-    prompt_row["recommendation_type"] = _canonical_recommendation_type(prompt_row.get("recommendation_type"))
-    prompt_row["target_segment_id"] = str(prompt_row.get("target_segment_id") or "").strip()
-    prompt_row["reason"] = _canonical_review_flag_message(prompt_row.get("reason"))
-    if "selected_asset_id" in prompt_row:
-        prompt_row["selected_asset_id"] = str(prompt_row.get("selected_asset_id") or "").strip()
-    if "created_at" in prompt_row:
-        prompt_row["created_at"] = str(prompt_row.get("created_at") or "").strip()
-    if "decision_state" in prompt_row:
-        prompt_row["decision_state"] = _canonical_decision_state(prompt_row.get("decision_state"))
-    payload = prompt_row.get("payload")
-    if isinstance(payload, dict) and "selected_asset_uri" in payload:
-        normalized_payload = dict(payload)
-        normalized_payload["selected_asset_uri"] = str(
-            normalized_payload.get("selected_asset_uri") or ""
-        ).strip()
-        prompt_row["payload"] = normalized_payload
-    return prompt_row
 
 
 class StructuredOutputCopyRuntime(Protocol):
@@ -285,7 +266,14 @@ class LocalFirstOutputOperatorCopyBuilder(OutputOperatorCopyBuilder):
         for item in pending_recommendations:
             if not _is_prompt_blocking_pending_recommendation(item):
                 continue
-            pending_summary.append(_normalize_prompt_pending_recommendation_row(item))
+            pending_summary.append(
+                normalize_prompt_pending_recommendation_row(
+                    item,
+                    canonical_recommendation_type=_canonical_recommendation_type,
+                    canonical_reason=_canonical_review_flag_message,
+                    canonical_decision_state=_canonical_decision_state,
+                )
+            )
         return (
             "Write concise operator-facing output guidance for this approved video timeline.\n"
             f"Output target: {target_label}\n"
