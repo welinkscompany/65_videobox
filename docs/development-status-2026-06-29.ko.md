@@ -8020,3 +8020,39 @@ focused 검증 메모:
 - 장기 우선순위 queue는 유지
 - 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
 - exact failing test 1개로만 다시 시작한다
+
+## 173. 2026-07-06 output operator copy prompt defaults missing pending recommendation reason closeout
+
+이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `review/output gating`과 바로 이어지는 output operator copy prompt의 reason 없는 valid `pending_recommendations` surface 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/core-engine/src/videobox_core_engine/output_operator_copy.py`의 `_build_prompt(...)`는 valid pending recommendation을 prompt row로 옮길 때 `reason`이 있는 경우에만 trim했고, 비어 있거나 없는 경우에는 canonical default blocker message를 채우지 않고 있었다
+- strict TDD로 `test_output_operator_copy_builder_defaults_missing_pending_recommendation_reason_in_prompt` exact regression을 먼저 추가했고, 실제로 prompt의 pending recommendation row에 `reason` 필드가 빠진 RED를 확인했다
+- 최소 수정으로 output operator copy prompt row가 pending recommendation의 `reason`도 `_canonical_review_flag_message(...)` 기준으로 정리하도록 맞춰, reason 없는 valid blocker도 canonical default blocker message를 surface하게 정리했다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 output operator copy prompt의 pending-recommendation default-reason 한 점만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 failed` 확인 후 `1 passed`
+- focused verification
+  - output operator copy prompt adjacent slice `5 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - output operator copy prompt의 pending-recommendation default-reason 한 점 수정이라 exact + adjacent focused evidence가 가장 직접적이다
+    - `./scripts/dev-fast-path.ps1 -Mode output-gating`와 같은 pattern의 직접 `py -m pytest` broad command는 이번 환경에서 타임아웃이 나서, 이번 범위와 직접 맞닿은 prompt normalization slice로 focused evidence를 다시 확인했다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. output operator copy prompt가 reason 없는 valid `pending_recommendations`에도 canonical default blocker message를 surface한다
+2. preview/export guidance prompt의 pending blocker reason surface가 review guidance 및 output truth와 같은 기본 blocker 문구 기준으로 정렬됐다
+3. valid blocker인데 reason만 비어 있어 prompt surface가 덜 완성된 형태로 남던 경로가 줄었다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다

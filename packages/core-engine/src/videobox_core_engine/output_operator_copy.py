@@ -261,8 +261,7 @@ class LocalFirstOutputOperatorCopyBuilder(OutputOperatorCopyBuilder):
             prompt_row["recommendation_id"] = str(prompt_row.get("recommendation_id") or "").strip()
             prompt_row["recommendation_type"] = _canonical_recommendation_type(prompt_row.get("recommendation_type"))
             prompt_row["target_segment_id"] = str(prompt_row.get("target_segment_id") or "").strip()
-            if "reason" in prompt_row:
-                prompt_row["reason"] = str(prompt_row.get("reason") or "").strip()
+            prompt_row["reason"] = _canonical_review_flag_message(prompt_row.get("reason"))
             if "selected_asset_id" in prompt_row:
                 prompt_row["selected_asset_id"] = str(prompt_row.get("selected_asset_id") or "").strip()
             if "created_at" in prompt_row:
