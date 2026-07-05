@@ -800,6 +800,7 @@
 - review recommendation approval mutation도 legacy `" NARRATION "` 같은 mixed-case stale `track_type`를 canonical lowercase track type으로 읽어 approved TTS narration clip 적용이 실패하지 않게 정리했다
 - output operator copy builder의 prompt `track summary` surface도 legacy `" NARRATION "` 같은 mixed-case stale `track_type`를 canonical lowercase track type으로 정리해 preview/export guidance prompt가 preview/output visible surface와 같은 기준을 유지하게 정리했다
 - review guidance prompt의 `Segments needing attention` surface도 whitespace stale `segment_id`를 trim 기준으로 정리해 operator guidance prompt가 preflight/runtime 쪽 canonical segment id 기준과 같은 방향을 유지하게 정리했다
+- review guidance prompt의 `Segments needing attention` 계산도 stale non-dict `segments` entry를 raw `.get(...)` 예외로 터뜨리지 않고 건너뛰어, blocked guidance prompt가 canonical segment input만 기준으로 attention surface를 만들게 정리했다
 - review guidance prompt의 `pending_recommendations` surface도 legacy `" TTS_REPLACEMENT "` 같은 mixed-case stale `recommendation_type`를 canonical lowercase type으로 정리해 operator guidance prompt가 approved/read-path recommendation type 기준과 같은 방향을 유지하게 정리했다
 - review guidance prompt의 `pending_recommendations.target_segment_id` surface도 whitespace stale `target_segment_id`를 trim 기준으로 정리해 operator guidance prompt가 TTS/output read-path의 canonical segment id 기준과 같은 방향을 유지하게 정리했다
 - review guidance prompt의 `review_flags.code` surface도 legacy `" TTS_REPLACEMENT_REVIEW_REQUIRED "` 같은 mixed-case stale code를 canonical lowercase code로 정리해 operator guidance prompt가 review/output gating의 canonical review-flag 기준과 같은 방향을 유지하게 정리했다

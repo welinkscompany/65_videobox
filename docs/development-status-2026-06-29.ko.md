@@ -404,6 +404,41 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 
 ## 177. 2026-07-06 capcut export adapter trims top-level subtitle file uri surface closeout
 
+## 179. 2026-07-06 review guidance ignores non-dict segments needing attention closeout
+
+이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `review/output gating`과 바로 이어지는 review guidance prompt의 `Segments needing attention` segment input 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/core-engine/src/videobox_core_engine/review_guidance.py`의 `_segments_needing_attention(...)`는 `segments`를 모두 dict라고 가정한 list comprehension으로 순회하고 있어, stale 문자열 같은 non-dict segment entry 하나만 있어도 blocked guidance prompt 계산이 `AttributeError`로 깨지고 있었다
+- strict TDD로 `test_review_guidance_builder_ignores_non_dict_segments_needing_attention` exact regression을 먼저 추가했고, 실제로 `["stale_segment_entry", {"segment_id": "seg_001", "review_required": True}]` 입력에서 helper가 그대로 예외로 중단되는 RED를 확인했다
+- 최소 수정으로 `_segments_needing_attention(...)`가 dict가 아닌 segment entry를 먼저 건너뛰도록만 맞춰, stale non-dict segment는 무시하고 실제 review-required segment id만 attention surface에 남게 정리했다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 review guidance segment-attention helper 한 점만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 failed` 확인 후 `1 passed`
+- focused verification
+  - backend output-gating `24 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - review guidance segment-attention helper 한 점 수정이라 exact + output-gating focused evidence가 가장 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. review guidance prompt가 stale non-dict `segments` entry 하나 때문에 attention 계산 중 예외로 중단되지 않는다
+2. `Segments needing attention` surface는 실제 review-required segment id만 남긴다
+3. review/output gating 인접 guidance surface가 review-flags/pending-recommendations 다음 단계까지 같은 stale-shape 방어 방향으로 더 정렬됐다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
 ## 178. 2026-07-06 output operator copy ignores non-dict track clips in prompt closeout
 
 이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `review/output gating`과 바로 이어지는 output operator copy prompt의 `track_summary.clip_count` 입력 경계 1개만 다시 닫았다.

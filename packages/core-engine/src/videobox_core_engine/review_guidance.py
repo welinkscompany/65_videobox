@@ -264,6 +264,7 @@ class LocalFirstReviewGuidanceBuilder(ReviewGuidanceBuilder):
         return [
             str(segment.get("segment_id") or "").strip()
             for segment in segments
+            if isinstance(segment, dict)
             if _normalize_boolish(segment.get("review_required"))
             and str(segment.get("segment_id") or "").strip()
         ]

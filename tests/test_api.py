@@ -1972,6 +1972,20 @@ def test_review_guidance_builder_ignores_string_false_segment_review_required() 
     ) == ["seg_002"]
 
 
+def test_review_guidance_builder_ignores_non_dict_segments_needing_attention() -> None:
+    builder = LocalFirstReviewGuidanceBuilder(runtime_service=object())
+
+    assert builder._segments_needing_attention(
+        [
+            "stale_segment_entry",
+            {
+                "segment_id": "seg_001",
+                "review_required": True,
+            },
+        ]
+    ) == ["seg_001"]
+
+
 def test_review_guidance_builder_trims_segment_ids_needing_attention_in_prompt() -> None:
     builder = LocalFirstReviewGuidanceBuilder(runtime_service=object())
 
