@@ -730,6 +730,11 @@
 4. 그 다음 `local_pipeline`의 partial regeneration / output 경로를 최소 단위로 점진 정리
 5. thin editor 범위에서 아직 직접 검증이 약한 남은 고위험 경로를 보강
 
+정리 마감 실행 기준:
+
+- 남은 안정화 slice와 전체 마감 작업의 분리 계획은 `docs/superpowers/plans/2026-07-05-finish-stabilization-and-closeout-plan.ko.md`를 따른다
+- 즉, 지금은 작은 stale-shape 안정화 slice를 먼저 더 닫고, 그 뒤에 전체 동작 검증/QA/시스템 검증/문서 최신화/정리 리팩터링/찌꺼기 파일 정리 순서로 넘어간다
+
 2026-07-04 최신 누적 메모:
 
 - output operator copy prompt도 non-list stale `tracks[].clips` 값을 실제 clip count처럼 세지 않고 건너뛰어, approved preview/export 경로가 valid track summary prompt surface만 유지하도록 정리했다

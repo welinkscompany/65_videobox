@@ -659,6 +659,41 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
 - exact failing test 1개로만 다시 시작한다
 
+## 166. 2026-07-05 finish stabilization and closeout plan alignment
+
+이번 turn에서는 새 runtime 경계를 구현하지 않고, 현재 브랜치의 남은 안정화 작업과 최종 마감 작업을 분리한 실행 계획을 SSOT에 고정했다.
+
+이번에 정리한 핵심은 아래와 같다.
+
+- 현재 브랜치는 대형 기능 추가 단계가 아니라 `작은 stale-shape 안정화 -> 전체 검증/QA/정리` 순서가 맞다는 점을 다시 고정했다
+- 이를 위해 `docs/superpowers/plans/2026-07-05-finish-stabilization-and-closeout-plan.ko.md`를 추가해, 페이즈 A 안정화와 페이즈 B/C 마감 작업의 순서, 종료 조건, 검증 범위를 문서화했다
+- `docs/implementation-plan.ko.md`의 `## 13. 다음 실제 작업`에도 위 계획 문서를 공식 참조로 연결해, 다음 turn부터 다시 설명하지 않고 바로 그 계획 기준으로 이어갈 수 있게 맞췄다
+
+이번 turn의 verification은 아래와 같다.
+
+- `git status --short --branch`
+- `git log -5 --oneline`
+- SSOT 재확인
+  - `docs/implementation-plan.ko.md`
+  - `docs/development-status-2026-06-29.ko.md`
+  - `docs/development-fast-path.ko.md`
+- closeout / plan 정합성 확인
+  - `docs/session-context-2026-07-05-output-operator-copy-ignore-stale-non-list-track-clips-closeout.ko.md`
+  - `docs/session-context-2026-07-05-preview-renderer-ignore-stale-non-list-track-clips-closeout.ko.md`
+  - `docs/session-context-2026-07-05-review-guidance-ignore-stale-minimal-review-flag-entry-closeout.ko.md`
+
+이 갱신으로 아래 범위는 현재 기준 정리됐다.
+
+1. 남은 안정화 작업과 최종 마감 작업의 순서가 문서로 고정됨
+2. 다음 turn부터는 `작은 안정화 slice 계속 진행`과 `전체 마감 검증 페이즈 전환`의 기준이 분명해짐
+3. 전체 QA/시스템 검증/문서 정리/리팩터링/찌꺼기 정리 작업이 언제 들어가야 하는지 SSOT 기준이 생김
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 페이즈 A 기준으로 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 가까운 exact regression 1개를 다시 고른다
+- 작은 stale-shape 안정화 slice를 더 닫는다
+- 그다음 전체 검증/QA/정리 페이즈로 넘어갈 시점을 판단한다
+
 ## 160. 2026-07-05 pending recommendation decision extraction ignores stale non-dict entries closeout
 
 이번 후속 작업에서는 장기 queue를 유지한 채, `TTS approval/output` 인접 approval decision extraction read-path에서 stale non-dict `pending_recommendations` shape를 그대로 믿고 있던 가장 작은 경계 1개를 다시 닫았다.
