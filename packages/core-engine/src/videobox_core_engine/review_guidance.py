@@ -44,6 +44,7 @@ VALID_PROMPT_RECOMMENDATION_TYPES = {
 
 VALID_PROMPT_REVIEW_FLAG_CODES = {
     "segment_review_required",
+    "broll_review_required",
     "tts_replacement_review_required",
 }
 

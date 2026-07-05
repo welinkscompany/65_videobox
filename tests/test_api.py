@@ -2304,6 +2304,31 @@ def test_heuristic_review_guidance_builder_defaults_missing_pending_recommendati
     ]
 
 
+def test_heuristic_review_guidance_builder_treats_broll_review_required_as_blocking() -> None:
+    builder = HeuristicReviewGuidanceBuilder()
+
+    guidance = builder.build(
+        project_id="project_001",
+        review_snapshot={
+            "review_status": "approved",
+            "review_flags": [
+                {
+                    "code": "broll_review_required",
+                    "segment_id": "seg_001",
+                    "message": "Review the B-roll pick before approval.",
+                }
+            ],
+            "pending_recommendations": [],
+            "segments": [],
+        },
+    )
+
+    assert guidance["summary"] == "Review is blocked until the flagged items are resolved."
+    assert guidance["action_items"] == [
+        "Review the B-roll pick before approval."
+    ]
+
+
 def test_heuristic_review_guidance_builder_ignores_unknown_pending_recommendation_type() -> None:
     builder = HeuristicReviewGuidanceBuilder()
 
