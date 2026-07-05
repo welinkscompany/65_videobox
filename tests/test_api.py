@@ -19869,6 +19869,75 @@ def test_editing_session_api_ignores_stale_minimal_dict_source_pending_recommend
     assert result_payload["timeline"]["review_flags"] == []
 
 
+def test_editing_session_api_ignores_non_dict_session_segments_in_partial_regeneration_fallback(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Runtime Fallback Session Segments Project")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": ["stale_clip_entry"],
+                }
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+            "export_overlays": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                "stale_segment_entry",
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Stable caption",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [],
+                    "music_override": None,
+                    "tts_replacement": None,
+                },
+            ],
+            "history": [],
+        },
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["caption"],
+        },
+    )
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["status"] == "succeeded"
+    result_response = client.get(
+        f"/api/projects/{project.project_id}/partial-regenerations/{payload['job_id']}",
+    )
+    assert result_response.status_code == 200
+    result_payload = result_response.json()
+    assert result_payload["timeline"]["review_status"] == "draft"
+    assert result_payload["timeline"]["pending_recommendations"] == []
+    assert result_payload["timeline"]["review_flags"] == []
+
+
 def test_editing_session_api_deduplicates_repeated_source_pending_recommendations_when_running_partial_regeneration(
     tmp_path: Path,
 ) -> None:

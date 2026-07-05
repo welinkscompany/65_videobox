@@ -2160,6 +2160,7 @@ class LocalPipelineRunner:
         session_segments = {
             str(segment.get("segment_id") or "").strip(): segment
             for segment in session.get("segments", [])
+            if isinstance(segment, dict)
             if str(segment.get("segment_id") or "").strip()
         }
         target_segment_ids = set(request["segment_ids"])
@@ -2179,6 +2180,7 @@ class LocalPipelineRunner:
                     "cleanup_decision": _normalize_runtime_cut_action(segment.get("cut_action")),
                 }
                 for segment in session.get("segments", [])
+                if isinstance(segment, dict)
                 if str(segment.get("segment_id") or "").strip()
             ]
 

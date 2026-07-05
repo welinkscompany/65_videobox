@@ -7985,3 +7985,38 @@ focused 검증 메모:
 - 장기 우선순위 queue는 유지
 - 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
 - exact failing test 1개로만 다시 시작한다
+
+## 172. 2026-07-06 partial regeneration runtime fallback ignores non-dict session segments closeout
+
+이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `preflight contract`와 바로 인접한 partial regeneration runtime fallback의 stale non-dict `session segments` 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/core-engine/src/videobox_core_engine/local_pipeline.py`의 `_execute_partial_regeneration(...)`는 source timeline에서 usable segment를 찾지 못해 session fallback으로 내려갈 때 `session["segments"]`의 모든 entry를 dict로 가정하고 `.get(...)`을 호출하고 있었다
+- strict TDD로 `test_editing_session_api_ignores_non_dict_session_segments_in_partial_regeneration_fallback` exact regression을 먼저 추가했고, 실제로 partial regeneration start API가 `500 Internal Server Error`로 깨지는 RED를 확인했다
+- 최소 수정으로 `_execute_partial_regeneration(...)`의 `session_segments` lookup과 fallback `source_segments` list comprehension이 `dict`가 아닌 stale entry를 먼저 건너뛰도록 맞춰, runtime fallback이 canonical session segment만 기준으로 계속 동작하게 정리했다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 partial regeneration runtime fallback의 stale session-segment read path 한 점만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 failed` 확인 후 `1 passed`
+- focused verification
+  - partial regeneration runtime adjacent slice `3 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - runtime fallback의 stale non-dict session-segment read path 한 점 수정이라 exact + adjacent focused evidence가 가장 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. partial regeneration runtime이 source timeline에서 usable segment를 찾지 못해 session fallback으로 내려가도 stale non-dict `session["segments"]` entry 때문에 500으로 깨지지 않는다
+2. runtime fallback source-segment 구성은 canonical dict session segment만 기준으로 계속 동작한다
+3. preflight fallback과 runtime fallback이 stale non-dict session-segment 방어 기준에서 같은 방향으로 정렬됐다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다

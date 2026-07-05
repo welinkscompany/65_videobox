@@ -452,6 +452,7 @@
 - `editing session` 저장/조회/수정 API
 - partial regeneration request contract와 backend job 실행
 - partial regeneration preflight request contract도 session `segments` 안의 stale non-dict entry를 targeted-segment lookup 후보로 취급하지 않고 건너뛰는 계약
+- partial regeneration runtime fallback도 session `segments` 안의 stale non-dict entry를 source-segment fallback 후보로 취급하지 않고 건너뛰는 계약
 - thin editor mutation save / clear / remove
 - review snapshot -> editing session handoff
 - review action family
