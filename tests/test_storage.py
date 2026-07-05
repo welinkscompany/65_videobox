@@ -344,3 +344,37 @@ def test_save_capcut_export_metadata_ignores_unknown_track_count(tmp_path: Path)
     )
 
     assert fetched["metadata"]["track_count"] == 1
+
+
+def test_save_preview_run_summary_ignores_unknown_track_clip_group_count(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Preview Summary Count Project")
+
+    saved = store.save_preview_run(
+        project_id=project.project_id,
+        timeline_id="timeline_001",
+        preview_payload={
+            "timeline_id": "timeline_001",
+            "artifact_kind": "playable_html_preview",
+            "clips": [
+                {
+                    "track_id": "track_legacy",
+                    "track_type": "legacy_overlay",
+                    "clip_count": 1,
+                },
+                {
+                    "track_id": "track_001",
+                    "track_type": "narration",
+                    "clip_count": 1,
+                },
+            ],
+            "player_html": "<html></html>",
+        },
+    )
+
+    fetched = store.get_preview_run(
+        project_id=project.project_id,
+        preview_id=saved["preview_id"],
+    )
+
+    assert fetched["summary"]["clip_group_count"] == 1

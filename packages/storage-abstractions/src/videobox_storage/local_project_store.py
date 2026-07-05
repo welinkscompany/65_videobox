@@ -62,6 +62,12 @@ def _is_store_supported_track(item: object) -> bool:
     return _canonical_track_type(item.get("track_type")) in VALID_STORE_TRACK_TYPES
 
 
+def _is_store_supported_track_summary(item: object) -> bool:
+    if not isinstance(item, dict):
+        return False
+    return _canonical_track_type(item.get("track_type")) in VALID_STORE_TRACK_TYPES
+
+
 def _is_store_blocking_review_flag(flag: object) -> bool:
     if not isinstance(flag, dict):
         return False
@@ -1077,7 +1083,11 @@ class LocalProjectStore:
         summary_json = json.dumps(
             {
                 "artifact_kind": payload.get("artifact_kind"),
-                "clip_group_count": len(payload.get("clips", [])),
+                "clip_group_count": sum(
+                    1 for clip_group in payload.get("clips", []) if _is_store_supported_track_summary(clip_group)
+                )
+                if isinstance(payload.get("clips", []), list)
+                else 0,
             },
             ensure_ascii=True,
         )

@@ -7213,3 +7213,39 @@ focused 검증 메모:
 - 장기 우선순위 queue는 유지
 - 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
 - exact failing test 1개로만 다시 시작한다
+
+## 161. 2026-07-06 preview summary ignores unknown track clip group count closeout
+
+이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `review/output gating`과 바로 이어지는 preview summary의 stale unknown `clips` track-group count 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/storage-abstractions/src/videobox_storage/local_project_store.py`의 `save_preview_run(...)`는 preview summary JSON의 `clip_group_count`를 raw list 길이로 저장하고 있어, unknown `track_type`를 가진 junk clip-group entry도 valid runtime preview track-group처럼 count를 부풀리고 있었다
+- strict TDD로 `test_save_preview_run_summary_ignores_unknown_track_clip_group_count` exact regression을 먼저 추가했고, 실제로 persisted preview summary의 `clip_group_count == 2` RED를 확인했다
+- 최소 수정으로 preview summary의 `clip_group_count`도 canonical runtime `track_type` 기준으로 계산하도록 맞춰, valid runtime preview track-group count만 persisted summary에 남기게 정리했다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 preview summary clip-group count 한 점만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 failed` 확인 후 `1 passed`
+- focused verification
+  - storage/output 인접 exact 묶음 `4 passed`
+  - frontend preflight `25 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - preview summary clip-group count 한 점 수정이라 exact + storage/output 인접 focused evidence가 가장 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. preview summary가 unknown `track_type` junk clip-group entry를 valid runtime preview track-group count처럼 저장하지 않는다
+2. preview summary `clip_group_count`가 actual runtime-supported track 기준과 같은 방향을 사용한다
+3. persisted preview summary count도 최근 timeline/export track count hardening과 같은 stale-shape 방어 방향으로 정렬됐다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
