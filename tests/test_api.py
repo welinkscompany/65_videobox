@@ -1009,6 +1009,21 @@ def test_extract_pending_recommendation_decision_ignores_non_dict_entries() -> N
     assert remaining == []
 
 
+def test_extract_pending_recommendation_decision_rejects_stale_minimal_dict_entry() -> None:
+    with pytest.raises(KeyError):
+        extract_pending_recommendation_decision(
+            timeline={
+                "pending_recommendations": [
+                    {
+                        "recommendation_id": "rec_tts_seg_001",
+                    }
+                ]
+            },
+            recommendation_id="rec_tts_seg_001",
+            decision="approved",
+        )
+
+
 def test_output_operator_copy_builder_canonicalizes_mixed_case_review_status_in_prompt() -> None:
     builder = LocalFirstOutputOperatorCopyBuilder(runtime_service=object())
 

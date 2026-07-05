@@ -18,6 +18,13 @@ def _canonical_track_type(value: object) -> str:
     return str(value or "").strip().lower()
 
 
+def _is_valid_pending_recommendation_entry(item: dict[str, Any]) -> bool:
+    recommendation_id = str(item.get("recommendation_id") or "").strip()
+    target_segment_id = str(item.get("target_segment_id") or "").strip()
+    recommendation_type = _canonical_recommendation_type(item.get("recommendation_type"))
+    return bool(recommendation_id and target_segment_id and recommendation_type)
+
+
 def extract_pending_recommendation_decision(
     *,
     timeline: dict[str, Any],
@@ -30,6 +37,8 @@ def extract_pending_recommendation_decision(
     remaining_pending: list[dict[str, Any]] = []
     for item in pending_recommendations:
         if not isinstance(item, dict):
+            continue
+        if not _is_valid_pending_recommendation_entry(item):
             continue
         if str(item.get("recommendation_id") or "").strip() != recommendation_id:
             remaining_pending.append(item)
