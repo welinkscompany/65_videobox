@@ -19,6 +19,10 @@ def _canonical_track_type(value: object) -> str:
     return str(value or "").strip().lower()
 
 
+def _canonical_source_uri(value: object) -> str:
+    return str(value or "").strip()
+
+
 VALID_EXPORT_TRACK_TYPES = {"narration", "broll", "bgm"}
 
 
@@ -61,7 +65,7 @@ class CapCutExportAdapter:
             "review_flags": timeline.get("review_flags", []),
             "capcut_tracks": self._build_capcut_tracks(
                 tracks=tracks,
-                narration_source_uri=str(timeline.get("narration_source_uri") or ""),
+                narration_source_uri=_canonical_source_uri(timeline.get("narration_source_uri")),
                 subtitle_file_uri=subtitle_file_uri,
                 export_overlays=timeline.get("export_overlays", []),
                 narration_override_segments={
@@ -173,14 +177,14 @@ class CapCutExportAdapter:
             return self._build_broll_track(track, track_name=track_name, track_role=track_role)
 
         segments = []
-        track_source_uri = str(track.get("source_uri") or "")
+        track_source_uri = _canonical_source_uri(track.get("source_uri"))
         effective_override_segment_ids = override_segment_ids or set()
         for clip in track.get("clips", []):
             start_sec = float(clip.get("start_sec") or 0.0)
             end_sec = float(clip.get("end_sec") or 0.0)
-            source_uri = track_source_uri or str(clip.get("asset_uri") or "")
+            source_uri = track_source_uri or _canonical_source_uri(clip.get("asset_uri"))
             if str(clip.get("segment_id") or "").strip() in effective_override_segment_ids:
-                source_uri = str(clip.get("asset_uri") or source_uri)
+                source_uri = _canonical_source_uri(clip.get("asset_uri") or source_uri)
             segments.append(
                 {
                     "clip_id": str(clip.get("clip_id") or ""),

@@ -402,6 +402,41 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
 - exact failing test 1개로만 다시 시작한다
 
+## 172. 2026-07-06 capcut export adapter trims tts narration source uri surface closeout
+
+이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `TTS approval/output`과 바로 이어지는 CapCut export adapter의 voiceover `source_uri` surface 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/capcut-export/src/videobox_capcut_export/adapter.py`의 `_build_clip_track(...)`는 approved TTS segment에 대해 narration clip `asset_uri`를 raw 문자열 그대로 `source_uri`에 넣고 있어, whitespace가 섞인 stale selected narration asset uri가 export payload의 visible voiceover surface에 그대로 노출되고 있었다
+- strict TDD로 `test_capcut_export_adapter_trims_tts_narration_source_uri_surface` exact regression을 먼저 추가했고, 실제로 voiceover 첫 segment `source_uri`가 ` local://...asset_tts_001.wav `처럼 padded/raw URI를 노출하는 RED를 확인했다
+- 최소 수정으로 CapCut export adapter도 narration source URI를 `strip()` 기준으로 정리해 내보내도록 맞춰, export payload surface가 canonical selected narration uri 기준을 유지하게 정리했다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 CapCut export adapter의 TTS narration source URI surface 한 점만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 failed` 확인 후 `1 passed`
+- focused verification
+  - backend output-gating `24 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - CapCut export adapter의 TTS narration source URI surface 한 점 수정이라 exact + output-gating focused evidence가 가장 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. approved TTS export voiceover surface가 whitespace stale `asset_uri`도 canonical trimmed narration source uri로 노출한다
+2. TTS approval/output export payload surface가 preview/API/prompt 쪽 selected asset uri canonicalization 흐름과 더 일치하게 정렬됐다
+3. 실제 approved narration source는 맞는데 export payload URI만 raw stale 문자열로 보이던 경로가 줄었다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
 ## 154. 2026-07-04 heuristic review guidance default pending recommendation reason closeout
 
 이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `review/output gating`과 바로 이어지는 heuristic review guidance fallback의 `reason` 없는 `pending_recommendations` default-reason surface 경계 1개만 다시 닫았다.
