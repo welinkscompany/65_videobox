@@ -6429,6 +6429,35 @@ def test_review_guidance_reuse_key_dedupes_duplicate_blocker_entries() -> None:
     )
 
 
+def test_review_guidance_reuse_key_fills_default_review_flag_message() -> None:
+    canonical_snapshot = {
+        "review_status": "blocked",
+        "review_flags": [
+            {
+                "code": "segment_review_required",
+                "segment_id": "seg_001",
+                "message": "Operator review required before approval or output.",
+            }
+        ],
+        "pending_recommendations": [],
+    }
+    stale_shape_snapshot = {
+        "review_status": "blocked",
+        "review_flags": [
+            {
+                "code": " segment_review_required ",
+                "segment_id": " seg_001 ",
+                "message": "   ",
+            }
+        ],
+        "pending_recommendations": [],
+    }
+
+    assert _build_review_guidance_reuse_key(stale_shape_snapshot) == _build_review_guidance_reuse_key(
+        canonical_snapshot
+    )
+
+
 def test_review_snapshot_fills_default_provider_trace_for_persisted_operator_guidance(
     tmp_path: Path,
 ) -> None:

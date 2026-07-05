@@ -86,6 +86,11 @@ def _canonical_runtime_review_flag_code(value: object) -> str:
     return str(value or "").strip().lower()
 
 
+def _canonical_runtime_review_flag_message(value: object) -> str:
+    message = str(value or "").strip()
+    return message or "Operator review required before approval or output."
+
+
 def _canonical_runtime_review_status(value: object) -> str:
     return str(value or "draft").strip().lower() or "draft"
 
@@ -114,7 +119,7 @@ def _build_review_guidance_reuse_key(review_snapshot: dict[str, Any]) -> str | N
         segment_id = str(item.get("segment_id") or "").strip()
         if code not in VALID_RUNTIME_BLOCKING_REVIEW_FLAG_CODES or not segment_id:
             continue
-        message = str(item.get("message") or "").strip()
+        message = _canonical_runtime_review_flag_message(item.get("message"))
         review_flag_key = (code, segment_id, message)
         if review_flag_key in existing_review_flag_keys:
             continue

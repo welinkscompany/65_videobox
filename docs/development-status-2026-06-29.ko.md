@@ -7424,3 +7424,38 @@ focused 검증 메모:
 - 장기 우선순위 queue는 유지
 - 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
 - exact failing test 1개로만 다시 시작한다
+
+## 167. 2026-07-06 review guidance reuse key fills default review-flag message closeout
+
+이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `review/output gating`과 바로 이어지는 review guidance persisted reuse key의 message 없는 valid `review_flags` 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/core-engine/src/videobox_core_engine/local_pipeline.py`의 `_build_review_guidance_reuse_key(...)`는 valid `review_flags`의 `message`를 raw trim 결과로만 hidden key에 넣고 있어, canonical default blocker message가 채워진 snapshot과 message가 비어 있는 stale snapshot이 같은 blocker truth인데도 다른 reuse key를 만들고 있었다
+- strict TDD로 `test_review_guidance_reuse_key_fills_default_review_flag_message` exact regression을 먼저 추가했고, 실제로 stale snapshot reuse key가 canonical snapshot reuse key와 달라지는 RED를 확인했다
+- 최소 수정으로 `_build_review_guidance_reuse_key(...)`가 review-flag message를 canonical default blocker message 기준으로 정리한 뒤 hidden blocker key를 만들도록 맞춰, 빈 message stale entry도 reuse key에서 같은 blocker truth로 취급하게 정리했다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 review guidance reuse key의 review-flag default-message canonicalization 한 점만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 failed` 확인 후 `1 passed`
+- focused verification
+  - backend output-gating `24 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - review guidance reuse key의 review-flag default-message canonicalization 한 점 수정이라 exact + output-gating focused evidence가 가장 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. review guidance persisted reuse key가 message 없는 valid `review_flags`를 canonical default blocker message 기준으로 정리한다
+2. review guidance persisted reuse key가 API/read-path와 같은 blocker truth인데 raw 빈 message 때문에 다른 hidden key를 만들지 않는다
+3. persisted guidance reuse 조건이 review-flag default-message canonical surface와 더 일치하게 정렬됐다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
