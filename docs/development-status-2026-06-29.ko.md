@@ -512,6 +512,43 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
 - exact failing test 1개로만 다시 시작한다
 
+## 157. 2026-07-05 subtitle render ignores stale non-list track clips closeout
+
+이번 후속 작업에서는 장기 queue를 유지한 채, `review/output gating` 인접 output consumer인 subtitle render에서 stale non-list `tracks[].clips` shape를 그대로 믿고 있던 가장 작은 경계 1개를 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/core-engine/src/videobox_core_engine/local_pipeline.py`의 `_segments_for_timeline(...)`는 timeline `tracks[].clips`를 모두 list[dict]라고 가정하고 raw loop를 돌고 있어, stale 문자열 clip container 하나만 있어도 subtitle render의 timeline segment ordering read-path가 `AttributeError`로 깨질 수 있었다
+- strict TDD로 `test_start_subtitle_render_ignores_stale_non_list_track_clips` exact regression을 먼저 추가했고, 실제로 subtitle render 시작이 문자열 clip entry를 dict처럼 읽다가 RED로 깨지는 것을 확인했다
+- 최소 수정으로 `_segments_for_timeline(...)`가 non-dict track, non-list `clips`, non-dict clip을 모두 건너뛰도록 맞춰, subtitle render가 canonical clip input만 기준으로 segment order를 잡게 했다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence behavior를 건드리지 않고 subtitle output read-path의 stale track/clip filtering 한 점만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `py -m pytest tests/test_preview_export.py -q -k "test_start_subtitle_render_ignores_stale_non_list_track_clips" -vv`
+  - 결과 `1 failed` 확인 후 `1 passed`
+- focused verification
+  - `py -m pytest tests/test_preview_export.py -q -k "test_start_subtitle_render_ignores_stale_non_list_track_clips or test_start_subtitle_render_uses_only_segments_from_the_approved_timeline or test_start_preview_render_marks_job_failed_when_renderer_errors" -vv`
+  - 결과 `3 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - 이번 수정은 subtitle render와 같은 timeline-segment ordering consumer 한 점에 한정돼 있어, exact + 같은 subtitle/output family focused evidence가 가장 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 491 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. subtitle render는 stale non-list `tracks[].clips` 값을 subtitle segment source처럼 순회하지 않는다
+2. subtitle render는 stale non-list `tracks[].clips` 때문에 output 생성 중 예외로 깨지지 않는다
+3. preview/output/export/subtitle 인접 consumer surface가 stale track input을 더 비슷한 기준으로 걸러낸다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
 ## 153. 2026-07-04 heuristic review guidance default review flag message closeout
 
 이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `review/output gating`과 바로 이어지는 heuristic review guidance fallback의 message 없는 `review_flags` default-message surface 경계 1개만 다시 닫았다.

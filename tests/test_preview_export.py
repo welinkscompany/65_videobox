@@ -1156,6 +1156,104 @@ def test_start_subtitle_render_uses_only_segments_from_the_approved_timeline(tmp
     assert "Stale line that should not ship." not in subtitle_text
 
 
+def test_start_subtitle_render_ignores_stale_non_list_track_clips(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Subtitle Non List Clips Project")
+    store.save_segment_analysis(
+        project_id=project.project_id,
+        transcript_id="transcript_001",
+        script_asset_id=None,
+        segments=[
+            {
+                "segment_id": "seg_001",
+                "text": "Only valid subtitle line should ship.",
+                "start_sec": 0.0,
+                "end_sec": 1.0,
+                "confidence": 0.99,
+                "review_required": False,
+                "cleanup_decision": "keep",
+            },
+            {
+                "segment_id": "seg_999",
+                "text": "Stale line should stay out.",
+                "start_sec": 9.0,
+                "end_sec": 10.0,
+                "confidence": 0.91,
+                "review_required": False,
+                "cleanup_decision": "keep",
+            },
+        ],
+    )
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [
+                {
+                    "track_id": "track_stale",
+                    "track_type": "narration",
+                    "clips": "stale_clip_container",
+                },
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": "local://assets/narration.wav",
+                            "start_sec": 0.0,
+                            "end_sec": 1.0,
+                            "clip_type": "narration",
+                            "recommendation_id": None,
+                        }
+                    ],
+                },
+            ],
+            "review_flags": [],
+            "applied_recommendations": [],
+            "pending_recommendations": [],
+        },
+    )
+    timeline_job = store.create_job(
+        project_id=project.project_id,
+        job_type=JobType.TIMELINE_BUILD,
+        input_ref="segment_analysis_job_001",
+        status=JobStatus.SUCCEEDED,
+    )
+    store.update_job(
+        project_id=project.project_id,
+        job_id=timeline_job["job_id"],
+        status=JobStatus.SUCCEEDED,
+        output_ref=timeline["timeline_id"],
+    )
+    store.save_review_state(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        status="approved",
+    )
+    runner = LocalPipelineRunner(store)
+
+    subtitle_job = runner.start_subtitle_render(
+        project_id=project.project_id,
+        timeline_job_id=timeline_job["job_id"],
+    )
+    subtitle_result = runner.get_subtitle_result(
+        project_id=project.project_id,
+        job_id=subtitle_job["job_id"],
+    )
+
+    subtitle_path = store.resolve_storage_uri(
+        project_id=project.project_id,
+        storage_uri=subtitle_result["subtitle"]["file_uri"],
+    )
+    subtitle_text = subtitle_path.read_text(encoding="utf-8")
+
+    assert "Only valid subtitle line should ship." in subtitle_text
+    assert "Stale line should stay out." not in subtitle_text
+
+
 def test_provider_trace_backfill_tolerates_non_object_json_shapes(tmp_path: Path) -> None:
     store = LocalProjectStore(tmp_path)
     project = store.bootstrap_project(name="Provider Trace Backfill Project")

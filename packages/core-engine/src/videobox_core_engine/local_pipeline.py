@@ -2091,7 +2091,14 @@ class LocalPipelineRunner:
         }
         ordered_segment_ids: list[str] = []
         for track in timeline.get("tracks", []):
-            for clip in track.get("clips", []):
+            if not isinstance(track, dict):
+                continue
+            clips = track.get("clips", [])
+            if not isinstance(clips, list):
+                continue
+            for clip in clips:
+                if not isinstance(clip, dict):
+                    continue
                 segment_id = str(clip.get("segment_id") or "").strip()
                 if segment_id and segment_id not in ordered_segment_ids:
                     ordered_segment_ids.append(segment_id)
