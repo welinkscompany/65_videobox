@@ -741,6 +741,7 @@
 - preview renderer도 non-list stale `tracks[].clips` 값을 track summary나 narration source list로 순회하지 않고 건너뛰어, approved preview visible surface가 valid track summary/input만 유지하도록 정리했다
 - preview renderer도 `tracks[].clips` list 안의 stale non-dict entry를 실제 clip처럼 세거나 narration source surface로 순회하지 않도록 정리해, approved preview visible surface가 canonical clip input만 유지하도록 맞췄다
 - CapCut export adapter도 non-list stale `tracks[].clips` 값을 voiceover/video/audio segment source처럼 순회하지 않고 건너뛰어, approved export surface가 valid track input만 유지하도록 정리했다
+- CapCut export adapter도 `tracks[].clips` list 안의 stale non-dict entry를 voiceover/video/audio segment source처럼 순회하지 않도록 정리해, approved export surface가 canonical clip input만 기준으로 manifest를 만들게 맞췄다
 - subtitle render의 timeline segment read-path도 non-list stale `tracks[].clips` 값을 subtitle segment source처럼 순회하지 않고 건너뛰어, approved subtitle output이 valid track input만 기준으로 segment order를 잡도록 정리했다
 - review approval의 TTS apply read-path도 stale non-dict `tracks` entry를 target narration track처럼 읽지 않고 건너뛰어, approved narration asset swap이 valid narration track input에만 적용되도록 정리했다
 - review approval의 TTS apply read-path도 stale non-dict `clips` entry를 target narration clip처럼 읽지 않고 건너뛰어, approved narration asset swap이 valid narration clip input에만 적용되도록 정리했다

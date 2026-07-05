@@ -38,11 +38,12 @@ class CapCutExportAdapter:
             clips = track.get("clips", [])
             if not isinstance(clips, list):
                 continue
+            valid_clips = [clip for clip in clips if isinstance(clip, dict)]
             promptable_tracks.append(
                 {
                     **track,
                     "track_type": track_type,
-                    "clips": clips,
+                    "clips": valid_clips,
                 }
             )
         return promptable_tracks
