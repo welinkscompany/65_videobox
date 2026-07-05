@@ -233,6 +233,8 @@ class LocalFirstReviewGuidanceBuilder(ReviewGuidanceBuilder):
     ) -> list[dict[str, Any]]:
         prompt_rows: list[dict[str, Any]] = []
         for item in pending_recommendations:
+            if not isinstance(item, dict):
+                continue
             prompt_row = dict(item)
             if "recommendation_id" in prompt_row:
                 prompt_row["recommendation_id"] = str(prompt_row.get("recommendation_id") or "").strip()

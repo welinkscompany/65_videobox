@@ -1671,6 +1671,32 @@ def test_review_guidance_builder_trims_pending_recommendation_target_segment_id_
     assert "'target_segment_id': ' seg_001 '" not in prompt
 
 
+def test_review_guidance_builder_ignores_non_dict_pending_recommendations_in_prompt() -> None:
+    builder = LocalFirstReviewGuidanceBuilder(runtime_service=object())
+
+    prompt = builder._build_prompt(
+        review_snapshot={
+            "review_status": "blocked",
+            "review_flags": [],
+            "pending_recommendations": [
+                "stale_pending_entry",
+                {
+                    "recommendation_id": "rec_001",
+                    "recommendation_type": "tts_replacement",
+                    "target_segment_id": "seg_001",
+                    "reason": "Select narration asset",
+                },
+            ],
+            "segments": [],
+        }
+    )
+
+    assert "stale_pending_entry" not in prompt
+    assert "'recommendation_id': 'rec_001'" in prompt
+    assert "'recommendation_type': 'tts_replacement'" in prompt
+    assert "'target_segment_id': 'seg_001'" in prompt
+
+
 def test_review_guidance_builder_canonicalizes_mixed_case_review_flag_code_in_prompt() -> None:
     builder = LocalFirstReviewGuidanceBuilder(runtime_service=object())
 
