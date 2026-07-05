@@ -760,6 +760,7 @@
 - review snapshot의 blocked persisted operator guidance reuse key도 stale unknown/minimal `review_flags`/`pending_recommendations` dict를 blocker truth처럼 키에 섞지 않도록 정리해, 실제 blocker surface가 같은데도 guidance를 불필요하게 다시 생성하는 persistence mismatch를 줄였다
 - subtitle render의 timeline segment order read-path도 `track_type` 없는 stale minimal-dict `tracks` entry를 실제 subtitle source track처럼 읽지 않도록 정리해, approved subtitle output이 canonical track input만 기준으로 세그먼트 순서를 잡게 맞췄다
 - subtitle render의 timeline segment order read-path도 supported set 밖의 stale unknown `track_type`를 subtitle source track처럼 읽지 않도록 정리해, approved subtitle output이 canonical runtime track type만 기준으로 세그먼트 순서를 잡게 맞췄다
+- output operator copy prompt의 track summary도 supported set 밖의 stale unknown `track_type`를 valid runtime track summary처럼 노출하지 않도록 정리해, approved preview/export guidance가 canonical runtime track type만 기준으로 요약을 만들게 맞췄다
 - partial regeneration `music_refresh`가 whitespace stale source `segment_id`를 가진 segment도 다시 선택하도록 `local_pipeline` source-segment match를 trim 기준으로 맞췄다
 - 같은 slice에서 `timeline_builder` dict segment payload도 `segment_id`를 trim해 refreshed recommendation과 segment lookup이 서로 다른 id 기준으로 어긋나지 않게 정리했다
 - partial regeneration `overlay_refresh`도 whitespace stale existing overlay `segment_id`를 targeted full refresh 범위에서 정확히 교체하도록 overlay segment match를 trim 기준으로 맞췄다

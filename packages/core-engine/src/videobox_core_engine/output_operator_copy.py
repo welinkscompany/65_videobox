@@ -41,6 +41,7 @@ VALID_PROMPT_RECOMMENDATION_TYPES = {
     RecommendationType.BGM.value,
     RecommendationType.OVERLAY.value,
 }
+VALID_PROMPT_TRACK_TYPES = {"narration", "broll", "bgm"}
 
 VALID_PROMPT_REVIEW_FLAG_CODES = {
     "segment_review_required",
@@ -200,7 +201,7 @@ class LocalFirstOutputOperatorCopyBuilder(OutputOperatorCopyBuilder):
             if not isinstance(track, dict):
                 continue
             track_type = _canonical_track_type(track.get("track_type"))
-            if not track_type:
+            if track_type not in VALID_PROMPT_TRACK_TYPES:
                 continue
             clips = track.get("clips", [])
             if not isinstance(clips, list):
