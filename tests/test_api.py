@@ -998,6 +998,60 @@ def test_preview_renderer_ignores_non_list_track_clips_in_track_summary_surfaces
     assert "20 clips" not in payload["player_html"]
 
 
+def test_preview_renderer_ignores_unknown_track_type_in_track_summary_surfaces() -> None:
+    renderer = PreviewRenderer()
+
+    payload = renderer.build_preview_payload(
+        project_id="project_001",
+        timeline={
+            "timeline_id": "timeline_001",
+            "review_status": "approved",
+            "narration_source_uri": "local://projects/project_001/assets/narration_original.wav",
+            "tracks": [
+                {
+                    "track_id": "track_legacy_overlay",
+                    "track_type": "legacy_overlay",
+                    "clips": [
+                        {
+                            "clip_id": "clip_overlay_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": "local://projects/project_001/assets/legacy_overlay.png",
+                            "start_sec": 0.0,
+                            "end_sec": 1.0,
+                            "clip_type": "overlay",
+                        }
+                    ],
+                },
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": "local://projects/project_001/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 1.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                },
+            ],
+            "applied_recommendations": [],
+        },
+    )
+
+    assert payload["clips"] == [
+        {
+            "track_id": "narration_primary",
+            "track_type": "narration",
+            "clip_count": 1,
+        }
+    ]
+    assert "<strong>legacy_overlay</strong>" not in payload["player_html"]
+    assert "<strong>narration</strong>: 1 clips" in payload["player_html"]
+
+
 def test_apply_approved_tts_recommendation_matches_mixed_case_narration_track_type() -> None:
     timeline = {
         "tracks": [
