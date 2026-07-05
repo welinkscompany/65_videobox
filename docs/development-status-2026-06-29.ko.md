@@ -1,8 +1,8 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 184. 2026-07-06 Phase C output operator copy pending row normalization refactor closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
-> 이 문서의 `## 1`부터 `## 183`까지는 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 184`만 기준으로 본다.
-> 단, `2일 내 1차 데모 완성` 실행 레일은 `## 184`의 장기 우선순위를 그대로 넓게 집행하지 않고, `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`의 축소된 실행 계획을 우선 적용한다.
+> 현재 authoritative 상태/next slice 판단은 `## 185. 2026-07-06 Phase C review guidance pending row normalization refactor closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 이 문서의 `## 1`부터 `## 184`까지는 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 185`만 기준으로 본다.
+> 단, `2일 내 1차 데모 완성` 실행 레일은 `## 185`의 장기 우선순위를 그대로 넓게 집행하지 않고, `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`의 축소된 실행 계획을 우선 적용한다.
 
 ## 1. 결론
 
@@ -8339,5 +8339,42 @@ focused 검증 메모:
 현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
 
 - review guidance prompt의 pending recommendation row normalization 중복을 같은 방식으로 줄일지 판단한다
+- dead helper, 임시 메모, 역할이 끝난 중복 파일의 정리 방식은 삭제보다 역할 명시가 맞는지 먼저 판단한다
+- 최종 closeout 직전 broad 재검증이 정말 필요한지 마지막으로 판단한다
+
+## 185. 2026-07-06 Phase C review guidance pending row normalization refactor closeout
+
+이번 후속 작업에서는 새 stale-shape 경계를 더 열지 않고, `Phase C` 정리 리팩터링 후보 중 가장 작은 범위였던 review guidance prompt의 pending recommendation row canonicalization 중복을 helper 1개로 공통화했다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `review_guidance.py` 안에서 blocking pending recommendation identity 판별과 prompt row canonicalization이 같은 파일 안에 따로 흩어져 있었다
+- 현재 동작은 이미 맞았지만, `selected_asset_uri`, identity, reason, decision_state trim/lower/default 기준이 나중에 한쪽만 바뀌면 blocked guidance prompt surface가 다시 어긋날 수 있는 구조였다
+- 그래서 동작을 바꾸지 않고 prompt row 정규화만 helper로 묶어, blocked guidance prompt surface의 canonicalization drift 가능성을 줄이는 쪽이 현재 `Phase C`에 가장 맞는 최소 리팩터링이라고 판단했다
+- 이번 정리는 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence behavior를 바꾸지 않는 code cleanup 성격의 수정이다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact verification
+  - `test_review_guidance_builder_trims_pending_recommendation_selected_asset_uri_in_prompt` -> `1 passed`
+  - `test_review_guidance_builder_ignores_minimal_dict_pending_recommendations_in_prompt` -> `1 passed`
+- focused verification
+  - `./scripts/dev-fast-path.ps1 -Mode output-gating`
+  - backend output-gating `24 passed`
+- broader verification
+  - 이번 turn에서는 재실행하지 않음
+  - 판단:
+    - 이번 변경은 review guidance prompt 내부 helper 공통화만 다루는 `Phase C` 소규모 리팩터링이다
+    - 현재 자동 baseline은 직전 closeout 기준 `frontend build 성공`, `full backend regression 543 passed`를 유지한다
+
+이 갱신으로 아래 범위는 현재 기준으로 정리됐다.
+
+1. review guidance prompt가 보는 pending recommendation canonical row 기준이 helper 1개로 다시 모였다
+2. selected asset uri, identity, reason, decision state canonicalization 기준 drift 위험이 줄었다
+3. 남아 있는 review/output prompt normalization 중복 후보를 더 적게 비교해도 되게 됐다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- review/output prompt normalization 중 남은 중복 후보가 더 있는지 다시 좁힌다
 - dead helper, 임시 메모, 역할이 끝난 중복 파일의 정리 방식은 삭제보다 역할 명시가 맞는지 먼저 판단한다
 - 최종 closeout 직전 broad 재검증이 정말 필요한지 마지막으로 판단한다
