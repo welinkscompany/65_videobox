@@ -733,6 +733,7 @@
 2026-07-04 최신 누적 메모:
 
 - output operator copy prompt도 non-list stale `tracks[].clips` 값을 실제 clip count처럼 세지 않고 건너뛰어, approved preview/export 경로가 valid track summary prompt surface만 유지하도록 정리했다
+- preview renderer도 non-list stale `tracks[].clips` 값을 track summary나 narration source list로 순회하지 않고 건너뛰어, approved preview visible surface가 valid track summary/input만 유지하도록 정리했다
 - output operator copy prompt도 `track_type` 없이 남은 stale minimal-dict `tracks` entry를 빈 track summary처럼 노출하지 않고 건너뛰어, approved preview/export 경로가 canonical track summary prompt surface만 유지하도록 정리했다
 - output operator copy prompt도 stale non-dict `tracks` entry를 raw track summary 생성 예외로 터뜨리지 않고 건너뛰어, approved preview/export 경로가 valid track summary prompt surface만 유지하도록 정리했다
 - output operator copy prompt도 `segment_id` 없이 남은 stale minimal-dict `review_flags` entry를 valid blocker처럼 노출하지 않고 건너뛰어, approved preview/export 경로가 canonical blocker identity를 가진 prompt surface만 유지하도록 정리했다

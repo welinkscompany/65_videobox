@@ -438,6 +438,43 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
 - exact failing test 1개로만 다시 시작한다
 
+## 155. 2026-07-05 preview renderer ignores stale non-list track clips closeout
+
+이번 후속 작업에서는 코드리뷰/갭검증/역방향 동작검증 관점에서, 직전에 hardened된 output operator copy와 preview visible surface가 stale `tracks[].clips` shape를 다르게 처리하던 가장 가까운 output 경계 1개를 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/core-engine/src/videobox_core_engine/output_operator_copy.py`는 이미 non-list `tracks[].clips`를 건너뛰도록 hardened됐지만, `packages/core-engine/src/videobox_core_engine/preview_renderer.py`는 여전히 `len(track.get("clips", []))`와 raw narration clip loop를 사용하고 있어 stale 문자열 clip container 하나만 있어도 preview HTML 생성이 `AttributeError`로 깨질 수 있었다
+- strict TDD로 `test_preview_renderer_ignores_non_list_track_clips_in_track_summary_surfaces` exact regression을 먼저 추가했고, 실제로 preview renderer가 narration source loop에서 문자열 clip entry를 dict처럼 읽다가 RED로 깨지는 것을 확인했다
+- 최소 수정으로 preview renderer에 promptable track filter를 추가해 non-dict track, empty canonical `track_type`, non-list `clips`를 모두 건너뛰고, preview payload의 `clips` surface와 HTML track summary/narration source surface가 같은 canonical track input만 보도록 맞췄다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence behavior를 건드리지 않고 preview visible surface의 stale track read-path 한 점만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `py -m pytest tests/test_api.py -q -k "test_preview_renderer_ignores_non_list_track_clips_in_track_summary_surfaces" -vv`
+  - 결과 `1 failed` 확인 후 `1 passed`
+- focused verification
+  - `./scripts/dev-fast-path.ps1 -Mode output-gating`
+  - 결과 `24 passed, 325 deselected`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - preview renderer의 stale non-list clip filtering 한 점 수정이라 exact + output-gating focused evidence가 가장 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 491 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. preview renderer는 stale non-list `tracks[].clips` 값을 실제 clip count처럼 세지 않는다
+2. preview renderer는 stale non-list `tracks[].clips` 때문에 narration source HTML 생성 중 예외로 깨지지 않는다
+3. preview visible surface와 output operator copy prompt가 stale track summary input을 더 비슷한 기준으로 걸러낸다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
 ## 153. 2026-07-04 heuristic review guidance default review flag message closeout
 
 이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `review/output gating`과 바로 이어지는 heuristic review guidance fallback의 message 없는 `review_flags` default-message surface 경계 1개만 다시 닫았다.

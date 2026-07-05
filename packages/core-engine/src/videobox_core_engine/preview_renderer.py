@@ -25,6 +25,26 @@ def _canonical_track_type(value: object) -> str:
 
 
 class PreviewRenderer:
+    def _promptable_tracks(self, timeline: dict[str, Any]) -> list[dict[str, Any]]:
+        promptable_tracks: list[dict[str, Any]] = []
+        for track in timeline.get("tracks", []):
+            if not isinstance(track, dict):
+                continue
+            track_type = _canonical_track_type(track.get("track_type"))
+            if not track_type:
+                continue
+            clips = track.get("clips", [])
+            if not isinstance(clips, list):
+                continue
+            promptable_tracks.append(
+                {
+                    "track_id": str(track.get("track_id") or "").strip(),
+                    "track_type": track_type,
+                    "clips": clips,
+                }
+            )
+        return promptable_tracks
+
     def build_preview_payload(
         self,
         *,
@@ -32,6 +52,7 @@ class PreviewRenderer:
         timeline: dict[str, Any],
     ) -> dict[str, Any]:
         player_html = self._build_player_html(project_id=project_id, timeline=timeline)
+        promptable_tracks = self._promptable_tracks(timeline)
         return {
             "project_id": project_id,
             "timeline_id": timeline["timeline_id"],
@@ -40,9 +61,9 @@ class PreviewRenderer:
                 {
                     "track_id": track["track_id"],
                     "track_type": track["track_type"],
-                    "clip_count": len(track.get("clips", [])),
+                    "clip_count": len(track["clips"]),
                 }
-                for track in timeline.get("tracks", [])
+                for track in promptable_tracks
             ],
             "player_html": player_html,
             "notes": [
@@ -52,7 +73,7 @@ class PreviewRenderer:
         }
 
     def _build_player_html(self, *, project_id: str, timeline: dict[str, Any]) -> str:
-        tracks = timeline.get("tracks", [])
+        tracks = self._promptable_tracks(timeline)
         review_status = _canonical_review_status(timeline.get("review_status", "approved"))
         tts_segments = {
             str(item.get("target_segment_id") or "").strip()
@@ -63,7 +84,7 @@ class PreviewRenderer:
             and not _normalize_boolish(item.get("review_required"))
         }
         track_items = "".join(
-            f"<li><strong>{escape(_canonical_track_type(track.get('track_type')))}</strong>: {len(track.get('clips', []))} clips</li>"
+            f"<li><strong>{escape(track['track_type'])}</strong>: {len(track['clips'])} clips</li>"
             for track in tracks
         )
         narration_source_items = "".join(
@@ -74,8 +95,8 @@ class PreviewRenderer:
                 "</li>"
             )
             for track in tracks
-            if _canonical_track_type(track.get("track_type")) == "narration"
-            for clip in track.get("clips", [])
+            if track["track_type"] == "narration"
+            for clip in track["clips"]
         )
         return f"""<!doctype html>
 <html lang="en">
