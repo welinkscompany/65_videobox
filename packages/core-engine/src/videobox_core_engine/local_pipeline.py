@@ -227,12 +227,22 @@ def _is_runtime_blocking_review_flag(flag: object) -> bool:
     )
 
 
+def _runtime_pending_recommendation_identity_key(item: object) -> tuple[str, str, str]:
+    if not isinstance(item, dict):
+        return ("", "", "")
+    return (
+        str(item.get("recommendation_id") or "").strip(),
+        str(item.get("target_segment_id") or "").strip(),
+        _canonical_runtime_recommendation_type(item.get("recommendation_type")),
+    )
+
+
 def _is_runtime_blocking_pending_recommendation(item: object) -> bool:
     if not isinstance(item, dict):
         return False
-    recommendation_id = item.get("recommendation_id")
-    target_segment_id = item.get("target_segment_id")
-    recommendation_type = item.get("recommendation_type")
+    recommendation_id, target_segment_id, recommendation_type = (
+        _runtime_pending_recommendation_identity_key(item)
+    )
     decision_state = str(item.get("decision_state") or "").strip().lower()
     if decision_state and decision_state != "pending":
         return False
@@ -241,11 +251,9 @@ def _is_runtime_blocking_pending_recommendation(item: object) -> bool:
     ):
         return False
     return (
-        isinstance(recommendation_id, str)
-        and bool(recommendation_id.strip())
-        and isinstance(target_segment_id, str)
-        and bool(target_segment_id.strip())
-        and _canonical_runtime_recommendation_type(recommendation_type) in VALID_RESTORED_RECOMMENDATION_TYPES
+        bool(recommendation_id)
+        and bool(target_segment_id)
+        and recommendation_type in VALID_RESTORED_RECOMMENDATION_TYPES
     )
 
 
@@ -257,24 +265,17 @@ def _normalized_runtime_pending_recommendations(items: object) -> list[dict[str,
     for item in items:
         if not _is_runtime_blocking_pending_recommendation(item):
             continue
-        recommendation_id = str(item.get("recommendation_id") or "").strip()
-        target_segment_id = str(item.get("target_segment_id") or "").strip()
+        pending_key = _runtime_pending_recommendation_identity_key(item)
+        recommendation_id, target_segment_id, recommendation_type = pending_key
         normalized_item = {
             **deepcopy(item),
             "recommendation_id": recommendation_id,
             "target_segment_id": target_segment_id,
-            "recommendation_type": _canonical_runtime_recommendation_type(
-                item.get("recommendation_type")
-            ),
+            "recommendation_type": recommendation_type,
             "provider_trace": item.get("provider_trace")
             if isinstance(item.get("provider_trace"), dict)
             else build_provider_trace(final_provider="rule_based_fallback"),
         }
-        pending_key = (
-            recommendation_id,
-            target_segment_id,
-            _canonical_runtime_recommendation_type(normalized_item.get("recommendation_type")),
-        )
         if pending_key in existing_pending_keys:
             continue
         existing_pending_keys.add(pending_key)
@@ -2320,20 +2321,12 @@ class LocalPipelineRunner:
             existing_review_flag_keys.add(review_flag_key)
             timeline_payload["review_flags"].append(flag)
         existing_pending_keys = {
-            (
-                str(item.get("recommendation_id") or "").strip(),
-                str(item.get("target_segment_id") or "").strip(),
-                _canonical_runtime_recommendation_type(item.get("recommendation_type")),
-            )
+            _runtime_pending_recommendation_identity_key(item)
             for item in timeline_payload["pending_recommendations"]
             if isinstance(item, dict)
         }
         for item in source_pending_recommendations:
-            pending_key = (
-                str(item.get("recommendation_id") or "").strip(),
-                str(item.get("target_segment_id") or "").strip(),
-                _canonical_runtime_recommendation_type(item.get("recommendation_type")),
-            )
+            pending_key = _runtime_pending_recommendation_identity_key(item)
             if pending_key in existing_pending_keys:
                 continue
             existing_pending_keys.add(pending_key)

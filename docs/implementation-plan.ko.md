@@ -739,6 +739,7 @@
 
 2026-07-04 최신 누적 메모:
 
+- partial regeneration/source merge와 output blocker read-path에서 쓰는 pending recommendation dedupe 기준을 `local_pipeline` 내부 helper 1개로 공통화해, mixed-case/trimmed recommendation identity key drift를 줄이되 동작은 바꾸지 않도록 정리했다
 - output operator copy prompt도 non-list stale `tracks[].clips` 값을 실제 clip count처럼 세지 않고 건너뛰어, approved preview/export 경로가 valid track summary prompt surface만 유지하도록 정리했다
 - preview renderer도 non-list stale `tracks[].clips` 값을 track summary나 narration source list로 순회하지 않고 건너뛰어, approved preview visible surface가 valid track summary/input만 유지하도록 정리했다
 - preview renderer도 `tracks[].clips` list 안의 stale non-dict entry를 실제 clip처럼 세거나 narration source surface로 순회하지 않도록 정리해, approved preview visible surface가 canonical clip input만 유지하도록 맞췄다

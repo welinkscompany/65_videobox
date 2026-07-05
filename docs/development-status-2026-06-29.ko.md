@@ -1,8 +1,8 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 179. 2026-07-06 Phase C 문서 최신화 기준 최신 상태`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
-> 이 문서의 `## 1`부터 `## 178`까지는 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 179`만 기준으로 본다.
-> 단, `2일 내 1차 데모 완성` 실행 레일은 `## 179`의 장기 우선순위를 그대로 넓게 집행하지 않고, `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`의 축소된 실행 계획을 우선 적용한다.
+> 현재 authoritative 상태/next slice 판단은 `## 183. 2026-07-06 Phase C pending recommendation identity key refactor closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 이 문서의 `## 1`부터 `## 182`까지는 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 183`만 기준으로 본다.
+> 단, `2일 내 1차 데모 완성` 실행 레일은 `## 183`의 장기 우선순위를 그대로 넓게 집행하지 않고, `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`의 축소된 실행 계획을 우선 적용한다.
 
 ## 1. 결론
 
@@ -8264,4 +8264,43 @@ focused 검증 메모:
 
 - 문서 최신화 이후 실제 중복이 확인된 작은 정리 리팩터링 후보를 안전 범위에서만 다시 좁힌다
 - dead helper, 임시 메모, 역할이 끝난 중복 파일 중 삭제보다 역할 명시가 맞는지 먼저 판단한다
+- 최종 closeout 직전 broad 재검증이 정말 필요한지 마지막으로 판단한다
+
+## 183. 2026-07-06 Phase C pending recommendation identity key refactor closeout
+
+이번 후속 작업에서는 새 stale-shape 버그를 더 열지 않고, `Phase C` 정리 리팩터링 후보 중 가장 작은 범위였던 pending recommendation canonical identity key 중복을 `local_pipeline` 내부 helper 1개로 공통화했다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- output blocker read-path, blocking pending recommendation 판별, partial regeneration source merge가 같은 `recommendation_id + target_segment_id + canonical recommendation_type` identity를 각자 다시 만들고 있었다
+- 현재 동작은 이미 맞았지만, trim/lower 기준이 나중에 한쪽만 바뀌면 output gating과 preflight dedupe가 다시 어긋날 수 있는 구조였다
+- 그래서 동작을 바꾸지 않고 canonical identity key 생성만 helper로 묶어, 중복 기준 drift 가능성을 줄이는 쪽이 현재 `Phase C`에 가장 맞는 최소 리팩터링이라고 판단했다
+- 이번 정리는 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence behavior를 바꾸지 않는 code cleanup 성격의 수정이다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact verification
+  - `test_output_blockers_deduplicate_repeated_persisted_pending_recommendation_entries` -> `1 passed`
+  - `test_editing_session_api_deduplicates_mixed_case_source_pending_recommendations_when_running_partial_regeneration` -> `1 passed`
+- focused verification
+  - `./scripts/dev-fast-path.ps1 -Mode current-focused-parallel`
+  - backend output-gating `24 passed`
+  - backend preflight `59 passed`
+  - frontend preflight `25 passed`
+- broader verification
+  - 이번 turn에서는 재실행하지 않음
+  - 판단:
+    - 이번 변경은 dedupe key 생성 공통화만 다루는 `Phase C` 소규모 리팩터링이다
+    - 현재 자동 baseline은 직전 closeout 기준 `frontend build 성공`, `full backend regression 543 passed`를 유지한다
+
+이 갱신으로 아래 범위는 현재 기준으로 정리됐다.
+
+1. output blocker와 partial regeneration source merge가 보는 pending recommendation canonical identity 기준이 한 helper로 다시 모였다
+2. mixed-case/trimmed recommendation type dedupe 기준이 흩어질 위험이 줄었다
+3. 동작 변경 없이도 다음 정리 리팩터링 후보를 고를 때 비교 기준이 더 단순해졌다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- review/output prompt normalization 중복과 stale-shape helper 중복 중 다음 최소 리팩터링 후보 1개를 다시 좁힌다
+- dead helper, 임시 메모, 역할이 끝난 중복 파일의 정리 방식은 삭제보다 역할 명시가 맞는지 먼저 판단한다
 - 최종 closeout 직전 broad 재검증이 정말 필요한지 마지막으로 판단한다
