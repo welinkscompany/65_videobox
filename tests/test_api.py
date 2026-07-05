@@ -20,7 +20,10 @@ from videobox_core_engine.local_pipeline import LocalPipelineRunner
 from videobox_core_engine.output_operator_copy import LocalFirstOutputOperatorCopyBuilder
 from videobox_core_engine.preview_renderer import PreviewRenderer
 from videobox_core_engine.provider_trace import build_provider_trace
-from videobox_core_engine.review_action_mutations import apply_approved_recommendation_to_timeline
+from videobox_core_engine.review_action_mutations import (
+    apply_approved_recommendation_to_timeline,
+    extract_pending_recommendation_decision,
+)
 from videobox_core_engine.review_guidance import HeuristicReviewGuidanceBuilder, LocalFirstReviewGuidanceBuilder
 from videobox_core_engine.settings import AutoCutConfig, LocalOpenAICompatibleRuntimeConfig
 from videobox_core_engine.timeline_builder import TimelineBuilder
@@ -980,6 +983,30 @@ def test_apply_approved_tts_recommendation_ignores_non_dict_clips() -> None:
     assert timeline["tracks"][0]["clips"][1]["asset_uri"] == (
         "local://projects/project_001/assets/generated/asset_tts_001.wav"
     )
+
+
+def test_extract_pending_recommendation_decision_ignores_non_dict_entries() -> None:
+    original, decided, remaining = extract_pending_recommendation_decision(
+        timeline={
+            "pending_recommendations": [
+                "stale_pending_entry",
+                {
+                    "recommendation_id": "rec_tts_seg_001",
+                    "target_segment_id": "seg_001",
+                    "recommendation_type": "tts_replacement",
+                    "reason": "Operator review required before approval or output.",
+                    "review_required": True,
+                },
+            ]
+        },
+        recommendation_id="rec_tts_seg_001",
+        decision="approved",
+    )
+
+    assert original["recommendation_id"] == "rec_tts_seg_001"
+    assert decided["decision_state"] == "approved"
+    assert decided["auto_apply_allowed"] is True
+    assert remaining == []
 
 
 def test_output_operator_copy_builder_canonicalizes_mixed_case_review_status_in_prompt() -> None:

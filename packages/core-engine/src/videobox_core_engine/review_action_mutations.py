@@ -29,6 +29,8 @@ def extract_pending_recommendation_decision(
     decided_recommendation: dict[str, Any] | None = None
     remaining_pending: list[dict[str, Any]] = []
     for item in pending_recommendations:
+        if not isinstance(item, dict):
+            continue
         if str(item.get("recommendation_id") or "").strip() != recommendation_id:
             remaining_pending.append(item)
             continue
