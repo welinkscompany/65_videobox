@@ -739,6 +739,7 @@
 
 2026-07-04 최신 누적 메모:
 
+- output operator copy prompt 안에서 pending recommendation row 정규화 중복을 helper 1개로 공통화해, selected_asset_uri / identity / reason / decision_state canonicalization drift 없이 prompt surface를 같은 기준으로 유지하도록 정리했다
 - partial regeneration/source merge와 output blocker read-path에서 쓰는 pending recommendation dedupe 기준을 `local_pipeline` 내부 helper 1개로 공통화해, mixed-case/trimmed recommendation identity key drift를 줄이되 동작은 바꾸지 않도록 정리했다
 - output operator copy prompt도 non-list stale `tracks[].clips` 값을 실제 clip count처럼 세지 않고 건너뛰어, approved preview/export 경로가 valid track summary prompt surface만 유지하도록 정리했다
 - preview renderer도 non-list stale `tracks[].clips` 값을 track summary나 narration source list로 순회하지 않고 건너뛰어, approved preview visible surface가 valid track summary/input만 유지하도록 정리했다
