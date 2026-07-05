@@ -3,6 +3,22 @@ from __future__ import annotations
 from typing import Any, Callable
 
 
+def has_canonical_pending_recommendation_identity(
+    item: dict[str, Any],
+    *,
+    canonical_recommendation_type: Callable[[object], str],
+    valid_recommendation_types: set[str],
+) -> bool:
+    recommendation_id = str(item.get("recommendation_id") or "").strip()
+    target_segment_id = str(item.get("target_segment_id") or "").strip()
+    recommendation_type = canonical_recommendation_type(item.get("recommendation_type"))
+    return bool(
+        recommendation_id
+        and target_segment_id
+        and recommendation_type in valid_recommendation_types
+    )
+
+
 def normalize_prompt_pending_recommendation_row(
     item: dict[str, Any],
     *,

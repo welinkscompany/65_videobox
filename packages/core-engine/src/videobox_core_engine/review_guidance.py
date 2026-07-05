@@ -6,6 +6,7 @@ from typing import Any, Protocol
 from videobox_core_engine.gemini_runtime import GeminiStructuredGenerationError
 from videobox_core_engine.local_first_runtime import LocalFirstStructuredGenerationError
 from videobox_core_engine.prompt_pending_recommendation import (
+    has_canonical_pending_recommendation_identity,
     normalize_prompt_pending_recommendation_row,
 )
 from videobox_core_engine.provider_trace import build_provider_trace, response_provider_trace, with_final_provider
@@ -54,23 +55,14 @@ VALID_PROMPT_REVIEW_FLAG_CODES = {
     "broll_review_required",
     "tts_replacement_review_required",
 }
-
-
-def _has_canonical_pending_recommendation_identity(item: dict[str, Any]) -> bool:
-    recommendation_id = str(item.get("recommendation_id") or "").strip()
-    target_segment_id = str(item.get("target_segment_id") or "").strip()
-    recommendation_type = _canonical_recommendation_type(item.get("recommendation_type"))
-    return bool(
-        recommendation_id
-        and target_segment_id
-        and recommendation_type in VALID_PROMPT_RECOMMENDATION_TYPES
-    )
-
-
 def _is_prompt_blocking_pending_recommendation(item: object) -> bool:
     if not isinstance(item, dict):
         return False
-    if not _has_canonical_pending_recommendation_identity(item):
+    if not has_canonical_pending_recommendation_identity(
+        item,
+        canonical_recommendation_type=_canonical_recommendation_type,
+        valid_recommendation_types=VALID_PROMPT_RECOMMENDATION_TYPES,
+    ):
         return False
     decision_state = _canonical_decision_state(item.get("decision_state"))
     if decision_state and decision_state != "pending":

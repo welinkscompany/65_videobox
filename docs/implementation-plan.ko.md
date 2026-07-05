@@ -739,6 +739,7 @@
 
 2026-07-04 최신 누적 메모:
 
+- output operator copy와 review guidance가 각각 들고 있던 canonical pending recommendation identity helper도 공통 모듈로 묶어, recommendation_id / target_segment_id / recommendation_type canonical identity 규칙이 파일별로 다시 갈라지지 않도록 정리했다
 - output operator copy와 review guidance가 각각 들고 있던 pending recommendation row 정규화 helper를 공통 모듈로 묶어, selected_asset_uri / identity / reason / decision_state canonicalization 규칙이 파일별로 다시 갈라지지 않도록 정리했다
 - review guidance prompt 안에서도 pending recommendation row 정규화 중복을 helper 1개로 공통화해, selected_asset_uri / identity / reason / decision_state canonicalization drift 없이 blocked guidance prompt surface를 같은 기준으로 유지하도록 정리했다
 - output operator copy prompt 안에서 pending recommendation row 정규화 중복을 helper 1개로 공통화해, selected_asset_uri / identity / reason / decision_state canonicalization drift 없이 prompt surface를 같은 기준으로 유지하도록 정리했다
