@@ -1542,7 +1542,8 @@ class LocalProjectStore:
         reuse_key = timeline_payload.get("_operator_guidance_reuse_key")
         if not isinstance(reuse_key, str):
             return None
-        return reuse_key or None
+        normalized_reuse_key = reuse_key.strip()
+        return normalized_reuse_key or None
 
     def save_operator_guidance(
         self,

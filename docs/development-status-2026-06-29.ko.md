@@ -7494,3 +7494,38 @@ focused 검증 메모:
 - 장기 우선순위 queue는 유지
 - 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
 - exact failing test 1개로만 다시 시작한다
+
+## 169. 2026-07-06 review guidance reuse key trims persisted stored key whitespace closeout
+
+이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `review/output gating`과 바로 이어지는 review guidance persisted reuse key read-path의 stored whitespace 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/storage-abstractions/src/videobox_storage/local_project_store.py`의 `get_operator_guidance_reuse_key(...)`는 stored `_operator_guidance_reuse_key`를 raw string 그대로 반환하고 있어, legacy 파일에 공백이 섞인 stale key가 남아 있으면 current blocker truth와 같은 key여도 persisted guidance를 재사용하지 못하고 다시 생성하고 있었다
+- strict TDD로 `test_review_snapshot_reuses_persisted_guidance_when_stored_reuse_key_has_whitespace` exact regression을 먼저 추가했고, 실제로 두 번째 review snapshot이 persisted guidance 대신 새 guidance를 다시 생성하는 RED를 확인했다
+- 최소 수정으로 `get_operator_guidance_reuse_key(...)`가 stored key도 `strip()` 기준으로 정리한 뒤 반환하도록 맞춰, whitespace-only drift가 있는 stale key도 current hidden key와 같은 기준으로 비교하게 정리했다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 review guidance persisted reuse key read-path trim 한 점만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 failed` 확인 후 `1 passed`
+- focused verification
+  - backend output-gating `24 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - review guidance persisted reuse key read-path trim 한 점 수정이라 exact + output-gating focused evidence가 가장 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. persisted `_operator_guidance_reuse_key`에 공백이 섞인 stale 파일 shape도 trim 기준으로 읽힌다
+2. blocker truth가 같은데 stored key whitespace 때문에 guidance를 다시 생성하던 경로가 줄었다
+3. persisted guidance reuse read-path가 save-path와 같은 key normalization 기준으로 더 일치하게 정렬됐다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다

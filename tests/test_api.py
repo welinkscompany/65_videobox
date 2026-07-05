@@ -6278,6 +6278,88 @@ def test_review_snapshot_persists_operator_guidance_for_repeated_reads(
     assert len(local_provider.calls) == 4
 
 
+def test_review_snapshot_reuses_persisted_guidance_when_stored_reuse_key_has_whitespace(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "videobox_provider_interfaces.stt.MockSTTProvider.transcribe",
+        _single_segment_transcribe,
+    )
+    local_provider = FakeStructuredProvider(
+        responses=[
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"review_required": True, "cleanup_decision": "review"},
+                raw_text='{"review_required":true,"cleanup_decision":"review"}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"keywords": ["office"]},
+                raw_text='{"keywords":["office"]}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={"music_mood": "cinematic pulse", "score": 0.91},
+                raw_text='{"music_mood":"cinematic pulse","score":0.91}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={
+                    "summary": "Persisted local review summary.",
+                    "action_items": ["Check seg_001 narration alignment"],
+                },
+                raw_text='{"summary":"Persisted local review summary.","action_items":["Check seg_001 narration alignment"]}',
+                metadata={},
+            ),
+            StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="Qwen3-32B",
+                output_data={
+                    "summary": "Unexpected extra guidance generation.",
+                    "action_items": ["Should not regenerate guidance for whitespace-only key drift."],
+                },
+                raw_text='{"summary":"Unexpected extra guidance generation.","action_items":["Should not regenerate guidance for whitespace-only key drift."]}',
+                metadata={},
+            ),
+        ]
+    )
+    app = create_app(
+        projects_root=tmp_path,
+        local_first_runtime_service_factory=_local_first_service_factory(
+            local_provider=local_provider,
+            gemini_provider=FakeStructuredProvider(),
+            local_enabled=True,
+        ),
+    )
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    first_review_snapshot = client.get(f"/api/projects/{project_id}/review-snapshots/{timeline_job_id}")
+    assert first_review_snapshot.status_code == 200
+    first_payload = first_review_snapshot.json()
+    timeline_id = first_payload["timeline_id"]
+    timeline_path = tmp_path / "projects" / project_id / "timelines" / f"{timeline_id}.json"
+    persisted_timeline = json.loads(timeline_path.read_text(encoding="utf-8"))
+    persisted_timeline["_operator_guidance_reuse_key"] = (
+        f'  {persisted_timeline["_operator_guidance_reuse_key"]}  '
+    )
+    timeline_path.write_text(json.dumps(persisted_timeline, indent=2), encoding="utf-8")
+
+    second_review_snapshot = client.get(f"/api/projects/{project_id}/review-snapshots/{timeline_job_id}")
+
+    assert second_review_snapshot.status_code == 200
+    assert second_review_snapshot.json()["operator_guidance"] == first_payload["operator_guidance"]
+    assert len(local_provider.calls) == 4
+
+
 def test_review_guidance_reuse_key_ignores_stale_unknown_and_minimal_blocker_entries() -> None:
     canonical_snapshot = {
         "review_status": "blocked",
