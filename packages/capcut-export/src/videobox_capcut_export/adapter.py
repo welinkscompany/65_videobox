@@ -55,18 +55,19 @@ class CapCutExportAdapter:
         subtitle_file_uri: str | None = None,
     ) -> dict[str, Any]:
         tracks = self._promptable_tracks(timeline)
+        canonical_subtitle_file_uri = _canonical_source_uri(subtitle_file_uri) if subtitle_file_uri else None
         return {
             "project_id": project_id,
             "timeline_id": timeline["timeline_id"],
             "export_type": "capcut",
             "adapter": "capcut_v1_port",
-            "subtitle_file_uri": subtitle_file_uri,
+            "subtitle_file_uri": canonical_subtitle_file_uri,
             "tracks": tracks,
             "review_flags": timeline.get("review_flags", []),
             "capcut_tracks": self._build_capcut_tracks(
                 tracks=tracks,
                 narration_source_uri=_canonical_source_uri(timeline.get("narration_source_uri")),
-                subtitle_file_uri=subtitle_file_uri,
+                subtitle_file_uri=canonical_subtitle_file_uri,
                 export_overlays=timeline.get("export_overlays", []),
                 narration_override_segments={
                     str(item.get("target_segment_id") or "").strip()
