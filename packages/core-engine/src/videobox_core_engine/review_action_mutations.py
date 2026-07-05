@@ -4,6 +4,15 @@ from copy import deepcopy
 from typing import Any
 
 from videobox_core_engine.provider_trace import build_provider_trace
+from videobox_domain_models.recommendations import RecommendationType
+
+
+VALID_PENDING_RECOMMENDATION_TYPES = {
+    RecommendationType.TTS_REPLACEMENT.value,
+    RecommendationType.BROLL.value,
+    RecommendationType.BGM.value,
+    RecommendationType.OVERLAY.value,
+}
 
 
 def _canonical_recommendation_type(value: object) -> str:
@@ -22,7 +31,11 @@ def _is_valid_pending_recommendation_entry(item: dict[str, Any]) -> bool:
     recommendation_id = str(item.get("recommendation_id") or "").strip()
     target_segment_id = str(item.get("target_segment_id") or "").strip()
     recommendation_type = _canonical_recommendation_type(item.get("recommendation_type"))
-    return bool(recommendation_id and target_segment_id and recommendation_type)
+    return bool(
+        recommendation_id
+        and target_segment_id
+        and recommendation_type in VALID_PENDING_RECOMMENDATION_TYPES
+    )
 
 
 def extract_pending_recommendation_decision(

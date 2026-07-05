@@ -1024,6 +1024,23 @@ def test_extract_pending_recommendation_decision_rejects_stale_minimal_dict_entr
         )
 
 
+def test_extract_pending_recommendation_decision_rejects_unknown_type_entry() -> None:
+    with pytest.raises(KeyError):
+        extract_pending_recommendation_decision(
+            timeline={
+                "pending_recommendations": [
+                    {
+                        "recommendation_id": "rec_unknown",
+                        "target_segment_id": "seg_001",
+                        "recommendation_type": "legacy_overlay_pick",
+                    }
+                ]
+            },
+            recommendation_id="rec_unknown",
+            decision="approved",
+        )
+
+
 def test_output_operator_copy_builder_canonicalizes_mixed_case_review_status_in_prompt() -> None:
     builder = LocalFirstOutputOperatorCopyBuilder(runtime_service=object())
 

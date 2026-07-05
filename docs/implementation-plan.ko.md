@@ -745,6 +745,7 @@
 - review approval의 TTS apply read-path도 stale non-dict `clips` entry를 target narration clip처럼 읽지 않고 건너뛰어, approved narration asset swap이 valid narration clip input에만 적용되도록 정리했다
 - review approval decision extraction read-path도 stale non-dict `pending_recommendations` entry를 valid recommendation row처럼 읽지 않고 건너뛰어, approved/rejected recommendation decision 추출이 valid recommendation input에만 적용되도록 정리했다
 - review approval decision extraction read-path도 `recommendation_id`만 남은 stale minimal-dict `pending_recommendations` entry를 valid recommendation row처럼 승인하지 않고 건너뛰어, approved/rejected recommendation decision 추출이 canonical recommendation identity/type/segment를 가진 input에만 적용되도록 정리했다
+- review approval decision extraction read-path도 unknown `recommendation_type`를 가진 stale `pending_recommendations` entry를 valid recommendation row처럼 승인하지 않고 건너뛰어, approved/rejected recommendation decision 추출이 supported recommendation type input에만 적용되도록 정리했다
 - review guidance prompt도 stale non-dict `review_flags` entry를 raw dict 변환 예외로 터뜨리지 않고 건너뛰어, blocked review guidance surface가 valid blocker prompt input만 유지하도록 정리했다
 - review guidance prompt도 `segment_id` 없이 남은 stale minimal-dict `review_flags` entry를 valid blocker prompt row처럼 노출하지 않고 건너뛰어, blocked review guidance surface가 canonical blocker identity와 supported code를 가진 input만 유지하도록 정리했다
 - review guidance prompt도 stale non-dict `pending_recommendations` entry를 raw dict 변환 예외로 터뜨리지 않고 건너뛰어, blocked review guidance surface가 valid recommendation prompt input만 유지하도록 정리했다
