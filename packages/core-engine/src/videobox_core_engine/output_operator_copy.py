@@ -9,7 +9,9 @@ from videobox_core_engine.prompt_pending_recommendation import (
     canonical_prompt_decision_state as _canonical_decision_state,
     canonical_prompt_recommendation_type as _canonical_recommendation_type,
     canonical_prompt_review_flag_message as _canonical_review_flag_message,
+    has_canonical_review_flag_identity,
     has_canonical_pending_recommendation_identity,
+    normalize_prompt_review_flag_row,
     normalize_prompt_pending_recommendation_row,
     VALID_PROMPT_RECOMMENDATION_TYPES,
     VALID_PROMPT_REVIEW_FLAG_CODES,
@@ -224,15 +226,19 @@ class LocalFirstOutputOperatorCopyBuilder(OutputOperatorCopyBuilder):
         for flag in review_flags:
             if not isinstance(flag, dict):
                 continue
-            code = _canonical_review_flag_code(flag.get("code"))
-            segment_id = str(flag.get("segment_id") or "").strip()
-            if code not in VALID_PROMPT_REVIEW_FLAG_CODES or not segment_id:
+            if not has_canonical_review_flag_identity(
+                flag,
+                canonical_review_flag_code=_canonical_review_flag_code,
+                valid_review_flag_codes=VALID_PROMPT_REVIEW_FLAG_CODES,
+            ):
                 continue
-            prompt_flag = dict(flag)
-            prompt_flag["code"] = code
-            prompt_flag["segment_id"] = segment_id
-            prompt_flag["message"] = _canonical_review_flag_message(prompt_flag.get("message"))
-            prompt_review_flags.append(prompt_flag)
+            prompt_review_flags.append(
+                normalize_prompt_review_flag_row(
+                    flag,
+                    canonical_review_flag_code=_canonical_review_flag_code,
+                    canonical_review_flag_message=_canonical_review_flag_message,
+                )
+            )
         pending_summary = []
         for item in pending_recommendations:
             if not _is_prompt_blocking_pending_recommendation(item):

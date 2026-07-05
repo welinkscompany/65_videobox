@@ -9,7 +9,9 @@ from videobox_core_engine.prompt_pending_recommendation import (
     canonical_prompt_decision_state as _canonical_decision_state,
     canonical_prompt_recommendation_type as _canonical_recommendation_type,
     canonical_prompt_review_flag_message as _canonical_review_flag_message,
+    has_canonical_review_flag_identity,
     has_canonical_pending_recommendation_identity,
+    normalize_prompt_review_flag_row,
     normalize_prompt_pending_recommendation_row,
     VALID_PROMPT_RECOMMENDATION_TYPES,
     VALID_PROMPT_REVIEW_FLAG_CODES,
@@ -52,13 +54,6 @@ def _is_prompt_blocking_pending_recommendation(item: object) -> bool:
         return False
     return True
 
-
-def _has_canonical_review_flag_identity(item: dict[str, Any]) -> bool:
-    code = _canonical_review_flag_code(item.get("code"))
-    segment_id = str(item.get("segment_id") or "").strip()
-    return bool(code in VALID_PROMPT_REVIEW_FLAG_CODES and segment_id)
-
-
 class StructuredReviewGuidanceRuntime(Protocol):
     def generate_structured(
         self,
@@ -94,7 +89,12 @@ class HeuristicReviewGuidanceBuilder(ReviewGuidanceBuilder):
         review_flags = [
             flag
             for flag in review_snapshot.get("review_flags", [])
-            if isinstance(flag, dict) and _has_canonical_review_flag_identity(flag)
+            if isinstance(flag, dict)
+            and has_canonical_review_flag_identity(
+                flag,
+                canonical_review_flag_code=_canonical_review_flag_code,
+                valid_review_flag_codes=VALID_PROMPT_REVIEW_FLAG_CODES,
+            )
         ]
         pending_recommendations = [
             item
@@ -255,13 +255,19 @@ class LocalFirstReviewGuidanceBuilder(ReviewGuidanceBuilder):
         for flag in review_flags:
             if not isinstance(flag, dict):
                 continue
-            if not _has_canonical_review_flag_identity(flag):
+            if not has_canonical_review_flag_identity(
+                flag,
+                canonical_review_flag_code=_canonical_review_flag_code,
+                valid_review_flag_codes=VALID_PROMPT_REVIEW_FLAG_CODES,
+            ):
                 continue
-            prompt_row = dict(flag)
-            prompt_row["code"] = _canonical_review_flag_code(prompt_row.get("code"))
-            prompt_row["segment_id"] = str(prompt_row.get("segment_id") or "").strip()
-            prompt_row["message"] = _canonical_review_flag_message(prompt_row.get("message"))
-            prompt_rows.append(prompt_row)
+            prompt_rows.append(
+                normalize_prompt_review_flag_row(
+                    flag,
+                    canonical_review_flag_code=_canonical_review_flag_code,
+                    canonical_review_flag_message=_canonical_review_flag_message,
+                )
+            )
         return prompt_rows
 
     def _prompt_pending_recommendations(

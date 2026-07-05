@@ -31,6 +31,17 @@ def canonical_prompt_review_flag_message(value: object) -> str:
     return message or "Operator review required before approval or output."
 
 
+def has_canonical_review_flag_identity(
+    item: dict[str, Any],
+    *,
+    canonical_review_flag_code: Callable[[object], str],
+    valid_review_flag_codes: set[str],
+) -> bool:
+    code = canonical_review_flag_code(item.get("code"))
+    segment_id = str(item.get("segment_id") or "").strip()
+    return bool(code in valid_review_flag_codes and segment_id)
+
+
 def has_canonical_pending_recommendation_identity(
     item: dict[str, Any],
     *,
@@ -45,6 +56,19 @@ def has_canonical_pending_recommendation_identity(
         and target_segment_id
         and recommendation_type in valid_recommendation_types
     )
+
+
+def normalize_prompt_review_flag_row(
+    item: dict[str, Any],
+    *,
+    canonical_review_flag_code: Callable[[object], str],
+    canonical_review_flag_message: Callable[[object], str],
+) -> dict[str, Any]:
+    prompt_row = dict(item)
+    prompt_row["code"] = canonical_review_flag_code(prompt_row.get("code"))
+    prompt_row["segment_id"] = str(prompt_row.get("segment_id") or "").strip()
+    prompt_row["message"] = canonical_review_flag_message(prompt_row.get("message"))
+    return prompt_row
 
 
 def normalize_prompt_pending_recommendation_row(
