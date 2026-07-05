@@ -104,10 +104,14 @@ def _build_review_guidance_reuse_key(review_snapshot: dict[str, Any]) -> str | N
     for item in review_snapshot.get("review_flags", []):
         if not isinstance(item, dict):
             continue
+        code = _canonical_runtime_review_flag_code(item.get("code"))
+        segment_id = str(item.get("segment_id") or "").strip()
+        if code not in VALID_RUNTIME_BLOCKING_REVIEW_FLAG_CODES or not segment_id:
+            continue
         review_flags.append(
             {
-                "code": _canonical_runtime_review_flag_code(item.get("code")),
-                "segment_id": str(item.get("segment_id") or "").strip(),
+                "code": code,
+                "segment_id": segment_id,
                 "message": str(item.get("message") or "").strip(),
             }
         )
@@ -117,14 +121,23 @@ def _build_review_guidance_reuse_key(review_snapshot: dict[str, Any]) -> str | N
     for item in review_snapshot.get("pending_recommendations", []):
         if not isinstance(item, dict):
             continue
+        recommendation_id = str(item.get("recommendation_id") or "").strip()
+        target_segment_id = str(item.get("target_segment_id") or "").strip()
+        recommendation_type = _canonical_runtime_recommendation_type(
+            item.get("recommendation_type")
+        )
+        if (
+            not recommendation_id
+            or not target_segment_id
+            or recommendation_type not in VALID_RESTORED_RECOMMENDATION_TYPES
+        ):
+            continue
         payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
         pending_recommendations.append(
             {
-                "recommendation_id": str(item.get("recommendation_id") or "").strip(),
-                "target_segment_id": str(item.get("target_segment_id") or "").strip(),
-                "recommendation_type": _canonical_runtime_recommendation_type(
-                    item.get("recommendation_type")
-                ),
+                "recommendation_id": recommendation_id,
+                "target_segment_id": target_segment_id,
+                "recommendation_type": recommendation_type,
                 "reason": str(item.get("reason") or "").strip(),
                 "selected_asset_id": str(item.get("selected_asset_id") or "").strip(),
                 "selected_asset_uri": str(payload.get("selected_asset_uri") or "").strip(),

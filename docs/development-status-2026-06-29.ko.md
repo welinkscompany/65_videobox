@@ -438,6 +438,43 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
 - exact failing test 1개로만 다시 시작한다
 
+## 156. 2026-07-05 review guidance reuse key ignores stale unknown and minimal blocker entries closeout
+
+이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `review/output gating`과 직접 맞닿은 blocked review guidance persistence 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/core-engine/src/videobox_core_engine/local_pipeline.py`의 `_build_review_guidance_reuse_key(...)`는 blocked snapshot의 `review_flags`/`pending_recommendations`에 dict 형태만 있으면 모두 reuse key에 넣고 있어, stale unknown code review flag나 minimal/unknown-type pending recommendation dict가 섞인 경우 실제 blocker surface는 같아도 persisted guidance 재사용 키가 달라질 수 있었다
+- strict TDD로 `test_review_guidance_reuse_key_ignores_stale_unknown_and_minimal_blocker_entries` exact regression을 먼저 추가했고, 실제로 canonical blocker snapshot과 stale-shape가 섞인 snapshot의 reuse key가 달라지는 RED를 확인했다
+- 최소 수정으로 blocked guidance reuse key 생성 시 supported review-flag code와 canonical `segment_id`, supported recommendation type과 canonical recommendation identity/segment를 가진 entry만 키에 반영하도록 좁혀, stale unknown/minimal blocker dict는 persistence key에서 제외하고 valid blocker truth만 남기게 정리했다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, output gating truth를 건드리지 않고 blocked review guidance persistence key의 stale-shape 경계 한 점만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 failed` 확인 후 `1 passed`
+- focused verification
+  - backend output-gating `24 passed`
+  - backend preflight focused command exit code `0` 확인
+  - frontend preflight `25 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - blocked guidance persistence reuse key의 stale-shape 경계 한 점 수정이라 exact + focused evidence가 가장 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. blocked review guidance persistence가 stale unknown/minimal blocker dict 때문에 같은 blocker truth를 다른 reuse key로 취급하지 않는다
+2. persisted operator guidance 재사용 판단은 canonical blocker surface 기준으로만 움직인다
+3. review/output gating 인접 persistence behavior가 기존 blocker truth 정리 방향과 같은 기준으로 정렬됐다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
 ## 155. 2026-07-05 preview renderer ignores stale non-list track clips closeout
 
 이번 후속 작업에서는 코드리뷰/갭검증/역방향 동작검증 관점에서, 직전에 hardened된 output operator copy와 preview visible surface가 stale `tracks[].clips` shape를 다르게 처리하던 가장 가까운 output 경계 1개를 다시 닫았다.

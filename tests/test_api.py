@@ -17,6 +17,7 @@ from videobox_api.main import (
 from videobox_api.orchestration import LocalFirstRuntimeService
 from videobox_core_engine.local_first_runtime import LocalFirstStructuredGenerationError
 from videobox_core_engine.local_pipeline import LocalPipelineRunner
+from videobox_core_engine.local_pipeline import _build_review_guidance_reuse_key
 from videobox_core_engine.output_operator_copy import LocalFirstOutputOperatorCopyBuilder
 from videobox_core_engine.preview_renderer import PreviewRenderer
 from videobox_core_engine.provider_trace import build_provider_trace
@@ -5927,6 +5928,54 @@ def test_review_snapshot_persists_operator_guidance_for_repeated_reads(
     assert first_payload["operator_guidance"]["summary"] == "Persisted local review summary."
     assert second_payload["operator_guidance"] == first_payload["operator_guidance"]
     assert len(local_provider.calls) == 4
+
+
+def test_review_guidance_reuse_key_ignores_stale_unknown_and_minimal_blocker_entries() -> None:
+    canonical_snapshot = {
+        "review_status": "blocked",
+        "review_flags": [
+            {
+                "code": "tts_replacement_review_required",
+                "segment_id": "seg_002",
+                "message": "Review the current seg_002 blocker before output.",
+            }
+        ],
+        "pending_recommendations": [
+            {
+                "recommendation_id": "rec_tts_review_002",
+                "target_segment_id": "seg_002",
+                "recommendation_type": "tts_replacement",
+                "reason": "Awaiting operator approval.",
+                "selected_asset_id": "asset_tts_review_002",
+                "payload": {
+                    "selected_asset_uri": "local://projects/project_001/assets/generated/asset_tts_review_002.wav"
+                },
+            }
+        ],
+    }
+    stale_shape_snapshot = {
+        "review_status": "blocked",
+        "review_flags": [
+            "stale_review_flag_entry",
+            {"code": "legacy_review_gate"},
+            {"code": "legacy_review_gate", "segment_id": "seg_stale"},
+            canonical_snapshot["review_flags"][0],
+        ],
+        "pending_recommendations": [
+            "stale_pending_recommendation_entry",
+            {"recommendation_id": "rec_stale_only"},
+            {
+                "recommendation_id": "rec_stale_unknown_type",
+                "target_segment_id": "seg_stale",
+                "recommendation_type": "legacy_overlay_pick",
+            },
+            canonical_snapshot["pending_recommendations"][0],
+        ],
+    }
+
+    assert _build_review_guidance_reuse_key(stale_shape_snapshot) == _build_review_guidance_reuse_key(
+        canonical_snapshot
+    )
 
 
 def test_review_snapshot_fills_default_provider_trace_for_persisted_operator_guidance(
