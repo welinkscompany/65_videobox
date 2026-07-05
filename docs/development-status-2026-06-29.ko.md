@@ -697,6 +697,43 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
 - exact failing test 1개로만 다시 시작한다
 
+## 162. 2026-07-05 review guidance prompt ignores stale non-dict review flag entries closeout
+
+이번 후속 작업에서는 장기 queue를 유지한 채, `review/output gating`에 가장 가까운 review guidance prompt의 stale non-dict `review_flags` 입력 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/core-engine/src/videobox_core_engine/review_guidance.py`의 `LocalFirstReviewGuidanceBuilder._prompt_review_flags(...)`는 모든 `review_flags` entry를 dict라고 가정하고 raw `dict(flag)`를 호출하고 있어, stale 문자열 같은 non-dict review flag entry 하나만 있어도 blocked review guidance prompt 생성이 `ValueError`로 깨지고 있었다
+- strict TDD로 `test_review_guidance_builder_ignores_non_dict_review_flags_in_prompt` exact regression을 먼저 추가했고, 실제로 `dictionary update sequence element #0 has length 1; 2 is required` RED를 확인했다
+- 최소 수정으로 prompt `review_flags` 루프에서 dict가 아닌 entry를 건너뛰도록만 맞춰, valid blocker prompt surface는 그대로 유지하면서 stale non-dict entry가 review guidance prompt 생성을 깨지 않게 정리했다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence behavior를 건드리지 않고 review guidance prompt의 stale review-flag input 경계 한 점만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `py -m pytest tests/test_api.py -q -k "test_review_guidance_builder_ignores_non_dict_review_flags_in_prompt" -vv`
+  - 결과 `1 failed` 확인 후 `1 passed`
+- focused verification
+  - `py -m pytest tests/test_api.py -q -k "test_review_guidance_builder_ignores_non_dict_review_flags_in_prompt or test_review_guidance_builder_canonicalizes_mixed_case_review_flag_code_in_prompt or test_review_guidance_builder_trims_review_flag_segment_id_in_prompt or test_review_guidance_builder_defaults_review_flag_message_in_prompt" -vv`
+  - 결과 `4 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - 이번 수정은 review guidance prompt의 stale non-dict review-flag input 한 점에 한정돼 있어, exact + 같은 prompt surface focused evidence가 가장 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 491 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. review guidance prompt가 stale non-dict `review_flags` entry 하나 때문에 예외로 중단되지 않는다
+2. blocked review guidance prompt는 valid blocker surface만 유지하고 junk review-flag input은 건너뛴다
+3. review guidance prompt surface가 output operator copy prompt의 stale review-flag input 방어 방향과 더 가까워졌다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
 ## 153. 2026-07-04 heuristic review guidance default review flag message closeout
 
 이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `review/output gating`과 바로 이어지는 heuristic review guidance fallback의 message 없는 `review_flags` default-message surface 경계 1개만 다시 닫았다.

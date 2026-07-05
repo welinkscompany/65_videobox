@@ -1692,6 +1692,29 @@ def test_review_guidance_builder_canonicalizes_mixed_case_review_flag_code_in_pr
     assert "'code': ' TTS_REPLACEMENT_REVIEW_REQUIRED '" not in prompt
 
 
+def test_review_guidance_builder_ignores_non_dict_review_flags_in_prompt() -> None:
+    builder = LocalFirstReviewGuidanceBuilder(runtime_service=object())
+
+    prompt = builder._build_prompt(
+        review_snapshot={
+            "review_status": "blocked",
+            "review_flags": [
+                "stale_review_flag_entry",
+                {
+                    "code": "tts_replacement_review_required",
+                    "segment_id": "seg_001",
+                },
+            ],
+            "pending_recommendations": [],
+            "segments": [],
+        }
+    )
+
+    assert "stale_review_flag_entry" not in prompt
+    assert "'code': 'tts_replacement_review_required'" in prompt
+    assert "'segment_id': 'seg_001'" in prompt
+
+
 def test_review_guidance_builder_trims_review_flag_segment_id_in_prompt() -> None:
     builder = LocalFirstReviewGuidanceBuilder(runtime_service=object())
 

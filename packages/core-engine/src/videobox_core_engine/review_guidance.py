@@ -217,6 +217,8 @@ class LocalFirstReviewGuidanceBuilder(ReviewGuidanceBuilder):
     ) -> list[dict[str, Any]]:
         prompt_rows: list[dict[str, Any]] = []
         for flag in review_flags:
+            if not isinstance(flag, dict):
+                continue
             prompt_row = dict(flag)
             prompt_row["code"] = _canonical_review_flag_code(prompt_row.get("code"))
             if "segment_id" in prompt_row:
