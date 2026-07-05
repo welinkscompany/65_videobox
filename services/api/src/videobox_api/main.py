@@ -849,6 +849,12 @@ def _normalize_recommendations_for_response(value: object) -> list[dict[str, obj
         except (TypeError, ValueError):
             score = 0.0
         payload = item.get("payload")
+        normalized_payload = dict(payload) if isinstance(payload, dict) else {}
+        selected_asset_uri = str(normalized_payload.get("selected_asset_uri") or "").strip()
+        if selected_asset_uri:
+            normalized_payload["selected_asset_uri"] = selected_asset_uri
+        elif "selected_asset_uri" in normalized_payload:
+            normalized_payload["selected_asset_uri"] = ""
         normalized.append(
             {
                 "recommendation_id": recommendation_id,
@@ -865,7 +871,7 @@ def _normalize_recommendations_for_response(value: object) -> list[dict[str, obj
                     item.get("review_required", False)
                 ),
                 "decision_state": str(item.get("decision_state") or "").strip().lower() or None,
-                "payload": payload if isinstance(payload, dict) else {},
+                "payload": normalized_payload,
                 "created_at": str(item.get("created_at") or "").strip() or "unknown",
                 "provider_trace": _normalize_provider_trace_response(item.get("provider_trace")),
             }

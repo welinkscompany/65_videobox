@@ -394,6 +394,33 @@ def test_recommendation_response_normalization_canonicalizes_mixed_case_recommen
     assert recommendations[0]["recommendation_type"] == "tts_replacement"
 
 
+def test_recommendation_response_normalization_trims_payload_selected_asset_uri() -> None:
+    recommendations = _normalize_recommendations_for_response(
+        [
+            {
+                "recommendation_id": "rec_001",
+                "target_segment_id": "seg_001",
+                "recommendation_type": "tts_replacement",
+                "selected_asset_id": "asset_tts_001",
+                "score": 0.91,
+                "reason": "Approved TTS replacement.",
+                "auto_apply_allowed": True,
+                "review_required": False,
+                "decision_state": "approved",
+                "payload": {
+                    "selected_asset_uri": " local://projects/project_001/assets/generated/asset_tts_001.wav "
+                },
+                "created_at": "2026-07-04T00:00:00+00:00",
+                "provider_trace": build_provider_trace(final_provider="rule_based_fallback"),
+            }
+        ]
+    )
+
+    assert recommendations[0]["payload"]["selected_asset_uri"] == (
+        "local://projects/project_001/assets/generated/asset_tts_001.wav"
+    )
+
+
 def test_review_flag_response_normalization_canonicalizes_mixed_case_code() -> None:
     review_flags = _normalize_review_flags_for_response(
         [
