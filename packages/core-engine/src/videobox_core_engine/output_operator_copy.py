@@ -233,10 +233,11 @@ class LocalFirstOutputOperatorCopyBuilder(OutputOperatorCopyBuilder):
             clips = track.get("clips", [])
             if not isinstance(clips, list):
                 continue
+            valid_clips = [clip for clip in clips if isinstance(clip, dict)]
             track_summary.append(
                 {
                     "track_type": track_type,
-                    "clip_count": len(clips),
+                    "clip_count": len(valid_clips),
                 }
             )
         prompt_review_flags = []
