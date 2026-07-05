@@ -1768,6 +1768,31 @@ def test_review_guidance_builder_ignores_non_dict_review_flags_in_prompt() -> No
     assert "'segment_id': 'seg_001'" in prompt
 
 
+def test_review_guidance_builder_ignores_minimal_dict_review_flags_in_prompt() -> None:
+    builder = LocalFirstReviewGuidanceBuilder(runtime_service=object())
+
+    prompt = builder._build_prompt(
+        review_snapshot={
+            "review_status": "blocked",
+            "review_flags": [
+                {
+                    "code": "segment_review_required",
+                },
+                {
+                    "code": "tts_replacement_review_required",
+                    "segment_id": "seg_001",
+                },
+            ],
+            "pending_recommendations": [],
+            "segments": [],
+        }
+    )
+
+    assert "'code': 'segment_review_required'" not in prompt
+    assert "'code': 'tts_replacement_review_required'" in prompt
+    assert "'segment_id': 'seg_001'" in prompt
+
+
 def test_review_guidance_builder_trims_review_flag_segment_id_in_prompt() -> None:
     builder = LocalFirstReviewGuidanceBuilder(runtime_service=object())
 

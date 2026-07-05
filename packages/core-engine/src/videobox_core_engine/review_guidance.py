@@ -6,6 +6,7 @@ from typing import Any, Protocol
 from videobox_core_engine.gemini_runtime import GeminiStructuredGenerationError
 from videobox_core_engine.local_first_runtime import LocalFirstStructuredGenerationError
 from videobox_core_engine.provider_trace import build_provider_trace, response_provider_trace, with_final_provider
+from videobox_domain_models.recommendations import RecommendationType
 from videobox_provider_interfaces.llm import LLMProviderError, LLMTaskType
 
 
@@ -34,11 +35,34 @@ def _canonical_review_flag_message(value: object) -> str:
     return message or "Operator review required before approval or output."
 
 
+VALID_PROMPT_RECOMMENDATION_TYPES = {
+    RecommendationType.TTS_REPLACEMENT.value,
+    RecommendationType.BROLL.value,
+    RecommendationType.BGM.value,
+    RecommendationType.OVERLAY.value,
+}
+
+VALID_PROMPT_REVIEW_FLAG_CODES = {
+    "segment_review_required",
+    "tts_replacement_review_required",
+}
+
+
 def _has_canonical_pending_recommendation_identity(item: dict[str, Any]) -> bool:
     recommendation_id = str(item.get("recommendation_id") or "").strip()
     target_segment_id = str(item.get("target_segment_id") or "").strip()
     recommendation_type = _canonical_recommendation_type(item.get("recommendation_type"))
-    return bool(recommendation_id and target_segment_id and recommendation_type)
+    return bool(
+        recommendation_id
+        and target_segment_id
+        and recommendation_type in VALID_PROMPT_RECOMMENDATION_TYPES
+    )
+
+
+def _has_canonical_review_flag_identity(item: dict[str, Any]) -> bool:
+    code = _canonical_review_flag_code(item.get("code"))
+    segment_id = str(item.get("segment_id") or "").strip()
+    return bool(code in VALID_PROMPT_REVIEW_FLAG_CODES and segment_id)
 
 
 class StructuredReviewGuidanceRuntime(Protocol):
@@ -226,10 +250,11 @@ class LocalFirstReviewGuidanceBuilder(ReviewGuidanceBuilder):
         for flag in review_flags:
             if not isinstance(flag, dict):
                 continue
+            if not _has_canonical_review_flag_identity(flag):
+                continue
             prompt_row = dict(flag)
             prompt_row["code"] = _canonical_review_flag_code(prompt_row.get("code"))
-            if "segment_id" in prompt_row:
-                prompt_row["segment_id"] = str(prompt_row.get("segment_id") or "").strip()
+            prompt_row["segment_id"] = str(prompt_row.get("segment_id") or "").strip()
             prompt_row["message"] = _canonical_review_flag_message(prompt_row.get("message"))
             prompt_rows.append(prompt_row)
         return prompt_rows
