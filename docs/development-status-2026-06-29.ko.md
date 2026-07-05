@@ -8164,3 +8164,43 @@ focused 검증 메모:
 - 작은 stale-shape exact regression을 더 억지로 찾기보다, Phase B의 전체 동작 검증 / QA / 시스템 검증으로 넘어갈지 판단한다
 - 필요하면 provider trace audit focused slice와 happy-path smoke evidence를 추가한다
 - 그 뒤 문서 최신화 / 정리 리팩터링 / 찌꺼기 파일 정리 순서로 마감 정리를 진행한다
+
+## 177. 2026-07-06 phase-b happy-path and provider-trace evidence closeout
+
+이번 후속 작업에서는 새 stale-shape slice를 더 열지 않고, `Phase B` 전체 동작 검증과 시스템 검증에 바로 연결되는 대표 happy-path / provider trace audit evidence를 현재 worktree 기준으로 다시 확인했다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- review snapshot approve 흐름은 `test_review_snapshot_api_can_approve_pending_recommendation` 기준으로 계속 동작했고, approve 이후 review snapshot의 pending/applied split과 status 변화가 현재 SSOT와 같은 방향으로 유지됐다
+- approved TTS replacement의 preview/export 반영 흐름은 `test_approved_tts_replacement_flows_through_preview_and_export_outputs` 기준으로 계속 동작했고, 승인된 narration asset이 preview/export 쪽 실제 output surface까지 이어지는 사실을 다시 확인했다
+- editing session -> partial regeneration -> candidate result 흐름은 `test_editing_session_api_can_fetch_partial_regeneration_result`와 `test_review_snapshot_api_uses_partial_regeneration_job_id_for_candidate_timeline` 기준으로 계속 동작했고, candidate timeline lineage도 review snapshot read path에서 현재 truth를 유지했다
+- provider trace audit의 candidate lineage는 `test_provider_trace_audit_timeline_filter_include_upstream_supports_partial_regeneration_candidate` 기준으로 계속 동작했고, partial regeneration candidate timeline에서도 upstream trace chain을 잃지 않는 사실을 다시 확인했다
+- frontend/operator 관점에서도 `shows a blocked preflight warning before execution when the rerun preserves existing review blockers`와 `clears resumed candidate restore warnings when the operator changes the rerun target` 2개를 다시 확인해, blocked-warning surface와 resumed-warning cleanup이 현재 UI 기준으로 유지되는 사실을 같이 확인했다
+- 이번 검증은 제품 코드를 더 바꾸지 않고도, 자동 baseline green 이후 실제 마감 검증에 필요한 핵심 흐름 증거를 한 번 더 좁게 확보한 단계다
+
+이번 turn의 verification은 아래와 같다.
+
+- phase-b representative backend verification
+  - `test_review_snapshot_api_can_approve_pending_recommendation`
+  - `test_approved_tts_replacement_flows_through_preview_and_export_outputs`
+  - `test_editing_session_api_can_fetch_partial_regeneration_result`
+  - `test_review_snapshot_api_uses_partial_regeneration_job_id_for_candidate_timeline`
+  - `test_provider_trace_audit_timeline_filter_include_upstream_supports_partial_regeneration_candidate`
+  - 결과: `5 passed`
+- phase-b representative frontend QA verification
+  - `shows a blocked preflight warning before execution when the rerun preserves existing review blockers`
+  - `clears resumed candidate restore warnings when the operator changes the rerun target`
+  - 결과: `2 passed`
+
+이 갱신으로 아래 범위는 현재 기준으로 근거가 더 확보됐다.
+
+1. review snapshot approve -> approved output 흐름이 현재 backend 기준 happy-path로 다시 확인됐다
+2. editing session -> partial regeneration -> candidate lineage 흐름이 현재 backend 기준으로 다시 확인됐다
+3. provider trace audit이 candidate timeline upstream lineage를 계속 유지한다는 시스템 검증 근거가 추가됐다
+4. blocked preflight warning과 resumed warning cleanup이 현재 frontend/operator surface 기준으로 다시 확인됐다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- frontend/operator 관점의 QA 근거를 조금 더 보강한다
+- 필요하면 provider trace audit의 failed-output / fallback 쪽 대표 slice 1개를 더 확인한다
+- 그 뒤 문서 최신화 / 정리 리팩터링 / 찌꺼기 파일 정리 순서로 마감 정리를 진행한다
