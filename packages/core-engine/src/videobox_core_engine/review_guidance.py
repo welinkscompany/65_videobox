@@ -34,6 +34,13 @@ def _canonical_review_flag_message(value: object) -> str:
     return message or "Operator review required before approval or output."
 
 
+def _has_canonical_pending_recommendation_identity(item: dict[str, Any]) -> bool:
+    recommendation_id = str(item.get("recommendation_id") or "").strip()
+    target_segment_id = str(item.get("target_segment_id") or "").strip()
+    recommendation_type = _canonical_recommendation_type(item.get("recommendation_type"))
+    return bool(recommendation_id and target_segment_id and recommendation_type)
+
+
 class StructuredReviewGuidanceRuntime(Protocol):
     def generate_structured(
         self,
@@ -234,6 +241,8 @@ class LocalFirstReviewGuidanceBuilder(ReviewGuidanceBuilder):
         prompt_rows: list[dict[str, Any]] = []
         for item in pending_recommendations:
             if not isinstance(item, dict):
+                continue
+            if not _has_canonical_pending_recommendation_identity(item):
                 continue
             prompt_row = dict(item)
             if "recommendation_id" in prompt_row:

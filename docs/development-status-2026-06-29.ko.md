@@ -771,6 +771,44 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
 - exact failing test 1개로만 다시 시작한다
 
+## 164. 2026-07-05 review guidance prompt ignores stale minimal pending recommendation entries closeout
+
+이번 후속 작업에서는 장기 queue를 유지한 채, 같은 `review/output gating` review guidance prompt의 `recommendation_id`만 남은 stale minimal-dict `pending_recommendations` 입력 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/core-engine/src/videobox_core_engine/review_guidance.py`의 `LocalFirstReviewGuidanceBuilder._prompt_pending_recommendations(...)`는 dict 여부만 통과하면 해당 entry를 prompt row로 그대로 올리고 있어, `recommendation_id`만 남고 `target_segment_id`나 canonical `recommendation_type`가 비어 있는 stale minimal-dict pending recommendation도 blocked review guidance prompt에 valid recommendation처럼 섞여 들어가고 있었다
+- strict TDD로 `test_review_guidance_builder_ignores_minimal_dict_pending_recommendations_in_prompt` exact regression을 먼저 추가했고, 실제로 stale `rec_stale_minimal` entry가 prompt 본문에 그대로 남는 RED를 확인했다
+- 최소 수정으로 prompt `pending_recommendations` row 생성 전에 `recommendation_id + target_segment_id + canonical recommendation_type` 유효성 체크만 추가해, stale minimal-dict entry는 건너뛰고 valid recommendation prompt row만 유지하게 했다
+- focused verification 중 기존 mixed-case recommendation-type test fixture가 새 최소 identity/type/segment 계약을 만족하지 않아, `target_segment_id`를 추가해 현재 계약 기준으로 바로잡았다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence behavior를 건드리지 않고 review guidance prompt의 stale minimal pending-recommendation input 경계 한 점만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `py -m pytest tests/test_api.py -q -k "test_review_guidance_builder_ignores_minimal_dict_pending_recommendations_in_prompt" -vv`
+  - 결과 `1 failed` 확인 후 `1 passed`
+- focused verification
+  - `py -m pytest tests/test_api.py -q -k "test_review_guidance_builder_ignores_non_dict_pending_recommendations_in_prompt or test_review_guidance_builder_ignores_minimal_dict_pending_recommendations_in_prompt or test_review_guidance_builder_canonicalizes_mixed_case_pending_recommendation_type_in_prompt or test_review_guidance_builder_trims_pending_recommendation_target_segment_id_in_prompt" -vv`
+  - 결과 `4 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - 이번 수정은 review guidance prompt의 stale minimal pending-recommendation input 한 점에 한정돼 있어, exact + 같은 prompt surface focused evidence가 가장 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 491 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. review guidance prompt가 `recommendation_id`만 남은 stale minimal-dict `pending_recommendations` entry를 valid recommendation prompt row처럼 노출하지 않는다
+2. blocked review guidance prompt는 canonical recommendation identity/type/segment를 가진 valid recommendation surface만 유지한다
+3. review guidance prompt surface가 output operator copy prompt의 stale minimal pending-recommendation input 방어 방향과 더 가까워졌다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
 ## 153. 2026-07-04 heuristic review guidance default review flag message closeout
 
 이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `review/output gating`과 바로 이어지는 heuristic review guidance fallback의 message 없는 `review_flags` default-message surface 경계 1개만 다시 닫았다.

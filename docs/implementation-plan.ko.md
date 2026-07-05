@@ -742,6 +742,7 @@
 - review approval decision extraction read-path도 `recommendation_id`만 남은 stale minimal-dict `pending_recommendations` entry를 valid recommendation row처럼 승인하지 않고 건너뛰어, approved/rejected recommendation decision 추출이 canonical recommendation identity/type/segment를 가진 input에만 적용되도록 정리했다
 - review guidance prompt도 stale non-dict `review_flags` entry를 raw dict 변환 예외로 터뜨리지 않고 건너뛰어, blocked review guidance surface가 valid blocker prompt input만 유지하도록 정리했다
 - review guidance prompt도 stale non-dict `pending_recommendations` entry를 raw dict 변환 예외로 터뜨리지 않고 건너뛰어, blocked review guidance surface가 valid recommendation prompt input만 유지하도록 정리했다
+- review guidance prompt도 `recommendation_id`만 남은 stale minimal-dict `pending_recommendations` entry를 valid recommendation prompt row처럼 노출하지 않고 건너뛰어, blocked review guidance surface가 canonical recommendation identity/type/segment를 가진 input만 유지하도록 정리했다
 - output operator copy prompt도 `track_type` 없이 남은 stale minimal-dict `tracks` entry를 빈 track summary처럼 노출하지 않고 건너뛰어, approved preview/export 경로가 canonical track summary prompt surface만 유지하도록 정리했다
 - output operator copy prompt도 stale non-dict `tracks` entry를 raw track summary 생성 예외로 터뜨리지 않고 건너뛰어, approved preview/export 경로가 valid track summary prompt surface만 유지하도록 정리했다
 - output operator copy prompt도 `segment_id` 없이 남은 stale minimal-dict `review_flags` entry를 valid blocker처럼 노출하지 않고 건너뛰어, approved preview/export 경로가 canonical blocker identity를 가진 prompt surface만 유지하도록 정리했다
