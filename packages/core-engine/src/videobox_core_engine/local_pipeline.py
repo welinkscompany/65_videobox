@@ -89,6 +89,10 @@ def _canonical_runtime_review_status(value: object) -> str:
     return str(value or "draft").strip().lower() or "draft"
 
 
+def _canonical_runtime_track_type(value: object) -> str:
+    return str(value or "").strip().lower()
+
+
 def _normalize_runtime_cut_action(value: object) -> str:
     cut_action = str(value or "keep")
     if cut_action not in {"keep", "remove", "trim"}:
@@ -2105,6 +2109,8 @@ class LocalPipelineRunner:
         ordered_segment_ids: list[str] = []
         for track in timeline.get("tracks", []):
             if not isinstance(track, dict):
+                continue
+            if not _canonical_runtime_track_type(track.get("track_type")):
                 continue
             clips = track.get("clips", [])
             if not isinstance(clips, list):

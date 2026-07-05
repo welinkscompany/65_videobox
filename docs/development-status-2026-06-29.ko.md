@@ -438,6 +438,48 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
 - exact failing test 1개로만 다시 시작한다
 
+## 157. 2026-07-06 subtitle segment order ignores stale minimal track without track type closeout
+
+이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `review/output gating`과 직접 맞닿은 subtitle render segment-order read path의 stale minimal track 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/core-engine/src/videobox_core_engine/local_pipeline.py`의 `_segments_for_timeline(...)`는 `tracks`가 dict이고 `clips`만 list면 모두 subtitle segment order source로 읽고 있어, `track_type` 없이 남은 stale minimal-dict track도 실제 subtitle source track처럼 세그먼트 순서에 끼어들 수 있었다
+- strict TDD로 `test_segments_for_timeline_ignores_minimal_dict_track_without_track_type` exact regression을 먼저 추가했고, 실제로 stale `seg_stale`가 canonical narration segment보다 먼저 subtitle order에 들어오는 RED를 확인했다
+- 최소 수정으로 subtitle segment-order 수집 시 canonical `track_type`가 있는 track만 읽도록 좁혀, stale minimal-dict track은 건너뛰고 valid track input만 subtitle source로 남기게 정리했다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence behavior를 건드리지 않고 subtitle render의 stale minimal track 입력 경계 한 점만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 failed` 확인 후 `1 passed`
+- focused verification
+  - backend output-gating focused command exit code `0` 확인
+  - backend preflight focused command exit code `0` 확인
+  - frontend preflight `25 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - subtitle segment-order read path의 stale minimal track 경계 한 점 수정이라 exact + focused evidence가 가장 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+focused 검증 메모:
+
+- `./scripts/dev-fast-path.ps1 -Mode current-focused-parallel`는 이번 환경에서도 backend `pytest.exe` 표준출력 인코딩 문제로 실패해 신뢰하지 않았다
+- backend focused는 `py -m pytest ...` 표준 명령으로 직접 다시 확인했다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. subtitle render의 segment order가 `track_type` 없는 stale minimal-dict track에 끌려가지 않는다
+2. approved subtitle output은 canonical track input만 기준으로 세그먼트 순서를 잡는다
+3. review/output gating 인접 subtitle read path가 preview/export prompt 쪽 track hardening 방향과 같은 기준으로 정렬됐다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
 ## 156. 2026-07-05 review guidance reuse key ignores stale unknown and minimal blocker entries closeout
 
 이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `review/output gating`과 직접 맞닿은 blocked review guidance persistence 경계 1개만 다시 닫았다.
