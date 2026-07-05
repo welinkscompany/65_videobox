@@ -6,6 +6,9 @@ from typing import Any, Protocol
 from videobox_core_engine.gemini_runtime import GeminiStructuredGenerationError
 from videobox_core_engine.local_first_runtime import LocalFirstStructuredGenerationError
 from videobox_core_engine.prompt_pending_recommendation import (
+    canonical_prompt_decision_state,
+    canonical_prompt_recommendation_type,
+    canonical_prompt_review_flag_message,
     has_canonical_pending_recommendation_identity,
     normalize_prompt_pending_recommendation_row,
     VALID_PROMPT_RECOMMENDATION_TYPES,
@@ -24,11 +27,11 @@ def _canonical_track_type(value: object) -> str:
 
 
 def _canonical_recommendation_type(value: object) -> str:
-    return str(value or "").strip().lower()
+    return canonical_prompt_recommendation_type(value)
 
 
 def _canonical_decision_state(value: object) -> str:
-    return str(value or "").strip().lower()
+    return canonical_prompt_decision_state(value)
 
 
 def _canonical_review_flag_code(value: object) -> str:
@@ -36,8 +39,7 @@ def _canonical_review_flag_code(value: object) -> str:
 
 
 def _canonical_review_flag_message(value: object) -> str:
-    message = str(value or "").strip()
-    return message or "Operator review required before approval or output."
+    return canonical_prompt_review_flag_message(value)
 
 
 def _normalize_boolish(value: object) -> bool:

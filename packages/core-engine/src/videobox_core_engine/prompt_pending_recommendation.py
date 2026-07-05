@@ -18,6 +18,19 @@ VALID_PROMPT_REVIEW_FLAG_CODES = {
 }
 
 
+def canonical_prompt_recommendation_type(value: object) -> str:
+    return str(value or "").strip().lower()
+
+
+def canonical_prompt_decision_state(value: object) -> str:
+    return str(value or "").strip().lower()
+
+
+def canonical_prompt_review_flag_message(value: object) -> str:
+    message = str(value or "").strip()
+    return message or "Operator review required before approval or output."
+
+
 def has_canonical_pending_recommendation_identity(
     item: dict[str, Any],
     *,

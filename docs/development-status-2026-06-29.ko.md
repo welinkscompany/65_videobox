@@ -1,8 +1,8 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 188. 2026-07-06 Phase C shared prompt valid sets closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
-> 이 문서의 `## 1`부터 `## 187`까지는 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 188`만 기준으로 본다.
-> 단, `2일 내 1차 데모 완성` 실행 레일은 `## 188`의 장기 우선순위를 그대로 넓게 집행하지 않고, `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`의 축소된 실행 계획을 우선 적용한다.
+> 현재 authoritative 상태/next slice 판단은 `## 189. 2026-07-06 Phase C shared prompt canonical string helpers closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 이 문서의 `## 1`부터 `## 188`까지는 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 189`만 기준으로 본다.
+> 단, `2일 내 1차 데모 완성` 실행 레일은 `## 189`의 장기 우선순위를 그대로 넓게 집행하지 않고, `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`의 축소된 실행 계획을 우선 적용한다.
 
 ## 1. 결론
 
@@ -8411,6 +8411,45 @@ focused 검증 메모:
 1. output operator copy와 review guidance가 보는 pending recommendation row canonicalization 기준이 공통 모듈로 다시 모였다
 2. selected asset uri, identity, reason, decision state canonicalization 규칙 drift 위험이 더 줄었다
 3. 남아 있는 cleanup 후보를 고를 때 review/output prompt family의 중복은 더 많이 정리된 상태가 됐다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- stale-shape helper 중복과 dead helper 후보 중 다음 최소 정리 대상 1개를 다시 좁힌다
+- 역할이 끝난 중복 메모 문서는 삭제보다 역할 명시가 맞는지 먼저 판단한다
+- 최종 closeout 직전 broad 재검증이 정말 필요한지 마지막으로 판단한다
+
+## 189. 2026-07-06 Phase C shared prompt canonical string helpers closeout
+
+이번 후속 작업에서는 새 stale-shape 경계를 더 열지 않고, output operator copy와 review guidance가 각각 들고 있던 `canonical_recommendation_type`, `canonical_decision_state`, `canonical_review_flag_message` helper를 공통 모듈로 묶었다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- valid set과 identity helper까지 공통화한 뒤에도, canonical string helper 3개는 여전히 두 prompt 파일 안에 같은 본문으로 각각 남아 있었다
+- 현재 동작은 이미 맞았지만, mixed-case recommendation type, pending decision state, default review message 기준이 나중에 파일별로 다시 갈라질 수 있는 구조였다
+- 그래서 canonical string helper 3개만 공통 모듈로 분리해, prompt family의 기본 string normalization 규칙 drift 가능성을 더 줄이는 쪽이 현재 `Phase C`에 가장 맞는 최소 리팩터링이라고 판단했다
+- 이번 정리는 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence behavior를 바꾸지 않는 code cleanup 성격의 수정이다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact verification
+  - `test_output_operator_copy_builder_canonicalizes_mixed_case_pending_recommendation_type_in_prompt` -> `1 passed`
+  - `test_output_operator_copy_builder_ignores_minimal_dict_pending_recommendations_in_prompt` -> `1 passed`
+  - `test_review_guidance_builder_ignores_unknown_pending_recommendation_in_prompt_count` -> `1 passed`
+  - `test_review_guidance_builder_ignores_minimal_dict_pending_recommendations_in_prompt` -> `1 passed`
+- focused verification
+  - `./scripts/dev-fast-path.ps1 -Mode output-gating`
+  - backend output-gating `24 passed`
+- broader verification
+  - 이번 turn에서는 재실행하지 않음
+  - 판단:
+    - 이번 변경은 prompt family canonical string helper 공통화만 다루는 `Phase C` 소규모 리팩터링이다
+    - 현재 자동 baseline은 직전 closeout 기준 `frontend build 성공`, `full backend regression 543 passed`를 유지한다
+
+이 갱신으로 아래 범위는 현재 기준으로 정리됐다.
+
+1. output operator copy와 review guidance가 보는 canonical recommendation type / decision state / default review message 기준이 공통 모듈로 다시 모였다
+2. mixed-case recommendation type, pending decision state, default blocker message 기준 drift 위험이 더 줄었다
+3. 남아 있는 cleanup 후보는 이전보다 더 작은 helper/파일 정리 쪽으로 더 수렴했다
 
 현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
 
