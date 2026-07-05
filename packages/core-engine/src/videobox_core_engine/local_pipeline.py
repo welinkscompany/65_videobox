@@ -124,19 +124,11 @@ def _build_review_guidance_reuse_key(review_snapshot: dict[str, Any]) -> str | N
 
     pending_recommendations: list[dict[str, str]] = []
     for item in review_snapshot.get("pending_recommendations", []):
-        if not isinstance(item, dict):
+        if not _is_runtime_blocking_pending_recommendation(item):
             continue
         recommendation_id = str(item.get("recommendation_id") or "").strip()
         target_segment_id = str(item.get("target_segment_id") or "").strip()
-        recommendation_type = _canonical_runtime_recommendation_type(
-            item.get("recommendation_type")
-        )
-        if (
-            not recommendation_id
-            or not target_segment_id
-            or recommendation_type not in VALID_RESTORED_RECOMMENDATION_TYPES
-        ):
-            continue
+        recommendation_type = _canonical_runtime_recommendation_type(item.get("recommendation_type"))
         payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
         pending_recommendations.append(
             {

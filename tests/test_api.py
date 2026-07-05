@@ -6326,6 +6326,43 @@ def test_review_guidance_reuse_key_ignores_stale_unknown_and_minimal_blocker_ent
     )
 
 
+def test_review_guidance_reuse_key_ignores_approved_pending_recommendation_entries() -> None:
+    canonical_snapshot = {
+        "review_status": "blocked",
+        "review_flags": [
+            {
+                "code": "tts_replacement_review_required",
+                "segment_id": "seg_002",
+                "message": "Review the current seg_002 blocker before output.",
+            }
+        ],
+        "pending_recommendations": [],
+    }
+    stale_shape_snapshot = {
+        "review_status": "blocked",
+        "review_flags": canonical_snapshot["review_flags"],
+        "pending_recommendations": [
+            {
+                "recommendation_id": "rec_tts_approved_002",
+                "target_segment_id": "seg_002",
+                "recommendation_type": "tts_replacement",
+                "decision_state": "approved",
+                "reason": "Already approved recommendation should not affect reuse key.",
+                "auto_apply_allowed": True,
+                "review_required": False,
+                "selected_asset_id": "asset_tts_approved_002",
+                "payload": {
+                    "selected_asset_uri": "local://projects/project_001/assets/generated/asset_tts_approved_002.wav"
+                },
+            }
+        ],
+    }
+
+    assert _build_review_guidance_reuse_key(stale_shape_snapshot) == _build_review_guidance_reuse_key(
+        canonical_snapshot
+    )
+
+
 def test_review_snapshot_fills_default_provider_trace_for_persisted_operator_guidance(
     tmp_path: Path,
 ) -> None:
