@@ -137,6 +137,8 @@ def apply_approved_recommendation_to_timeline(
         raise ValueError("Approved TTS replacement requires target_segment_id.")
     matched_clip = False
     for track in timeline.get("tracks", []):
+        if not isinstance(track, dict):
+            continue
         if _canonical_track_type(track.get("track_type")) != "narration":
             continue
         clips = track.get("clips")
