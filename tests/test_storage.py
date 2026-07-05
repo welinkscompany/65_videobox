@@ -188,3 +188,39 @@ def test_save_timeline_run_summary_ignores_unknown_review_flag_count(tmp_path: P
     )
 
     assert fetched["summary"]["review_flag_count"] == 1
+
+
+def test_save_timeline_run_summary_ignores_unknown_pending_recommendation_count(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Timeline Pending Summary Count Project")
+
+    saved = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "version": "v001",
+            "tracks": [],
+            "review_flags": [],
+            "pending_recommendations": [
+                {
+                    "recommendation_id": "rec_unknown_pending",
+                    "target_segment_id": "seg_legacy",
+                    "recommendation_type": "legacy_overlay_pick",
+                    "auto_apply_allowed": False,
+                    "review_required": True,
+                    "payload": {},
+                    "created_at": "2026-07-06T00:00:00+00:00",
+                }
+            ],
+            "applied_recommendations": [],
+        },
+    )
+
+    fetched = store.get_timeline_run(
+        project_id=project.project_id,
+        timeline_id=saved["timeline_id"],
+    )
+
+    assert fetched["summary"]["pending_recommendation_count"] == 0

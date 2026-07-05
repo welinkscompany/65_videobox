@@ -110,6 +110,7 @@ def _normalize_review_flag_payloads(value: object) -> list[dict[str, str]]:
 
 def _timeline_summary_json(payload: dict[str, Any]) -> str:
     review_flags = payload.get("review_flags", [])
+    pending_recommendations = payload.get("pending_recommendations", [])
     return json.dumps(
         {
             "track_count": len(payload.get("tracks", [])),
@@ -119,7 +120,13 @@ def _timeline_summary_json(payload: dict[str, Any]) -> str:
             if isinstance(review_flags, list)
             else 0,
             "applied_recommendation_count": len(payload.get("applied_recommendations", [])),
-            "pending_recommendation_count": len(payload.get("pending_recommendations", [])),
+            "pending_recommendation_count": sum(
+                1
+                for item in pending_recommendations
+                if _is_store_blocking_pending_recommendation(item)
+            )
+            if isinstance(pending_recommendations, list)
+            else 0,
         },
         ensure_ascii=True,
     )
