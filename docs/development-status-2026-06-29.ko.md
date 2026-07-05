@@ -8127,3 +8127,40 @@ focused 검증 메모:
 - 장기 우선순위 queue는 유지
 - 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
 - exact failing test 1개로만 다시 시작한다
+
+## 176. 2026-07-06 output operator copy pending decision-state stale test alignment and broader verification closeout
+
+이번 후속 작업에서는 새 동작 변경을 더 넓히지 않고, `broader` 자동 검증에서 드러난 stale test expectation 1개를 현재 SSOT에 맞게 정리하고 전체 자동 검증 baseline을 다시 확인했다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `pytest -q` broader 재실행 중 `tests/test_api.py::test_output_operator_copy_builder_canonicalizes_pending_recommendation_decision_state_in_prompt` 1건이 실패했는데, 원인은 현재 worktree의 output operator copy prompt가 `decision_state="approved"` stale pending recommendation을 blocker prompt에서 제외하도록 이미 정리돼 있는데도 예전 테스트가 여전히 `approved` row가 prompt 안에 남아야 한다고 기대하던 점이었다
+- 이 경계는 이미 `test_output_operator_copy_builder_ignores_approved_decision_state_pending_recommendations_in_prompt`와 현재 SSOT가 설명하는 applied-like approved entry non-blocking 규칙과 충돌하고 있어, stale expectation을 mixed-case `pending` canonicalization 검증으로 좁혀 `test_output_operator_copy_builder_canonicalizes_pending_decision_state_in_prompt`로 정리했다
+- 제품 코드 동작은 바꾸지 않았고, test expectation만 현재 SSOT와 같은 방향으로 맞춘 뒤 exact/focused/broader를 다시 통과시켰다
+- 이로써 `current-focused-parallel`과 `broader`가 모두 현재 worktree 기준으로 다시 green이 되었고, Phase A 종료 판단 뒤 Phase B 자동 검증 진입 조건이 충족되는 쪽으로 진전됐다
+
+이번 turn의 verification은 아래와 같다.
+
+- current-focused-parallel
+  - backend output-gating `24 passed`
+  - backend preflight `59 passed`
+  - frontend preflight `25 passed`
+- exact regression
+  - `test_output_operator_copy_builder_canonicalizes_pending_decision_state_in_prompt` -> `1 passed`
+- focused verification
+  - output operator copy pending decision-state adjacent slice `4 passed`
+- broader verification
+  - frontend build 성공
+  - full backend regression `543 passed`
+
+이 갱신으로 아래 범위는 현재 기준 정리됐다.
+
+1. output operator copy prompt family의 pending decision-state test expectation이 stale approved-like pending blocker 비노출 SSOT와 같은 방향으로 맞춰졌다
+2. 제품 동작을 건드리지 않고도 stale test mismatch 때문에 막히던 broader backend regression이 다시 green으로 돌아왔다
+3. 현재 worktree 기준 자동 검증 baseline은 `current-focused-parallel green + frontend build green + full backend regression green`으로 다시 정렬됐다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 작은 stale-shape exact regression을 더 억지로 찾기보다, Phase B의 전체 동작 검증 / QA / 시스템 검증으로 넘어갈지 판단한다
+- 필요하면 provider trace audit focused slice와 happy-path smoke evidence를 추가한다
+- 그 뒤 문서 최신화 / 정리 리팩터링 / 찌꺼기 파일 정리 순서로 마감 정리를 진행한다

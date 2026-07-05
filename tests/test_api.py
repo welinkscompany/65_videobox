@@ -1762,7 +1762,7 @@ def test_output_operator_copy_builder_trims_pending_recommendation_selected_asse
     )
 
 
-def test_output_operator_copy_builder_canonicalizes_pending_recommendation_decision_state_in_prompt() -> None:
+def test_output_operator_copy_builder_canonicalizes_pending_decision_state_in_prompt() -> None:
     builder = LocalFirstOutputOperatorCopyBuilder(runtime_service=object())
 
     prompt = builder._build_prompt(
@@ -1778,7 +1778,7 @@ def test_output_operator_copy_builder_canonicalizes_pending_recommendation_decis
                     "target_segment_id": "seg_001",
                     "selected_asset_id": "asset_tts_001",
                     "created_at": "2026-07-04T00:00:00+00:00",
-                    "decision_state": " Approved ",
+                    "decision_state": " Pending ",
                     "reason": "Select narration asset",
                 }
             ],
@@ -1787,8 +1787,8 @@ def test_output_operator_copy_builder_canonicalizes_pending_recommendation_decis
         subtitle_file_uri=None,
     )
 
-    assert "'decision_state': 'approved'" in prompt
-    assert "'decision_state': ' Approved '" not in prompt
+    assert "'decision_state': 'pending'" in prompt
+    assert "'decision_state': ' Pending '" not in prompt
 
 
 def test_output_operator_copy_builder_canonicalizes_review_flag_code_in_prompt() -> None:
