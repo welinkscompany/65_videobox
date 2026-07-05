@@ -1,8 +1,8 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 17. 2026-07-01 시스템 정비 기준 최신 상태`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
-> 이 문서의 `## 1`부터 `## 16`까지는 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 17`만 기준으로 본다.
-> 단, `2일 내 1차 데모 완성` 실행 레일은 `## 17`의 장기 우선순위를 그대로 넓게 집행하지 않고, `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`의 축소된 실행 계획을 우선 적용한다.
+> 현재 authoritative 상태/next slice 판단은 `## 179. 2026-07-06 Phase C 문서 최신화 기준 최신 상태`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 이 문서의 `## 1`부터 `## 178`까지는 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 179`만 기준으로 본다.
+> 단, `2일 내 1차 데모 완성` 실행 레일은 `## 179`의 장기 우선순위를 그대로 넓게 집행하지 않고, `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`의 축소된 실행 계획을 우선 적용한다.
 
 ## 1. 결론
 
@@ -8227,3 +8227,41 @@ focused 검증 메모:
 - frontend/operator 관점의 QA 근거를 조금 더 보강한다
 - 필요하면 provider trace audit의 failed-output / fallback 쪽 대표 slice 1개를 더 확인한다
 - 그 뒤 문서 최신화 / 정리 리팩터링 / 찌꺼기 파일 정리 순서로 마감 정리를 진행한다
+
+## 179. 2026-07-06 Phase C 문서 최신화 기준 최신 상태
+
+이번 후속 작업에서는 제품 동작을 더 바꾸지 않고, 이미 green으로 닫힌 자동 baseline과 representative evidence를 기준으로 상위 SSOT 문서의 현재 상태 표현을 `Phase C` 마감 정리 단계에 맞게 다시 정렬했다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `current-focused-parallel`, `frontend build`, `full backend regression`, representative happy-path/provider-trace/operator/persistence evidence까지 이미 확보된 상태인데도 일부 상위 문서에는 여전히 `다음 exact stale-shape slice를 더 고른다`는 문구가 남아 있었다
+- 이 차이는 구현 상태 자체의 문제라기보다 closeout 문구의 시차 문제였고, 실제 현재 단계는 `새 slice 추가`보다 `문서 최신화 -> 정리 리팩터링 판단 -> 찌꺼기 파일 정리 -> 최종 closeout` 순서가 더 맞다
+- historical closeout 섹션은 그대로 보존하고, authoritative 포인터와 현재 next-step 문구만 최신 단계에 맞게 올리는 방식이 가장 안전했다
+- 이번 정리는 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence behavior를 건드리지 않는 문서-only 변경이다
+
+이번 turn의 verification은 아래와 같다.
+
+- 상태 확인
+  - `git status --short --branch`
+  - `git log -5 --oneline`
+- 문서 정합성 확인
+  - `docs/implementation-plan.ko.md`의 `## 13. 다음 실제 작업`
+  - `docs/superpowers/plans/2026-07-05-finish-stabilization-and-closeout-plan.ko.md`의 `## 7. 지금 시점의 추천`
+  - `docs/development-status-2026-06-29.ko.md`의 authoritative 포인터와 최신 closeout 섹션
+- broader verification
+  - 이번 turn에서는 재실행하지 않음
+  - 판단:
+    - 이번 변경은 코드나 테스트 동작이 아니라 현재 상태 표현 정렬만 다루는 문서-only 작업이다
+    - 최신 자동 baseline은 직전 closeout 기준 `current-focused-parallel green`, `frontend build 성공`, `full backend regression 543 passed`를 유지한다
+
+이 갱신으로 아래 범위는 현재 기준으로 정리됐다.
+
+1. 구현 계획서와 상태 로그의 현재 next-step 표현이 실제 진행 단계인 `Phase C` 마감 정리와 다시 맞춰졌다
+2. historical stale-shape closeout 기록은 그대로 보존하면서도, 지금 무엇을 해야 하는지 읽는 entry point는 최신 단계로 갱신됐다
+3. 새 기능 추가나 추가 slice 개방 없이도, 최종 정리 턴에서 따라야 할 문서 기준이 더 단순해졌다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 문서 최신화 이후 실제 중복이 확인된 작은 정리 리팩터링 후보를 안전 범위에서만 다시 좁힌다
+- dead helper, 임시 메모, 역할이 끝난 중복 파일 중 삭제보다 역할 명시가 맞는지 먼저 판단한다
+- 최종 closeout 직전 broad 재검증이 정말 필요한지 마지막으로 판단한다

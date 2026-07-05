@@ -726,16 +726,16 @@
 
 현재 기준 다음 실제 작업은 아래 순서로 재고정한다.
 
-1. review-required 상태에서 subtitle/preview/export gating의 추가 경계와 승인 후 반영 규칙을 세분화
-2. TTS replacement approval/output contract에서 stale approval 차단과 approved read-path decision-state surface 이후에도 남아 있는 추가 경계를 선별 보강
-3. partial regeneration preflight의 backend read-only/prediction contract와 frontend resume 경계에서 남은 작은 경계를 계속 세분화
-4. 그 다음 `local_pipeline`의 partial regeneration / output 경로를 최소 단위로 점진 정리
-5. thin editor 범위에서 아직 직접 검증이 약한 남은 고위험 경로를 보강
+1. `Phase C` 기준으로 `docs/implementation-plan.ko.md`, `docs/development-status-2026-06-29.ko.md`, 최신 closeout 문서의 현재 상태/다음 작업 문구를 서로 맞춘다
+2. review/output prompt, stale-shape filtering helper, 테스트 fixture 중 실제 중복이 확인된 곳만 안전한 범위에서 정리 리팩터링 후보로 다시 좁힌다
+3. 자동 baseline과 대표 검증 evidence를 깨지 않는 범위에서만 dead helper, 임시 메모, 역할이 끝난 중복 파일의 정리 대상을 선별한다
+4. 필요하면 현재 green baseline을 설명하는 최소 QA/검수 체크리스트를 closeout 문서에 보강한다
+5. 최종 closeout 직전에는 변경 범위를 다시 점검하고, broad 재검증이 정말 필요한 경우에만 마지막 한 번 더 판단한다
 
 정리 마감 실행 기준:
 
 - 남은 안정화 slice와 전체 마감 작업의 분리 계획은 `docs/superpowers/plans/2026-07-05-finish-stabilization-and-closeout-plan.ko.md`를 따른다
-- 즉, 지금은 작은 stale-shape 안정화 slice를 먼저 더 닫고, 그 뒤에 전체 동작 검증/QA/시스템 검증/문서 최신화/정리 리팩터링/찌꺼기 파일 정리 순서로 넘어간다
+- 현재 worktree는 `current-focused-parallel green + frontend build green + full backend regression green + representative Phase B evidence 확보`까지 온 상태이므로, 새 stale-shape slice를 더 여는 것보다 `문서 최신화 -> 정리 리팩터링 판단 -> 찌꺼기 파일 정리 -> 최종 closeout` 순서가 우선이다
 
 2026-07-04 최신 누적 메모:
 
