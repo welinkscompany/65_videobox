@@ -421,6 +421,28 @@ def test_recommendation_response_normalization_trims_payload_selected_asset_uri(
     )
 
 
+def test_recommendation_response_normalization_filters_missing_recommendation_type() -> None:
+    recommendations = _normalize_recommendations_for_response(
+        [
+            {
+                "recommendation_id": "rec_001",
+                "target_segment_id": "seg_001",
+                "selected_asset_id": "asset_tts_001",
+                "score": 0.91,
+                "reason": "Missing type should not remain on response surface.",
+                "auto_apply_allowed": False,
+                "review_required": True,
+                "decision_state": None,
+                "payload": {},
+                "created_at": "2026-07-04T00:00:00+00:00",
+                "provider_trace": build_provider_trace(final_provider="rule_based_fallback"),
+            }
+        ]
+    )
+
+    assert recommendations == []
+
+
 def test_review_flag_response_normalization_canonicalizes_mixed_case_code() -> None:
     review_flags = _normalize_review_flags_for_response(
         [

@@ -843,7 +843,12 @@ def _normalize_recommendations_for_response(value: object) -> list[dict[str, obj
             continue
         recommendation_id = str(item.get("recommendation_id") or "").strip()
         target_segment_id = str(item.get("target_segment_id") or "").strip()
-        if not recommendation_id or not target_segment_id:
+        recommendation_type = str(item.get("recommendation_type") or "").strip().lower()
+        if (
+            not recommendation_id
+            or not target_segment_id
+            or recommendation_type not in VALID_PREVIEW_RECOMMENDATION_TYPES
+        ):
             continue
         score_value = item.get("score", 0.0)
         try:
@@ -861,7 +866,7 @@ def _normalize_recommendations_for_response(value: object) -> list[dict[str, obj
             {
                 "recommendation_id": recommendation_id,
                 "target_segment_id": target_segment_id,
-                "recommendation_type": str(item.get("recommendation_type") or "").strip().lower(),
+                "recommendation_type": recommendation_type,
                 "selected_asset_id": str(item.get("selected_asset_id") or "").strip() or None,
                 "score": score,
                 "reason": str(item.get("reason") or "").strip()

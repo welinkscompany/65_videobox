@@ -8092,3 +8092,38 @@ focused 검증 메모:
 - 장기 우선순위 queue는 유지
 - 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
 - exact failing test 1개로만 다시 시작한다
+
+## 175. 2026-07-06 recommendation response normalization filters missing recommendation type closeout
+
+이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `review/output gating`과 바로 이어지는 API response normalization의 missing `recommendation_type` stale recommendation surface 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `services/api/src/videobox_api/main.py`의 `_normalize_recommendations_for_response(...)`는 `recommendation_id`와 `target_segment_id`만 있으면 recommendation row를 그대로 응답 surface에 남기고 있어, `recommendation_type`이 비어 있는 stale `pending_recommendations`/`applied_recommendations` row도 valid recommendation처럼 recommendation/timeline/review snapshot API response에 그대로 노출되고 있었다
+- strict TDD로 `test_recommendation_response_normalization_filters_missing_recommendation_type` exact regression을 먼저 추가했고, 실제로 normalized response helper가 `recommendation_type=""` recommendation row를 그대로 반환하는 RED를 확인했다
+- 최소 수정으로 `_normalize_recommendations_for_response(...)`가 canonical lowercase `recommendation_type`를 먼저 계산한 뒤 supported recommendation type 집합에 없으면 row 자체를 건너뛰도록 맞춰, API response surface가 canonical recommendation identity/type/segment 기준만 유지하게 정리했다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 recommendation response normalization의 missing recommendation-type filtering 한 점만 좁게 정리했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 failed` 확인 후 `1 passed`
+- focused verification
+  - recommendation response normalization adjacent slice `4 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - recommendation response normalization의 missing recommendation-type filtering 한 점 수정이라 exact + adjacent focused evidence가 가장 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. recommendation/timeline/review snapshot API response가 `recommendation_type` 없는 stale recommendation row를 valid recommendation처럼 surface하지 않는다
+2. review/output read surface의 valid recommendation 기준이 최근 prompt/decision/preflight 쪽 canonical recommendation identity/type/segment 규칙과 더 일치하게 정렬됐다
+3. minimal stale recommendation row 하나 때문에 API read-path가 빈 type recommendation을 다시 노출하던 경로가 줄었다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다

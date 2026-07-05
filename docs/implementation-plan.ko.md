@@ -769,6 +769,7 @@
 - review snapshot의 blocked persisted operator guidance reuse key는 reason 없는 valid `pending_recommendations`도 canonical default blocker message 기준으로 정리해, API/read-path와 같은 blocker truth인데 raw 빈 reason 때문에 guidance를 불필요하게 다시 생성하지 않게 맞췄다
 - review snapshot의 blocked persisted operator guidance persisted reuse key read-path도 legacy `_operator_guidance_reuse_key`에 공백이 섞인 stale 파일 shape를 trim 기준으로 정리해, blocker truth가 같은데 stored key whitespace 때문에 guidance를 불필요하게 다시 생성하지 않게 맞췄다
 - recommendation/timeline/review snapshot API response normalization도 `payload.selected_asset_uri`의 whitespace stale shape를 trim 기준으로 정리해, TTS approval/output과 review/output read surface가 canonical selected asset uri 기준을 유지하게 맞췄다
+- recommendation/timeline/review snapshot API response normalization도 `recommendation_type` 없는 stale `pending_recommendations`/`applied_recommendations` row를 valid recommendation처럼 surface하지 않고 건너뛰어, review/output read surface가 canonical recommendation identity/type/segment 기준만 유지하게 맞췄다
 - preview renderer의 approved TTS narration source surface도 whitespace stale `asset_uri`를 trim 기준으로 정리해, TTS approval/output preview visible surface가 canonical selected narration uri 기준을 유지하게 맞췄다
 - CapCut export adapter의 approved TTS voiceover `source_uri` surface도 whitespace stale `asset_uri`를 trim 기준으로 정리해, TTS approval/output export payload surface가 canonical selected narration uri 기준을 유지하게 맞췄다
 - CapCut export adapter의 B-roll `source_uri` surface도 whitespace stale `asset_uri`를 trim 기준으로 정리해, export payload surface가 canonical asset uri 기준을 유지하게 맞췄다
