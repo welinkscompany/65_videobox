@@ -97,8 +97,16 @@ class HeuristicReviewGuidanceBuilder(ReviewGuidanceBuilder):
         review_snapshot: dict[str, Any],
     ) -> dict[str, Any]:
         del project_id
-        review_flags = review_snapshot.get("review_flags", [])
-        pending_recommendations = review_snapshot.get("pending_recommendations", [])
+        review_flags = [
+            flag
+            for flag in review_snapshot.get("review_flags", [])
+            if isinstance(flag, dict) and _has_canonical_review_flag_identity(flag)
+        ]
+        pending_recommendations = [
+            item
+            for item in review_snapshot.get("pending_recommendations", [])
+            if isinstance(item, dict) and _has_canonical_pending_recommendation_identity(item)
+        ]
         review_status = _canonical_review_status(review_snapshot.get("review_status"))
 
         if review_flags or pending_recommendations:

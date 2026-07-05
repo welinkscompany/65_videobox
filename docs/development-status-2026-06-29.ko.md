@@ -438,6 +438,44 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
 - exact failing test 1개로만 다시 시작한다
 
+## 162. 2026-07-06 heuristic review guidance ignores unknown pending recommendation type closeout
+
+이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `review/output gating`에 가장 가까운 heuristic review guidance fallback의 stale unknown `pending_recommendations.recommendation_type` 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/core-engine/src/videobox_core_engine/review_guidance.py`의 `HeuristicReviewGuidanceBuilder.build(...)`는 raw `pending_recommendations` 리스트가 비어 있지 않기만 하면 blocked fallback 경로로 들어가서, supported set 밖의 stale unknown recommendation type 하나만 있어도 approved guidance를 blocked guidance로 뒤집을 수 있었다
+- strict TDD로 `test_heuristic_review_guidance_builder_ignores_unknown_pending_recommendation_type` exact regression을 먼저 추가했고, 실제로 `review_status="approved"`인데도 unknown pending recommendation 때문에 blocked summary가 내려오는 RED를 확인했다
+- 최소 수정으로 heuristic fallback도 canonical blocker identity를 가진 review flag와 supported recommendation type을 가진 pending recommendation만 실제 blocker로 읽도록 좁혀, junk pending input은 무시하고 valid blocker truth만 guidance에 반영하게 정리했다
+- 이번 focused verification은 review guidance fallback과 인접 prompt surface 범위만 다시 돌렸다. helper의 backend output-gating 전체 lane은 이번 수정면보다 검증 범위가 넓어서 직접 인접한 exact/focused 테스트를 우선 사용했다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence behavior를 건드리지 않고 heuristic review guidance fallback의 unknown pending-type blocker 판정 한 점만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `py -m pytest tests/test_api.py -q -k "test_heuristic_review_guidance_builder_ignores_unknown_pending_recommendation_type" -vv`
+  - RED `1 failed` 확인 후 GREEN `1 passed`
+- focused verification
+  - `py -m pytest tests/test_api.py -q -k "test_heuristic_review_guidance_builder_ignores_unknown_pending_recommendation_type or test_heuristic_review_guidance_builder_defaults_missing_pending_recommendation_reason or test_heuristic_review_guidance_builder_canonicalizes_mixed_case_approved_review_status or test_review_guidance_builder_canonicalizes_mixed_case_pending_recommendation_type_in_prompt or test_review_guidance_builder_ignores_minimal_dict_pending_recommendations_in_prompt" -vv` -> `5 passed`
+  - `./scripts/dev-fast-path.ps1 -Mode preflight-frontend` -> `25 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - heuristic fallback unknown pending-type filtering 한 점 수정이라 exact + 같은 review guidance family focused evidence가 가장 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. heuristic review guidance fallback은 supported set 밖의 stale unknown pending recommendation type을 실제 blocker처럼 취급하지 않는다
+2. approved guidance truth는 junk pending recommendation input 하나 때문에 blocked guidance로 뒤집히지 않는다
+3. review guidance prompt와 heuristic fallback이 pending recommendation validity 판정에서 더 같은 기준을 사용한다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
 ## 161. 2026-07-06 capcut export ignores unknown track type closeout
 
 이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `review/output gating`에 가장 가까운 CapCut export adapter의 stale unknown `track_type` 경계 1개만 다시 닫았다.
