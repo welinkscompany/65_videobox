@@ -8,9 +8,10 @@ from videobox_core_engine.local_first_runtime import LocalFirstStructuredGenerat
 from videobox_core_engine.prompt_pending_recommendation import (
     has_canonical_pending_recommendation_identity,
     normalize_prompt_pending_recommendation_row,
+    VALID_PROMPT_RECOMMENDATION_TYPES,
+    VALID_PROMPT_REVIEW_FLAG_CODES,
 )
 from videobox_core_engine.provider_trace import build_provider_trace, response_provider_trace, with_final_provider
-from videobox_domain_models.recommendations import RecommendationType
 from videobox_provider_interfaces.llm import LLMProviderError, LLMTaskType
 
 
@@ -45,19 +46,7 @@ def _normalize_boolish(value: object) -> bool:
     return bool(value)
 
 
-VALID_PROMPT_RECOMMENDATION_TYPES = {
-    RecommendationType.TTS_REPLACEMENT.value,
-    RecommendationType.BROLL.value,
-    RecommendationType.BGM.value,
-    RecommendationType.OVERLAY.value,
-}
 VALID_PROMPT_TRACK_TYPES = {"narration", "broll", "bgm"}
-
-VALID_PROMPT_REVIEW_FLAG_CODES = {
-    "segment_review_required",
-    "broll_review_required",
-    "tts_replacement_review_required",
-}
 def _is_prompt_blocking_pending_recommendation(item: object) -> bool:
     if not isinstance(item, dict):
         return False

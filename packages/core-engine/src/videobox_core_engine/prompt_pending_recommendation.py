@@ -1,6 +1,21 @@
 from __future__ import annotations
 
 from typing import Any, Callable
+from videobox_domain_models.recommendations import RecommendationType
+
+
+VALID_PROMPT_RECOMMENDATION_TYPES = {
+    RecommendationType.TTS_REPLACEMENT.value,
+    RecommendationType.BROLL.value,
+    RecommendationType.BGM.value,
+    RecommendationType.OVERLAY.value,
+}
+
+VALID_PROMPT_REVIEW_FLAG_CODES = {
+    "segment_review_required",
+    "broll_review_required",
+    "tts_replacement_review_required",
+}
 
 
 def has_canonical_pending_recommendation_identity(
