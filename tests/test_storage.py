@@ -259,3 +259,56 @@ def test_save_timeline_run_summary_ignores_unknown_track_count(tmp_path: Path) -
     )
 
     assert fetched["summary"]["track_count"] == 1
+
+
+def test_save_timeline_run_summary_ignores_unknown_applied_recommendation_count(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Timeline Applied Summary Count Project")
+
+    saved = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "version": "v001",
+            "tracks": [],
+            "review_flags": [],
+            "pending_recommendations": [],
+            "applied_recommendations": [
+                {
+                    "recommendation_id": "rec_unknown_applied",
+                    "target_segment_id": "seg_legacy",
+                    "recommendation_type": "legacy_overlay_pick",
+                    "selected_asset_id": "asset_legacy_001",
+                    "score": 0.5,
+                    "reason": "Unknown applied recommendation should not count.",
+                    "auto_apply_allowed": True,
+                    "review_required": False,
+                    "decision_state": "approved",
+                    "payload": {},
+                    "created_at": "2026-07-06T00:00:00+00:00",
+                },
+                {
+                    "recommendation_id": "rec_broll_001",
+                    "target_segment_id": "seg_001",
+                    "recommendation_type": "broll",
+                    "selected_asset_id": "asset_broll_001",
+                    "score": 0.91,
+                    "reason": "Canonical applied recommendation should count.",
+                    "auto_apply_allowed": True,
+                    "review_required": False,
+                    "decision_state": "approved",
+                    "payload": {},
+                    "created_at": "2026-07-06T00:00:00+00:00",
+                },
+            ],
+        },
+    )
+
+    fetched = store.get_timeline_run(
+        project_id=project.project_id,
+        timeline_id=saved["timeline_id"],
+    )
+
+    assert fetched["summary"]["applied_recommendation_count"] == 1

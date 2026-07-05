@@ -806,6 +806,7 @@
 - timeline summary의 `review_flag_count`도 raw stale list 길이가 아니라 canonical blocking review flag 기준으로 계산하도록 맞춰, unknown junk review flag가 persisted summary blocker count를 부풀리지 않게 정리했다
 - timeline summary의 `pending_recommendation_count`도 raw stale list 길이가 아니라 canonical blocking pending recommendation 기준으로 계산하도록 맞춰, unknown junk recommendation이 persisted summary blocker count를 부풀리지 않게 정리했다
 - timeline summary의 `track_count`도 raw stale list 길이가 아니라 canonical runtime `track_type` 기준으로 계산하도록 맞춰, unknown junk track이 persisted summary output count를 부풀리지 않게 정리했다
+- timeline summary의 `applied_recommendation_count`도 raw stale list 길이가 아니라 canonical runtime recommendation type 기준으로 계산하도록 맞춰, unknown junk applied recommendation이 persisted summary output count를 부풀리지 않게 정리했다
 - output operator copy prompt의 `pending_recommendations.recommendation_type` surface도 legacy `" TTS_REPLACEMENT "` 같은 mixed-case stale type을 canonical lowercase type으로 정리해 preview/export guidance prompt가 review guidance 및 output truth와 같은 recommendation type 기준을 유지하게 정리했다
 - output operator copy prompt의 `pending_recommendations.target_segment_id` surface도 whitespace stale segment id를 trim 기준으로 정리해 preview/export guidance prompt가 review guidance 및 output truth와 같은 canonical segment id 기준을 유지하게 정리했다
 - output operator copy prompt의 `pending_recommendations.reason` surface도 whitespace stale reason을 trim 기준으로 정리해 preview/export guidance prompt가 review guidance 및 output truth와 같은 canonical recommendation reason 기준을 유지하게 정리했다
