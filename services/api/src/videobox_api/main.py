@@ -614,6 +614,8 @@ def _build_targeted_segments(
 ) -> list[dict[str, object]]:
     segment_lookup: dict[str, dict[str, object]] = {}
     for segment in session.get("segments", []):
+        if not isinstance(segment, dict):
+            continue
         segment_id = str(segment.get("segment_id") or "").strip()
         if not segment_id:
             continue

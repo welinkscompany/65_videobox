@@ -404,6 +404,42 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 
 ## 177. 2026-07-06 capcut export adapter trims top-level subtitle file uri surface closeout
 
+## 182. 2026-07-06 preflight request ignores non-dict session segments closeout
+
+이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `preflight contract`와 바로 이어지는 partial regeneration request / targeted-segment read-path의 non-dict session segment 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/core-engine/src/videobox_core_engine/editing_session.py`의 `build_partial_regeneration_request(...)`는 session `segments`를 모두 dict라고 가정한 set comprehension으로 `session_segment_ids`를 만들고 있어, stale 문자열 같은 non-dict session segment entry 하나만 있어도 preflight request preview가 `AttributeError`로 500 실패하고 있었다
+- 같은 family의 `services/api/src/videobox_api/main.py` `_build_targeted_segments(...)`도 session `segments`를 dict라고 가정하고 있어, request builder를 통과하더라도 targeted-segment response surface에서 같은 stale shape에 다시 취약한 상태였다
+- strict TDD로 `test_editing_session_api_ignores_non_dict_session_segments_in_preflight_fallback` exact regression을 먼저 추가했고, 실제로 source timeline fallback preflight 요청이 HTTP `500`과 `"'str' object has no attribute 'get'"` detail을 반환하는 RED를 확인했다
+- 최소 수정으로 request builder의 `session_segment_ids`와 API targeted-segment lookup 모두 non-dict session segment를 먼저 건너뛰도록 맞춰, stale session junk는 무시하고 valid session segment만 기준으로 preflight request/response가 만들어지게 정리했다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 preflight request contract의 session-segment filtering 한 점만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 failed` 확인 후 `1 passed`
+- focused verification
+  - backend preflight `59 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - preflight request contract의 session-segment filtering 한 점 수정이라 exact + preflight-backend focused evidence가 가장 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. partial regeneration preflight request가 session `segments` 안의 stale non-dict entry 하나 때문에 500으로 중단되지 않는다
+2. targeted session segment lookup과 response surface는 valid dict segment만 기준으로 동작한다
+3. preflight contract가 source review-flag/pending-recommendation stale-shape 방어 다음 단계까지 같은 방향으로 더 정렬됐다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
 ## 181. 2026-07-06 capcut export adapter ignores non-dict track clips closeout
 
 이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `review/output gating`과 바로 이어지는 CapCut export adapter의 non-dict `tracks[].clips` 입력 경계 1개만 다시 닫았다.

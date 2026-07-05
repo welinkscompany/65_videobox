@@ -411,7 +411,7 @@ def build_partial_regeneration_request(
     session_segment_ids = {
         str(segment.get("segment_id")).strip()
         for segment in session.get("segments", [])
-        if str(segment.get("segment_id") or "").strip()
+        if isinstance(segment, dict) and str(segment.get("segment_id") or "").strip()
     }
     unknown_segment_ids = [segment_id for segment_id in normalized_segment_ids if segment_id not in session_segment_ids]
     if unknown_segment_ids:
