@@ -945,6 +945,43 @@ def test_apply_approved_tts_recommendation_ignores_non_dict_tracks() -> None:
     )
 
 
+def test_apply_approved_tts_recommendation_ignores_non_dict_clips() -> None:
+    timeline = {
+        "tracks": [
+            {
+                "track_id": "narration_primary",
+                "track_type": "narration",
+                "clips": [
+                    "stale_clip_entry",
+                    {
+                        "clip_id": "clip_narration_001",
+                        "segment_id": "seg_001",
+                        "asset_uri": "local://projects/project_001/segments/seg_001",
+                        "start_sec": 0.0,
+                        "end_sec": 1.0,
+                        "clip_type": "narration",
+                    },
+                ],
+            },
+        ]
+    }
+
+    apply_approved_recommendation_to_timeline(
+        timeline=timeline,
+        decided_recommendation={
+            "recommendation_type": "tts_replacement",
+            "target_segment_id": "seg_001",
+            "payload": {
+                "selected_asset_uri": "local://projects/project_001/assets/generated/asset_tts_001.wav"
+            },
+        },
+    )
+
+    assert timeline["tracks"][0]["clips"][1]["asset_uri"] == (
+        "local://projects/project_001/assets/generated/asset_tts_001.wav"
+    )
+
+
 def test_output_operator_copy_builder_canonicalizes_mixed_case_review_status_in_prompt() -> None:
     builder = LocalFirstOutputOperatorCopyBuilder(runtime_service=object())
 

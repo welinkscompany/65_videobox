@@ -145,6 +145,8 @@ def apply_approved_recommendation_to_timeline(
         if not isinstance(clips, list):
             continue
         for clip in clips:
+            if not isinstance(clip, dict):
+                continue
             if str(clip.get("segment_id") or "").strip() == target_segment_id:
                 matched_clip = True
                 clip["asset_uri"] = selected_asset_uri
