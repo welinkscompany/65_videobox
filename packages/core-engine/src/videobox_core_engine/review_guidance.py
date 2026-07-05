@@ -228,8 +228,10 @@ class LocalFirstReviewGuidanceBuilder(ReviewGuidanceBuilder):
 
     def _build_prompt(self, *, review_snapshot: dict[str, Any]) -> str:
         review_status = _canonical_review_status(review_snapshot.get("review_status"))
-        review_flags = review_snapshot.get("review_flags", [])
-        pending_recommendations = review_snapshot.get("pending_recommendations", [])
+        review_flags = self._prompt_review_flags(review_snapshot.get("review_flags", []))
+        pending_recommendations = self._prompt_pending_recommendations(
+            review_snapshot.get("pending_recommendations", [])
+        )
         segments = review_snapshot.get("segments", [])
         return (
             "Write concise operator-facing review guidance for this video timeline.\n"
@@ -237,8 +239,8 @@ class LocalFirstReviewGuidanceBuilder(ReviewGuidanceBuilder):
             f"Flag count: {len(review_flags)}\n"
             f"Pending recommendation count: {len(pending_recommendations)}\n"
             f"Segments needing attention: {self._segments_needing_attention(segments)}\n"
-            f"Review flags: {self._prompt_review_flags(review_flags)}\n"
-            f"Pending recommendations: {self._prompt_pending_recommendations(pending_recommendations)}\n"
+            f"Review flags: {review_flags}\n"
+            f"Pending recommendations: {pending_recommendations}\n"
             "Return a short summary and a list of concrete next action items."
         )
 

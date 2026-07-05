@@ -1949,6 +1949,30 @@ def test_review_guidance_builder_ignores_minimal_dict_pending_recommendations_in
     assert "'target_segment_id': 'seg_001'" in prompt
 
 
+def test_review_guidance_builder_ignores_unknown_pending_recommendation_in_prompt_count() -> None:
+    builder = LocalFirstReviewGuidanceBuilder(runtime_service=object())
+
+    prompt = builder._build_prompt(
+        review_snapshot={
+            "review_status": "blocked",
+            "review_flags": [],
+            "pending_recommendations": [
+                {
+                    "recommendation_id": "rec_unknown",
+                    "target_segment_id": "seg_001",
+                    "recommendation_type": "legacy_overlay_pick",
+                    "reason": "Unknown recommendation should not count as a blocker row.",
+                }
+            ],
+            "segments": [],
+        }
+    )
+
+    assert "Pending recommendation count: 0" in prompt
+    assert "Pending recommendation count: 1" not in prompt
+    assert "legacy_overlay_pick" not in prompt
+
+
 def test_review_guidance_builder_canonicalizes_mixed_case_review_flag_code_in_prompt() -> None:
     builder = LocalFirstReviewGuidanceBuilder(runtime_service=object())
 
