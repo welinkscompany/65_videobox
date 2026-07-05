@@ -6997,3 +6997,39 @@ focused 검증 메모:
 - 장기 우선순위 queue는 유지
 - 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
 - exact failing test 1개로만 다시 시작한다
+
+## 155. 2026-07-06 timeline summary ignores unknown review flag count closeout
+
+이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `review/output gating`과 바로 이어지는 persisted timeline summary의 stale unknown `review_flags` count 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/storage-abstractions/src/videobox_storage/local_project_store.py`의 `save_timeline_run(...)` / `update_timeline_run(...)`는 summary JSON의 `review_flag_count`를 raw list 길이로 저장하고 있어, unknown `review_flags.code`를 가진 junk entry도 valid blocker처럼 count를 부풀리고 있었다
+- strict TDD로 `test_save_timeline_run_summary_ignores_unknown_review_flag_count` exact regression을 먼저 추가했고, 실제로 persisted summary의 `review_flag_count == 2` RED를 확인했다
+- 최소 수정으로 `_timeline_summary_json(...)` helper를 추가해 summary `review_flag_count`도 canonical blocking review flag 기준으로 계산하도록 맞춰, valid blocker count만 persisted summary에 남기게 정리했다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence 규칙을 건드리지 않고 timeline summary review-flag count 한 점만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `1 failed` 확인 후 `1 passed`
+- focused verification
+  - storage/read 인접 exact 묶음 `4 passed`
+  - frontend preflight `25 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - timeline summary review-flag count 한 점 수정이라 exact + storage/read 인접 focused evidence가 가장 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. persisted timeline summary가 unknown `review_flags.code` junk entry를 valid blocker count처럼 저장하지 않는다
+2. summary `review_flag_count`가 actual blocking review flag 기준과 같은 방향을 사용한다
+3. persistence summary count도 최근 review guidance prompt count hardening과 같은 stale-shape 방어 방향으로 정렬됐다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다

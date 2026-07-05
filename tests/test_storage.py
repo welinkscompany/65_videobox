@@ -153,3 +153,38 @@ def test_gemini_key_state_updates_persist_for_dashboard_visibility(tmp_path: Pat
     assert listed[0]["key_id"] == saved["key_id"]
     assert listed[0]["label"] == "Primary Gemini Updated"
     assert "api_key_secret" not in listed[0]
+
+
+def test_save_timeline_run_summary_ignores_unknown_review_flag_count(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Timeline Summary Count Project")
+
+    saved = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "version": "v001",
+            "tracks": [],
+            "review_flags": [
+                {
+                    "code": "legacy_review_required",
+                    "segment_id": "seg_legacy",
+                    "message": "Legacy blocker that should not count.",
+                },
+                {
+                    "code": "segment_review_required",
+                    "segment_id": "seg_001",
+                    "message": "Canonical blocker that should count.",
+                },
+            ],
+            "pending_recommendations": [],
+            "applied_recommendations": [],
+        },
+    )
+
+    fetched = store.get_timeline_run(
+        project_id=project.project_id,
+        timeline_id=saved["timeline_id"],
+    )
+
+    assert fetched["summary"]["review_flag_count"] == 1

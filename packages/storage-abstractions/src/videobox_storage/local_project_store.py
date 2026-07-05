@@ -108,6 +108,23 @@ def _normalize_review_flag_payloads(value: object) -> list[dict[str, str]]:
     return normalized
 
 
+def _timeline_summary_json(payload: dict[str, Any]) -> str:
+    review_flags = payload.get("review_flags", [])
+    return json.dumps(
+        {
+            "track_count": len(payload.get("tracks", [])),
+            "review_flag_count": sum(
+                1 for flag in review_flags if _is_store_blocking_review_flag(flag)
+            )
+            if isinstance(review_flags, list)
+            else 0,
+            "applied_recommendation_count": len(payload.get("applied_recommendations", [])),
+            "pending_recommendation_count": len(payload.get("pending_recommendations", [])),
+        },
+        ensure_ascii=True,
+    )
+
+
 class LocalProjectStore:
     def __init__(self, projects_root: Path) -> None:
         self.projects_root = Path(projects_root)
@@ -483,15 +500,7 @@ class LocalProjectStore:
             **timeline_payload,
         }
         timeline_path.write_text(json.dumps(payload, indent=2, ensure_ascii=True), encoding="utf-8")
-        summary_json = json.dumps(
-            {
-                "track_count": len(payload.get("tracks", [])),
-                "review_flag_count": len(payload.get("review_flags", [])),
-                "applied_recommendation_count": len(payload.get("applied_recommendations", [])),
-                "pending_recommendation_count": len(payload.get("pending_recommendations", [])),
-            },
-            ensure_ascii=True,
-        )
+        summary_json = _timeline_summary_json(payload)
         self._execute(
             project_id,
             """
@@ -663,15 +672,7 @@ class LocalProjectStore:
         file_path = self._timeline_file_path(project_id=project_id, timeline_id=timeline_id)
         file_path.write_text(json.dumps(payload, indent=2, ensure_ascii=True), encoding="utf-8")
 
-        summary_json = json.dumps(
-            {
-                "track_count": len(payload.get("tracks", [])),
-                "review_flag_count": len(payload.get("review_flags", [])),
-                "applied_recommendation_count": len(payload.get("applied_recommendations", [])),
-                "pending_recommendation_count": len(payload.get("pending_recommendations", [])),
-            },
-            ensure_ascii=True,
-        )
+        summary_json = _timeline_summary_json(payload)
         self._execute(
             project_id,
             """
