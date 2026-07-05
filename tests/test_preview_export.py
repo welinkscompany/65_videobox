@@ -176,6 +176,24 @@ def test_capcut_export_adapter_builds_structured_track_manifest_from_timeline_sc
     assert payload["capcut_tracks"][3]["track_role"] == "audio"
 
 
+def test_capcut_export_adapter_trims_subtitle_source_uri_surface() -> None:
+    adapter = CapCutExportAdapter()
+
+    payload = adapter.build_payload(
+        project_id="project_123",
+        timeline={
+            "timeline_id": "timeline_001",
+            "tracks": [],
+            "review_flags": [],
+        },
+        subtitle_file_uri=" local://projects/project_123/subtitles/subtitle_001.srt ",
+    )
+
+    subtitle_track = next(track for track in payload["capcut_tracks"] if track["track_name"] == "subtitle")
+
+    assert subtitle_track["source_uri"] == "local://projects/project_123/subtitles/subtitle_001.srt"
+
+
 def test_capcut_export_adapter_maps_hook_title_overlay_metadata() -> None:
     adapter = CapCutExportAdapter()
 

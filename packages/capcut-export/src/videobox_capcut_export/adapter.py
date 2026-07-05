@@ -128,7 +128,7 @@ class CapCutExportAdapter:
                     "track_name": "subtitle",
                     "track_role": "text",
                     "source_track_id": None,
-                    "source_uri": subtitle_file_uri,
+                    "source_uri": _canonical_source_uri(subtitle_file_uri),
                     "segments": [],
                 }
             )
