@@ -438,6 +438,44 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 - 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
 - exact failing test 1개로만 다시 시작한다
 
+## 161. 2026-07-06 capcut export ignores unknown track type closeout
+
+이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `review/output gating`에 가장 가까운 CapCut export adapter의 stale unknown `track_type` 경계 1개만 다시 닫았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `packages/capcut-export/src/videobox_capcut_export/adapter.py`의 `_promptable_tracks(...)`는 canonical empty `track_type`만 걸러서, supported set 밖의 stale unknown track도 export payload `tracks` surface에 그대로 올리고 있었다
+- strict TDD로 `test_capcut_export_adapter_ignores_unknown_track_type_in_export_payload` exact regression을 먼저 추가했고, 실제로 `legacy_overlay` track이 export payload `tracks` 첫 항목에 그대로 남는 RED를 확인했다
+- 최소 수정으로 CapCut export adapter도 supported runtime track type 집합 `narration/broll/bgm`만 promptable track으로 유지하도록 좁혀, unknown `track_type`는 export payload에서 건너뛰고 valid runtime track input만 manifest에 남기게 정리했다
+- 이번 focused verification은 이 수정이 직접 닿는 export consumer family만 다시 돌렸다. helper의 output-gating backend lane은 이번 slice 변경면과 직접 연결되지 않아 재사용하지 않았다
+- 이번 수정은 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence behavior를 건드리지 않고 CapCut export adapter의 unknown runtime track surface 경계 한 점만 좁게 수정했다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact regression
+  - `py -m pytest tests/test_preview_export.py -q -k "test_capcut_export_adapter_ignores_unknown_track_type_in_export_payload" -vv`
+  - RED `1 failed` 확인 후 GREEN `1 passed`
+- focused verification
+  - `py -m pytest tests/test_preview_export.py -q -k "test_capcut_export_adapter_ignores_unknown_track_type_in_export_payload or test_capcut_export_adapter_builds_structured_track_manifest_from_timeline_schema or test_capcut_export_adapter_matches_mixed_case_narration_track_type_for_voiceover_track or test_capcut_export_adapter_ignores_non_list_track_clips_in_voiceover_surface" -vv` -> `4 passed`
+  - `./scripts/dev-fast-path.ps1 -Mode preflight-frontend` -> `25 passed`
+- broader verification
+  - 실행하지 않음
+  - 판단:
+    - CapCut export adapter unknown track filtering 한 점 수정이라 exact + 같은 export consumer family focused evidence가 가장 직접적이다
+    - latest broader baseline은 직전 closeout 기준 `full backend regression 346 passed`, `frontend build 성공`을 유지한다
+
+이 갱신으로 아래 범위는 현재 기준 안정화됐다.
+
+1. CapCut export adapter는 supported set 밖의 stale unknown `track_type`를 export payload `tracks` surface에 노출하지 않는다
+2. CapCut export manifest는 supported runtime track type만 기준으로 source track 목록을 만든다
+3. subtitle render / output operator copy / preview renderer / CapCut export adapter가 runtime track summary read-path에서 같은 supported track-type 기준으로 더 정렬됐다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 장기 우선순위 queue는 유지
+- 다음 slice는 다시 `review/output gating`, `TTS approval/output`, `preflight contract` 중 가장 작은 남은 경계 1개만 고른다
+- exact failing test 1개로만 다시 시작한다
+
 ## 160. 2026-07-06 preview renderer ignores unknown track type closeout
 
 이번 후속 작업에서는 장기 우선순위 queue를 유지한 채, `review/output gating`에 가장 가까운 preview renderer의 stale unknown `track_type` 경계 1개만 다시 닫았다.

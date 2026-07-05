@@ -860,6 +860,67 @@ def test_capcut_export_adapter_ignores_non_list_track_clips_in_voiceover_surface
     ]
 
 
+def test_capcut_export_adapter_ignores_unknown_track_type_in_export_payload() -> None:
+    adapter = CapCutExportAdapter()
+
+    payload = adapter.build_payload(
+        project_id="project_123",
+        timeline={
+            "timeline_id": "timeline_001",
+            "narration_source_uri": "local://projects/project_123/inputs/narration/source.wav",
+            "tracks": [
+                {
+                    "track_id": "track_legacy_overlay",
+                    "track_type": "legacy_overlay",
+                    "clips": [
+                        {
+                            "clip_id": "clip_overlay_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": "local://projects/project_123/assets/legacy_overlay.png",
+                            "start_sec": 0.0,
+                            "end_sec": 1.0,
+                            "clip_type": "overlay",
+                        }
+                    ],
+                },
+                {
+                    "track_id": "narration_primary",
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "clip_id": "clip_narration_001",
+                            "segment_id": "seg_001",
+                            "asset_uri": "local://projects/project_123/segments/seg_001",
+                            "start_sec": 0.0,
+                            "end_sec": 1.0,
+                            "clip_type": "narration",
+                        }
+                    ],
+                },
+            ],
+            "review_flags": [],
+        },
+    )
+
+    assert payload["tracks"] == [
+        {
+            "track_id": "narration_primary",
+            "track_type": "narration",
+            "clips": [
+                {
+                    "clip_id": "clip_narration_001",
+                    "segment_id": "seg_001",
+                    "asset_uri": "local://projects/project_123/segments/seg_001",
+                    "start_sec": 0.0,
+                    "end_sec": 1.0,
+                    "clip_type": "narration",
+                }
+            ],
+        }
+    ]
+    assert [track["track_name"] for track in payload["capcut_tracks"]] == ["voiceover"]
+
+
 class FailingPreviewRenderer:
     def build_preview_payload(self, *, project_id: str, timeline: dict[str, object]) -> dict[str, object]:
         raise RuntimeError("preview renderer exploded")

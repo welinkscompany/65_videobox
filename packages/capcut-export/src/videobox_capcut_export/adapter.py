@@ -19,6 +19,9 @@ def _canonical_track_type(value: object) -> str:
     return str(value or "").strip().lower()
 
 
+VALID_EXPORT_TRACK_TYPES = {"narration", "broll", "bgm"}
+
+
 class CapCutExportAdapter:
     def _promptable_tracks(self, timeline: dict[str, Any]) -> list[dict[str, Any]]:
         promptable_tracks: list[dict[str, Any]] = []
@@ -26,7 +29,7 @@ class CapCutExportAdapter:
             if not isinstance(track, dict):
                 continue
             track_type = _canonical_track_type(track.get("track_type"))
-            if not track_type:
+            if track_type not in VALID_EXPORT_TRACK_TYPES:
                 continue
             clips = track.get("clips", [])
             if not isinstance(clips, list):
