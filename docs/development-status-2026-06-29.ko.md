@@ -1,7 +1,7 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 189. 2026-07-06 Phase C shared prompt canonical string helpers closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
-> 이 문서의 `## 1`부터 `## 188`까지는 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 189`만 기준으로 본다.
+> 현재 authoritative 상태/next slice 판단은 `## 190. 2026-07-06 Phase C prompt canonical wrapper removal closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 이 문서의 `## 1`부터 `## 189`까지는 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 190`만 기준으로 본다.
 > 단, `2일 내 1차 데모 완성` 실행 레일은 `## 189`의 장기 우선순위를 그대로 넓게 집행하지 않고, `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`의 축소된 실행 계획을 우선 적용한다.
 
 ## 1. 결론
@@ -8411,6 +8411,45 @@ focused 검증 메모:
 1. output operator copy와 review guidance가 보는 pending recommendation row canonicalization 기준이 공통 모듈로 다시 모였다
 2. selected asset uri, identity, reason, decision state canonicalization 규칙 drift 위험이 더 줄었다
 3. 남아 있는 cleanup 후보를 고를 때 review/output prompt family의 중복은 더 많이 정리된 상태가 됐다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- stale-shape helper 중복과 dead helper 후보 중 다음 최소 정리 대상 1개를 다시 좁힌다
+- 역할이 끝난 중복 메모 문서는 삭제보다 역할 명시가 맞는지 먼저 판단한다
+- 최종 closeout 직전 broad 재검증이 정말 필요한지 마지막으로 판단한다
+
+## 190. 2026-07-06 Phase C prompt canonical wrapper removal closeout
+
+이번 후속 작업에서는 새 stale-shape 경계를 더 열지 않고, 바로 앞 턴에 공통 모듈로 옮긴 canonical string helper를 감싸기만 하던 local wrapper 함수를 `output_operator_copy.py`와 `review_guidance.py`에서 제거했다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `canonical_recommendation_type`, `canonical_decision_state`, `canonical_review_flag_message` 본체는 이미 공통 모듈에 있었지만, 두 prompt 파일 안에는 이름만 다시 감싼 thin wrapper가 그대로 남아 있었다
+- 이 wrapper는 동작을 바꾸지 않지만, 앞으로 helper 위치를 읽을 때 탐색 경로를 늘리고 `Phase C` cleanup 관점에서는 dead indirection에 가깝다
+- import alias로 직접 연결해도 현재 prompt surface와 blocker counting 동작은 그대로 유지됐다
+- 이번 정리는 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence behavior를 바꾸지 않는 code cleanup 성격의 수정이다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact verification
+  - `test_output_operator_copy_builder_canonicalizes_mixed_case_pending_recommendation_type_in_prompt` -> `1 passed`
+  - `test_output_operator_copy_builder_ignores_minimal_dict_pending_recommendations_in_prompt` -> `1 passed`
+  - `test_review_guidance_builder_ignores_unknown_pending_recommendation_in_prompt_count` -> `1 passed`
+  - `test_review_guidance_builder_ignores_minimal_dict_pending_recommendations_in_prompt` -> `1 passed`
+- focused verification
+  - `./scripts/dev-fast-path.ps1 -Mode output-gating`
+  - backend output-gating `24 passed`
+- broader verification
+  - 이번 turn에서는 재실행하지 않음
+  - 판단:
+    - 이번 변경은 prompt family local wrapper 제거만 다루는 `Phase C` 소규모 리팩터링이다
+    - 현재 자동 baseline은 직전 closeout 기준 `frontend build 성공`, `full backend regression 543 passed`를 유지한다
+
+이 갱신으로 아래 범위는 현재 기준으로 정리됐다.
+
+1. output operator copy와 review guidance가 canonical string helper를 thin wrapper 없이 공통 모듈에 직접 연결한다
+2. prompt family helper 탐색 경로와 dead indirection이 한 단계 줄었다
+3. 남아 있는 cleanup 후보는 helper 본체보다 더 바깥의 dead code, 임시 메모, 역할 종료 파일 정리 쪽으로 더 수렴했다
 
 현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
 
