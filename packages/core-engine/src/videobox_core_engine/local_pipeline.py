@@ -106,6 +106,7 @@ def _build_review_guidance_reuse_key(review_snapshot: dict[str, Any]) -> str | N
         return None
 
     review_flags: list[dict[str, str]] = []
+    existing_review_flag_keys: set[tuple[str, str, str]] = set()
     for item in review_snapshot.get("review_flags", []):
         if not isinstance(item, dict):
             continue
@@ -113,16 +114,16 @@ def _build_review_guidance_reuse_key(review_snapshot: dict[str, Any]) -> str | N
         segment_id = str(item.get("segment_id") or "").strip()
         if code not in VALID_RUNTIME_BLOCKING_REVIEW_FLAG_CODES or not segment_id:
             continue
-        review_flags.append(
-            {
-                "code": code,
-                "segment_id": segment_id,
-                "message": str(item.get("message") or "").strip(),
-            }
-        )
+        message = str(item.get("message") or "").strip()
+        review_flag_key = (code, segment_id, message)
+        if review_flag_key in existing_review_flag_keys:
+            continue
+        existing_review_flag_keys.add(review_flag_key)
+        review_flags.append({"code": code, "segment_id": segment_id, "message": message})
     review_flags.sort(key=lambda item: (item["code"], item["segment_id"], item["message"]))
 
     pending_recommendations: list[dict[str, str]] = []
+    existing_pending_recommendation_keys: set[tuple[str, str, str, str, str, str]] = set()
     for item in review_snapshot.get("pending_recommendations", []):
         if not _is_runtime_blocking_pending_recommendation(item):
             continue
@@ -130,14 +131,28 @@ def _build_review_guidance_reuse_key(review_snapshot: dict[str, Any]) -> str | N
         target_segment_id = str(item.get("target_segment_id") or "").strip()
         recommendation_type = _canonical_runtime_recommendation_type(item.get("recommendation_type"))
         payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
+        reason = str(item.get("reason") or "").strip()
+        selected_asset_id = str(item.get("selected_asset_id") or "").strip()
+        selected_asset_uri = str(payload.get("selected_asset_uri") or "").strip()
+        pending_recommendation_key = (
+            recommendation_id,
+            target_segment_id,
+            recommendation_type,
+            reason,
+            selected_asset_id,
+            selected_asset_uri,
+        )
+        if pending_recommendation_key in existing_pending_recommendation_keys:
+            continue
+        existing_pending_recommendation_keys.add(pending_recommendation_key)
         pending_recommendations.append(
             {
                 "recommendation_id": recommendation_id,
                 "target_segment_id": target_segment_id,
                 "recommendation_type": recommendation_type,
-                "reason": str(item.get("reason") or "").strip(),
-                "selected_asset_id": str(item.get("selected_asset_id") or "").strip(),
-                "selected_asset_uri": str(payload.get("selected_asset_uri") or "").strip(),
+                "reason": reason,
+                "selected_asset_id": selected_asset_id,
+                "selected_asset_uri": selected_asset_uri,
             }
         )
     pending_recommendations.sort(

@@ -6376,6 +6376,59 @@ def test_review_guidance_reuse_key_returns_none_when_blocked_status_has_no_actua
     )
 
 
+def test_review_guidance_reuse_key_dedupes_duplicate_blocker_entries() -> None:
+    canonical_snapshot = {
+        "review_status": "blocked",
+        "review_flags": [
+            {
+                "code": "tts_replacement_review_required",
+                "segment_id": "seg_002",
+                "message": "Review the current seg_002 blocker before output.",
+            }
+        ],
+        "pending_recommendations": [
+            {
+                "recommendation_id": "rec_tts_review_002",
+                "target_segment_id": "seg_002",
+                "recommendation_type": "tts_replacement",
+                "reason": "Awaiting operator approval.",
+                "selected_asset_id": "asset_tts_review_002",
+                "payload": {
+                    "selected_asset_uri": "local://projects/project_001/assets/generated/asset_tts_review_002.wav"
+                },
+            }
+        ],
+    }
+    stale_shape_snapshot = {
+        "review_status": "blocked",
+        "review_flags": [
+            canonical_snapshot["review_flags"][0],
+            {
+                "code": " TTS_REPLACEMENT_REVIEW_REQUIRED ",
+                "segment_id": " seg_002 ",
+                "message": "Review the current seg_002 blocker before output.",
+            },
+        ],
+        "pending_recommendations": [
+            canonical_snapshot["pending_recommendations"][0],
+            {
+                "recommendation_id": " rec_tts_review_002 ",
+                "target_segment_id": " seg_002 ",
+                "recommendation_type": " TTS_REPLACEMENT ",
+                "reason": "Awaiting operator approval.",
+                "selected_asset_id": " asset_tts_review_002 ",
+                "payload": {
+                    "selected_asset_uri": " local://projects/project_001/assets/generated/asset_tts_review_002.wav "
+                },
+            },
+        ],
+    }
+
+    assert _build_review_guidance_reuse_key(stale_shape_snapshot) == _build_review_guidance_reuse_key(
+        canonical_snapshot
+    )
+
+
 def test_review_snapshot_fills_default_provider_trace_for_persisted_operator_guidance(
     tmp_path: Path,
 ) -> None:
