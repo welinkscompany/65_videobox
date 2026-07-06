@@ -345,6 +345,17 @@ button {
   border-color: rgba(237, 169, 105, 0.34);
 }
 
+.recommendation-evidence {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0;
+  padding: 10px;
+  border-radius: 8px;
+  background: rgba(19, 17, 16, 0.34);
+  color: #f8ebd8;
+  font-size: 0.86rem;
+}
+
 .provider-form {
   margin-bottom: 18px;
   padding: 16px;

@@ -12,6 +12,7 @@ import {
   type PartialRegenerationRun,
   type PreviewJob,
   type Project,
+  type RecommendationItem,
   type ReviewSnapshot,
   type SubtitleJob,
   type TimelineJob,
@@ -105,6 +106,49 @@ function formatBrollAssetTitle(asset: BrollAsset) {
 function formatBrollAssetTags(asset: BrollAsset) {
   const tags = asset.metadata.tags;
   return Array.isArray(tags) ? tags.map((tag) => String(tag)).filter(Boolean).join(", ") : "";
+}
+
+function formatStringList(value: unknown) {
+  return Array.isArray(value)
+    ? value
+        .map((item) => String(item).trim())
+        .filter(Boolean)
+        .join(", ")
+    : "";
+}
+
+function formatRecommendationScore(score: number) {
+  return Number.isFinite(score) ? score.toFixed(2) : "not available";
+}
+
+function renderBrollRecommendationEvidence(
+  item: RecommendationItem,
+  brollAssets: BrollAsset[],
+  segments: ReviewSnapshot["segments"],
+) {
+  if (item.recommendation_type !== "broll") {
+    return null;
+  }
+  const selectedAsset = brollAssets.find((asset) => asset.asset_id === item.selected_asset_id);
+  const selectedAssetLabel = selectedAsset
+    ? `${formatBrollAssetTitle(selectedAsset)} - ${selectedAsset.asset_id}`
+    : item.selected_asset_id || "No selected B-roll asset";
+  const segment = segments.find((candidate) => candidate.segment_id === item.target_segment_id);
+  const matchedTags = formatStringList(item.payload.matched_tags ?? item.payload.tags);
+  const assetTags = selectedAsset ? formatBrollAssetTags(selectedAsset) : "";
+
+  return (
+    <div className="recommendation-evidence">
+      <span>
+        Segment {item.target_segment_id}
+        {segment ? `: ${segment.text}` : ""}
+      </span>
+      <span>Selected asset: {selectedAssetLabel}</span>
+      <span>Score {formatRecommendationScore(item.score)}</span>
+      {matchedTags ? <span>Matched tags: {matchedTags}</span> : null}
+      {assetTags ? <span>Asset tags: {assetTags}</span> : null}
+    </div>
+  );
 }
 
 type EditingSegmentDraft = {
@@ -1921,6 +1965,11 @@ export function App() {
                       <strong>{item.recommendation_type}</strong>
                       <p>{item.reason}</p>
                       <span>{item.target_segment_id}</span>
+                      {renderBrollRecommendationEvidence(
+                        item,
+                        brollAssets,
+                        reviewSnapshot?.segments ?? [],
+                      )}
                     </div>
                   ))}
                 </div>
@@ -1935,6 +1984,11 @@ export function App() {
                         <strong>{prettifyJobType(item.recommendation_type)}</strong>
                         <p>{item.reason}</p>
                         <span>{item.target_segment_id}</span>
+                        {renderBrollRecommendationEvidence(
+                          item,
+                          brollAssets,
+                          reviewSnapshot?.segments ?? [],
+                        )}
                         <button
                           className="action-button"
                           onClick={() =>

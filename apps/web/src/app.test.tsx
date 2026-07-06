@@ -1531,6 +1531,40 @@ describe("App", () => {
     expect(screen.getByRole("checkbox", { name: /explanation card/i })).not.toBeChecked();
   });
 
+  it("shows B-roll recommendation evidence with archived asset metadata in the review snapshot", async () => {
+    const brollRecommendation = {
+      recommendation_id: "rec_broll_review_002",
+      target_segment_id: "seg_002",
+      recommendation_type: "broll",
+      selected_asset_id: "asset_broll_archive_002",
+      score: 0.88,
+      reason: "Matched meeting keywords.",
+      auto_apply_allowed: false,
+      review_required: true,
+      payload: { matched_tags: ["team", "meeting"] },
+      created_at: "2026-06-30T00:00:00Z",
+    };
+    const reviewSnapshot: ReviewSnapshot = {
+      ...reviewSnapshotResponse,
+      review_status: "blocked",
+      applied_recommendations: [],
+      pending_recommendations: [brollRecommendation],
+      review_flags: [],
+    };
+    vi.stubGlobal("fetch", createFetchMock({ reviewSnapshot }));
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /review snapshot/i }));
+
+    expect(await screen.findByText(/Team whiteboard/i)).toBeInTheDocument();
+    expect(screen.getByText(/asset_broll_archive_002/i)).toBeInTheDocument();
+    expect(screen.getByText(/Score 0.88/i)).toBeInTheDocument();
+    expect(screen.getByText(/Matched meeting keywords/i)).toBeInTheDocument();
+    expect(screen.getByText(/Matched tags: team, meeting/i)).toBeInTheDocument();
+    expect(screen.getByText(/Asset tags: team, planning/i)).toBeInTheDocument();
+  });
+
   it("opens the flagged segment in the editing session without overwriting its default rerun scope when no direct field mapping exists", async () => {
     const fetchMock = createFetchMock({
       reviewSnapshot: blockedReviewSnapshotResponse,
