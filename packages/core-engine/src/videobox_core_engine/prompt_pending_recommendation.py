@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from typing import Any, Callable
+from videobox_core_engine.canonical_operator_review_text import (
+    canonical_operator_review_text,
+)
 from videobox_core_engine.canonical_recommendation import (
     canonical_recommendation_type as canonical_prompt_recommendation_type,
     VALID_CANONICAL_RECOMMENDATION_TYPES as VALID_PROMPT_RECOMMENDATION_TYPES,
@@ -16,8 +19,7 @@ def canonical_prompt_decision_state(value: object) -> str:
 
 
 def canonical_prompt_review_flag_message(value: object) -> str:
-    message = str(value or "").strip()
-    return message or "Operator review required before approval or output."
+    return canonical_operator_review_text(value)
 
 
 def has_canonical_review_flag_identity(

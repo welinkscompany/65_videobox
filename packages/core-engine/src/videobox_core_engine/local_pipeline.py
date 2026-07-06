@@ -9,6 +9,9 @@ import warnings
 from videobox_core_engine.canonical_boolish import (
     normalize_strict_boolish as _normalize_runtime_boolish,
 )
+from videobox_core_engine.canonical_operator_review_text import (
+    canonical_operator_review_text as _canonical_runtime_operator_review_text,
+)
 from videobox_core_engine.canonical_recommendation import (
     canonical_recommendation_type as _canonical_runtime_recommendation_type,
     VALID_CANONICAL_RECOMMENDATION_TYPES as VALID_RESTORED_RECOMMENDATION_TYPES,
@@ -75,13 +78,11 @@ from videobox_storage.local_project_store import LocalProjectStore
 
 
 def _canonical_runtime_review_flag_message(value: object) -> str:
-    message = str(value or "").strip()
-    return message or "Operator review required before approval or output."
+    return _canonical_runtime_operator_review_text(value)
 
 
 def _canonical_runtime_pending_recommendation_reason(value: object) -> str:
-    reason = str(value or "").strip()
-    return reason or "Operator review required before approval or output."
+    return _canonical_runtime_operator_review_text(value)
 
 
 def _normalize_runtime_cut_action(value: object) -> str:
@@ -2176,8 +2177,7 @@ class LocalPipelineRunner:
                 **deepcopy(flag),
                 "code": _canonical_runtime_review_flag_code(flag.get("code")),
                 "segment_id": str(flag.get("segment_id") or "").strip(),
-                "message": str(flag.get("message") or "").strip()
-                or "Operator review required before approval or output.",
+                "message": _canonical_runtime_operator_review_text(flag.get("message")),
             }
             for flag in source_timeline.get("review_flags", [])
             if _is_runtime_blocking_review_flag(flag)

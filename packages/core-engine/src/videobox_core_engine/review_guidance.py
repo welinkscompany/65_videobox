@@ -6,6 +6,9 @@ from typing import Any, Protocol
 from videobox_core_engine.canonical_boolish import (
     normalize_strict_boolish as _normalize_boolish,
 )
+from videobox_core_engine.canonical_operator_review_text import (
+    canonical_operator_review_text as _canonical_operator_review_text,
+)
 from videobox_core_engine.canonical_review_status import (
     canonical_review_status as _canonical_review_status,
 )
@@ -113,7 +116,7 @@ class HeuristicReviewGuidanceBuilder(ReviewGuidanceBuilder):
                     and str(item.get("target_segment_id") or "").strip()
                     and _canonical_recommendation_type(item.get("recommendation_type"))
                 ):
-                    action_items.append("Operator review required before approval or output.")
+                    action_items.append(_canonical_operator_review_text(item.get("reason")))
             if not action_items:
                 action_items.append("Resolve review blockers before approval.")
             return {

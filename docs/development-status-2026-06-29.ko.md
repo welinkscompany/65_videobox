@@ -1,7 +1,7 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 199. 2026-07-06 Phase C shared canonical source-uri helper closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
-> 이 문서의 `## 1`부터 `## 198`까지는 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 199`만 기준으로 본다.
+> 현재 authoritative 상태/next slice 판단은 `## 200. 2026-07-06 Phase C shared operator review default text helper closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 이 문서의 `## 1`부터 `## 199`까지는 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 200`만 기준으로 본다.
 > 단, `2일 내 1차 데모 완성` 실행 레일은 `## 189`의 장기 우선순위를 그대로 넓게 집행하지 않고, `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`의 축소된 실행 계획을 우선 적용한다.
 
 ## 1. 결론
@@ -8411,6 +8411,46 @@ focused 검증 메모:
 1. output operator copy와 review guidance가 보는 pending recommendation row canonicalization 기준이 공통 모듈로 다시 모였다
 2. selected asset uri, identity, reason, decision state canonicalization 규칙 drift 위험이 더 줄었다
 3. 남아 있는 cleanup 후보를 고를 때 review/output prompt family의 중복은 더 많이 정리된 상태가 됐다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- stale-shape helper 중복과 dead helper 후보 중 다음 최소 정리 대상 1개를 다시 좁힌다
+- 역할이 끝난 중복 메모 문서는 삭제보다 역할 명시가 맞는지 먼저 판단한다
+- 최종 closeout 직전 broad 재검증이 정말 필요한지 마지막으로 판단한다
+
+## 200. 2026-07-06 Phase C shared operator review default text helper closeout
+
+이번 후속 작업에서는 새 stale-shape 경계를 더 열지 않고, `prompt_pending_recommendation.py`, `review_guidance.py`, `local_pipeline.py`에 흩어져 있던 기본 operator review 문구 fallback 중복을 공통 helper로 다시 모았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- prompt review-flag row, blocked guidance fallback, runtime reuse key, source timeline restore path는 모두 `"Operator review required before approval or output."`를 기본 fallback 문구로 쓰고 있었지만, 구현은 파일별 local helper와 inline literal 중복으로 남아 있었다
+- `canonical_operator_review_text.py`에 shared `canonical_operator_review_text(...)`와 `DEFAULT_OPERATOR_REVIEW_TEXT`를 추가하고 각 경로가 이를 직접 재사용하게 맞춰도 현재 blocked guidance, prompt surface, reuse key 동작은 그대로 유지됐다
+- 이번 정리는 기본 안내 문구 fallback만 모은 cleanup이며, blocker 판단, recommendation truth, persistence semantics는 바꾸지 않았다
+- editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence behavior는 바꾸지 않았다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact verification
+  - `py -m pytest tests/test_api.py -q -k "test_review_guidance_reuse_key_fills_default_review_flag_message or test_review_guidance_reuse_key_fills_default_pending_recommendation_reason or test_heuristic_review_guidance_builder_defaults_missing_pending_recommendation_reason" -vv` -> `3 passed`
+  - `py -m pytest tests/test_api.py -q -k "test_heuristic_review_guidance_builder_defaults_missing_review_flag_message" -vv` -> `1 passed`
+  - `py -m pytest tests/test_api.py -q -k "test_review_guidance_builder_defaults_missing_pending_recommendation_reason_in_prompt" -vv` -> `1 passed`
+- focused verification
+  - `./scripts/dev-fast-path.ps1 -Mode output-gating`
+  - backend output-gating `24 passed`
+  - `./scripts/dev-fast-path.ps1 -Mode preflight-backend`
+  - backend preflight `59 passed`
+- broader verification
+  - 이번 turn에서는 재실행하지 않음
+  - 판단:
+    - 이번 변경은 operator review default text helper 공통화만 다루는 `Phase C` 소규모 리팩터링이다
+    - 현재 자동 baseline은 직전 closeout 기준 `frontend build 성공`, `full backend regression 543 passed`를 유지한다
+
+이 갱신으로 아래 범위는 현재 기준으로 정리됐다.
+
+1. prompt/guidance/runtime read-path가 같은 기본 operator review 문구 fallback을 직접 공유한다
+2. 기본 blocker 안내 문구 drift 위험이 더 줄었다
+3. 남아 있는 cleanup 후보는 dead helper, historical 문서 역할 정리, broader 최종 판단 쪽으로 더 수렴했다
 
 현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
 
