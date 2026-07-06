@@ -61,6 +61,26 @@
 - 검증: `npm run test:focused` 71 passed, `npm run build` 통과.
 - 브라우저 smoke: 편집 탭에서 `선택 B롤` 요약, B-roll picker, 기본 폴더 가져오기, `가져옴 1개`, 새 picker option 반영 확인. 콘솔 오류는 favicon 404만 확인됐다.
 
+## 214. 2026-07-06 B-roll library scale UX closeout
+
+이번 slice의 제품 결정은 `자산이 늘어나면 select만으로는 부족하다`다.
+
+확정된 기준은 아래다.
+
+- B-roll picker와 수동 `asset_id` 입력은 유지한다.
+- picker 앞에 `B롤 검색` 입력을 추가한다.
+- 검색 대상은 표시명, 태그, `asset_id`로 제한한다.
+- 검색 결과 수는 `보임 N/M`으로 짧게 보여준다.
+- 현재 선택된 B-roll은 검색 결과 밖이어도 선택 상태와 요약 카드에서 유지한다.
+- DB 원본 데이터는 변경하지 않고 웹 UI 상태만 추가한다.
+
+검증 결과는 아래다.
+
+- `apps/web/src/App.tsx`에 B-roll 검색 상태, 필터링된 asset option, 결과 수 표시를 추가했다.
+- `apps/web/src/app.test.tsx`는 표시명/태그/`asset_id` 검색과 필터 후 저장 흐름을 검증한다.
+- 검증: `npm run test:focused` 72 passed, `npm run build` 통과.
+- 브라우저 smoke: 편집 탭에서 `B롤 검색`, `보임 7/7`, `팀` 검색 후 `보임 1/7`, 검색 결과 선택, `B롤 저장`, 선택 요약 갱신 확인. 콘솔 오류는 favicon 404만 확인됐다.
+
 ## 1. 결론
 
 현재 개발은 계획서에서 크게 새지 않았다.

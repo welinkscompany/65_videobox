@@ -594,6 +594,7 @@ export function App() {
   );
   const [brollSourcePaths, setBrollSourcePaths] = useState("");
   const [brollImportTags, setBrollImportTags] = useState("");
+  const [brollAssetFilter, setBrollAssetFilter] = useState("");
   const [brollImportError, setBrollImportError] = useState<string | null>(null);
   const [brollImportMessage, setBrollImportMessage] = useState<string | null>(null);
   const [isImportingBroll, setIsImportingBroll] = useState(false);
@@ -668,6 +669,7 @@ export function App() {
       setExportJob(null);
       setBrollAssets([]);
       setBrollAssetLoadError(null);
+      setBrollAssetFilter("");
       setBrollImportError(null);
       setBrollImportMessage(null);
       setGeminiKeys([]);
@@ -685,6 +687,7 @@ export function App() {
       setLoadState("loading");
       setErrorMessage(null);
       setBrollAssetLoadError(null);
+      setBrollAssetFilter("");
       setBrollImportError(null);
       setBrollImportMessage(null);
       setGeminiLoadError(null);
@@ -1548,6 +1551,22 @@ export function App() {
   const selectedBrollAsset = selectedEditingDraft?.brollAssetId
     ? brollAssets.find((asset) => asset.asset_id === selectedEditingDraft.brollAssetId)
     : undefined;
+  const filteredBrollAssets = useMemo(() => {
+    const query = brollAssetFilter.trim().toLowerCase();
+    if (!query) {
+      return brollAssets;
+    }
+    return brollAssets.filter((asset) => formatBrollAssetLabel(asset).toLowerCase().includes(query));
+  }, [brollAssetFilter, brollAssets]);
+  const selectableBrollAssets = useMemo(() => {
+    if (
+      selectedBrollAsset &&
+      !filteredBrollAssets.some((asset) => asset.asset_id === selectedBrollAsset.asset_id)
+    ) {
+      return [selectedBrollAsset, ...filteredBrollAssets];
+    }
+    return filteredBrollAssets;
+  }, [filteredBrollAssets, selectedBrollAsset]);
   const activeEditingSessionId = editingSession?.session_id ?? null;
   const changedSegmentIds = useMemo(
     () =>
@@ -2756,6 +2775,16 @@ export function App() {
                   {brollImportError ? <p className="error-copy">{brollImportError}</p> : null}
                   {brollImportMessage ? <p className="meta-copy">{brollImportMessage}</p> : null}
                   <label className="field">
+                    <span>B롤 검색</span>
+                    <input
+                      onChange={(event) => setBrollAssetFilter(event.target.value)}
+                      value={brollAssetFilter}
+                    />
+                  </label>
+                  <p className="meta-copy">
+                    보임 {filteredBrollAssets.length}/{brollAssets.length}
+                  </p>
+                  <label className="field">
                     <span>B롤 선택</span>
                     <select
                       onChange={(event) =>
@@ -2774,7 +2803,7 @@ export function App() {
                           현재 수동 ID
                         </option>
                       ) : null}
-                      {brollAssets.map((asset) => {
+                      {selectableBrollAssets.map((asset) => {
                         return (
                           <option key={asset.asset_id} value={asset.asset_id}>
                             {formatBrollAssetLabel(asset)}

@@ -2376,6 +2376,42 @@ describe("App", () => {
     });
   });
 
+  it("filters archived B-roll assets by display name tags and asset id before saving", async () => {
+    const fetchMock = await renderStartedEditingSession();
+    const picker = await screen.findByRole("combobox", { name: /B롤 선택/i });
+
+    expect(picker).toHaveTextContent(/사무실 로비 패닝/i);
+    expect(picker).toHaveTextContent(/팀 화이트보드/i);
+
+    fireEvent.change(screen.getByLabelText(/B롤 검색/i), {
+      target: { value: "기획" },
+    });
+    expect(picker).not.toHaveTextContent(/사무실 로비 패닝/i);
+    expect(picker).toHaveTextContent(/팀 화이트보드/i);
+    expect(screen.getByText(/보임 1\/2/i)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText(/B롤 검색/i), {
+      target: { value: "archive_001" },
+    });
+    expect(picker).toHaveTextContent(/사무실 로비 패닝/i);
+    expect(picker).not.toHaveTextContent(/팀 화이트보드/i);
+
+    fireEvent.change(picker, {
+      target: { value: "asset_broll_archive_001" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /B롤 저장/i }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/broll",
+        expect.objectContaining({
+          method: "PATCH",
+          body: JSON.stringify({ asset_id: "asset_broll_archive_001" }),
+        }),
+      );
+    });
+  });
+
   it("imports a B-roll folder from the editing session and refreshes the asset picker", async () => {
     const fetchMock = await renderStartedEditingSession();
     const folderPath =
