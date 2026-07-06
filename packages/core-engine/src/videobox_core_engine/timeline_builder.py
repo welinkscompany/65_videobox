@@ -10,7 +10,7 @@ from videobox_core_engine.canonical_recommendation import (
 from videobox_core_engine.canonical_source_uri import (
     canonical_source_uri as _canonical_source_uri,
 )
-from videobox_domain_models.recommendations import RecommendationRecord, RecommendationType
+from videobox_domain_models.recommendations import RecommendationRecord
 from videobox_domain_models.segments import SegmentRecord
 from videobox_timeline_schema.models import (
     TimelineClip,
