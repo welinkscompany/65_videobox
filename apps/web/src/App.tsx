@@ -152,6 +152,15 @@ function formatDisplayText(value: string | null | undefined) {
     return "";
   }
   const normalized = value.trim();
+  if (
+    normalized.includes("://") ||
+    /^\d{4}-\d{2}-\d{2}T/.test(normalized) ||
+    /\b[a-z]+_[a-z0-9_]+_\d+\b/i.test(normalized) ||
+    /\b(asset|clip|job|rec|seg|timeline|editing_session)_[a-z0-9_]+\b/i.test(normalized) ||
+    /^gemini-[a-z0-9.-]+$/i.test(normalized)
+  ) {
+    return normalized;
+  }
   const labels: Record<string, string> = {
     "B-roll Smoke Test": "B롤 검수 테스트",
     "Operator Review Demo": "작업자 검수 데모",
@@ -171,12 +180,20 @@ function formatDisplayText(value: string | null | undefined) {
     "Fallback cooldown key": "대기 예비 키",
     "Burst quota key": "긴급 할당 키",
     "429 quota exceeded": "429 할당량 초과",
+    "Mock CapCut payload written for local post-editing handoff.": "캡컷 초안 생성",
+    playable_html_preview: "HTML 미리보기",
+    capcut: "캡컷",
   };
-  return labels[normalized] ?? normalized;
+  return labels[normalized] ?? formatDisplayTokens(normalized);
 }
 
 function formatDisplayTag(tag: string) {
-  const labels: Record<string, string> = {
+  const labels = getDisplayTokenLabels();
+  return labels[tag] ?? formatDisplayTokens(tag);
+}
+
+function getDisplayTokenLabels(): Record<string, string> {
+  return {
     office: "사무실",
     overview: "개요",
     lobby: "로비",
@@ -187,8 +204,29 @@ function formatDisplayTag(tag: string) {
     "live-smoke": "실사용 검수",
     "live-smoke-final": "최종 실사용 검수",
     "folder-import": "폴더 가져오기",
+    broll: "B롤",
+    roll: "롤",
+    video: "영상",
+    pan: "패닝",
+    whiteboard: "화이트보드",
+    factory: "공장",
+    line: "라인",
   };
-  return labels[tag] ?? tag;
+}
+
+function formatDisplayTokens(value: string) {
+  const labels = getDisplayTokenLabels();
+  return value
+    .split(/([\s_-]+)/)
+    .map((part) => {
+      if (/^[\s_-]+$/.test(part)) {
+        return " ";
+      }
+      return labels[part.toLowerCase() as keyof ReturnType<typeof getDisplayTokenLabels>] ?? part;
+    })
+    .join("")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function formatBrollAssetTitle(asset: BrollAsset) {
@@ -239,10 +277,10 @@ function renderBrollRecommendationEvidence(
         세그먼트 {item.target_segment_id}
         {segment ? `: ${formatDisplayText(segment.text)}` : ""}
       </span>
-      <span>선택 자산: {selectedAssetLabel}</span>
+      <span>자산: {selectedAssetLabel}</span>
       <span>점수 {formatRecommendationScore(item.score)}</span>
-      {matchedTags ? <span>매칭 태그: {matchedTags}</span> : null}
-      {assetTags ? <span>자산 태그: {assetTags}</span> : null}
+      {matchedTags ? <span>매칭: {matchedTags}</span> : null}
+      {assetTags ? <span>태그: {assetTags}</span> : null}
     </div>
   );
 }
@@ -444,18 +482,24 @@ function formatWorkflowStep(step: string) {
 }
 
 function formatOperatorNote(note: string) {
+  const matchedKeywords = note.match(/^Matched keywords:\s*(.+)$/i);
+  if (matchedKeywords) {
+    return matchedKeywords[1]
+      .split(",")
+      .map((item) => formatDisplayTag(item.trim()))
+      .filter(Boolean)
+      .join(" · ");
+  }
   const labels: Record<string, string> = {
-    "Matched keywords: office": "키워드 · office",
-    "Matched keywords: office, team": "키워드 · office, team",
-    "Matched office overview keywords": "사무실 개요 키워드",
-    "Matched meeting keywords.": "회의 키워드 매칭",
-    "Narration replacement still requires operator confirmation.": "내레이션 교체 확인 필요",
-    "Operator should confirm the suggested B-roll pick.": "추천 B롤 확인 필요",
-    "Operator should inspect this segment manually.": "수동 세그먼트 확인 필요",
-    "Pronunciation restart detected": "발음 재시작 감지",
-    "Segment requires operator review before export.": "내보내기 전 검수 필요",
+    "Matched office overview keywords": "사무실 개요",
+    "Matched meeting keywords.": "회의",
+    "Narration replacement still requires operator confirmation.": "내레이션 확인",
+    "Operator should confirm the suggested B-roll pick.": "B롤 확인",
+    "Operator should inspect this segment manually.": "수동 확인",
+    "Pronunciation restart detected": "재시작 감지",
+    "Segment requires operator review before export.": "내보내기 전 확인",
     "source timeline already has unresolved review blockers that rerun will preserve": "기존 보류 유지",
-    "selected segments already require operator review, so rerun output stays blocked": "선택 세그먼트 검수 필요",
+    "selected segments already require operator review, so rerun output stays blocked": "선택 구간 보류",
     "b-roll asset replaced with regenerated recommendation": "B롤 교체",
     "explanation card text refreshed": "설명 카드 갱신",
   };
@@ -1732,7 +1776,7 @@ export function App() {
           <div className="panel-header">
             <div>
               <p className="section-kicker">파이프라인</p>
-              <h2 id="status-heading">작업 상태</h2>
+              <h2 id="status-heading">진행</h2>
             </div>
           </div>
           <div className="status-grid">
@@ -1770,7 +1814,7 @@ export function App() {
                     <dd>{timelineJob.timeline.tracks.length}</dd>
                   </div>
                   <div>
-                    <dt>검수 표시</dt>
+                  <dt>표시</dt>
                     <dd>{timelineJob.timeline.review_flags.length}</dd>
                   </div>
                   <div>
@@ -1840,7 +1884,9 @@ export function App() {
                 </div>
                 <div>
                   <dt>미리보기 파일</dt>
-                  <dd>{formatJobValue(previewJob?.preview.artifact_kind)}</dd>
+                  <dd>
+                    {previewJob ? formatDisplayText(previewJob.preview.artifact_kind) : "미시작"}
+                  </dd>
                 </div>
                 <div>
                   <dt>내보내기 작업</dt>
@@ -1848,7 +1894,7 @@ export function App() {
                 </div>
                 <div>
                   <dt>내보내기 대상</dt>
-                  <dd>{formatJobValue(exportJob?.export.export_type)}</dd>
+                  <dd>{exportJob ? formatDisplayText(exportJob.export.export_type) : "미시작"}</dd>
                 </div>
               </dl>
             </article>
@@ -1857,7 +1903,7 @@ export function App() {
               <div className="panel-header">
                 <div>
                   <p className="section-kicker">제미나이</p>
-                  <h2>키 관리</h2>
+                  <h2>키</h2>
                 </div>
                 <button
                   className="action-button"
@@ -2038,7 +2084,7 @@ export function App() {
               <div className="track-stack">
                 {previewJob ? (
                   <article className="artifact-card">
-                    <h3>{previewJob.preview.artifact_kind}</h3>
+                    <h3>{formatDisplayText(previewJob.preview.artifact_kind)}</h3>
                     <p>{previewJob.preview.player_uri ?? previewJob.preview.file_uri}</p>
                   </article>
                 ) : null}
@@ -2050,10 +2096,10 @@ export function App() {
                 ) : null}
                 {exportJob ? (
                   <article className="artifact-card">
-                    <h3>{exportJob.export.export_type}</h3>
+                    <h3>{formatDisplayText(exportJob.export.export_type)}</h3>
                     <p>{exportJob.export.file_uri}</p>
                     <p>{exportJob.export.subtitle_file_uri ?? "자막 없음"}</p>
-                    <p>{exportJob.export.notes[0]}</p>
+                    <p>{formatDisplayText(exportJob.export.notes[0])}</p>
                   </article>
                 ) : null}
                 {timelineJob.timeline.tracks.map((track) => (
@@ -2073,7 +2119,7 @@ export function App() {
                           <span>{formatSeconds(clip.start_sec, clip.end_sec)}</span>
                           <span>{clip.asset_uri}</span>
                           <span>
-                            추천 출처: {clip.recommendation_id ?? "수동 내레이션"}
+                            추천: {clip.recommendation_id ?? "수동 내레이션"}
                           </span>
                         </div>
                       ))}
@@ -2124,7 +2170,7 @@ export function App() {
               <div className="panel-header">
                 <div>
                   <p className="section-kicker">추천</p>
-                  <h2>적용 · 대기</h2>
+                  <h2>추천</h2>
                 </div>
               </div>
               <div className="recommendation-groups">
@@ -2182,7 +2228,7 @@ export function App() {
               <div className="panel-header">
                 <div>
                   <p className="section-kicker">표시</p>
-                  <h2>검수 표시</h2>
+                  <h2>표시</h2>
                 </div>
               </div>
               <div className="flag-list">
@@ -2246,7 +2292,7 @@ export function App() {
               <div className="panel-header">
                 <div>
                   <p className="section-kicker">편집</p>
-                  <h2>타임라인 편집기</h2>
+                  <h2>편집기</h2>
                 </div>
               </div>
               <div className="action-row">
@@ -2285,7 +2331,7 @@ export function App() {
                       <dd>{editingSession.history.length}</dd>
                     </div>
                     <div>
-                      <dt>변경 세그먼트</dt>
+                      <dt>변경</dt>
                       <dd>{changedSegmentIds.size}</dd>
                     </div>
                     <div>
@@ -2433,7 +2479,7 @@ export function App() {
               <div className="panel-header">
                 <div>
                   <p className="section-kicker">검증</p>
-                  <h2>변경 세그먼트</h2>
+                  <h2>변경</h2>
                 </div>
               </div>
               {editingSession ? (
@@ -2474,7 +2520,7 @@ export function App() {
                       ))}
                     </div>
                   ) : (
-                    <p className="empty-state">부분 재생성 필요</p>
+                    <p className="empty-state">재생성 필요</p>
                   )}
                   <div>
                     <h3>유지 영역</h3>
@@ -2494,7 +2540,7 @@ export function App() {
               <div className="panel-header">
                 <div>
                   <p className="section-kicker">판단</p>
-                  <h2>검수 결정</h2>
+                  <h2>판단</h2>
                 </div>
               </div>
               {editingSession ? (
@@ -2550,7 +2596,7 @@ export function App() {
                   </>
                 ) : (
                   <p className="empty-state">
-                    부분 재생성 필요
+                    재생성 필요
                   </p>
                 )
               ) : (
@@ -2562,7 +2608,7 @@ export function App() {
               <div className="panel-header">
                 <div>
                   <p className="section-kicker">선택</p>
-                  <h2>세그먼트 상세</h2>
+                  <h2>상세</h2>
                 </div>
               </div>
               {selectedEditingSegment && selectedEditingDraft ? (
@@ -3230,7 +3276,7 @@ export function App() {
               <div className="panel-header">
                 <div>
                   <p className="section-kicker">변경</p>
-                  <h2>트랙 영향</h2>
+                  <h2>트랙</h2>
                 </div>
               </div>
               {timelineJob ? (

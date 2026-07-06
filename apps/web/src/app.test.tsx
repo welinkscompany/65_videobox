@@ -1352,7 +1352,7 @@ describe("App", () => {
     expect(screen.getByText(/프로젝트 · 타임라인 · 검수 · 출력/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /개요/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^검수$/i })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: /작업 상태/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /진행/i })).toBeInTheDocument();
     expect(screen.getByText(/^전사$/i)).toBeInTheDocument();
     expect(screen.queryByText(/Local-first review shell/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Inspect projects/i)).not.toBeInTheDocument();
@@ -1375,7 +1375,7 @@ describe("App", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /^검수$/i }));
 
-    expect(await screen.findByText(/적용 · 대기/i)).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /^추천$/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /추천 승인/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /추천 거절/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /수동 편집/i })).toBeInTheDocument();
@@ -1396,9 +1396,9 @@ describe("App", () => {
     fireEvent.click(await screen.findByRole("button", { name: /미리보기 생성/i }));
     fireEvent.click(await screen.findByRole("button", { name: /캡컷 내보내기/i }));
 
-    expect(await screen.findByText(/playable_html_preview/i)).toBeInTheDocument();
+    expect(await screen.findByText(/HTML 미리보기/i)).toBeInTheDocument();
     expect(await screen.findAllByText(/subtitle_001\.srt/i)).toHaveLength(2);
-    expect(await screen.findByText(/mock capcut payload written/i)).toBeInTheDocument();
+    expect(await screen.findByText(/캡컷 초안 생성/i)).toBeInTheDocument();
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith("/api/projects", undefined);
@@ -1416,7 +1416,7 @@ describe("App", () => {
     fireEvent.click(await screen.findByRole("button", { name: /^검수$/i }));
     fireEvent.click(await screen.findByRole("button", { name: /추천 검수 · seg_002/i }));
 
-    expect(await screen.findByRole("heading", { name: /타임라인 편집기/i })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /편집기/i })).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: /대상 세그먼트/i })).toHaveValue("seg_002");
     expect(screen.getByRole("checkbox", { name: /TTS/i })).toBeChecked();
     expect(screen.getByRole("checkbox", { name: /B롤/i })).not.toBeChecked();
@@ -1539,7 +1539,7 @@ describe("App", () => {
     fireEvent.click(await screen.findByRole("button", { name: /^검수$/i }));
     fireEvent.click(await screen.findByRole("button", { name: /수동 편집/i }));
 
-    expect(await screen.findByRole("heading", { name: /타임라인 편집기/i })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /편집기/i })).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: /대상 세그먼트/i })).toHaveValue("seg_002");
     expect(screen.getByRole("checkbox", { name: /B롤/i })).toBeChecked();
     expect(screen.getByRole("checkbox", { name: /TTS/i })).not.toBeChecked();
@@ -1575,9 +1575,9 @@ describe("App", () => {
     expect(await screen.findByText(/팀 화이트보드/i)).toBeInTheDocument();
     expect(screen.getByText(/asset_broll_archive_002/i)).toBeInTheDocument();
     expect(screen.getByText(/점수 0.88/i)).toBeInTheDocument();
-    expect(screen.getByText(/회의 키워드 매칭/i)).toBeInTheDocument();
-    expect(screen.getByText(/매칭 태그: 팀, 회의/i)).toBeInTheDocument();
-    expect(screen.getByText(/자산 태그: 팀, 기획/i)).toBeInTheDocument();
+    expect(screen.getByText(/^회의$/i)).toBeInTheDocument();
+    expect(screen.getByText(/매칭: 팀, 회의/i)).toBeInTheDocument();
+    expect(screen.getByText(/태그: 팀, 기획/i)).toBeInTheDocument();
   });
 
   it("opens the flagged segment in the editing session without overwriting its default rerun scope when no direct field mapping exists", async () => {
@@ -1591,7 +1591,7 @@ describe("App", () => {
     fireEvent.click(await screen.findByRole("button", { name: /^검수$/i }));
     fireEvent.click(await screen.findByRole("button", { name: /편집 확인 · seg_002/i }));
 
-    expect(await screen.findByRole("heading", { name: /타임라인 편집기/i })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /편집기/i })).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: /대상 세그먼트/i })).toHaveValue("seg_002");
     expect(screen.getByRole("checkbox", { name: /B롤/i })).toBeChecked();
     expect(screen.getByRole("checkbox", { name: /설명 카드/i })).toBeChecked();
@@ -1609,7 +1609,7 @@ describe("App", () => {
     fireEvent.click(await screen.findByRole("button", { name: /^검수$/i }));
     fireEvent.click(await screen.findByRole("button", { name: /편집 열기 · seg_002/i }));
 
-    expect(await screen.findByRole("heading", { name: /타임라인 편집기/i })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /편집기/i })).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: /대상 세그먼트/i })).toHaveValue("seg_002");
     expect(screen.getByRole("checkbox", { name: /B롤/i })).toBeChecked();
     expect(screen.getByRole("checkbox", { name: /설명 카드/i })).toBeChecked();
@@ -1642,7 +1642,7 @@ describe("App", () => {
     fireEvent.click(await screen.findByRole("button", { name: /^검수$/i }));
     fireEvent.click(await screen.findByRole("button", { name: /추천 검수 · seg_002/i }));
 
-    expect(await screen.findByRole("heading", { name: /타임라인 편집기/i })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /편집기/i })).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: /대상 세그먼트/i })).toHaveValue("seg_002");
     expect(screen.getByRole("checkbox", { name: /B롤/i })).toBeChecked();
     expect(screen.getByRole("checkbox", { name: /설명 카드/i })).toBeChecked();
@@ -1922,7 +1922,7 @@ describe("App", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: /키 관리/i })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /^키$/i })).toBeInTheDocument();
     expect(await screen.findByText(/기본 라우팅 키/i)).toBeInTheDocument();
     expect(await screen.findByText("AIza...1234")).toBeInTheDocument();
     expect(await screen.findByText(/대기 예비 키/i)).toBeInTheDocument();
@@ -1939,7 +1939,7 @@ describe("App", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: /키 관리/i })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /^키$/i })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /키 추가/i }));
     fireEvent.change(screen.getByLabelText(/이름/i), {
@@ -3180,10 +3180,10 @@ describe("App", () => {
     fireEvent.click(await screen.findByRole("button", { name: /사전 확인/i }));
     fireEvent.click(await screen.findByRole("button", { name: /부분 재생성/i }));
 
-    expect(await screen.findByRole("heading", { name: /타임라인 편집기/i })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: /세그먼트 상세/i })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: /트랙 영향/i })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: /변경 세그먼트/i })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /편집기/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /상세/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /^트랙$/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /^변경$/i })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /유지 영역/i })).toBeInTheDocument();
 
     expect(screen.getByText(/seg_002 변경/i)).toBeInTheDocument();
@@ -3208,7 +3208,7 @@ describe("App", () => {
     fireEvent.click(await screen.findByRole("button", { name: /사전 확인/i }));
     fireEvent.click(await screen.findByRole("button", { name: /부분 재생성/i }));
 
-    expect(await screen.findByRole("heading", { name: /검수 결정/i })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /^판단$/i })).toBeInTheDocument();
     expect(screen.getByText(/준비 1/i)).toBeInTheDocument();
     expect(screen.getByText(/보류 0/i)).toBeInTheDocument();
     expect(screen.getByText(/seg_002 승인 준비/i)).toBeInTheDocument();
@@ -3241,7 +3241,7 @@ describe("App", () => {
     fireEvent.click(await screen.findByRole("button", { name: /사전 확인/i }));
     fireEvent.click(await screen.findByRole("button", { name: /부분 재생성/i }));
 
-    expect(await screen.findByRole("heading", { name: /검수 결정/i })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /^판단$/i })).toBeInTheDocument();
     expect(screen.getByText(/준비 0/i)).toBeInTheDocument();
     expect(screen.getByText(/보류 1/i)).toBeInTheDocument();
     expect(screen.getByText(/seg_002 검수 필요/i)).toBeInTheDocument();

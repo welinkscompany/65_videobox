@@ -22,6 +22,25 @@
 - `docs/implementation-plan.ko.md`의 `웹 대시보드 표시 언어 기준`을 원문 보존 정책에서 `화면 한글 우선 + 추적값 원문 유지` 정책으로 갱신했다.
 - 검증: `npm run test:focused` 71 passed, `npm run build` 통과, 브라우저 smoke에서 개요/타임라인/검수/편집/B-roll picker/제미나이 form 확인.
 
+## 212. 2026-07-06 한글 UX 자연어 품질 closeout
+
+이번 slice의 제품 결정은 `설명문보다 짧은 작업 단어`다.
+
+확정된 기준은 아래다.
+
+- 화면 제목은 `진행`, `키`, `추천`, `표시`, `편집기`, `변경`, `판단`, `상세`, `트랙`처럼 짧게 쓴다.
+- 추천 근거는 `키워드`, `매칭 태그`, `자산 태그` 같은 설명형 라벨보다 `사무실`, `사무실 · 팀`, `매칭`, `태그`처럼 즉시 읽히는 단어를 우선한다.
+- B-roll title/tag fallback은 token 기반 표시 helper로 일반화한다.
+- `asset_id`, `clip_id`, `seg_*`, `rec_*`, `job_id`, `timeline_id`, `local://`, 모델명, ISO 시간은 원문을 유지한다.
+- DB 원본 데이터와 입력 form 값은 변경하지 않고, 읽기 화면/목록/카드/버튼 접근성 이름에만 표시 변환을 적용한다.
+
+검증 결과는 아래다.
+
+- `apps/web/src/App.tsx`의 표시 helper가 알려진 단어와 token fallback을 함께 처리한다.
+- `apps/web/src/app.test.tsx`는 짧은 한글 표시 정책과 ID/URI/secret 원문 보존을 함께 검증한다.
+- 검증: `npm run test:focused` 71 passed, `npm run build` 통과.
+- 브라우저 smoke: 개요/타임라인/검수/편집/B-roll picker/제미나이 form 확인. 콘솔 오류는 favicon 404만 확인됐다.
+
 ## 1. 결론
 
 현재 개발은 계획서에서 크게 새지 않았다.
