@@ -1,7 +1,7 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 201. 2026-07-06 broader rerun recovered nested target_segment_id pending recommendation regression closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
-> 이 문서의 `## 1`부터 `## 200`까지는 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 201`만 기준으로 본다.
+> 현재 authoritative 상태/next slice 판단은 `## 202. 2026-07-06 phase b representative verification refreshed after broader recovery closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 이 문서의 `## 1`부터 `## 201`까지는 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 202`만 기준으로 본다.
 > 단, `2일 내 1차 데모 완성` 실행 레일은 `## 189`의 장기 우선순위를 그대로 넓게 집행하지 않고, `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`의 축소된 실행 계획을 우선 적용한다.
 
 ## 1. 결론
@@ -8417,6 +8417,55 @@ focused 검증 메모:
 - stale-shape helper 중복과 dead helper 후보 중 다음 최소 정리 대상 1개를 다시 좁힌다
 - 역할이 끝난 중복 메모 문서는 삭제보다 역할 명시가 맞는지 먼저 판단한다
 - 최종 closeout 직전 broad 재검증이 정말 필요한지 마지막으로 판단한다
+
+## 202. 2026-07-06 phase b representative verification refreshed after broader recovery closeout
+
+이번 후속 작업에서는 코드를 더 바꾸지 않고, broad 회귀 복구 직후의 최신 baseline 위에서 `Phase B` 대표 검증 근거를 다시 수집했다. 목적은 final closeout 전에 happy-path, frontend operator flow, provider trace failed-output/fallback evidence가 여전히 살아 있는지 최신 상태로 확인하는 것이었다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- backend representative happy-path 체인 5개가 모두 다시 green이었다
+  - review snapshot approve
+  - approved TTS replacement preview/export 반영
+  - partial regeneration result fetch
+  - candidate timeline job id lineage
+  - provider trace audit candidate upstream lineage
+- provider trace audit의 failed-output / fallback 대표 경계 5개도 모두 다시 green이었다
+  - failed segment analysis without output ref
+  - failed gemini fallback recommendation run
+  - default trace for failed provider job without trace
+  - failed preview render without output ref
+  - authoritative failed run when audit log append fails
+- frontend representative QA 경계 3개도 다시 green이었다
+  - blocked preflight warning
+  - resumed candidate restore warning cleanup
+  - mark for manual edit -> editing session 진입
+- 즉, 현재 최신 baseline은 자동 focused/broader green뿐 아니라 representative Phase B evidence까지 다시 최신 상태로 확보된 셈이다
+
+이번 turn의 verification은 아래와 같다.
+
+- representative backend happy-path / lineage evidence
+  - `py -m pytest tests/test_api.py -q -k "test_review_snapshot_api_can_approve_pending_recommendation or test_approved_tts_replacement_flows_through_preview_and_export_outputs or test_editing_session_api_can_fetch_partial_regeneration_result or test_review_snapshot_api_uses_partial_regeneration_job_id_for_candidate_timeline or test_provider_trace_audit_timeline_filter_include_upstream_supports_partial_regeneration_candidate" -vv` -> `5 passed`
+- representative provider trace failed-output / fallback evidence
+  - `py -m pytest tests/test_api.py -q -k "test_provider_trace_audit_endpoint_includes_failed_segment_analysis_without_output_ref or test_provider_trace_audit_endpoint_includes_failed_gemini_fallback_recommendation_run or test_provider_trace_audit_endpoint_uses_default_trace_for_failed_provider_job_without_trace or test_provider_trace_audit_endpoint_includes_failed_preview_render_without_output_ref or test_provider_trace_audit_endpoint_uses_authoritative_failed_run_when_audit_log_append_fails" -vv` -> `5 passed`
+- representative frontend QA evidence
+  - `npm test -- --run src/app.test.tsx -t "shows a blocked preflight warning before execution when the rerun preserves existing review blockers|clears resumed candidate restore warnings when the operator changes the rerun target|opens the actionable pending recommendation in the editing session when marked for manual edit"` -> `3 passed`
+- current automatic baseline already verified in the immediately previous closeout
+  - `./scripts/dev-fast-path.ps1 -Mode current-focused-parallel` -> backend output-gating `24 passed`, backend preflight `59 passed`, frontend preflight `25 passed`
+  - `npm run build` -> 성공
+  - `pytest -q` -> `543 passed`
+
+이 갱신으로 아래 범위는 현재 기준으로 정리됐다.
+
+1. final closeout 전에 필요한 representative Phase B evidence가 최신 baseline 위에서 다시 확보됐다
+2. happy-path, frontend operator flow, provider trace failed-output/fallback 대표 근거가 모두 최신 green으로 맞춰졌다
+3. 남은 일은 실제 final closeout용 전체 동작 검증 서술 정리, QA/system verification judgment, historical 문서/찌꺼기 정리 판단으로 더 좁혀졌다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- final closeout 문서에 전체 동작 검증, QA, 시스템 검증 결과를 어떤 단위로 묶을지 결정한다
+- historical 문서와 역할 종료 메모의 삭제/유지 기준을 정리한다
+- 최종 마감 커밋 단위를 설계한다
 
 ## 201. 2026-07-06 broader rerun recovered nested target_segment_id pending recommendation regression closeout
 

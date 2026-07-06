@@ -752,6 +752,7 @@
 - preview/review-action/runtime/timeline이 각각 들고 있던 source-uri trim helper도 공통 모듈로 다시 모아, selected_asset_uri와 narration source surface trim 기준이 파일별로 다시 갈라지지 않도록 정리했다
 - prompt/guidance/runtime이 각각 들고 있던 기본 operator review 안내 문구 fallback도 공통 모듈로 다시 모아, default review flag message와 pending recommendation reason 기준이 파일별로 다시 갈라지지 않도록 정리했다
 - broader 재검증에서 드러난 nested `target_segment_id` stale pending recommendation runtime 회귀 1개도 복구해, partial regeneration read-path이 string 타입 target identity만 유효한 pending recommendation으로 인정하도록 다시 맞췄다
+- broad 회귀 복구 직후 representative Phase B evidence도 다시 수집해, happy-path, frontend operator flow, provider trace failed-output/fallback 근거가 최신 baseline 위에서 모두 green인지 다시 확인했다
 - output operator copy와 review guidance가 각각 들고 있던 `VALID_PROMPT_RECOMMENDATION_TYPES`와 `VALID_PROMPT_REVIEW_FLAG_CODES`도 공통 모듈로 묶어, prompt family의 valid-set 기준이 파일별로 다시 갈라지지 않도록 정리했다
 - output operator copy와 review guidance가 각각 들고 있던 canonical pending recommendation identity helper도 공통 모듈로 묶어, recommendation_id / target_segment_id / recommendation_type canonical identity 규칙이 파일별로 다시 갈라지지 않도록 정리했다
 - output operator copy와 review guidance가 각각 들고 있던 pending recommendation row 정규화 helper를 공통 모듈로 묶어, selected_asset_uri / identity / reason / decision_state canonicalization 규칙이 파일별로 다시 갈라지지 않도록 정리했다
