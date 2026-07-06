@@ -1,25 +1,16 @@
 from __future__ import annotations
 
 from typing import Any, Callable
-from videobox_domain_models.recommendations import RecommendationType
-
-
-VALID_PROMPT_RECOMMENDATION_TYPES = {
-    RecommendationType.TTS_REPLACEMENT.value,
-    RecommendationType.BROLL.value,
-    RecommendationType.BGM.value,
-    RecommendationType.OVERLAY.value,
-}
+from videobox_core_engine.canonical_recommendation import (
+    canonical_recommendation_type as canonical_prompt_recommendation_type,
+    VALID_CANONICAL_RECOMMENDATION_TYPES as VALID_PROMPT_RECOMMENDATION_TYPES,
+)
 
 VALID_PROMPT_REVIEW_FLAG_CODES = {
     "segment_review_required",
     "broll_review_required",
     "tts_replacement_review_required",
 }
-
-
-def canonical_prompt_recommendation_type(value: object) -> str:
-    return str(value or "").strip().lower()
 
 
 def canonical_prompt_decision_state(value: object) -> str:

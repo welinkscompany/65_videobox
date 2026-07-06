@@ -745,6 +745,7 @@
 - output operator copy와 review guidance가 review flag code canonicalizer local helper도 공통 모듈로 다시 모아, mixed-case review flag code 기준이 파일별로 다시 갈라지지 않도록 정리했다
 - local pipeline에서 `_normalize_runtime_boolish(...)`를 한 번 더 감싸기만 하던 `review_required` dead wrapper도 제거해, output gating과 partial regeneration read-path이 같은 boolish helper를 직접 공유하도록 정리했다
 - preview/output/runtime/TTS apply가 각각 들고 있던 track type canonicalizer와 valid track set도 공통 helper로 다시 모아, mixed-case narration track type과 unknown track type 기준이 파일별로 다시 갈라지지 않도록 정리했다
+- prompt/output/runtime/timeline/TTS approval이 각각 들고 있던 recommendation type canonicalizer와 valid recommendation set도 공통 helper로 다시 모아, mixed-case recommendation type과 valid recommendation set 기준이 파일별로 다시 갈라지지 않도록 정리했다
 - output operator copy와 review guidance가 각각 들고 있던 `VALID_PROMPT_RECOMMENDATION_TYPES`와 `VALID_PROMPT_REVIEW_FLAG_CODES`도 공통 모듈로 묶어, prompt family의 valid-set 기준이 파일별로 다시 갈라지지 않도록 정리했다
 - output operator copy와 review guidance가 각각 들고 있던 canonical pending recommendation identity helper도 공통 모듈로 묶어, recommendation_id / target_segment_id / recommendation_type canonical identity 규칙이 파일별로 다시 갈라지지 않도록 정리했다
 - output operator copy와 review guidance가 각각 들고 있던 pending recommendation row 정규화 helper를 공통 모듈로 묶어, selected_asset_uri / identity / reason / decision_state canonicalization 규칙이 파일별로 다시 갈라지지 않도록 정리했다

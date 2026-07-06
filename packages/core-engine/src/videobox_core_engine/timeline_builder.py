@@ -3,6 +3,10 @@ from __future__ import annotations
 from dataclasses import asdict
 from uuid import uuid4
 
+from videobox_core_engine.canonical_recommendation import (
+    canonical_recommendation_type as _canonical_recommendation_type,
+    VALID_CANONICAL_RECOMMENDATION_TYPES as SUPPORTED_TIMELINE_RECOMMENDATION_TYPES,
+)
 from videobox_domain_models.recommendations import RecommendationRecord, RecommendationType
 from videobox_domain_models.segments import SegmentRecord
 from videobox_timeline_schema.models import (
@@ -17,18 +21,6 @@ def _normalize_boolish(value: object) -> bool:
     if isinstance(value, str):
         return value.strip().lower() not in {"", "0", "false", "no", "off"}
     return bool(value)
-
-
-def _canonical_recommendation_type(value: object) -> str:
-    return str(value or "").strip().lower()
-
-
-SUPPORTED_TIMELINE_RECOMMENDATION_TYPES = {
-    RecommendationType.TTS_REPLACEMENT.value,
-    RecommendationType.BROLL.value,
-    RecommendationType.BGM.value,
-    RecommendationType.OVERLAY.value,
-}
 
 
 class TimelineBuilder:

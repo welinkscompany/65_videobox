@@ -3,6 +3,9 @@ from __future__ import annotations
 from html import escape
 from typing import Any
 
+from videobox_core_engine.canonical_recommendation import (
+    canonical_recommendation_type as _canonical_recommendation_type,
+)
 from videobox_core_engine.canonical_track import (
     canonical_track_type as _canonical_track_type,
     VALID_CANONICAL_TRACK_TYPES as VALID_PREVIEW_TRACK_TYPES,
@@ -15,10 +18,6 @@ def _normalize_boolish(value: object) -> bool:
     if isinstance(value, bool):
         return value
     return False
-
-
-def _canonical_recommendation_type(value: object) -> str:
-    return str(value or "").strip().lower()
 
 
 def _canonical_review_status(value: object) -> str:
