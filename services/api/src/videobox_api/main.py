@@ -72,6 +72,15 @@ class AssetResponse(BaseModel):
     storage_uri: str
 
 
+class AssetArchiveItemResponse(AssetResponse):
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: str
+
+
+class AssetListResponse(BaseModel):
+    assets: list[AssetArchiveItemResponse]
+
+
 class AutoCutBlackRegionRequest(BaseModel):
     start: float = Field(ge=0)
     end: float = Field(ge=0)
@@ -1063,6 +1072,14 @@ def create_app(
             asset_type=asset.asset_type,
             storage_uri=asset.storage_uri,
         )
+
+    @app.get("/api/projects/{project_id}/assets/broll-video")
+    def list_broll_assets(project_id: str) -> AssetListResponse:
+        try:
+            assets = orchestrator.list_broll_assets(project_id=project_id)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return AssetListResponse(assets=[AssetArchiveItemResponse(**asset) for asset in assets])
 
     @app.post("/api/projects/{project_id}/assets/raw-video", status_code=status.HTTP_201_CREATED)
     def register_raw_video(project_id: str, payload: AssetRegistrationRequest) -> AssetResponse:

@@ -17,6 +17,7 @@ from videobox_provider_interfaces.llm import (
     StructuredLLMResponse,
 )
 from videobox_core_engine.local_pipeline import LocalPipelineRunner
+from videobox_domain_models.assets import AssetType
 from videobox_storage.local_project_store import LocalProjectStore
 
 
@@ -189,6 +190,9 @@ class ApiOrchestrator:
             asset_type=asset["asset_type"],
             storage_uri=asset["storage_uri"],
         )
+
+    def list_broll_assets(self, *, project_id: str) -> list[dict[str, Any]]:
+        return self.store.list_assets(project_id=project_id, asset_type=AssetType.BROLL_VIDEO)
 
     def register_raw_video_asset(self, *, project_id: str, source_path: Path) -> RegisteredAsset:
         asset = self.pipeline.register_raw_video_asset(

@@ -4286,6 +4286,50 @@ def _create_broll_recommendation_project(
     return project_id, segment_job_id
 
 
+def test_broll_asset_list_endpoint_returns_archived_metadata(tmp_path: Path) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    source_broll = tmp_path / "office-lobby-pan.mp4"
+    source_broll.write_bytes(b"video bytes")
+
+    project_id = client.post("/api/projects", json={"name": "Broll Archive UX"}).json()["project_id"]
+    registered = client.post(
+        f"/api/projects/{project_id}/assets/broll-video",
+        json={
+            "source_path": str(source_broll),
+            "title": "Office lobby pan",
+            "tags": ["office", "lobby"],
+        },
+    )
+    assert registered.status_code == 201
+    archived_path = (
+        tmp_path
+        / "projects"
+        / project_id
+        / "assets"
+        / "imported"
+        / source_broll.name
+    )
+    assert archived_path.read_bytes() == b"video bytes"
+
+    response = client.get(f"/api/projects/{project_id}/assets/broll-video")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["assets"] == [
+        {
+            "asset_id": registered.json()["asset_id"],
+            "asset_type": "broll_video",
+            "storage_uri": registered.json()["storage_uri"],
+            "metadata": {
+                "title": "Office lobby pan",
+                "tags": ["office", "lobby"],
+            },
+            "created_at": payload["assets"][0]["created_at"],
+        }
+    ]
+
+
 def _create_music_recommendation_project(
     client: TestClient,
     tmp_path: Path,
@@ -5484,7 +5528,11 @@ def test_segment_analysis_local_first_path_preserves_downstream_timeline_review_
     assert len(local_provider.calls) >= 2
 
 
-def test_recommendation_flow_persists_broll_and_music_results(tmp_path: Path) -> None:
+def test_recommendation_flow_persists_broll_and_music_results(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "videobox_provider_interfaces.stt.MockSTTProvider.transcribe",
+        _risky_multi_segment_transcribe,
+    )
     source_audio = tmp_path / "source-narration.wav"
     source_script = tmp_path / "source-script.txt"
     broll_city = tmp_path / "city-office.mp4"
@@ -5584,6 +5632,10 @@ def test_recommendation_flow_persists_broll_and_music_results(tmp_path: Path) ->
     assert all("reason" in item for item in broll_payload["recommendations"])
     assert all(item["auto_apply_allowed"] is True for item in broll_payload["recommendations"])
     assert all(item["review_required"] is False for item in broll_payload["recommendations"])
+    assert {item["selected_asset_id"] for item in broll_payload["recommendations"]} == {
+        city_asset.json()["asset_id"],
+        team_asset.json()["asset_id"],
+    }
 
     project_root = tmp_path / "projects" / project_id
     recommendation_files = list((project_root / "analysis" / "recommendations").glob("*.json"))

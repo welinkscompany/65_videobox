@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 
 import { App } from "./App";
 import type {
+  BrollAsset,
   EditingSession,
   PartialRegenerationPreflight,
   RecommendationItem,
@@ -585,8 +586,34 @@ const geminiKeysResponse = {
   ],
 };
 
+const brollAssetsResponse = {
+  assets: [
+    {
+      asset_id: "asset_broll_archive_001",
+      asset_type: "broll_video",
+      storage_uri: "local://projects/project_001/assets/imported/office-lobby-pan.mp4",
+      metadata: {
+        title: "Office lobby pan",
+        tags: ["office", "lobby"],
+      },
+      created_at: "2026-07-06T00:00:00Z",
+    },
+    {
+      asset_id: "asset_broll_archive_002",
+      asset_type: "broll_video",
+      storage_uri: "local://projects/project_001/assets/imported/team-whiteboard.mp4",
+      metadata: {
+        title: "Team whiteboard",
+        tags: ["team", "planning"],
+      },
+      created_at: "2026-07-06T00:00:01Z",
+    },
+  ],
+};
+
 function createFetchMock({
   geminiKeys = geminiKeysResponse,
+  brollAssets = brollAssetsResponse,
   timeline = timelineResponse,
   editingSession = editingSessionResponse,
   latestEditingSession = editingSessionResponse,
@@ -601,6 +628,7 @@ function createFetchMock({
   jobs = jobsResponse,
 }: {
   geminiKeys?: { keys: Array<Record<string, unknown>> };
+  brollAssets?: { assets: BrollAsset[] };
   timeline?: TimelineJob;
   editingSession?: EditingSession;
   latestEditingSession?: EditingSession | null;
@@ -618,6 +646,7 @@ function createFetchMock({
     timeline: TimelinePayload;
     editingSession: EditingSession;
     geminiKeys: { keys: Array<Record<string, unknown>> };
+    brollAssets: { assets: BrollAsset[] };
     reviewSnapshot: ReviewSnapshot;
     candidateReviewSnapshot: ReviewSnapshot;
     candidateTimelineReviewStatus: string;
@@ -625,6 +654,7 @@ function createFetchMock({
     timeline: structuredClone(timeline.timeline),
     editingSession: structuredClone(editingSession) as EditingSession,
     geminiKeys: structuredClone(geminiKeys),
+    brollAssets: structuredClone(brollAssets),
     reviewSnapshot: structuredClone(reviewSnapshot),
     candidateReviewSnapshot: structuredClone(candidateReviewSnapshot),
     candidateTimelineReviewStatus: partialRegenerationResult.timeline.review_status,
@@ -640,6 +670,9 @@ function createFetchMock({
     }
     if (url.endsWith("/api/projects/project_001/jobs")) {
       return new Response(JSON.stringify(jobs));
+    }
+    if (url.endsWith("/api/projects/project_001/assets/broll-video")) {
+      return new Response(JSON.stringify(state.brollAssets));
     }
     if (
       url.endsWith("/api/projects/project_001/jobs/build-timeline") &&
@@ -904,6 +937,30 @@ function createFetchMock({
             ? {
                 ...segment,
                 music_override: null,
+              }
+            : segment,
+        ),
+      };
+      return new Response(JSON.stringify(state.editingSession));
+    }
+    if (
+      url.endsWith(
+        "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/broll",
+      ) &&
+      init?.method === "PATCH"
+    ) {
+      const payload = JSON.parse(String(init.body)) as {
+        asset_id: string;
+      };
+      state.editingSession = {
+        ...state.editingSession,
+        segments: state.editingSession.segments.map((segment) =>
+          segment.segment_id === "seg_002"
+            ? {
+                ...segment,
+                broll_override: {
+                  asset_id: payload.asset_id,
+                },
               }
             : segment,
         ),
@@ -2218,6 +2275,28 @@ describe("App", () => {
     });
     expect(screen.queryByText(/partial_regeneration_job_001/i)).not.toBeInTheDocument();
   }
+
+  it("shows archived B-roll assets in the editing session picker and saves the selected override", async () => {
+    const fetchMock = await renderStartedEditingSession();
+
+    expect(await screen.findByText(/office lobby pan/i)).toBeInTheDocument();
+    expect(screen.getByText(/asset_broll_archive_001/i)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("combobox", { name: /b-roll asset picker/i }), {
+      target: { value: "asset_broll_archive_002" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /save b-roll override/i }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/broll",
+        expect.objectContaining({
+          method: "PATCH",
+          body: JSON.stringify({ asset_id: "asset_broll_archive_002" }),
+        }),
+      );
+    });
+  });
 
   it("removes the saved explanation card and invalidates the active candidate", async () => {
     const fetchMock = await renderStartedEditingSession(

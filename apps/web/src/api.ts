@@ -17,6 +17,14 @@ export type JobRecord = {
   finished_at: string | null;
 };
 
+export type BrollAsset = {
+  asset_id: string;
+  asset_type: string;
+  storage_uri: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+};
+
 export type TimelineClip = {
   clip_id: string;
   segment_id: string;
@@ -332,6 +340,12 @@ export const api = {
     return payload.projects;
   },
   getProject: (projectId: string) => request<Project>(`/api/projects/${projectId}`),
+  listBrollAssets: async (projectId: string): Promise<BrollAsset[]> => {
+    const payload = await request<{ assets: BrollAsset[] }>(
+      `/api/projects/${projectId}/assets/broll-video`,
+    );
+    return payload.assets;
+  },
   listJobs: async (projectId: string): Promise<JobRecord[]> => {
     const payload = await request<{ jobs: JobRecord[] }>(`/api/projects/${projectId}/jobs`);
     return payload.jobs;

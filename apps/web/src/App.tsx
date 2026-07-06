@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import {
   api,
+  type BrollAsset,
   type EditingSession,
   type EditingSessionSegment,
   type ExportJob,
@@ -94,6 +95,16 @@ function createEmptyGeminiKeyForm(): GeminiKeyFormState {
 
 function formatNullableValue(value: string | null) {
   return value ?? "not available";
+}
+
+function formatBrollAssetTitle(asset: BrollAsset) {
+  const title = asset.metadata.title;
+  return typeof title === "string" && title.trim() ? title : asset.asset_id;
+}
+
+function formatBrollAssetTags(asset: BrollAsset) {
+  const tags = asset.metadata.tags;
+  return Array.isArray(tags) ? tags.map((tag) => String(tag)).filter(Boolean).join(", ") : "";
 }
 
 type EditingSegmentDraft = {
@@ -312,6 +323,8 @@ export function App() {
   const [subtitleJob, setSubtitleJob] = useState<SubtitleJob | null>(null);
   const [previewJob, setPreviewJob] = useState<PreviewJob | null>(null);
   const [exportJob, setExportJob] = useState<ExportJob | null>(null);
+  const [brollAssets, setBrollAssets] = useState<BrollAsset[]>([]);
+  const [brollAssetLoadError, setBrollAssetLoadError] = useState<string | null>(null);
   const [geminiKeys, setGeminiKeys] = useState<GeminiProviderKey[]>([]);
   const [geminiLoadError, setGeminiLoadError] = useState<string | null>(null);
   const [editingSessionRestoreError, setEditingSessionRestoreError] = useState<string | null>(null);
@@ -381,6 +394,8 @@ export function App() {
       setSubtitleJob(null);
       setPreviewJob(null);
       setExportJob(null);
+      setBrollAssets([]);
+      setBrollAssetLoadError(null);
       setGeminiKeys([]);
       setGeminiLoadError(null);
       setIsGeminiFormOpen(false);
@@ -395,12 +410,20 @@ export function App() {
     async function loadProjectWorkspace() {
       setLoadState("loading");
       setErrorMessage(null);
+      setBrollAssetLoadError(null);
       setGeminiLoadError(null);
       setEditingSessionRestoreError(null);
       setPartialRegenerationRestoreWarning(null);
       try {
         const project = await api.getProject(projectId);
         const jobItems = await api.listJobs(projectId);
+        let archivedBrollAssets: BrollAsset[] = [];
+        try {
+          archivedBrollAssets = await api.listBrollAssets(projectId);
+        } catch {
+          archivedBrollAssets = [];
+          setBrollAssetLoadError("B-roll archive unavailable.");
+        }
         let latestEditingSession: EditingSession | null = null;
         try {
           latestEditingSession = await api.getLatestEditingSession(projectId);
@@ -624,6 +647,7 @@ export function App() {
         setSubtitleJob(activeSubtitle);
         setPreviewJob(activePreview);
         setExportJob(activeExport);
+        setBrollAssets(archivedBrollAssets);
         setLoadState("ready");
         try {
           const providerKeys = await api.listGeminiProviderKeys(projectId);
@@ -2357,6 +2381,42 @@ export function App() {
                   >
                     Save cut action
                   </button>
+                  <label className="field">
+                    <span>B-roll asset picker</span>
+                    <select
+                      onChange={(event) =>
+                        updateEditingDraft(selectedEditingSegment.segment_id, {
+                          brollAssetId: event.target.value,
+                        })
+                      }
+                      value={selectedEditingDraft.brollAssetId}
+                    >
+                      <option value="">No B-roll asset selected</option>
+                      {selectedEditingDraft.brollAssetId &&
+                      !brollAssets.some(
+                        (asset) => asset.asset_id === selectedEditingDraft.brollAssetId,
+                      ) ? (
+                        <option value={selectedEditingDraft.brollAssetId}>
+                          Current manual ID
+                        </option>
+                      ) : null}
+                      {brollAssets.map((asset) => {
+                        const tags = formatBrollAssetTags(asset);
+                        return (
+                          <option key={asset.asset_id} value={asset.asset_id}>
+                            {formatBrollAssetTitle(asset)} - {asset.asset_id}
+                            {tags ? ` - ${tags}` : ""}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </label>
+                  {brollAssetLoadError ? (
+                    <p className="error-copy">{brollAssetLoadError}</p>
+                  ) : null}
+                  {!brollAssetLoadError && brollAssets.length === 0 ? (
+                    <p className="empty-state">No archived B-roll assets.</p>
+                  ) : null}
                   <label className="field">
                     <span>B-roll asset ID</span>
                     <input
