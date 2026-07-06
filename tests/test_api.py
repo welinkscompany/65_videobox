@@ -4330,6 +4330,136 @@ def test_broll_asset_list_endpoint_returns_archived_metadata(tmp_path: Path) -> 
     ]
 
 
+def test_broll_batch_import_registers_multiple_files_for_recommendation(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "videobox_provider_interfaces.stt.MockSTTProvider.transcribe",
+        _risky_multi_segment_transcribe,
+    )
+    source_audio = tmp_path / "source-narration.wav"
+    source_script = tmp_path / "source-script.txt"
+    broll_city = tmp_path / "city-office.mp4"
+    broll_team = tmp_path / "team-meeting.mp4"
+    source_audio.write_bytes(b"fake wav data")
+    source_script.write_text("Office overview.\n\nTeam meeting restart.\n", encoding="utf-8")
+    broll_city.write_bytes(b"video bytes 1")
+    broll_team.write_bytes(b"video bytes 2")
+
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "Batch Broll Import"}).json()["project_id"]
+
+    batch_response = client.post(
+        f"/api/projects/{project_id}/assets/broll-video/batch",
+        json={
+            "source_paths": [str(broll_city), str(broll_team)],
+            "tags": ["batch-import"],
+            "title_by_source_path": {
+                str(broll_city): "Office skyline",
+                str(broll_team): "Team meeting",
+            },
+        },
+    )
+
+    assert batch_response.status_code == 201
+    imported_assets = batch_response.json()["assets"]
+    assert [asset["metadata"]["title"] for asset in imported_assets] == [
+        "Office skyline",
+        "Team meeting",
+    ]
+    assert all(asset["metadata"]["tags"] == ["batch-import"] for asset in imported_assets)
+    assert (tmp_path / "projects" / project_id / "assets" / "imported" / "city-office.mp4").read_bytes() == (
+        b"video bytes 1"
+    )
+    assert (tmp_path / "projects" / project_id / "assets" / "imported" / "team-meeting.mp4").read_bytes() == (
+        b"video bytes 2"
+    )
+    list_response = client.get(f"/api/projects/{project_id}/assets/broll-video")
+    assert list_response.status_code == 200
+    assert [asset["asset_id"] for asset in list_response.json()["assets"]] == [
+        asset["asset_id"] for asset in imported_assets
+    ]
+
+    narration_asset_id = client.post(
+        f"/api/projects/{project_id}/assets/narration-audio",
+        json={"source_path": str(source_audio)},
+    ).json()["asset_id"]
+    script_asset_id = client.post(
+        f"/api/projects/{project_id}/assets/script-document",
+        json={"source_path": str(source_script)},
+    ).json()["asset_id"]
+    transcription_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/transcription",
+        json={"narration_asset_id": narration_asset_id},
+    ).json()["job_id"]
+    segment_job_id = client.post(
+        f"/api/projects/{project_id}/jobs/segment-analysis",
+        json={
+            "transcription_job_id": transcription_job_id,
+            "script_asset_id": script_asset_id,
+        },
+    ).json()["job_id"]
+    broll_job = client.post(
+        f"/api/projects/{project_id}/jobs/broll-recommendation",
+        json={"segment_analysis_job_id": segment_job_id},
+    )
+
+    assert broll_job.status_code == 202
+    broll_payload = client.get(
+        f"/api/projects/{project_id}/jobs/broll-recommendation/{broll_job.json()['job_id']}"
+    ).json()
+    assert {item["selected_asset_id"] for item in broll_payload["recommendations"]} == {
+        asset["asset_id"] for asset in imported_assets
+    }
+
+
+def test_broll_batch_import_expands_directory_and_fails_atomically_on_invalid_file(
+    tmp_path: Path,
+) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    source_directory = tmp_path / "broll-folder"
+    source_directory.mkdir()
+    office_clip = source_directory / "office-pan.mp4"
+    team_clip = source_directory / "team-board.mov"
+    ignored_note = source_directory / "notes.txt"
+    office_clip.write_bytes(b"office video")
+    team_clip.write_bytes(b"team video")
+    ignored_note.write_text("not video", encoding="utf-8")
+
+    project_id = client.post("/api/projects", json={"name": "Folder Broll Import"}).json()["project_id"]
+    folder_response = client.post(
+        f"/api/projects/{project_id}/assets/broll-video/batch",
+        json={
+            "source_directory": str(source_directory),
+            "tags": ["folder"],
+        },
+    )
+
+    assert folder_response.status_code == 201
+    assert [asset["metadata"]["title"] for asset in folder_response.json()["assets"]] == [
+        "office-pan",
+        "team-board",
+    ]
+    assert (tmp_path / "projects" / project_id / "assets" / "imported" / "office-pan.mp4").exists()
+    assert (tmp_path / "projects" / project_id / "assets" / "imported" / "team-board.mov").exists()
+    assert not (tmp_path / "projects" / project_id / "assets" / "imported" / "notes.txt").exists()
+
+    invalid_response = client.post(
+        f"/api/projects/{project_id}/assets/broll-video/batch",
+        json={
+            "source_paths": [str(source_directory / "missing.mp4"), str(office_clip)],
+            "tags": ["invalid"],
+        },
+    )
+
+    assert invalid_response.status_code == 400
+    list_response = client.get(f"/api/projects/{project_id}/assets/broll-video")
+    assert len(list_response.json()["assets"]) == 2
+
+
 def _create_music_recommendation_project(
     client: TestClient,
     tmp_path: Path,

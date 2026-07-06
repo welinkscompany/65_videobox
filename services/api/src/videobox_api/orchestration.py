@@ -20,6 +20,8 @@ from videobox_core_engine.local_pipeline import LocalPipelineRunner
 from videobox_domain_models.assets import AssetType
 from videobox_storage.local_project_store import LocalProjectStore
 
+BROLL_VIDEO_EXTENSIONS = {".mp4", ".mov", ".mkv", ".webm"}
+
 
 @dataclass(slots=True, frozen=True)
 class RegisteredAsset:
@@ -193,6 +195,85 @@ class ApiOrchestrator:
 
     def list_broll_assets(self, *, project_id: str) -> list[dict[str, Any]]:
         return self.store.list_assets(project_id=project_id, asset_type=AssetType.BROLL_VIDEO)
+
+    def register_broll_assets_batch(
+        self,
+        *,
+        project_id: str,
+        source_paths: list[Path],
+        source_directory: Path | None,
+        tags: list[str],
+        title_by_source_path: dict[str, str],
+    ) -> list[dict[str, Any]]:
+        paths = self._resolve_broll_batch_paths(
+            source_paths=source_paths,
+            source_directory=source_directory,
+        )
+        registered_asset_ids: list[str] = []
+        for source_path in paths:
+            asset = self.pipeline.register_broll_asset(
+                project_id=project_id,
+                source_path=source_path,
+                title=title_by_source_path.get(str(source_path)) or source_path.stem,
+                tags=tags,
+            )
+            registered_asset_ids.append(asset["asset_id"])
+        assets_by_id = {
+            asset["asset_id"]: asset
+            for asset in self.store.list_assets(project_id=project_id, asset_type=AssetType.BROLL_VIDEO)
+        }
+        return [assets_by_id[asset_id] for asset_id in registered_asset_ids if asset_id in assets_by_id]
+
+    def _resolve_broll_batch_paths(
+        self,
+        *,
+        source_paths: list[Path],
+        source_directory: Path | None,
+    ) -> list[Path]:
+        paths: list[Path] = []
+        if source_directory is not None:
+            if not source_directory.exists():
+                raise ValueError(f"B-roll source directory does not exist: {source_directory}")
+            if not source_directory.is_dir():
+                raise ValueError(f"B-roll source directory is not a directory: {source_directory}")
+            paths.extend(
+                sorted(
+                    (
+                        candidate
+                        for candidate in source_directory.iterdir()
+                        if candidate.is_file()
+                        and candidate.suffix.lower() in BROLL_VIDEO_EXTENSIONS
+                    ),
+                    key=lambda path: path.name.lower(),
+                )
+            )
+        paths.extend(source_paths)
+        if not paths:
+            raise ValueError("No B-roll video files found for batch import.")
+        unique_paths: list[Path] = []
+        seen: set[Path] = set()
+        for path in paths:
+            if path in seen:
+                continue
+            seen.add(path)
+            unique_paths.append(path)
+        invalid_paths = [path for path in unique_paths if not path.exists() or not path.is_file()]
+        if invalid_paths:
+            raise ValueError(
+                "B-roll batch import requires existing files: "
+                + ", ".join(str(path) for path in invalid_paths)
+            )
+        invalid_extensions = [
+            path
+            for path in unique_paths
+            if path.suffix.lower() not in BROLL_VIDEO_EXTENSIONS
+        ]
+        if invalid_extensions:
+            raise ValueError(
+                "B-roll batch import only accepts video files: "
+                + ", ".join(str(path) for path in invalid_extensions)
+            )
+        return unique_paths
 
     def register_raw_video_asset(self, *, project_id: str, source_path: Path) -> RegisteredAsset:
         asset = self.pipeline.register_raw_video_asset(

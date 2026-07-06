@@ -66,6 +66,28 @@ class BrollAssetRegistrationRequest(AssetRegistrationRequest):
     tags: list[str] = Field(default_factory=list)
 
 
+class BrollBatchAssetRegistrationRequest(BaseModel):
+    source_paths: list[str] = Field(default_factory=list)
+    source_directory: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    title_by_source_path: dict[str, str] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_sources(self) -> "BrollBatchAssetRegistrationRequest":
+        self.source_paths = [str(path).strip() for path in self.source_paths if str(path).strip()]
+        if self.source_directory is not None:
+            self.source_directory = self.source_directory.strip() or None
+        self.tags = [str(tag).strip() for tag in self.tags if str(tag).strip()]
+        self.title_by_source_path = {
+            str(path).strip(): str(title).strip()
+            for path, title in self.title_by_source_path.items()
+            if str(path).strip() and str(title).strip()
+        }
+        if not self.source_paths and not self.source_directory:
+            raise ValueError("source_paths or source_directory is required.")
+        return self
+
+
 class AssetResponse(BaseModel):
     asset_id: str
     asset_type: str
@@ -1077,6 +1099,23 @@ def create_app(
     def list_broll_assets(project_id: str) -> AssetListResponse:
         try:
             assets = orchestrator.list_broll_assets(project_id=project_id)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return AssetListResponse(assets=[AssetArchiveItemResponse(**asset) for asset in assets])
+
+    @app.post("/api/projects/{project_id}/assets/broll-video/batch", status_code=status.HTTP_201_CREATED)
+    def register_broll_assets_batch(
+        project_id: str,
+        payload: BrollBatchAssetRegistrationRequest,
+    ) -> AssetListResponse:
+        try:
+            assets = orchestrator.register_broll_assets_batch(
+                project_id=project_id,
+                source_paths=[Path(source_path) for source_path in payload.source_paths],
+                source_directory=Path(payload.source_directory) if payload.source_directory else None,
+                tags=payload.tags,
+                title_by_source_path=payload.title_by_source_path,
+            )
         except Exception as exc:
             raise _http_error(exc) from exc
         return AssetListResponse(assets=[AssetArchiveItemResponse(**asset) for asset in assets])
