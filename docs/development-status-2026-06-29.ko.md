@@ -1,7 +1,7 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 192. 2026-07-06 Phase C shared prompt review-flag code helper closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
-> 이 문서의 `## 1`부터 `## 191`까지는 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 192`만 기준으로 본다.
+> 현재 authoritative 상태/next slice 판단은 `## 193. 2026-07-06 Phase C runtime review-required wrapper removal closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 이 문서의 `## 1`부터 `## 192`까지는 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 193`만 기준으로 본다.
 > 단, `2일 내 1차 데모 완성` 실행 레일은 `## 189`의 장기 우선순위를 그대로 넓게 집행하지 않고, `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`의 축소된 실행 계획을 우선 적용한다.
 
 ## 1. 결론
@@ -8411,6 +8411,46 @@ focused 검증 메모:
 1. output operator copy와 review guidance가 보는 pending recommendation row canonicalization 기준이 공통 모듈로 다시 모였다
 2. selected asset uri, identity, reason, decision state canonicalization 규칙 drift 위험이 더 줄었다
 3. 남아 있는 cleanup 후보를 고를 때 review/output prompt family의 중복은 더 많이 정리된 상태가 됐다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- stale-shape helper 중복과 dead helper 후보 중 다음 최소 정리 대상 1개를 다시 좁힌다
+- 역할이 끝난 중복 메모 문서는 삭제보다 역할 명시가 맞는지 먼저 판단한다
+- 최종 closeout 직전 broad 재검증이 정말 필요한지 마지막으로 판단한다
+
+## 193. 2026-07-06 Phase C runtime review-required wrapper removal closeout
+
+이번 후속 작업에서는 새 stale-shape 경계를 더 열지 않고, `local_pipeline.py`에서 `_normalize_runtime_boolish(...)`를 한 번 더 감싸기만 하던 `_normalize_runtime_review_required(...)` dead wrapper를 제거했다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- 이 wrapper는 별도 규칙을 추가하지 않고 boolish helper를 그대로 한 번 더 호출하기만 하고 있었다
+- 실제 사용처도 segment review_required read-path 두 군데뿐이어서, wrapper를 제거해도 현재 runtime normalization 의미는 바뀌지 않았다
+- output gating 쪽 `segment_review_required` 합성과 partial regeneration source segment read-path는 그대로 `_normalize_runtime_boolish(...)`를 직접 사용해 현재 동작을 유지했다
+- 이번 정리는 editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence behavior를 바꾸지 않는 code cleanup 성격의 수정이다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact verification
+  - `test_editing_session_api_normalizes_legacy_string_false_segment_review_required_from_store` -> `1 passed`
+  - `test_editing_session_api_normalizes_string_false_review_required_when_running_partial_regeneration` -> `1 passed`
+  - `test_output_jobs_ignore_stale_non_bool_segment_review_required_on_approved_timeline` -> `1 passed`
+- focused verification
+  - `./scripts/dev-fast-path.ps1 -Mode output-gating`
+  - backend output-gating `24 passed`
+  - `./scripts/dev-fast-path.ps1 -Mode preflight-backend`
+  - exit code `0`
+- broader verification
+  - 이번 turn에서는 재실행하지 않음
+  - 판단:
+    - 이번 변경은 runtime review_required dead wrapper 제거만 다루는 `Phase C` 소규모 리팩터링이다
+    - 현재 자동 baseline은 직전 closeout 기준 `frontend build 성공`, `full backend regression 543 passed`를 유지한다
+
+이 갱신으로 아래 범위는 현재 기준으로 정리됐다.
+
+1. local pipeline의 runtime review_required normalization 경로가 dead wrapper 없이 더 직접적인 형태가 됐다
+2. output gating과 partial regeneration read-path이 같은 boolish helper를 직접 공유하게 됐다
+3. 남아 있는 cleanup 후보는 더 작은 dead helper나 역할 종료 문서 정리 쪽으로 더 수렴했다
 
 현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
 

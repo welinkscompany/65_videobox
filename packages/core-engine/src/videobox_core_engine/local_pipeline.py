@@ -78,10 +78,6 @@ def _canonical_runtime_recommendation_type(value: object) -> str:
     return str(value or "").strip().lower()
 
 
-def _normalize_runtime_review_required(value: object) -> bool:
-    return _normalize_runtime_boolish(value)
-
-
 def _canonical_runtime_review_flag_code(value: object) -> str:
     return str(value or "").strip().lower()
 
@@ -1932,7 +1928,7 @@ class LocalPipelineRunner:
             segment_id = str(segment.get("segment_id") or "").strip()
             if (
                 segment_id
-                and _normalize_runtime_review_required(segment.get("review_required", False))
+                and _normalize_runtime_boolish(segment.get("review_required", False))
                 and ("segment_review_required", segment_id) not in existing_review_flag_keys
             ):
                 existing_review_flag_keys.add(("segment_review_required", segment_id))
@@ -2175,7 +2171,7 @@ class LocalPipelineRunner:
                     "start_sec": float(segment.get("start_sec") or 0.0),
                     "end_sec": float(segment.get("end_sec") or 0.0),
                     "confidence": 1.0,
-                    "review_required": _normalize_runtime_review_required(
+                    "review_required": _normalize_runtime_boolish(
                         segment.get("review_required", False)
                     ),
                     "cleanup_decision": _normalize_runtime_cut_action(segment.get("cut_action")),
