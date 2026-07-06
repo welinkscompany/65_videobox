@@ -4,6 +4,24 @@
 > 이 문서의 `## 1`부터 `## 209`까지는 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 210`만 기준으로 본다.
 > 단, `2일 내 1차 데모 완성` 실행 레일은 `## 189`의 장기 우선순위를 그대로 넓게 집행하지 않고, `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`의 축소된 실행 계획을 우선 적용한다.
 
+## 211. 2026-07-06 웹 대시보드 한글 표시 정책 closeout
+
+이번 slice의 제품 결정은 `화면은 한글 우선, 추적값은 원문 유지`다.
+
+확정된 기준은 아래다.
+
+- 프로젝트명, 세그먼트 문장, 자산명, 파일명, 태그, 추천 이유, 검수 메시지는 웹 UI 표시 계층에서 한글 표시명 또는 한글 요약을 우선 사용한다.
+- DB 원본 데이터는 변경하지 않는다.
+- `asset_id`, `job_id`, `timeline_id`, `recommendation_id`, 모델명, `local://`/storage URI는 추적성과 디버깅 때문에 원문을 유지한다.
+- 사용자 입력 form 값은 저장 원문을 유지하고, 읽기 화면/목록/카드/버튼 접근성 이름에만 한글 표시 helper를 적용한다.
+
+검증 결과는 아래다.
+
+- `apps/web/src/App.tsx`에 표시 전용 formatter를 추가해 B-roll picker, review snapshot, editing selected segment, Gemini key card의 서버 데이터 표시명을 한글화했다.
+- `apps/web/src/app.test.tsx`의 focused frontend test를 한글 표시 정책 기준으로 갱신했다.
+- `docs/implementation-plan.ko.md`의 `웹 대시보드 표시 언어 기준`을 원문 보존 정책에서 `화면 한글 우선 + 추적값 원문 유지` 정책으로 갱신했다.
+- 검증: `npm run test:focused` 71 passed, `npm run build` 통과, 브라우저 smoke에서 개요/타임라인/검수/편집/B-roll picker/제미나이 form 확인.
+
 ## 1. 결론
 
 현재 개발은 계획서에서 크게 새지 않았다.

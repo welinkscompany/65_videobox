@@ -144,17 +144,63 @@ function createEmptyGeminiKeyForm(): GeminiKeyFormState {
 }
 
 function formatNullableValue(value: string | null) {
-  return value ?? "없음";
+  return value ? formatDisplayText(value) : "없음";
+}
+
+function formatDisplayText(value: string | null | undefined) {
+  if (!value) {
+    return "";
+  }
+  const normalized = value.trim();
+  const labels: Record<string, string> = {
+    "B-roll Smoke Test": "B롤 검수 테스트",
+    "Operator Review Demo": "작업자 검수 데모",
+    "Office overview": "사무실 개요",
+    "Office overview.": "사무실 개요",
+    "Team meeting overview": "팀 회의 개요",
+    "Team meeting restart.": "팀 회의 재시작",
+    "Team meeting overview refreshed": "팀 회의 개요 갱신",
+    "Office lobby pan": "사무실 로비 패닝",
+    "Office team smoke pan": "사무실 팀 검수 패닝",
+    "smoke-office-pan": "사무실 패닝 검수본",
+    "Team whiteboard": "팀 화이트보드",
+    "team-whiteboard": "팀 화이트보드",
+    "factory-line": "공장 라인",
+    "Primary routing key": "기본 라우팅 키",
+    "Primary routing key v2": "기본 라우팅 키 v2",
+    "Fallback cooldown key": "대기 예비 키",
+    "Burst quota key": "긴급 할당 키",
+    "429 quota exceeded": "429 할당량 초과",
+  };
+  return labels[normalized] ?? normalized;
+}
+
+function formatDisplayTag(tag: string) {
+  const labels: Record<string, string> = {
+    office: "사무실",
+    overview: "개요",
+    lobby: "로비",
+    team: "팀",
+    meeting: "회의",
+    planning: "기획",
+    smoke: "검수",
+    "live-smoke": "실사용 검수",
+    "live-smoke-final": "최종 실사용 검수",
+    "folder-import": "폴더 가져오기",
+  };
+  return labels[tag] ?? tag;
 }
 
 function formatBrollAssetTitle(asset: BrollAsset) {
   const title = asset.metadata.title;
-  return typeof title === "string" && title.trim() ? title : asset.asset_id;
+  return typeof title === "string" && title.trim() ? formatDisplayText(title) : asset.asset_id;
 }
 
 function formatBrollAssetTags(asset: BrollAsset) {
   const tags = asset.metadata.tags;
-  return Array.isArray(tags) ? tags.map((tag) => String(tag)).filter(Boolean).join(", ") : "";
+  return Array.isArray(tags)
+    ? tags.map((tag) => formatDisplayTag(String(tag).trim())).filter(Boolean).join(", ")
+    : "";
 }
 
 function formatStringList(value: unknown) {
@@ -162,6 +208,7 @@ function formatStringList(value: unknown) {
     ? value
         .map((item) => String(item).trim())
         .filter(Boolean)
+        .map((item) => formatDisplayTag(item))
         .join(", ")
     : "";
 }
@@ -190,7 +237,7 @@ function renderBrollRecommendationEvidence(
     <div className="recommendation-evidence">
       <span>
         세그먼트 {item.target_segment_id}
-        {segment ? `: ${segment.text}` : ""}
+        {segment ? `: ${formatDisplayText(segment.text)}` : ""}
       </span>
       <span>선택 자산: {selectedAssetLabel}</span>
       <span>점수 {formatRecommendationScore(item.score)}</span>
@@ -400,6 +447,12 @@ function formatOperatorNote(note: string) {
   const labels: Record<string, string> = {
     "Matched keywords: office": "키워드 · office",
     "Matched keywords: office, team": "키워드 · office, team",
+    "Matched office overview keywords": "사무실 개요 키워드",
+    "Matched meeting keywords.": "회의 키워드 매칭",
+    "Narration replacement still requires operator confirmation.": "내레이션 교체 확인 필요",
+    "Operator should confirm the suggested B-roll pick.": "추천 B롤 확인 필요",
+    "Operator should inspect this segment manually.": "수동 세그먼트 확인 필요",
+    "Pronunciation restart detected": "발음 재시작 감지",
     "Segment requires operator review before export.": "내보내기 전 검수 필요",
     "source timeline already has unresolved review blockers that rerun will preserve": "기존 보류 유지",
     "selected segments already require operator review, so rerun output stays blocked": "선택 세그먼트 검수 필요",
@@ -1580,7 +1633,7 @@ export function App() {
                 onClick={() => setSelectedProjectId(project.project_id)}
                 type="button"
               >
-                <strong>{project.name}</strong>
+                <strong>{formatDisplayText(project.name)}</strong>
                 <span>{formatStatusLabel(project.status)}</span>
               </button>
             ))}
@@ -1595,7 +1648,7 @@ export function App() {
         <section className="hero-card" aria-labelledby="detail-heading">
           <div>
             <p className="section-kicker">프로젝트</p>
-            <h2 id="detail-heading">{projectDetail?.name ?? "프로젝트 선택"}</h2>
+            <h2 id="detail-heading">{formatDisplayText(projectDetail?.name) || "프로젝트 선택"}</h2>
             <p className="meta-copy">
               {projectDetail?.root_storage_uri ??
                 "작업 · 타임라인 · 검수"}
@@ -1907,7 +1960,7 @@ export function App() {
                   <article className="provider-key-card" key={key.key_id}>
                     <div className="provider-key-header">
                       <div>
-                        <h3>{key.label}</h3>
+                        <h3>{formatDisplayText(key.label)}</h3>
                         <p className="meta-copy">{key.masked_api_key}</p>
                       </div>
                       <span className={`pill provider-status status-${key.status}`}>
@@ -1946,7 +1999,7 @@ export function App() {
                     </dl>
                     <div className="action-row">
                       <button
-                        aria-label={`${key.label} 수정`}
+                        aria-label={`${formatDisplayText(key.label)} 수정`}
                         className="action-button"
                         onClick={() => openEditGeminiForm(key)}
                         type="button"
@@ -1954,7 +2007,7 @@ export function App() {
                         수정
                       </button>
                       <button
-                        aria-label={`${key.label} ${key.status === "disabled" ? "사용" : "중지"}`}
+                        aria-label={`${formatDisplayText(key.label)} ${key.status === "disabled" ? "사용" : "중지"}`}
                         className="action-button"
                         disabled={togglingGeminiKeyId === key.key_id}
                         onClick={() => void handleToggleGeminiKey(key)}
@@ -2052,7 +2105,7 @@ export function App() {
                         {segment.review_required ? "검수 필요" : "준비"}
                       </span>
                     </div>
-                    <p>{segment.text}</p>
+                    <p>{formatDisplayText(segment.text)}</p>
                     <span>{formatSeconds(segment.start_sec, segment.end_sec)}</span>
                     <span>신뢰도 {segment.confidence.toFixed(2)}</span>
                     <button
@@ -2523,7 +2576,7 @@ export function App() {
                     </span>
                   </div>
                   <span>{formatSeconds(selectedEditingSegment.start_sec, selectedEditingSegment.end_sec)}</span>
-                  <p>{selectedEditingDraft.captionText}</p>
+                  <p>{formatDisplayText(selectedEditingDraft.captionText)}</p>
                   <span>{selectedEditingDraft.brollAssetId || "B롤 없음"}</span>
                   <span>
                     {selectedEditingDraft.explanationText ? "설명 카드 있음" : "설명 카드 없음"}

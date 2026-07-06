@@ -1367,7 +1367,7 @@ describe("App", () => {
     expect(
       await screen.findByRole("heading", { name: /VideoBox 작업판/i }),
     ).toBeInTheDocument();
-    expect(await screen.findByText(/operator review demo/i)).toBeInTheDocument();
+    expect(await screen.findByText(/작업자 검수 데모/i)).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /타임라인/i })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /스냅샷/i })).toBeInTheDocument();
     expect((await screen.findAllByText(/preview_render_job_006/i)).length).toBeGreaterThan(0);
@@ -1572,12 +1572,12 @@ describe("App", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: /^검수$/i }));
 
-    expect(await screen.findByText(/Team whiteboard/i)).toBeInTheDocument();
+    expect(await screen.findByText(/팀 화이트보드/i)).toBeInTheDocument();
     expect(screen.getByText(/asset_broll_archive_002/i)).toBeInTheDocument();
     expect(screen.getByText(/점수 0.88/i)).toBeInTheDocument();
-    expect(screen.getByText(/Matched meeting keywords/i)).toBeInTheDocument();
-    expect(screen.getByText(/매칭 태그: team, meeting/i)).toBeInTheDocument();
-    expect(screen.getByText(/자산 태그: team, planning/i)).toBeInTheDocument();
+    expect(screen.getByText(/회의 키워드 매칭/i)).toBeInTheDocument();
+    expect(screen.getByText(/매칭 태그: 팀, 회의/i)).toBeInTheDocument();
+    expect(screen.getByText(/자산 태그: 팀, 기획/i)).toBeInTheDocument();
   });
 
   it("opens the flagged segment in the editing session without overwriting its default rerun scope when no direct field mapping exists", async () => {
@@ -1909,7 +1909,7 @@ describe("App", () => {
 
     render(<App />);
 
-    expect(await screen.findByText(/operator review demo/i)).toBeInTheDocument();
+    expect(await screen.findByText(/작업자 검수 데모/i)).toBeInTheDocument();
     expect(await screen.findByText(/timeline_001/i)).toBeInTheDocument();
     expect(await screen.findByText(/제미나이 라우팅 오류/i)).toBeInTheDocument();
     expect(screen.queryByText(/request failed: \/api\/projects\/project_001\/providers\/gemini\/keys/i)).not.toBeInTheDocument();
@@ -1923,10 +1923,10 @@ describe("App", () => {
     render(<App />);
 
     expect(await screen.findByRole("heading", { name: /키 관리/i })).toBeInTheDocument();
-    expect(await screen.findByText(/primary routing key/i)).toBeInTheDocument();
+    expect(await screen.findByText(/기본 라우팅 키/i)).toBeInTheDocument();
     expect(await screen.findByText("AIza...1234")).toBeInTheDocument();
-    expect(await screen.findByText(/fallback cooldown key/i)).toBeInTheDocument();
-    expect(await screen.findByText(/429 quota exceeded/i)).toBeInTheDocument();
+    expect(await screen.findByText(/대기 예비 키/i)).toBeInTheDocument();
+    expect(await screen.findByText(/429 할당량 초과/i)).toBeInTheDocument();
     expect(await screen.findByText(/2026-06-28T00:05:00Z/i)).toBeInTheDocument();
     expect(screen.getAllByText(/연속 실패/i).length).toBeGreaterThan(0);
     expect(screen.queryByText(/AIzaSyDANGER_SECRET/i)).not.toBeInTheDocument();
@@ -1959,12 +1959,12 @@ describe("App", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: /키 저장/i }));
 
-    expect(await screen.findByText(/burst quota key/i)).toBeInTheDocument();
+    expect(await screen.findByText(/긴급 할당 키/i)).toBeInTheDocument();
     expect(screen.getByText("AIza...9999")).toBeInTheDocument();
     expect(screen.queryByText(/AIzaSyDANGER_SECRET/i)).not.toBeInTheDocument();
     expect(screen.queryByDisplayValue(/AIzaSyDANGER_SECRET/i)).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /Primary routing key 수정/i }));
+    fireEvent.click(screen.getByRole("button", { name: /기본 라우팅 키 수정/i }));
     fireEvent.change(screen.getByLabelText(/이름/i), {
       target: { value: "Primary routing key v2" },
     });
@@ -1973,15 +1973,15 @@ describe("App", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: /변경 저장/i }));
 
-    expect(await screen.findByText(/primary routing key v2/i)).toBeInTheDocument();
+    expect(await screen.findByText(/기본 라우팅 키 v2/i)).toBeInTheDocument();
     expect(screen.getAllByText(/gemini-2.5-flash/i).length).toBeGreaterThan(0);
 
-    fireEvent.click(screen.getByRole("button", { name: /Primary routing key v2 중지/i }));
+    fireEvent.click(screen.getByRole("button", { name: /기본 라우팅 키 v2 중지/i }));
     await waitFor(() => {
       expect(screen.getAllByText(/^중지$/i).length).toBeGreaterThan(0);
     });
 
-    fireEvent.click(screen.getByRole("button", { name: /Primary routing key v2 사용/i }));
+    fireEvent.click(screen.getByRole("button", { name: /기본 라우팅 키 v2 사용/i }));
     await waitFor(() => {
       expect(screen.getAllByText(/^사용$/i).length).toBeGreaterThan(1);
     });
@@ -2000,7 +2000,7 @@ describe("App", () => {
 
     render(<App />);
 
-    expect(await screen.findByText(/operator review demo/i)).toBeInTheDocument();
+    expect(await screen.findByText(/작업자 검수 데모/i)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /^편집$/i }));
 
@@ -2354,7 +2354,7 @@ describe("App", () => {
   it("shows archived B-roll assets in the editing session picker and saves the selected override", async () => {
     const fetchMock = await renderStartedEditingSession();
 
-    expect(await screen.findByText(/office lobby pan/i)).toBeInTheDocument();
+    expect(await screen.findByText(/사무실 로비 패닝/i)).toBeInTheDocument();
     expect(screen.getByText(/asset_broll_archive_001/i)).toBeInTheDocument();
 
     fireEvent.change(screen.getByRole("combobox", { name: /B롤 선택/i }), {
@@ -2399,7 +2399,9 @@ describe("App", () => {
         }),
       );
     });
-    expect(await screen.findByText(/factory-line/i)).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByRole("combobox", { name: /B롤 선택/i })).toHaveTextContent(/공장 라인/i);
+    });
     expect(screen.getByRole("combobox", { name: /B롤 선택/i })).toHaveTextContent(
       /asset_broll_archive_003/i,
     );
