@@ -31,6 +31,10 @@ def canonical_prompt_review_flag_message(value: object) -> str:
     return message or "Operator review required before approval or output."
 
 
+def canonical_prompt_review_flag_code(value: object) -> str:
+    return str(value or "").strip().lower()
+
+
 def has_canonical_review_flag_identity(
     item: dict[str, Any],
     *,

@@ -8,6 +8,7 @@ from videobox_core_engine.local_first_runtime import LocalFirstStructuredGenerat
 from videobox_core_engine.prompt_pending_recommendation import (
     canonical_prompt_decision_state as _canonical_decision_state,
     canonical_prompt_recommendation_type as _canonical_recommendation_type,
+    canonical_prompt_review_flag_code as _canonical_review_flag_code,
     canonical_prompt_review_flag_message as _canonical_review_flag_message,
     has_canonical_review_flag_identity,
     has_canonical_pending_recommendation_identity,
@@ -30,10 +31,6 @@ def _normalize_boolish(value: object) -> bool:
 
 def _canonical_review_status(value: object) -> str:
     return str(value or "draft").strip().lower() or "draft"
-
-
-def _canonical_review_flag_code(value: object) -> str:
-    return str(value or "").strip().lower()
 
 
 def _is_prompt_blocking_pending_recommendation(item: object) -> bool:
