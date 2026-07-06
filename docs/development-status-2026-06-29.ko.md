@@ -1,7 +1,7 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 208. 2026-07-06 final closeout remote sync and record save`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
-> 이 문서의 `## 1`부터 `## 207`까지는 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 208`만 기준으로 본다.
+> 현재 authoritative 상태/next slice 판단은 `## 209. 2026-07-06 operational readiness check`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 이 문서의 `## 1`부터 `## 208`까지는 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 209`만 기준으로 본다.
 > 단, `2일 내 1차 데모 완성` 실행 레일은 `## 189`의 장기 우선순위를 그대로 넓게 집행하지 않고, `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`의 축소된 실행 계획을 우선 적용한다.
 
 ## 1. 결론
@@ -8417,6 +8417,52 @@ focused 검증 메모:
 - stale-shape helper 중복과 dead helper 후보 중 다음 최소 정리 대상 1개를 다시 좁힌다
 - 역할이 끝난 중복 메모 문서는 삭제보다 역할 명시가 맞는지 먼저 판단한다
 - 최종 closeout 직전 broad 재검증이 정말 필요한지 마지막으로 판단한다
+
+## 209. 2026-07-06 operational readiness check
+
+이번 후속 작업에서는 개발 closeout 완료 상태와 운영 마감 완료 상태를 실제 검증 결과 기준으로 다시 분리해 점검했다. 목적은 `문서 closeout은 끝났지만 실제 운영 마감도 끝났는가`를 다시 증명하는 것이었다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- focused verification
+  - `./scripts/dev-fast-path.ps1 -Mode current-focused`
+    - backend output-gating `24 passed`
+    - backend preflight `59 passed`
+    - frontend preflight `25 passed`
+- broader verification
+  - `./scripts/dev-fast-path.ps1 -Mode broader`
+    - frontend production build는 성공했다
+    - full backend regression은 `1 failed, 542 passed`로 red였다
+  - failing test는 `test_editing_session_api_can_fetch_visual_overlay_and_music_updates`였다
+- exact rerun
+  - 같은 failing test를 단독으로 다시 돌리면 `1 passed`였다
+- representative smoke / QA
+  - backend happy-path / lineage / partial-regeneration / provider-trace representative `5 passed`
+  - frontend operator QA representative `3 passed`
+
+현재 authoritative 운영 판단은 아래처럼 정리한다.
+
+- 현재 브랜치는 `개발 closeout 완료` 상태다
+- 하지만 `운영 마감 완료` 상태는 아직 아니다
+- 이유는 broader full backend regression에서 실제 red가 한 번 확인됐기 때문이다
+- 현재 가장 가능성 높은 원인은 기능 단독 실패보다 full-suite 순서 의존 또는 테스트 간 상태 오염이다
+
+historical / dead artifact 판단은 아래 기본값을 유지한다.
+
+- 현재 범위에서 즉시 삭제해야 할 명백한 dead artifact 후보는 확인하지 못했다
+- historical closeout 문서는 reference로 유지한다
+
+이 갱신으로 아래 범위는 현재 기준으로 정리됐다.
+
+1. 개발 closeout 완료와 운영 마감 완료가 같은 말이 아니라는 점이 최신 증거 기준으로 다시 분리됐다
+2. focused, build, representative smoke는 green이지만 broader backend regression은 아직 green이 아니다
+3. 다음 실제 우선순위는 `test_editing_session_api_can_fetch_visual_overlay_and_music_updates`의 full-suite only red 원인을 좁히는 것이다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- full-suite에서만 보이는 `test_editing_session_api_can_fetch_visual_overlay_and_music_updates` red 원인을 좁힌다
+- 필요하면 그 경계 1개만 minimal fix로 복구한다
+- broader를 다시 돌려 운영 마감 가능 여부를 재판단한다
 
 ## 208. 2026-07-06 final closeout remote sync and record save
 

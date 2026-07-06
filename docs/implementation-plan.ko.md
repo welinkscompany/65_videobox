@@ -899,3 +899,5 @@
 - 후속 적용 순서는 `token/semantic color 정리 -> layout contrast 재점검 -> component skin 최소 치환`으로 제한해, MVP 기능 검증이 끝나기 전에는 실제 UI 리디자인 작업을 시작하지 않는다
 - CapCut export와 review/output 계약은 계속 유지한다
 - TTS, editing session, review 상태 계약은 서로 따로 놀지 않도록 같은 증거 기준으로 검증해야 한다
+- 단, 최종 운영 마감 점검에서는 focused와 representative smoke가 green이어도 broader full backend regression이 red면 운영 완료로 닫지 않는다
+- 현재 최신 운영 점검 결과는 `full-suite only red 1개`가 남아 있으므로, 다음 실제 작업은 새 기능 추가가 아니라 그 경계 1개를 좁히는 안정화 복귀다
