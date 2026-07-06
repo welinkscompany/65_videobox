@@ -1343,6 +1343,21 @@ function createFetchMock({
 }
 
 describe("App", () => {
+  it("renders the dashboard with Korean short labels instead of explanatory English copy", async () => {
+    vi.stubGlobal("fetch", createFetchMock());
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: /VideoBox 작업판/i })).toBeInTheDocument();
+    expect(screen.getByText(/프로젝트 · 타임라인 · 검수 · 출력/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /개요/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^검수$/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /작업 상태/i })).toBeInTheDocument();
+    expect(screen.getByText(/^전사$/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Local-first review shell/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Inspect projects/i)).not.toBeInTheDocument();
+  });
+
   it("renders a local-first operator dashboard from API data", async () => {
     const fetchMock = createFetchMock();
     vi.stubGlobal("fetch", fetchMock);
@@ -1350,22 +1365,22 @@ describe("App", () => {
     render(<App />);
 
     expect(
-      await screen.findByRole("heading", { name: /videobox operator dashboard/i }),
+      await screen.findByRole("heading", { name: /VideoBox 작업판/i }),
     ).toBeInTheDocument();
     expect(await screen.findByText(/operator review demo/i)).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: /timeline summary/i })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: /review snapshot/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /타임라인/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /스냅샷/i })).toBeInTheDocument();
     expect((await screen.findAllByText(/preview_render_job_006/i)).length).toBeGreaterThan(0);
     expect((await screen.findAllByText(/capcut_export_job_007/i)).length).toBeGreaterThan(0);
 
-    fireEvent.click(screen.getByRole("button", { name: /review snapshot/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^검수$/i }));
 
-    expect(await screen.findByText(/applied and pending recommendations/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /approve recommendation/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /reject recommendation/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /mark for manual edit/i })).toBeInTheDocument();
+    expect(await screen.findByText(/적용 · 대기/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /추천 승인/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /추천 거절/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /수동 편집/i })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /rebuild timeline draft/i }));
+    fireEvent.click(screen.getByRole("button", { name: /타임라인 재생성/i }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -1376,10 +1391,10 @@ describe("App", () => {
       );
     });
 
-    expect(await screen.findByRole("button", { name: /reopen review/i })).toBeInTheDocument();
-    fireEvent.click(await screen.findByRole("button", { name: /generate subtitle file/i }));
-    fireEvent.click(await screen.findByRole("button", { name: /render preview artifact/i }));
-    fireEvent.click(await screen.findByRole("button", { name: /export capcut payload/i }));
+    expect(await screen.findByRole("button", { name: /검수 재개/i })).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: /자막 생성/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /미리보기 생성/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /캡컷 내보내기/i }));
 
     expect(await screen.findByText(/playable_html_preview/i)).toBeInTheDocument();
     expect(await screen.findAllByText(/subtitle_001\.srt/i)).toHaveLength(2);
@@ -1398,14 +1413,14 @@ describe("App", () => {
 
     render(<App />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /review snapshot/i }));
-    fireEvent.click(await screen.findByRole("button", { name: /review seg_002 in editor/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^검수$/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /추천 검수 · seg_002/i }));
 
-    expect(await screen.findByRole("heading", { name: /timeline-centered editor shell/i })).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: /target segment/i })).toHaveValue("seg_002");
-    expect(screen.getByRole("checkbox", { name: /tts replacement/i })).toBeChecked();
-    expect(screen.getByRole("checkbox", { name: /broll/i })).not.toBeChecked();
-    expect(screen.getByRole("checkbox", { name: /explanation card/i })).not.toBeChecked();
+    expect(await screen.findByRole("heading", { name: /타임라인 편집기/i })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: /대상 세그먼트/i })).toHaveValue("seg_002");
+    expect(screen.getByRole("checkbox", { name: /TTS/i })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /B롤/i })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /설명 카드/i })).not.toBeChecked();
   });
 
   it("approves a pending recommendation through the review action and refreshes the review snapshot", async () => {
@@ -1453,8 +1468,8 @@ describe("App", () => {
 
     render(<App />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /review snapshot/i }));
-    fireEvent.click(await screen.findByRole("button", { name: /^approve recommendation$/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^검수$/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^추천 승인$/i }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -1471,9 +1486,9 @@ describe("App", () => {
       ).not.toBeInTheDocument();
     });
     expect(
-      screen.getByRole("button", { name: /^approve recommendation$/i }),
+      screen.getByRole("button", { name: /^추천 승인$/i }),
     ).toBeDisabled();
-    expect(screen.getByRole("button", { name: /approve timeline/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /타임라인 승인/i })).toBeEnabled();
   });
 
   it("opens the actionable pending recommendation in the editing session when marked for manual edit", async () => {
@@ -1521,14 +1536,14 @@ describe("App", () => {
 
     render(<App />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /review snapshot/i }));
-    fireEvent.click(await screen.findByRole("button", { name: /mark for manual edit/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^검수$/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /수동 편집/i }));
 
-    expect(await screen.findByRole("heading", { name: /timeline-centered editor shell/i })).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: /target segment/i })).toHaveValue("seg_002");
-    expect(screen.getByRole("checkbox", { name: /broll/i })).toBeChecked();
-    expect(screen.getByRole("checkbox", { name: /tts replacement/i })).not.toBeChecked();
-    expect(screen.getByRole("checkbox", { name: /explanation card/i })).not.toBeChecked();
+    expect(await screen.findByRole("heading", { name: /타임라인 편집기/i })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: /대상 세그먼트/i })).toHaveValue("seg_002");
+    expect(screen.getByRole("checkbox", { name: /B롤/i })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /TTS/i })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /설명 카드/i })).not.toBeChecked();
   });
 
   it("shows B-roll recommendation evidence with archived asset metadata in the review snapshot", async () => {
@@ -1555,14 +1570,14 @@ describe("App", () => {
 
     render(<App />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /review snapshot/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^검수$/i }));
 
     expect(await screen.findByText(/Team whiteboard/i)).toBeInTheDocument();
     expect(screen.getByText(/asset_broll_archive_002/i)).toBeInTheDocument();
-    expect(screen.getByText(/Score 0.88/i)).toBeInTheDocument();
+    expect(screen.getByText(/점수 0.88/i)).toBeInTheDocument();
     expect(screen.getByText(/Matched meeting keywords/i)).toBeInTheDocument();
-    expect(screen.getByText(/Matched tags: team, meeting/i)).toBeInTheDocument();
-    expect(screen.getByText(/Asset tags: team, planning/i)).toBeInTheDocument();
+    expect(screen.getByText(/매칭 태그: team, meeting/i)).toBeInTheDocument();
+    expect(screen.getByText(/자산 태그: team, planning/i)).toBeInTheDocument();
   });
 
   it("opens the flagged segment in the editing session without overwriting its default rerun scope when no direct field mapping exists", async () => {
@@ -1573,14 +1588,14 @@ describe("App", () => {
 
     render(<App />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /review snapshot/i }));
-    fireEvent.click(await screen.findByRole("button", { name: /inspect seg_002 in editor/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^검수$/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /편집 확인 · seg_002/i }));
 
-    expect(await screen.findByRole("heading", { name: /timeline-centered editor shell/i })).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: /target segment/i })).toHaveValue("seg_002");
-    expect(screen.getByRole("checkbox", { name: /broll/i })).toBeChecked();
-    expect(screen.getByRole("checkbox", { name: /explanation card/i })).toBeChecked();
-    expect(screen.getByRole("checkbox", { name: /tts replacement/i })).not.toBeChecked();
+    expect(await screen.findByRole("heading", { name: /타임라인 편집기/i })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: /대상 세그먼트/i })).toHaveValue("seg_002");
+    expect(screen.getByRole("checkbox", { name: /B롤/i })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /설명 카드/i })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /TTS/i })).not.toBeChecked();
   });
 
   it("opens the review snapshot segment directly in the editing session", async () => {
@@ -1591,13 +1606,13 @@ describe("App", () => {
 
     render(<App />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /review snapshot/i }));
-    fireEvent.click(await screen.findByRole("button", { name: /open seg_002 in editor/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^검수$/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /편집 열기 · seg_002/i }));
 
-    expect(await screen.findByRole("heading", { name: /timeline-centered editor shell/i })).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: /target segment/i })).toHaveValue("seg_002");
-    expect(screen.getByRole("checkbox", { name: /broll/i })).toBeChecked();
-    expect(screen.getByRole("checkbox", { name: /explanation card/i })).toBeChecked();
+    expect(await screen.findByRole("heading", { name: /타임라인 편집기/i })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: /대상 세그먼트/i })).toHaveValue("seg_002");
+    expect(screen.getByRole("checkbox", { name: /B롤/i })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /설명 카드/i })).toBeChecked();
   });
 
   it("falls back to the segment default rerun scope when a pending recommendation type is not mapped to an editor field", async () => {
@@ -1624,14 +1639,14 @@ describe("App", () => {
 
     render(<App />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /review snapshot/i }));
-    fireEvent.click(await screen.findByRole("button", { name: /review seg_002 in editor/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^검수$/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /추천 검수 · seg_002/i }));
 
-    expect(await screen.findByRole("heading", { name: /timeline-centered editor shell/i })).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: /target segment/i })).toHaveValue("seg_002");
-    expect(screen.getByRole("checkbox", { name: /broll/i })).toBeChecked();
-    expect(screen.getByRole("checkbox", { name: /explanation card/i })).toBeChecked();
-    expect(screen.getByRole("checkbox", { name: /tts replacement/i })).not.toBeChecked();
+    expect(await screen.findByRole("heading", { name: /타임라인 편집기/i })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: /대상 세그먼트/i })).toHaveValue("seg_002");
+    expect(screen.getByRole("checkbox", { name: /B롤/i })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /설명 카드/i })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /TTS/i })).not.toBeChecked();
   });
 
   it("disables preview and export controls until review blockers are cleared", async () => {
@@ -1713,13 +1728,13 @@ describe("App", () => {
     render(<App />);
 
     expect(
-      await screen.findByRole("button", { name: /approve timeline/i }),
+      await screen.findByRole("button", { name: /타임라인 승인/i }),
     ).toBeDisabled();
     expect(
-      await screen.findByRole("button", { name: /render preview artifact/i }),
+      await screen.findByRole("button", { name: /미리보기 생성/i }),
     ).toBeDisabled();
     expect(
-      await screen.findByRole("button", { name: /export capcut payload/i }),
+      await screen.findByRole("button", { name: /캡컷 내보내기/i }),
     ).toBeDisabled();
   });
 
@@ -1775,16 +1790,16 @@ describe("App", () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /approve timeline/i })).toBeEnabled();
+      expect(screen.getByRole("button", { name: /타임라인 승인/i })).toBeEnabled();
     });
     expect(
-      await screen.findByRole("button", { name: /generate subtitle file/i }),
+      await screen.findByRole("button", { name: /자막 생성/i }),
     ).toBeDisabled();
     expect(
-      await screen.findByRole("button", { name: /render preview artifact/i }),
+      await screen.findByRole("button", { name: /미리보기 생성/i }),
     ).toBeDisabled();
     expect(
-      await screen.findByRole("button", { name: /export capcut payload/i }),
+      await screen.findByRole("button", { name: /캡컷 내보내기/i }),
     ).toBeDisabled();
   });
 
@@ -1841,20 +1856,20 @@ describe("App", () => {
 
     render(<App />);
 
-    const subtitleCard = (await screen.findByText("Subtitle render")).closest("article");
-    const previewCard = (await screen.findByText("Preview render")).closest("article");
-    const exportCard = (await screen.findByText("CapCut export")).closest("article");
+    const subtitleCard = (await screen.findByText("자막")).closest("article");
+    const previewCard = (await screen.findByText("미리보기")).closest("article");
+    const exportCard = (await screen.findByText("캡컷")).closest("article");
 
     expect(subtitleCard).not.toBeNull();
     expect(previewCard).not.toBeNull();
     expect(exportCard).not.toBeNull();
 
-    expect(within(subtitleCard!).getByText("pending")).toBeInTheDocument();
-    expect(within(subtitleCard!).getByText("not-started")).toBeInTheDocument();
-    expect(within(previewCard!).getByText("pending")).toBeInTheDocument();
-    expect(within(previewCard!).getByText("not-started")).toBeInTheDocument();
-    expect(within(exportCard!).getByText("pending")).toBeInTheDocument();
-    expect(within(exportCard!).getByText("not-started")).toBeInTheDocument();
+    expect(within(subtitleCard!).getByText("대기")).toBeInTheDocument();
+    expect(within(subtitleCard!).getByText("미시작")).toBeInTheDocument();
+    expect(within(previewCard!).getByText("대기")).toBeInTheDocument();
+    expect(within(previewCard!).getByText("미시작")).toBeInTheDocument();
+    expect(within(exportCard!).getByText("대기")).toBeInTheDocument();
+    expect(within(exportCard!).getByText("미시작")).toBeInTheDocument();
   });
 
   it("keeps the baseline dashboard usable when Gemini key loading fails", async () => {
@@ -1896,9 +1911,9 @@ describe("App", () => {
 
     expect(await screen.findByText(/operator review demo/i)).toBeInTheDocument();
     expect(await screen.findByText(/timeline_001/i)).toBeInTheDocument();
-    expect(await screen.findByText(/gemini routing state unavailable/i)).toBeInTheDocument();
+    expect(await screen.findByText(/제미나이 라우팅 오류/i)).toBeInTheDocument();
     expect(screen.queryByText(/request failed: \/api\/projects\/project_001\/providers\/gemini\/keys/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/no gemini routing keys configured for this project/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/제미나이 키 없음/i)).not.toBeInTheDocument();
   });
 
   it("renders masked Gemini keys with routing state visibility and never leaks raw secrets", async () => {
@@ -1907,13 +1922,13 @@ describe("App", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: /gemini provider keys/i })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /키 관리/i })).toBeInTheDocument();
     expect(await screen.findByText(/primary routing key/i)).toBeInTheDocument();
     expect(await screen.findByText("AIza...1234")).toBeInTheDocument();
     expect(await screen.findByText(/fallback cooldown key/i)).toBeInTheDocument();
     expect(await screen.findByText(/429 quota exceeded/i)).toBeInTheDocument();
     expect(await screen.findByText(/2026-06-28T00:05:00Z/i)).toBeInTheDocument();
-    expect(screen.getAllByText(/consecutive failures/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/연속 실패/i).length).toBeGreaterThan(0);
     expect(screen.queryByText(/AIzaSyDANGER_SECRET/i)).not.toBeInTheDocument();
     expect(screen.queryByDisplayValue(/AIzaSyDANGER_SECRET/i)).not.toBeInTheDocument();
   });
@@ -1924,51 +1939,51 @@ describe("App", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: /gemini provider keys/i })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /키 관리/i })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /add gemini key/i }));
-    fireEvent.change(screen.getByLabelText(/label/i), {
+    fireEvent.click(screen.getByRole("button", { name: /키 추가/i }));
+    fireEvent.change(screen.getByLabelText(/이름/i), {
       target: { value: "Burst quota key" },
     });
-    fireEvent.change(screen.getByLabelText(/api key/i), {
+    fireEvent.change(screen.getByLabelText(/API 키/i), {
       target: { value: "AIzaSyDANGER_SECRET" },
     });
-    fireEvent.change(screen.getByLabelText(/primary model/i), {
+    fireEvent.change(screen.getByLabelText(/기본 모델/i), {
       target: { value: "gemini-2.5-flash" },
     });
-    fireEvent.change(screen.getByLabelText(/cheap model/i), {
+    fireEvent.change(screen.getByLabelText(/저가 모델/i), {
       target: { value: "gemini-2.5-flash-lite" },
     });
-    fireEvent.change(screen.getByLabelText(/high quality model/i), {
+    fireEvent.change(screen.getByLabelText(/고품질 모델/i), {
       target: { value: "gemini-2.5-pro" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /save gemini key/i }));
+    fireEvent.click(screen.getByRole("button", { name: /키 저장/i }));
 
     expect(await screen.findByText(/burst quota key/i)).toBeInTheDocument();
     expect(screen.getByText("AIza...9999")).toBeInTheDocument();
     expect(screen.queryByText(/AIzaSyDANGER_SECRET/i)).not.toBeInTheDocument();
     expect(screen.queryByDisplayValue(/AIzaSyDANGER_SECRET/i)).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /edit primary routing key/i }));
-    fireEvent.change(screen.getByLabelText(/label/i), {
+    fireEvent.click(screen.getByRole("button", { name: /Primary routing key 수정/i }));
+    fireEvent.change(screen.getByLabelText(/이름/i), {
       target: { value: "Primary routing key v2" },
     });
-    fireEvent.change(screen.getByLabelText(/cheap model/i), {
+    fireEvent.change(screen.getByLabelText(/저가 모델/i), {
       target: { value: "gemini-2.5-flash" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+    fireEvent.click(screen.getByRole("button", { name: /변경 저장/i }));
 
     expect(await screen.findByText(/primary routing key v2/i)).toBeInTheDocument();
     expect(screen.getAllByText(/gemini-2.5-flash/i).length).toBeGreaterThan(0);
 
-    fireEvent.click(screen.getByRole("button", { name: /disable primary routing key v2/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Primary routing key v2 중지/i }));
     await waitFor(() => {
-      expect(screen.getAllByText(/^disabled$/i).length).toBeGreaterThan(0);
+      expect(screen.getAllByText(/^중지$/i).length).toBeGreaterThan(0);
     });
 
-    fireEvent.click(screen.getByRole("button", { name: /enable primary routing key v2/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Primary routing key v2 사용/i }));
     await waitFor(() => {
-      expect(screen.getAllByText(/^active$/i).length).toBeGreaterThan(1);
+      expect(screen.getAllByText(/^사용$/i).length).toBeGreaterThan(1);
     });
 
     await waitFor(() => {
@@ -1987,9 +2002,9 @@ describe("App", () => {
 
     expect(await screen.findByText(/operator review demo/i)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /editing session/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^편집$/i }));
 
-    fireEvent.click(await screen.findByRole("button", { name: /start editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /편집 시작/i }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -2010,7 +2025,7 @@ describe("App", () => {
       screen.getByText(/meeting context: summarize the active discussion\./i),
     ).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /request regeneration preflight/i }));
+    fireEvent.click(screen.getByRole("button", { name: /사전 확인/i }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -2025,16 +2040,16 @@ describe("App", () => {
       );
     });
 
-    expect(await screen.findByText(/expected affected output areas/i)).toBeInTheDocument();
-    expect(screen.getAllByText(/b-roll track/i).length).toBeGreaterThan(0);
-    expect(screen.getByText(/timeline preview/i)).toBeInTheDocument();
-    expect(screen.getByText(/capcut export/i)).toBeInTheDocument();
-    expect(screen.getByText(/draft after rerun/i)).toBeInTheDocument();
+    expect(await screen.findByText(/영향 출력/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/B롤 트랙/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/타임라인 미리보기/i)).toBeInTheDocument();
+    expect(screen.getByText(/캡컷 전달/i)).toBeInTheDocument();
+    expect(screen.getByText(/재생성 초안/i)).toBeInTheDocument();
     expect(
-      screen.getByText(/this rerun is expected to create a new draft that still needs approval before output jobs run/i),
+      screen.getByText(/초안 · 승인 필요/i),
     ).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /run partial regeneration/i }));
+    fireEvent.click(screen.getByRole("button", { name: /부분 재생성/i }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -2050,7 +2065,7 @@ describe("App", () => {
     });
 
     expect(await screen.findByText(/partial_regeneration_job_001/i)).toBeInTheDocument();
-    expect(screen.getAllByText(/b-roll asset replaced with regenerated recommendation/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/B롤 교체/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/timeline_002/i)).toBeInTheDocument();
   });
 
@@ -2060,13 +2075,13 @@ describe("App", () => {
 
     render(<App />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
-    fireEvent.click(await screen.findByRole("button", { name: /start editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /편집 시작/i }));
 
-    const runButton = await screen.findByRole("button", { name: /run partial regeneration/i });
+    const runButton = await screen.findByRole("button", { name: /부분 재생성/i });
     expect(runButton).toBeDisabled();
 
-    fireEvent.click(screen.getByRole("button", { name: /request regeneration preflight/i }));
+    fireEvent.click(screen.getByRole("button", { name: /사전 확인/i }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -2091,7 +2106,7 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: /seg_002/i }));
     expect(runButton).toBeDisabled();
 
-    fireEvent.click(screen.getByRole("checkbox", { name: /broll/i }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /B롤/i }));
     expect(runButton).toBeDisabled();
   });
 
@@ -2119,40 +2134,40 @@ describe("App", () => {
 
     render(<App />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
-    fireEvent.click(await screen.findByRole("button", { name: /start editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /편집 시작/i }));
 
-    fireEvent.change(screen.getByLabelText(/explanation text/i), {
+    fireEvent.change(screen.getByLabelText(/설명 텍스트/i), {
       target: { value: "Meeting context: capture the approved discussion points." },
     });
-    fireEvent.click(screen.getByRole("button", { name: /save explanation card/i }));
+    fireEvent.click(screen.getByRole("button", { name: /설명 저장/i }));
 
-    fireEvent.change(screen.getByLabelText(/image overlay asset id/i), {
+    fireEvent.change(screen.getByLabelText(/이미지 자산 ID/i), {
       target: { value: "asset_image_002" },
     });
-    fireEvent.change(screen.getByLabelText(/image overlay text/i), {
+    fireEvent.change(screen.getByLabelText(/이미지 텍스트/i), {
       target: { value: "Image overlay summary for the discussion." },
     });
-    fireEvent.click(screen.getByRole("button", { name: /save image overlay/i }));
+    fireEvent.click(screen.getByRole("button", { name: /이미지 저장/i }));
 
-    fireEvent.change(screen.getByLabelText(/table columns/i), {
+    fireEvent.change(screen.getByLabelText(/표 열/i), {
       target: { value: "Topic, Owner" },
     });
-    fireEvent.change(screen.getByLabelText(/table rows/i), {
+    fireEvent.change(screen.getByLabelText(/표 행/i), {
       target: { value: "Launch plan, Louis\nQA follow-up, Team" },
     });
-    fireEvent.change(screen.getByLabelText(/table text/i), {
+    fireEvent.change(screen.getByLabelText(/표 텍스트/i), {
       target: { value: "Table overlay summary for operator review." },
     });
-    fireEvent.click(screen.getByRole("button", { name: /save table overlay/i }));
+    fireEvent.click(screen.getByRole("button", { name: /표 저장/i }));
 
-    fireEvent.change(screen.getByLabelText(/tts recommendation id/i), {
+    fireEvent.change(screen.getByLabelText(/TTS 추천 ID/i), {
       target: { value: "rec_tts_002" },
     });
-    fireEvent.change(screen.getByLabelText(/tts asset id/i), {
+    fireEvent.change(screen.getByLabelText(/TTS 자산 ID/i), {
       target: { value: "tts_asset_002" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /save tts replacement/i }));
+    fireEvent.click(screen.getByRole("button", { name: /TTS 저장/i }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -2202,12 +2217,12 @@ describe("App", () => {
       }),
     );
 
-    fireEvent.click(screen.getByRole("checkbox", { name: /broll/i }));
-    fireEvent.click(screen.getByRole("checkbox", { name: /image overlay/i }));
-    fireEvent.click(screen.getByRole("checkbox", { name: /table overlay/i }));
-    fireEvent.click(screen.getByRole("checkbox", { name: /tts replacement/i }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /B롤/i }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /이미지/i }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /표/i }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /TTS/i }));
 
-    fireEvent.click(screen.getByRole("button", { name: /request regeneration preflight/i }));
+    fireEvent.click(screen.getByRole("button", { name: /사전 확인/i }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -2228,15 +2243,15 @@ describe("App", () => {
     });
 
     expect(
-      await screen.findByRole("heading", { name: /preflight scope/i }),
+      await screen.findByRole("heading", { name: /사전 확인 범위/i }),
     ).toBeInTheDocument();
-    expect(screen.getByText(/seg_002 included in preflight scope/i)).toBeInTheDocument();
-    expect(screen.getByText(/explanation card field selected for preflight/i)).toBeInTheDocument();
-    expect(screen.getByText(/image overlay field selected for preflight/i)).toBeInTheDocument();
-    expect(screen.getByText(/table overlay field selected for preflight/i)).toBeInTheDocument();
-    expect(screen.getByText(/tts replacement field selected for preflight/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/seg_002 포함/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/설명 카드 선택/i)).toBeInTheDocument();
+    expect(screen.getByText(/이미지 선택/i)).toBeInTheDocument();
+    expect(screen.getByText(/표 선택/i)).toBeInTheDocument();
+    expect(screen.getByText(/TTS 선택/i)).toBeInTheDocument();
     expect(
-      screen.getByText(/preflight is read-only\. the timeline draft stays unchanged until you run partial regeneration/i),
+      screen.getByText(/읽기 전용 · 타임라인 유지/i),
     ).toBeInTheDocument();
     expect(screen.queryByText(/partial_regeneration_job_001/i)).not.toBeInTheDocument();
     expect(
@@ -2253,19 +2268,19 @@ describe("App", () => {
 
     render(<App />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
-    fireEvent.click(await screen.findByRole("button", { name: /start editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /편집 시작/i }));
     expect(await screen.findByText(/editing_session_001/i)).toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText(/explanation text/i), {
+    fireEvent.change(screen.getByLabelText(/설명 텍스트/i), {
       target: { value: "" },
     });
 
-    const explanationButton = screen.getByRole("button", { name: /save explanation card/i });
-    const imageButton = screen.getByRole("button", { name: /save image overlay/i });
-    const tableButton = screen.getByRole("button", { name: /save table overlay/i });
-    const musicButton = screen.getByRole("button", { name: /save music override/i });
-    const ttsButton = screen.getByRole("button", { name: /save tts replacement/i });
+    const explanationButton = screen.getByRole("button", { name: /설명 저장/i });
+    const imageButton = screen.getByRole("button", { name: /이미지 저장/i });
+    const tableButton = screen.getByRole("button", { name: /표 저장/i });
+    const musicButton = screen.getByRole("button", { name: /음악 저장/i });
+    const ttsButton = screen.getByRole("button", { name: /TTS 저장/i });
 
     expect(explanationButton).toBeDisabled();
     expect(imageButton).toBeDisabled();
@@ -2277,12 +2292,12 @@ describe("App", () => {
     expect(tableButton).toHaveAttribute("aria-describedby", "seg_002-table-save-help");
     expect(musicButton).toHaveAttribute("aria-describedby", "seg_002-music-save-help");
     expect(ttsButton).toHaveAttribute("aria-describedby", "seg_002-tts-save-help");
-    expect(screen.getByText(/explanation text required before saving/i)).toBeInTheDocument();
-    expect(screen.getByText(/image overlay asset id required before saving/i)).toBeInTheDocument();
-    expect(screen.getByText(/table text required before saving/i)).toBeInTheDocument();
-    expect(screen.getByText(/music asset id required before saving/i)).toBeInTheDocument();
+    expect(screen.getByText(/설명 텍스트 필요/i)).toBeInTheDocument();
+    expect(screen.getByText(/이미지 ID 필요/i)).toBeInTheDocument();
+    expect(screen.getByText(/표 텍스트 필요/i)).toBeInTheDocument();
+    expect(screen.getByText(/음악 ID 필요/i)).toBeInTheDocument();
     expect(
-      screen.getByText(/tts recommendation id and asset id required before saving/i),
+      screen.getByText(/TTS 추천 ID · 자산 ID 필요/i),
     ).toBeInTheDocument();
 
     fireEvent.click(explanationButton);
@@ -2316,22 +2331,22 @@ describe("App", () => {
   async function renderStartedEditingSession(fetchMock = createFetchMock()) {
     vi.stubGlobal("fetch", fetchMock);
     render(<App />);
-    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
-    fireEvent.click(await screen.findByRole("button", { name: /start editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /편집 시작/i }));
     return fetchMock;
   }
 
   async function runCandidateToApprovalReady() {
-    fireEvent.click(await screen.findByRole("button", { name: /request regeneration preflight/i }));
-    fireEvent.click(await screen.findByRole("button", { name: /run partial regeneration/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /사전 확인/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /부분 재생성/i }));
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /approve timeline/i })).toBeEnabled();
+      expect(screen.getByRole("button", { name: /타임라인 승인/i })).toBeEnabled();
     });
   }
 
   async function expectCandidateInvalidated() {
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /approve timeline/i })).toBeDisabled();
+      expect(screen.getByRole("button", { name: /타임라인 승인/i })).toBeDisabled();
     });
     expect(screen.queryByText(/partial_regeneration_job_001/i)).not.toBeInTheDocument();
   }
@@ -2342,10 +2357,10 @@ describe("App", () => {
     expect(await screen.findByText(/office lobby pan/i)).toBeInTheDocument();
     expect(screen.getByText(/asset_broll_archive_001/i)).toBeInTheDocument();
 
-    fireEvent.change(screen.getByRole("combobox", { name: /b-roll asset picker/i }), {
+    fireEvent.change(screen.getByRole("combobox", { name: /B롤 선택/i }), {
       target: { value: "asset_broll_archive_002" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /save b-roll override/i }));
+    fireEvent.click(screen.getByRole("button", { name: /B롤 저장/i }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -2363,13 +2378,13 @@ describe("App", () => {
     const folderPath =
       "D:\\AI_Workspace_louis_office_50\\20_project\\65_videobox-project\\비롤_라이브러리\\검수완료";
 
-    fireEvent.change(screen.getByLabelText(/b-roll folder path/i), {
+    fireEvent.change(screen.getByLabelText(/B롤 폴더/i), {
       target: { value: folderPath },
     });
-    fireEvent.change(screen.getByLabelText(/b-roll import tags/i), {
+    fireEvent.change(screen.getByLabelText(/B롤 태그/i), {
       target: { value: "folder-import" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /import b-roll folder/i }));
+    fireEvent.click(screen.getByRole("button", { name: /B롤 가져오기/i }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -2385,7 +2400,7 @@ describe("App", () => {
       );
     });
     expect(await screen.findByText(/factory-line/i)).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: /b-roll asset picker/i })).toHaveTextContent(
+    expect(screen.getByRole("combobox", { name: /B롤 선택/i })).toHaveTextContent(
       /asset_broll_archive_003/i,
     );
   });
@@ -2393,12 +2408,12 @@ describe("App", () => {
   it("shows a B-roll import error when folder import fails", async () => {
     await renderStartedEditingSession(createFetchMock({ brollBatchImportStatus: 400 }));
 
-    fireEvent.change(screen.getByLabelText(/b-roll folder path/i), {
+    fireEvent.change(screen.getByLabelText(/B롤 폴더/i), {
       target: { value: "D:\\missing\\비롤" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /import b-roll folder/i }));
+    fireEvent.click(screen.getByRole("button", { name: /B롤 가져오기/i }));
 
-    expect(await screen.findByText(/b-roll import failed/i)).toBeInTheDocument();
+    expect(await screen.findByText(/B롤 가져오기 실패/i)).toBeInTheDocument();
   });
 
   it("removes the saved explanation card and invalidates the active candidate", async () => {
@@ -2407,7 +2422,7 @@ describe("App", () => {
     );
 
     await runCandidateToApprovalReady();
-    fireEvent.click(screen.getByRole("button", { name: /remove explanation card/i }));
+    fireEvent.click(screen.getByRole("button", { name: /설명 삭제/i }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -2418,9 +2433,9 @@ describe("App", () => {
       );
     });
     await expectCandidateInvalidated();
-    expect(screen.queryByRole("button", { name: /remove explanation card/i })).not.toBeInTheDocument();
-    expect(screen.getByText(/no explanation card/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/explanation text/i)).toHaveValue("");
+    expect(screen.queryByRole("button", { name: /설명 삭제/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/설명 카드 없음/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/설명 텍스트/i)).toHaveValue("");
   });
 
   it("removes the saved image overlay and invalidates the active candidate", async () => {
@@ -2428,13 +2443,13 @@ describe("App", () => {
       createFetchMock({ candidateReviewSnapshot: candidateReviewSnapshotResponse }),
     );
 
-    fireEvent.change(screen.getByLabelText(/image overlay asset id/i), {
+    fireEvent.change(screen.getByLabelText(/이미지 자산 ID/i), {
       target: { value: "asset_image_002" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /save image overlay/i }));
+    fireEvent.click(screen.getByRole("button", { name: /이미지 저장/i }));
 
     await runCandidateToApprovalReady();
-    fireEvent.click(screen.getByRole("button", { name: /remove image overlay/i }));
+    fireEvent.click(screen.getByRole("button", { name: /이미지 삭제/i }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -2445,9 +2460,9 @@ describe("App", () => {
       );
     });
     await expectCandidateInvalidated();
-    expect(screen.queryByRole("button", { name: /remove image overlay/i })).not.toBeInTheDocument();
-    expect(screen.getByText(/no image overlay/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/image overlay asset id/i)).toHaveValue("");
+    expect(screen.queryByRole("button", { name: /이미지 삭제/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/이미지 없음/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/이미지 자산 ID/i)).toHaveValue("");
   });
 
   it("removes the saved table overlay and invalidates the active candidate", async () => {
@@ -2455,13 +2470,13 @@ describe("App", () => {
       createFetchMock({ candidateReviewSnapshot: candidateReviewSnapshotResponse }),
     );
 
-    fireEvent.change(screen.getByLabelText(/table text/i), {
+    fireEvent.change(screen.getByLabelText(/표 텍스트/i), {
       target: { value: "Table overlay summary for operator review." },
     });
-    fireEvent.click(screen.getByRole("button", { name: /save table overlay/i }));
+    fireEvent.click(screen.getByRole("button", { name: /표 저장/i }));
 
     await runCandidateToApprovalReady();
-    fireEvent.click(screen.getByRole("button", { name: /remove table overlay/i }));
+    fireEvent.click(screen.getByRole("button", { name: /표 삭제/i }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -2472,9 +2487,9 @@ describe("App", () => {
       );
     });
     await expectCandidateInvalidated();
-    expect(screen.queryByRole("button", { name: /remove table overlay/i })).not.toBeInTheDocument();
-    expect(screen.getByText(/no table overlay/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/table text/i)).toHaveValue("");
+    expect(screen.queryByRole("button", { name: /표 삭제/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/표 없음/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/표 텍스트/i)).toHaveValue("");
   });
 
   it("clears the saved tts replacement and invalidates the active candidate", async () => {
@@ -2482,16 +2497,16 @@ describe("App", () => {
       createFetchMock({ candidateReviewSnapshot: candidateReviewSnapshotResponse }),
     );
 
-    fireEvent.change(screen.getByLabelText(/tts recommendation id/i), {
+    fireEvent.change(screen.getByLabelText(/TTS 추천 ID/i), {
       target: { value: "rec_tts_002" },
     });
-    fireEvent.change(screen.getByLabelText(/tts asset id/i), {
+    fireEvent.change(screen.getByLabelText(/TTS 자산 ID/i), {
       target: { value: "tts_asset_002" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /save tts replacement/i }));
+    fireEvent.click(screen.getByRole("button", { name: /TTS 저장/i }));
 
     await runCandidateToApprovalReady();
-    fireEvent.click(screen.getByRole("button", { name: /clear tts replacement/i }));
+    fireEvent.click(screen.getByRole("button", { name: /TTS 해제/i }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -2502,10 +2517,10 @@ describe("App", () => {
       );
     });
     await expectCandidateInvalidated();
-    expect(screen.queryByRole("button", { name: /clear tts replacement/i })).not.toBeInTheDocument();
-    expect(screen.getByText(/no tts replacement/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/tts recommendation id/i)).toHaveValue("");
-    expect(screen.getByLabelText(/tts asset id/i)).toHaveValue("");
+    expect(screen.queryByRole("button", { name: /TTS 해제/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/TTS 없음/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/TTS 추천 ID/i)).toHaveValue("");
+    expect(screen.getByLabelText(/TTS 자산 ID/i)).toHaveValue("");
   });
 
   it("saves the music override, invalidates the active candidate, and exposes music in the rerun scope", async () => {
@@ -2515,10 +2530,10 @@ describe("App", () => {
 
     await runCandidateToApprovalReady();
 
-    fireEvent.change(screen.getByLabelText(/music asset id/i), {
+    fireEvent.change(screen.getByLabelText(/음악 자산 ID/i), {
       target: { value: "music_manual_002" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /save music override/i }));
+    fireEvent.click(screen.getByRole("button", { name: /음악 저장/i }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -2532,10 +2547,10 @@ describe("App", () => {
       );
     });
     await expectCandidateInvalidated();
-    expect(screen.getByLabelText(/music asset id/i)).toHaveValue("music_manual_002");
-    expect(screen.getByRole("checkbox", { name: /^music$/i })).toBeChecked();
+    expect(screen.getByLabelText(/음악 자산 ID/i)).toHaveValue("music_manual_002");
+    expect(screen.getByRole("checkbox", { name: /^음악$/i })).toBeChecked();
 
-    fireEvent.click(screen.getByRole("button", { name: /request regeneration preflight/i }));
+    fireEvent.click(screen.getByRole("button", { name: /사전 확인/i }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -2582,14 +2597,14 @@ describe("App", () => {
 
     render(<App />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
-    fireEvent.click(await screen.findByRole("button", { name: /start editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /편집 시작/i }));
 
     expect(await screen.findByText(/editing_session_001/i)).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: /target segment/i })).toHaveValue("seg_002");
-    expect(screen.getByLabelText(/music asset id/i)).toHaveValue("music_manual_001");
-    expect(screen.getByRole("checkbox", { name: /^music$/i })).toBeChecked();
-    expect(screen.getByRole("checkbox", { name: /broll/i })).not.toBeChecked();
+    expect(screen.getByRole("combobox", { name: /대상 세그먼트/i })).toHaveValue("seg_002");
+    expect(screen.getByLabelText(/음악 자산 ID/i)).toHaveValue("music_manual_001");
+    expect(screen.getByRole("checkbox", { name: /^음악$/i })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /B롤/i })).not.toBeChecked();
   });
 
   it("maps a backend image_card overlay into the image overlay preflight field", async () => {
@@ -2629,13 +2644,13 @@ describe("App", () => {
 
     render(<App />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
-    fireEvent.click(await screen.findByRole("button", { name: /start editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /편집 시작/i }));
 
     expect(await screen.findByText(/editing_session_001/i)).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: /target segment/i })).toHaveValue("seg_002");
+    expect(screen.getByRole("combobox", { name: /대상 세그먼트/i })).toHaveValue("seg_002");
 
-    fireEvent.click(screen.getByRole("button", { name: /request regeneration preflight/i }));
+    fireEvent.click(screen.getByRole("button", { name: /사전 확인/i }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -2688,13 +2703,13 @@ describe("App", () => {
 
     render(<App />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
-    fireEvent.click(await screen.findByRole("button", { name: /start editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /편집 시작/i }));
 
     expect(await screen.findByText(/editing_session_001/i)).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: /target segment/i })).toHaveValue("seg_002");
+    expect(screen.getByRole("combobox", { name: /대상 세그먼트/i })).toHaveValue("seg_002");
 
-    fireEvent.click(screen.getByRole("button", { name: /request regeneration preflight/i }));
+    fireEvent.click(screen.getByRole("button", { name: /사전 확인/i }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -2747,13 +2762,13 @@ describe("App", () => {
 
     render(<App />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
-    fireEvent.click(await screen.findByRole("button", { name: /start editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /편집 시작/i }));
 
     expect(await screen.findByText(/editing_session_001/i)).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: /target segment/i })).toHaveValue("seg_002");
+    expect(screen.getByRole("combobox", { name: /대상 세그먼트/i })).toHaveValue("seg_002");
 
-    fireEvent.click(screen.getByRole("button", { name: /request regeneration preflight/i }));
+    fireEvent.click(screen.getByRole("button", { name: /사전 확인/i }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -2806,13 +2821,13 @@ describe("App", () => {
 
     render(<App />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
-    fireEvent.click(await screen.findByRole("button", { name: /start editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /편집 시작/i }));
 
     expect(await screen.findByText(/editing_session_001/i)).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: /target segment/i })).toHaveValue("seg_002");
+    expect(screen.getByRole("combobox", { name: /대상 세그먼트/i })).toHaveValue("seg_002");
 
-    fireEvent.click(screen.getByRole("button", { name: /request regeneration preflight/i }));
+    fireEvent.click(screen.getByRole("button", { name: /사전 확인/i }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -2866,16 +2881,16 @@ describe("App", () => {
       }),
     );
 
-    fireEvent.change(screen.getByLabelText(/music asset id/i), {
+    fireEvent.change(screen.getByLabelText(/음악 자산 ID/i), {
       target: { value: "music_manual_002" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /save music override/i }));
+    fireEvent.click(screen.getByRole("button", { name: /음악 저장/i }));
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /clear music override/i })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /음악 해제/i })).toBeInTheDocument();
     });
 
     await runCandidateToApprovalReady();
-    fireEvent.click(screen.getByRole("button", { name: /clear music override/i }));
+    fireEvent.click(screen.getByRole("button", { name: /음악 해제/i }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -2886,9 +2901,9 @@ describe("App", () => {
       );
     });
     await expectCandidateInvalidated();
-    expect(screen.queryByRole("button", { name: /clear music override/i })).not.toBeInTheDocument();
-    expect(screen.getByLabelText(/music asset id/i)).toHaveValue("");
-    expect(screen.getByRole("checkbox", { name: /^music$/i })).not.toBeChecked();
+    expect(screen.queryByRole("button", { name: /음악 해제/i })).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/음악 자산 ID/i)).toHaveValue("");
+    expect(screen.getByRole("checkbox", { name: /^음악$/i })).not.toBeChecked();
   });
 
   it("clears the saved b-roll override and invalidates the active candidate", async () => {
@@ -2897,7 +2912,7 @@ describe("App", () => {
     );
 
     await runCandidateToApprovalReady();
-    fireEvent.click(screen.getByRole("button", { name: /clear b-roll override/i }));
+    fireEvent.click(screen.getByRole("button", { name: /B롤 해제/i }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -2908,9 +2923,9 @@ describe("App", () => {
       );
     });
     await expectCandidateInvalidated();
-    expect(screen.queryByRole("button", { name: /clear b-roll override/i })).not.toBeInTheDocument();
-    expect(screen.getByLabelText(/b-roll asset id/i)).toHaveValue("");
-    expect(screen.getByRole("checkbox", { name: /broll/i })).not.toBeChecked();
+    expect(screen.queryByRole("button", { name: /B롤 해제/i })).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/B롤 자산 ID/i)).toHaveValue("");
+    expect(screen.getByRole("checkbox", { name: /B롤/i })).not.toBeChecked();
   });
 
   it("blocks preflight and rerun while an editing save is still in flight", async () => {
@@ -2933,15 +2948,15 @@ describe("App", () => {
 
     await renderStartedEditingSession(fetchMock);
 
-    fireEvent.change(screen.getByLabelText(/image overlay asset id/i), {
+    fireEvent.change(screen.getByLabelText(/이미지 자산 ID/i), {
       target: { value: "asset_image_002" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /save image overlay/i }));
+    fireEvent.click(screen.getByRole("button", { name: /이미지 저장/i }));
 
     const requestButton = screen.getByRole("button", {
-      name: /request regeneration preflight/i,
+      name: /사전 확인/i,
     });
-    const runButton = screen.getByRole("button", { name: /run partial regeneration/i });
+    const runButton = screen.getByRole("button", { name: /부분 재생성/i });
 
     expect(requestButton).toBeDisabled();
     expect(runButton).toBeDisabled();
@@ -2986,7 +3001,7 @@ describe("App", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /request regeneration preflight/i })).toBeEnabled();
+      expect(screen.getByRole("button", { name: /사전 확인/i })).toBeEnabled();
     });
   });
 
@@ -3010,23 +3025,23 @@ describe("App", () => {
 
     await renderStartedEditingSession(fetchMock);
 
-    fireEvent.change(screen.getByLabelText(/tts recommendation id/i), {
+    fireEvent.change(screen.getByLabelText(/TTS 추천 ID/i), {
       target: { value: "rec_tts_002" },
     });
-    fireEvent.change(screen.getByLabelText(/tts asset id/i), {
+    fireEvent.change(screen.getByLabelText(/TTS 자산 ID/i), {
       target: { value: "tts_asset_002" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /save tts replacement/i }));
+    fireEvent.click(screen.getByRole("button", { name: /TTS 저장/i }));
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /clear tts replacement/i })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /TTS 해제/i })).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: /clear tts replacement/i }));
+    fireEvent.click(screen.getByRole("button", { name: /TTS 해제/i }));
 
     const requestButton = screen.getByRole("button", {
-      name: /request regeneration preflight/i,
+      name: /사전 확인/i,
     });
-    const runButton = screen.getByRole("button", { name: /run partial regeneration/i });
+    const runButton = screen.getByRole("button", { name: /부분 재생성/i });
 
     expect(requestButton).toBeDisabled();
     expect(runButton).toBeDisabled();
@@ -3050,7 +3065,7 @@ describe("App", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /request regeneration preflight/i })).toBeEnabled();
+      expect(screen.getByRole("button", { name: /사전 확인/i })).toBeEnabled();
     });
   });
 
@@ -3075,13 +3090,13 @@ describe("App", () => {
 
     render(<App />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
-    fireEvent.click(await screen.findByRole("button", { name: /start editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /편집 시작/i }));
 
     const requestButton = await screen.findByRole("button", {
-      name: /request regeneration preflight/i,
+      name: /사전 확인/i,
     });
-    const runButton = screen.getByRole("button", { name: /run partial regeneration/i });
+    const runButton = screen.getByRole("button", { name: /부분 재생성/i });
 
     fireEvent.click(requestButton);
     expect(runButton).toBeDisabled();
@@ -3091,18 +3106,18 @@ describe("App", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /run partial regeneration/i })).toBeEnabled();
+      expect(screen.getByRole("button", { name: /부분 재생성/i })).toBeEnabled();
     });
 
     fireEvent.click(requestButton);
-    expect(screen.getByRole("button", { name: /run partial regeneration/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /부분 재생성/i })).toBeDisabled();
 
     pendingPreflightResolvers.shift()?.(
       new Response(JSON.stringify(partialRegenerationPreflightResponse)),
     );
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /run partial regeneration/i })).toBeEnabled();
+      expect(screen.getByRole("button", { name: /부분 재생성/i })).toBeEnabled();
     });
   });
 
@@ -3112,18 +3127,18 @@ describe("App", () => {
 
     render(<App />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
-    fireEvent.click(await screen.findByRole("button", { name: /start editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /편집 시작/i }));
 
     expect(await screen.findByRole("button", { name: /seg_002/i })).toBeInTheDocument();
-    expect(screen.getByRole("checkbox", { name: /broll/i })).toBeChecked();
-    expect(screen.getByRole("checkbox", { name: /explanation card/i })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /B롤/i })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /설명 카드/i })).toBeChecked();
 
     fireEvent.click(screen.getByRole("button", { name: /seg_001/i }));
 
-    expect(screen.getByRole("checkbox", { name: /caption/i })).toBeChecked();
-    expect(screen.getByRole("checkbox", { name: /broll/i })).not.toBeChecked();
-    expect(screen.getByRole("checkbox", { name: /explanation card/i })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /자막/i })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /B롤/i })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /설명 카드/i })).not.toBeChecked();
   });
 
   it("shows a blocked preflight warning before execution when the rerun preserves existing review blockers", async () => {
@@ -3135,21 +3150,21 @@ describe("App", () => {
 
     render(<App />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
-    fireEvent.click(await screen.findByRole("button", { name: /start editing session/i }));
-    fireEvent.click(screen.getByRole("checkbox", { name: /broll/i }));
-    fireEvent.click(screen.getByRole("checkbox", { name: /explanation card/i }));
-    fireEvent.click(screen.getByRole("checkbox", { name: /caption/i }));
-    fireEvent.click(await screen.findByRole("button", { name: /request regeneration preflight/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /편집 시작/i }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /B롤/i }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /설명 카드/i }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /자막/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /사전 확인/i }));
 
-    expect(await screen.findByText(/blocked after rerun/i)).toBeInTheDocument();
+    expect(await screen.findByText(/재검수 보류/i)).toBeInTheDocument();
     expect(
-      screen.getByText(/source timeline already has unresolved review blockers that rerun will preserve/i),
+      screen.getByText(/기존 보류 유지/i),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/selected segments already require operator review, so rerun output stays blocked/i),
+      screen.getByText(/보류 · 확인 필요/i),
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /run partial regeneration/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /부분 재생성/i })).toBeEnabled();
   });
 
   it("shows a timeline-centered editing shell with changed-vs-preserved context after partial regeneration", async () => {
@@ -3158,25 +3173,25 @@ describe("App", () => {
 
     render(<App />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
-    fireEvent.click(await screen.findByRole("button", { name: /start editing session/i }));
-    fireEvent.click(await screen.findByRole("button", { name: /request regeneration preflight/i }));
-    fireEvent.click(await screen.findByRole("button", { name: /run partial regeneration/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /편집 시작/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /사전 확인/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /부분 재생성/i }));
 
-    expect(await screen.findByRole("heading", { name: /timeline-centered editor shell/i })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: /selected segment detail/i })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: /track impact summary/i })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: /changed segment focus/i })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: /preserved timeline area/i })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /타임라인 편집기/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /세그먼트 상세/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /트랙 영향/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /변경 세그먼트/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /유지 영역/i })).toBeInTheDocument();
 
-    expect(screen.getByText(/seg_002 changed in current run/i)).toBeInTheDocument();
-    expect(screen.getByText(/seg_001 preserved from prior timeline/i)).toBeInTheDocument();
-    expect(screen.getAllByText(/^changed segments 1$/i).length).toBeGreaterThan(0);
-    expect(screen.getByText(/preserved segments 1/i)).toBeInTheDocument();
+    expect(screen.getByText(/seg_002 변경/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/seg_001 유지/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/^변경 1$/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/유지 1/i)).toBeInTheDocument();
 
-    expect(screen.getByText(/narration track/i)).toBeInTheDocument();
-    expect(screen.getByText(/b-roll track/i)).toBeInTheDocument();
-    expect(screen.getByText(/overlay track/i)).toBeInTheDocument();
+    expect(screen.getByText(/내레이션 트랙/i)).toBeInTheDocument();
+    expect(screen.getByText(/B롤 트랙/i)).toBeInTheDocument();
+    expect(screen.getByText(/화면 표시 트랙/i)).toBeInTheDocument();
     expect(screen.getByText(/asset_broll_regenerated_002/i)).toBeInTheDocument();
   });
 
@@ -3186,21 +3201,21 @@ describe("App", () => {
 
     render(<App />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
-    fireEvent.click(await screen.findByRole("button", { name: /start editing session/i }));
-    fireEvent.click(await screen.findByRole("button", { name: /request regeneration preflight/i }));
-    fireEvent.click(await screen.findByRole("button", { name: /run partial regeneration/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /편집 시작/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /사전 확인/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /부분 재생성/i }));
 
-    expect(await screen.findByRole("heading", { name: /operator review decision loop/i })).toBeInTheDocument();
-    expect(screen.getByText(/ready changed segments 1/i)).toBeInTheDocument();
-    expect(screen.getByText(/review blockers 0/i)).toBeInTheDocument();
-    expect(screen.getByText(/seg_002 ready for operator sign-off/i)).toBeInTheDocument();
-    expect(screen.getByText(/approve updated timeline/i)).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /검수 결정/i })).toBeInTheDocument();
+    expect(screen.getByText(/준비 1/i)).toBeInTheDocument();
+    expect(screen.getByText(/보류 0/i)).toBeInTheDocument();
+    expect(screen.getByText(/seg_002 승인 준비/i)).toBeInTheDocument();
+    expect(screen.getByText(/승인 가능/i)).toBeInTheDocument();
     expect(
-      screen.getByText(/all changed outputs are ready and the candidate timeline can now be approved/i),
+      screen.getByText(/변경 출력 준비/i),
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /approve timeline/i })).toBeEnabled();
-    expect(screen.getByText(/seg_001 remains stable outside the current rerun/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /타임라인 승인/i })).toBeEnabled();
+    expect(screen.getAllByText(/seg_001 유지/i).length).toBeGreaterThan(0);
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
         "/api/projects/project_001/review-snapshots/partial_regeneration_job_001",
@@ -3219,18 +3234,18 @@ describe("App", () => {
 
     render(<App />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
-    fireEvent.click(await screen.findByRole("button", { name: /start editing session/i }));
-    fireEvent.click(await screen.findByRole("button", { name: /request regeneration preflight/i }));
-    fireEvent.click(await screen.findByRole("button", { name: /run partial regeneration/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /편집 시작/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /사전 확인/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /부분 재생성/i }));
 
-    expect(await screen.findByRole("heading", { name: /operator review decision loop/i })).toBeInTheDocument();
-    expect(screen.getByText(/ready changed segments 0/i)).toBeInTheDocument();
-    expect(screen.getByText(/review blockers 1/i)).toBeInTheDocument();
-    expect(screen.getByText(/seg_002 still needs operator review/i)).toBeInTheDocument();
-    expect(screen.getByText(/hold before preview\/export/i)).toBeInTheDocument();
-    expect(screen.getByText(/rerun suggested if the changed output is still incorrect/i)).toBeInTheDocument();
-    expect(screen.getByText(/seg_001 remains stable outside the current rerun/i)).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /검수 결정/i })).toBeInTheDocument();
+    expect(screen.getByText(/준비 0/i)).toBeInTheDocument();
+    expect(screen.getByText(/보류 1/i)).toBeInTheDocument();
+    expect(screen.getByText(/seg_002 검수 필요/i)).toBeInTheDocument();
+    expect(screen.getByText(/출력 보류/i)).toBeInTheDocument();
+    expect(screen.getByText(/재생성 권장/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/seg_001 유지/i).length).toBeGreaterThan(0);
   });
 
   it("routes approval and output generation through the active partial-regeneration candidate", async () => {
@@ -3249,12 +3264,12 @@ describe("App", () => {
 
     render(<App />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
-    fireEvent.click(await screen.findByRole("button", { name: /start editing session/i }));
-    fireEvent.click(await screen.findByRole("button", { name: /request regeneration preflight/i }));
-    fireEvent.click(await screen.findByRole("button", { name: /run partial regeneration/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /편집 시작/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /사전 확인/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /부분 재생성/i }));
 
-    const approveButton = await screen.findByRole("button", { name: /approve timeline/i });
+    const approveButton = await screen.findByRole("button", { name: /타임라인 승인/i });
     await waitFor(() => {
       expect(approveButton).toBeEnabled();
     });
@@ -3270,12 +3285,12 @@ describe("App", () => {
       );
     });
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /generate subtitle file/i })).toBeEnabled();
+      expect(screen.getByRole("button", { name: /자막 생성/i })).toBeEnabled();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: /generate subtitle file/i }));
-    fireEvent.click(screen.getByRole("button", { name: /render preview artifact/i }));
-    fireEvent.click(screen.getByRole("button", { name: /export capcut payload/i }));
+    fireEvent.click(screen.getByRole("button", { name: /자막 생성/i }));
+    fireEvent.click(screen.getByRole("button", { name: /미리보기 생성/i }));
+    fireEvent.click(screen.getByRole("button", { name: /캡컷 내보내기/i }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -3316,19 +3331,19 @@ describe("App", () => {
 
     render(<App />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
-    fireEvent.click(await screen.findByRole("button", { name: /start editing session/i }));
-    fireEvent.click(await screen.findByRole("button", { name: /request regeneration preflight/i }));
-    fireEvent.click(await screen.findByRole("button", { name: /run partial regeneration/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /편집 시작/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /사전 확인/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /부분 재생성/i }));
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /approve timeline/i })).toBeEnabled();
+      expect(screen.getByRole("button", { name: /타임라인 승인/i })).toBeEnabled();
     });
 
     fireEvent.change(screen.getByDisplayValue("Team meeting overview"), {
       target: { value: "Team meeting overview refreshed" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /save caption/i }));
+    fireEvent.click(screen.getByRole("button", { name: /자막 저장/i }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -3342,7 +3357,7 @@ describe("App", () => {
       );
     });
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /approve timeline/i })).toBeDisabled();
+      expect(screen.getByRole("button", { name: /타임라인 승인/i })).toBeDisabled();
     });
     expect(screen.queryByText(/partial_regeneration_job_001/i)).not.toBeInTheDocument();
   });
@@ -3394,21 +3409,21 @@ describe("App", () => {
       );
     });
 
-    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
 
     expect(await screen.findByText(/editing_session_001/i)).toBeInTheDocument();
     expect(await screen.findByText(/partial_regeneration_job_001/i)).toBeInTheDocument();
-    expect(screen.getByText(/draft after rerun/i)).toBeInTheDocument();
+    expect(screen.getByText(/재생성 초안/i)).toBeInTheDocument();
     expect(
-      screen.getByText(/this rerun is expected to create a new draft that still needs approval before output jobs run/i),
+      screen.getByText(/초안 · 승인 필요/i),
     ).toBeInTheDocument();
-    expect(screen.getByText(/resumed rerun scope/i)).toBeInTheDocument();
-    expect(screen.getByText(/1 segment in scope/i)).toBeInTheDocument();
-    expect(screen.getByText(/seg_002 included in resumed scope/i)).toBeInTheDocument();
-    expect(screen.getByText(/broll field resumed/i)).toBeInTheDocument();
-    expect(screen.getByText(/explanation card field resumed/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /approve timeline/i })).toBeEnabled();
-    expect(screen.getByRole("button", { name: /generate subtitle file/i })).toBeDisabled();
+    expect(screen.getByText(/^재개 범위$/i)).toBeInTheDocument();
+    expect(screen.getByText(/범위 1개/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/seg_002 포함/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/B롤 재개/i)).toBeInTheDocument();
+    expect(screen.getByText(/설명 카드 재개/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /타임라인 승인/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /자막 생성/i })).toBeDisabled();
   });
 
   it("treats latest editing session 404 as a normal no-session case", async () => {
@@ -3419,11 +3434,11 @@ describe("App", () => {
 
     render(<App />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
 
-    expect((await screen.findAllByText(/no editing session loaded yet/i)).length).toBeGreaterThan(0);
-    expect(screen.queryByText(/latest editing session could not be restored/i)).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /start editing session/i })).toBeEnabled();
+    expect((await screen.findAllByText(/편집 세션 없음/i)).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/편집 세션 복구 실패/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /편집 시작/i })).toBeEnabled();
     expect(fetchMock).not.toHaveBeenCalledWith(
       "/api/projects/project_001/partial-regenerations/partial_regeneration_job_001",
       undefined,
@@ -3439,13 +3454,13 @@ describe("App", () => {
 
     render(<App />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
 
-    expect(await screen.findByText(/latest editing session could not be restored/i)).toBeInTheDocument();
-    expect(screen.getByText(/stable timeline data is still available below/i)).toBeInTheDocument();
-    expect(screen.getAllByText(/no editing session loaded yet/i).length).toBeGreaterThan(0);
-    expect(screen.getByRole("button", { name: /start editing session/i })).toBeEnabled();
-    expect(screen.getByRole("button", { name: /generate subtitle file/i })).toBeEnabled();
+    expect(await screen.findByText(/편집 세션 복구 실패/i)).toBeInTheDocument();
+    expect(screen.getByText(/기존 타임라인 유지/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/편집 세션 없음/i).length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: /편집 시작/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /자막 생성/i })).toBeEnabled();
     expect(fetchMock).not.toHaveBeenCalledWith(
       "/api/projects/project_001/partial-regenerations/partial_regeneration_job_001",
       undefined,
@@ -3461,13 +3476,13 @@ describe("App", () => {
 
     render(<App />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
-    expect(await screen.findByText(/latest editing session could not be restored/i)).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
+    expect(await screen.findByText(/편집 세션 복구 실패/i)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /start editing session/i }));
+    fireEvent.click(screen.getByRole("button", { name: /편집 시작/i }));
 
     expect(await screen.findByText(/editing_session_001/i)).toBeInTheDocument();
-    expect(screen.queryByText(/latest editing session could not be restored/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/편집 세션 복구 실패/i)).not.toBeInTheDocument();
   });
 
   it("shows a degraded resume warning when the resumed candidate result cannot be restored", async () => {
@@ -3492,13 +3507,13 @@ describe("App", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
-    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
 
-    expect(await screen.findByText(/resumed candidate could not be restored/i)).toBeInTheDocument();
-    expect(screen.getByText(/stable timeline data remains active below/i)).toBeInTheDocument();
+    expect(await screen.findByText(/후보 복구 실패/i)).toBeInTheDocument();
+    expect(screen.getByText(/기존 타임라인 유지/i)).toBeInTheDocument();
     expect(screen.queryByText(/partial_regeneration_job_001/i)).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /generate subtitle file/i })).toBeEnabled();
-    expect(screen.getByRole("button", { name: /reopen review/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /자막 생성/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /검수 재개/i })).toBeEnabled();
   });
 
   it("shows a degraded resume warning when the resumed candidate review snapshot cannot be restored", async () => {
@@ -3523,13 +3538,13 @@ describe("App", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
-    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
 
-    expect(await screen.findByText(/resumed candidate could not be restored/i)).toBeInTheDocument();
-    expect(screen.getByText(/stable timeline data remains active below/i)).toBeInTheDocument();
+    expect(await screen.findByText(/후보 복구 실패/i)).toBeInTheDocument();
+    expect(screen.getByText(/기존 타임라인 유지/i)).toBeInTheDocument();
     expect(screen.queryByText(/partial_regeneration_job_001/i)).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /generate subtitle file/i })).toBeEnabled();
-    expect(screen.getByRole("button", { name: /reopen review/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /자막 생성/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /검수 재개/i })).toBeEnabled();
   });
 
   it("shows a limited restore warning when resumed preflight interpretation cannot be restored", async () => {
@@ -3554,15 +3569,15 @@ describe("App", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
-    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
 
-    expect(await screen.findByText(/resumed candidate preflight interpretation is unavailable/i)).toBeInTheDocument();
-    expect(screen.getByText(/candidate scope is visible, but review prediction details could not be reused/i)).toBeInTheDocument();
+    expect(await screen.findByText(/재개 범위 확인 · 검수 예측 없음/i)).toBeInTheDocument();
+    expect(screen.getByText(/재개 범위 확인 · 검수 예측 없음/i)).toBeInTheDocument();
     expect(screen.getByText(/partial_regeneration_job_001/i)).toBeInTheDocument();
-    expect(screen.getByText(/resumed rerun scope/i)).toBeInTheDocument();
-    expect(screen.getAllByText("not-started").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("pending").length).toBeGreaterThan(0);
-    expect(screen.queryByText(/draft after rerun/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/^재개 범위$/i)).toBeInTheDocument();
+    expect(screen.getAllByText("미시작").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("대기").length).toBeGreaterThan(0);
+    expect(screen.queryByText(/재생성 초안/i)).not.toBeInTheDocument();
   });
 
   it("clears resumed candidate restore warnings when the operator changes the rerun target", async () => {
@@ -3587,17 +3602,17 @@ describe("App", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
-    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
 
-    expect(await screen.findByText(/resumed candidate preflight interpretation is unavailable/i)).toBeInTheDocument();
+    expect(await screen.findByText(/재개 범위 확인 · 검수 예측 없음/i)).toBeInTheDocument();
 
-    fireEvent.change(screen.getByRole("combobox", { name: /target segment/i }), {
+    fireEvent.change(screen.getByRole("combobox", { name: /대상 세그먼트/i }), {
       target: { value: "seg_002" },
     });
 
     await waitFor(() => {
       expect(
-        screen.queryByText(/resumed candidate preflight interpretation is unavailable/i),
+        screen.queryByText(/재개 범위 확인 · 검수 예측 없음/i),
       ).not.toBeInTheDocument();
     });
   });
@@ -3624,15 +3639,15 @@ describe("App", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
-    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
 
-    expect(await screen.findByText(/resumed candidate preflight interpretation is unavailable/i)).toBeInTheDocument();
+    expect(await screen.findByText(/재개 범위 확인 · 검수 예측 없음/i)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("checkbox", { name: /caption/i }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /자막/i }));
 
     await waitFor(() => {
       expect(
-        screen.queryByText(/resumed candidate preflight interpretation is unavailable/i),
+        screen.queryByText(/재개 범위 확인 · 검수 예측 없음/i),
       ).not.toBeInTheDocument();
     });
   });
@@ -3667,15 +3682,15 @@ describe("App", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
-    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
 
-    expect(await screen.findByText(/resumed candidate preflight interpretation is unavailable/i)).toBeInTheDocument();
+    expect(await screen.findByText(/재개 범위 확인 · 검수 예측 없음/i)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /reopen review/i }));
+    fireEvent.click(screen.getByRole("button", { name: /검수 재개/i }));
 
     await waitFor(() => {
       expect(
-        screen.queryByText(/resumed candidate preflight interpretation is unavailable/i),
+        screen.queryByText(/재개 범위 확인 · 검수 예측 없음/i),
       ).not.toBeInTheDocument();
     });
   });
@@ -3702,11 +3717,11 @@ describe("App", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
-    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
 
-    expect(await screen.findByText(/resumed candidate preflight interpretation is unavailable/i)).toBeInTheDocument();
+    expect(await screen.findByText(/재개 범위 확인 · 검수 예측 없음/i)).toBeInTheDocument();
 
-    const approveButton = screen.getByRole("button", { name: /approve timeline/i });
+    const approveButton = screen.getByRole("button", { name: /타임라인 승인/i });
     await waitFor(() => {
       expect(approveButton).toBeEnabled();
     });
@@ -3722,7 +3737,7 @@ describe("App", () => {
     });
     await waitFor(() => {
       expect(
-        screen.queryByText(/resumed candidate preflight interpretation is unavailable/i),
+        screen.queryByText(/재개 범위 확인 · 검수 예측 없음/i),
       ).not.toBeInTheDocument();
     });
   });
@@ -3764,11 +3779,11 @@ describe("App", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
-    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
 
-    expect(await screen.findByText(/resumed candidate preflight interpretation is unavailable/i)).toBeInTheDocument();
+    expect(await screen.findByText(/재개 범위 확인 · 검수 예측 없음/i)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /request regeneration preflight/i }));
+    fireEvent.click(screen.getByRole("button", { name: /사전 확인/i }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -3784,10 +3799,10 @@ describe("App", () => {
     });
     await waitFor(() => {
       expect(
-        screen.queryByText(/resumed candidate preflight interpretation is unavailable/i),
+        screen.queryByText(/재개 범위 확인 · 검수 예측 없음/i),
       ).not.toBeInTheDocument();
     });
-    expect(await screen.findByText(/draft after rerun/i)).toBeInTheDocument();
+    expect(await screen.findByText(/재생성 초안/i)).toBeInTheDocument();
   });
 
   it("reuses blocked preflight interpretation on refresh-resume for the latest fresh candidate", async () => {
@@ -3833,17 +3848,17 @@ describe("App", () => {
       );
     });
 
-    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
 
     expect(await screen.findByText(/partial_regeneration_job_001/i)).toBeInTheDocument();
-    expect(screen.getByText(/blocked after rerun/i)).toBeInTheDocument();
+    expect(screen.getByText(/재검수 보류/i)).toBeInTheDocument();
     expect(
-      screen.getByText(/source timeline already has unresolved review blockers that rerun will preserve/i),
+      screen.getByText(/기존 보류 유지/i),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/selected segments already require operator review, so rerun output stays blocked/i),
+      screen.getByText(/보류 · 확인 필요/i),
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /approve timeline/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /타임라인 승인/i })).toBeEnabled();
   });
 
   it("aligns the selected rerun scope with the resumed candidate before reusing preflight interpretation", async () => {
@@ -3884,12 +3899,12 @@ describe("App", () => {
 
     render(<App />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
 
     expect(await screen.findByText(/partial_regeneration_job_001/i)).toBeInTheDocument();
-    expect(screen.getByRole("checkbox", { name: /caption/i })).toBeChecked();
-    expect(screen.getByRole("checkbox", { name: /broll/i })).not.toBeChecked();
-    expect(screen.getByRole("checkbox", { name: /explanation card/i })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /자막/i })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /B롤/i })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /설명 카드/i })).not.toBeChecked();
   });
 
   it("does not reuse resumed preflight interpretation when the restored preflight scope differs from the resumed candidate", async () => {
@@ -3932,20 +3947,20 @@ describe("App", () => {
 
     render(<App />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
 
     expect(await screen.findByText(/partial_regeneration_job_001/i)).toBeInTheDocument();
     expect(
-      screen.getByText(/resumed candidate preflight interpretation is unavailable/i),
+      screen.getByText(/재개 범위 확인 · 검수 예측 없음/i),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/candidate scope is visible, but review prediction details could not be reused/i),
+      screen.getByText(/재개 범위 확인 · 검수 예측 없음/i),
     ).toBeInTheDocument();
-    expect(screen.queryByText(/draft after rerun/i)).not.toBeInTheDocument();
-    expect(screen.getByText(/resumed rerun scope/i)).toBeInTheDocument();
-    expect(screen.getByText(/seg_002 included in resumed scope/i)).toBeInTheDocument();
-    expect(screen.getByText(/broll field resumed/i)).toBeInTheDocument();
-    expect(screen.getByText(/explanation card field resumed/i)).toBeInTheDocument();
+    expect(screen.queryByText(/재생성 초안/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/^재개 범위$/i)).toBeInTheDocument();
+    expect(screen.getByText(/seg_002 포함/i)).toBeInTheDocument();
+    expect(screen.getByText(/B롤 재개/i)).toBeInTheDocument();
+    expect(screen.getByText(/설명 카드 재개/i)).toBeInTheDocument();
   });
 
   it("does not reuse resumed preflight interpretation when the restored preflight session_id differs from the resumed candidate session", async () => {
@@ -3982,20 +3997,20 @@ describe("App", () => {
 
     render(<App />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
 
     expect(await screen.findByText(/partial_regeneration_job_001/i)).toBeInTheDocument();
     expect(
-      screen.getByText(/resumed candidate preflight interpretation is unavailable/i),
+      screen.getByText(/재개 범위 확인 · 검수 예측 없음/i),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/candidate scope is visible, but review prediction details could not be reused/i),
+      screen.getByText(/재개 범위 확인 · 검수 예측 없음/i),
     ).toBeInTheDocument();
-    expect(screen.queryByText(/draft after rerun/i)).not.toBeInTheDocument();
-    expect(screen.getByText(/resumed rerun scope/i)).toBeInTheDocument();
-    expect(screen.getByText(/seg_002 included in resumed scope/i)).toBeInTheDocument();
-    expect(screen.getByText(/broll field resumed/i)).toBeInTheDocument();
-    expect(screen.getByText(/explanation card field resumed/i)).toBeInTheDocument();
+    expect(screen.queryByText(/재생성 초안/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/^재개 범위$/i)).toBeInTheDocument();
+    expect(screen.getByText(/seg_002 포함/i)).toBeInTheDocument();
+    expect(screen.getByText(/B롤 재개/i)).toBeInTheDocument();
+    expect(screen.getByText(/설명 카드 재개/i)).toBeInTheDocument();
   });
 
   it("does not reuse resumed preflight interpretation when the restored preflight fields include duplicates", async () => {
@@ -4031,20 +4046,20 @@ describe("App", () => {
 
     render(<App />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
 
     expect(await screen.findByText(/partial_regeneration_job_001/i)).toBeInTheDocument();
     expect(
-      screen.getByText(/resumed candidate preflight interpretation is unavailable/i),
+      screen.getByText(/재개 범위 확인 · 검수 예측 없음/i),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/candidate scope is visible, but review prediction details could not be reused/i),
+      screen.getByText(/재개 범위 확인 · 검수 예측 없음/i),
     ).toBeInTheDocument();
-    expect(screen.queryByText(/draft after rerun/i)).not.toBeInTheDocument();
-    expect(screen.getByText(/resumed rerun scope/i)).toBeInTheDocument();
-    expect(screen.getByText(/seg_002 included in resumed scope/i)).toBeInTheDocument();
-    expect(screen.getByText(/broll field resumed/i)).toBeInTheDocument();
-    expect(screen.getByText(/explanation card field resumed/i)).toBeInTheDocument();
+    expect(screen.queryByText(/재생성 초안/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/^재개 범위$/i)).toBeInTheDocument();
+    expect(screen.getByText(/seg_002 포함/i)).toBeInTheDocument();
+    expect(screen.getByText(/B롤 재개/i)).toBeInTheDocument();
+    expect(screen.getByText(/설명 카드 재개/i)).toBeInTheDocument();
   });
 
   it("does not reuse resumed preflight interpretation when restored targeted segments differ from the resumed candidate scope", async () => {
@@ -4082,20 +4097,20 @@ describe("App", () => {
 
     render(<App />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
 
     expect(await screen.findByText(/partial_regeneration_job_001/i)).toBeInTheDocument();
     expect(
-      screen.getByText(/resumed candidate preflight interpretation is unavailable/i),
+      screen.getByText(/재개 범위 확인 · 검수 예측 없음/i),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/candidate scope is visible, but review prediction details could not be reused/i),
+      screen.getByText(/재개 범위 확인 · 검수 예측 없음/i),
     ).toBeInTheDocument();
-    expect(screen.queryByText(/draft after rerun/i)).not.toBeInTheDocument();
-    expect(screen.getByText(/resumed rerun scope/i)).toBeInTheDocument();
-    expect(screen.getByText(/seg_002 included in resumed scope/i)).toBeInTheDocument();
-    expect(screen.getByText(/broll field resumed/i)).toBeInTheDocument();
-    expect(screen.getByText(/explanation card field resumed/i)).toBeInTheDocument();
+    expect(screen.queryByText(/재생성 초안/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/^재개 범위$/i)).toBeInTheDocument();
+    expect(screen.getByText(/seg_002 포함/i)).toBeInTheDocument();
+    expect(screen.getByText(/B롤 재개/i)).toBeInTheDocument();
+    expect(screen.getByText(/설명 카드 재개/i)).toBeInTheDocument();
   });
 
   it("does not reuse resumed preflight interpretation when restored targeted segment review state differs from the editing session", async () => {
@@ -4138,20 +4153,20 @@ describe("App", () => {
 
     render(<App />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
 
     expect(await screen.findByText(/partial_regeneration_job_001/i)).toBeInTheDocument();
     expect(
-      screen.getByText(/resumed candidate preflight interpretation is unavailable/i),
+      screen.getByText(/재개 범위 확인 · 검수 예측 없음/i),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/candidate scope is visible, but review prediction details could not be reused/i),
+      screen.getByText(/재개 범위 확인 · 검수 예측 없음/i),
     ).toBeInTheDocument();
-    expect(screen.queryByText(/draft after rerun/i)).not.toBeInTheDocument();
-    expect(screen.getByText(/resumed rerun scope/i)).toBeInTheDocument();
-    expect(screen.getByText(/seg_002 included in resumed scope/i)).toBeInTheDocument();
-    expect(screen.getByText(/broll field resumed/i)).toBeInTheDocument();
-    expect(screen.getByText(/explanation card field resumed/i)).toBeInTheDocument();
+    expect(screen.queryByText(/재생성 초안/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/^재개 범위$/i)).toBeInTheDocument();
+    expect(screen.getByText(/seg_002 포함/i)).toBeInTheDocument();
+    expect(screen.getByText(/B롤 재개/i)).toBeInTheDocument();
+    expect(screen.getByText(/설명 카드 재개/i)).toBeInTheDocument();
   });
 
   it("does not reuse resumed preflight interpretation when restored targeted segment tts replacement differs from the editing session", async () => {
@@ -4197,20 +4212,20 @@ describe("App", () => {
 
     render(<App />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
 
     expect(await screen.findByText(/partial_regeneration_job_001/i)).toBeInTheDocument();
     expect(
-      screen.getByText(/resumed candidate preflight interpretation is unavailable/i),
+      screen.getByText(/재개 범위 확인 · 검수 예측 없음/i),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/candidate scope is visible, but review prediction details could not be reused/i),
+      screen.getByText(/재개 범위 확인 · 검수 예측 없음/i),
     ).toBeInTheDocument();
-    expect(screen.queryByText(/draft after rerun/i)).not.toBeInTheDocument();
-    expect(screen.getByText(/resumed rerun scope/i)).toBeInTheDocument();
-    expect(screen.getByText(/seg_002 included in resumed scope/i)).toBeInTheDocument();
-    expect(screen.getByText(/broll field resumed/i)).toBeInTheDocument();
-    expect(screen.getByText(/explanation card field resumed/i)).toBeInTheDocument();
+    expect(screen.queryByText(/재생성 초안/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/^재개 범위$/i)).toBeInTheDocument();
+    expect(screen.getByText(/seg_002 포함/i)).toBeInTheDocument();
+    expect(screen.getByText(/B롤 재개/i)).toBeInTheDocument();
+    expect(screen.getByText(/설명 카드 재개/i)).toBeInTheDocument();
   });
 
   it("does not reuse resumed preflight interpretation when restored targeted segment visual overlays differ from the editing session", async () => {
@@ -4260,20 +4275,20 @@ describe("App", () => {
 
     render(<App />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
 
     expect(await screen.findByText(/partial_regeneration_job_001/i)).toBeInTheDocument();
     expect(
-      screen.getByText(/resumed candidate preflight interpretation is unavailable/i),
+      screen.getByText(/재개 범위 확인 · 검수 예측 없음/i),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/candidate scope is visible, but review prediction details could not be reused/i),
+      screen.getByText(/재개 범위 확인 · 검수 예측 없음/i),
     ).toBeInTheDocument();
-    expect(screen.queryByText(/draft after rerun/i)).not.toBeInTheDocument();
-    expect(screen.getByText(/resumed rerun scope/i)).toBeInTheDocument();
-    expect(screen.getByText(/seg_002 included in resumed scope/i)).toBeInTheDocument();
-    expect(screen.getByText(/broll field resumed/i)).toBeInTheDocument();
-    expect(screen.getByText(/explanation card field resumed/i)).toBeInTheDocument();
+    expect(screen.queryByText(/재생성 초안/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/^재개 범위$/i)).toBeInTheDocument();
+    expect(screen.getByText(/seg_002 포함/i)).toBeInTheDocument();
+    expect(screen.getByText(/B롤 재개/i)).toBeInTheDocument();
+    expect(screen.getByText(/설명 카드 재개/i)).toBeInTheDocument();
   });
 
   it("does not reuse resumed preflight interpretation when restored targeted segment broll override differs from the editing session", async () => {
@@ -4318,20 +4333,20 @@ describe("App", () => {
 
     render(<App />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
 
     expect(await screen.findByText(/partial_regeneration_job_001/i)).toBeInTheDocument();
     expect(
-      screen.getByText(/resumed candidate preflight interpretation is unavailable/i),
+      screen.getByText(/재개 범위 확인 · 검수 예측 없음/i),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/candidate scope is visible, but review prediction details could not be reused/i),
+      screen.getByText(/재개 범위 확인 · 검수 예측 없음/i),
     ).toBeInTheDocument();
-    expect(screen.queryByText(/draft after rerun/i)).not.toBeInTheDocument();
-    expect(screen.getByText(/resumed rerun scope/i)).toBeInTheDocument();
-    expect(screen.getByText(/seg_002 included in resumed scope/i)).toBeInTheDocument();
-    expect(screen.getByText(/broll field resumed/i)).toBeInTheDocument();
-    expect(screen.getByText(/explanation card field resumed/i)).toBeInTheDocument();
+    expect(screen.queryByText(/재생성 초안/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/^재개 범위$/i)).toBeInTheDocument();
+    expect(screen.getByText(/seg_002 포함/i)).toBeInTheDocument();
+    expect(screen.getByText(/B롤 재개/i)).toBeInTheDocument();
+    expect(screen.getByText(/설명 카드 재개/i)).toBeInTheDocument();
   });
 
   it("does not reuse resumed preflight interpretation when restored targeted segment music override differs from the editing session", async () => {
@@ -4376,20 +4391,20 @@ describe("App", () => {
 
     render(<App />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
 
     expect(await screen.findByText(/partial_regeneration_job_001/i)).toBeInTheDocument();
     expect(
-      screen.getByText(/resumed candidate preflight interpretation is unavailable/i),
+      screen.getByText(/재개 범위 확인 · 검수 예측 없음/i),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/candidate scope is visible, but review prediction details could not be reused/i),
+      screen.getByText(/재개 범위 확인 · 검수 예측 없음/i),
     ).toBeInTheDocument();
-    expect(screen.queryByText(/draft after rerun/i)).not.toBeInTheDocument();
-    expect(screen.getByText(/resumed rerun scope/i)).toBeInTheDocument();
-    expect(screen.getByText(/seg_002 included in resumed scope/i)).toBeInTheDocument();
-    expect(screen.getByText(/music field resumed/i)).toBeInTheDocument();
-    expect(screen.getByText(/explanation card field resumed/i)).toBeInTheDocument();
+    expect(screen.queryByText(/재생성 초안/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/^재개 범위$/i)).toBeInTheDocument();
+    expect(screen.getByText(/seg_002 포함/i)).toBeInTheDocument();
+    expect(screen.getByText(/음악 재개/i)).toBeInTheDocument();
+    expect(screen.getByText(/설명 카드 재개/i)).toBeInTheDocument();
   });
 
   it("does not reuse preflight interpretation for a resumed multi-segment candidate that the current editor cannot represent", async () => {
@@ -4426,25 +4441,25 @@ describe("App", () => {
       );
     });
 
-    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
 
     expect(await screen.findByText(/partial_regeneration_job_001/i)).toBeInTheDocument();
-    expect(screen.getByText(/resumed rerun scope/i)).toBeInTheDocument();
-    expect(screen.getByText(/2 segments in scope/i)).toBeInTheDocument();
-    expect(screen.getByText(/seg_001 included in resumed scope/i)).toBeInTheDocument();
-    expect(screen.getByText(/seg_002 included in resumed scope/i)).toBeInTheDocument();
-    expect(screen.getByText(/caption field resumed/i)).toBeInTheDocument();
-    expect(screen.getByText(/broll field resumed/i)).toBeInTheDocument();
-    expect(screen.getByText(/multi-segment resumed scope is readable here, but not mapped into single-segment editor defaults/i)).toBeInTheDocument();
+    expect(screen.getByText(/^재개 범위$/i)).toBeInTheDocument();
+    expect(screen.getByText(/범위 2개/i)).toBeInTheDocument();
+    expect(screen.getByText(/seg_001 포함/i)).toBeInTheDocument();
+    expect(screen.getByText(/seg_002 포함/i)).toBeInTheDocument();
+    expect(screen.getByText(/자막 재개/i)).toBeInTheDocument();
+    expect(screen.getByText(/B롤 재개/i)).toBeInTheDocument();
+    expect(screen.getByText(/다중 세그먼트 · 수동 확인/i)).toBeInTheDocument();
     expect(
       fetchMock,
     ).not.toHaveBeenCalledWith(
       "/api/projects/project_001/editing-sessions/editing_session_001/partial-regeneration/preflight",
       expect.anything(),
     );
-    expect(screen.queryByText(/draft after rerun/i)).not.toBeInTheDocument();
-    expect(screen.getByRole("checkbox", { name: /caption/i })).not.toBeChecked();
-    expect(screen.getByRole("checkbox", { name: /broll/i })).toBeChecked();
+    expect(screen.queryByText(/재생성 초안/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: /자막/i })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /B롤/i })).toBeChecked();
   });
 
   it("clears resumed multi-segment scope when the operator changes the rerun target", async () => {
@@ -4474,20 +4489,20 @@ describe("App", () => {
 
     render(<App />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
 
     expect(await screen.findByText(/partial_regeneration_job_001/i)).toBeInTheDocument();
-    expect(screen.getByText(/2 segments in scope/i)).toBeInTheDocument();
-    expect(screen.getByText(/multi-segment resumed scope is readable here, but not mapped into single-segment editor defaults/i)).toBeInTheDocument();
+    expect(screen.getByText(/범위 2개/i)).toBeInTheDocument();
+    expect(screen.getByText(/다중 세그먼트 · 수동 확인/i)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /seg_001/i }));
 
     await waitFor(() => {
       expect(screen.queryByText(/partial_regeneration_job_001/i)).not.toBeInTheDocument();
     });
-    expect(screen.queryByText(/2 segments in scope/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/범위 2개/i)).not.toBeInTheDocument();
     expect(
-      screen.queryByText(/multi-segment resumed scope is readable here, but not mapped into single-segment editor defaults/i),
+      screen.queryByText(/다중 세그먼트 · 수동 확인/i),
     ).not.toBeInTheDocument();
   });
 
@@ -4518,20 +4533,20 @@ describe("App", () => {
 
     render(<App />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
 
     expect(await screen.findByText(/partial_regeneration_job_001/i)).toBeInTheDocument();
-    expect(screen.getByText(/2 segments in scope/i)).toBeInTheDocument();
-    expect(screen.getByText(/multi-segment resumed scope is readable here, but not mapped into single-segment editor defaults/i)).toBeInTheDocument();
+    expect(screen.getByText(/범위 2개/i)).toBeInTheDocument();
+    expect(screen.getByText(/다중 세그먼트 · 수동 확인/i)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("checkbox", { name: /caption/i }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /자막/i }));
 
     await waitFor(() => {
       expect(screen.queryByText(/partial_regeneration_job_001/i)).not.toBeInTheDocument();
     });
-    expect(screen.queryByText(/2 segments in scope/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/범위 2개/i)).not.toBeInTheDocument();
     expect(
-      screen.queryByText(/multi-segment resumed scope is readable here, but not mapped into single-segment editor defaults/i),
+      screen.queryByText(/다중 세그먼트 · 수동 확인/i),
     ).not.toBeInTheDocument();
   });
 
@@ -4569,11 +4584,11 @@ describe("App", () => {
       );
     });
 
-    fireEvent.click(await screen.findByRole("button", { name: /editing session/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
 
     expect(await screen.findByText(/editing_session_001/i)).toBeInTheDocument();
     expect(screen.queryByText(/partial_regeneration_job_001/i)).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /approve timeline/i })).toBeDisabled();
-    expect(screen.getByRole("button", { name: /generate subtitle file/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /타임라인 승인/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /자막 생성/i })).toBeEnabled();
   });
 });

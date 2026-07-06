@@ -28,7 +28,56 @@ const reviewActions = [
 ] as const;
 
 function prettifyJobType(jobType: string) {
-  return jobType.replace(/_/g, " ");
+  const labels: Record<string, string> = {
+    transcription: "전사",
+    segment_analysis: "세그먼트",
+    broll_recommendation: "B롤 추천",
+    music_recommendation: "음악 추천",
+    timeline_build: "타임라인",
+    subtitle_render: "자막",
+    preview_render: "미리보기",
+    capcut_export: "캡컷",
+    broll: "B롤",
+    music: "음악",
+    manual_review: "수동 검수",
+    broll_review_required: "B롤 검수",
+    partial_regeneration: "부분 재생성",
+  };
+  return labels[jobType] ?? jobType.replace(/_/g, " ");
+}
+
+function formatStatusLabel(status: string | null | undefined) {
+  if (!status) {
+    return "상태 없음";
+  }
+  const labels: Record<string, string> = {
+    active: "사용",
+    approved: "승인",
+    blocked: "보류",
+    cooldown: "대기",
+    disabled: "중지",
+    draft: "초안",
+    error: "오류",
+    failed: "실패",
+    loading: "로딩",
+    pending: "대기",
+    ready: "준비",
+    review: "검수",
+    running: "진행",
+    succeeded: "완료",
+    "not-started": "미시작",
+  };
+  return labels[status] ?? status;
+}
+
+function formatJobValue(value: string | null | undefined) {
+  if (!value || value === "not-started") {
+    return "미시작";
+  }
+  if (value === "pending") {
+    return "대기";
+  }
+  return value;
 }
 
 function formatSeconds(startSec: number, endSec: number) {
@@ -95,7 +144,7 @@ function createEmptyGeminiKeyForm(): GeminiKeyFormState {
 }
 
 function formatNullableValue(value: string | null) {
-  return value ?? "not available";
+  return value ?? "없음";
 }
 
 function formatBrollAssetTitle(asset: BrollAsset) {
@@ -118,7 +167,7 @@ function formatStringList(value: unknown) {
 }
 
 function formatRecommendationScore(score: number) {
-  return Number.isFinite(score) ? score.toFixed(2) : "not available";
+  return Number.isFinite(score) ? score.toFixed(2) : "없음";
 }
 
 function renderBrollRecommendationEvidence(
@@ -132,7 +181,7 @@ function renderBrollRecommendationEvidence(
   const selectedAsset = brollAssets.find((asset) => asset.asset_id === item.selected_asset_id);
   const selectedAssetLabel = selectedAsset
     ? `${formatBrollAssetTitle(selectedAsset)} - ${selectedAsset.asset_id}`
-    : item.selected_asset_id || "No selected B-roll asset";
+    : item.selected_asset_id || "B롤 미선택";
   const segment = segments.find((candidate) => candidate.segment_id === item.target_segment_id);
   const matchedTags = formatStringList(item.payload.matched_tags ?? item.payload.tags);
   const assetTags = selectedAsset ? formatBrollAssetTags(selectedAsset) : "";
@@ -140,13 +189,13 @@ function renderBrollRecommendationEvidence(
   return (
     <div className="recommendation-evidence">
       <span>
-        Segment {item.target_segment_id}
+        세그먼트 {item.target_segment_id}
         {segment ? `: ${segment.text}` : ""}
       </span>
-      <span>Selected asset: {selectedAssetLabel}</span>
-      <span>Score {formatRecommendationScore(item.score)}</span>
-      {matchedTags ? <span>Matched tags: {matchedTags}</span> : null}
-      {assetTags ? <span>Asset tags: {assetTags}</span> : null}
+      <span>선택 자산: {selectedAssetLabel}</span>
+      <span>점수 {formatRecommendationScore(item.score)}</span>
+      {matchedTags ? <span>매칭 태그: {matchedTags}</span> : null}
+      {assetTags ? <span>자산 태그: {assetTags}</span> : null}
     </div>
   );
 }
@@ -266,7 +315,18 @@ function buildDefaultEditingSelection(session: EditingSession) {
 }
 
 function formatFieldLabel(field: string) {
-  return field.replace(/_/g, " ");
+  const labels: Record<string, string> = {
+    caption: "자막",
+    cut_action: "컷",
+    broll: "B롤",
+    music: "음악",
+    visual_overlay: "화면",
+    explanation_card: "설명 카드",
+    image_overlay: "이미지",
+    table_overlay: "표",
+    tts_replacement: "TTS",
+  };
+  return labels[field] ?? field.replace(/_/g, " ");
 }
 
 function mapRecommendationTypeToEditingField(recommendationType: string) {
@@ -313,37 +373,83 @@ function restoredTargetedSegmentsMatch(
 }
 
 function formatAffectedOutputArea(area: string) {
-  if (area === "capcut export") {
-    return "CapCut handoff";
-  }
-  return area;
+  const labels: Record<string, string> = {
+    "b-roll track": "B롤 트랙",
+    "narration track": "내레이션 트랙",
+    "overlay track": "화면 표시 트랙",
+    "visual overlays": "화면 표시",
+    "timeline preview": "타임라인 미리보기",
+    "subtitle render": "자막 생성",
+    "capcut export": "캡컷 전달",
+    "segment copy": "세그먼트 문구",
+  };
+  return labels[area] ?? area;
+}
+
+function formatWorkflowStep(step: string) {
+  const labels: Record<string, string> = {
+    broll_refresh: "B롤 갱신",
+    overlay_refresh: "화면 표시 갱신",
+    segment_refresh: "세그먼트 갱신",
+    timeline_build: "타임라인 생성",
+  };
+  return labels[step] ?? step;
+}
+
+function formatOperatorNote(note: string) {
+  const labels: Record<string, string> = {
+    "source timeline already has unresolved review blockers that rerun will preserve": "기존 보류 유지",
+    "selected segments already require operator review, so rerun output stays blocked": "선택 세그먼트 검수 필요",
+    "b-roll asset replaced with regenerated recommendation": "B롤 교체",
+    "explanation card text refreshed": "설명 카드 갱신",
+  };
+  return labels[note] ?? note;
 }
 
 function formatTrackLabel(trackType: string) {
   if (trackType === "broll") {
-    return "B-roll track";
+    return "B롤 트랙";
   }
-  return `${trackType.charAt(0).toUpperCase()}${trackType.slice(1)} track`;
+  if (trackType === "narration") {
+    return "내레이션 트랙";
+  }
+  if (trackType === "bgm") {
+    return "배경음악 트랙";
+  }
+  if (trackType === "overlay") {
+    return "화면 표시 트랙";
+  }
+  return `${trackType} 트랙`;
 }
 
 function formatPredictedReviewStatusLabel(status: string) {
   if (status === "blocked") {
-    return "Blocked after rerun";
+    return "재검수 보류";
   }
   if (status === "draft") {
-    return "Draft after rerun";
+    return "재생성 초안";
   }
-  return "Review status unknown after rerun";
+  return "상태 미확인";
 }
 
 function formatPredictedReviewStatusDescription(status: string) {
   if (status === "blocked") {
-    return "This rerun is expected to keep review blockers in place until they are cleared.";
+    return "보류 · 확인 필요";
   }
   if (status === "draft") {
-    return "This rerun is expected to create a new draft that still needs approval before output jobs run.";
+    return "초안 · 승인 필요";
   }
-  return "The rerun scope could not be mapped to a safe post-rerun review prediction.";
+  return "범위 · 확인 필요";
+}
+
+function formatReviewActionLabel(action: (typeof reviewActions)[number]) {
+  if (action === "Approve recommendation") {
+    return "추천 승인";
+  }
+  if (action === "Reject recommendation") {
+    return "추천 거절";
+  }
+  return "수동 편집";
 }
 
 export function App() {
@@ -419,7 +525,7 @@ export function App() {
         if (cancelled) {
           return;
         }
-        setErrorMessage(error instanceof Error ? error.message : "Unknown error");
+        setErrorMessage(error instanceof Error ? error.message : "알 수 없는 오류");
         setLoadState("error");
       }
     }
@@ -475,7 +581,7 @@ export function App() {
           archivedBrollAssets = await api.listBrollAssets(projectId);
         } catch {
           archivedBrollAssets = [];
-          setBrollAssetLoadError("B-roll archive unavailable.");
+          setBrollAssetLoadError("B롤 보관함 오류");
         }
         let latestEditingSession: EditingSession | null = null;
         try {
@@ -483,8 +589,8 @@ export function App() {
         } catch (error) {
           setEditingSessionRestoreError(
             error instanceof Error
-              ? `Latest editing session could not be restored. Stable timeline data is still available below. (${error.message})`
-              : "Latest editing session could not be restored. Stable timeline data is still available below.",
+              ? `편집 세션 복구 실패 · 기존 타임라인 유지 (${error.message})`
+              : "편집 세션 복구 실패 · 기존 타임라인 유지",
           );
           latestEditingSession = null;
         }
@@ -630,12 +736,12 @@ export function App() {
                     } else {
                       resumedPartialRegenerationPreflight = null;
                       resumedPartialRegenerationRestoreWarning =
-                        "Resumed candidate preflight interpretation is unavailable. Candidate scope is visible, but review prediction details could not be reused.";
+                        "재개 범위 확인 · 검수 예측 없음";
                     }
                   } catch {
                     resumedPartialRegenerationPreflight = null;
                     resumedPartialRegenerationRestoreWarning =
-                      "Resumed candidate preflight interpretation is unavailable. Candidate scope is visible, but review prediction details could not be reused.";
+                      "재개 범위 확인 · 검수 예측 없음";
                   }
                 }
                 activeTimeline = {
@@ -671,7 +777,7 @@ export function App() {
             } catch {
               resumedPartialRegeneration = null;
               resumedPartialRegenerationRestoreWarning =
-                "Resumed candidate could not be restored. Stable timeline data remains active below.";
+                "후보 복구 실패 · 기존 타임라인 유지";
             }
           }
         }
@@ -714,13 +820,13 @@ export function App() {
             return;
           }
           setGeminiKeys([]);
-          setGeminiLoadError("Gemini routing state unavailable.");
+          setGeminiLoadError("제미나이 라우팅 오류");
         }
       } catch (error) {
         if (cancelled) {
           return;
         }
-        setErrorMessage(error instanceof Error ? error.message : "Unknown error");
+        setErrorMessage(error instanceof Error ? error.message : "알 수 없는 오류");
         setLoadState("error");
       }
     }
@@ -739,14 +845,14 @@ export function App() {
 
   const pipelineStages = useMemo(
     () => [
-      { label: "Transcription", jobType: "transcription" },
-      { label: "Segment analysis", jobType: "segment_analysis" },
-      { label: "B-roll recommendation", jobType: "broll_recommendation" },
-      { label: "Music recommendation", jobType: "music_recommendation" },
-      { label: "Timeline build", jobType: "timeline_build" },
-      { label: "Subtitle render", jobType: "subtitle_render" },
-      { label: "Preview render", jobType: "preview_render" },
-      { label: "CapCut export", jobType: "capcut_export" },
+      { label: "전사", jobType: "transcription" },
+      { label: "세그먼트", jobType: "segment_analysis" },
+      { label: "B롤 추천", jobType: "broll_recommendation" },
+      { label: "음악 추천", jobType: "music_recommendation" },
+      { label: "타임라인", jobType: "timeline_build" },
+      { label: "자막", jobType: "subtitle_render" },
+      { label: "미리보기", jobType: "preview_render" },
+      { label: "캡컷", jobType: "capcut_export" },
     ],
     [],
   );
@@ -871,7 +977,7 @@ export function App() {
       setPreviewJob(null);
       setExportJob(null);
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Unknown error");
+      setErrorMessage(error instanceof Error ? error.message : "알 수 없는 오류");
     } finally {
       setIsSavingEditingMutation(null);
     }
@@ -893,7 +999,7 @@ export function App() {
       setPartialRegenerationPreflight(null);
       setPartialRegenerationRun(null);
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Unknown error");
+      setErrorMessage(error instanceof Error ? error.message : "알 수 없는 오류");
     } finally {
       setIsStartingEditingSession(false);
     }
@@ -925,7 +1031,7 @@ export function App() {
       setPartialRegenerationPreflight(preflight);
       setPartialRegenerationRun(null);
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Unknown error");
+      setErrorMessage(error instanceof Error ? error.message : "알 수 없는 오류");
     } finally {
       setIsRequestingRegenerationPreflight(false);
     }
@@ -980,7 +1086,7 @@ export function App() {
         setReviewSnapshot(review);
       }
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Unknown error");
+      setErrorMessage(error instanceof Error ? error.message : "알 수 없는 오류");
     } finally {
       setIsRunningPartialRegeneration(false);
     }
@@ -1016,7 +1122,7 @@ export function App() {
       setExportJob(null);
       setSelectedSection("timeline");
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Unknown error");
+      setErrorMessage(error instanceof Error ? error.message : "알 수 없는 오류");
     } finally {
       setIsRebuildingTimeline(false);
     }
@@ -1039,7 +1145,7 @@ export function App() {
       setJobs(jobItems);
       setPreviewJob(preview);
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Unknown error");
+      setErrorMessage(error instanceof Error ? error.message : "알 수 없는 오류");
     } finally {
       setIsRenderingPreview(false);
     }
@@ -1062,7 +1168,7 @@ export function App() {
       setJobs(jobItems);
       setExportJob(capcutExport);
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Unknown error");
+      setErrorMessage(error instanceof Error ? error.message : "알 수 없는 오류");
     } finally {
       setIsExportingCapcut(false);
     }
@@ -1084,7 +1190,7 @@ export function App() {
       setTimelineJob(timeline);
       setReviewSnapshot(review);
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Unknown error");
+      setErrorMessage(error instanceof Error ? error.message : "알 수 없는 오류");
     } finally {
       setIsApprovingTimeline(false);
     }
@@ -1112,7 +1218,7 @@ export function App() {
       setReviewSnapshot(review);
       setTimelineJob(timeline);
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Unknown error");
+      setErrorMessage(error instanceof Error ? error.message : "알 수 없는 오류");
     }
   }
 
@@ -1156,7 +1262,7 @@ export function App() {
       setPreviewJob(null);
       setExportJob(null);
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Unknown error");
+      setErrorMessage(error instanceof Error ? error.message : "알 수 없는 오류");
     } finally {
       setIsReopeningTimeline(false);
     }
@@ -1179,7 +1285,7 @@ export function App() {
       setJobs(jobItems);
       setSubtitleJob(subtitle);
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Unknown error");
+      setErrorMessage(error instanceof Error ? error.message : "알 수 없는 오류");
     } finally {
       setIsRenderingSubtitle(false);
     }
@@ -1207,7 +1313,7 @@ export function App() {
       .map((path) => path.trim())
       .filter(Boolean);
     if (!sourceDirectory && sourcePaths.length === 0) {
-      setBrollImportError("B-roll import failed: source path is required.");
+      setBrollImportError("B롤 가져오기 실패 · 경로 필요");
       return;
     }
     setIsImportingBroll(true);
@@ -1224,7 +1330,7 @@ export function App() {
       await refreshBrollAssets(selectedProjectId);
     } catch (error) {
       setBrollImportError(
-        error instanceof Error ? `B-roll import failed. ${error.message}` : "B-roll import failed.",
+        error instanceof Error ? `B롤 가져오기 실패 · ${error.message}` : "B롤 가져오기 실패",
       );
     } finally {
       setIsImportingBroll(false);
@@ -1281,7 +1387,7 @@ export function App() {
       await refreshGeminiKeys(selectedProjectId);
       closeGeminiForm();
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Unknown error");
+      setErrorMessage(error instanceof Error ? error.message : "알 수 없는 오류");
     } finally {
       setIsSavingGeminiKey(false);
     }
@@ -1301,7 +1407,7 @@ export function App() {
       }
       await refreshGeminiKeys(selectedProjectId);
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Unknown error");
+      setErrorMessage(error instanceof Error ? error.message : "알 수 없는 오류");
     } finally {
       setTogglingGeminiKeyId(null);
     }
@@ -1391,17 +1497,17 @@ export function App() {
     ? null
     : decisionBlockerCount > 0
       ? {
-          title: "Hold before preview/export",
-          body: "Rerun suggested if the changed output is still incorrect.",
+          title: "출력 보류",
+          body: "재생성 권장",
         }
       : canApproveTimeline
         ? {
-          title: "Approve updated timeline",
-          body: "All changed outputs are ready and the candidate timeline can now be approved.",
+          title: "승인 가능",
+          body: "변경 출력 준비",
         }
         : {
-            title: "Hold before preview/export",
-            body: "Changed outputs look ready, but refreshed review state is still unavailable.",
+            title: "출력 보류",
+            body: "검수 상태 없음",
           };
   const handleSelectEditingSegment = (segmentId: string) => {
     setSelectedEditingSegmentId(segmentId);
@@ -1440,20 +1546,17 @@ export function App() {
 
   return (
     <div className="shell">
-      <aside className="sidebar" aria-label="Project navigation">
+      <aside className="sidebar" aria-label="프로젝트 탐색">
         <div className="brand-card">
-          <p className="eyebrow">Local-first review shell</p>
-          <h1>VideoBox Operator Dashboard</h1>
-          <p className="lede">
-            Inspect projects, verify draft timelines, and make review-first
-            decisions before preview or export.
-          </p>
+          <p className="eyebrow">로컬 검수</p>
+          <h1>VideoBox 작업판</h1>
+          <p className="lede">프로젝트 · 타임라인 · 검수 · 출력</p>
         </div>
 
         <section className="sidebar-section" aria-labelledby="projects-heading">
           <div className="sidebar-header">
-            <p className="section-kicker">Projects</p>
-            <h2 id="projects-heading">Project list</h2>
+            <p className="section-kicker">프로젝트</p>
+            <h2 id="projects-heading">목록</h2>
           </div>
           <div className="project-list">
             {projects.map((project) => (
@@ -1466,11 +1569,11 @@ export function App() {
                 type="button"
               >
                 <strong>{project.name}</strong>
-                <span>{project.status}</span>
+                <span>{formatStatusLabel(project.status)}</span>
               </button>
             ))}
             {projects.length === 0 && loadState === "ready" ? (
-              <p className="empty-state">No local projects found yet.</p>
+              <p className="empty-state">로컬 프로젝트 없음</p>
             ) : null}
           </div>
         </section>
@@ -1479,19 +1582,19 @@ export function App() {
       <main className="content">
         <section className="hero-card" aria-labelledby="detail-heading">
           <div>
-            <p className="section-kicker">Project detail</p>
-            <h2 id="detail-heading">{projectDetail?.name ?? "Select a project"}</h2>
+            <p className="section-kicker">프로젝트</p>
+            <h2 id="detail-heading">{projectDetail?.name ?? "프로젝트 선택"}</h2>
             <p className="meta-copy">
               {projectDetail?.root_storage_uri ??
-                "Choose a project to inspect job state, timeline output, and review flags."}
+                "작업 · 타임라인 · 검수"}
             </p>
           </div>
-          <nav className="section-tabs" aria-label="Workspace sections">
+          <nav className="section-tabs" aria-label="작업 영역">
             {[
-              ["overview", "Overview"],
-              ["timeline", "Timeline summary"],
-              ["review", "Review snapshot"],
-              ["editing", "Editing session"],
+              ["overview", "개요"],
+              ["timeline", "타임라인"],
+              ["review", "검수"],
+              ["editing", "편집"],
             ].map(([value, label]) => (
               <button
                 key={value}
@@ -1512,7 +1615,7 @@ export function App() {
               onClick={() => void handleRebuildTimeline()}
               type="button"
             >
-              {isRebuildingTimeline ? "Rebuilding timeline..." : "Rebuild timeline draft"}
+              {isRebuildingTimeline ? "타임라인 생성 중" : "타임라인 재생성"}
             </button>
             <button
               className="action-button"
@@ -1520,7 +1623,7 @@ export function App() {
               onClick={() => void handleRenderSubtitle()}
               type="button"
             >
-              {isRenderingSubtitle ? "Generating subtitles..." : "Generate subtitle file"}
+              {isRenderingSubtitle ? "자막 생성 중" : "자막 생성"}
             </button>
             <button
               className="action-button"
@@ -1528,7 +1631,7 @@ export function App() {
               onClick={() => void handleRenderPreview()}
               type="button"
             >
-              {isRenderingPreview ? "Rendering preview..." : "Render preview artifact"}
+              {isRenderingPreview ? "미리보기 생성 중" : "미리보기 생성"}
             </button>
             <button
               className="action-button"
@@ -1536,7 +1639,7 @@ export function App() {
               onClick={() => void handleExportCapcut()}
               type="button"
             >
-              {isExportingCapcut ? "Exporting CapCut..." : "Export CapCut payload"}
+              {isExportingCapcut ? "캡컷 내보내는 중" : "캡컷 내보내기"}
             </button>
             <button
               className="action-button"
@@ -1544,7 +1647,7 @@ export function App() {
               onClick={() => void handleApproveTimeline()}
               type="button"
             >
-              {isApprovingTimeline ? "Approving..." : "Approve timeline"}
+              {isApprovingTimeline ? "승인 중" : "타임라인 승인"}
             </button>
             <button
               className="action-button"
@@ -1552,27 +1655,27 @@ export function App() {
               onClick={() => void handleReopenTimeline()}
               type="button"
             >
-              {isReopeningTimeline ? "Reopening..." : "Reopen review"}
+              {isReopeningTimeline ? "검수 재개 중" : "검수 재개"}
             </button>
           </div>
         </section>
 
-        {loadState === "loading" ? <p className="loading-banner">Loading local workspace...</p> : null}
+        {loadState === "loading" ? <p className="loading-banner">로컬 작업 로딩</p> : null}
         {loadState === "error" ? <p className="error-banner">{errorMessage}</p> : null}
 
         <section className="panel" aria-labelledby="status-heading">
           <div className="panel-header">
             <div>
-              <p className="section-kicker">Pipeline status</p>
-              <h2 id="status-heading">Job status visibility</h2>
+              <p className="section-kicker">파이프라인</p>
+              <h2 id="status-heading">작업 상태</h2>
             </div>
           </div>
           <div className="status-grid">
             {stageStatus.map((stage) => (
               <article className="status-card" key={stage.jobType}>
                 <span className="status-label">{stage.label}</span>
-                <strong>{stage.status}</strong>
-                <span className="status-meta">{stage.jobId}</span>
+                <strong>{formatStatusLabel(stage.status)}</strong>
+                <span className="status-meta">{formatJobValue(stage.jobId)}</span>
               </article>
             ))}
           </div>
@@ -1583,104 +1686,104 @@ export function App() {
             <article className="panel">
               <div className="panel-header">
                 <div>
-                  <p className="section-kicker">Latest timeline</p>
-                  <h2>Timeline summary</h2>
+                  <p className="section-kicker">최근</p>
+                  <h2>타임라인</h2>
                 </div>
               </div>
               {timelineJob ? (
                 <dl className="summary-list">
                   <div>
-                    <dt>Timeline ID</dt>
+                    <dt>타임라인 ID</dt>
                     <dd>{timelineJob.timeline.timeline_id}</dd>
                   </div>
                   <div>
-                    <dt>Output mode</dt>
-                    <dd>{timelineJob.timeline.output_mode}</dd>
+                    <dt>출력 모드</dt>
+                    <dd>{formatStatusLabel(timelineJob.timeline.output_mode)}</dd>
                   </div>
                   <div>
-                    <dt>Track count</dt>
+                    <dt>트랙 수</dt>
                     <dd>{timelineJob.timeline.tracks.length}</dd>
                   </div>
                   <div>
-                    <dt>Review flags</dt>
+                    <dt>검수 표시</dt>
                     <dd>{timelineJob.timeline.review_flags.length}</dd>
                   </div>
                   <div>
-                    <dt>Review status</dt>
-                    <dd>{reviewStatus}</dd>
+                    <dt>검수 상태</dt>
+                    <dd>{formatStatusLabel(reviewStatus)}</dd>
                   </div>
                 </dl>
               ) : (
-                <p className="empty-state">No succeeded timeline build job yet.</p>
+                <p className="empty-state">타임라인 없음</p>
               )}
             </article>
 
             <article className="panel">
               <div className="panel-header">
                 <div>
-                  <p className="section-kicker">Review queue</p>
-                  <h2>Review snapshot</h2>
+                  <p className="section-kicker">검수</p>
+                  <h2>스냅샷</h2>
                 </div>
               </div>
               {reviewSnapshot ? (
                 <dl className="summary-list">
                   <div>
-                    <dt>Segments</dt>
+                    <dt>세그먼트</dt>
                     <dd>{reviewSnapshot.segments.length}</dd>
                   </div>
                   <div>
-                    <dt>Applied</dt>
+                    <dt>적용</dt>
                     <dd>{reviewSnapshot.applied_recommendations.length}</dd>
                   </div>
                   <div>
-                    <dt>Pending</dt>
+                    <dt>대기</dt>
                     <dd>{reviewSnapshot.pending_recommendations.length}</dd>
                   </div>
                   <div>
-                    <dt>Flags</dt>
+                    <dt>표시</dt>
                     <dd>{reviewSnapshot.review_flags.length}</dd>
                   </div>
                   <div>
-                    <dt>Status</dt>
-                    <dd>{reviewSnapshot.review_status}</dd>
+                    <dt>상태</dt>
+                    <dd>{formatStatusLabel(reviewSnapshot.review_status)}</dd>
                   </div>
                 </dl>
               ) : (
-                <p className="empty-state">Build a timeline to unlock review snapshot data.</p>
+                <p className="empty-state">검수 데이터 없음</p>
               )}
             </article>
 
             <article className="panel">
               <div className="panel-header">
                 <div>
-                  <p className="section-kicker">Output artifacts</p>
-                  <h2>Preview and export</h2>
+                  <p className="section-kicker">출력</p>
+                  <h2>파일</h2>
                 </div>
               </div>
               <dl className="summary-list">
                 <div>
-                  <dt>Subtitle job</dt>
-                  <dd>{subtitleJob?.job_id ?? "not-started"}</dd>
+                  <dt>자막 작업</dt>
+                  <dd>{formatJobValue(subtitleJob?.job_id)}</dd>
                 </div>
                 <div>
-                  <dt>Subtitle file</dt>
-                  <dd>{subtitleJob?.subtitle.file_uri ?? "pending"}</dd>
+                  <dt>자막 파일</dt>
+                  <dd>{formatJobValue(subtitleJob?.subtitle.file_uri)}</dd>
                 </div>
                 <div>
-                  <dt>Preview job</dt>
-                  <dd>{previewJob?.job_id ?? "not-started"}</dd>
+                  <dt>미리보기 작업</dt>
+                  <dd>{formatJobValue(previewJob?.job_id)}</dd>
                 </div>
                 <div>
-                  <dt>Preview artifact</dt>
-                  <dd>{previewJob?.preview.artifact_kind ?? "pending"}</dd>
+                  <dt>미리보기 파일</dt>
+                  <dd>{formatJobValue(previewJob?.preview.artifact_kind)}</dd>
                 </div>
                 <div>
-                  <dt>Export job</dt>
-                  <dd>{exportJob?.job_id ?? "not-started"}</dd>
+                  <dt>내보내기 작업</dt>
+                  <dd>{formatJobValue(exportJob?.job_id)}</dd>
                 </div>
                 <div>
-                  <dt>Export target</dt>
-                  <dd>{exportJob?.export.export_type ?? "pending"}</dd>
+                  <dt>내보내기 대상</dt>
+                  <dd>{formatJobValue(exportJob?.export.export_type)}</dd>
                 </div>
               </dl>
             </article>
@@ -1688,21 +1791,21 @@ export function App() {
             <article className="panel">
               <div className="panel-header">
                 <div>
-                  <p className="section-kicker">Provider routing</p>
-                  <h2>Gemini provider keys</h2>
+                  <p className="section-kicker">제미나이</p>
+                  <h2>키 관리</h2>
                 </div>
                 <button
                   className="action-button"
                   onClick={openCreateGeminiForm}
                   type="button"
                 >
-                  Add Gemini key
+                  키 추가
                 </button>
               </div>
               {isGeminiFormOpen ? (
                 <div className="provider-form">
                   <label className="field">
-                    <span>Label</span>
+                    <span>이름</span>
                     <input
                       onChange={(event) =>
                         setGeminiForm((current) => ({
@@ -1715,7 +1818,7 @@ export function App() {
                   </label>
                   {!editingGeminiKeyId ? (
                     <label className="field">
-                      <span>API key</span>
+                      <span>API 키</span>
                       <input
                         onChange={(event) =>
                           setGeminiForm((current) => ({
@@ -1729,7 +1832,7 @@ export function App() {
                     </label>
                   ) : null}
                   <label className="field">
-                    <span>Primary model</span>
+                    <span>기본 모델</span>
                     <input
                       onChange={(event) =>
                         setGeminiForm((current) => ({
@@ -1741,7 +1844,7 @@ export function App() {
                     />
                   </label>
                   <label className="field">
-                    <span>Cheap model</span>
+                    <span>저가 모델</span>
                     <input
                       onChange={(event) =>
                         setGeminiForm((current) => ({
@@ -1753,7 +1856,7 @@ export function App() {
                     />
                   </label>
                   <label className="field">
-                    <span>High quality model</span>
+                    <span>고품질 모델</span>
                     <input
                       onChange={(event) =>
                         setGeminiForm((current) => ({
@@ -1778,10 +1881,10 @@ export function App() {
                       onClick={() => void handleSaveGeminiKey()}
                       type="button"
                     >
-                      {editingGeminiKeyId ? "Save changes" : "Save Gemini key"}
+                      {editingGeminiKeyId ? "변경 저장" : "키 저장"}
                     </button>
                     <button className="action-button" onClick={closeGeminiForm} type="button">
-                      Cancel
+                      취소
                     </button>
                   </div>
                 </div>
@@ -1795,61 +1898,63 @@ export function App() {
                         <h3>{key.label}</h3>
                         <p className="meta-copy">{key.masked_api_key}</p>
                       </div>
-                      <span className={`pill provider-status status-${key.status}`}>{key.status}</span>
+                      <span className={`pill provider-status status-${key.status}`}>
+                        {formatStatusLabel(key.status)}
+                      </span>
                     </div>
                     <dl className="provider-key-details">
                       <div>
-                        <dt>Primary model</dt>
+                        <dt>기본 모델</dt>
                         <dd>{key.primary_model}</dd>
                       </div>
                       <div>
-                        <dt>Cheap model</dt>
+                        <dt>저가 모델</dt>
                         <dd>{key.cheap_model}</dd>
                       </div>
                       <div>
-                        <dt>High quality model</dt>
+                        <dt>고품질 모델</dt>
                         <dd>{key.high_quality_model}</dd>
                       </div>
                       <div>
-                        <dt>Consecutive failures</dt>
+                        <dt>연속 실패</dt>
                         <dd>{key.consecutive_failures}</dd>
                       </div>
                       <div>
-                        <dt>Cooldown until</dt>
+                        <dt>대기 종료</dt>
                         <dd>{formatNullableValue(key.cooldown_until)}</dd>
                       </div>
                       <div>
-                        <dt>Last used at</dt>
+                        <dt>최근 사용</dt>
                         <dd>{formatNullableValue(key.last_used_at)}</dd>
                       </div>
                       <div>
-                        <dt>Last error</dt>
+                        <dt>최근 오류</dt>
                         <dd>{formatNullableValue(key.last_error)}</dd>
                       </div>
                     </dl>
                     <div className="action-row">
                       <button
-                        aria-label={`Edit ${key.label}`}
+                        aria-label={`${key.label} 수정`}
                         className="action-button"
                         onClick={() => openEditGeminiForm(key)}
                         type="button"
                       >
-                        Edit
+                        수정
                       </button>
                       <button
-                        aria-label={`${key.status === "disabled" ? "Enable" : "Disable"} ${key.label}`}
+                        aria-label={`${key.label} ${key.status === "disabled" ? "사용" : "중지"}`}
                         className="action-button"
                         disabled={togglingGeminiKeyId === key.key_id}
                         onClick={() => void handleToggleGeminiKey(key)}
                         type="button"
                       >
-                        {key.status === "disabled" ? "Enable" : "Disable"}
+                        {key.status === "disabled" ? "사용" : "중지"}
                       </button>
                     </div>
                   </article>
                 ))}
                 {geminiKeys.length === 0 && !geminiLoadError ? (
-                  <p className="empty-state">No Gemini routing keys configured for this project.</p>
+                  <p className="empty-state">제미나이 키 없음</p>
                 ) : null}
               </div>
             </article>
@@ -1860,8 +1965,8 @@ export function App() {
           <section className="panel" aria-labelledby="timeline-heading">
             <div className="panel-header">
               <div>
-                <p className="section-kicker">Timeline summary</p>
-                <h2 id="timeline-heading">Tracks and clip metadata</h2>
+                <p className="section-kicker">타임라인</p>
+                <h2 id="timeline-heading">트랙 · 클립</h2>
               </div>
             </div>
             {timelineJob ? (
@@ -1882,7 +1987,7 @@ export function App() {
                   <article className="artifact-card">
                     <h3>{exportJob.export.export_type}</h3>
                     <p>{exportJob.export.file_uri}</p>
-                    <p>{exportJob.export.subtitle_file_uri ?? "No subtitle linked yet"}</p>
+                    <p>{exportJob.export.subtitle_file_uri ?? "자막 없음"}</p>
                     <p>{exportJob.export.notes[0]}</p>
                   </article>
                 ) : null}
@@ -1890,10 +1995,10 @@ export function App() {
                   <article className="track-card" key={track.track_id}>
                     <header className="track-header">
                       <div>
-                        <h3>{track.track_type}</h3>
+                        <h3>{formatTrackLabel(track.track_type)}</h3>
                         <p>{track.track_id}</p>
                       </div>
-                      <span className="pill">{track.clips.length} clips</span>
+                      <span className="pill">{track.clips.length}개</span>
                     </header>
                     <div className="clip-list">
                       {track.clips.map((clip) => (
@@ -1903,7 +2008,7 @@ export function App() {
                           <span>{formatSeconds(clip.start_sec, clip.end_sec)}</span>
                           <span>{clip.asset_uri}</span>
                           <span>
-                            Recommendation origin: {clip.recommendation_id ?? "manual narration base"}
+                            추천 출처: {clip.recommendation_id ?? "수동 내레이션"}
                           </span>
                         </div>
                       ))}
@@ -1912,7 +2017,7 @@ export function App() {
                 ))}
               </div>
             ) : (
-              <p className="empty-state">No timeline available for inspection.</p>
+              <p className="empty-state">타임라인 없음</p>
             )}
           </section>
         ) : null}
@@ -1922,8 +2027,8 @@ export function App() {
             <article className="panel">
               <div className="panel-header">
                 <div>
-                  <p className="section-kicker">Review snapshot</p>
-                  <h2>Segments</h2>
+                  <p className="section-kicker">검수</p>
+                  <h2>세그먼트</h2>
                 </div>
               </div>
               <div className="segment-list">
@@ -1932,34 +2037,34 @@ export function App() {
                     <div className="segment-heading">
                       <strong>{segment.segment_id}</strong>
                       <span className={segment.review_required ? "pill warning" : "pill okay"}>
-                        {segment.review_required ? "review required" : "ready"}
+                        {segment.review_required ? "검수 필요" : "준비"}
                       </span>
                     </div>
                     <p>{segment.text}</p>
                     <span>{formatSeconds(segment.start_sec, segment.end_sec)}</span>
-                    <span>Confidence {segment.confidence.toFixed(2)}</span>
+                    <span>신뢰도 {segment.confidence.toFixed(2)}</span>
                     <button
                       className="action-button"
                       onClick={() => openSegmentInEditor(segment.segment_id)}
                       type="button"
                     >
-                      Open {segment.segment_id} in editor
+                      편집 열기 · {segment.segment_id}
                     </button>
                   </div>
-                )) ?? <p className="empty-state">No review snapshot data.</p>}
+                )) ?? <p className="empty-state">검수 데이터 없음</p>}
               </div>
             </article>
 
             <article className="panel">
               <div className="panel-header">
                 <div>
-                  <p className="section-kicker">Recommendation review</p>
-                  <h2>Applied and pending recommendations</h2>
+                  <p className="section-kicker">추천</p>
+                  <h2>적용 · 대기</h2>
                 </div>
               </div>
               <div className="recommendation-groups">
                 <div>
-                  <h3>Auto-applied</h3>
+                  <h3>자동 적용</h3>
                   {(reviewSnapshot?.applied_recommendations ?? []).map((item) => (
                     <div className="recommendation-card applied" key={item.recommendation_id}>
                       <strong>{item.recommendation_type}</strong>
@@ -1974,7 +2079,7 @@ export function App() {
                   ))}
                 </div>
                 <div>
-                  <h3>Pending review</h3>
+                  <h3>검수 대기</h3>
                   {(reviewSnapshot?.pending_recommendations ?? []).map((item) => {
                     const mappedField = mapRecommendationTypeToEditingField(
                       item.recommendation_type,
@@ -1999,7 +2104,7 @@ export function App() {
                           }
                           type="button"
                         >
-                          Review {item.target_segment_id} in editor
+                          추천 검수 · {item.target_segment_id}
                         </button>
                       </div>
                     );
@@ -2011,8 +2116,8 @@ export function App() {
             <article className="panel">
               <div className="panel-header">
                 <div>
-                  <p className="section-kicker">Flags and actions</p>
-                  <h2>Review flags</h2>
+                  <p className="section-kicker">표시</p>
+                  <h2>검수 표시</h2>
                 </div>
               </div>
               <div className="flag-list">
@@ -2026,7 +2131,7 @@ export function App() {
                       onClick={() => openSegmentInEditor(flag.segment_id)}
                       type="button"
                     >
-                      Inspect {flag.segment_id} in editor
+                      편집 확인 · {flag.segment_id}
                     </button>
                   </div>
                 ))}
@@ -2042,7 +2147,7 @@ export function App() {
                         onClick={() => void handleApproveRecommendation()}
                         type="button"
                       >
-                        {action}
+                        {formatReviewActionLabel(action)}
                       </button>
                     );
                   }
@@ -2055,13 +2160,13 @@ export function App() {
                         onClick={handleMarkRecommendationForManualEdit}
                         type="button"
                       >
-                        {action}
+                        {formatReviewActionLabel(action)}
                       </button>
                     );
                   }
                   return (
                     <button className="action-button" key={action} type="button">
-                      {action}
+                      {formatReviewActionLabel(action)}
                     </button>
                   );
                 })}
@@ -2075,8 +2180,8 @@ export function App() {
             <article className="panel">
               <div className="panel-header">
                 <div>
-                  <p className="section-kicker">Editing session</p>
-                  <h2>Timeline-centered editor shell</h2>
+                  <p className="section-kicker">편집</p>
+                  <h2>타임라인 편집기</h2>
                 </div>
               </div>
               <div className="action-row">
@@ -2086,7 +2191,7 @@ export function App() {
                   onClick={() => void handleStartEditingSession()}
                   type="button"
                 >
-                  {isStartingEditingSession ? "Starting editing session..." : "Start editing session"}
+                  {isStartingEditingSession ? "편집 시작 중" : "편집 시작"}
                 </button>
               </div>
               {editingSessionRestoreError ? (
@@ -2099,39 +2204,39 @@ export function App() {
                 <>
                   <dl className="summary-list">
                     <div>
-                      <dt>Session ID</dt>
+                      <dt>세션 ID</dt>
                       <dd>{editingSession.session_id}</dd>
                     </div>
                     <div>
-                      <dt>Timeline ID</dt>
+                      <dt>타임라인 ID</dt>
                       <dd>{editingSession.timeline_id}</dd>
                     </div>
                     <div>
-                      <dt>Segments</dt>
+                      <dt>세그먼트</dt>
                       <dd>{editingSession.segments.length}</dd>
                     </div>
                     <div>
-                      <dt>Mutation history</dt>
+                      <dt>수정 기록</dt>
                       <dd>{editingSession.history.length}</dd>
                     </div>
                     <div>
-                      <dt>Changed segments</dt>
+                      <dt>변경 세그먼트</dt>
                       <dd>{changedSegmentIds.size}</dd>
                     </div>
                     <div>
-                      <dt>Preserved segments</dt>
+                      <dt>유지 세그먼트</dt>
                       <dd>{preservedEditingSegments.length}</dd>
                     </div>
                   </dl>
                   <label className="field">
-                    <span>Target segment</span>
+                    <span>대상 세그먼트</span>
                     <select
                       onChange={(event) => handleSelectEditingSegment(event.target.value)}
                       value={selectedEditingSegmentId ?? ""}
                     >
                       {editingSession.segments.map((segment) => (
                         <option key={segment.segment_id} value={segment.segment_id}>
-                          {`Target ${formatSeconds(segment.start_sec, segment.end_sec)}`}
+                          {`대상 ${formatSeconds(segment.start_sec, segment.end_sec)}`}
                         </option>
                       ))}
                     </select>
@@ -2150,7 +2255,7 @@ export function App() {
                       >
                         <strong>{segment.segment_id}</strong>
                         <span>
-                          {changedSegmentIds.has(segment.segment_id) ? "changed" : "preserved"}
+                          {changedSegmentIds.has(segment.segment_id) ? "변경" : "유지"}
                         </span>
                       </button>
                     ))}
@@ -2189,8 +2294,8 @@ export function App() {
                       type="button"
                     >
                       {isRequestingRegenerationPreflight
-                        ? "Requesting preflight..."
-                        : "Request regeneration preflight"}
+                        ? "사전 확인 중"
+                        : "사전 확인"}
                     </button>
                     <button
                       className="action-button primary"
@@ -2206,8 +2311,8 @@ export function App() {
                       type="button"
                     >
                       {isRunningPartialRegeneration
-                        ? "Running partial regeneration..."
-                        : "Run partial regeneration"}
+                        ? "부분 재생성 중"
+                        : "부분 재생성"}
                     </button>
                   </div>
                   {partialRegenerationPreflight ? (
@@ -2218,53 +2323,52 @@ export function App() {
                           partialRegenerationPreflight.predicted_review_status_after_rerun,
                         )}
                       </p>
-                      <h3>Preflight scope</h3>
+                      <h3>사전 확인 범위</h3>
                       <div className="clip-list">
                         {partialRegenerationPreflight.segment_ids.map((segmentId) => (
-                          <span key={segmentId}>{`${segmentId} included in preflight scope`}</span>
+                          <span key={segmentId}>{`${segmentId} 포함`}</span>
                         ))}
                       </div>
                       <div className="clip-list">
                         {partialRegenerationPreflight.fields.map((field) => (
-                          <span key={field}>{`${formatFieldLabel(field)} field selected for preflight`}</span>
+                          <span key={field}>{`${formatFieldLabel(field)} 선택`}</span>
                         ))}
                       </div>
                       <p>
-                        Preflight is read-only. The timeline draft stays unchanged until you run
-                        partial regeneration.
+                        읽기 전용 · 타임라인 유지
                       </p>
                       {partialRegenerationPreflight.prediction_reasons.length > 0 ? (
                         <div className="clip-list">
                           {partialRegenerationPreflight.prediction_reasons.map((reason) => (
-                            <span key={reason}>{reason}</span>
+                            <span key={reason}>{formatOperatorNote(reason)}</span>
                           ))}
                         </div>
                       ) : null}
-                      <h3>Expected affected output areas</h3>
+                      <h3>영향 출력</h3>
                       <div className="clip-list">
                         {partialRegenerationPreflight.affected_output_areas.map((area) => (
                           <span key={area}>{formatAffectedOutputArea(area)}</span>
                         ))}
                       </div>
-                      <h3>Downstream rerun steps</h3>
+                      <h3>다음 작업</h3>
                       <div className="clip-list">
                         {partialRegenerationPreflight.downstream_steps.map((step) => (
-                          <span key={step}>{step}</span>
+                          <span key={step}>{formatWorkflowStep(step)}</span>
                         ))}
                       </div>
                     </div>
                   ) : null}
                 </>
               ) : (
-                <p className="empty-state">Start an editing session from the latest timeline draft.</p>
+                <p className="empty-state">편집 세션 없음</p>
               )}
             </article>
 
             <article className="panel">
               <div className="panel-header">
                 <div>
-                  <p className="section-kicker">Run validation</p>
-                  <h2>Changed segment focus</h2>
+                  <p className="section-kicker">검증</p>
+                  <h2>변경 세그먼트</h2>
                 </div>
               </div>
               {editingSession ? (
@@ -2272,61 +2376,60 @@ export function App() {
                   {partialRegenerationRun ? (
                     <div className="track-card">
                       <h3>{partialRegenerationRun.job_id}</h3>
-                      <p>{partialRegenerationRun.status}</p>
-                      <p>{partialRegenerationRun.delta?.timeline_id ?? "timeline pending"}</p>
-                      <h3>Resumed rerun scope</h3>
-                      <p>{`${resumedScopeSegmentIds.length} ${resumedScopeSegmentIds.length === 1 ? "segment" : "segments"} in scope`}</p>
+                      <p>{formatStatusLabel(partialRegenerationRun.status)}</p>
+                      <p>{partialRegenerationRun.delta?.timeline_id ?? "타임라인 대기"}</p>
+                      <h3>재개 범위</h3>
+                      <p>{`범위 ${resumedScopeSegmentIds.length}개`}</p>
                       <div className="clip-list">
                         {resumedScopeSegmentIds.map((segmentId) => (
-                          <span key={segmentId}>{`${segmentId} included in resumed scope`}</span>
+                          <span key={segmentId}>{`${segmentId} 포함`}</span>
                         ))}
                       </div>
                       <div className="clip-list">
                         {resumedScopeFields.map((field) => (
-                          <span key={field}>{`${formatFieldLabel(field)} field resumed`}</span>
+                          <span key={field}>{`${formatFieldLabel(field)} 재개`}</span>
                         ))}
                       </div>
                       {resumedScopeSegmentIds.length > 1 ? (
                         <p>
-                          Multi-segment resumed scope is readable here, but not mapped into
-                          single-segment editor defaults.
+                          다중 세그먼트 · 수동 확인
                         </p>
                       ) : null}
-                      <p>{`Changed segments ${changedSegmentIds.size}`}</p>
-                      <p>{`Preserved segments ${preservedEditingSegments.length}`}</p>
+                      <p>{`변경 ${changedSegmentIds.size}`}</p>
+                      <p>{`유지 ${preservedEditingSegments.length}`}</p>
                       {(partialRegenerationRun.delta?.regenerated_segments ?? []).map((segment) => (
                         <div className="clip-card" key={String(segment.segment_id ?? Math.random())}>
-                          <strong>{`${String(segment.segment_id ?? "segment")} changed in current run`}</strong>
+                          <strong>{`${String(segment.segment_id ?? "세그먼트")} 변경`}</strong>
                           {Array.isArray(segment.output_changes)
                             ? (segment.output_changes as unknown[]).map((change) => (
-                                <span key={String(change)}>{String(change)}</span>
+                                <span key={String(change)}>{formatOperatorNote(String(change))}</span>
                               ))
                             : null}
                         </div>
                       ))}
                     </div>
                   ) : (
-                    <p className="empty-state">Run partial regeneration to inspect changed outputs.</p>
+                    <p className="empty-state">부분 재생성 필요</p>
                   )}
                   <div>
-                    <h3>Preserved timeline area</h3>
+                    <h3>유지 영역</h3>
                     <div className="clip-list">
                       {preservedEditingSegments.map((segment) => (
-                        <span key={segment.segment_id}>{`${segment.segment_id} preserved from prior timeline`}</span>
+                        <span key={segment.segment_id}>{`${segment.segment_id} 유지`}</span>
                       ))}
                     </div>
                   </div>
                 </>
               ) : (
-                <p className="empty-state">No editing session loaded yet.</p>
+                <p className="empty-state">편집 세션 없음</p>
               )}
             </article>
 
             <article className="panel">
               <div className="panel-header">
                 <div>
-                  <p className="section-kicker">Decision support</p>
-                  <h2>Operator review decision loop</h2>
+                  <p className="section-kicker">판단</p>
+                  <h2>검수 결정</h2>
                 </div>
               </div>
               {editingSession ? (
@@ -2334,47 +2437,47 @@ export function App() {
                   <>
                     <dl className="summary-list">
                       <div>
-                        <dt>Ready changed segments</dt>
+                        <dt>준비 변경</dt>
                         <dd>{readyChangedSegments.length}</dd>
                       </div>
                       <div>
-                        <dt>Review blockers</dt>
+                        <dt>보류 항목</dt>
                         <dd>{decisionBlockerCount}</dd>
                       </div>
                     </dl>
-                    <p>{`Ready changed segments ${readyChangedSegments.length}`}</p>
-                    <p>{`Review blockers ${decisionBlockerCount}`}</p>
+                    <p>{`준비 ${readyChangedSegments.length}`}</p>
+                    <p>{`보류 ${decisionBlockerCount}`}</p>
                     <div className="track-card">
-                      <h3>Changed segment readiness</h3>
+                      <h3>변경 준비</h3>
                       <div className="clip-list">
                         {changedEditingSegments.map((segment) => (
                           <span key={segment.segment_id}>
                             {segment.review_required
-                              ? `${segment.segment_id} still needs operator review`
-                              : `${segment.segment_id} ready for operator sign-off`}
+                              ? `${segment.segment_id} 검수 필요`
+                              : `${segment.segment_id} 승인 준비`}
                           </span>
                         ))}
                       </div>
                     </div>
                     <div className="track-card">
-                      <h3>Changed output checklist</h3>
+                      <h3>출력 체크</h3>
                       <div className="clip-list">
                         {changedOutputChecklist.map((item) => (
-                          <span key={item}>{item}</span>
+                          <span key={item}>{formatOperatorNote(item)}</span>
                         ))}
                       </div>
                     </div>
                     <div className="track-card">
-                      <h3>Decision cue</h3>
+                      <h3>판단</h3>
                       <strong>{decisionCue?.title}</strong>
                       <p>{decisionCue?.body}</p>
                     </div>
                     <div className="track-card">
-                      <h3>Preserved segment stability</h3>
+                      <h3>유지 안정</h3>
                       <div className="clip-list">
                         {preservedEditingSegments.map((segment) => (
                           <span key={segment.segment_id}>
-                            {`${segment.segment_id} remains stable outside the current rerun`}
+                            {`${segment.segment_id} 유지`}
                           </span>
                         ))}
                       </div>
@@ -2382,42 +2485,42 @@ export function App() {
                   </>
                 ) : (
                   <p className="empty-state">
-                    Run partial regeneration to open the operator decision loop.
+                    부분 재생성 필요
                   </p>
                 )
               ) : (
-                <p className="empty-state">No editing session loaded yet.</p>
+                <p className="empty-state">편집 세션 없음</p>
               )}
             </article>
 
             <article className="panel">
               <div className="panel-header">
                 <div>
-                  <p className="section-kicker">Selected segment</p>
-                  <h2>Selected segment detail</h2>
+                  <p className="section-kicker">선택</p>
+                  <h2>세그먼트 상세</h2>
                 </div>
               </div>
               {selectedEditingSegment && selectedEditingDraft ? (
                 <div className="segment-card">
                   <div className="segment-heading">
-                    <strong>Selected focus</strong>
+                    <strong>선택 항목</strong>
                     <span
                       className={selectedEditingSegment.review_required ? "pill warning" : "pill okay"}
                     >
-                      {selectedEditingSegment.review_required ? "review required" : "ready"}
+                      {selectedEditingSegment.review_required ? "검수 필요" : "준비"}
                     </span>
                   </div>
                   <span>{formatSeconds(selectedEditingSegment.start_sec, selectedEditingSegment.end_sec)}</span>
                   <p>{selectedEditingDraft.captionText}</p>
-                  <span>{selectedEditingDraft.brollAssetId || "No B-roll override"}</span>
+                  <span>{selectedEditingDraft.brollAssetId || "B롤 없음"}</span>
                   <span>
-                    {selectedEditingDraft.explanationText ? "Explanation card loaded" : "No explanation card"}
+                    {selectedEditingDraft.explanationText ? "설명 카드 있음" : "설명 카드 없음"}
                   </span>
-                  <span>{selectedEditingDraft.imageAssetId || "No image overlay"}</span>
-                  <span>{selectedEditingDraft.tableText || "No table overlay"}</span>
-                  <span>{selectedEditingDraft.ttsAssetId || "No TTS replacement"}</span>
+                  <span>{selectedEditingDraft.imageAssetId || "이미지 없음"}</span>
+                  <span>{selectedEditingDraft.tableText || "표 없음"}</span>
+                  <span>{selectedEditingDraft.ttsAssetId || "TTS 없음"}</span>
                   <label className="field">
-                    <span>Caption</span>
+                    <span>자막</span>
                     <input
                       onChange={(event) =>
                         updateEditingDraft(selectedEditingSegment.segment_id, {
@@ -2446,10 +2549,10 @@ export function App() {
                     }
                     type="button"
                   >
-                    Save caption
+                    자막 저장
                   </button>
                   <label className="field">
-                    <span>Cut action</span>
+                    <span>컷</span>
                     <select
                       onChange={(event) =>
                         updateEditingDraft(selectedEditingSegment.segment_id, {
@@ -2458,9 +2561,9 @@ export function App() {
                       }
                       value={selectedEditingDraft.cutAction}
                     >
-                      <option value="keep">keep</option>
-                      <option value="remove">remove</option>
-                      <option value="trim">trim</option>
+                      <option value="keep">유지</option>
+                      <option value="remove">삭제</option>
+                      <option value="trim">자르기</option>
                     </select>
                   </label>
                   <button
@@ -2482,17 +2585,17 @@ export function App() {
                     }
                     type="button"
                   >
-                    Save cut action
+                    컷 저장
                   </button>
                   <label className="field">
-                    <span>B-roll folder path</span>
+                    <span>B롤 폴더</span>
                     <input
                       onChange={(event) => setBrollFolderPath(event.target.value)}
                       value={brollFolderPath}
                     />
                   </label>
                   <label className="field">
-                    <span>B-roll source paths</span>
+                    <span>B롤 파일</span>
                     <textarea
                       onChange={(event) => setBrollSourcePaths(event.target.value)}
                       rows={3}
@@ -2500,7 +2603,7 @@ export function App() {
                     />
                   </label>
                   <label className="field">
-                    <span>B-roll import tags</span>
+                    <span>B롤 태그</span>
                     <input
                       onChange={(event) => setBrollImportTags(event.target.value)}
                       value={brollImportTags}
@@ -2516,11 +2619,11 @@ export function App() {
                     onClick={() => void handleImportBrollBatch()}
                     type="button"
                   >
-                    {isImportingBroll ? "Importing B-roll folder..." : "Import B-roll folder"}
+                    {isImportingBroll ? "B롤 가져오는 중" : "B롤 가져오기"}
                   </button>
                   {brollImportError ? <p className="error-copy">{brollImportError}</p> : null}
                   <label className="field">
-                    <span>B-roll asset picker</span>
+                    <span>B롤 선택</span>
                     <select
                       onChange={(event) =>
                         updateEditingDraft(selectedEditingSegment.segment_id, {
@@ -2529,13 +2632,13 @@ export function App() {
                       }
                       value={selectedEditingDraft.brollAssetId}
                     >
-                      <option value="">No B-roll asset selected</option>
+                      <option value="">B롤 미선택</option>
                       {selectedEditingDraft.brollAssetId &&
                       !brollAssets.some(
                         (asset) => asset.asset_id === selectedEditingDraft.brollAssetId,
                       ) ? (
                         <option value={selectedEditingDraft.brollAssetId}>
-                          Current manual ID
+                          현재 수동 ID
                         </option>
                       ) : null}
                       {brollAssets.map((asset) => {
@@ -2553,10 +2656,10 @@ export function App() {
                     <p className="error-copy">{brollAssetLoadError}</p>
                   ) : null}
                   {!brollAssetLoadError && brollAssets.length === 0 ? (
-                    <p className="empty-state">No archived B-roll assets.</p>
+                    <p className="empty-state">보관 B롤 없음</p>
                   ) : null}
                   <label className="field">
-                    <span>B-roll asset ID</span>
+                    <span>B롤 자산 ID</span>
                     <input
                       onChange={(event) =>
                         updateEditingDraft(selectedEditingSegment.segment_id, {
@@ -2586,7 +2689,7 @@ export function App() {
                     }
                     type="button"
                   >
-                    Save B-roll override
+                    B롤 저장
                   </button>
                   {selectedEditingSegment.broll_override ? (
                     <button
@@ -2610,11 +2713,11 @@ export function App() {
                       }
                       type="button"
                     >
-                      Clear B-roll override
+                      B롤 해제
                     </button>
                   ) : null}
                   <label className="field">
-                    <span>Music asset ID</span>
+                    <span>음악 자산 ID</span>
                     <input
                       onChange={(event) =>
                         updateEditingDraft(selectedEditingSegment.segment_id, {
@@ -2652,11 +2755,11 @@ export function App() {
                     }
                     type="button"
                   >
-                    Save music override
+                    음악 저장
                   </button>
                   {!selectedEditingDraft.musicAssetId ? (
                     <p className="meta-copy" id={`${selectedEditingSegment.segment_id}-music-save-help`}>
-                      Music asset ID required before saving.
+                      음악 ID 필요
                     </p>
                   ) : null}
                   {selectedEditingSegment.music_override ? (
@@ -2681,11 +2784,11 @@ export function App() {
                       }
                       type="button"
                     >
-                      Clear music override
+                      음악 해제
                     </button>
                   ) : null}
                   <label className="field">
-                    <span>Explanation title</span>
+                    <span>설명 제목</span>
                     <input
                       onChange={(event) =>
                         updateEditingDraft(selectedEditingSegment.segment_id, {
@@ -2696,7 +2799,7 @@ export function App() {
                     />
                   </label>
                   <label className="field">
-                    <span>Explanation body</span>
+                    <span>설명 본문</span>
                     <input
                       onChange={(event) =>
                         updateEditingDraft(selectedEditingSegment.segment_id, {
@@ -2707,7 +2810,7 @@ export function App() {
                     />
                   </label>
                   <label className="field">
-                    <span>Explanation text</span>
+                    <span>설명 텍스트</span>
                     <textarea
                       onChange={(event) =>
                         updateEditingDraft(selectedEditingSegment.segment_id, {
@@ -2746,14 +2849,14 @@ export function App() {
                     }
                     type="button"
                   >
-                    Save explanation card
+                    설명 저장
                   </button>
                   {!selectedEditingDraft.explanationText ? (
                     <p
                       className="meta-copy"
                       id={`${selectedEditingSegment.segment_id}-explanation-save-help`}
                     >
-                      Explanation text required before saving.
+                      설명 텍스트 필요
                     </p>
                   ) : null}
                   {selectedEditingSegment.visual_overlays.some(
@@ -2779,11 +2882,11 @@ export function App() {
                       }
                       type="button"
                     >
-                      Remove explanation card
+                      설명 삭제
                     </button>
                   ) : null}
                   <label className="field">
-                    <span>Image overlay asset ID</span>
+                    <span>이미지 자산 ID</span>
                     <input
                       onChange={(event) =>
                         updateEditingDraft(selectedEditingSegment.segment_id, {
@@ -2794,7 +2897,7 @@ export function App() {
                     />
                   </label>
                   <label className="field">
-                    <span>Image overlay text</span>
+                    <span>이미지 텍스트</span>
                     <textarea
                       onChange={(event) =>
                         updateEditingDraft(selectedEditingSegment.segment_id, {
@@ -2832,14 +2935,14 @@ export function App() {
                     }
                     type="button"
                   >
-                    Save image overlay
+                    이미지 저장
                   </button>
                   {!selectedEditingDraft.imageAssetId ? (
                     <p
                       className="meta-copy"
                       id={`${selectedEditingSegment.segment_id}-image-save-help`}
                     >
-                      Image overlay asset ID required before saving.
+                      이미지 ID 필요
                     </p>
                   ) : null}
                   {Boolean(readOverlay(selectedEditingSegment, "image_overlay")) ? (
@@ -2861,11 +2964,11 @@ export function App() {
                       }
                       type="button"
                     >
-                      Remove image overlay
+                      이미지 삭제
                     </button>
                   ) : null}
                   <label className="field">
-                    <span>Table columns</span>
+                    <span>표 열</span>
                     <input
                       onChange={(event) =>
                         updateEditingDraft(selectedEditingSegment.segment_id, {
@@ -2876,7 +2979,7 @@ export function App() {
                     />
                   </label>
                   <label className="field">
-                    <span>Table rows</span>
+                    <span>표 행</span>
                     <textarea
                       onChange={(event) =>
                         updateEditingDraft(selectedEditingSegment.segment_id, {
@@ -2887,7 +2990,7 @@ export function App() {
                     />
                   </label>
                   <label className="field">
-                    <span>Table text</span>
+                    <span>표 텍스트</span>
                     <textarea
                       onChange={(event) =>
                         updateEditingDraft(selectedEditingSegment.segment_id, {
@@ -2937,14 +3040,14 @@ export function App() {
                     }
                     type="button"
                   >
-                    Save table overlay
+                    표 저장
                   </button>
                   {!selectedEditingDraft.tableText ? (
                     <p
                       className="meta-copy"
                       id={`${selectedEditingSegment.segment_id}-table-save-help`}
                     >
-                      Table text required before saving.
+                      표 텍스트 필요
                     </p>
                   ) : null}
                   {Boolean(readOverlay(selectedEditingSegment, "table_overlay")) ? (
@@ -2966,11 +3069,11 @@ export function App() {
                       }
                       type="button"
                     >
-                      Remove table overlay
+                      표 삭제
                     </button>
                   ) : null}
                   <label className="field">
-                    <span>TTS recommendation ID</span>
+                    <span>TTS 추천 ID</span>
                     <input
                       onChange={(event) =>
                         updateEditingDraft(selectedEditingSegment.segment_id, {
@@ -2981,7 +3084,7 @@ export function App() {
                     />
                   </label>
                   <label className="field">
-                    <span>TTS asset ID</span>
+                    <span>TTS 자산 ID</span>
                     <input
                       onChange={(event) =>
                         updateEditingDraft(selectedEditingSegment.segment_id, {
@@ -3020,14 +3123,14 @@ export function App() {
                     }
                     type="button"
                   >
-                    Save TTS replacement
+                    TTS 저장
                   </button>
                   {!selectedEditingDraft.ttsRecommendationId || !selectedEditingDraft.ttsAssetId ? (
                     <p
                       className="meta-copy"
                       id={`${selectedEditingSegment.segment_id}-tts-save-help`}
                     >
-                      TTS recommendation ID and asset ID required before saving.
+                      TTS 추천 ID · 자산 ID 필요
                     </p>
                   ) : null}
                   {selectedEditingSegment.tts_replacement ? (
@@ -3049,20 +3152,20 @@ export function App() {
                       }
                       type="button"
                     >
-                      Clear TTS replacement
+                      TTS 해제
                     </button>
                   ) : null}
                 </div>
               ) : (
-                <p className="empty-state">Choose a session segment to inspect its draft state.</p>
+                <p className="empty-state">세그먼트 선택</p>
               )}
             </article>
 
             <article className="panel">
               <div className="panel-header">
                 <div>
-                  <p className="section-kicker">Timeline delta</p>
-                  <h2>Track impact summary</h2>
+                  <p className="section-kicker">변경</p>
+                  <h2>트랙 영향</h2>
                 </div>
               </div>
               {timelineJob ? (
@@ -3074,7 +3177,7 @@ export function App() {
                           <h3>{formatTrackLabel(track.track_type)}</h3>
                           <p>{track.track_id}</p>
                         </div>
-                        <span className="pill">{track.clips.length} clips</span>
+                        <span className="pill">{track.clips.length}개</span>
                       </header>
                       <div className="clip-list">
                         {track.clips.map((clip) => (
@@ -3082,8 +3185,8 @@ export function App() {
                             <strong>{clip.segment_id}</strong>
                             <span>
                               {changedSegmentIds.has(clip.segment_id)
-                                ? "changed in current run"
-                                : "preserved from prior timeline"}
+                                ? "현재 변경"
+                                : "기존 유지"}
                             </span>
                             <span>{clip.asset_uri}</span>
                           </div>
@@ -3093,7 +3196,7 @@ export function App() {
                   ))}
                 </div>
               ) : (
-                <p className="empty-state">No regenerated timeline available yet.</p>
+                <p className="empty-state">재생성 타임라인 없음</p>
               )}
             </article>
           </section>
