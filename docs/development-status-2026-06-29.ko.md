@@ -1,7 +1,7 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 200. 2026-07-06 Phase C shared operator review default text helper closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
-> 이 문서의 `## 1`부터 `## 199`까지는 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 200`만 기준으로 본다.
+> 현재 authoritative 상태/next slice 판단은 `## 201. 2026-07-06 broader rerun recovered nested target_segment_id pending recommendation regression closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 이 문서의 `## 1`부터 `## 200`까지는 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 201`만 기준으로 본다.
 > 단, `2일 내 1차 데모 완성` 실행 레일은 `## 189`의 장기 우선순위를 그대로 넓게 집행하지 않고, `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`의 축소된 실행 계획을 우선 적용한다.
 
 ## 1. 결론
@@ -8417,6 +8417,45 @@ focused 검증 메모:
 - stale-shape helper 중복과 dead helper 후보 중 다음 최소 정리 대상 1개를 다시 좁힌다
 - 역할이 끝난 중복 메모 문서는 삭제보다 역할 명시가 맞는지 먼저 판단한다
 - 최종 closeout 직전 broad 재검증이 정말 필요한지 마지막으로 판단한다
+
+## 201. 2026-07-06 broader rerun recovered nested target_segment_id pending recommendation regression closeout
+
+이번 후속 작업에서는 새 cleanup을 더 여는 대신 `Phase A`가 충분히 닫혔는지 확인하려고 `current-focused-parallel`과 `broader`를 다시 돌렸고, 그 과정에서 `partial regeneration` 런타임 read-path에 남아 있던 nested `target_segment_id` stale shape 회귀 1개를 발견해 최소 수정으로 복구했다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- `current-focused-parallel`은 그대로 green이었지만, full backend regression을 다시 돌리자 `test_editing_session_api_ignores_nested_target_segment_id_source_pending_recommendation_when_running_partial_regeneration` 1개가 실패했다
+- 원인은 `_runtime_pending_recommendation_identity_key(...)`가 `target_segment_id`를 무조건 `str(...).strip()`로 바꿔 nested dict stale shape도 유효한 pending recommendation identity처럼 살리던 점이었다
+- `recommendation_id`와 `target_segment_id`를 실제 string 타입일 때만 identity로 인정하도록 최소 수정하자 exact RED가 바로 GREEN으로 복구됐고, 인접 preflight 경계와 full backend regression도 다시 green으로 돌아왔다
+- editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence behavior는 바꾸지 않았다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact verification
+  - `py -m pytest tests/test_api.py -q -k "test_editing_session_api_ignores_nested_target_segment_id_source_pending_recommendation_when_running_partial_regeneration" -vv` -> RED `1 failed`, GREEN `1 passed`
+  - `py -m pytest tests/test_api.py -q -k "test_editing_session_api_filters_nested_target_segment_id_source_pending_recommendation_from_preflight_prediction" -vv` -> `1 passed`
+- focused verification
+  - `./scripts/dev-fast-path.ps1 -Mode current-focused-parallel`
+  - backend output-gating `24 passed`
+  - backend preflight `59 passed`
+  - frontend preflight `25 passed`
+  - `./scripts/dev-fast-path.ps1 -Mode preflight-backend`
+  - backend preflight `59 passed`
+- broader verification
+  - `npm run build` -> 성공
+  - `pytest -q` -> `543 passed`
+
+이 갱신으로 아래 범위는 현재 기준으로 정리됐다.
+
+1. broader rerun에서 실제로 남아 있던 nested `target_segment_id` stale shape 회귀 1개가 복구됐다
+2. current-focused-parallel, frontend build, full backend regression 기준의 자동 baseline이 다시 최신 green으로 확인됐다
+3. 이제 남은 일은 final closeout 직전의 전체 동작 검증, QA, 시스템 검증, historical 문서/찌꺼기 정리 판단 쪽으로 더 분명하게 수렴했다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 전체 동작 검증, QA, 시스템 검증을 final closeout 순서로 실제 착수할지 판단한다
+- historical 문서와 역할 종료 메모의 삭제/유지 기준을 정리한다
+- 최종 closeout 문서와 정리 커밋 단위를 설계한다
 
 ## 200. 2026-07-06 Phase C shared operator review default text helper closeout
 

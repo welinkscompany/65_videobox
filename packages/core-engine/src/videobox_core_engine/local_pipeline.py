@@ -211,9 +211,11 @@ def _is_runtime_blocking_review_flag(flag: object) -> bool:
 def _runtime_pending_recommendation_identity_key(item: object) -> tuple[str, str, str]:
     if not isinstance(item, dict):
         return ("", "", "")
+    recommendation_id = item.get("recommendation_id")
+    target_segment_id = item.get("target_segment_id")
     return (
-        str(item.get("recommendation_id") or "").strip(),
-        str(item.get("target_segment_id") or "").strip(),
+        recommendation_id.strip() if isinstance(recommendation_id, str) else "",
+        target_segment_id.strip() if isinstance(target_segment_id, str) else "",
         _canonical_runtime_recommendation_type(item.get("recommendation_type")),
     )
 
