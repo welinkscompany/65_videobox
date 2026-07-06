@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
+from videobox_core_engine.canonical_track import canonical_track_type as _canonical_track_type
 from videobox_core_engine.provider_trace import build_provider_trace
 from videobox_domain_models.recommendations import RecommendationType
 
@@ -20,10 +21,6 @@ def _canonical_recommendation_type(value: object) -> str:
 
 
 def _canonical_review_flag_code(value: object) -> str:
-    return str(value or "").strip().lower()
-
-
-def _canonical_track_type(value: object) -> str:
     return str(value or "").strip().lower()
 
 

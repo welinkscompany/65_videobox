@@ -6,6 +6,10 @@ from typing import Any
 import json
 import warnings
 
+from videobox_core_engine.canonical_track import (
+    canonical_track_type as _canonical_runtime_track_type,
+    VALID_CANONICAL_TRACK_TYPES as VALID_RUNTIME_TRACK_TYPES,
+)
 from videobox_capcut_export import CapCutExportAdapter
 from videobox_core_engine.auto_cut import AutoCutPlanner
 from videobox_core_engine.editing_session import (
@@ -58,7 +62,6 @@ VALID_RESTORED_RECOMMENDATION_TYPES = {
     RecommendationType.BGM.value,
     RecommendationType.OVERLAY.value,
 }
-VALID_RUNTIME_TRACK_TYPES = {"narration", "broll", "bgm"}
 VALID_RUNTIME_BLOCKING_REVIEW_FLAG_CODES = {
     "segment_review_required",
     "broll_review_required",
@@ -94,10 +97,6 @@ def _canonical_runtime_pending_recommendation_reason(value: object) -> str:
 
 def _canonical_runtime_review_status(value: object) -> str:
     return str(value or "draft").strip().lower() or "draft"
-
-
-def _canonical_runtime_track_type(value: object) -> str:
-    return str(value or "").strip().lower()
 
 
 def _normalize_runtime_cut_action(value: object) -> str:

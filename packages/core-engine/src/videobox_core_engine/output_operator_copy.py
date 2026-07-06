@@ -3,6 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from videobox_core_engine.canonical_track import (
+    canonical_track_type as _canonical_track_type,
+    VALID_CANONICAL_TRACK_TYPES as VALID_PROMPT_TRACK_TYPES,
+)
 from videobox_core_engine.gemini_runtime import GeminiStructuredGenerationError
 from videobox_core_engine.local_first_runtime import LocalFirstStructuredGenerationError
 from videobox_core_engine.prompt_pending_recommendation import (
@@ -25,17 +29,12 @@ def _canonical_review_status(value: object) -> str:
     return str(value or "approved").strip().lower() or "approved"
 
 
-def _canonical_track_type(value: object) -> str:
-    return str(value or "").strip().lower()
-
-
 def _normalize_boolish(value: object) -> bool:
     if isinstance(value, str):
         return value.strip().lower() not in {"", "0", "false", "no", "off"}
     return bool(value)
 
 
-VALID_PROMPT_TRACK_TYPES = {"narration", "broll", "bgm"}
 def _is_prompt_blocking_pending_recommendation(item: object) -> bool:
     if not isinstance(item, dict):
         return False

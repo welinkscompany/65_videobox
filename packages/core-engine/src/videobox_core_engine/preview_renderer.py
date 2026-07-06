@@ -3,6 +3,11 @@ from __future__ import annotations
 from html import escape
 from typing import Any
 
+from videobox_core_engine.canonical_track import (
+    canonical_track_type as _canonical_track_type,
+    VALID_CANONICAL_TRACK_TYPES as VALID_PREVIEW_TRACK_TYPES,
+)
+
 
 def _normalize_boolish(value: object) -> bool:
     if isinstance(value, str):
@@ -20,15 +25,8 @@ def _canonical_review_status(value: object) -> str:
     return str(value or "approved").strip().lower() or "approved"
 
 
-def _canonical_track_type(value: object) -> str:
-    return str(value or "").strip().lower()
-
-
 def _canonical_source_uri(value: object) -> str:
     return str(value or "").strip()
-
-
-VALID_PREVIEW_TRACK_TYPES = {"narration", "broll", "bgm"}
 
 
 class PreviewRenderer:

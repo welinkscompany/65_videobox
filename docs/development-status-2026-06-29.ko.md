@@ -1,7 +1,7 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 193. 2026-07-06 Phase C runtime review-required wrapper removal closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
-> 이 문서의 `## 1`부터 `## 192`까지는 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 193`만 기준으로 본다.
+> 현재 authoritative 상태/next slice 판단은 `## 194. 2026-07-06 Phase C shared canonical track helper closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 이 문서의 `## 1`부터 `## 193`까지는 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 194`만 기준으로 본다.
 > 단, `2일 내 1차 데모 완성` 실행 레일은 `## 189`의 장기 우선순위를 그대로 넓게 집행하지 않고, `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`의 축소된 실행 계획을 우선 적용한다.
 
 ## 1. 결론
@@ -8411,6 +8411,49 @@ focused 검증 메모:
 1. output operator copy와 review guidance가 보는 pending recommendation row canonicalization 기준이 공통 모듈로 다시 모였다
 2. selected asset uri, identity, reason, decision state canonicalization 규칙 drift 위험이 더 줄었다
 3. 남아 있는 cleanup 후보를 고를 때 review/output prompt family의 중복은 더 많이 정리된 상태가 됐다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- stale-shape helper 중복과 dead helper 후보 중 다음 최소 정리 대상 1개를 다시 좁힌다
+- 역할이 끝난 중복 메모 문서는 삭제보다 역할 명시가 맞는지 먼저 판단한다
+- 최종 closeout 직전 broad 재검증이 정말 필요한지 마지막으로 판단한다
+
+## 194. 2026-07-06 Phase C shared canonical track helper closeout
+
+이번 후속 작업에서는 새 stale-shape 경계를 더 열지 않고, `preview_renderer.py`, `output_operator_copy.py`, `local_pipeline.py`, `review_action_mutations.py`에 흩어져 있던 track type canonicalizer와 valid track set 중복을 공통 helper로 다시 모았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- mixed-case narration track type, unknown track type, valid track set 기준은 이미 여러 exact test로 닫혀 있었지만, 구현은 파일별로 같은 `trim/lower` 함수와 같은 set 상수를 반복해서 들고 있었다
+- `canonical_track.py`에 shared `canonical_track_type`과 `VALID_CANONICAL_TRACK_TYPES`를 추가하고 각 read-path가 이를 직접 재사용하게 맞춰도 현재 preview/output/runtime/TTS apply 동작은 그대로 유지됐다
+- 이번 정리는 review/output gating, TTS approval apply, preflight/runtime segment ordering read-path가 같은 track truth를 더 직접 공유하게 만드는 code cleanup 성격의 수정이다
+- editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence behavior는 바꾸지 않았다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact verification
+  - `test_preview_renderer_matches_mixed_case_narration_track_type_for_narration_source` -> `1 passed`
+  - `test_preview_renderer_ignores_unknown_track_type_in_track_summary_surfaces` -> `1 passed`
+  - `test_output_operator_copy_builder_canonicalizes_mixed_case_track_type_in_prompt` -> `1 passed`
+  - `test_output_operator_copy_builder_ignores_unknown_track_type_in_prompt` -> `1 passed`
+  - `test_segments_for_timeline_ignores_unknown_track_type` -> `1 passed`
+  - `test_apply_approved_tts_recommendation_matches_mixed_case_narration_track_type` -> `1 passed`
+- focused verification
+  - `./scripts/dev-fast-path.ps1 -Mode output-gating`
+  - backend output-gating `24 passed`
+  - `./scripts/dev-fast-path.ps1 -Mode preflight-backend`
+  - backend preflight `59 passed`
+- broader verification
+  - 이번 turn에서는 재실행하지 않음
+  - 판단:
+    - 이번 변경은 canonical track helper 공통화만 다루는 `Phase C` 소규모 리팩터링이다
+    - 현재 자동 baseline은 직전 closeout 기준 `frontend build 성공`, `full backend regression 543 passed`를 유지한다
+
+이 갱신으로 아래 범위는 현재 기준으로 정리됐다.
+
+1. preview, output prompt, runtime segment ordering, approved TTS apply가 같은 track canonicalization 기준을 직접 공유한다
+2. mixed-case narration track type과 unknown track type 기준 drift 위험이 더 줄었다
+3. 남아 있는 cleanup 후보는 더 작은 dead helper나 역할 종료 문서 정리 쪽으로 더 수렴했다
 
 현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
 
