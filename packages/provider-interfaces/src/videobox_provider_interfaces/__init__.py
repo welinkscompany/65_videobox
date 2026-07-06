@@ -27,6 +27,10 @@ from videobox_provider_interfaces.stt import (
     STTRequest,
     STTResult,
 )
+from videobox_provider_interfaces.faster_whisper_stt import (
+    FasterWhisperSTTProvider,
+    STTTranscriptionError,
+)
 from videobox_provider_interfaces.tts import TTSProvider, TTSRequest, TTSResult
 from videobox_provider_interfaces.visual_generation import (
     VisualGenerationProvider,
@@ -44,6 +48,7 @@ __all__ = [
     "StructuredLLMProvider",
     "StructuredLLMRequest",
     "StructuredLLMResponse",
+    "FasterWhisperSTTProvider",
     "GeminiHTTPTransport",
     "GeminiRESTStructuredProvider",
     "LocalQwenHTTPTransport",
@@ -57,6 +62,7 @@ __all__ = [
     "STTRequest",
     "STTResult",
     "STTSegment",
+    "STTTranscriptionError",
     "TTSProvider",
     "TTSRequest",
     "TTSResult",

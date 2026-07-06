@@ -30,6 +30,9 @@ class AutoCutPlanner:
     def build_scene_detection_filter(self) -> str:
         return f"select='gt(scene,{self.config.scene_threshold})',showinfo"
 
+    def build_static_check_filter(self) -> str:
+        return f"select='gt(scene,{self.config.static_check_scene_threshold})',showinfo"
+
     def build_blackdetect_filter(self) -> str:
         return (
             f"blackdetect=d={self.config.blackdetect_min_duration}:"

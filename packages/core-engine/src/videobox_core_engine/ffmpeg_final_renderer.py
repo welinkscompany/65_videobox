@@ -1,0 +1,224 @@
+from __future__ import annotations
+
+import subprocess
+import tempfile
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+from videobox_core_engine.canonical_track import canonical_track_type
+from videobox_storage.local_project_store import LocalProjectStore
+from videobox_storage.timeline_clip_source_resolution import (
+    ResolvedClipSource,
+    TimelineClipSourceError,
+    resolve_broll_clip_source,
+    resolve_generic_asset_uri,
+    resolve_narration_clip_source,
+)
+
+
+class FinalRenderError(RuntimeError):
+    pass
+
+
+@dataclass(slots=True)
+class FfmpegFinalRenderer:
+    store: LocalProjectStore
+    ffmpeg_binary: str = "ffmpeg"
+    render_timeout_seconds: int = 1800
+    video_width: int = 1280
+    video_height: int = 720
+    video_fps: int = 30
+    bgm_volume: float = 0.25
+
+    def _run(self, command: list[str]) -> subprocess.CompletedProcess:
+        try:
+            return subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=self.render_timeout_seconds,
+            )
+        except FileNotFoundError as exc:
+            raise FinalRenderError(f"'{self.ffmpeg_binary}' binary was not found. Install ffmpeg.") from exc
+        except subprocess.TimeoutExpired as exc:
+            raise FinalRenderError(f"ffmpeg timed out after {self.render_timeout_seconds}s.") from exc
+
+    def _resolve_narration_clip_source(
+        self, *, project_id: str, timeline: dict[str, Any], clip: dict[str, Any]
+    ) -> ResolvedClipSource:
+        try:
+            return resolve_narration_clip_source(store=self.store, project_id=project_id, timeline=timeline, clip=clip)
+        except TimelineClipSourceError as exc:
+            raise FinalRenderError(str(exc)) from exc
+
+    def _resolve_broll_clip_source(self, *, project_id: str, clip: dict[str, Any]) -> ResolvedClipSource:
+        return resolve_broll_clip_source(store=self.store, project_id=project_id, clip=clip)
+
+    def _resolve_generic_asset_uri(self, *, project_id: str, asset_uri: str) -> Path:
+        return resolve_generic_asset_uri(store=self.store, project_id=project_id, asset_uri=asset_uri)
+
+    def _extract_segment(self, *, source: ResolvedClipSource, output_path: Path, video: bool) -> None:
+        command = [self.ffmpeg_binary, "-y"]
+        if source.trim_start_sec:
+            command += ["-ss", str(source.trim_start_sec)]
+        command += ["-i", str(source.path)]
+        if source.trim_duration_sec is not None:
+            command += ["-t", str(source.trim_duration_sec)]
+        if video:
+            command += [
+                "-an",
+                "-vf",
+                f"scale={self.video_width}:{self.video_height}:force_original_aspect_ratio=decrease,"
+                f"pad={self.video_width}:{self.video_height}:(ow-iw)/2:(oh-ih)/2,setsar=1",
+                "-r",
+                str(self.video_fps),
+                "-c:v",
+                "libx264",
+                "-preset",
+                "veryfast",
+                "-crf",
+                "20",
+            ]
+        else:
+            command += ["-vn", "-ar", "48000", "-ac", "2", "-c:a", "pcm_s16le"]
+        command.append(str(output_path))
+        result = self._run(command)
+        if result.returncode != 0:
+            raise FinalRenderError(f"ffmpeg failed extracting segment from '{source.path}': {result.stderr[-800:]}")
+
+    def _concat(self, *, segment_paths: list[Path], output_path: Path, work_dir: Path) -> None:
+        list_path = work_dir / f"{output_path.stem}_concat_list.txt"
+        list_path.write_text(
+            "\n".join(f"file '{segment_path.as_posix()}'" for segment_path in segment_paths),
+            encoding="utf-8",
+        )
+        command = [
+            self.ffmpeg_binary,
+            "-y",
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            str(list_path),
+            "-c",
+            "copy",
+            str(output_path),
+        ]
+        result = self._run(command)
+        if result.returncode != 0:
+            raise FinalRenderError(f"ffmpeg failed concatenating segments into '{output_path}': {result.stderr[-800:]}")
+
+    def render_timeline_to_mp4(
+        self,
+        *,
+        project_id: str,
+        timeline: dict[str, Any],
+        output_path: Path,
+        subtitle_file_path: Path | None = None,
+    ) -> Path:
+        narration_clips: list[dict[str, Any]] = []
+        broll_clips: list[dict[str, Any]] = []
+        bgm_clips: list[dict[str, Any]] = []
+        for track in timeline.get("tracks", []):
+            if not isinstance(track, dict):
+                continue
+            track_type = canonical_track_type(track.get("track_type"))
+            clips = track.get("clips", [])
+            if not isinstance(clips, list):
+                continue
+            valid_clips = sorted(
+                (clip for clip in clips if isinstance(clip, dict)),
+                key=lambda clip: float(clip.get("start_sec", 0.0)),
+            )
+            if track_type == "narration":
+                narration_clips.extend(valid_clips)
+            elif track_type == "broll":
+                broll_clips.extend(valid_clips)
+            elif track_type == "bgm":
+                bgm_clips.extend(valid_clips)
+
+        if not narration_clips:
+            raise FinalRenderError("Timeline has no narration clips to render.")
+        if not broll_clips:
+            raise FinalRenderError("Timeline has no broll clips to render.")
+
+        with tempfile.TemporaryDirectory(prefix="videobox_render_") as raw_work_dir:
+            work_dir = Path(raw_work_dir)
+
+            narration_segment_paths = []
+            for index, clip in enumerate(narration_clips, start=1):
+                source = self._resolve_narration_clip_source(project_id=project_id, timeline=timeline, clip=clip)
+                segment_path = work_dir / f"narration_{index:03d}.wav"
+                self._extract_segment(source=source, output_path=segment_path, video=False)
+                narration_segment_paths.append(segment_path)
+            narration_path = work_dir / "narration_full.wav"
+            self._concat(segment_paths=narration_segment_paths, output_path=narration_path, work_dir=work_dir)
+
+            broll_segment_paths = []
+            for index, clip in enumerate(broll_clips, start=1):
+                source = self._resolve_broll_clip_source(project_id=project_id, clip=clip)
+                segment_path = work_dir / f"broll_{index:03d}.mp4"
+                self._extract_segment(source=source, output_path=segment_path, video=True)
+                broll_segment_paths.append(segment_path)
+            video_path = work_dir / "broll_full.mp4"
+            self._concat(segment_paths=broll_segment_paths, output_path=video_path, work_dir=work_dir)
+
+            audio_path = narration_path
+            if bgm_clips:
+                bgm_source = self._resolve_generic_asset_uri(
+                    project_id=project_id, asset_uri=str(bgm_clips[0].get("asset_uri") or "")
+                )
+                mixed_path = work_dir / "audio_with_bgm.wav"
+                command = [
+                    self.ffmpeg_binary,
+                    "-y",
+                    "-i",
+                    str(narration_path),
+                    "-stream_loop",
+                    "-1",
+                    "-i",
+                    str(bgm_source),
+                    "-filter_complex",
+                    f"[1:a]volume={self.bgm_volume}[bgm];[0:a][bgm]amix=inputs=2:duration=first[aout]",
+                    "-map",
+                    "[aout]",
+                    str(mixed_path),
+                ]
+                result = self._run(command)
+                if result.returncode != 0:
+                    raise FinalRenderError(f"ffmpeg failed mixing bgm: {result.stderr[-800:]}")
+                audio_path = mixed_path
+
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            command = [
+                self.ffmpeg_binary,
+                "-y",
+                "-i",
+                str(video_path),
+                "-i",
+                str(audio_path),
+            ]
+            if subtitle_file_path is not None:
+                command += ["-i", str(subtitle_file_path), "-c:s", "mov_text", "-map", "2:s"]
+            command += [
+                "-map",
+                "0:v",
+                "-map",
+                "1:a",
+                "-c:v",
+                "copy",
+                "-c:a",
+                "aac",
+                "-shortest",
+                str(output_path),
+            ]
+            result = self._run(command)
+            if result.returncode != 0:
+                raise FinalRenderError(f"ffmpeg failed muxing final output: {result.stderr[-800:]}")
+
+        return output_path
+
+
+__all__ = ["FfmpegFinalRenderer", "FinalRenderError"]

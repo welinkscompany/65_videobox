@@ -286,6 +286,30 @@ class ApiOrchestrator:
             storage_uri=asset["storage_uri"],
         )
 
+    def register_voice_sample_asset(self, *, project_id: str, source_path: Path) -> RegisteredAsset:
+        asset = self.pipeline.register_voice_sample_asset(
+            project_id=project_id,
+            source_path=source_path,
+        )
+        return RegisteredAsset(
+            asset_id=asset["asset_id"],
+            asset_type=asset["asset_type"],
+            storage_uri=asset["storage_uri"],
+        )
+
+    def generate_tts_replacement_candidate(
+        self,
+        *,
+        project_id: str,
+        segment_text: str,
+        voice_sample_asset_id: str,
+    ) -> dict[str, Any]:
+        return self.pipeline.generate_tts_replacement_candidate(
+            project_id=project_id,
+            segment_text=segment_text,
+            voice_sample_asset_id=voice_sample_asset_id,
+        )
+
     def plan_auto_cut_segments(
         self,
         *,
@@ -303,6 +327,12 @@ class ApiOrchestrator:
             scene_timestamps=scene_timestamps,
             black_regions=black_regions,
             segment_samples=segment_samples,
+        )
+
+    def run_auto_cut_detection(self, *, project_id: str, raw_video_asset_id: str) -> dict[str, Any]:
+        return self.pipeline.run_auto_cut_detection(
+            project_id=project_id,
+            raw_video_asset_id=raw_video_asset_id,
         )
 
     def start_transcription(self, *, project_id: str, narration_asset_id: str) -> dict[str, Any]:
@@ -738,6 +768,18 @@ class ApiOrchestrator:
 
     def get_capcut_export_result(self, *, project_id: str, job_id: str) -> dict[str, Any]:
         return self.pipeline.get_capcut_export_result(project_id=project_id, job_id=job_id)
+
+    def start_final_render(self, *, project_id: str, timeline_job_id: str) -> dict[str, Any]:
+        return self.pipeline.start_final_render(project_id=project_id, timeline_job_id=timeline_job_id)
+
+    def get_final_render_result(self, *, project_id: str, job_id: str) -> dict[str, Any]:
+        return self.pipeline.get_final_render_result(project_id=project_id, job_id=job_id)
+
+    def start_capcut_draft_export(self, *, project_id: str, timeline_job_id: str) -> dict[str, Any]:
+        return self.pipeline.start_capcut_draft_export(project_id=project_id, timeline_job_id=timeline_job_id)
+
+    def get_capcut_draft_export_result(self, *, project_id: str, job_id: str) -> dict[str, Any]:
+        return self.pipeline.get_capcut_draft_export_result(project_id=project_id, job_id=job_id)
 
     def get_provider_trace_audit(
         self,

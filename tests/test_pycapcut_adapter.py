@@ -1,0 +1,117 @@
+from __future__ import annotations
+
+import shutil
+import subprocess
+from pathlib import Path
+
+import pytest
+
+from videobox_capcut_export.pycapcut_adapter import PyCapCutExportError, PyCapCutRealExportAdapter
+from videobox_domain_models.assets import AssetType
+from videobox_storage.local_project_store import LocalProjectStore
+
+FFMPEG_AVAILABLE = shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
+
+
+def _generate(command: list[str]) -> None:
+    result = subprocess.run(command, capture_output=True, text=True, timeout=60)
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg/ffprobe not installed on this machine")
+def test_export_timeline_writes_a_real_capcut_draft(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="CapCut Export Project")
+
+    narration_file = tmp_path / "narration_source.wav"
+    _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=6", str(narration_file)])
+    narration_asset = store.register_asset(
+        project_id=project.project_id, asset_type=AssetType.NARRATION_AUDIO, source_path=narration_file
+    )
+
+    broll_file = tmp_path / "broll_source.mp4"
+    _generate(
+        ["ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc=duration=6:size=320x240:rate=15", str(broll_file)]
+    )
+    broll_asset = store.register_asset(
+        project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=broll_file
+    )
+
+    bgm_file = tmp_path / "bgm_source.wav"
+    _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "sine=frequency=220:duration=6", str(bgm_file)])
+    bgm_asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.BGM, source_path=bgm_file)
+
+    timeline = {
+        "narration_source_uri": narration_asset.storage_uri,
+        "tracks": [
+            {
+                "track_type": "narration",
+                "clips": [
+                    {
+                        "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                        "start_sec": 0.0,
+                        "end_sec": 3.0,
+                    },
+                    {
+                        "asset_uri": f"local://projects/{project.project_id}/segments/seg_002",
+                        "start_sec": 3.0,
+                        "end_sec": 6.0,
+                    },
+                ],
+            },
+            {
+                "track_type": "broll",
+                "clips": [
+                    {
+                        "asset_uri": f"local://projects/{project.project_id}/assets/{broll_asset.asset_id}",
+                        "start_sec": 0.0,
+                        "end_sec": 3.0,
+                    },
+                    {
+                        "asset_uri": f"local://projects/{project.project_id}/assets/{broll_asset.asset_id}",
+                        "start_sec": 3.0,
+                        "end_sec": 6.0,
+                    },
+                ],
+            },
+            {
+                "track_type": "bgm",
+                "clips": [
+                    {
+                        "asset_uri": f"local://projects/{project.project_id}/assets/{bgm_asset.asset_id}",
+                        "start_sec": 0.0,
+                        "end_sec": 6.0,
+                    }
+                ],
+            },
+        ],
+    }
+
+    adapter = PyCapCutRealExportAdapter(store=store)
+    drafts_root = tmp_path / "capcut_drafts"
+
+    draft_path = adapter.export_timeline(
+        project_id=project.project_id,
+        timeline=timeline,
+        drafts_root=drafts_root,
+        draft_name="videobox_export_test",
+    )
+
+    assert draft_path.exists()
+    draft_content = draft_path / "draft_content.json"
+    assert draft_content.exists()
+    assert draft_content.stat().st_size > 0
+
+
+def test_export_timeline_requires_narration_clips(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="CapCut Export Rejection Project")
+    adapter = PyCapCutRealExportAdapter(store=store)
+
+    with pytest.raises(PyCapCutExportError, match="narration"):
+        adapter.export_timeline(
+            project_id=project.project_id,
+            timeline={"tracks": []},
+            drafts_root=tmp_path / "capcut_drafts",
+            draft_name="empty_export",
+        )

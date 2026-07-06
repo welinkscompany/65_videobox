@@ -1202,6 +1202,152 @@ class LocalProjectStore:
             raise
         return {"export_id": export_id, "file_uri": file_uri, "export": payload}
 
+    def save_final_render(
+        self,
+        *,
+        project_id: str,
+        timeline_id: str,
+        source_output_path: Path,
+    ) -> dict[str, Any]:
+        sequence = self._next_sequence(
+            self.project_root(project_id) / "exports" / "final_render",
+            "export_*",
+        )
+        export_id = f"export_{sequence:03d}"
+        export_directory = self.project_root(project_id) / "exports" / "final_render" / export_id
+        export_directory.mkdir(parents=True, exist_ok=True)
+        destination_path = export_directory / f"output{source_output_path.suffix or '.mp4'}"
+        shutil.copy2(source_output_path, destination_path)
+        file_uri = self._path_to_uri(project_id, destination_path)
+        created_at = self._now_iso()
+        try:
+            self._execute(
+                project_id,
+                """
+                INSERT INTO exports (
+                    export_id,
+                    project_id,
+                    timeline_id,
+                    export_type,
+                    file_uri,
+                    status,
+                    metadata_json,
+                    created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    export_id,
+                    project_id,
+                    timeline_id,
+                    "final_render",
+                    file_uri,
+                    "succeeded",
+                    json.dumps({}, ensure_ascii=True),
+                    created_at,
+                ),
+            )
+        except Exception:
+            shutil.rmtree(export_directory, ignore_errors=True)
+            raise
+        return {"export_id": export_id, "file_uri": file_uri, "created_at": created_at}
+
+    def get_final_render_export(self, *, project_id: str, export_id: str) -> dict[str, Any]:
+        row = self._fetchone(
+            project_id,
+            """
+            SELECT export_id, project_id, timeline_id, export_type, file_uri, status, created_at
+            FROM exports
+            WHERE export_id = ?
+            """,
+            (export_id,),
+        )
+        if row is None:
+            raise KeyError(f"Export not found: {export_id}")
+        file_path = self.resolve_storage_uri(project_id=project_id, storage_uri=str(row["file_uri"]))
+        if not file_path.exists():
+            raise KeyError(f"Export artifact missing: {export_id}")
+        return {
+            "export_id": row["export_id"],
+            "timeline_id": row["timeline_id"],
+            "export_type": row["export_type"],
+            "file_uri": row["file_uri"],
+            "status": row["status"],
+            "created_at": row["created_at"],
+        }
+
+    def save_capcut_draft_export(
+        self,
+        *,
+        project_id: str,
+        timeline_id: str,
+        source_draft_path: Path,
+    ) -> dict[str, Any]:
+        sequence = self._next_sequence(
+            self.project_root(project_id) / "exports" / "capcut_draft",
+            "export_*",
+        )
+        export_id = f"export_{sequence:03d}"
+        export_directory = self.project_root(project_id) / "exports" / "capcut_draft" / export_id
+        export_directory.parent.mkdir(parents=True, exist_ok=True)
+        destination_path = export_directory / source_draft_path.name
+        shutil.copytree(source_draft_path, destination_path)
+        file_uri = self._path_to_uri(project_id, destination_path)
+        created_at = self._now_iso()
+        try:
+            self._execute(
+                project_id,
+                """
+                INSERT INTO exports (
+                    export_id,
+                    project_id,
+                    timeline_id,
+                    export_type,
+                    file_uri,
+                    status,
+                    metadata_json,
+                    created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    export_id,
+                    project_id,
+                    timeline_id,
+                    "capcut_draft_export",
+                    file_uri,
+                    "succeeded",
+                    json.dumps({}, ensure_ascii=True),
+                    created_at,
+                ),
+            )
+        except Exception:
+            shutil.rmtree(export_directory, ignore_errors=True)
+            raise
+        return {"export_id": export_id, "file_uri": file_uri, "created_at": created_at}
+
+    def get_capcut_draft_export(self, *, project_id: str, export_id: str) -> dict[str, Any]:
+        row = self._fetchone(
+            project_id,
+            """
+            SELECT export_id, project_id, timeline_id, export_type, file_uri, status, created_at
+            FROM exports
+            WHERE export_id = ?
+            """,
+            (export_id,),
+        )
+        if row is None:
+            raise KeyError(f"Export not found: {export_id}")
+        file_path = self.resolve_storage_uri(project_id=project_id, storage_uri=str(row["file_uri"]))
+        if not file_path.exists():
+            raise KeyError(f"Export artifact missing: {export_id}")
+        return {
+            "export_id": row["export_id"],
+            "timeline_id": row["timeline_id"],
+            "export_type": row["export_type"],
+            "file_uri": row["file_uri"],
+            "status": row["status"],
+            "created_at": row["created_at"],
+        }
+
     def create_job(
         self,
         *,

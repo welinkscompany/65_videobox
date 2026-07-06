@@ -18,11 +18,16 @@ from videobox_core_engine.script_scene_planner import LocalFirstSegmentAnalyzer
 from videobox_core_engine.settings import (
     DEFAULT_PROJECTS_ROOT,
     AutoCutConfig,
+    CapCutDraftExportConfig,
     LocalOpenAICompatibleRuntimeConfig,
+    TTSEngineConfig,
+    WhisperSTTConfig,
 )
 from videobox_domain_models.recommendations import RecommendationType
+from videobox_provider_interfaces.faster_whisper_stt import FasterWhisperSTTProvider
 from videobox_provider_interfaces.gemini import GeminiHTTPTransport, GeminiRESTStructuredProvider
 from videobox_provider_interfaces.llm import LLMProviderConfig
+from videobox_provider_interfaces.stt import MockSTTProvider, STTProvider
 from videobox_storage.local_project_store import LocalProjectStore
 
 VALID_PREVIEW_RECOMMENDATION_TYPES = {
@@ -64,6 +69,11 @@ class AssetRegistrationRequest(BaseModel):
 class BrollAssetRegistrationRequest(AssetRegistrationRequest):
     title: str | None = None
     tags: list[str] = Field(default_factory=list)
+
+
+class TTSCandidateRequest(BaseModel):
+    segment_text: str = Field(min_length=1)
+    voice_sample_asset_id: str = Field(min_length=1)
 
 
 class BrollBatchAssetRegistrationRequest(BaseModel):
@@ -133,6 +143,10 @@ class AutoCutPlanRequest(BaseModel):
     scene_timestamps: list[float] = Field(default_factory=list)
     black_regions: list[AutoCutBlackRegionRequest] = Field(default_factory=list)
     segment_samples: list[AutoCutSegmentSampleRequest] = Field(default_factory=list)
+
+
+class AutoCutDetectRequest(BaseModel):
+    raw_video_asset_id: str = Field(min_length=1)
 
 
 class AutoCutPlannedSegmentResponse(BaseModel):
@@ -531,6 +545,32 @@ class ExportArtifactResponse(BaseModel):
 
 class ExportJobResponse(StartJobResponse):
     export: ExportArtifactResponse
+
+
+class FinalRenderArtifactResponse(BaseModel):
+    export_id: str
+    timeline_id: str
+    export_type: str
+    file_uri: str
+    status: str
+    created_at: str | None = None
+
+
+class FinalRenderJobResponse(StartJobResponse):
+    render: FinalRenderArtifactResponse
+
+
+class CapCutDraftExportArtifactResponse(BaseModel):
+    export_id: str
+    timeline_id: str
+    export_type: str
+    file_uri: str
+    status: str
+    created_at: str | None = None
+
+
+class CapCutDraftExportJobResponse(StartJobResponse):
+    export: CapCutDraftExportArtifactResponse
 
 
 class ProviderTraceAuditSummaryResponse(BaseModel):
@@ -950,11 +990,62 @@ def _normalize_operator_guidance_response(value: object) -> dict[str, object]:
     }
 
 
+def _build_stt_provider(config: WhisperSTTConfig) -> STTProvider:
+    if not config.enabled:
+        return MockSTTProvider()
+    return FasterWhisperSTTProvider(
+        model_size=config.model_size,
+        device=config.device,
+        compute_type=config.compute_type,
+        language=config.language,
+        ffmpeg_binary=config.ffmpeg_binary,
+    )
+
+
+def _build_pycapcut_exporter(config: CapCutDraftExportConfig, *, store: LocalProjectStore) -> Any | None:
+    if not config.enabled:
+        return None
+    from videobox_capcut_export.pycapcut_adapter import PyCapCutRealExportAdapter
+
+    return PyCapCutRealExportAdapter(
+        store=store,
+        video_width=config.video_width,
+        video_height=config.video_height,
+        video_fps=config.video_fps,
+    )
+
+
+def _build_tts_provider(config: TTSEngineConfig) -> Any | None:
+    if not config.enabled:
+        return None
+    if config.engine == "gtts":
+        from videobox_provider_interfaces.gtts_provider import GTTSProvider
+
+        return GTTSProvider(language=config.language)
+    if config.engine == "elevenlabs":
+        from videobox_provider_interfaces.elevenlabs_tts_provider import ElevenLabsTTSProvider
+
+        return ElevenLabsTTSProvider(
+            api_key=config.elevenlabs_api_key,
+            voice_id=config.elevenlabs_voice_id,
+        )
+    from videobox_provider_interfaces.local_xtts_provider import LocalXTTSProvider
+
+    return LocalXTTSProvider(
+        model_name=config.local_xtts_model_name,
+        language=config.language,
+        use_gpu=config.local_xtts_use_gpu,
+    )
+
+
 def create_app(
     *,
     projects_root: Path | None = None,
     local_runtime_config: LocalOpenAICompatibleRuntimeConfig | None = None,
     auto_cut_config: AutoCutConfig | None = None,
+    whisper_stt_config: WhisperSTTConfig | None = None,
+    capcut_draft_export_config: CapCutDraftExportConfig | None = None,
+    tts_engine_config: TTSEngineConfig | None = None,
     local_first_runtime_service_factory=None,
 ) -> FastAPI:
     app = FastAPI(title="VideoBox API", version="0.1.0")
@@ -973,6 +1064,9 @@ def create_app(
     )
     runtime_service = runtime_service_factory(store)
     resolved_auto_cut_config = auto_cut_config or AutoCutConfig()
+    resolved_whisper_stt_config = whisper_stt_config or WhisperSTTConfig()
+    resolved_capcut_draft_export_config = capcut_draft_export_config or CapCutDraftExportConfig()
+    resolved_tts_engine_config = tts_engine_config or TTSEngineConfig()
     pipeline = LocalPipelineRunner(
         store,
         segment_analyzer=LocalFirstSegmentAnalyzer(runtime_service=runtime_service),
@@ -981,10 +1075,16 @@ def create_app(
         review_guidance_builder=LocalFirstReviewGuidanceBuilder(runtime_service=runtime_service),
         output_operator_copy_builder=LocalFirstOutputOperatorCopyBuilder(runtime_service=runtime_service),
         auto_cut_planner=AutoCutPlanner(config=resolved_auto_cut_config),
+        stt_provider=_build_stt_provider(resolved_whisper_stt_config),
+        pycapcut_exporter=_build_pycapcut_exporter(resolved_capcut_draft_export_config, store=store),
+        tts_provider=_build_tts_provider(resolved_tts_engine_config),
     )
     orchestrator = ApiOrchestrator(store, pipeline=pipeline)
     app.state.local_runtime_config = resolved_local_runtime_config
     app.state.auto_cut_config = resolved_auto_cut_config
+    app.state.whisper_stt_config = resolved_whisper_stt_config
+    app.state.capcut_draft_export_config = resolved_capcut_draft_export_config
+    app.state.tts_engine_config = resolved_tts_engine_config
     app.state.build_local_first_runtime_service = build_local_first_runtime_service
     app.state.local_first_runtime_service_factory = runtime_service_factory
     app.state.local_http_client = urlopen
@@ -1135,6 +1235,33 @@ def create_app(
             storage_uri=asset.storage_uri,
         )
 
+    @app.post("/api/projects/{project_id}/assets/voice-sample", status_code=status.HTTP_201_CREATED)
+    def register_voice_sample(project_id: str, payload: AssetRegistrationRequest) -> AssetResponse:
+        try:
+            asset = orchestrator.register_voice_sample_asset(
+                project_id=project_id,
+                source_path=Path(payload.source_path),
+            )
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return AssetResponse(
+            asset_id=asset.asset_id,
+            asset_type=asset.asset_type,
+            storage_uri=asset.storage_uri,
+        )
+
+    @app.post("/api/projects/{project_id}/tts-candidates", status_code=status.HTTP_201_CREATED)
+    def generate_tts_candidate(project_id: str, payload: TTSCandidateRequest) -> AssetResponse:
+        try:
+            asset = orchestrator.generate_tts_replacement_candidate(
+                project_id=project_id,
+                segment_text=payload.segment_text,
+                voice_sample_asset_id=payload.voice_sample_asset_id,
+            )
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return AssetResponse(**asset)
+
     @app.post("/api/projects/{project_id}/jobs/auto-cut-plan")
     def plan_auto_cut(project_id: str, payload: AutoCutPlanRequest) -> AutoCutPlanResponse:
         try:
@@ -1145,6 +1272,17 @@ def create_app(
                 scene_timestamps=payload.scene_timestamps,
                 black_regions=[region.model_dump() for region in payload.black_regions],
                 segment_samples=[segment.model_dump() for segment in payload.segment_samples],
+            )
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return AutoCutPlanResponse(**result)
+
+    @app.post("/api/projects/{project_id}/jobs/auto-cut-detect")
+    def detect_auto_cut(project_id: str, payload: AutoCutDetectRequest) -> AutoCutPlanResponse:
+        try:
+            result = orchestrator.run_auto_cut_detection(
+                project_id=project_id,
+                raw_video_asset_id=payload.raw_video_asset_id,
             )
         except Exception as exc:
             raise _http_error(exc) from exc
@@ -1883,6 +2021,52 @@ def create_app(
             job_id=result["job_id"],
             status=result["status"],
             export=ExportArtifactResponse(**result["export"]),
+        )
+
+    @app.post("/api/projects/{project_id}/jobs/final-render", status_code=status.HTTP_202_ACCEPTED)
+    def start_final_render(project_id: str, payload: OutputJobRequest) -> StartJobResponse:
+        try:
+            result = orchestrator.start_final_render(
+                project_id=project_id,
+                timeline_job_id=payload.timeline_job_id,
+            )
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return StartJobResponse(**result)
+
+    @app.get("/api/projects/{project_id}/final-renders/{job_id}")
+    def get_final_render_result(project_id: str, job_id: str) -> FinalRenderJobResponse:
+        try:
+            result = orchestrator.get_final_render_result(project_id=project_id, job_id=job_id)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return FinalRenderJobResponse(
+            job_id=result["job_id"],
+            status=result["status"],
+            render=FinalRenderArtifactResponse(**result["render"]),
+        )
+
+    @app.post("/api/projects/{project_id}/jobs/capcut-draft-export", status_code=status.HTTP_202_ACCEPTED)
+    def start_capcut_draft_export(project_id: str, payload: OutputJobRequest) -> StartJobResponse:
+        try:
+            result = orchestrator.start_capcut_draft_export(
+                project_id=project_id,
+                timeline_job_id=payload.timeline_job_id,
+            )
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return StartJobResponse(**result)
+
+    @app.get("/api/projects/{project_id}/capcut-draft-exports/{job_id}")
+    def get_capcut_draft_export_result(project_id: str, job_id: str) -> CapCutDraftExportJobResponse:
+        try:
+            result = orchestrator.get_capcut_draft_export_result(project_id=project_id, job_id=job_id)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return CapCutDraftExportJobResponse(
+            job_id=result["job_id"],
+            status=result["status"],
+            export=CapCutDraftExportArtifactResponse(**result["export"]),
         )
 
     @app.get("/api/projects/{project_id}/provider-traces")

@@ -21,6 +21,8 @@ class JobType(StrEnum):
     SUBTITLE_RENDER = "subtitle_render"
     PREVIEW_RENDER = "preview_render"
     CAPCUT_EXPORT = "capcut_export"
+    FINAL_RENDER = "final_render"
+    CAPCUT_DRAFT_EXPORT = "capcut_draft_export"
 
 
 class JobStatus(StrEnum):

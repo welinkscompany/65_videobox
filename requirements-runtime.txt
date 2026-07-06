@@ -1,0 +1,12 @@
+faster-whisper==1.2.1
+pycapcut==0.0.3
+gtts==2.5.4
+requests==2.34.2
+
+# Optional TTS engines (enable via TTSEngineConfig.engine):
+# - "gtts" (default, no extra deps beyond gtts above, needs network access)
+# - "elevenlabs" (needs `requests` above plus an API key + voice_id, no local install)
+# - "local_xtts" (real local voice cloning, NOT installed by the lines above —
+#   requires `pip install coqui-tts` plus a matching PyTorch build; this was not
+#   validated end-to-end in this environment because it needs several GB of
+#   additional downloads)

@@ -4,6 +4,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 import json
+import tempfile
 import warnings
 
 from videobox_core_engine.canonical_boolish import (
@@ -32,6 +33,8 @@ from videobox_core_engine.canonical_track import (
 )
 from videobox_capcut_export import CapCutExportAdapter
 from videobox_core_engine.auto_cut import AutoCutPlanner
+from videobox_core_engine.ffmpeg_auto_cut_executor import FfmpegAutoCutExecutor
+from videobox_core_engine.ffmpeg_final_renderer import FfmpegFinalRenderer
 from videobox_core_engine.editing_session import (
     build_editing_session,
     build_partial_regeneration_request,
@@ -74,6 +77,7 @@ from videobox_domain_models.jobs import JobStatus, JobType
 from videobox_domain_models.recommendations import RecommendationType
 from videobox_provider_interfaces.recommenders import RecommendationProvider, RecommendationRequest
 from videobox_provider_interfaces.stt import MockSTTProvider, STTProvider, STTRequest
+from videobox_provider_interfaces.tts import TTSRequest
 from videobox_storage.local_project_store import LocalProjectStore
 
 
@@ -281,6 +285,10 @@ class LocalPipelineRunner:
         preview_renderer: PreviewRenderer | None = None,
         capcut_exporter: CapCutExportAdapter | None = None,
         auto_cut_planner: AutoCutPlanner | None = None,
+        auto_cut_executor: FfmpegAutoCutExecutor | None = None,
+        final_renderer: FfmpegFinalRenderer | None = None,
+        pycapcut_exporter: Any | None = None,
+        tts_provider: Any | None = None,
         transcript_aligner: TranscriptAligner | None = None,
     ) -> None:
         self.store = store
@@ -294,6 +302,16 @@ class LocalPipelineRunner:
         self.preview_renderer = preview_renderer or PreviewRenderer()
         self.capcut_exporter = capcut_exporter or CapCutExportAdapter()
         self.auto_cut_planner = auto_cut_planner or AutoCutPlanner()
+        self.auto_cut_executor = auto_cut_executor or FfmpegAutoCutExecutor(planner=self.auto_cut_planner)
+        self.final_renderer = final_renderer or FfmpegFinalRenderer(store=store)
+        # No eager default: pycapcut pulls in Windows-only automation deps that
+        # aren't installed by default, so this stays unset unless the caller
+        # (create_app, when CapCutDraftExportConfig.enabled) explicitly injects one.
+        self.pycapcut_exporter = pycapcut_exporter
+        # No eager default: gtts needs network access, elevenlabs needs an API
+        # key, and local_xtts needs a heavy optional install — none of these
+        # should run implicitly for callers/tests that don't opt in.
+        self.tts_provider = tts_provider
         self.transcript_aligner = transcript_aligner or HeuristicTranscriptAligner()
 
     def register_narration_asset(self, *, project_id: str, source_path: Path) -> dict[str, Any]:
@@ -335,6 +353,64 @@ class LocalPipelineRunner:
             source_path=source_path,
         )
         return self._asset_payload(asset)
+
+    def register_voice_sample_asset(self, *, project_id: str, source_path: Path) -> dict[str, Any]:
+        asset = self.store.register_asset(
+            project_id=project_id,
+            asset_type=AssetType.VOICE_SAMPLE_AUDIO,
+            source_path=source_path,
+        )
+        return self._asset_payload(asset)
+
+    def generate_tts_replacement_candidate(
+        self,
+        *,
+        project_id: str,
+        segment_text: str,
+        voice_sample_asset_id: str,
+    ) -> dict[str, Any]:
+        if self.tts_provider is None:
+            raise RuntimeError(
+                "TTS synthesis is not configured. Enable TTSEngineConfig and install the "
+                "matching engine package (see requirements-runtime.txt)."
+            )
+        voice_sample_asset = self.store.get_asset(project_id=project_id, asset_id=voice_sample_asset_id)
+        if voice_sample_asset["asset_type"] != AssetType.VOICE_SAMPLE_AUDIO.value:
+            raise ValueError("generate_tts_replacement_candidate requires a voice_sample_audio asset.")
+        voice_sample_path = self.store.resolve_storage_uri(
+            project_id=project_id, storage_uri=voice_sample_asset["storage_uri"]
+        )
+        with tempfile.TemporaryDirectory(prefix="videobox_tts_candidate_") as raw_work_dir:
+            output_path = Path(raw_work_dir) / "tts_candidate.mp3"
+            tts_result = self.tts_provider.synthesize(
+                TTSRequest(
+                    text=segment_text,
+                    voice_sample_uri=str(voice_sample_path),
+                    output_path=output_path,
+                )
+            )
+            asset = self.store.register_asset(
+                project_id=project_id,
+                asset_type=AssetType.GENERATED_TTS_AUDIO,
+                source_path=output_path,
+                metadata={"provider_name": tts_result.provider_name, "source_text": segment_text},
+            )
+        return self._asset_payload(asset)
+
+    def run_auto_cut_detection(self, *, project_id: str, raw_video_asset_id: str) -> dict[str, Any]:
+        asset = self.store.get_asset(project_id=project_id, asset_id=raw_video_asset_id)
+        if asset["asset_type"] != AssetType.RAW_VIDEO.value:
+            raise ValueError("auto_cut detection requires a raw_video asset.")
+        asset_path = self.store.resolve_storage_uri(project_id=project_id, storage_uri=asset["storage_uri"])
+        detection = self.auto_cut_executor.run_full_detection(asset_path)
+        return self.plan_auto_cut_segments(
+            project_id=project_id,
+            raw_video_asset_id=raw_video_asset_id,
+            total_duration=detection["total_duration"],
+            scene_timestamps=detection["scene_timestamps"],
+            black_regions=detection["black_regions"],
+            segment_samples=detection["segment_samples"],
+        )
 
     def plan_auto_cut_segments(
         self,
@@ -1710,6 +1786,119 @@ class LocalPipelineRunner:
     def get_capcut_export_result(self, *, project_id: str, job_id: str) -> dict[str, Any]:
         job = self.store.get_job(project_id=project_id, job_id=job_id)
         export = self.store.get_export_run(project_id=project_id, export_id=job["output_ref"])
+        return {"job_id": job["job_id"], "status": job["status"], "export": export}
+
+    def start_final_render(self, *, project_id: str, timeline_job_id: str) -> dict[str, Any]:
+        job = self.store.create_job(
+            project_id=project_id,
+            job_type=JobType.FINAL_RENDER,
+            input_ref=timeline_job_id,
+            status=JobStatus.RUNNING,
+        )
+        try:
+            timeline = self.get_timeline_result(project_id=project_id, job_id=timeline_job_id)["timeline"]
+            self._ensure_timeline_ready_for_output(timeline)
+            with tempfile.TemporaryDirectory(prefix="videobox_final_render_") as raw_render_dir:
+                render_output_path = Path(raw_render_dir) / "output.mp4"
+                self.final_renderer.render_timeline_to_mp4(
+                    project_id=project_id,
+                    timeline=timeline,
+                    output_path=render_output_path,
+                )
+                persisted = self.store.save_final_render(
+                    project_id=project_id,
+                    timeline_id=str(timeline["timeline_id"]),
+                    source_output_path=render_output_path,
+                )
+        except Exception as exc:
+            failed_job = self.store.update_job(
+                project_id=project_id,
+                job_id=job["job_id"],
+                status=JobStatus.FAILED,
+                error_message=str(exc),
+            )
+            self._save_failed_provider_trace_audit_event(
+                project_id=project_id,
+                job=failed_job,
+                source_job_id=timeline_job_id,
+                exc=exc,
+            )
+            raise
+        self.store.update_job(
+            project_id=project_id,
+            job_id=job["job_id"],
+            status=JobStatus.SUCCEEDED,
+            output_ref=persisted["export_id"],
+        )
+        return {"job_id": job["job_id"], "status": JobStatus.SUCCEEDED.value}
+
+    def get_final_render_result(self, *, project_id: str, job_id: str) -> dict[str, Any]:
+        job = self.store.get_job(project_id=project_id, job_id=job_id)
+        render = self.store.get_final_render_export(project_id=project_id, export_id=job["output_ref"])
+        return {"job_id": job["job_id"], "status": job["status"], "render": render}
+
+    def start_capcut_draft_export(self, *, project_id: str, timeline_job_id: str) -> dict[str, Any]:
+        if self.pycapcut_exporter is None:
+            raise RuntimeError(
+                "Real CapCut draft export is not configured. Enable CapCutDraftExportConfig "
+                "and install the 'pycapcut' package (see requirements-runtime.txt)."
+            )
+        job = self.store.create_job(
+            project_id=project_id,
+            job_type=JobType.CAPCUT_DRAFT_EXPORT,
+            input_ref=timeline_job_id,
+            status=JobStatus.RUNNING,
+        )
+        try:
+            timeline = self.get_timeline_result(project_id=project_id, job_id=timeline_job_id)["timeline"]
+            self._ensure_timeline_ready_for_output(timeline)
+            latest_subtitle = self.store.get_latest_subtitle_for_timeline(
+                project_id=project_id,
+                timeline_id=str(timeline["timeline_id"]),
+            )
+            subtitle_file_path = (
+                self.store.resolve_storage_uri(project_id=project_id, storage_uri=latest_subtitle["file_uri"])
+                if latest_subtitle
+                else None
+            )
+            with tempfile.TemporaryDirectory(prefix="videobox_capcut_draft_") as raw_drafts_root:
+                draft_path = self.pycapcut_exporter.export_timeline(
+                    project_id=project_id,
+                    timeline=timeline,
+                    drafts_root=Path(raw_drafts_root),
+                    draft_name=str(timeline["timeline_id"]),
+                    subtitle_file_path=subtitle_file_path,
+                )
+                persisted = self.store.save_capcut_draft_export(
+                    project_id=project_id,
+                    timeline_id=str(timeline["timeline_id"]),
+                    source_draft_path=draft_path,
+                )
+        except Exception as exc:
+            failed_job = self.store.update_job(
+                project_id=project_id,
+                job_id=job["job_id"],
+                status=JobStatus.FAILED,
+                error_message=str(exc),
+            )
+            self._save_failed_provider_trace_audit_event(
+                project_id=project_id,
+                job=failed_job,
+                source_job_id=timeline_job_id,
+                exc=exc,
+            )
+            raise
+        self.store.update_job(
+            project_id=project_id,
+            job_id=job["job_id"],
+            status=JobStatus.SUCCEEDED,
+            output_ref=persisted["export_id"],
+        )
+        return {"job_id": job["job_id"], "status": JobStatus.SUCCEEDED.value}
+
+    def get_capcut_draft_export_result(self, *, project_id: str, job_id: str) -> dict[str, Any]:
+        job = self.store.get_job(project_id=project_id, job_id=job_id)
+        export = self.store.get_capcut_draft_export(project_id=project_id, export_id=job["output_ref"])
         return {"job_id": job["job_id"], "status": job["status"], "export": export}
 
     def _asset_payload(self, asset: Any) -> dict[str, Any]:
