@@ -41,6 +41,26 @@
 - 검증: `npm run test:focused` 71 passed, `npm run build` 통과.
 - 브라우저 smoke: 개요/타임라인/검수/편집/B-roll picker/제미나이 form 확인. 콘솔 오류는 favicon 404만 확인됐다.
 
+## 213. 2026-07-06 B-roll thin editor polish closeout
+
+이번 slice의 제품 결정은 `선택 결과를 picker 밖에서도 바로 보이게 한다`다.
+
+확정된 기준은 아래다.
+
+- B-roll picker는 유지한다.
+- 선택된 B-roll은 별도 `선택 B롤` 요약으로 이름, `asset_id`, 태그를 함께 보여준다.
+- 상단 세그먼트 요약은 raw ID 반복 대신 `B롤 선택됨`으로 줄인다.
+- B-roll 가져오기 성공 시 `가져옴 N개` 또는 `보관함 N개`를 짧게 보여준다.
+- 가져오기 실패 메시지는 기존처럼 `B롤 가져오기 실패` 중심으로 유지한다.
+- DB 원본 데이터와 수동 `asset_id` 입력 경로는 변경하지 않는다.
+
+검증 결과는 아래다.
+
+- `apps/web/src/App.tsx`에 B-roll 표시 label helper, 선택 요약, 가져오기 성공 메시지를 추가했다.
+- `apps/web/src/app.test.tsx`는 선택 요약과 가져오기 성공 후 picker 갱신을 검증한다.
+- 검증: `npm run test:focused` 71 passed, `npm run build` 통과.
+- 브라우저 smoke: 편집 탭에서 `선택 B롤` 요약, B-roll picker, 기본 폴더 가져오기, `가져옴 1개`, 새 picker option 반영 확인. 콘솔 오류는 favicon 404만 확인됐다.
+
 ## 1. 결론
 
 현재 개발은 계획서에서 크게 새지 않았다.

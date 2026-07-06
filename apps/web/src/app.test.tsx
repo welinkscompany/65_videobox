@@ -2360,6 +2360,9 @@ describe("App", () => {
     fireEvent.change(screen.getByRole("combobox", { name: /B롤 선택/i }), {
       target: { value: "asset_broll_archive_002" },
     });
+    expect(screen.getByRole("heading", { name: /선택 B롤/i })).toBeInTheDocument();
+    expect(screen.getAllByText(/팀 화이트보드/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/asset_broll_archive_002/i).length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole("button", { name: /B롤 저장/i }));
 
     await waitFor(() => {
@@ -2402,6 +2405,7 @@ describe("App", () => {
     await waitFor(() => {
       expect(screen.getByRole("combobox", { name: /B롤 선택/i })).toHaveTextContent(/공장 라인/i);
     });
+    expect(await screen.findByText(/가져옴 1개/i)).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: /B롤 선택/i })).toHaveTextContent(
       /asset_broll_archive_003/i,
     );

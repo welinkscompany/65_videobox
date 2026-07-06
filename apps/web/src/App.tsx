@@ -241,6 +241,11 @@ function formatBrollAssetTags(asset: BrollAsset) {
     : "";
 }
 
+function formatBrollAssetLabel(asset: BrollAsset) {
+  const tags = formatBrollAssetTags(asset);
+  return `${formatBrollAssetTitle(asset)} - ${asset.asset_id}${tags ? ` - ${tags}` : ""}`;
+}
+
 function formatStringList(value: unknown) {
   return Array.isArray(value)
     ? value
@@ -590,6 +595,7 @@ export function App() {
   const [brollSourcePaths, setBrollSourcePaths] = useState("");
   const [brollImportTags, setBrollImportTags] = useState("");
   const [brollImportError, setBrollImportError] = useState<string | null>(null);
+  const [brollImportMessage, setBrollImportMessage] = useState<string | null>(null);
   const [isImportingBroll, setIsImportingBroll] = useState(false);
   const [geminiKeys, setGeminiKeys] = useState<GeminiProviderKey[]>([]);
   const [geminiLoadError, setGeminiLoadError] = useState<string | null>(null);
@@ -663,6 +669,7 @@ export function App() {
       setBrollAssets([]);
       setBrollAssetLoadError(null);
       setBrollImportError(null);
+      setBrollImportMessage(null);
       setGeminiKeys([]);
       setGeminiLoadError(null);
       setIsGeminiFormOpen(false);
@@ -679,6 +686,7 @@ export function App() {
       setErrorMessage(null);
       setBrollAssetLoadError(null);
       setBrollImportError(null);
+      setBrollImportMessage(null);
       setGeminiLoadError(null);
       setEditingSessionRestoreError(null);
       setPartialRegenerationRestoreWarning(null);
@@ -1423,10 +1431,12 @@ export function App() {
       .filter(Boolean);
     if (!sourceDirectory && sourcePaths.length === 0) {
       setBrollImportError("B롤 가져오기 실패 · 경로 필요");
+      setBrollImportMessage(null);
       return;
     }
     setIsImportingBroll(true);
     setBrollImportError(null);
+    setBrollImportMessage(null);
     try {
       await api.importBrollBatch(selectedProjectId, {
         source_directory: sourceDirectory || undefined,
@@ -1436,11 +1446,19 @@ export function App() {
           .map((tag) => tag.trim())
           .filter(Boolean),
       });
-      await refreshBrollAssets(selectedProjectId);
+      const beforeCount = brollAssets.length;
+      const assets = await api.listBrollAssets(selectedProjectId);
+      setBrollAssets(assets);
+      setBrollAssetLoadError(null);
+      const importedCount = Math.max(assets.length - beforeCount, 0);
+      setBrollImportMessage(
+        importedCount > 0 ? `가져옴 ${importedCount}개` : `보관함 ${assets.length}개`,
+      );
     } catch (error) {
       setBrollImportError(
         error instanceof Error ? `B롤 가져오기 실패 · ${error.message}` : "B롤 가져오기 실패",
       );
+      setBrollImportMessage(null);
     } finally {
       setIsImportingBroll(false);
     }
@@ -1526,6 +1544,9 @@ export function App() {
     editingSession?.segments.find((segment) => segment.segment_id === selectedEditingSegmentId) ?? null;
   const selectedEditingDraft = selectedEditingSegmentId
     ? editingDrafts[selectedEditingSegmentId]
+    : undefined;
+  const selectedBrollAsset = selectedEditingDraft?.brollAssetId
+    ? brollAssets.find((asset) => asset.asset_id === selectedEditingDraft.brollAssetId)
     : undefined;
   const activeEditingSessionId = editingSession?.session_id ?? null;
   const changedSegmentIds = useMemo(
@@ -2623,7 +2644,7 @@ export function App() {
                   </div>
                   <span>{formatSeconds(selectedEditingSegment.start_sec, selectedEditingSegment.end_sec)}</span>
                   <p>{formatDisplayText(selectedEditingDraft.captionText)}</p>
-                  <span>{selectedEditingDraft.brollAssetId || "B롤 없음"}</span>
+                  <span>{selectedEditingDraft.brollAssetId ? "B롤 선택됨" : "B롤 없음"}</span>
                   <span>
                     {selectedEditingDraft.explanationText ? "설명 카드 있음" : "설명 카드 없음"}
                   </span>
@@ -2733,6 +2754,7 @@ export function App() {
                     {isImportingBroll ? "B롤 가져오는 중" : "B롤 가져오기"}
                   </button>
                   {brollImportError ? <p className="error-copy">{brollImportError}</p> : null}
+                  {brollImportMessage ? <p className="meta-copy">{brollImportMessage}</p> : null}
                   <label className="field">
                     <span>B롤 선택</span>
                     <select
@@ -2753,16 +2775,33 @@ export function App() {
                         </option>
                       ) : null}
                       {brollAssets.map((asset) => {
-                        const tags = formatBrollAssetTags(asset);
                         return (
                           <option key={asset.asset_id} value={asset.asset_id}>
-                            {formatBrollAssetTitle(asset)} - {asset.asset_id}
-                            {tags ? ` - ${tags}` : ""}
+                            {formatBrollAssetLabel(asset)}
                           </option>
                         );
                       })}
                     </select>
                   </label>
+                  <div className="track-card">
+                    <h3>선택 B롤</h3>
+                    {selectedBrollAsset ? (
+                      <>
+                        <strong>{formatBrollAssetTitle(selectedBrollAsset)}</strong>
+                        <span>{selectedBrollAsset.asset_id}</span>
+                        {formatBrollAssetTags(selectedBrollAsset) ? (
+                          <span>{formatBrollAssetTags(selectedBrollAsset)}</span>
+                        ) : null}
+                      </>
+                    ) : selectedEditingDraft.brollAssetId ? (
+                      <>
+                        <strong>수동 ID</strong>
+                        <span>{selectedEditingDraft.brollAssetId}</span>
+                      </>
+                    ) : (
+                      <p className="empty-state">선택 없음</p>
+                    )}
+                  </div>
                   {brollAssetLoadError ? (
                     <p className="error-copy">{brollAssetLoadError}</p>
                   ) : null}
