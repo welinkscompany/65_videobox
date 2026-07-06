@@ -8,12 +8,12 @@
 ## 저장된 현재 상태
 
 - branch: `codex/tts-approved-runtime`
-- latest pushed commit: `905ae28 docs: confirm closeout completion judgment`
+- latest pushed commit: `1fe19f5 docs: save remote synced closeout handoff`
 - worktree: clean
 
 ## authoritative 문서 포인터
 
-- 상태/next judgment: `docs/development-status-2026-06-29.ko.md`의 `## 207. 2026-07-06 final closeout completion judgment`
+- 상태/next judgment: `docs/development-status-2026-06-29.ko.md`의 `## 208. 2026-07-06 final closeout remote sync and record save`
 - 최종 closeout 본문: `docs/session-context-2026-07-06-final-closeout.ko.md`
 - 구현 계획 상태: `docs/implementation-plan.ko.md`
 
