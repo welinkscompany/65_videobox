@@ -12,14 +12,13 @@ from videobox_core_engine.canonical_boolish import (
 from videobox_core_engine.canonical_review_status import (
     canonical_review_status as _canonical_review_status,
 )
+from videobox_core_engine.canonical_source_uri import (
+    canonical_source_uri as _canonical_source_uri,
+)
 from videobox_core_engine.canonical_track import (
     canonical_track_type as _canonical_track_type,
     VALID_CANONICAL_TRACK_TYPES as VALID_PREVIEW_TRACK_TYPES,
 )
-
-
-def _canonical_source_uri(value: object) -> str:
-    return str(value or "").strip()
 
 
 class PreviewRenderer:

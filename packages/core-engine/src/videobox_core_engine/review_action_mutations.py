@@ -8,6 +8,7 @@ from videobox_core_engine.canonical_recommendation import (
     VALID_CANONICAL_RECOMMENDATION_TYPES as VALID_PENDING_RECOMMENDATION_TYPES,
 )
 from videobox_core_engine.canonical_review_flag import canonical_review_flag_code as _canonical_review_flag_code
+from videobox_core_engine.canonical_source_uri import canonical_source_uri as _canonical_source_uri
 from videobox_core_engine.canonical_track import canonical_track_type as _canonical_track_type
 from videobox_core_engine.provider_trace import build_provider_trace
 
@@ -137,7 +138,7 @@ def apply_approved_recommendation_to_timeline(
     payload = decided_recommendation.get("payload")
     if not isinstance(payload, dict):
         raise ValueError("Approved TTS replacement requires payload.selected_asset_uri.")
-    selected_asset_uri = str(payload.get("selected_asset_uri") or "").strip()
+    selected_asset_uri = _canonical_source_uri(payload.get("selected_asset_uri"))
     target_segment_id = str(decided_recommendation.get("target_segment_id") or "").strip()
     if not selected_asset_uri:
         raise ValueError("Approved TTS replacement requires payload.selected_asset_uri.")

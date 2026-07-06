@@ -7,6 +7,9 @@ from videobox_core_engine.canonical_recommendation import (
     canonical_recommendation_type as _canonical_recommendation_type,
     VALID_CANONICAL_RECOMMENDATION_TYPES as SUPPORTED_TIMELINE_RECOMMENDATION_TYPES,
 )
+from videobox_core_engine.canonical_source_uri import (
+    canonical_source_uri as _canonical_source_uri,
+)
 from videobox_domain_models.recommendations import RecommendationRecord, RecommendationType
 from videobox_domain_models.segments import SegmentRecord
 from videobox_timeline_schema.models import (
@@ -81,7 +84,7 @@ class TimelineBuilder:
                     payload = recommendation.get("payload")
                     if not isinstance(payload, dict):
                         payload = {}
-                    selected_asset_uri = str(payload.get("selected_asset_uri") or "").strip()
+                    selected_asset_uri = _canonical_source_uri(payload.get("selected_asset_uri"))
                     if selected_asset_uri:
                         narration_asset_uri = selected_asset_uri
                     break

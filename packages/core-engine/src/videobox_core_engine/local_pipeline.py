@@ -16,6 +16,9 @@ from videobox_core_engine.canonical_recommendation import (
 from videobox_core_engine.canonical_review_status import (
     canonical_review_status as _canonical_runtime_review_status,
 )
+from videobox_core_engine.canonical_source_uri import (
+    canonical_source_uri as _canonical_runtime_source_uri,
+)
 from videobox_core_engine.canonical_review_flag import (
     canonical_review_flag_code as _canonical_runtime_review_flag_code,
     VALID_CANONICAL_REVIEW_FLAG_CODES as VALID_RUNTIME_BLOCKING_REVIEW_FLAG_CODES,
@@ -120,7 +123,7 @@ def _build_review_guidance_reuse_key(review_snapshot: dict[str, Any]) -> str | N
         payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
         reason = _canonical_runtime_pending_recommendation_reason(item.get("reason"))
         selected_asset_id = str(item.get("selected_asset_id") or "").strip()
-        selected_asset_uri = str(payload.get("selected_asset_uri") or "").strip()
+        selected_asset_uri = _canonical_runtime_source_uri(payload.get("selected_asset_uri"))
         pending_recommendation_key = (
             recommendation_id,
             target_segment_id,
