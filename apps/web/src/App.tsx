@@ -398,12 +398,24 @@ function formatWorkflowStep(step: string) {
 
 function formatOperatorNote(note: string) {
   const labels: Record<string, string> = {
+    "Matched keywords: office": "키워드 · office",
+    "Matched keywords: office, team": "키워드 · office, team",
+    "Segment requires operator review before export.": "내보내기 전 검수 필요",
     "source timeline already has unresolved review blockers that rerun will preserve": "기존 보류 유지",
     "selected segments already require operator review, so rerun output stays blocked": "선택 세그먼트 검수 필요",
     "b-roll asset replaced with regenerated recommendation": "B롤 교체",
     "explanation card text refreshed": "설명 카드 갱신",
   };
   return labels[note] ?? note;
+}
+
+function formatReviewFlagCode(code: string) {
+  const labels: Record<string, string> = {
+    broll_review_required: "B롤 검수",
+    segment_review_required: "세그먼트 검수",
+    tts_replacement_review_required: "TTS 검수",
+  };
+  return labels[code] ?? prettifyJobType(code);
 }
 
 function formatTrackLabel(trackType: string) {
@@ -2067,8 +2079,8 @@ export function App() {
                   <h3>자동 적용</h3>
                   {(reviewSnapshot?.applied_recommendations ?? []).map((item) => (
                     <div className="recommendation-card applied" key={item.recommendation_id}>
-                      <strong>{item.recommendation_type}</strong>
-                      <p>{item.reason}</p>
+                      <strong>{prettifyJobType(item.recommendation_type)}</strong>
+                      <p>{formatOperatorNote(item.reason)}</p>
                       <span>{item.target_segment_id}</span>
                       {renderBrollRecommendationEvidence(
                         item,
@@ -2087,7 +2099,7 @@ export function App() {
                     return (
                       <div className="recommendation-card pending" key={item.recommendation_id}>
                         <strong>{prettifyJobType(item.recommendation_type)}</strong>
-                        <p>{item.reason}</p>
+                        <p>{formatOperatorNote(item.reason)}</p>
                         <span>{item.target_segment_id}</span>
                         {renderBrollRecommendationEvidence(
                           item,
@@ -2123,8 +2135,8 @@ export function App() {
               <div className="flag-list">
                 {(reviewSnapshot?.review_flags ?? []).map((flag) => (
                   <div className="flag-card" key={`${flag.code}-${flag.segment_id}`}>
-                    <strong>{prettifyJobType(flag.code)}</strong>
-                    <p>{flag.message}</p>
+                    <strong>{formatReviewFlagCode(flag.code)}</strong>
+                    <p>{formatOperatorNote(flag.message)}</p>
                     <span>{flag.segment_id}</span>
                     <button
                       className="action-button"
