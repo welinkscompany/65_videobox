@@ -765,6 +765,7 @@
 - final closeout 본문을 실제로 작성한 뒤에는, 남은 일은 새 기능 구현이 아니라 final commit 단위 설계와 historical retention judgment를 마감 순서에 맞게 닫는 쪽으로 더 좁혀진다
 - 현재 브랜치에서는 마지막 코드 변경이 `56005dc`에서 끝났고, 그 뒤 커밋은 final closeout 문서화만 다뤘으므로 broad 재검증을 다시 돌릴 직접 사유는 현재 없다
 - scoped 정리 점검에서도 즉시 삭제해야 할 임시/실험/찌꺼기 파일 후보는 확인되지 않았으므로, 현재 단계의 required work는 사실상 final closeout과 handoff judgment까지 닫힌 상태로 본다
+- remote-synced handoff 메모까지 저장된 현재 시점에서는, 이 구현 계획 기준 required work는 모두 닫힌 상태로 유지한다
 - output operator copy와 review guidance가 각각 들고 있던 `VALID_PROMPT_RECOMMENDATION_TYPES`와 `VALID_PROMPT_REVIEW_FLAG_CODES`도 공통 모듈로 묶어, prompt family의 valid-set 기준이 파일별로 다시 갈라지지 않도록 정리했다
 - output operator copy와 review guidance가 각각 들고 있던 canonical pending recommendation identity helper도 공통 모듈로 묶어, recommendation_id / target_segment_id / recommendation_type canonical identity 규칙이 파일별로 다시 갈라지지 않도록 정리했다
 - output operator copy와 review guidance가 각각 들고 있던 pending recommendation row 정규화 helper를 공통 모듈로 묶어, selected_asset_uri / identity / reason / decision_state canonicalization 규칙이 파일별로 다시 갈라지지 않도록 정리했다
