@@ -278,6 +278,34 @@ button {
   font-size: 1.05rem;
 }
 
+.readiness-banner {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding: 14px;
+  border: 1px solid rgba(246, 219, 188, 0.12);
+  border-radius: 16px;
+  background: rgba(42, 31, 25, 0.72);
+}
+
+.readiness-banner strong,
+.readiness-banner p {
+  margin: 0;
+}
+
+.readiness-ready {
+  border-color: rgba(105, 178, 137, 0.36);
+}
+
+.readiness-ready .pill {
+  background: rgba(55, 95, 72, 0.9);
+}
+
+.readiness-pending .pill,
+.readiness-blocked .pill {
+  background: rgba(136, 74, 39, 0.88);
+}
+
 .track-stack,
 .clip-list,
 .segment-list,

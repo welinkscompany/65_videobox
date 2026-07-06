@@ -4,6 +4,26 @@
 > 이 문서의 `## 1`부터 `## 209`까지는 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 210`만 기준으로 본다.
 > 단, `2일 내 1차 데모 완성` 실행 레일은 `## 189`의 장기 우선순위를 그대로 넓게 집행하지 않고, `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`의 축소된 실행 계획을 우선 적용한다.
 
+## 216. 2026-07-07 output readiness UI closeout
+
+이번 slice의 제품 결정은 `출력 가능 여부를 개요 화면에서 바로 보이게 한다`다.
+
+확정된 기준은 아래다.
+
+- output readiness UI는 새 truth를 만들지 않고 기존 `reviewSnapshot`과 `timeline`의 blocker/approval 상태만 읽는다.
+- approved + blocker 없음이면 `내보내기 가능`과 다음 행동을 보여준다.
+- blocker 없음 + 미승인이면 `승인 필요`와 `타임라인 승인` 다음 행동을 보여준다.
+- blocker가 남아 있으면 `내보내기 보류`, 검수 표시 수, 대기 추천 수, 검수 탭 처리 안내를 보여준다.
+- 타임라인/검수 데이터가 없으면 준비 확인 불가 상태로 둔다.
+
+검증 결과는 아래다.
+
+- `apps/web/src/App.tsx`의 출력 카드에 readiness banner를 추가했다.
+- `apps/web/src/app.test.tsx`는 blocked / draft / approved 세 상태의 readiness 문구를 검증한다.
+- `apps/web/src/styles.css`는 readiness 상태별 표시 스타일만 추가했다.
+- 검증: exact RED 확인 후 GREEN 3 passed, `npm run test:focused` 75 passed, `npm run build` 통과, `./scripts/dev-fast-path.ps1 -Mode preflight-frontend` 25 passed, `./scripts/dev-fast-path.ps1 -Mode output-gating` 24 passed.
+- 전체 backend regression `py -m pytest -q`는 이번 turn에서 재시도하지 않았고, 전체 통과로 주장하지 않는다.
+
 ## 211. 2026-07-06 웹 대시보드 한글 표시 정책 closeout
 
 이번 slice의 제품 결정은 `화면은 한글 우선, 추적값은 원문 유지`다.

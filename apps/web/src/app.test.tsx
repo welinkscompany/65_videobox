@@ -1701,7 +1701,10 @@ describe("App", () => {
     };
     const blockedJobsResponse = {
       jobs: jobsResponse.jobs.filter(
-        (job) => job.job_type !== "preview_render" && job.job_type !== "capcut_export",
+        (job) =>
+          job.job_type !== "subtitle_render" &&
+          job.job_type !== "preview_render" &&
+          job.job_type !== "capcut_export",
       ),
     };
 
@@ -1741,6 +1744,10 @@ describe("App", () => {
     expect(
       await screen.findByRole("button", { name: /캡컷 내보내기/i }),
     ).toBeDisabled();
+    expect(await screen.findByText(/내보내기 보류/i)).toBeInTheDocument();
+    expect(screen.getByText(/검수 표시 1/i)).toBeInTheDocument();
+    expect(screen.getByText(/대기 추천 1/i)).toBeInTheDocument();
+    expect(screen.getByText(/다음: 검수 탭에서 보류 항목 처리/i)).toBeInTheDocument();
   });
 
   it("keeps output actions disabled until operator approval even when blockers are clear", async () => {
@@ -1806,6 +1813,17 @@ describe("App", () => {
     expect(
       await screen.findByRole("button", { name: /캡컷 내보내기/i }),
     ).toBeDisabled();
+    expect(await screen.findByText(/승인 필요/i)).toBeInTheDocument();
+    expect(screen.getByText(/다음: 타임라인 승인/i)).toBeInTheDocument();
+  });
+
+  it("surfaces approved output readiness before export generation", async () => {
+    vi.stubGlobal("fetch", createFetchMock());
+
+    render(<App />);
+
+    expect(await screen.findByText(/내보내기 가능/i)).toBeInTheDocument();
+    expect(screen.getByText(/다음: 미리보기 또는 캡컷 내보내기/i)).toBeInTheDocument();
   });
 
   it("hides stale output stage success from older timelines", async () => {

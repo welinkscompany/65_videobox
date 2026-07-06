@@ -1068,6 +1068,56 @@ export function App() {
   const canReopenTimeline = !!activeTimelineJobId && reviewStatus === "approved";
   const canGenerateOutputs =
     !!activeTimelineJobId && !hasReviewBlockers && reviewStatus === "approved";
+  const outputReadiness = useMemo(() => {
+    const reviewFlagCount =
+      reviewSnapshot?.review_flags.length ?? timelineJob?.timeline.review_flags.length ?? 0;
+    const pendingRecommendationCount =
+      reviewSnapshot?.pending_recommendations.length ??
+      timelineJob?.timeline.pending_recommendations.length ??
+      0;
+
+    if (!timelineJob || !reviewSnapshot) {
+      return {
+        tone: "blocked",
+        title: "준비 확인 불가",
+        detail: "타임라인과 검수 데이터 필요",
+        next: "다음: 타임라인 생성",
+        reviewFlagCount,
+        pendingRecommendationCount,
+      };
+    }
+
+    if (hasReviewBlockers) {
+      return {
+        tone: "blocked",
+        title: "내보내기 보류",
+        detail: `검수 표시 ${reviewFlagCount} · 대기 추천 ${pendingRecommendationCount}`,
+        next: "다음: 검수 탭에서 보류 항목 처리",
+        reviewFlagCount,
+        pendingRecommendationCount,
+      };
+    }
+
+    if (reviewStatus !== "approved") {
+      return {
+        tone: "pending",
+        title: "승인 필요",
+        detail: "보류 항목 없음",
+        next: "다음: 타임라인 승인",
+        reviewFlagCount,
+        pendingRecommendationCount,
+      };
+    }
+
+    return {
+      tone: "ready",
+      title: "내보내기 가능",
+      detail: "검수 승인 완료",
+      next: "다음: 미리보기 또는 캡컷 내보내기",
+      reviewFlagCount,
+      pendingRecommendationCount,
+    };
+  }, [hasReviewBlockers, reviewSnapshot, reviewStatus, timelineJob]);
   const actionablePendingRecommendation =
     reviewSnapshot?.pending_recommendations.length === 1
       ? reviewSnapshot.pending_recommendations[0]
@@ -1953,6 +2003,11 @@ export function App() {
                   <p className="section-kicker">출력</p>
                   <h2>파일</h2>
                 </div>
+              </div>
+              <div className={`readiness-banner readiness-${outputReadiness.tone}`}>
+                <span className="pill">{outputReadiness.title}</span>
+                <strong>{outputReadiness.detail}</strong>
+                <p>{outputReadiness.next}</p>
               </div>
               <dl className="summary-list">
                 <div>
