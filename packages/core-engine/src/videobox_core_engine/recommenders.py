@@ -6,7 +6,6 @@ from typing import Any, Protocol
 from videobox_core_engine.gemini_runtime import GeminiStructuredGenerationError
 from videobox_core_engine.local_first_runtime import LocalFirstStructuredGenerationError
 from videobox_core_engine.provider_trace import build_provider_trace, response_provider_trace, with_final_provider
-from videobox_domain_models.recommendations import RecommendationType
 from videobox_provider_interfaces.llm import LLMProviderError, LLMTaskType
 from videobox_provider_interfaces.recommendation_policies import get_recommendation_guardrail
 from videobox_provider_interfaces.recommenders import (
