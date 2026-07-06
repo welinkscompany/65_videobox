@@ -10,6 +10,9 @@ from videobox_core_engine.canonical_recommendation import (
     canonical_recommendation_type as _canonical_runtime_recommendation_type,
     VALID_CANONICAL_RECOMMENDATION_TYPES as VALID_RESTORED_RECOMMENDATION_TYPES,
 )
+from videobox_core_engine.canonical_review_status import (
+    canonical_review_status as _canonical_runtime_review_status,
+)
 from videobox_core_engine.canonical_review_flag import (
     canonical_review_flag_code as _canonical_runtime_review_flag_code,
     VALID_CANONICAL_REVIEW_FLAG_CODES as VALID_RUNTIME_BLOCKING_REVIEW_FLAG_CODES,
@@ -82,10 +85,6 @@ def _canonical_runtime_pending_recommendation_reason(value: object) -> str:
     return reason or "Operator review required before approval or output."
 
 
-def _canonical_runtime_review_status(value: object) -> str:
-    return str(value or "draft").strip().lower() or "draft"
-
-
 def _normalize_runtime_cut_action(value: object) -> str:
     cut_action = str(value or "keep")
     if cut_action not in {"keep", "remove", "trim"}:
@@ -94,7 +93,7 @@ def _normalize_runtime_cut_action(value: object) -> str:
 
 
 def _build_review_guidance_reuse_key(review_snapshot: dict[str, Any]) -> str | None:
-    if _canonical_runtime_review_status(review_snapshot.get("review_status")) != "blocked":
+    if _canonical_runtime_review_status(review_snapshot.get("review_status"), default="draft") != "blocked":
         return None
 
     review_flags: list[dict[str, str]] = []
@@ -1333,7 +1332,10 @@ class LocalPipelineRunner:
             timeline_review_flags=timeline_review_flags,
         )
         snapshot["review_status"] = timeline["review_status"]
-        current_review_status = _canonical_runtime_review_status(timeline["review_status"])
+        current_review_status = _canonical_runtime_review_status(
+            timeline["review_status"],
+            default="draft",
+        )
         current_operator_guidance_reuse_key = _build_review_guidance_reuse_key(snapshot)
         persisted_review_status = self.store.get_review_state(
             project_id=project_id,

@@ -6,6 +6,9 @@ from typing import Any
 from videobox_core_engine.canonical_recommendation import (
     canonical_recommendation_type as _canonical_recommendation_type,
 )
+from videobox_core_engine.canonical_review_status import (
+    canonical_review_status as _canonical_review_status,
+)
 from videobox_core_engine.canonical_track import (
     canonical_track_type as _canonical_track_type,
     VALID_CANONICAL_TRACK_TYPES as VALID_PREVIEW_TRACK_TYPES,
@@ -18,10 +21,6 @@ def _normalize_boolish(value: object) -> bool:
     if isinstance(value, bool):
         return value
     return False
-
-
-def _canonical_review_status(value: object) -> str:
-    return str(value or "approved").strip().lower() or "approved"
 
 
 def _canonical_source_uri(value: object) -> str:
@@ -79,7 +78,7 @@ class PreviewRenderer:
 
     def _build_player_html(self, *, project_id: str, timeline: dict[str, Any]) -> str:
         tracks = self._promptable_tracks(timeline)
-        review_status = _canonical_review_status(timeline.get("review_status", "approved"))
+        review_status = _canonical_review_status(timeline.get("review_status", "approved"), default="approved")
         tts_segments = {
             str(item.get("target_segment_id") or "").strip()
             for item in timeline.get("applied_recommendations", [])

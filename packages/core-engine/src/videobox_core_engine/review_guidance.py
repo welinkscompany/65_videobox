@@ -3,6 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from videobox_core_engine.canonical_review_status import (
+    canonical_review_status as _canonical_review_status,
+)
 from videobox_core_engine.gemini_runtime import GeminiStructuredGenerationError
 from videobox_core_engine.local_first_runtime import LocalFirstStructuredGenerationError
 from videobox_core_engine.prompt_pending_recommendation import (
@@ -27,10 +30,6 @@ def _normalize_boolish(value: object) -> bool:
     if isinstance(value, bool):
         return value
     return False
-
-
-def _canonical_review_status(value: object) -> str:
-    return str(value or "draft").strip().lower() or "draft"
 
 
 def _is_prompt_blocking_pending_recommendation(item: object) -> bool:
@@ -98,7 +97,7 @@ class HeuristicReviewGuidanceBuilder(ReviewGuidanceBuilder):
             for item in review_snapshot.get("pending_recommendations", [])
             if _is_prompt_blocking_pending_recommendation(item)
         ]
-        review_status = _canonical_review_status(review_snapshot.get("review_status"))
+        review_status = _canonical_review_status(review_snapshot.get("review_status"), default="draft")
 
         if review_flags or pending_recommendations:
             action_items: list[str] = []
@@ -218,7 +217,7 @@ class LocalFirstReviewGuidanceBuilder(ReviewGuidanceBuilder):
             return fallback_guidance
 
     def _build_prompt(self, *, review_snapshot: dict[str, Any]) -> str:
-        review_status = _canonical_review_status(review_snapshot.get("review_status"))
+        review_status = _canonical_review_status(review_snapshot.get("review_status"), default="draft")
         review_flags = self._prompt_review_flags(review_snapshot.get("review_flags", []))
         pending_recommendations = self._prompt_pending_recommendations(
             review_snapshot.get("pending_recommendations", [])

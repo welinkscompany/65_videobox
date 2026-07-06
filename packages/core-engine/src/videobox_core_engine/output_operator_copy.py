@@ -3,6 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from videobox_core_engine.canonical_review_status import (
+    canonical_review_status as _canonical_review_status,
+)
 from videobox_core_engine.canonical_track import (
     canonical_track_type as _canonical_track_type,
     VALID_CANONICAL_TRACK_TYPES as VALID_PROMPT_TRACK_TYPES,
@@ -23,10 +26,6 @@ from videobox_core_engine.prompt_pending_recommendation import (
 )
 from videobox_core_engine.provider_trace import build_provider_trace, response_provider_trace, with_final_provider
 from videobox_provider_interfaces.llm import LLMProviderError, LLMTaskType
-
-
-def _canonical_review_status(value: object) -> str:
-    return str(value or "approved").strip().lower() or "approved"
 
 
 def _normalize_boolish(value: object) -> bool:
@@ -251,7 +250,7 @@ class LocalFirstOutputOperatorCopyBuilder(OutputOperatorCopyBuilder):
             "Write concise operator-facing output guidance for this approved video timeline.\n"
             f"Output target: {target_label}\n"
             f"Timeline id: {timeline.get('timeline_id')}\n"
-            f"Review status: {_canonical_review_status(timeline.get('review_status', 'approved'))}\n"
+            f"Review status: {_canonical_review_status(timeline.get('review_status', 'approved'), default='approved')}\n"
             f"Subtitle attached: {'yes' if subtitle_file_uri else 'no'}\n"
             f"Track summary: {track_summary}\n"
             f"Review flags: {prompt_review_flags}\n"
