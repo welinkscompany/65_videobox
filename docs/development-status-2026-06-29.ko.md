@@ -1,7 +1,7 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 204. 2026-07-06 final closeout structure and historical retention policy confirmation`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
-> 이 문서의 `## 1`부터 `## 203`까지는 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 204`만 기준으로 본다.
+> 현재 authoritative 상태/next slice 판단은 `## 205. 2026-07-06 final closeout summary`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 이 문서의 `## 1`부터 `## 204`까지는 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 205`만 기준으로 본다.
 > 단, `2일 내 1차 데모 완성` 실행 레일은 `## 189`의 장기 우선순위를 그대로 넓게 집행하지 않고, `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`의 축소된 실행 계획을 우선 적용한다.
 
 ## 1. 결론
@@ -8417,6 +8417,54 @@ focused 검증 메모:
 - stale-shape helper 중복과 dead helper 후보 중 다음 최소 정리 대상 1개를 다시 좁힌다
 - 역할이 끝난 중복 메모 문서는 삭제보다 역할 명시가 맞는지 먼저 판단한다
 - 최종 closeout 직전 broad 재검증이 정말 필요한지 마지막으로 판단한다
+
+## 205. 2026-07-06 final closeout summary
+
+이번 후속 작업에서는 코드를 더 바꾸지 않고, 현재 브랜치의 final closeout 본문을 작성할 수 있을 정도로 모인 최신 검증 근거와 정리 기준을 한 자리에서 다시 요약했다. 목적은 이제 더 이상 `다음 slice`를 찾지 않고, 현재 상태를 authoritative final-closeout-ready 상태로 읽게 만드는 것이다.
+
+현재 authoritative summary는 아래와 같다.
+
+- automatic baseline
+  - `./scripts/dev-fast-path.ps1 -Mode current-focused-parallel`
+    - backend output-gating `24 passed`
+    - backend preflight `59 passed`
+    - frontend preflight `25 passed`
+  - `npm run build` -> 성공
+  - `pytest -q` -> `543 passed`
+- representative Phase B evidence
+  - backend happy-path / lineage `5 passed`
+  - provider trace failed-output / fallback `5 passed`
+  - frontend operator QA `3 passed`
+- latest broader recovery
+  - nested `target_segment_id` stale pending recommendation runtime regression 1개를 복구했고, 그 뒤 full backend regression까지 다시 green을 확인했다
+- historical retention policy
+  - closeout 기록과 역할 종료 메모는 기본적으로 삭제보다 역할 명시를 우선한다
+
+현재 QA/system verification judgment는 아래처럼 정리된다.
+
+- QA judgment
+  - blocked preflight warning, resumed candidate restore warning cleanup, mark for manual edit -> editing session 진입 대표 경계는 최신 frontend evidence로 다시 green이다
+- system verification judgment
+  - provider trace audit의 candidate lineage와 failed-output/fallback 대표 경계는 최신 backend evidence로 다시 green이다
+  - editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence behavior를 깨뜨리는 최신 회귀는 현재 baseline 기준으로 다시 확인되지 않았다
+
+historical 문서와 찌꺼기 파일 판단은 아래 기본값을 유지한다.
+
+- historical closeout 문서는 삭제하지 않고 historical reference로 남긴다
+- 역할 종료 메모도 authoritative 포인터에서 밀려난 기록으로 유지한다
+- 실제 삭제는 historical 가치가 없는 임시 실험 파일이나 명백한 dead artifact가 확인될 때만 별도 판단한다
+
+이 갱신으로 아래 범위는 현재 기준으로 정리됐다.
+
+1. current truth를 읽기 위한 authoritative final closeout summary가 SSOT에 반영됐다
+2. 다음 턴은 새로운 cleanup이나 추가 검증보다, final closeout 문서를 실제로 작성하고 마지막 마감 커밋 단위를 정하는 데 집중하면 된다
+3. 현재 남은 리스크는 코드보다 final closeout 문장을 얼마나 명확하게 쓰느냐 쪽으로 줄었다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- final closeout 본문을 실제로 작성한다
+- 최종 마감 커밋 단위를 설계한다
+- 필요하면 마지막 문서 정리만 더 수행한다
 
 ## 204. 2026-07-06 final closeout structure and historical retention policy confirmation
 
