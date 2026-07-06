@@ -59,16 +59,18 @@ QA judgment는 아래처럼 정리합니다.
 
 ## 5. final commit / push 상태
 
-- latest pushed commit before this closeout note: `73b29a6 docs: add final closeout summary`
-- worktree at closeout writing start: clean
+- final closeout commit: `f12ab67 docs: write final closeout body`
+- latest code-changing commit before final closeout docs: `56005dc fix: ignore nested target segment id runtime pending recommendations`
+- worktree after final closeout commit/push: clean
 
 ## 6. 이번 턴에서 새로 한 일
 
 - `final closeout summary` 단계에서 멈춰 있던 상태를 실제 final closeout 본문으로 한 번 더 묶었습니다.
 - 이제 `다음 exact regression 1개`를 더 찾는 것이 아니라, final commit 단위와 마지막 historical 정리 판단만 남았다고 문서 기준을 다시 맞췄습니다.
+- 이어서 final commit 단위가 실제로 docs-only closeout commit인지 확인했고, scoped 정리 점검에서도 즉시 삭제해야 할 임시/실험 파일 후보는 확인되지 않았습니다.
+- broad 재검증도 마지막 코드 변경 뒤 추가 코드 수정이 없는 현재 상태에서는 다시 돌릴 직접 사유가 없다고 판단했습니다.
 
 ## 7. 남은 일
 
-- final commit 단위를 설계합니다.
-- historical 정리에서 실제 삭제 판단이 필요한 대상이 있는지 마지막으로만 확인합니다.
-- broad 재검증을 다시 돌릴 이유가 실제로 남아 있는지 final commit 직전에만 판단합니다.
+- 현재 closeout 범위에서 필수 남은 일은 없습니다.
+- 이후 새 코드 변경이 다시 생기면 그때 exact regression 또는 broader 재검증 필요성을 다시 판단합니다.
