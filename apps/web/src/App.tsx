@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 
 import {
   api,
@@ -600,7 +600,7 @@ export function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [selectedSection, setSelectedSection] = useState<
-    "overview" | "timeline" | "review" | "editing"
+    "overview" | "timeline" | "review" | "editing" | "settings"
   >("overview");
   const [projectDetail, setProjectDetail] = useState<Project | null>(null);
   const [jobs, setJobs] = useState<JobRecord[]>([]);
@@ -1839,12 +1839,15 @@ export function App() {
               ["timeline", "타임라인"],
               ["review", "검수"],
               ["editing", "편집"],
+              ["settings", "설정"],
             ].map(([value, label]) => (
               <button
                 key={value}
                 className={selectedSection === value ? "tab-button is-active" : "tab-button"}
                 onClick={() =>
-                  setSelectedSection(value as "overview" | "timeline" | "review" | "editing")
+                  setSelectedSection(
+                    value as "overview" | "timeline" | "review" | "editing" | "settings",
+                  )
                 }
                 type="button"
               >
@@ -1886,15 +1889,17 @@ export function App() {
               {isExportingCapcut ? "캡컷 내보내는 중" : "캡컷 내보내기"}
             </button>
             <button
-              className="action-button"
+              className={canApproveTimeline ? "action-button success" : "action-button"}
               disabled={!canApproveTimeline || isApprovingTimeline}
               onClick={() => void handleApproveTimeline()}
               type="button"
             >
               {isApprovingTimeline ? "승인 중" : "타임라인 승인"}
             </button>
+          </div>
+          <div className="hero-actions-secondary">
             <button
-              className="action-button"
+              className="action-button subtle"
               disabled={!canReopenTimeline || isReopeningTimeline}
               onClick={() => void handleReopenTimeline()}
               type="button"
@@ -1903,6 +1908,12 @@ export function App() {
             </button>
           </div>
         </section>
+
+        <div className={`readiness-banner readiness-hero readiness-${outputReadiness.tone}`}>
+          <span className="pill">{outputReadiness.title}</span>
+          <strong>{outputReadiness.next}</strong>
+          <p>{outputReadiness.detail}</p>
+        </div>
 
         {loadState === "loading" ? <p className="loading-banner">로컬 작업 로딩</p> : null}
         {loadState === "error" ? <p className="error-banner">{errorMessage}</p> : null}
@@ -1914,15 +1925,40 @@ export function App() {
               <h2 id="status-heading">진행</h2>
             </div>
           </div>
-          <div className="status-grid">
-            {stageStatus.map((stage) => (
-              <article className="status-card" key={stage.jobType}>
-                <span className="status-label">{stage.label}</span>
-                <strong>{formatStatusLabel(stage.status)}</strong>
-                <span className="status-meta">{formatJobValue(stage.jobId)}</span>
-              </article>
+          <div className="pipeline-stepper">
+            {stageStatus.map((stage, index) => (
+              <Fragment key={stage.jobType}>
+                <article
+                  className={
+                    stage.status === "succeeded"
+                      ? "stepper-step is-done"
+                      : stage.status === "running"
+                        ? "stepper-step is-running"
+                        : "stepper-step"
+                  }
+                >
+                  <span className="stepper-dot" aria-hidden="true" />
+                  <span className="stepper-label">{stage.label}</span>
+                  <span className="stepper-status">{formatStatusLabel(stage.status)}</span>
+                </article>
+                {index < stageStatus.length - 1 ? (
+                  <span className="stepper-connector" aria-hidden="true" />
+                ) : null}
+              </Fragment>
             ))}
           </div>
+          <details className="stage-detail-toggle">
+            <summary>단계별 job ID 보기</summary>
+            <div className="stage-detail-list">
+              {stageStatus.map((stage) => (
+                <span key={stage.jobType}>
+                  <strong>{`${stage.label}:`}</strong>
+                  <span>{formatStatusLabel(stage.status)}</span>
+                  <span>{formatJobValue(stage.jobId)}</span>
+                </span>
+              ))}
+            </div>
+          </details>
         </section>
 
         {selectedSection === "overview" ? (
@@ -1947,14 +1983,6 @@ export function App() {
                   <div>
                     <dt>트랙 수</dt>
                     <dd>{timelineJob.timeline.tracks.length}</dd>
-                  </div>
-                  <div>
-                  <dt>표시</dt>
-                    <dd>{timelineJob.timeline.review_flags.length}</dd>
-                  </div>
-                  <div>
-                    <dt>검수 상태</dt>
-                    <dd>{formatStatusLabel(reviewStatus)}</dd>
                   </div>
                 </dl>
               ) : (
@@ -2004,11 +2032,6 @@ export function App() {
                   <h2>파일</h2>
                 </div>
               </div>
-              <div className={`readiness-banner readiness-${outputReadiness.tone}`}>
-                <span className="pill">{outputReadiness.title}</span>
-                <strong>{outputReadiness.detail}</strong>
-                <p>{outputReadiness.next}</p>
-              </div>
               <dl className="summary-list">
                 <div>
                   <dt>자막 작업</dt>
@@ -2039,6 +2062,11 @@ export function App() {
               </dl>
             </article>
 
+          </section>
+        ) : null}
+
+        {selectedSection === "settings" ? (
+          <section className="workspace-grid">
             <article className="panel">
               <div className="panel-header">
                 <div>
@@ -2309,8 +2337,8 @@ export function App() {
             <article className="panel">
               <div className="panel-header">
                 <div>
-                  <p className="section-kicker">추천</p>
-                  <h2>추천</h2>
+                  <p className="section-kicker">검수</p>
+                  <h2>추천 항목</h2>
                 </div>
               </div>
               <div className="recommendation-groups">
@@ -2367,8 +2395,8 @@ export function App() {
             <article className="panel">
               <div className="panel-header">
                 <div>
-                  <p className="section-kicker">표시</p>
-                  <h2>표시</h2>
+                  <p className="section-kicker">검수</p>
+                  <h2>플래그</h2>
                 </div>
               </div>
               <div className="flag-list">

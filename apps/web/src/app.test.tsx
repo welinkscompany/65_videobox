@@ -1380,7 +1380,7 @@ describe("App", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /^검수$/i }));
 
-    expect(await screen.findByRole("heading", { name: /^추천$/i })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /^추천 항목$/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /추천 승인/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /추천 거절/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /수동 편집/i })).toBeInTheDocument();
@@ -1888,11 +1888,11 @@ describe("App", () => {
     expect(exportCard).not.toBeNull();
 
     expect(within(subtitleCard!).getByText("대기")).toBeInTheDocument();
-    expect(within(subtitleCard!).getByText("미시작")).toBeInTheDocument();
     expect(within(previewCard!).getByText("대기")).toBeInTheDocument();
-    expect(within(previewCard!).getByText("미시작")).toBeInTheDocument();
     expect(within(exportCard!).getByText("대기")).toBeInTheDocument();
-    expect(within(exportCard!).getByText("미시작")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText(/단계별 job ID 보기/i));
+    expect(screen.getAllByText(/미시작/i).length).toBeGreaterThan(0);
   });
 
   it("keeps the baseline dashboard usable when Gemini key loading fails", async () => {
@@ -1934,6 +1934,7 @@ describe("App", () => {
 
     expect(await screen.findByText(/작업자 검수 데모/i)).toBeInTheDocument();
     expect(await screen.findByText(/timeline_001/i)).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: /^설정$/i }));
     expect(await screen.findByText(/제미나이 라우팅 오류/i)).toBeInTheDocument();
     expect(screen.queryByText(/request failed: \/api\/projects\/project_001\/providers\/gemini\/keys/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/제미나이 키 없음/i)).not.toBeInTheDocument();
@@ -1944,6 +1945,7 @@ describe("App", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: /^설정$/i }));
 
     expect(await screen.findByRole("heading", { name: /^키$/i })).toBeInTheDocument();
     expect(await screen.findByText(/기본 라우팅 키/i)).toBeInTheDocument();
@@ -1961,6 +1963,7 @@ describe("App", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: /^설정$/i }));
 
     expect(await screen.findByRole("heading", { name: /^키$/i })).toBeInTheDocument();
 
