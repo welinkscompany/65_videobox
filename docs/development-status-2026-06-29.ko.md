@@ -1,7 +1,7 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 195. 2026-07-06 Phase C shared canonical recommendation helper closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
-> 이 문서의 `## 1`부터 `## 194`까지는 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 195`만 기준으로 본다.
+> 현재 authoritative 상태/next slice 판단은 `## 196. 2026-07-06 Phase C shared canonical review-flag helper closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 이 문서의 `## 1`부터 `## 195`까지는 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 196`만 기준으로 본다.
 > 단, `2일 내 1차 데모 완성` 실행 레일은 `## 189`의 장기 우선순위를 그대로 넓게 집행하지 않고, `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`의 축소된 실행 계획을 우선 적용한다.
 
 ## 1. 결론
@@ -8411,6 +8411,48 @@ focused 검증 메모:
 1. output operator copy와 review guidance가 보는 pending recommendation row canonicalization 기준이 공통 모듈로 다시 모였다
 2. selected asset uri, identity, reason, decision state canonicalization 규칙 drift 위험이 더 줄었다
 3. 남아 있는 cleanup 후보를 고를 때 review/output prompt family의 중복은 더 많이 정리된 상태가 됐다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- stale-shape helper 중복과 dead helper 후보 중 다음 최소 정리 대상 1개를 다시 좁힌다
+- 역할이 끝난 중복 메모 문서는 삭제보다 역할 명시가 맞는지 먼저 판단한다
+- 최종 closeout 직전 broad 재검증이 정말 필요한지 마지막으로 판단한다
+
+## 196. 2026-07-06 Phase C shared canonical review-flag helper closeout
+
+이번 후속 작업에서는 새 stale-shape 경계를 더 열지 않고, `prompt_pending_recommendation.py`, `review_action_mutations.py`, `local_pipeline.py`에 흩어져 있던 review-flag code canonicalizer와 valid review-flag set 중복을 공통 helper로 다시 모았다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- mixed-case review-flag code, valid blocker code, stale unknown blocker filtering 경계는 이미 여러 exact test로 닫혀 있었지만, 구현은 prompt/runtime/review-action이 같은 `trim/lower` 함수와 같은 valid set 상수를 반복해서 들고 있었다
+- `canonical_review_flag.py`에 shared `canonical_review_flag_code`와 `VALID_CANONICAL_REVIEW_FLAG_CODES`를 추가하고 각 read-path가 이를 직접 재사용하게 맞춰도 현재 prompt/output/runtime/review-action 동작은 그대로 유지됐다
+- 이번 정리는 review/output prompt family, output gating blocker read-path, review guidance reuse key, recommendation approve mutation이 같은 review-flag truth를 더 직접 공유하게 만드는 code cleanup 성격의 수정이다
+- editing-session SSOT, review/output rules, Gemini fallback, provider trace audit, persistence behavior는 바꾸지 않았다
+
+이번 turn의 verification은 아래와 같다.
+
+- exact verification
+  - `test_output_operator_copy_builder_canonicalizes_review_flag_code_in_prompt` -> `1 passed`
+  - `test_review_guidance_builder_canonicalizes_mixed_case_review_flag_code_in_prompt` -> `1 passed`
+  - `test_output_gating_blocks_mixed_case_review_flag_code_on_approved_timeline` -> `1 passed`
+  - `test_approving_last_pending_recommendation_removes_mixed_case_review_flag_code_for_same_segment` -> `1 passed`
+  - `test_review_guidance_reuse_key_ignores_stale_unknown_and_minimal_blocker_entries` -> `1 passed`
+- focused verification
+  - `./scripts/dev-fast-path.ps1 -Mode output-gating`
+  - backend output-gating `24 passed`
+  - `./scripts/dev-fast-path.ps1 -Mode preflight-backend`
+  - backend preflight `59 passed`
+- broader verification
+  - 이번 turn에서는 재실행하지 않음
+  - 판단:
+    - 이번 변경은 canonical review-flag helper 공통화만 다루는 `Phase C` 소규모 리팩터링이다
+    - 현재 자동 baseline은 직전 closeout 기준 `frontend build 성공`, `full backend regression 543 passed`를 유지한다
+
+이 갱신으로 아래 범위는 현재 기준으로 정리됐다.
+
+1. prompt/output/runtime/review-action read-path가 같은 review-flag canonicalization 기준을 직접 공유한다
+2. mixed-case review-flag code와 valid blocker code 기준 drift 위험이 더 줄었다
+3. 남아 있는 cleanup 후보는 더 작은 dead helper나 역할 종료 문서 정리 쪽으로 더 수렴했다
 
 현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
 

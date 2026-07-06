@@ -10,6 +10,10 @@ from videobox_core_engine.canonical_recommendation import (
     canonical_recommendation_type as _canonical_runtime_recommendation_type,
     VALID_CANONICAL_RECOMMENDATION_TYPES as VALID_RESTORED_RECOMMENDATION_TYPES,
 )
+from videobox_core_engine.canonical_review_flag import (
+    canonical_review_flag_code as _canonical_runtime_review_flag_code,
+    VALID_CANONICAL_REVIEW_FLAG_CODES as VALID_RUNTIME_BLOCKING_REVIEW_FLAG_CODES,
+)
 from videobox_core_engine.canonical_track import (
     canonical_track_type as _canonical_runtime_track_type,
     VALID_CANONICAL_TRACK_TYPES as VALID_RUNTIME_TRACK_TYPES,
@@ -60,23 +64,12 @@ from videobox_provider_interfaces.recommenders import RecommendationProvider, Re
 from videobox_provider_interfaces.stt import MockSTTProvider, STTProvider, STTRequest
 from videobox_storage.local_project_store import LocalProjectStore
 
-VALID_RUNTIME_BLOCKING_REVIEW_FLAG_CODES = {
-    "segment_review_required",
-    "broll_review_required",
-    "tts_replacement_review_required",
-}
-
-
 def _normalize_runtime_boolish(value: object) -> bool:
     if isinstance(value, str):
         return value.strip().lower() not in {"", "0", "false", "no", "off"}
     if isinstance(value, bool):
         return value
     return False
-
-
-def _canonical_runtime_review_flag_code(value: object) -> str:
-    return str(value or "").strip().lower()
 
 
 def _canonical_runtime_review_flag_message(value: object) -> str:

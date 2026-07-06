@@ -5,12 +5,10 @@ from videobox_core_engine.canonical_recommendation import (
     canonical_recommendation_type as canonical_prompt_recommendation_type,
     VALID_CANONICAL_RECOMMENDATION_TYPES as VALID_PROMPT_RECOMMENDATION_TYPES,
 )
-
-VALID_PROMPT_REVIEW_FLAG_CODES = {
-    "segment_review_required",
-    "broll_review_required",
-    "tts_replacement_review_required",
-}
+from videobox_core_engine.canonical_review_flag import (
+    canonical_review_flag_code as canonical_prompt_review_flag_code,
+    VALID_CANONICAL_REVIEW_FLAG_CODES as VALID_PROMPT_REVIEW_FLAG_CODES,
+)
 
 
 def canonical_prompt_decision_state(value: object) -> str:
@@ -20,10 +18,6 @@ def canonical_prompt_decision_state(value: object) -> str:
 def canonical_prompt_review_flag_message(value: object) -> str:
     message = str(value or "").strip()
     return message or "Operator review required before approval or output."
-
-
-def canonical_prompt_review_flag_code(value: object) -> str:
-    return str(value or "").strip().lower()
 
 
 def has_canonical_review_flag_identity(

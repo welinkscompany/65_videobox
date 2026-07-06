@@ -7,13 +7,9 @@ from videobox_core_engine.canonical_recommendation import (
     canonical_recommendation_type as _canonical_recommendation_type,
     VALID_CANONICAL_RECOMMENDATION_TYPES as VALID_PENDING_RECOMMENDATION_TYPES,
 )
+from videobox_core_engine.canonical_review_flag import canonical_review_flag_code as _canonical_review_flag_code
 from videobox_core_engine.canonical_track import canonical_track_type as _canonical_track_type
 from videobox_core_engine.provider_trace import build_provider_trace
-
-
-def _canonical_review_flag_code(value: object) -> str:
-    return str(value or "").strip().lower()
-
 
 def _is_valid_pending_recommendation_entry(item: dict[str, Any]) -> bool:
     recommendation_id = str(item.get("recommendation_id") or "").strip()
