@@ -726,11 +726,10 @@
 
 현재 기준 다음 실제 작업은 아래 순서로 재고정한다.
 
-1. final closeout 본문을 작성해 current truth를 한 문서로 고정한다
-2. 전체 동작 검증, QA, 시스템 검증 결과를 closeout 문서 안에서 authoritative 요약으로 묶는다
-3. historical 문서, 역할 종료 메모, 찌꺼기 파일 후보 중 실제 삭제보다 역할 명시가 맞는 대상을 먼저 선별한다
-4. 필요하면 현재 green baseline을 설명하는 최소 QA/검수 체크리스트를 closeout 문서에 보강한다
-5. 최종 closeout 커밋 직전에는 변경 범위를 다시 점검하고, broad 재검증을 한 번 더 돌릴 이유가 실제로 남아 있는지 마지막으로 판단한다
+1. final closeout 본문을 기준 문서로 고정한 뒤, final commit 단위를 설계한다
+2. historical 문서, 역할 종료 메모, 찌꺼기 파일 후보 중 실제 삭제보다 역할 명시가 맞는 대상을 먼저 선별한다
+3. 필요하면 현재 green baseline을 설명하는 최소 QA/검수 체크리스트를 closeout 문서에 보강한다
+4. 최종 closeout 커밋 직전에는 변경 범위를 다시 점검하고, broad 재검증을 한 번 더 돌릴 이유가 실제로 남아 있는지 마지막으로 판단한다
 6. 최종 마감 문서는 최소한 아래 블록을 포함한다
    - 현재 authoritative 상태 요약
    - automatic baseline 요약
@@ -764,6 +763,7 @@
 - 따라서 현재 worktree의 next step은 추가 cleanup보다 `final closeout 문서화 -> historical 정리 판단 -> 최종 마감 커밋 설계` 쪽이 더 맞다
 - final closeout 단계에서는 historical 문서와 역할 종료 메모를 기본적으로 삭제하지 않고, authoritative 포인터에서 밀려난 기록이라는 역할을 먼저 명시하는 쪽을 기본값으로 둔다
 - final closeout 본문은 새 cleanup 탐색이 아니라, 이미 확보한 latest automatic baseline + representative evidence를 authoritative 한 장으로 묶는 역할을 맡는다
+- final closeout 본문을 실제로 작성한 뒤에는, 남은 일은 새 기능 구현이 아니라 final commit 단위 설계와 historical retention judgment를 마감 순서에 맞게 닫는 쪽으로 더 좁혀진다
 - output operator copy와 review guidance가 각각 들고 있던 `VALID_PROMPT_RECOMMENDATION_TYPES`와 `VALID_PROMPT_REVIEW_FLAG_CODES`도 공통 모듈로 묶어, prompt family의 valid-set 기준이 파일별로 다시 갈라지지 않도록 정리했다
 - output operator copy와 review guidance가 각각 들고 있던 canonical pending recommendation identity helper도 공통 모듈로 묶어, recommendation_id / target_segment_id / recommendation_type canonical identity 규칙이 파일별로 다시 갈라지지 않도록 정리했다
 - output operator copy와 review guidance가 각각 들고 있던 pending recommendation row 정규화 helper를 공통 모듈로 묶어, selected_asset_uri / identity / reason / decision_state canonicalization 규칙이 파일별로 다시 갈라지지 않도록 정리했다
