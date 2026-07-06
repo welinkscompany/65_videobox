@@ -731,6 +731,14 @@
 3. historical 문서, 역할 종료 메모, 찌꺼기 파일 후보 중 실제 삭제보다 역할 명시가 맞는 대상을 먼저 선별한다
 4. 필요하면 현재 green baseline을 설명하는 최소 QA/검수 체크리스트를 closeout 문서에 보강한다
 5. 최종 closeout 커밋 직전에는 변경 범위를 다시 점검하고, broad 재검증을 한 번 더 돌릴 이유가 실제로 남아 있는지 마지막으로 판단한다
+6. 최종 마감 문서는 최소한 아래 블록을 포함한다
+   - 현재 authoritative 상태 요약
+   - automatic baseline 요약
+   - representative Phase B evidence 요약
+   - QA/system verification judgment
+   - historical 문서/찌꺼기 정리 판단
+   - 남기지 않은 것과 그 이유
+   - final commit/push 상태
 
 정리 마감 실행 기준:
 
@@ -754,6 +762,7 @@
 - broader 재검증에서 드러난 nested `target_segment_id` stale pending recommendation runtime 회귀 1개도 복구해, partial regeneration read-path이 string 타입 target identity만 유효한 pending recommendation으로 인정하도록 다시 맞췄다
 - broad 회귀 복구 직후 representative Phase B evidence도 다시 수집해, happy-path, frontend operator flow, provider trace failed-output/fallback 근거가 최신 baseline 위에서 모두 green인지 다시 확인했다
 - 따라서 현재 worktree의 next step은 추가 cleanup보다 `final closeout 문서화 -> historical 정리 판단 -> 최종 마감 커밋 설계` 쪽이 더 맞다
+- final closeout 단계에서는 historical 문서와 역할 종료 메모를 기본적으로 삭제하지 않고, authoritative 포인터에서 밀려난 기록이라는 역할을 먼저 명시하는 쪽을 기본값으로 둔다
 - output operator copy와 review guidance가 각각 들고 있던 `VALID_PROMPT_RECOMMENDATION_TYPES`와 `VALID_PROMPT_REVIEW_FLAG_CODES`도 공통 모듈로 묶어, prompt family의 valid-set 기준이 파일별로 다시 갈라지지 않도록 정리했다
 - output operator copy와 review guidance가 각각 들고 있던 canonical pending recommendation identity helper도 공통 모듈로 묶어, recommendation_id / target_segment_id / recommendation_type canonical identity 규칙이 파일별로 다시 갈라지지 않도록 정리했다
 - output operator copy와 review guidance가 각각 들고 있던 pending recommendation row 정규화 helper를 공통 모듈로 묶어, selected_asset_uri / identity / reason / decision_state canonicalization 규칙이 파일별로 다시 갈라지지 않도록 정리했다

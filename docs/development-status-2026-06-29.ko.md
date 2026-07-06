@@ -1,7 +1,7 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 203. 2026-07-06 final closeout prep stage confirmation`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
-> 이 문서의 `## 1`부터 `## 202`까지는 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 203`만 기준으로 본다.
+> 현재 authoritative 상태/next slice 판단은 `## 204. 2026-07-06 final closeout structure and historical retention policy confirmation`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 이 문서의 `## 1`부터 `## 203`까지는 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 204`만 기준으로 본다.
 > 단, `2일 내 1차 데모 완성` 실행 레일은 `## 189`의 장기 우선순위를 그대로 넓게 집행하지 않고, `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`의 축소된 실행 계획을 우선 적용한다.
 
 ## 1. 결론
@@ -8417,6 +8417,43 @@ focused 검증 메모:
 - stale-shape helper 중복과 dead helper 후보 중 다음 최소 정리 대상 1개를 다시 좁힌다
 - 역할이 끝난 중복 메모 문서는 삭제보다 역할 명시가 맞는지 먼저 판단한다
 - 최종 closeout 직전 broad 재검증이 정말 필요한지 마지막으로 판단한다
+
+## 204. 2026-07-06 final closeout structure and historical retention policy confirmation
+
+이번 후속 작업에서는 코드를 더 바꾸지 않고, final closeout 문서에 무엇을 반드시 넣을지와 historical 문서/역할 종료 메모를 어떤 기본 원칙으로 다룰지 먼저 확정했다. 목적은 다음 턴이 더 이상 cleanup 탐색으로 돌아가지 않고, 실제 final closeout 본문 작성으로 바로 이어지게 만드는 것이다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- 현재 상태에서 가장 부족한 것은 테스트가 아니라 final closeout 문서 구조의 고정이었다
+- automatic baseline, broader baseline, representative Phase B evidence는 이미 최신 green이므로, 이제 남은 리스크는 `무엇을 final truth로 남길지`를 흐리게 쓰는 쪽이다
+- historical 문서와 역할 종료 메모는 기본적으로 삭제보다 역할 명시가 더 안전하다
+  - 이유:
+    - 이 저장소는 closeout 기록이 누적 증거 역할도 한다
+    - 지금 단계에서는 cleanup 기록 삭제보다 authoritative 포인터에서 밀려난 historical 기록임을 분명히 하는 편이 회귀 조사와 handoff에 더 유리하다
+- 따라서 다음 final closeout 문서는 최소한 `현재 상태`, `automatic baseline`, `representative evidence`, `QA/system verification judgment`, `historical retention judgment`, `final commit/push 상태`를 한 문서 안에서 묶어야 한다
+
+이번 turn의 verification 근거는 아래를 그대로 사용한다.
+
+- current automatic baseline
+  - `./scripts/dev-fast-path.ps1 -Mode current-focused-parallel` -> backend output-gating `24 passed`, backend preflight `59 passed`, frontend preflight `25 passed`
+  - `npm run build` -> 성공
+  - `pytest -q` -> `543 passed`
+- representative Phase B evidence
+  - backend happy-path / lineage `5 passed`
+  - provider trace failed-output / fallback `5 passed`
+  - frontend operator QA `3 passed`
+
+이 갱신으로 아래 범위는 현재 기준으로 정리됐다.
+
+1. final closeout 문서에 들어갈 최소 구조가 고정됐다
+2. historical 문서/역할 종료 메모는 기본적으로 삭제보다 역할 명시를 우선한다는 정리 기준이 고정됐다
+3. 다음 턴은 코드 수정 없이 final closeout 본문 작성과 최종 마감 판단에 바로 들어갈 수 있다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- final closeout 본문을 실제로 작성한다
+- QA/system verification judgment를 최종 문장으로 고정한다
+- 최종 마감 커밋 단위를 설계한다
 
 ## 203. 2026-07-06 final closeout prep stage confirmation
 
