@@ -1,7 +1,7 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 209. 2026-07-06 operational readiness check`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
-> 이 문서의 `## 1`부터 `## 208`까지는 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 209`만 기준으로 본다.
+> 현재 authoritative 상태/next slice 판단은 `## 210. 2026-07-06 operational readiness complete`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 이 문서의 `## 1`부터 `## 209`까지는 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 210`만 기준으로 본다.
 > 단, `2일 내 1차 데모 완성` 실행 레일은 `## 189`의 장기 우선순위를 그대로 넓게 집행하지 않고, `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`의 축소된 실행 계획을 우선 적용한다.
 
 ## 1. 결론
@@ -8417,6 +8417,46 @@ focused 검증 메모:
 - stale-shape helper 중복과 dead helper 후보 중 다음 최소 정리 대상 1개를 다시 좁힌다
 - 역할이 끝난 중복 메모 문서는 삭제보다 역할 명시가 맞는지 먼저 판단한다
 - 최종 closeout 직전 broad 재검증이 정말 필요한지 마지막으로 판단한다
+
+## 210. 2026-07-06 operational readiness complete
+
+이번 후속 작업에서는 운영 마감 blocker 1개를 실제로 복구하고, focused와 broader를 다시 돌려 현재 브랜치가 운영 마감 완료 상태인지 최신 증거로 재판정했다. 목적은 `개발 closeout은 끝났지만 운영 마감은 아직 아님`으로 남아 있던 상태를 실제 green 기준으로 닫는 것이었다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- exact blocker slice
+  - `test_broll_recommendation_endpoint_preserves_heuristic_path_on_unexpected_runtime_failure`
+  - 예상 밖 runtime 예외가 나와도 broll recommendation 단계가 heuristic fallback으로 내려가야 한다는 경계를 RED -> GREEN으로 복구했다
+- focused verification
+  - `./scripts/dev-fast-path.ps1 -Mode current-focused`
+    - backend output-gating `24 passed`
+    - backend preflight `59 passed`
+    - frontend preflight `25 passed`
+- broader verification
+  - `npm run build` -> 성공
+  - `pytest -q` -> `544 passed`
+
+현재 authoritative 운영 판단은 아래처럼 정리한다.
+
+- 현재 브랜치는 `개발 closeout 완료`이면서 동시에 `운영 마감 완료` 상태다
+- focused, representative smoke, frontend build, full backend regression이 모두 최신 green으로 다시 확보됐다
+- 현재 브랜치 기준 필수 blocker는 남아 있지 않다
+
+historical / dead artifact 판단은 아래 기본값을 유지한다.
+
+- 이번 턴에서도 즉시 삭제해야 할 명백한 dead artifact 후보는 확인하지 못했다
+- historical closeout 문서는 reference로 유지한다
+
+이 갱신으로 아래 범위는 현재 기준으로 정리됐다.
+
+1. 운영 마감 blocker 1개가 실제로 복구됐다
+2. broader full backend regression이 다시 green으로 닫혔다
+3. 현재 브랜치는 운영 마감 완료 상태로 봐도 되는 최신 증거가 다시 확보됐다
+
+현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+
+- 현재 브랜치 범위에서 필수 남은 일은 없다
+- 이후 새 요구가 생기면 새 goal로 열고, 실제 코드 변경인지부터 다시 판정한다
 
 ## 209. 2026-07-06 operational readiness check
 

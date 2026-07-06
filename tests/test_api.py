@@ -6257,6 +6257,44 @@ def test_broll_recommendation_endpoint_preserves_heuristic_path_after_runtime_fa
     }
 
 
+def test_broll_recommendation_endpoint_preserves_heuristic_path_on_unexpected_runtime_failure(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "videobox_provider_interfaces.stt.MockSTTProvider.transcribe",
+        _single_segment_transcribe,
+    )
+    bootstrap_client = TestClient(create_app(projects_root=tmp_path))
+    project_id, segment_job_id = _create_broll_recommendation_project(bootstrap_client, tmp_path)
+
+    local_provider = FakeStructuredProvider(errors=[RuntimeError("broll keyword expansion exploded")])
+    app = create_app(
+        projects_root=tmp_path,
+        local_first_runtime_service_factory=_local_first_service_factory(
+            local_provider=local_provider,
+            gemini_provider=FakeStructuredProvider(),
+            local_enabled=True,
+        ),
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        f"/api/projects/{project_id}/jobs/broll-recommendation",
+        json={"segment_analysis_job_id": segment_job_id},
+    )
+
+    assert response.status_code == 202
+    result = client.get(f"/api/projects/{project_id}/jobs/broll-recommendation/{response.json()['job_id']}")
+    assert result.status_code == 200
+    assert result.json()["recommendations"][0]["reason"].lower().startswith("matched keywords: office")
+    assert result.json()["recommendations"][0]["provider_trace"] == {
+        "routing_mode": "local_first",
+        "final_provider": "heuristic_fallback",
+        "fallback_reasons": ["unexpected_runtime_failure"],
+    }
+
+
 def test_timeline_and_review_snapshot_flow(tmp_path: Path) -> None:
     source_audio = tmp_path / "source-narration.wav"
     source_script = tmp_path / "source-script.txt"

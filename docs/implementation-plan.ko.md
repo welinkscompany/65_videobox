@@ -901,3 +901,4 @@
 - TTS, editing session, review 상태 계약은 서로 따로 놀지 않도록 같은 증거 기준으로 검증해야 한다
 - 단, 최종 운영 마감 점검에서는 focused와 representative smoke가 green이어도 broader full backend regression이 red면 운영 완료로 닫지 않는다
 - 현재 최신 운영 점검 결과는 `full-suite only red 1개`가 남아 있으므로, 다음 실제 작업은 새 기능 추가가 아니라 그 경계 1개를 좁히는 안정화 복귀다
+- 그 blocker를 복구한 뒤 focused와 broader가 모두 다시 green으로 닫혔으므로, 현재 구현 계획 기준 required work는 운영 마감 단계까지 모두 완료된 상태로 본다

@@ -138,6 +138,14 @@ class LocalFirstKeywordBrollRecommender(RecommendationProvider):
                 final_provider="heuristic_fallback",
             )
             return enriched
+        except Exception:
+            enriched = dict(segment)
+            enriched["provider_trace"] = with_final_provider(
+                build_provider_trace(final_provider="heuristic_fallback"),
+                final_provider="heuristic_fallback",
+                additional_reason="unexpected_runtime_failure",
+            )
+            return enriched
 
         keywords = [
             str(item).strip().lower()
