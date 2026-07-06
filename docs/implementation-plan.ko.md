@@ -748,6 +748,7 @@
 - prompt/output/runtime/timeline/TTS approval이 각각 들고 있던 recommendation type canonicalizer와 valid recommendation set도 공통 helper로 다시 모아, mixed-case recommendation type과 valid recommendation set 기준이 파일별로 다시 갈라지지 않도록 정리했다
 - prompt/output/runtime/review-action이 각각 들고 있던 review-flag code canonicalizer와 valid blocker code set도 공통 helper로 다시 모아, mixed-case review-flag code와 valid blocker code 기준이 파일별로 다시 갈라지지 않도록 정리했다
 - preview/output/runtime/review-guidance가 각각 들고 있던 review-status canonicalizer도 공통 helper로 다시 모아, mixed-case review-status surface와 blocked/draft/approved 판단 기준이 파일별로 다시 갈라지지 않도록 정리했다
+- preview/review-guidance/runtime이 각각 들고 있던 strict boolish normalization helper도 공통 모듈로 다시 모아, string false와 stale non-bool review_required 해석 기준이 파일별로 다시 갈라지지 않도록 정리했다
 - output operator copy와 review guidance가 각각 들고 있던 `VALID_PROMPT_RECOMMENDATION_TYPES`와 `VALID_PROMPT_REVIEW_FLAG_CODES`도 공통 모듈로 묶어, prompt family의 valid-set 기준이 파일별로 다시 갈라지지 않도록 정리했다
 - output operator copy와 review guidance가 각각 들고 있던 canonical pending recommendation identity helper도 공통 모듈로 묶어, recommendation_id / target_segment_id / recommendation_type canonical identity 규칙이 파일별로 다시 갈라지지 않도록 정리했다
 - output operator copy와 review guidance가 각각 들고 있던 pending recommendation row 정규화 helper를 공통 모듈로 묶어, selected_asset_uri / identity / reason / decision_state canonicalization 규칙이 파일별로 다시 갈라지지 않도록 정리했다

@@ -6,6 +6,9 @@ from typing import Any
 import json
 import warnings
 
+from videobox_core_engine.canonical_boolish import (
+    normalize_strict_boolish as _normalize_runtime_boolish,
+)
 from videobox_core_engine.canonical_recommendation import (
     canonical_recommendation_type as _canonical_runtime_recommendation_type,
     VALID_CANONICAL_RECOMMENDATION_TYPES as VALID_RESTORED_RECOMMENDATION_TYPES,
@@ -66,13 +69,6 @@ from videobox_domain_models.recommendations import RecommendationType
 from videobox_provider_interfaces.recommenders import RecommendationProvider, RecommendationRequest
 from videobox_provider_interfaces.stt import MockSTTProvider, STTProvider, STTRequest
 from videobox_storage.local_project_store import LocalProjectStore
-
-def _normalize_runtime_boolish(value: object) -> bool:
-    if isinstance(value, str):
-        return value.strip().lower() not in {"", "0", "false", "no", "off"}
-    if isinstance(value, bool):
-        return value
-    return False
 
 
 def _canonical_runtime_review_flag_message(value: object) -> str:

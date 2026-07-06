@@ -3,6 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from videobox_core_engine.canonical_boolish import (
+    normalize_strict_boolish as _normalize_boolish,
+)
 from videobox_core_engine.canonical_review_status import (
     canonical_review_status as _canonical_review_status,
 )
@@ -22,14 +25,6 @@ from videobox_core_engine.prompt_pending_recommendation import (
 )
 from videobox_core_engine.provider_trace import build_provider_trace, response_provider_trace, with_final_provider
 from videobox_provider_interfaces.llm import LLMProviderError, LLMTaskType
-
-
-def _normalize_boolish(value: object) -> bool:
-    if isinstance(value, str):
-        return value.strip().lower() not in {"", "0", "false", "no", "off"}
-    if isinstance(value, bool):
-        return value
-    return False
 
 
 def _is_prompt_blocking_pending_recommendation(item: object) -> bool:
