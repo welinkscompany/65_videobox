@@ -9306,6 +9306,34 @@ historical 문서와 찌꺼기 파일 판단은 아래 기본값을 유지한다
 - 역할이 끝난 중복 메모 문서는 삭제보다 역할 명시가 맞는지 먼저 판단한다
 - 최종 closeout 직전 broad 재검증이 정말 필요한지 마지막으로 판단한다
 
+## 189. 2026-07-06 Korean dashboard display policy closeout
+
+이번 후속 작업에서는 웹 대시보드 한글 UX live smoke 결과를 기준으로, 남는 영어를 `서버 데이터 원문 / ID·URI / UI 고정 문구`로 분류하고 표시 정책을 최상위 계획서에 반영했다.
+
+이번에 새로 확인된 사실은 아래와 같다.
+
+- 로컬 커밋 2개(`fix: localize dashboard copy`, `fix: localize review dashboard notes`)는 원격 `codex/tts-approved-runtime`에 push 완료됐다
+- 실제 브라우저 smoke에서 개요/타임라인/검수/편집/B롤 picker/import/제미나이 키 폼의 고정 UI 문구는 한글 단어 중심으로 확인됐다
+- 화면에 남는 영어 중 `B-roll Smoke Test`, `Office overview.`, `Team meeting restart.`, `Office team smoke pan`, `smoke-office-pan`은 프로젝트/세그먼트/자산/파일명 원문 데이터다
+- `transcription_job_001`, `timeline_002`, `asset_...`, `rec_...`, `local://...`는 추적용 ID/URI다
+- 따라서 서버 데이터 원문과 ID/URI는 자동 번역하지 않고 기본 보존하는 것이 맞다
+- UI 고정 문구와 상태/작업/검수 코드는 사용자 의미 기준 한글 라벨로 계속 매핑한다
+
+이번 turn의 verification은 아래와 같다.
+
+- push
+  - `git push` -> `3c54dd3..4ed7e76 codex/tts-approved-runtime -> codex/tts-approved-runtime`
+- policy update
+  - `docs/implementation-plan.ko.md`에 `## 7.1. 웹 대시보드 표시 언어 기준` 추가
+- judgment
+  - 자동 번역은 기본값으로 사용하지 않음
+  - 필요한 경우 후속 UX에서 `원문 유지 / 한글 요약 별도 표시 / 원문 보기 토글`을 검토한다
+
+현재 이 단계에서 다음 핵심 남은 일은 아래로 정리된다.
+
+- 문서화된 표시 정책에 맞춰 후속 UI 변경 시 서버 원문과 고정 UI 문구를 계속 구분한다
+- 사용자가 실제 편집 중 원문 영어가 불편하다고 판단하면, 자동 번역보다 한글 요약 보조 표시를 먼저 검토한다
+
 ## 188. 2026-07-06 Phase C shared prompt valid sets closeout
 
 이번 후속 작업에서는 새 stale-shape 경계를 더 열지 않고, output operator copy와 review guidance가 각각 들고 있던 `VALID_PROMPT_RECOMMENDATION_TYPES`와 `VALID_PROMPT_REVIEW_FLAG_CODES`를 공통 모듈로 묶었다.
