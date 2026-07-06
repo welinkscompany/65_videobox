@@ -614,6 +614,7 @@ const brollAssetsResponse = {
 function createFetchMock({
   geminiKeys = geminiKeysResponse,
   brollAssets = brollAssetsResponse,
+  brollBatchImportStatus,
   timeline = timelineResponse,
   editingSession = editingSessionResponse,
   latestEditingSession = editingSessionResponse,
@@ -629,6 +630,7 @@ function createFetchMock({
 }: {
   geminiKeys?: { keys: Array<Record<string, unknown>> };
   brollAssets?: { assets: BrollAsset[] };
+  brollBatchImportStatus?: number;
   timeline?: TimelineJob;
   editingSession?: EditingSession;
   latestEditingSession?: EditingSession | null;
@@ -670,6 +672,30 @@ function createFetchMock({
     }
     if (url.endsWith("/api/projects/project_001/jobs")) {
       return new Response(JSON.stringify(jobs));
+    }
+    if (
+      url.endsWith("/api/projects/project_001/assets/broll-video/batch") &&
+      init?.method === "POST"
+    ) {
+      if (brollBatchImportStatus != null && brollBatchImportStatus >= 400) {
+        return new Response("B-roll import failed", { status: brollBatchImportStatus });
+      }
+      const importedAssets = [
+        {
+          asset_id: "asset_broll_archive_003",
+          asset_type: "broll_video",
+          storage_uri: "local://projects/project_001/assets/imported/factory-line.mp4",
+          metadata: {
+            title: "factory-line",
+            tags: ["folder-import"],
+          },
+          created_at: "2026-07-06T00:00:02Z",
+        },
+      ];
+      state.brollAssets = {
+        assets: [...state.brollAssets.assets, ...importedAssets],
+      };
+      return new Response(JSON.stringify({ assets: importedAssets }), { status: 201 });
     }
     if (url.endsWith("/api/projects/project_001/assets/broll-video")) {
       return new Response(JSON.stringify(state.brollAssets));
@@ -2296,6 +2322,49 @@ describe("App", () => {
         }),
       );
     });
+  });
+
+  it("imports a B-roll folder from the editing session and refreshes the asset picker", async () => {
+    const fetchMock = await renderStartedEditingSession();
+    const folderPath =
+      "D:\\AI_Workspace_louis_office_50\\20_project\\65_videobox-project\\비롤_라이브러리\\검수완료";
+
+    fireEvent.change(screen.getByLabelText(/b-roll folder path/i), {
+      target: { value: folderPath },
+    });
+    fireEvent.change(screen.getByLabelText(/b-roll import tags/i), {
+      target: { value: "folder-import" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /import b-roll folder/i }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/projects/project_001/assets/broll-video/batch",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            source_directory: folderPath,
+            source_paths: [],
+            tags: ["folder-import"],
+          }),
+        }),
+      );
+    });
+    expect(await screen.findByText(/factory-line/i)).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: /b-roll asset picker/i })).toHaveTextContent(
+      /asset_broll_archive_003/i,
+    );
+  });
+
+  it("shows a B-roll import error when folder import fails", async () => {
+    await renderStartedEditingSession(createFetchMock({ brollBatchImportStatus: 400 }));
+
+    fireEvent.change(screen.getByLabelText(/b-roll folder path/i), {
+      target: { value: "D:\\missing\\비롤" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /import b-roll folder/i }));
+
+    expect(await screen.findByText(/b-roll import failed/i)).toBeInTheDocument();
   });
 
   it("removes the saved explanation card and invalidates the active candidate", async () => {

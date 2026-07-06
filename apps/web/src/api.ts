@@ -25,6 +25,12 @@ export type BrollAsset = {
   created_at: string;
 };
 
+export type BrollBatchImportRequest = {
+  source_paths: string[];
+  source_directory?: string;
+  tags: string[];
+};
+
 export type TimelineClip = {
   clip_id: string;
   segment_id: string;
@@ -345,6 +351,22 @@ export const api = {
       `/api/projects/${projectId}/assets/broll-video`,
     );
     return payload.assets;
+  },
+  importBrollBatch: async (
+    projectId: string,
+    payload: BrollBatchImportRequest,
+  ): Promise<BrollAsset[]> => {
+    const response = await request<{ assets: BrollAsset[] }>(
+      `/api/projects/${projectId}/assets/broll-video/batch`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      },
+    );
+    return response.assets;
   },
   listJobs: async (projectId: string): Promise<JobRecord[]> => {
     const payload = await request<{ jobs: JobRecord[] }>(`/api/projects/${projectId}/jobs`);

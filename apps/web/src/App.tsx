@@ -325,6 +325,13 @@ export function App() {
   const [exportJob, setExportJob] = useState<ExportJob | null>(null);
   const [brollAssets, setBrollAssets] = useState<BrollAsset[]>([]);
   const [brollAssetLoadError, setBrollAssetLoadError] = useState<string | null>(null);
+  const [brollFolderPath, setBrollFolderPath] = useState(
+    "D:\\AI_Workspace_louis_office_50\\20_project\\65_videobox-project\\비롤_라이브러리\\검수완료",
+  );
+  const [brollSourcePaths, setBrollSourcePaths] = useState("");
+  const [brollImportTags, setBrollImportTags] = useState("");
+  const [brollImportError, setBrollImportError] = useState<string | null>(null);
+  const [isImportingBroll, setIsImportingBroll] = useState(false);
   const [geminiKeys, setGeminiKeys] = useState<GeminiProviderKey[]>([]);
   const [geminiLoadError, setGeminiLoadError] = useState<string | null>(null);
   const [editingSessionRestoreError, setEditingSessionRestoreError] = useState<string | null>(null);
@@ -396,6 +403,7 @@ export function App() {
       setExportJob(null);
       setBrollAssets([]);
       setBrollAssetLoadError(null);
+      setBrollImportError(null);
       setGeminiKeys([]);
       setGeminiLoadError(null);
       setIsGeminiFormOpen(false);
@@ -411,6 +419,7 @@ export function App() {
       setLoadState("loading");
       setErrorMessage(null);
       setBrollAssetLoadError(null);
+      setBrollImportError(null);
       setGeminiLoadError(null);
       setEditingSessionRestoreError(null);
       setPartialRegenerationRestoreWarning(null);
@@ -1136,6 +1145,46 @@ export function App() {
     const providerKeys = await api.listGeminiProviderKeys(projectId);
     setGeminiKeys(providerKeys);
     setGeminiLoadError(null);
+  }
+
+  async function refreshBrollAssets(projectId: string) {
+    const assets = await api.listBrollAssets(projectId);
+    setBrollAssets(assets);
+    setBrollAssetLoadError(null);
+  }
+
+  async function handleImportBrollBatch() {
+    if (!selectedProjectId) {
+      return;
+    }
+    const sourceDirectory = brollFolderPath.trim();
+    const sourcePaths = brollSourcePaths
+      .split(/\r?\n/)
+      .map((path) => path.trim())
+      .filter(Boolean);
+    if (!sourceDirectory && sourcePaths.length === 0) {
+      setBrollImportError("B-roll import failed: source path is required.");
+      return;
+    }
+    setIsImportingBroll(true);
+    setBrollImportError(null);
+    try {
+      await api.importBrollBatch(selectedProjectId, {
+        source_directory: sourceDirectory || undefined,
+        source_paths: sourcePaths,
+        tags: brollImportTags
+          .split(",")
+          .map((tag) => tag.trim())
+          .filter(Boolean),
+      });
+      await refreshBrollAssets(selectedProjectId);
+    } catch (error) {
+      setBrollImportError(
+        error instanceof Error ? `B-roll import failed. ${error.message}` : "B-roll import failed.",
+      );
+    } finally {
+      setIsImportingBroll(false);
+    }
   }
 
   function openCreateGeminiForm() {
@@ -2381,6 +2430,41 @@ export function App() {
                   >
                     Save cut action
                   </button>
+                  <label className="field">
+                    <span>B-roll folder path</span>
+                    <input
+                      onChange={(event) => setBrollFolderPath(event.target.value)}
+                      value={brollFolderPath}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>B-roll source paths</span>
+                    <textarea
+                      onChange={(event) => setBrollSourcePaths(event.target.value)}
+                      rows={3}
+                      value={brollSourcePaths}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>B-roll import tags</span>
+                    <input
+                      onChange={(event) => setBrollImportTags(event.target.value)}
+                      value={brollImportTags}
+                    />
+                  </label>
+                  <button
+                    className="action-button"
+                    disabled={
+                      !selectedProjectId ||
+                      isImportingBroll ||
+                      (!brollFolderPath.trim() && !brollSourcePaths.trim())
+                    }
+                    onClick={() => void handleImportBrollBatch()}
+                    type="button"
+                  >
+                    {isImportingBroll ? "Importing B-roll folder..." : "Import B-roll folder"}
+                  </button>
+                  {brollImportError ? <p className="error-copy">{brollImportError}</p> : null}
                   <label className="field">
                     <span>B-roll asset picker</span>
                     <select
