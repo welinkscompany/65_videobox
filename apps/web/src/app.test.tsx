@@ -622,6 +622,7 @@ function createFetchMock({
   candidateResultStatus,
   candidateReviewStatus,
   candidatePreflightStatus,
+  editingMutationStatus,
   reviewSnapshot = reviewSnapshotResponse,
   candidateReviewSnapshot = candidateReviewSnapshotResponse,
   partialRegenerationResult = partialRegenerationResultResponse,
@@ -638,6 +639,7 @@ function createFetchMock({
   candidateResultStatus?: number;
   candidateReviewStatus?: number;
   candidatePreflightStatus?: number;
+  editingMutationStatus?: number;
   reviewSnapshot?: ReviewSnapshot;
   candidateReviewSnapshot?: ReviewSnapshot;
   partialRegenerationResult?: typeof partialRegenerationResultResponse;
@@ -912,6 +914,9 @@ function createFetchMock({
       ) &&
       init?.method === "PATCH"
     ) {
+      if (editingMutationStatus != null && editingMutationStatus >= 400) {
+        return new Response("caption save failed", { status: editingMutationStatus });
+      }
       const payload = JSON.parse(String(init.body)) as { caption_text: string };
       state.editingSession = {
         ...state.editingSession,
@@ -2376,6 +2381,28 @@ describe("App", () => {
     });
   });
 
+  it("shows a short success message after saving an editing change", async () => {
+    await renderStartedEditingSession();
+
+    fireEvent.change(screen.getByDisplayValue("Team meeting overview"), {
+      target: { value: "Team meeting overview refreshed" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /자막 저장/i }));
+
+    expect(await screen.findByText(/자막 저장됨/i)).toBeInTheDocument();
+  });
+
+  it("shows a short failure message near the editor when an editing save fails", async () => {
+    await renderStartedEditingSession(createFetchMock({ editingMutationStatus: 500 }));
+
+    fireEvent.change(screen.getByDisplayValue("Team meeting overview"), {
+      target: { value: "Team meeting overview refreshed" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /자막 저장/i }));
+
+    expect(await screen.findByText(/자막 저장 실패/i)).toBeInTheDocument();
+  });
+
   it("filters archived B-roll assets by display name tags and asset id before saving", async () => {
     const fetchMock = await renderStartedEditingSession();
     const picker = await screen.findByRole("combobox", { name: /B롤 선택/i });
@@ -2965,6 +2992,7 @@ describe("App", () => {
       );
     });
     await expectCandidateInvalidated();
+    expect(screen.getByText(/B롤 해제됨/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /B롤 해제/i })).not.toBeInTheDocument();
     expect(screen.getByLabelText(/B롤 자산 ID/i)).toHaveValue("");
     expect(screen.getByRole("checkbox", { name: /B롤/i })).not.toBeChecked();

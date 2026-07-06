@@ -81,6 +81,24 @@
 - 검증: `npm run test:focused` 72 passed, `npm run build` 통과.
 - 브라우저 smoke: 편집 탭에서 `B롤 검색`, `보임 7/7`, `팀` 검색 후 `보임 1/7`, 검색 결과 선택, `B롤 저장`, 선택 요약 갱신 확인. 콘솔 오류는 favicon 404만 확인됐다.
 
+## 215. 2026-07-06 편집 저장 피드백 UX closeout
+
+이번 slice의 제품 결정은 `저장 버튼은 누른 뒤 바로 결과를 보여준다`다.
+
+확정된 기준은 아래다.
+
+- 자막, 컷, B롤, 음악, 설명, 이미지, 표, TTS 저장/해제/삭제 mutation은 공통 저장 helper에서 짧은 성공/실패 메시지를 보여준다.
+- 성공 메시지는 `자막 저장됨`처럼 항목명과 저장 결과만 보여준다.
+- 실패 메시지는 `자막 저장 실패`, `B롤 해제 실패`처럼 항목명과 동작을 앞에 두고 API 오류 내용을 뒤에 붙인다.
+- DB 원본 데이터, 저장 API, editing session 갱신, partial regeneration invalidation 흐름은 변경하지 않는다.
+
+검증 결과는 아래다.
+
+- `apps/web/src/App.tsx`에 편집 저장 피드백 상태와 mutation key 기반 표시 label helper를 추가했다.
+- `apps/web/src/app.test.tsx`는 저장 성공 메시지와 저장 실패 메시지를 검증한다.
+- 검증: `npm run test:focused` 74 passed, `npm run build` 통과.
+- 브라우저 smoke: 편집 탭에서 자막을 저장한 뒤 `자막 저장됨` 노출과 재생성 타임라인 무효화 확인. 콘솔 오류는 favicon 404만 확인됐다.
+
 ## 1. 결론
 
 현재 개발은 계획서에서 크게 새지 않았다.

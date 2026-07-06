@@ -19,6 +19,36 @@ import {
 } from "./api";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
+
+type EditingMutationFeedback = {
+  kind: "success" | "error";
+  message: string;
+} | null;
+
+function formatEditingMutationFeedbackLabel(mutationKey: string): string {
+  const mutationParts = mutationKey.split("-");
+  const mutationType = mutationParts[mutationParts.length - 1];
+  switch (mutationType) {
+    case "caption":
+      return "자막";
+    case "cut":
+      return "컷";
+    case "broll":
+      return "B롤";
+    case "music":
+      return "음악";
+    case "explanation":
+      return "설명";
+    case "image":
+      return "이미지";
+    case "table":
+      return "표";
+    case "tts":
+      return "TTS";
+    default:
+      return "변경";
+  }
+}
 type RestoredTargetedSegment = Record<string, unknown>;
 
 const reviewActions = [
@@ -606,6 +636,8 @@ export function App() {
   >(null);
   const [loadState, setLoadState] = useState<LoadState>("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [editingMutationFeedback, setEditingMutationFeedback] =
+    useState<EditingMutationFeedback>(null);
   const [isRebuildingTimeline, setIsRebuildingTimeline] = useState(false);
   const [isApprovingTimeline, setIsApprovingTimeline] = useState(false);
   const [isReopeningTimeline, setIsReopeningTimeline] = useState(false);
@@ -1069,11 +1101,15 @@ export function App() {
     action: () => Promise<EditingSession>,
     options?: {
       addRegenerationField?: string;
+      feedbackAction?: "저장" | "해제" | "삭제";
       removeRegenerationField?: string;
     },
   ) {
+    const feedbackLabel = formatEditingMutationFeedbackLabel(mutationKey);
+    const feedbackAction = options?.feedbackAction ?? "저장";
     setIsSavingEditingMutation(mutationKey);
     setErrorMessage(null);
+    setEditingMutationFeedback(null);
     try {
       const session = await action();
       applyEditingSessionState(session);
@@ -1096,8 +1132,17 @@ export function App() {
       setSubtitleJob(null);
       setPreviewJob(null);
       setExportJob(null);
+      setEditingMutationFeedback({
+        kind: "success",
+        message: `${feedbackLabel} ${feedbackAction}됨`,
+      });
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "알 수 없는 오류");
+      const message = error instanceof Error ? error.message : "알 수 없는 오류";
+      setErrorMessage(message);
+      setEditingMutationFeedback({
+        kind: "error",
+        message: `${feedbackLabel} ${feedbackAction} 실패 · ${message}`,
+      });
     } finally {
       setIsSavingEditingMutation(null);
     }
@@ -2670,6 +2715,17 @@ export function App() {
                   <span>{selectedEditingDraft.imageAssetId || "이미지 없음"}</span>
                   <span>{selectedEditingDraft.tableText || "표 없음"}</span>
                   <span>{selectedEditingDraft.ttsAssetId || "TTS 없음"}</span>
+                  {editingMutationFeedback ? (
+                    <p
+                      className={
+                        editingMutationFeedback.kind === "error"
+                          ? "error-copy"
+                          : "meta-copy"
+                      }
+                    >
+                      {editingMutationFeedback.message}
+                    </p>
+                  ) : null}
                   <label className="field">
                     <span>자막</span>
                     <input
@@ -2887,7 +2943,7 @@ export function App() {
                               activeEditingSessionId!,
                               selectedEditingSegment.segment_id,
                             ),
-                          { removeRegenerationField: "broll" },
+                          { feedbackAction: "해제", removeRegenerationField: "broll" },
                         )
                       }
                       type="button"
@@ -2958,7 +3014,7 @@ export function App() {
                               activeEditingSessionId!,
                               selectedEditingSegment.segment_id,
                             ),
-                          { removeRegenerationField: "music" },
+                          { feedbackAction: "해제", removeRegenerationField: "music" },
                         )
                       }
                       type="button"
@@ -3057,6 +3113,7 @@ export function App() {
                               activeEditingSessionId!,
                               selectedEditingSegment.segment_id,
                             ),
+                          { feedbackAction: "삭제" },
                         )
                       }
                       type="button"
@@ -3139,6 +3196,7 @@ export function App() {
                             activeEditingSessionId!,
                             selectedEditingSegment.segment_id,
                           ),
+                        { feedbackAction: "삭제" },
                         )
                       }
                       type="button"
@@ -3244,6 +3302,7 @@ export function App() {
                             activeEditingSessionId!,
                             selectedEditingSegment.segment_id,
                           ),
+                        { feedbackAction: "삭제" },
                         )
                       }
                       type="button"
@@ -3327,6 +3386,7 @@ export function App() {
                             activeEditingSessionId!,
                             selectedEditingSegment.segment_id,
                           ),
+                        { feedbackAction: "해제" },
                         )
                       }
                       type="button"
