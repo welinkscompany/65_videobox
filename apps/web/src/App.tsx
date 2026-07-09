@@ -3,9 +3,11 @@ import { Fragment, useEffect, useMemo, useState } from "react";
 import {
   api,
   type BrollAsset,
+  type CapCutDraftExportJob,
   type EditingSession,
   type EditingSessionSegment,
   type ExportJob,
+  type FinalRenderJob,
   type GeminiProviderKey,
   type JobRecord,
   type PartialRegenerationPreflight,
@@ -617,6 +619,17 @@ export function App() {
   const [subtitleJob, setSubtitleJob] = useState<SubtitleJob | null>(null);
   const [previewJob, setPreviewJob] = useState<PreviewJob | null>(null);
   const [exportJob, setExportJob] = useState<ExportJob | null>(null);
+  const [finalRenderJob, setFinalRenderJob] = useState<FinalRenderJob | null>(null);
+  const [capcutDraftJob, setCapcutDraftJob] = useState<CapCutDraftExportJob | null>(null);
+  const [voiceSamplePath, setVoiceSamplePath] = useState("");
+  const [voiceSampleAssetId, setVoiceSampleAssetId] = useState("");
+  const [isRegisteringVoiceSample, setIsRegisteringVoiceSample] = useState(false);
+  const [voiceSampleMessage, setVoiceSampleMessage] = useState<string | null>(null);
+  const [voiceSampleError, setVoiceSampleError] = useState<string | null>(null);
+  const [ttsCandidateVoiceSampleId, setTtsCandidateVoiceSampleId] = useState("");
+  const [isGeneratingTtsCandidate, setIsGeneratingTtsCandidate] = useState(false);
+  const [ttsCandidateMessage, setTtsCandidateMessage] = useState<string | null>(null);
+  const [ttsCandidateError, setTtsCandidateError] = useState<string | null>(null);
   const [brollAssets, setBrollAssets] = useState<BrollAsset[]>([]);
   const [brollAssetLoadError, setBrollAssetLoadError] = useState<string | null>(null);
   const [brollFolderPath, setBrollFolderPath] = useState(
@@ -644,6 +657,8 @@ export function App() {
   const [isRenderingSubtitle, setIsRenderingSubtitle] = useState(false);
   const [isRenderingPreview, setIsRenderingPreview] = useState(false);
   const [isExportingCapcut, setIsExportingCapcut] = useState(false);
+  const [isRenderingFinal, setIsRenderingFinal] = useState(false);
+  const [isExportingCapcutDraft, setIsExportingCapcutDraft] = useState(false);
   const [isStartingEditingSession, setIsStartingEditingSession] = useState(false);
   const [isSavingEditingMutation, setIsSavingEditingMutation] = useState<string | null>(null);
   const [isRequestingRegenerationPreflight, setIsRequestingRegenerationPreflight] =
@@ -1389,6 +1404,123 @@ export function App() {
     }
   }
 
+  async function pollUntilJobFinished<T extends { status: string }>(
+    fetchResult: () => Promise<T>,
+    options?: { intervalMs?: number; timeoutMs?: number },
+  ): Promise<T> {
+    const intervalMs = options?.intervalMs ?? 1000;
+    const timeoutMs = options?.timeoutMs ?? 60 * 60 * 1000;
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const result = await fetchResult();
+      if (result.status === "succeeded" || result.status === "failed") {
+        return result;
+      }
+      if (Date.now() > deadline) {
+        throw new Error("작업이 시간 내에 끝나지 않았습니다");
+      }
+      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    }
+  }
+
+  async function handleFinalRender() {
+    if (!selectedProjectId || !activeTimelineJobId || !canGenerateOutputs) {
+      return;
+    }
+    setIsRenderingFinal(true);
+    setErrorMessage(null);
+    try {
+      const renderResult = await api.startFinalRender(selectedProjectId, {
+        timeline_job_id: activeTimelineJobId,
+      });
+      const finalRender = await pollUntilJobFinished(() =>
+        api.getFinalRender(selectedProjectId, renderResult.job_id),
+      );
+      const jobItems = await api.listJobs(selectedProjectId);
+      setJobs(jobItems);
+      setFinalRenderJob(finalRender);
+      if (finalRender.status === "failed") {
+        setErrorMessage("완성본 렌더 실패");
+      }
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "알 수 없는 오류");
+    } finally {
+      setIsRenderingFinal(false);
+    }
+  }
+
+  async function handleCapcutDraftExport() {
+    if (!selectedProjectId || !activeTimelineJobId || !canGenerateOutputs) {
+      return;
+    }
+    setIsExportingCapcutDraft(true);
+    setErrorMessage(null);
+    try {
+      const exportResult = await api.startCapcutDraftExport(selectedProjectId, {
+        timeline_job_id: activeTimelineJobId,
+      });
+      const capcutDraftExport = await pollUntilJobFinished(() =>
+        api.getCapcutDraftExport(selectedProjectId, exportResult.job_id),
+      );
+      const jobItems = await api.listJobs(selectedProjectId);
+      setJobs(jobItems);
+      setCapcutDraftJob(capcutDraftExport);
+      if (capcutDraftExport.status === "failed") {
+        setErrorMessage("CapCut 초안 내보내기 실패");
+      }
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "알 수 없는 오류");
+    } finally {
+      setIsExportingCapcutDraft(false);
+    }
+  }
+
+  async function handleRegisterVoiceSample() {
+    if (!selectedProjectId || !voiceSamplePath.trim()) {
+      return;
+    }
+    setIsRegisteringVoiceSample(true);
+    setVoiceSampleError(null);
+    setVoiceSampleMessage(null);
+    try {
+      const asset = await api.registerVoiceSample(selectedProjectId, {
+        source_path: voiceSamplePath.trim(),
+      });
+      setVoiceSampleAssetId(asset.asset_id);
+      setTtsCandidateVoiceSampleId(asset.asset_id);
+      setVoiceSampleMessage(`등록됨 · ${asset.asset_id}`);
+    } catch (error) {
+      setVoiceSampleError(
+        error instanceof Error ? `음성 샘플 등록 실패 · ${error.message}` : "음성 샘플 등록 실패",
+      );
+    } finally {
+      setIsRegisteringVoiceSample(false);
+    }
+  }
+
+  async function handleGenerateTtsCandidate(segmentId: string, segmentText: string) {
+    if (!selectedProjectId || !ttsCandidateVoiceSampleId.trim() || !segmentText.trim()) {
+      return;
+    }
+    setIsGeneratingTtsCandidate(true);
+    setTtsCandidateError(null);
+    setTtsCandidateMessage(null);
+    try {
+      const asset = await api.generateTtsCandidate(selectedProjectId, {
+        segment_text: segmentText,
+        voice_sample_asset_id: ttsCandidateVoiceSampleId.trim(),
+      });
+      updateEditingDraft(segmentId, { ttsAssetId: asset.asset_id });
+      setTtsCandidateMessage(`생성됨 · ${asset.asset_id} (TTS 자산 ID에 채워짐)`);
+    } catch (error) {
+      setTtsCandidateError(
+        error instanceof Error ? `TTS 후보 생성 실패 · ${error.message}` : "TTS 후보 생성 실패",
+      );
+    } finally {
+      setIsGeneratingTtsCandidate(false);
+    }
+  }
+
   async function handleApproveTimeline() {
     if (!selectedProjectId || !activeTimelineJobId || !canApproveTimeline) {
       return;
@@ -1889,6 +2021,22 @@ export function App() {
               {isExportingCapcut ? "캡컷 내보내는 중" : "캡컷 내보내기"}
             </button>
             <button
+              className="action-button"
+              disabled={!canGenerateOutputs || isRenderingFinal}
+              onClick={() => void handleFinalRender()}
+              type="button"
+            >
+              {isRenderingFinal ? "완성본 렌더 중" : "완성본 렌더"}
+            </button>
+            <button
+              className="action-button"
+              disabled={!canGenerateOutputs || isExportingCapcutDraft}
+              onClick={() => void handleCapcutDraftExport()}
+              type="button"
+            >
+              {isExportingCapcutDraft ? "CapCut 초안 내보내는 중" : "CapCut 초안(실제)"}
+            </button>
+            <button
               className={canApproveTimeline ? "action-button success" : "action-button"}
               disabled={!canApproveTimeline || isApprovingTimeline}
               onClick={() => void handleApproveTimeline()}
@@ -2059,6 +2207,22 @@ export function App() {
                   <dt>내보내기 대상</dt>
                   <dd>{exportJob ? formatDisplayText(exportJob.export.export_type) : "미시작"}</dd>
                 </div>
+                <div>
+                  <dt>완성본 렌더</dt>
+                  <dd>{formatJobValue(finalRenderJob?.job_id)}</dd>
+                </div>
+                <div>
+                  <dt>완성본 파일</dt>
+                  <dd>{finalRenderJob ? formatDisplayText(finalRenderJob.render.file_uri) : "미시작"}</dd>
+                </div>
+                <div>
+                  <dt>CapCut 초안(실제)</dt>
+                  <dd>{formatJobValue(capcutDraftJob?.job_id)}</dd>
+                </div>
+                <div>
+                  <dt>CapCut 초안 파일</dt>
+                  <dd>{capcutDraftJob ? formatDisplayText(capcutDraftJob.export.file_uri) : "미시작"}</dd>
+                </div>
               </dl>
             </article>
 
@@ -2067,6 +2231,46 @@ export function App() {
 
         {selectedSection === "settings" ? (
           <section className="workspace-grid">
+            <article className="panel">
+              <div className="panel-header">
+                <div>
+                  <p className="section-kicker">TTS</p>
+                  <h2>음성 샘플</h2>
+                </div>
+              </div>
+              <label className="field">
+                <span>음성 샘플 파일 경로</span>
+                <input
+                  onChange={(event) => setVoiceSamplePath(event.target.value)}
+                  placeholder="C:\path\to\voice_sample.wav"
+                  value={voiceSamplePath}
+                />
+              </label>
+              <div className="action-row">
+                <button
+                  className="action-button primary"
+                  disabled={!selectedProjectId || !voiceSamplePath.trim() || isRegisteringVoiceSample}
+                  onClick={() => void handleRegisterVoiceSample()}
+                  type="button"
+                >
+                  {isRegisteringVoiceSample ? "등록 중" : "음성 샘플 등록"}
+                </button>
+              </div>
+              {voiceSampleMessage ? <p className="meta-copy">{voiceSampleMessage}</p> : null}
+              {voiceSampleError ? <p className="error-banner">{voiceSampleError}</p> : null}
+              <label className="field">
+                <span>TTS 후보 생성에 쓸 음성 샘플 자산 ID</span>
+                <input
+                  onChange={(event) => setTtsCandidateVoiceSampleId(event.target.value)}
+                  value={ttsCandidateVoiceSampleId || voiceSampleAssetId}
+                />
+              </label>
+              <p className="meta-copy">
+                편집 탭의 세그먼트에서 &quot;TTS 후보 생성&quot; 버튼으로 이 음성 샘플 기반 나레이션을
+                만들 수 있습니다.
+              </p>
+            </article>
+
             <article className="panel">
               <div className="panel-header">
                 <div>
@@ -3454,6 +3658,29 @@ export function App() {
                       TTS 추천 ID · 자산 ID 필요
                     </p>
                   ) : null}
+                  <button
+                    className="action-button"
+                    disabled={
+                      !selectedProjectId ||
+                      !ttsCandidateVoiceSampleId.trim() ||
+                      !selectedEditingSegment.caption_text.trim() ||
+                      isGeneratingTtsCandidate
+                    }
+                    onClick={() =>
+                      void handleGenerateTtsCandidate(
+                        selectedEditingSegment.segment_id,
+                        selectedEditingSegment.caption_text,
+                      )
+                    }
+                    type="button"
+                  >
+                    {isGeneratingTtsCandidate ? "TTS 후보 생성 중" : "TTS 후보 생성 (음성 클로닝)"}
+                  </button>
+                  {!ttsCandidateVoiceSampleId.trim() ? (
+                    <p className="meta-copy">설정 탭에서 음성 샘플을 먼저 등록하세요</p>
+                  ) : null}
+                  {ttsCandidateMessage ? <p className="meta-copy">{ttsCandidateMessage}</p> : null}
+                  {ttsCandidateError ? <p className="error-banner">{ttsCandidateError}</p> : null}
                   {selectedEditingSegment.tts_replacement ? (
                     <button
                       className="action-button"

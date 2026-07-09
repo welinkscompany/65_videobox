@@ -332,6 +332,51 @@ export type GeminiProviderKeyUpdateRequest = {
   high_quality_model?: string;
 };
 
+export type AssetResponse = {
+  asset_id: string;
+  asset_type: string;
+  storage_uri: string;
+};
+
+export type AssetRegistrationRequest = {
+  source_path: string;
+};
+
+export type TtsCandidateRequest = {
+  segment_text: string;
+  voice_sample_asset_id: string;
+};
+
+export type FinalRenderArtifact = {
+  export_id: string;
+  timeline_id: string;
+  export_type: string;
+  file_uri: string;
+  status: string;
+  created_at?: string | null;
+};
+
+export type FinalRenderJob = {
+  job_id: string;
+  status: string;
+  render: FinalRenderArtifact;
+};
+
+export type CapCutDraftExportArtifact = {
+  export_id: string;
+  timeline_id: string;
+  export_type: string;
+  file_uri: string;
+  status: string;
+  created_at?: string | null;
+};
+
+export type CapCutDraftExportJob = {
+  job_id: string;
+  status: string;
+  export: CapCutDraftExportArtifact;
+};
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, init);
   if (!response.ok) {
@@ -724,4 +769,43 @@ export const api = {
         method: "POST",
       },
     ),
+  registerVoiceSample: (projectId: string, payload: AssetRegistrationRequest) =>
+    request<AssetResponse>(`/api/projects/${projectId}/assets/voice-sample`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    }),
+  generateTtsCandidate: (projectId: string, payload: TtsCandidateRequest) =>
+    request<AssetResponse>(`/api/projects/${projectId}/tts-candidates`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    }),
+  startFinalRender: (projectId: string, payload: OutputJobRequest) =>
+    request<{ job_id: string; status: string }>(`/api/projects/${projectId}/jobs/final-render`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    }),
+  getFinalRender: (projectId: string, jobId: string) =>
+    request<FinalRenderJob>(`/api/projects/${projectId}/final-renders/${jobId}`),
+  startCapcutDraftExport: (projectId: string, payload: OutputJobRequest) =>
+    request<{ job_id: string; status: string }>(
+      `/api/projects/${projectId}/jobs/capcut-draft-export`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      },
+    ),
+  getCapcutDraftExport: (projectId: string, jobId: string) =>
+    request<CapCutDraftExportJob>(`/api/projects/${projectId}/capcut-draft-exports/${jobId}`),
 };
