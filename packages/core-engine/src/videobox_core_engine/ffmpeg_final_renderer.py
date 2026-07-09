@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import subprocess
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -117,7 +118,11 @@ class FfmpegFinalRenderer:
         timeline: dict[str, Any],
         output_path: Path,
         subtitle_file_path: Path | None = None,
+        on_progress: Callable[[int], None] | None = None,
     ) -> Path:
+        def report_progress(percent: int) -> None:
+            if on_progress is not None:
+                on_progress(percent)
         narration_clips: list[dict[str, Any]] = []
         broll_clips: list[dict[str, Any]] = []
         bgm_clips: list[dict[str, Any]] = []
@@ -155,6 +160,7 @@ class FfmpegFinalRenderer:
                 narration_segment_paths.append(segment_path)
             narration_path = work_dir / "narration_full.wav"
             self._concat(segment_paths=narration_segment_paths, output_path=narration_path, work_dir=work_dir)
+            report_progress(25)
 
             broll_segment_paths = []
             for index, clip in enumerate(broll_clips, start=1):
@@ -164,6 +170,7 @@ class FfmpegFinalRenderer:
                 broll_segment_paths.append(segment_path)
             video_path = work_dir / "broll_full.mp4"
             self._concat(segment_paths=broll_segment_paths, output_path=video_path, work_dir=work_dir)
+            report_progress(60)
 
             audio_path = narration_path
             if bgm_clips:
@@ -190,6 +197,7 @@ class FfmpegFinalRenderer:
                 if result.returncode != 0:
                     raise FinalRenderError(f"ffmpeg failed mixing bgm: {result.stderr[-800:]}")
                 audio_path = mixed_path
+            report_progress(80)
 
             output_path.parent.mkdir(parents=True, exist_ok=True)
             command = [
@@ -217,6 +225,7 @@ class FfmpegFinalRenderer:
             result = self._run(command)
             if result.returncode != 0:
                 raise FinalRenderError(f"ffmpeg failed muxing final output: {result.stderr[-800:]}")
+            report_progress(100)
 
         return output_path
 

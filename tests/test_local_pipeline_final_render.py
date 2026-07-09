@@ -19,6 +19,7 @@ class _FakeFinalRenderer:
         timeline: dict[str, Any],
         output_path: Path,
         subtitle_file_path: Path | None = None,
+        on_progress: Any = None,
     ) -> Path:
         self.received_calls.append(
             {
@@ -28,6 +29,8 @@ class _FakeFinalRenderer:
                 "subtitle_file_path": subtitle_file_path,
             }
         )
+        if on_progress is not None:
+            on_progress(100)
         output_path.write_bytes(b"fake rendered mp4 bytes")
         return output_path
 

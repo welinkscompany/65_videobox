@@ -1,12 +1,32 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from difflib import SequenceMatcher
 from typing import Any, Protocol
 
 from videobox_core_engine.local_first_runtime import LocalFirstStructuredGenerationError
 from videobox_core_engine.provider_trace import build_provider_trace, response_provider_trace, with_final_provider
 from videobox_core_engine.transcript_alignment import split_script_units
 from videobox_provider_interfaces.llm import LLMProviderError, LLMTaskType
+
+# A gap this long between two consecutive narration segments is treated as
+# dead air/silence worth flagging for operator review rather than assuming
+# it's an intentional pause.
+NARRATION_SILENCE_GAP_SECONDS = 2.0
+# Consecutive segments whose text similarity meets this ratio are treated as
+# a retake (the narrator re-recorded the same line) rather than two distinct
+# sentences that happen to share vocabulary.
+NARRATION_RETAKE_SIMILARITY_RATIO = 0.82
+
+
+def _is_likely_retake(previous_text: str, current_text: str) -> bool:
+    previous_normalized = previous_text.strip().lower()
+    current_normalized = current_text.strip().lower()
+    if len(previous_normalized) < 4 or len(current_normalized) < 4:
+        return False
+    return SequenceMatcher(None, previous_normalized, current_normalized).ratio() >= (
+        NARRATION_RETAKE_SIMILARITY_RATIO
+    )
 
 
 class StructuredScenePlanningRuntime(Protocol):
@@ -45,26 +65,45 @@ class HeuristicSegmentAnalyzer(SegmentAnalyzer):
         del project_id
         script_lines = split_script_units(script_text) if script_text else []
         analyzed_segments: list[dict[str, Any]] = []
+        previous_segment: dict[str, Any] | None = None
         for index, segment in enumerate(transcript_segments):
             transcript_text = str(segment["text"]).strip()
             script_reference = script_lines[index] if index < len(script_lines) else None
-            review_required = (
-                "restart" in transcript_text.lower()
-                or float(segment.get("confidence", 1.0)) < 0.85
-                or (script_reference is not None and transcript_text.rstrip(".") != script_reference.rstrip("."))
-            )
+            start_sec = float(segment["start_sec"])
+
+            reasons: list[str] = []
+            if "restart" in transcript_text.lower():
+                reasons.append("restart_keyword")
+            if float(segment.get("confidence", 1.0)) < 0.85:
+                reasons.append("low_confidence")
+            if script_reference is not None and transcript_text.rstrip(".") != script_reference.rstrip("."):
+                reasons.append("script_mismatch")
+            if previous_segment is not None:
+                gap_sec = start_sec - float(previous_segment["end_sec"])
+                if gap_sec > NARRATION_SILENCE_GAP_SECONDS:
+                    reasons.append("narration_silence_gap")
+                if _is_likely_retake(str(previous_segment["text"]).strip(), transcript_text):
+                    reasons.append("narration_retake_duplicate")
+
+            review_required = bool(reasons)
             analyzed_segments.append(
                 {
                     "segment_id": f"seg_{index + 1:03d}",
                     "text": transcript_text,
-                    "start_sec": float(segment["start_sec"]),
+                    "start_sec": start_sec,
                     "end_sec": float(segment["end_sec"]),
                     "confidence": float(segment.get("confidence", 1.0)),
                     "review_required": review_required,
                     "cleanup_decision": "review" if review_required else "keep",
+                    "review_reasons": reasons,
                     "provider_trace": build_provider_trace(final_provider="heuristic_fallback"),
                 }
             )
+            previous_segment = {
+                "text": transcript_text,
+                "start_sec": start_sec,
+                "end_sec": float(segment["end_sec"]),
+            }
         return analyzed_segments
 
 

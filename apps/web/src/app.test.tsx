@@ -702,6 +702,9 @@ function createFetchMock({
     if (url.endsWith("/api/projects/project_001/assets/broll-video")) {
       return new Response(JSON.stringify(state.brollAssets));
     }
+    if (/\/api\/projects\/project_001\/segments\/[^/]+\/tts-candidates$/.test(url)) {
+      return new Response(JSON.stringify({ candidates: [] }));
+    }
     if (
       url.endsWith("/api/projects/project_001/jobs/build-timeline") &&
       init?.method === "POST"
@@ -2380,8 +2383,8 @@ describe("App", () => {
   it("shows archived B-roll assets in the editing session picker and saves the selected override", async () => {
     const fetchMock = await renderStartedEditingSession();
 
-    expect(await screen.findByText(/사무실 로비 패닝/i)).toBeInTheDocument();
-    expect(screen.getByText(/asset_broll_archive_001/i)).toBeInTheDocument();
+    expect((await screen.findAllByText(/사무실 로비 패닝/i)).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/asset_broll_archive_001/i).length).toBeGreaterThan(0);
 
     fireEvent.change(screen.getByRole("combobox", { name: /B롤 선택/i }), {
       target: { value: "asset_broll_archive_002" },

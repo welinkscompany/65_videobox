@@ -182,6 +182,16 @@ PROJECT_SCHEMA_STATEMENTS = (
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS tts_candidates (
+        candidate_id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        segment_id TEXT NOT NULL,
+        asset_id TEXT NOT NULL,
+        source_text TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS gemini_provider_keys (
         key_id TEXT PRIMARY KEY,
         project_id TEXT NOT NULL,

@@ -15,7 +15,10 @@ export type JobRecord = {
   error_message: string | null;
   started_at: string | null;
   finished_at: string | null;
+  progress_percent?: number | null;
 };
+
+export type JobRecordWithProject = JobRecord & { project_name: string };
 
 export type BrollAsset = {
   asset_id: string;
@@ -93,6 +96,7 @@ export type SegmentRecord = {
   confidence: number;
   review_required: boolean;
   cleanup_decision: string;
+  review_reasons?: string[];
 };
 
 export type ReviewSnapshot = {
@@ -345,6 +349,16 @@ export type AssetRegistrationRequest = {
 export type TtsCandidateRequest = {
   segment_text: string;
   voice_sample_asset_id: string;
+  segment_id?: string;
+};
+
+export type TtsCandidateRecord = {
+  candidate_id: string;
+  project_id: string;
+  segment_id: string;
+  asset_id: string;
+  source_text: string;
+  created_at: string;
 };
 
 export type FinalRenderArtifact = {
@@ -415,6 +429,10 @@ export const api = {
   },
   listJobs: async (projectId: string): Promise<JobRecord[]> => {
     const payload = await request<{ jobs: JobRecord[] }>(`/api/projects/${projectId}/jobs`);
+    return payload.jobs;
+  },
+  listAllJobs: async (): Promise<JobRecordWithProject[]> => {
+    const payload = await request<{ jobs: JobRecordWithProject[] }>("/api/jobs");
     return payload.jobs;
   },
   buildTimeline: (projectId: string, payload: BuildTimelineRequest) =>
@@ -785,6 +803,14 @@ export const api = {
       },
       body: JSON.stringify(payload),
     }),
+  listTtsCandidates: (projectId: string, segmentId: string) =>
+    request<{ candidates: TtsCandidateRecord[] }>(
+      `/api/projects/${projectId}/segments/${segmentId}/tts-candidates`,
+    ),
+  assetContentUrl: (projectId: string, assetId: string) =>
+    `/api/projects/${projectId}/assets/${assetId}/content`,
+  assetThumbnailUrl: (projectId: string, assetId: string) =>
+    `/api/projects/${projectId}/assets/${assetId}/thumbnail`,
   startFinalRender: (projectId: string, payload: OutputJobRequest) =>
     request<{ job_id: string; status: string }>(`/api/projects/${projectId}/jobs/final-render`, {
       method: "POST",
@@ -808,4 +834,8 @@ export const api = {
     ),
   getCapcutDraftExport: (projectId: string, jobId: string) =>
     request<CapCutDraftExportJob>(`/api/projects/${projectId}/capcut-draft-exports/${jobId}`),
+  retryJob: (projectId: string, jobId: string) =>
+    request<{ job_id: string; status: string }>(`/api/projects/${projectId}/jobs/${jobId}/retry`, {
+      method: "POST",
+    }),
 };

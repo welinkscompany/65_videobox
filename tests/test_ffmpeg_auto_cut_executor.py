@@ -94,6 +94,36 @@ def test_count_scene_changes_uses_static_check_filter_not_cut_filter(
     assert not any("gt(scene,0.4)" in part for part in captured_commands[0])
 
 
+def test_detect_scene_and_black_regions_combines_both_parsers(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    executor = FfmpegAutoCutExecutor(planner=AutoCutPlanner())
+    stderr = (
+        "[Parsed_showinfo_2 @ 0x0] n:0 pts_time:10\n"
+        "[Parsed_blackdetect_3 @ 0x0] black_start:8 black_end:9.8 black_duration:1.8\n"
+    )
+    captured_commands: list[list[str]] = []
+
+    def _capture(command: list[str], **kwargs: object):
+        captured_commands.append(command)
+        return _fake_result(stderr=stderr)
+
+    _patch_subprocess_run(monkeypatch, _capture)
+
+    scene_timestamps, black_regions = executor.detect_scene_and_black_regions(tmp_path / "clip.mp4")
+
+    assert scene_timestamps == [10.0]
+    assert black_regions == [{"start": 8.0, "end": 9.8}]
+    assert any("split=2" in part for part in captured_commands[0])
+
+
+def test_scaled_detection_timeout_grows_with_duration(tmp_path: Path) -> None:
+    executor = FfmpegAutoCutExecutor(planner=AutoCutPlanner(), detection_timeout_seconds=300)
+
+    assert executor._scaled_detection_timeout(60.0) == 300
+    assert executor._scaled_detection_timeout(3600.0) == 5400
+
+
 def test_run_full_detection_raises_helpful_error_when_ffmpeg_missing(tmp_path: Path) -> None:
     executor = FfmpegAutoCutExecutor(planner=AutoCutPlanner(), ffmpeg_binary="videobox-nonexistent-ffmpeg")
 

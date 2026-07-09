@@ -125,6 +125,10 @@ def test_final_render_endpoint_produces_a_real_playable_mp4_end_to_end(
     assert body["status"] == "succeeded"
     assert body["render"]["export_type"] == "final_render"
 
+    jobs = client.get(f"/api/projects/{project_id}/jobs").json()["jobs"]
+    render_job = next(job for job in jobs if job["job_id"] == render_job_id)
+    assert render_job["progress_percent"] == 100
+
     file_uri = body["render"]["file_uri"]
     relative_output_path = Path(file_uri.removeprefix(f"local://projects/{project_id}/"))
     resolved_output_path = tmp_path / "projects" / project_id / relative_output_path

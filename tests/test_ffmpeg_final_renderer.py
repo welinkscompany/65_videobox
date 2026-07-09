@@ -193,6 +193,70 @@ def test_render_timeline_to_mp4_produces_a_real_playable_video(tmp_path: Path) -
     assert float(probe.stdout.strip()) == pytest.approx(6.0, abs=1.0)
 
 
+@pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg/ffprobe not installed on this machine")
+def test_render_timeline_to_mp4_reports_progress_milestones(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Render Progress Project")
+
+    narration_file = tmp_path / "narration_source.wav"
+    _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=2", str(narration_file)])
+    narration_asset = store.register_asset(
+        project_id=project.project_id,
+        asset_type=AssetType.NARRATION_AUDIO,
+        source_path=narration_file,
+    )
+
+    broll_file = tmp_path / "broll_source.mp4"
+    _generate(
+        ["ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc=duration=2:size=320x240:rate=15", str(broll_file)]
+    )
+    broll_asset = store.register_asset(
+        project_id=project.project_id,
+        asset_type=AssetType.BROLL_VIDEO,
+        source_path=broll_file,
+    )
+
+    timeline = {
+        "narration_source_uri": narration_asset.storage_uri,
+        "tracks": [
+            {
+                "track_type": "narration",
+                "clips": [
+                    {
+                        "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                        "start_sec": 0.0,
+                        "end_sec": 2.0,
+                    }
+                ],
+            },
+            {
+                "track_type": "broll",
+                "clips": [
+                    {
+                        "asset_uri": f"local://projects/{project.project_id}/assets/{broll_asset.asset_id}",
+                        "start_sec": 0.0,
+                        "end_sec": 2.0,
+                    }
+                ],
+            },
+        ],
+    }
+
+    renderer = FfmpegFinalRenderer(store=store)
+    output_path = tmp_path / "final_output.mp4"
+    reported: list[int] = []
+
+    renderer.render_timeline_to_mp4(
+        project_id=project.project_id,
+        timeline=timeline,
+        output_path=output_path,
+        on_progress=reported.append,
+    )
+
+    assert reported == sorted(reported)
+    assert reported[-1] == 100
+
+
 def _generate(command: list[str]) -> None:
     result = subprocess.run(command, capture_output=True, text=True, timeout=60)
     assert result.returncode == 0, result.stderr

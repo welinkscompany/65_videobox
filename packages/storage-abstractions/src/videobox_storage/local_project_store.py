@@ -202,11 +202,30 @@ class LocalProjectStore:
                 items.append(dict(row))
         return items
 
+    def list_all_jobs(self) -> list[dict[str, Any]]:
+        # Jobs live in one SQLite file per project (see database_path) with no
+        # shared/global jobs table, so a cross-project view has to iterate
+        # every project directory and merge — the same approach list_projects
+        # already uses. Fine at the project counts a local-first single-user
+        # tool expects; would need a real index if that ever changes.
+        all_jobs: list[dict[str, Any]] = []
+        for project in self.list_projects():
+            project_id = str(project["project_id"])
+            for job in self.list_jobs(project_id=project_id):
+                all_jobs.append({"project_name": project["name"], **job})
+        return all_jobs
+
     def project_root(self, project_id: str) -> Path:
         return self.projects_root / "projects" / project_id
 
     def database_path(self, project_id: str) -> Path:
         return self.project_root(project_id) / "db" / "project.sqlite"
+
+    def thumbnail_storage_path(self, *, project_id: str, asset_id: str) -> Path:
+        return self.project_root(project_id) / "derived" / "thumbnails" / f"{asset_id}.jpg"
+
+    def thumbnail_storage_uri(self, *, project_id: str, asset_id: str) -> str:
+        return self._path_to_uri(project_id, self.thumbnail_storage_path(project_id=project_id, asset_id=asset_id))
 
     def get_project(self, *, project_id: str) -> dict[str, Any]:
         row = self._fetchone(
@@ -771,6 +790,48 @@ class LocalProjectStore:
         if not file_path.exists():
             raise KeyError(f"Partial regeneration run not found: {partial_regeneration_id}")
         return json.loads(file_path.read_text(encoding="utf-8"))
+
+    def save_tts_candidate(
+        self,
+        *,
+        project_id: str,
+        segment_id: str,
+        asset_id: str,
+        source_text: str,
+    ) -> dict[str, Any]:
+        sequence = self._count_rows(project_id, "tts_candidates") + 1
+        candidate_id = f"tts_candidate_{sequence:03d}"
+        created_at = self._now_iso()
+        self._execute(
+            project_id,
+            """
+            INSERT INTO tts_candidates (
+                candidate_id, project_id, segment_id, asset_id, source_text, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (candidate_id, project_id, segment_id, asset_id, source_text, created_at),
+        )
+        return {
+            "candidate_id": candidate_id,
+            "project_id": project_id,
+            "segment_id": segment_id,
+            "asset_id": asset_id,
+            "source_text": source_text,
+            "created_at": created_at,
+        }
+
+    def list_tts_candidates(self, *, project_id: str, segment_id: str) -> list[dict[str, Any]]:
+        rows = self._fetchall(
+            project_id,
+            """
+            SELECT candidate_id, project_id, segment_id, asset_id, source_text, created_at
+            FROM tts_candidates
+            WHERE segment_id = ?
+            ORDER BY created_at ASC, candidate_id ASC
+            """,
+            (segment_id,),
+        )
+        return [dict(row) for row in rows]
 
     def save_gemini_provider_key(
         self,
@@ -1409,6 +1470,7 @@ class LocalProjectStore:
             "error_message": None,
             "started_at": started_at,
             "finished_at": finished_at,
+            "progress_percent": None,
         }
         self._execute(
             project_id,
@@ -1422,8 +1484,9 @@ class LocalProjectStore:
                 output_ref,
                 error_message,
                 started_at,
-                finished_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                finished_at,
+                progress_percent
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 payload["job_id"],
@@ -1435,6 +1498,7 @@ class LocalProjectStore:
                 payload["error_message"],
                 payload["started_at"],
                 payload["finished_at"],
+                payload["progress_percent"],
             ),
         )
         return payload
@@ -1450,6 +1514,9 @@ class LocalProjectStore:
     ) -> dict[str, Any]:
         started_at = self._now_iso() if status is JobStatus.RUNNING else None
         finished_at = self._now_iso() if status in {JobStatus.SUCCEEDED, JobStatus.FAILED} else None
+        # A finished job always reports a definite progress value so the UI
+        # doesn't get stuck showing a stale in-flight percentage.
+        finished_progress_percent = 100 if status is JobStatus.SUCCEEDED else None
         self._execute(
             project_id,
             """
@@ -1458,12 +1525,20 @@ class LocalProjectStore:
                 output_ref = COALESCE(?, output_ref),
                 error_message = ?,
                 started_at = COALESCE(started_at, ?),
-                finished_at = COALESCE(?, finished_at)
+                finished_at = COALESCE(?, finished_at),
+                progress_percent = COALESCE(?, progress_percent)
             WHERE job_id = ?
             """,
-            (status.value, output_ref, error_message, started_at, finished_at, job_id),
+            (status.value, output_ref, error_message, started_at, finished_at, finished_progress_percent, job_id),
         )
         return self.get_job(project_id=project_id, job_id=job_id)
+
+    def update_job_progress(self, *, project_id: str, job_id: str, progress_percent: int) -> None:
+        self._execute(
+            project_id,
+            "UPDATE jobs SET progress_percent = ? WHERE job_id = ?",
+            (max(0, min(100, progress_percent)), job_id),
+        )
 
     def get_job(self, *, project_id: str, job_id: str) -> dict[str, Any]:
         row = self._fetchone(
@@ -1478,7 +1553,8 @@ class LocalProjectStore:
                 output_ref,
                 error_message,
                 started_at,
-                finished_at
+                finished_at,
+                progress_percent
             FROM jobs
             WHERE job_id = ?
             """,
@@ -1502,7 +1578,8 @@ class LocalProjectStore:
                     output_ref,
                     error_message,
                     started_at,
-                    finished_at
+                    finished_at,
+                    progress_percent
                 FROM jobs
                 ORDER BY rowid ASC
                 """
@@ -1510,6 +1587,16 @@ class LocalProjectStore:
         finally:
             connection.close()
         return [dict(row) for row in rows]
+
+    def update_asset_metadata(self, *, project_id: str, asset_id: str, metadata_patch: dict[str, Any]) -> dict[str, Any]:
+        asset = self.get_asset(project_id=project_id, asset_id=asset_id)
+        merged_metadata = {**asset["metadata"], **metadata_patch}
+        self._execute(
+            project_id,
+            "UPDATE assets SET metadata_json = ? WHERE asset_id = ?",
+            (json.dumps(merged_metadata, ensure_ascii=True), asset_id),
+        )
+        return self.get_asset(project_id=project_id, asset_id=asset_id)
 
     def get_asset(self, *, project_id: str, asset_id: str) -> dict[str, Any]:
         row = self._fetchone(
@@ -2532,9 +2619,17 @@ class LocalProjectStore:
 
     def _connection(self, project_id: str) -> sqlite3.Connection:
         connection = sqlite3.connect(self.database_path(project_id))
+        # WAL lets readers proceed while a writer holds the lock, and
+        # busy_timeout makes any remaining contention retry instead of
+        # immediately raising "database is locked" — both matter once
+        # background job threads (see run_*_job in local_pipeline.py) write
+        # to the same per-project database concurrently with polling reads.
+        connection.execute("PRAGMA journal_mode=WAL")
+        connection.execute("PRAGMA busy_timeout=5000")
         for statement in PROJECT_SCHEMA_STATEMENTS:
             connection.execute(statement)
         self._ensure_recommendation_decision_state_column(connection)
+        self._ensure_job_progress_percent_column(connection)
         connection.commit()
         connection.row_factory = sqlite3.Row
         return connection
@@ -2546,6 +2641,14 @@ class LocalProjectStore:
         }
         if "decision_state" not in existing_columns:
             connection.execute("ALTER TABLE recommendations ADD COLUMN decision_state TEXT")
+
+    def _ensure_job_progress_percent_column(self, connection: sqlite3.Connection) -> None:
+        existing_columns = {
+            str(row[1])
+            for row in connection.execute("PRAGMA table_info(jobs)").fetchall()
+        }
+        if "progress_percent" not in existing_columns:
+            connection.execute("ALTER TABLE jobs ADD COLUMN progress_percent INTEGER")
 
     def _derive_recommendation_decision_state(self, recommendation: dict[str, Any]) -> str:
         if _normalize_boolish(recommendation.get("auto_apply_allowed")) and not _normalize_boolish(

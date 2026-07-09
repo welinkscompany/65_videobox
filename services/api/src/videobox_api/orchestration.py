@@ -303,12 +303,17 @@ class ApiOrchestrator:
         project_id: str,
         segment_text: str,
         voice_sample_asset_id: str,
+        segment_id: str | None = None,
     ) -> dict[str, Any]:
         return self.pipeline.generate_tts_replacement_candidate(
             project_id=project_id,
             segment_text=segment_text,
             voice_sample_asset_id=voice_sample_asset_id,
+            segment_id=segment_id,
         )
+
+    def list_tts_replacement_candidates(self, *, project_id: str, segment_id: str) -> list[dict[str, Any]]:
+        return self.pipeline.list_tts_replacement_candidates(project_id=project_id, segment_id=segment_id)
 
     def plan_auto_cut_segments(
         self,
@@ -871,3 +876,39 @@ class ApiOrchestrator:
             key_id=key_id,
             status=status,
         )
+
+    # Job types whose start_* call takes exactly one input_ref-shaped kwarg,
+    # so a failed run can be retried generically from the stored job record
+    # alone. TIMELINE_BUILD (needs recommendation_job_ids too), SEGMENT_ANALYSIS
+    # (needs an optional script_asset_id), and PARTIAL_REGENERATION (needs
+    # session_id/segment_ids/fields) carry extra parameters that aren't
+    # recoverable from input_ref alone, so they're intentionally excluded —
+    # those must be re-triggered manually with their full original request.
+    _RETRYABLE_JOB_DISPATCH: dict[str, tuple[str, str]] = {
+        "transcription": ("start_transcription", "narration_asset_id"),
+        "broll_recommendation": ("start_broll_recommendation", "segment_analysis_job_id"),
+        "music_recommendation": ("start_music_recommendation", "segment_analysis_job_id"),
+        "subtitle_render": ("start_subtitle_render", "timeline_job_id"),
+        "preview_render": ("start_preview_render", "timeline_job_id"),
+        "capcut_export": ("start_capcut_export", "timeline_job_id"),
+        "final_render": ("start_final_render_job", "timeline_job_id"),
+        "capcut_draft_export": ("start_capcut_draft_export_job", "timeline_job_id"),
+    }
+
+    def retry_job(self, *, project_id: str, job_id: str) -> dict[str, Any]:
+        job = self.store.get_job(project_id=project_id, job_id=job_id)
+        if job["status"] != "failed":
+            raise ValueError(f"Job '{job_id}' is not in a failed state and cannot be retried.")
+        job_type = str(job["job_type"])
+        dispatch = self._RETRYABLE_JOB_DISPATCH.get(job_type)
+        if dispatch is None:
+            raise ValueError(
+                f"Job type '{job_type}' cannot be retried automatically; "
+                "restart it with its original request instead."
+            )
+        method_name, input_kwarg = dispatch
+        if not job["input_ref"]:
+            raise ValueError(f"Job '{job_id}' has no input_ref recorded and cannot be retried.")
+        method = getattr(self, method_name)
+        result = method(project_id=project_id, **{input_kwarg: job["input_ref"]})
+        return {"job_type": job_type, "input_ref": job["input_ref"], **result}

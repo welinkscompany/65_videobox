@@ -49,7 +49,14 @@ class FfmpegAutoCutExecutor:
         except ValueError:
             return 0.0
 
-    def detect_scene_timestamps(self, video_path: Path) -> list[float]:
+    def _scaled_detection_timeout(self, total_duration: float) -> int:
+        # A fixed 300s budget is fine for short clips but risks spurious
+        # timeouts on long-form (30-60min) source video, where a single
+        # hi-res/HEVC decode pass can approach or exceed realtime. Scale
+        # the budget with the source duration instead of a flat constant.
+        return max(self.detection_timeout_seconds, int(total_duration * 1.5))
+
+    def detect_scene_timestamps(self, video_path: Path, *, timeout: int | None = None) -> list[float]:
         command = [
             self.ffmpeg_binary,
             "-i",
@@ -62,10 +69,10 @@ class FfmpegAutoCutExecutor:
             "null",
             "-",
         ]
-        result = self._run(command, timeout=self.detection_timeout_seconds, binary=self.ffmpeg_binary)
+        result = self._run(command, timeout=timeout or self.detection_timeout_seconds, binary=self.ffmpeg_binary)
         return self.planner.parse_scene_timestamps(result.stderr)
 
-    def detect_black_regions(self, video_path: Path) -> list[dict[str, float]]:
+    def detect_black_regions(self, video_path: Path, *, timeout: int | None = None) -> list[dict[str, float]]:
         command = [
             self.ffmpeg_binary,
             "-i",
@@ -76,8 +83,43 @@ class FfmpegAutoCutExecutor:
             "null",
             "-",
         ]
-        result = self._run(command, timeout=self.detection_timeout_seconds, binary=self.ffmpeg_binary)
+        result = self._run(command, timeout=timeout or self.detection_timeout_seconds, binary=self.ffmpeg_binary)
         return self.planner.parse_black_regions(result.stderr)
+
+    def detect_scene_and_black_regions(
+        self, video_path: Path, *, timeout: int | None = None
+    ) -> tuple[list[float], list[dict[str, float]]]:
+        # Scene-detect and blackdetect are independent video filters that can
+        # share a single decode pass via split — verified against a real
+        # multi-scene synthetic video to produce byte-identical
+        # pts_time/black_start/black_end lines as running them separately.
+        # This halves full-file ffmpeg invocations on long source video.
+        command = [
+            self.ffmpeg_binary,
+            "-i",
+            str(video_path),
+            "-filter_complex",
+            (
+                "[0:v]split=2[scene_in][black_in];"
+                f"[scene_in]{self.planner.build_scene_detection_filter()}[scene_out];"
+                f"[black_in]{self.planner.build_blackdetect_filter()}[black_out]"
+            ),
+            "-map",
+            "[scene_out]",
+            "-f",
+            "null",
+            "-",
+            "-map",
+            "[black_out]",
+            "-f",
+            "null",
+            "-",
+        ]
+        result = self._run(command, timeout=timeout or self.detection_timeout_seconds, binary=self.ffmpeg_binary)
+        return (
+            self.planner.parse_scene_timestamps(result.stderr),
+            self.planner.parse_black_regions(result.stderr),
+        )
 
     def measure_clip_brightness(self, video_path: Path, *, start_sec: float, duration_sec: float) -> float:
         sample_duration = max(0.1, min(duration_sec, self.brightness_sample_seconds))
@@ -123,8 +165,8 @@ class FfmpegAutoCutExecutor:
 
     def run_full_detection(self, video_path: Path) -> dict[str, Any]:
         total_duration = self.get_duration(video_path)
-        scene_timestamps = self.detect_scene_timestamps(video_path)
-        black_regions = self.detect_black_regions(video_path)
+        timeout = self._scaled_detection_timeout(total_duration)
+        scene_timestamps, black_regions = self.detect_scene_and_black_regions(video_path, timeout=timeout)
         planned_segments = self.planner.plan_segments(
             total_duration=total_duration,
             scene_timestamps=scene_timestamps,
