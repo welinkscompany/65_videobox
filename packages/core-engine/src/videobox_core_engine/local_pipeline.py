@@ -1789,21 +1789,54 @@ class LocalPipelineRunner:
         return {"job_id": job["job_id"], "status": job["status"], "export": export}
 
     def start_final_render(self, *, project_id: str, timeline_job_id: str) -> dict[str, Any]:
+        """Synchronous convenience wrapper: create the job and run it to completion
+        inline. Used by direct pipeline callers/tests. Real API usage should prefer
+        start_final_render_job + run_final_render_job so the HTTP request does not
+        block for the full render duration."""
         job = self.store.create_job(
             project_id=project_id,
             job_type=JobType.FINAL_RENDER,
             input_ref=timeline_job_id,
             status=JobStatus.RUNNING,
         )
+        self.run_final_render_job(project_id=project_id, timeline_job_id=timeline_job_id, job=job)
+        refreshed_job = self.store.get_job(project_id=project_id, job_id=job["job_id"])
+        if refreshed_job["status"] == JobStatus.FAILED.value:
+            raise RuntimeError(refreshed_job["error_message"])
+        return {"job_id": job["job_id"], "status": refreshed_job["status"]}
+
+    def start_final_render_job(self, *, project_id: str, timeline_job_id: str) -> dict[str, Any]:
+        """Create a RUNNING final-render job and return immediately. The caller
+        (the API layer) is responsible for invoking run_final_render_job in the
+        background so the HTTP request does not block for the render duration."""
+        job = self.store.create_job(
+            project_id=project_id,
+            job_type=JobType.FINAL_RENDER,
+            input_ref=timeline_job_id,
+            status=JobStatus.RUNNING,
+        )
+        return {"job_id": job["job_id"], "status": job["status"]}
+
+    def run_final_render_job(self, *, project_id: str, timeline_job_id: str, job: dict[str, Any]) -> None:
         try:
             timeline = self.get_timeline_result(project_id=project_id, job_id=timeline_job_id)["timeline"]
             self._ensure_timeline_ready_for_output(timeline)
+            latest_subtitle = self.store.get_latest_subtitle_for_timeline(
+                project_id=project_id,
+                timeline_id=str(timeline["timeline_id"]),
+            )
+            subtitle_file_path = (
+                self.store.resolve_storage_uri(project_id=project_id, storage_uri=latest_subtitle["file_uri"])
+                if latest_subtitle
+                else None
+            )
             with tempfile.TemporaryDirectory(prefix="videobox_final_render_") as raw_render_dir:
                 render_output_path = Path(raw_render_dir) / "output.mp4"
                 self.final_renderer.render_timeline_to_mp4(
                     project_id=project_id,
                     timeline=timeline,
                     output_path=render_output_path,
+                    subtitle_file_path=subtitle_file_path,
                 )
                 persisted = self.store.save_final_render(
                     project_id=project_id,
@@ -1823,21 +1856,41 @@ class LocalPipelineRunner:
                 source_job_id=timeline_job_id,
                 exc=exc,
             )
-            raise
+            return
         self.store.update_job(
             project_id=project_id,
             job_id=job["job_id"],
             status=JobStatus.SUCCEEDED,
             output_ref=persisted["export_id"],
         )
-        return {"job_id": job["job_id"], "status": JobStatus.SUCCEEDED.value}
 
     def get_final_render_result(self, *, project_id: str, job_id: str) -> dict[str, Any]:
         job = self.store.get_job(project_id=project_id, job_id=job_id)
+        if not job["output_ref"]:
+            return {"job_id": job["job_id"], "status": job["status"], "render": None}
         render = self.store.get_final_render_export(project_id=project_id, export_id=job["output_ref"])
         return {"job_id": job["job_id"], "status": job["status"], "render": render}
 
     def start_capcut_draft_export(self, *, project_id: str, timeline_job_id: str) -> dict[str, Any]:
+        """Synchronous convenience wrapper: create the job and run it to completion
+        inline. Used by direct pipeline callers/tests. Real API usage should prefer
+        start_capcut_draft_export_job + run_capcut_draft_export_job so the HTTP
+        request does not block for the full export duration."""
+        job = self.start_capcut_draft_export_job(project_id=project_id, timeline_job_id=timeline_job_id)
+        self.run_capcut_draft_export_job(
+            project_id=project_id,
+            timeline_job_id=timeline_job_id,
+            job={"job_id": job["job_id"]},
+        )
+        refreshed_job = self.store.get_job(project_id=project_id, job_id=job["job_id"])
+        if refreshed_job["status"] == JobStatus.FAILED.value:
+            raise RuntimeError(refreshed_job["error_message"])
+        return {"job_id": job["job_id"], "status": refreshed_job["status"]}
+
+    def start_capcut_draft_export_job(self, *, project_id: str, timeline_job_id: str) -> dict[str, Any]:
+        """Create a RUNNING CapCut draft export job and return immediately. The
+        caller (the API layer) is responsible for invoking run_capcut_draft_export_job
+        in the background so the HTTP request does not block for the export duration."""
         if self.pycapcut_exporter is None:
             raise RuntimeError(
                 "Real CapCut draft export is not configured. Enable CapCutDraftExportConfig "
@@ -1849,6 +1902,11 @@ class LocalPipelineRunner:
             input_ref=timeline_job_id,
             status=JobStatus.RUNNING,
         )
+        return {"job_id": job["job_id"], "status": job["status"]}
+
+    def run_capcut_draft_export_job(
+        self, *, project_id: str, timeline_job_id: str, job: dict[str, Any]
+    ) -> None:
         try:
             timeline = self.get_timeline_result(project_id=project_id, job_id=timeline_job_id)["timeline"]
             self._ensure_timeline_ready_for_output(timeline)
@@ -1887,17 +1945,18 @@ class LocalPipelineRunner:
                 source_job_id=timeline_job_id,
                 exc=exc,
             )
-            raise
+            return
         self.store.update_job(
             project_id=project_id,
             job_id=job["job_id"],
             status=JobStatus.SUCCEEDED,
             output_ref=persisted["export_id"],
         )
-        return {"job_id": job["job_id"], "status": JobStatus.SUCCEEDED.value}
 
     def get_capcut_draft_export_result(self, *, project_id: str, job_id: str) -> dict[str, Any]:
         job = self.store.get_job(project_id=project_id, job_id=job_id)
+        if not job["output_ref"]:
+            return {"job_id": job["job_id"], "status": job["status"], "export": None}
         export = self.store.get_capcut_draft_export(project_id=project_id, export_id=job["output_ref"])
         return {"job_id": job["job_id"], "status": job["status"], "export": export}
 

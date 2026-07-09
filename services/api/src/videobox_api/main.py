@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 from typing import Any
 from urllib.request import urlopen
@@ -557,7 +558,7 @@ class FinalRenderArtifactResponse(BaseModel):
 
 
 class FinalRenderJobResponse(StartJobResponse):
-    render: FinalRenderArtifactResponse
+    render: FinalRenderArtifactResponse | None = None
 
 
 class CapCutDraftExportArtifactResponse(BaseModel):
@@ -570,7 +571,7 @@ class CapCutDraftExportArtifactResponse(BaseModel):
 
 
 class CapCutDraftExportJobResponse(StartJobResponse):
-    export: CapCutDraftExportArtifactResponse
+    export: CapCutDraftExportArtifactResponse | None = None
 
 
 class ProviderTraceAuditSummaryResponse(BaseModel):
@@ -2026,12 +2027,21 @@ def create_app(
     @app.post("/api/projects/{project_id}/jobs/final-render", status_code=status.HTTP_202_ACCEPTED)
     def start_final_render(project_id: str, payload: OutputJobRequest) -> StartJobResponse:
         try:
-            result = orchestrator.start_final_render(
+            result = orchestrator.start_final_render_job(
                 project_id=project_id,
                 timeline_job_id=payload.timeline_job_id,
             )
         except Exception as exc:
             raise _http_error(exc) from exc
+        threading.Thread(
+            target=orchestrator.run_final_render_job,
+            kwargs={
+                "project_id": project_id,
+                "timeline_job_id": payload.timeline_job_id,
+                "job": {"job_id": result["job_id"]},
+            },
+            daemon=True,
+        ).start()
         return StartJobResponse(**result)
 
     @app.get("/api/projects/{project_id}/final-renders/{job_id}")
@@ -2043,18 +2053,27 @@ def create_app(
         return FinalRenderJobResponse(
             job_id=result["job_id"],
             status=result["status"],
-            render=FinalRenderArtifactResponse(**result["render"]),
+            render=FinalRenderArtifactResponse(**result["render"]) if result["render"] else None,
         )
 
     @app.post("/api/projects/{project_id}/jobs/capcut-draft-export", status_code=status.HTTP_202_ACCEPTED)
     def start_capcut_draft_export(project_id: str, payload: OutputJobRequest) -> StartJobResponse:
         try:
-            result = orchestrator.start_capcut_draft_export(
+            result = orchestrator.start_capcut_draft_export_job(
                 project_id=project_id,
                 timeline_job_id=payload.timeline_job_id,
             )
         except Exception as exc:
             raise _http_error(exc) from exc
+        threading.Thread(
+            target=orchestrator.run_capcut_draft_export_job,
+            kwargs={
+                "project_id": project_id,
+                "timeline_job_id": payload.timeline_job_id,
+                "job": {"job_id": result["job_id"]},
+            },
+            daemon=True,
+        ).start()
         return StartJobResponse(**result)
 
     @app.get("/api/projects/{project_id}/capcut-draft-exports/{job_id}")
@@ -2066,7 +2085,7 @@ def create_app(
         return CapCutDraftExportJobResponse(
             job_id=result["job_id"],
             status=result["status"],
-            export=CapCutDraftExportArtifactResponse(**result["export"]),
+            export=CapCutDraftExportArtifactResponse(**result["export"]) if result["export"] else None,
         )
 
     @app.get("/api/projects/{project_id}/provider-traces")

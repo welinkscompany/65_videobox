@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -19,6 +20,16 @@ PYCAPCUT_AVAILABLE = importlib.util.find_spec("pycapcut") is not None
 def _generate(command: list[str]) -> None:
     result = subprocess.run(command, capture_output=True, text=True, timeout=60)
     assert result.returncode == 0, result.stderr
+
+
+def _poll_until_finished(get_result, *, timeout_seconds: float = 30.0):
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        body = get_result()
+        if body["status"] in {"succeeded", "failed"}:
+            return body
+        time.sleep(0.1)
+    raise TimeoutError("Job did not finish in time.")
 
 
 def _clean_high_confidence_transcribe(self, request):  # noqa: ANN001
@@ -103,10 +114,10 @@ def test_capcut_draft_export_endpoint_produces_a_real_openable_draft_end_to_end(
         json={"timeline_job_id": timeline_job_id},
     ).json()["job_id"]
 
-    export_result = client.get(f"/api/projects/{project_id}/capcut-draft-exports/{export_job_id}")
+    body = _poll_until_finished(
+        lambda: client.get(f"/api/projects/{project_id}/capcut-draft-exports/{export_job_id}").json()
+    )
 
-    assert export_result.status_code == 200
-    body = export_result.json()
     assert body["status"] == "succeeded"
     assert body["export"]["export_type"] == "capcut_draft_export"
 

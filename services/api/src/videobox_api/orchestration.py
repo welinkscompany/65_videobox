@@ -772,11 +772,27 @@ class ApiOrchestrator:
     def start_final_render(self, *, project_id: str, timeline_job_id: str) -> dict[str, Any]:
         return self.pipeline.start_final_render(project_id=project_id, timeline_job_id=timeline_job_id)
 
+    def start_final_render_job(self, *, project_id: str, timeline_job_id: str) -> dict[str, Any]:
+        return self.pipeline.start_final_render_job(project_id=project_id, timeline_job_id=timeline_job_id)
+
+    def run_final_render_job(self, *, project_id: str, timeline_job_id: str, job: dict[str, Any]) -> None:
+        self.pipeline.run_final_render_job(project_id=project_id, timeline_job_id=timeline_job_id, job=job)
+
     def get_final_render_result(self, *, project_id: str, job_id: str) -> dict[str, Any]:
         return self.pipeline.get_final_render_result(project_id=project_id, job_id=job_id)
 
     def start_capcut_draft_export(self, *, project_id: str, timeline_job_id: str) -> dict[str, Any]:
         return self.pipeline.start_capcut_draft_export(project_id=project_id, timeline_job_id=timeline_job_id)
+
+    def start_capcut_draft_export_job(self, *, project_id: str, timeline_job_id: str) -> dict[str, Any]:
+        return self.pipeline.start_capcut_draft_export_job(project_id=project_id, timeline_job_id=timeline_job_id)
+
+    def run_capcut_draft_export_job(
+        self, *, project_id: str, timeline_job_id: str, job: dict[str, Any]
+    ) -> None:
+        self.pipeline.run_capcut_draft_export_job(
+            project_id=project_id, timeline_job_id=timeline_job_id, job=job
+        )
 
     def get_capcut_draft_export_result(self, *, project_id: str, job_id: str) -> dict[str, Any]:
         return self.pipeline.get_capcut_draft_export_result(project_id=project_id, job_id=job_id)

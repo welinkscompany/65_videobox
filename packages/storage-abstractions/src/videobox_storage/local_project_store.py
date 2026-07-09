@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from copy import deepcopy
+import re
 import shutil
 import sqlite3
 from datetime import UTC, datetime
@@ -16,6 +17,10 @@ from videobox_domain_models.recommendations import RecommendationRecord, Recomme
 from videobox_domain_models.transcripts import TranscriptRecord
 from videobox_core_engine.provider_trace import build_provider_trace
 from videobox_storage.sqlite_schema import PROJECT_SCHEMA_STATEMENTS
+
+# Heavy exports (rendered mp4s, CapCut drafts) can be large; keep only the most
+# recent N per export_type per project so disk usage does not grow unbounded.
+DEFAULT_EXPORT_RETENTION_COUNT = 5
 
 
 def _normalize_boolish(value: object) -> bool:
@@ -1121,6 +1126,46 @@ class LocalProjectStore:
             raise
         return {"preview_id": preview_id, "file_uri": file_uri, "preview": payload}
 
+    def _next_export_sequence(self, project_id: str) -> int:
+        # All export types (capcut / final_render / capcut_draft_export) share one
+        # `exports` table with a single export_id primary key, but each type is
+        # written to its own subdirectory. Numbering per-subdirectory would let two
+        # different export types both compute "export_001" and collide on insert,
+        # so the sequence must be derived from the shared table, not a directory.
+        rows = self._fetchall(project_id, "SELECT export_id FROM exports", ())
+        highest = 0
+        for row in rows:
+            match = re.search(r"(\d+)$", str(row["export_id"]))
+            if match:
+                highest = max(highest, int(match.group(1)))
+        return highest + 1
+
+    def _prune_old_exports(
+        self,
+        *,
+        project_id: str,
+        export_type: str,
+        keep_last: int = DEFAULT_EXPORT_RETENTION_COUNT,
+    ) -> None:
+        rows = self._fetchall(
+            project_id,
+            """
+            SELECT export_id, file_uri
+            FROM exports
+            WHERE export_type = ?
+            ORDER BY created_at DESC
+            """,
+            (export_type,),
+        )
+        for row in rows[keep_last:]:
+            artifact_path = self.resolve_storage_uri(project_id=project_id, storage_uri=str(row["file_uri"]))
+            shutil.rmtree(artifact_path.parent, ignore_errors=True)
+            self._execute(
+                project_id,
+                "DELETE FROM exports WHERE export_id = ?",
+                (row["export_id"],),
+            )
+
     def save_capcut_export(
         self,
         *,
@@ -1129,10 +1174,7 @@ class LocalProjectStore:
         export_payload: dict[str, Any],
     ) -> dict[str, Any]:
         invariant_note = "CapCut remains an export target, not the internal source of truth."
-        sequence = self._next_sequence(
-            self.project_root(project_id) / "exports" / "capcut",
-            "export_*",
-        )
+        sequence = self._next_export_sequence(project_id)
         export_id = f"export_{sequence:03d}"
         export_directory = self.project_root(project_id) / "exports" / "capcut" / export_id
         export_directory.mkdir(parents=True, exist_ok=True)
@@ -1200,6 +1242,7 @@ class LocalProjectStore:
         except Exception:
             shutil.rmtree(export_directory, ignore_errors=True)
             raise
+        self._prune_old_exports(project_id=project_id, export_type="capcut")
         return {"export_id": export_id, "file_uri": file_uri, "export": payload}
 
     def save_final_render(
@@ -1209,10 +1252,7 @@ class LocalProjectStore:
         timeline_id: str,
         source_output_path: Path,
     ) -> dict[str, Any]:
-        sequence = self._next_sequence(
-            self.project_root(project_id) / "exports" / "final_render",
-            "export_*",
-        )
+        sequence = self._next_export_sequence(project_id)
         export_id = f"export_{sequence:03d}"
         export_directory = self.project_root(project_id) / "exports" / "final_render" / export_id
         export_directory.mkdir(parents=True, exist_ok=True)
@@ -1249,6 +1289,7 @@ class LocalProjectStore:
         except Exception:
             shutil.rmtree(export_directory, ignore_errors=True)
             raise
+        self._prune_old_exports(project_id=project_id, export_type="final_render")
         return {"export_id": export_id, "file_uri": file_uri, "created_at": created_at}
 
     def get_final_render_export(self, *, project_id: str, export_id: str) -> dict[str, Any]:
@@ -1282,10 +1323,7 @@ class LocalProjectStore:
         timeline_id: str,
         source_draft_path: Path,
     ) -> dict[str, Any]:
-        sequence = self._next_sequence(
-            self.project_root(project_id) / "exports" / "capcut_draft",
-            "export_*",
-        )
+        sequence = self._next_export_sequence(project_id)
         export_id = f"export_{sequence:03d}"
         export_directory = self.project_root(project_id) / "exports" / "capcut_draft" / export_id
         export_directory.parent.mkdir(parents=True, exist_ok=True)
@@ -1322,6 +1360,7 @@ class LocalProjectStore:
         except Exception:
             shutil.rmtree(export_directory, ignore_errors=True)
             raise
+        self._prune_old_exports(project_id=project_id, export_type="capcut_draft_export")
         return {"export_id": export_id, "file_uri": file_uri, "created_at": created_at}
 
     def get_capcut_draft_export(self, *, project_id: str, export_id: str) -> dict[str, Any]:
@@ -2481,7 +2520,15 @@ class LocalProjectStore:
         return f"local://projects/{project_id}/{relative_path}"
 
     def _next_sequence(self, directory: Path, pattern: str) -> int:
-        return len(list(directory.glob(pattern))) + 1
+        # Based on the highest existing numeric suffix, not the count of entries:
+        # once older entries can be pruned (see _prune_old_exports), a count-based
+        # sequence collides with still-existing higher-numbered entries.
+        highest = 0
+        for path in directory.glob(pattern):
+            match = re.search(r"(\d+)$", path.stem)
+            if match:
+                highest = max(highest, int(match.group(1)))
+        return highest + 1
 
     def _connection(self, project_id: str) -> sqlite3.Connection:
         connection = sqlite3.connect(self.database_path(project_id))
@@ -2530,6 +2577,18 @@ class LocalProjectStore:
         connection = self._connection(project_id)
         try:
             return connection.execute(query, params).fetchone()
+        finally:
+            connection.close()
+
+    def _fetchall(
+        self,
+        project_id: str,
+        query: str,
+        params: tuple[Any, ...],
+    ) -> list[sqlite3.Row]:
+        connection = self._connection(project_id)
+        try:
+            return connection.execute(query, params).fetchall()
         finally:
             connection.close()
 
