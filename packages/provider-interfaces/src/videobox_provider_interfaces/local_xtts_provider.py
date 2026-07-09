@@ -11,9 +11,12 @@ from videobox_provider_interfaces.tts import TTSRequest, TTSResult
 @dataclass(slots=True)
 class LocalXTTSProvider:
     """Real local voice cloning via Coqui XTTS-v2, using voice_sample_uri as the
-    speaker reference wav. Requires `pip install coqui-tts` plus PyTorch, and
-    downloads the multi-GB XTTS-v2 model on first use. Not installed by default:
-    see requirements-runtime.txt."""
+    speaker reference wav. Verified working end-to-end on Windows/Python 3.12 —
+    see requirements-runtime.txt for the exact dependency versions this needs
+    (the obvious/latest versions of torch, numpy, and transformers all break it).
+    Not installed by default. Downloads the ~2GB XTTS-v2 model on first use and
+    requires accepting Coqui's non-commercial CPML license (COQUI_TOS_AGREED=1
+    to accept non-interactively)."""
 
     provider_name: str = "local_xtts"
     model_name: str = "tts_models/multilingual/multi-dataset/xtts_v2"

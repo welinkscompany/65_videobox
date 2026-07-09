@@ -6,7 +6,19 @@ requests==2.34.2
 # Optional TTS engines (enable via TTSEngineConfig.engine):
 # - "gtts" (default, no extra deps beyond gtts above, needs network access)
 # - "elevenlabs" (needs `requests` above plus an API key + voice_id, no local install)
-# - "local_xtts" (real local voice cloning, NOT installed by the lines above —
-#   requires `pip install coqui-tts` plus a matching PyTorch build; this was not
-#   validated end-to-end in this environment because it needs several GB of
-#   additional downloads)
+# - "local_xtts" (real local voice cloning, verified end-to-end on Windows/Python 3.12
+#   with the exact versions below — a newer/looser install WILL break, since this
+#   stack has several incompatible-by-default combinations. Install with:
+#     pip install coqui-tts
+#     pip install torch==2.8.0 torchaudio==2.8.0 --index-url https://download.pytorch.org/whl/cpu
+#     pip install "numpy<2.5" "transformers>=4.40,<5"
+#   Notes on why each pin exists:
+#     - torch must be <2.9, or Coqui TTS additionally requires `torchcodec`, whose
+#       prebuilt wheel could not find a compatible ffmpeg ABI in this environment.
+#     - numpy must be <2.5: numba (a librosa dependency) rejects numpy>=2.5.
+#     - transformers must be <5: coqui-tts's XTTS code imports
+#       `isin_mps_friendly` from transformers.pytorch_utils, which transformers 5.x removed.
+#   First real use also downloads the ~2GB XTTS-v2 model and requires accepting
+#   Coqui's CPML license (non-commercial only, unless you buy a commercial license
+#   from Coqui) — interactively on first run, or non-interactively by setting
+#   the environment variable COQUI_TOS_AGREED=1 beforehand.
