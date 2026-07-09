@@ -90,7 +90,9 @@ class FfmpegAutoCutExecutor:
             "-i",
             str(video_path),
             "-vf",
-            "scale=64:64,signalstats",
+            # signalstats computes YAVG internally but does not print it to
+            # stderr on its own — metadata=print is required to surface it.
+            "scale=64:64,signalstats,metadata=print",
             "-f",
             "null",
             "-",

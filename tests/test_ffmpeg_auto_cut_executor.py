@@ -49,14 +49,20 @@ def test_detect_black_regions_delegates_to_planner_parser(monkeypatch: pytest.Mo
 
 def test_measure_clip_brightness_parses_yavg(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     executor = FfmpegAutoCutExecutor(planner=AutoCutPlanner())
-    _patch_subprocess_run(
-        monkeypatch,
-        lambda command, **kwargs: _fake_result(stderr="frame:1 pts:1 YAVG:42.7 YMIN:0 YMAX:255"),
-    )
+    captured_commands: list[list[str]] = []
+
+    def _capture(command: list[str], **kwargs: object):
+        captured_commands.append(command)
+        # Real ffmpeg (verified against an actual signalstats+metadata=print run)
+        # logs one line like this per frame, not a single summary line.
+        return _fake_result(stderr="[Parsed_metadata_2 @ 0x0] lavfi.signalstats.YAVG=42.7\n")
+
+    _patch_subprocess_run(monkeypatch, _capture)
 
     brightness = executor.measure_clip_brightness(tmp_path / "clip.mp4", start_sec=0.0, duration_sec=5.0)
 
     assert brightness == pytest.approx(42.7)
+    assert any("metadata=print" in part for part in captured_commands[0])
 
 
 def test_measure_clip_brightness_falls_back_when_unparseable(
