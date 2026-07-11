@@ -70,6 +70,7 @@ class TimelineBuilder:
         narration_clips: list[TimelineClip] = []
         broll_clips: list[TimelineClip] = []
         music_clips: list[TimelineClip] = []
+        sfx_clips: list[TimelineClip] = []
 
         for index, segment in enumerate(normalized_segments, start=1):
             segment_id = str(segment["segment_id"])
@@ -138,6 +139,18 @@ class TimelineBuilder:
                                 recommendation_id=str(recommendation["recommendation_id"]),
                             )
                         )
+                    if rec_type == "sfx":
+                        sfx_clips.append(
+                            TimelineClip(
+                                clip_id=f"clip_sfx_{len(sfx_clips) + 1:03d}",
+                                segment_id=segment_id,
+                                asset_uri=f"local://projects/{project_id}/assets/{selected_asset_id}",
+                                start_sec=float(segment["start_sec"]),
+                                end_sec=float(segment["end_sec"]),
+                                clip_type="sfx",
+                                recommendation_id=str(recommendation["recommendation_id"]),
+                            )
+                        )
                 else:
                     pending_recommendations.append(recommendation)
 
@@ -146,6 +159,8 @@ class TimelineBuilder:
             tracks.append(TimelineTrack(track_id="broll_overlay", track_type="broll", clips=broll_clips))
         if music_clips:
             tracks.append(TimelineTrack(track_id="music_bed", track_type="bgm", clips=music_clips))
+        if sfx_clips:
+            tracks.append(TimelineTrack(track_id="sfx_overlay", track_type="sfx", clips=sfx_clips))
 
         return TimelineRecord(
             timeline_id=f"timeline_{uuid4().hex[:12]}",

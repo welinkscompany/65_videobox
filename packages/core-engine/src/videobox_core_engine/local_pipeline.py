@@ -269,6 +269,14 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
             return {**self._asset_payload(asset), **candidate}
         return self._asset_payload(asset)
 
+    def register_sfx_asset(self, *, project_id: str, source_path: Path) -> dict[str, Any]:
+        asset = self.store.register_asset(
+            project_id=project_id,
+            asset_type=AssetType.SFX,
+            source_path=source_path,
+        )
+        return self._asset_payload(asset)
+
     def list_tts_replacement_candidates(self, *, project_id: str, segment_id: str) -> list[dict[str, Any]]:
         return self.store.list_tts_candidates(project_id=project_id, segment_id=segment_id)
 

@@ -64,5 +64,55 @@ def test_timeline_builder_does_not_auto_apply_bgm_without_a_real_music_asset() -
     assert all("music/suggested" not in clip.asset_uri for track in timeline.tracks for clip in track.clips)
 
 
+def test_timeline_builder_materializes_only_an_approved_sfx_asset() -> None:
+    builder = TimelineBuilder()
+    segment = SegmentRecord.create(
+        project_id="proj_001",
+        text="Narration line",
+        start_sec=0.0,
+        end_sec=4.2,
+    )
+
+    assetless = builder.build(
+        project_id="proj_001",
+        segments=[segment],
+        recommendations=[
+            {
+                "recommendation_id": "rec_sfx_missing",
+                "target_segment_id": segment.segment_id,
+                "recommendation_type": "sfx",
+                "selected_asset_id": None,
+                "reason": "Impact recommended, but no local SFX is available.",
+                "score": 0.8,
+                "auto_apply_allowed": False,
+                "review_required": True,
+                "payload": {},
+            }
+        ],
+    )
+    assert not any(track.track_type == "sfx" for track in assetless.tracks)
+
+    approved = builder.build(
+        project_id="proj_001",
+        segments=[segment],
+        recommendations=[
+            {
+                "recommendation_id": "rec_sfx_approved",
+                "target_segment_id": segment.segment_id,
+                "recommendation_type": "sfx",
+                "selected_asset_id": "asset_sfx_001",
+                "reason": "Approved impact SFX.",
+                "score": 0.9,
+                "auto_apply_allowed": True,
+                "review_required": False,
+                "payload": {},
+            }
+        ],
+    )
+
+    sfx_track = next(track for track in approved.tracks if track.track_type == "sfx")
+    assert sfx_track.clips[0].asset_uri == "local://projects/proj_001/assets/asset_sfx_001"
+
+
 def test_default_projects_root_targets_project_workspace() -> None:
     assert str(DEFAULT_PROJECTS_ROOT).endswith("20_project\\65_videobox-project")

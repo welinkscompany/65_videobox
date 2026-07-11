@@ -14,6 +14,7 @@ class RecommendationType(StrEnum):
     TTS_REPLACEMENT = "tts_replacement"
     BROLL = "broll"
     BGM = "bgm"
+    SFX = "sfx"
     OVERLAY = "overlay"
 
 

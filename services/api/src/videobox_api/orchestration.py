@@ -196,6 +196,10 @@ class ApiOrchestrator:
     def list_broll_assets(self, *, project_id: str) -> list[dict[str, Any]]:
         return self.store.list_assets(project_id=project_id, asset_type=AssetType.BROLL_VIDEO)
 
+    def register_sfx_asset(self, *, project_id: str, source_path: Path) -> RegisteredAsset:
+        asset = self.pipeline.register_sfx_asset(project_id=project_id, source_path=source_path)
+        return RegisteredAsset(asset_id=asset["asset_id"], asset_type=asset["asset_type"], storage_uri=asset["storage_uri"])
+
     def register_broll_assets_batch(
         self,
         *,

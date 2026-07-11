@@ -115,6 +115,14 @@ def build_assets_router(orchestrator: ApiOrchestrator, store: LocalProjectStore)
             storage_uri=asset.storage_uri,
         )
 
+    @router.post("/api/projects/{project_id}/assets/sfx", status_code=status.HTTP_201_CREATED)
+    def register_sfx(project_id: str, payload: AssetRegistrationRequest) -> AssetResponse:
+        try:
+            asset = orchestrator.register_sfx_asset(project_id=project_id, source_path=Path(payload.source_path))
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return AssetResponse(asset_id=asset.asset_id, asset_type=asset.asset_type, storage_uri=asset.storage_uri)
+
     @router.post("/api/projects/{project_id}/assets/voice-sample", status_code=status.HTTP_201_CREATED)
     def register_voice_sample(project_id: str, payload: AssetRegistrationRequest) -> AssetResponse:
         try:

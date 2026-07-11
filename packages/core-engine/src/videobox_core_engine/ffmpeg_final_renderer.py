@@ -206,6 +206,7 @@ class FfmpegFinalRenderer:
         narration_clips: list[dict[str, Any]] = []
         broll_clips: list[dict[str, Any]] = []
         bgm_clips: list[dict[str, Any]] = []
+        sfx_clips: list[dict[str, Any]] = []
         for track in timeline.get("tracks", []):
             if not isinstance(track, dict):
                 continue
@@ -223,6 +224,8 @@ class FfmpegFinalRenderer:
                 broll_clips.extend(valid_clips)
             elif track_type == "bgm":
                 bgm_clips.extend(valid_clips)
+            elif track_type == "sfx":
+                sfx_clips.extend(valid_clips)
 
         if not narration_clips:
             raise FinalRenderError("Timeline has no narration clips to render.")
@@ -282,6 +285,26 @@ class FfmpegFinalRenderer:
                 result = self._run(command)
                 if result.returncode != 0:
                     raise FinalRenderError(f"ffmpeg failed mixing bgm: {result.stderr[-800:]}")
+                audio_path = mixed_path
+            if sfx_clips:
+                mixed_path = work_dir / "audio_with_sfx.wav"
+                command = [self.ffmpeg_binary, "-y", "-i", str(audio_path)]
+                filter_parts = ["[0:a]anull[base]"]
+                mix_inputs = "[base]"
+                for index, clip in enumerate(sfx_clips, start=1):
+                    source = self._resolve_generic_asset_uri(
+                        project_id=project_id, asset_uri=str(clip.get("asset_uri") or "")
+                    )
+                    command += ["-i", str(source)]
+                    start_ms = int(float(clip.get("start_sec", 0.0)) * 1000)
+                    duration_sec = float(clip.get("end_sec", 0.0)) - float(clip.get("start_sec", 0.0))
+                    filter_parts.append(f"[{index}:a]atrim=duration={duration_sec},adelay={start_ms}|{start_ms}[sfx{index}]")
+                    mix_inputs += f"[sfx{index}]"
+                filter_parts.append(f"{mix_inputs}amix=inputs={len(sfx_clips) + 1}:duration=first[aout]")
+                command += ["-filter_complex", ";".join(filter_parts), "-map", "[aout]", str(mixed_path)]
+                result = self._run(command)
+                if result.returncode != 0:
+                    raise FinalRenderError(f"ffmpeg failed mixing sfx: {result.stderr[-800:]}")
                 audio_path = mixed_path
             report_progress(80)
 

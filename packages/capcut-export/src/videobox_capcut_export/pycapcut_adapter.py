@@ -58,7 +58,7 @@ class PyCapCutRealExportAdapter:
         draft_name: str,
         subtitle_file_path: Path | None = None,
     ) -> Path:
-        narration_clips, broll_clips, bgm_clips = self._collect_clips(timeline)
+        narration_clips, broll_clips, bgm_clips, sfx_clips = self._collect_clips(timeline)
         if not narration_clips:
             raise PyCapCutExportError("Timeline has no narration clips to export.")
 
@@ -86,6 +86,8 @@ class PyCapCutRealExportAdapter:
         script.add_track(TrackType.video, "broll")
         if bgm_clips:
             script.add_track(TrackType.audio, "bgm")
+        if sfx_clips:
+            script.add_track(TrackType.audio, "sfx")
         export_overlays = [item for item in timeline.get("export_overlays", []) if isinstance(item, dict)]
         if export_overlays:
             script.add_track(TrackType.text, "videobox_overlays")
@@ -107,6 +109,8 @@ class PyCapCutRealExportAdapter:
             self._add_broll_segment(script=script, project_id=project_id, clip=clip)
         for clip in bgm_clips:
             self._add_bgm_segment(script=script, project_id=project_id, clip=clip)
+        for clip in sfx_clips:
+            self._add_sfx_segment(script=script, project_id=project_id, clip=clip)
         for overlay in export_overlays:
             self._add_text_overlay(script=script, overlay=overlay)
         for overlay in image_overlays:
@@ -120,10 +124,11 @@ class PyCapCutRealExportAdapter:
 
     def _collect_clips(
         self, timeline: dict[str, Any]
-    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
         narration_clips: list[dict[str, Any]] = []
         broll_clips: list[dict[str, Any]] = []
         bgm_clips: list[dict[str, Any]] = []
+        sfx_clips: list[dict[str, Any]] = []
         for track in timeline.get("tracks", []):
             if not isinstance(track, dict):
                 continue
@@ -141,7 +146,9 @@ class PyCapCutRealExportAdapter:
                 broll_clips.extend(valid_clips)
             elif track_type == "bgm":
                 bgm_clips.extend(valid_clips)
-        return narration_clips, broll_clips, bgm_clips
+            elif track_type == "sfx":
+                sfx_clips.extend(valid_clips)
+        return narration_clips, broll_clips, bgm_clips, sfx_clips
 
     def _add_narration_segment(
         self,
@@ -296,6 +303,17 @@ class PyCapCutRealExportAdapter:
             volume=0.25,
         )
         script.add_segment(segment, "bgm")
+
+    def _add_sfx_segment(self, *, script: ScriptFile, project_id: str, clip: dict[str, Any]) -> None:
+        path = resolve_generic_asset_uri(store=self.store, project_id=project_id, asset_uri=str(clip.get("asset_uri") or ""))
+        material = AudioMaterial(str(path))
+        placement_start_us = _seconds_to_us(float(clip.get("start_sec", 0.0)))
+        needed_duration_us = _seconds_to_us(float(clip.get("end_sec", 0.0)) - float(clip.get("start_sec", 0.0)))
+        source_duration_us = min(needed_duration_us, material.duration) or material.duration
+        script.add_segment(
+            AudioSegment(material, Timerange(start=placement_start_us, duration=needed_duration_us), source_timerange=Timerange(start=0, duration=source_duration_us)),
+            "sfx",
+        )
 
     def _add_text_overlay(self, *, script: ScriptFile, overlay: dict[str, Any]) -> None:
         text = str(overlay.get("text") or overlay.get("title") or overlay.get("body") or "").strip()

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 
-VALID_CANONICAL_TRACK_TYPES = {"narration", "broll", "bgm"}
+VALID_CANONICAL_TRACK_TYPES = {"narration", "broll", "bgm", "sfx"}
 
 
 def canonical_track_type(value: object) -> str:

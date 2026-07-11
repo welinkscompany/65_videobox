@@ -250,3 +250,32 @@ def test_export_timeline_materializes_image_overlay_in_real_capcut_draft(tmp_pat
         "duration": 2_000_000,
     }
     assert tracks["videobox_image_overlays"][0]["material_id"] == image_material["id"]
+
+
+def test_real_capcut_draft_materializes_sfx_audio_track(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="SFX CapCut Draft Project")
+    narration_path = tmp_path / "narration.wav"
+    _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=2", str(narration_path)])
+    narration_asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.NARRATION_AUDIO, source_path=narration_path)
+    sfx_path = tmp_path / "impact.wav"
+    _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "sine=frequency=880:duration=1", str(sfx_path)])
+    sfx_asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.SFX, source_path=sfx_path)
+
+    draft_path = PyCapCutRealExportAdapter(store=store).export_timeline(
+        project_id=project.project_id,
+        timeline={
+            "narration_source_uri": narration_asset.storage_uri,
+            "tracks": [
+                {"track_type": "narration", "clips": [{"asset_uri": f"local://projects/{project.project_id}/segments/seg_001", "start_sec": 0.0, "end_sec": 2.0}]},
+                {"track_type": "sfx", "clips": [{"asset_uri": f"local://projects/{project.project_id}/assets/{sfx_asset.asset_id}", "start_sec": 1.0, "end_sec": 2.0}]},
+            ],
+            "export_overlays": [],
+        },
+        drafts_root=tmp_path / "drafts",
+        draft_name="sfx-draft",
+    )
+
+    content = json.loads((draft_path / "draft_content.json").read_text(encoding="utf-8"))
+    stored_sfx_path = store.resolve_storage_uri(project_id=project.project_id, storage_uri=sfx_asset.storage_uri)
+    assert any(Path(material["path"]) == stored_sfx_path for material in content["materials"]["audios"])
