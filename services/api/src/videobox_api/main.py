@@ -65,6 +65,7 @@ def create_app(
     stt_provider=None,
     tts_provider=None,
     final_renderer=None,
+    pycapcut_exporter=None,
 ) -> FastAPI:
     app = FastAPI(title="VideoBox API", version="0.1.0")
     store = LocalProjectStore(projects_root or DEFAULT_PROJECTS_ROOT)
@@ -94,7 +95,9 @@ def create_app(
         output_operator_copy_builder=LocalFirstOutputOperatorCopyBuilder(runtime_service=runtime_service),
         auto_cut_planner=AutoCutPlanner(config=resolved_auto_cut_config),
         stt_provider=stt_provider or _build_stt_provider(resolved_whisper_stt_config),
-        pycapcut_exporter=_build_pycapcut_exporter(resolved_capcut_draft_export_config, store=store),
+        pycapcut_exporter=pycapcut_exporter or _build_pycapcut_exporter(
+            resolved_capcut_draft_export_config, store=store
+        ),
         tts_provider=tts_provider or _build_tts_provider(resolved_tts_engine_config),
         final_renderer=final_renderer,
     )

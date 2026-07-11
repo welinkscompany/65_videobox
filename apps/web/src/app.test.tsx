@@ -9,6 +9,7 @@ import type {
   ReviewSnapshot,
   TimelineJob,
   TimelinePayload,
+  TtsCandidateRecord,
 } from "./api";
 
 const projectsResponse = {

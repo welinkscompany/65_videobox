@@ -8403,6 +8403,13 @@ focused 검증 메모:
 - dead helper, 임시 메모, 역할이 끝난 중복 파일 중 삭제보다 역할 명시가 맞는지 먼저 판단한다
 - 최종 closeout 직전 broad 재검증이 정말 필요한지 마지막으로 판단한다
 
+## 218. 2026-07-12 personal voice TTS acceptance
+
+- 완료: technical acceptance, original-narration fallback, target duration, pending listening review UI/API, Korean 10-minute FFmpeg + real CapCut smoke.
+- 검증: frontend 83 passed/build success, backend Python 3.12 `.venv` 628 passed, smoke final MP4 SHA-256 `6e257a604e05a15963a69554b1541107d999cb74a769b8d073747b81d1b46ba5`.
+- 전체 milestone: 39개 중 37 완료, 2 부분. strict 94.9%, partial=0.5 weighted 97.4%, weighted remaining 2.6%.
+- 남은 부분: 실제 사용자 녹음으로 수행하는 human listening approval, SFX materialization, 다중 프로젝트 human CapCut UX QA.
+
 ## 183. 2026-07-06 Phase C pending recommendation identity key refactor closeout
 
 이번 후속 작업에서는 새 stale-shape 버그를 더 열지 않고, `Phase C` 정리 리팩터링 후보 중 가장 작은 범위였던 pending recommendation canonical identity key 중복을 `local_pipeline` 내부 helper 1개로 공통화했다.

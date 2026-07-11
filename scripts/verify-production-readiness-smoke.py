@@ -31,6 +31,7 @@ for package_source in (
 from fastapi.testclient import TestClient
 
 from videobox_api.main import create_app
+from videobox_capcut_export.pycapcut_adapter import PyCapCutRealExportAdapter
 from videobox_core_engine.ffmpeg_final_renderer import FfmpegFinalRenderer
 from videobox_provider_interfaces.llm import LLMProviderError
 from videobox_provider_interfaces.stt import STTRequest, STTResult, STTSegment
@@ -82,7 +83,8 @@ class DeterministicWaveTTSProvider:
             output.setnchannels(1)
             output.setsampwidth(2)
             output.setframerate(48_000)
-            output.writeframes(b"\x00\x00" * 48_000)
+            duration_sec = request.target_duration_sec or 1.0
+            output.writeframes(b"\x10\x00" * int(48_000 * duration_sec))
         return TTSResult(output_uri=str(request.output_path), provider_name=self.provider_name)
 
 
@@ -161,6 +163,16 @@ def _poll_final_render(client: TestClient, *, project_id: str, job_id: str, time
     raise TimeoutError(f"Timed out waiting for final render job '{job_id}'.")
 
 
+def _poll_capcut_draft_export(client: TestClient, *, project_id: str, job_id: str, timeout_sec: int) -> dict[str, Any]:
+    deadline = time.monotonic() + timeout_sec
+    while time.monotonic() < deadline:
+        payload = _assert_status(client.get(f"/api/projects/{project_id}/capcut-draft-exports/{job_id}"), 200)
+        if payload["status"] in {"succeeded", "failed"}:
+            return payload
+        time.sleep(0.5)
+    raise TimeoutError(f"Timed out waiting for CapCut draft export job '{job_id}'.")
+
+
 def _extract_frame(path: Path, *, second: float, output_path: Path, ffmpeg_binary: str) -> str:
     _run([ffmpeg_binary, "-y", "-ss", str(second), "-i", str(path), "-frames:v", "1", str(output_path)], timeout=120)
     return _sha256(output_path)
@@ -220,6 +232,7 @@ def run_smoke(*, narration: Path, work_root: Path, ffmpeg_binary: str, ffprobe_b
         stt_provider=DeterministicKoreanSTTProvider(),
         tts_provider=DeterministicWaveTTSProvider(),
         final_renderer=renderer,
+        pycapcut_exporter=PyCapCutRealExportAdapter(store=store, video_width=320, video_height=180, video_fps=12),
     )
     checks: dict[str, bool] = {}
     with TestClient(app) as client:
@@ -227,6 +240,8 @@ def run_smoke(*, narration: Path, work_root: Path, ffmpeg_binary: str, ffprobe_b
         project_id = project["project_id"]
         narration_asset = _assert_status(client.post(
             f"/api/projects/{project_id}/assets/narration-audio", json={"source_path": str(narration)}), 201)
+        voice_sample_asset = _assert_status(client.post(
+            f"/api/projects/{project_id}/assets/voice-sample", json={"source_path": str(narration)}), 201)
         script_asset = _assert_status(client.post(
             f"/api/projects/{project_id}/assets/script-document", json={"source_path": str(script_path)}), 201)
         broll_asset = _assert_status(client.post(
@@ -241,6 +256,19 @@ def run_smoke(*, narration: Path, work_root: Path, ffmpeg_binary: str, ffprobe_b
             f"/api/projects/{project_id}/jobs/segment-analysis",
             json={"transcription_job_id": transcription["job_id"], "script_asset_id": script_asset["asset_id"]},
         ), 202)
+        tts_candidate = _assert_status(client.post(
+            f"/api/projects/{project_id}/tts-candidates",
+            json={
+                "segment_text": SOURCE_CAPTIONS[0],
+                "voice_sample_asset_id": voice_sample_asset["asset_id"],
+                "segment_id": "seg_001",
+                "target_duration_sec": 300.0,
+            },
+        ), 201)
+        checks["tts_candidate_pending_operator_review"] = (
+            tts_candidate["technical_status"] == "accepted"
+            and tts_candidate["operator_review_status"] == "pending"
+        )
         broll_recommendation = _assert_status(client.post(
             f"/api/projects/{project_id}/jobs/broll-recommendation", json={"segment_analysis_job_id": analysis["job_id"]}), 202)
         music_recommendation = _assert_status(client.post(
@@ -258,6 +286,10 @@ def run_smoke(*, narration: Path, work_root: Path, ffmpeg_binary: str, ffprobe_b
         session = _assert_status(client.post(
             f"/api/projects/{project_id}/editing-sessions", json={"timeline_job_id": timeline_job["job_id"]}), 201)
         session_id = session["session_id"]
+        _assert_status(client.patch(
+            f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/tts-replacement",
+            json={"recommendation_id": "tts_smoke_candidate", "asset_id": tts_candidate["asset_id"]},
+        ), 200)
         for segment in session["segments"]:
             segment_id = segment["segment_id"]
             _assert_status(client.patch(
@@ -275,7 +307,10 @@ def run_smoke(*, narration: Path, work_root: Path, ffmpeg_binary: str, ffprobe_b
         ), 200)
         regenerated = _assert_status(client.post(
             f"/api/projects/{project_id}/editing-sessions/{session_id}/partial-regeneration",
-            json={"segment_ids": [revised_segment_id], "fields": ["caption", "broll", "visual_overlay"]},
+            json={
+                "segment_ids": ["seg_001", revised_segment_id],
+                "fields": ["caption", "broll", "visual_overlay", "tts_replacement"],
+            },
         ), 202)
         partial = _assert_status(client.get(
             f"/api/projects/{project_id}/partial-regenerations/{regenerated['job_id']}"), 200)
@@ -283,6 +318,16 @@ def run_smoke(*, narration: Path, work_root: Path, ffmpeg_binary: str, ffprobe_b
         _assert_status(client.post(
             f"/api/projects/{project_id}/review-approvals/{candidate_timeline_job_id}/approve"), 202)
         checks["edit_and_approval"] = True
+
+        candidate_timeline = _assert_status(
+            client.get(f"/api/projects/{project_id}/timelines/{candidate_timeline_job_id}"), 200
+        )["timeline"]
+        checks["approved_tts_in_final_and_capcut"] = any(
+            item.get("recommendation_type") == "tts_replacement"
+            and item.get("payload", {}).get("selected_asset_uri")
+            for item in candidate_timeline.get("applied_recommendations", [])
+            if isinstance(item, dict)
+        )
 
         subtitle_job = _assert_status(client.post(
             f"/api/projects/{project_id}/jobs/subtitle-render", json={"timeline_job_id": candidate_timeline_job_id}), 202)
@@ -316,6 +361,20 @@ def run_smoke(*, narration: Path, work_root: Path, ffmpeg_binary: str, ffprobe_b
             ffmpeg_binary=ffmpeg_binary,
         )
         checks["final_artifact_sha256"] = bool(_sha256(final_path))
+        capcut_job = _assert_status(client.post(
+            f"/api/projects/{project_id}/jobs/capcut-draft-export",
+            json={"timeline_job_id": candidate_timeline_job_id},
+        ), 202)
+        capcut = _poll_capcut_draft_export(
+            client, project_id=project_id, job_id=capcut_job["job_id"], timeout_sec=300
+        )
+        if capcut["status"] != "succeeded" or capcut["export"] is None:
+            raise RuntimeError(f"CapCut draft export failed: {capcut}")
+        draft_path = store.resolve_storage_uri(project_id=project_id, storage_uri=capcut["export"]["file_uri"])
+        draft_content = (draft_path / "draft_content.json").read_text(encoding="utf-8")
+        checks["approved_tts_in_final_and_capcut"] = (
+            checks["approved_tts_in_final_and_capcut"] and "tts_candidate.wav" in draft_content
+        )
 
     if not all(checks.values()):
         raise AssertionError(f"Smoke checks failed: {checks}")

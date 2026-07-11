@@ -960,3 +960,10 @@ production-readiness blocker slice 1의 9개 Task는 구현·회귀·600초 smok
 - 단, 최종 운영 마감 점검에서는 focused와 representative smoke가 green이어도 broader full backend regression이 red면 운영 완료로 닫지 않는다
 - 현재 최신 운영 점검 결과는 `full-suite only red 1개`가 남아 있으므로, 다음 실제 작업은 새 기능 추가가 아니라 그 경계 1개를 좁히는 안정화 복귀다
 - 그 blocker를 복구한 뒤 focused와 broader가 모두 다시 green으로 닫혔으므로, 현재 구현 계획 기준 required work는 운영 마감 단계까지 모두 완료된 상태로 본다
+
+## 14. 2026-07-12 personal voice TTS acceptance closeout
+
+- 개인 음성 TTS 후보는 무음, 손상, target duration 불일치를 기술적으로 거부하고 `pending operator review`를 별도 유지한다.
+- provider 실패는 generic TTS 자동 대체가 아니라 원본 narration 유지 오류로 처리한다.
+- BrollBox `execution/tts_engine.py`는 environment-global 및 gTTS fallback 결합 때문에 `rewrite`, Voicebox는 `reference only`로 확정한다.
+- deterministic Korean WAV provider와 실제 FFmpeg/real CapCut adapter를 이용한 600초 smoke가 TTS 후보, timeline approval, SRT, MP4, CapCut draft를 확인한다.
