@@ -61,6 +61,7 @@ import {
   restoredTargetedSegmentsMatch,
   reviewActions,
 } from "./lib/formatters";
+import { ProjectOnboarding } from "./ProjectOnboarding";
 
 export function App() {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -1469,6 +1470,12 @@ export function App() {
     "tts_replacement",
   ] as const;
 
+  function handleProjectCreated(project: Project) {
+    setProjects((current) => [project, ...current.filter((item) => item.project_id !== project.project_id)]);
+    setSelectedProjectId(project.project_id);
+    setLoadState("ready");
+  }
+
   return (
     <div className="shell">
       <aside className="sidebar" aria-label="프로젝트 탐색">
@@ -1477,6 +1484,10 @@ export function App() {
           <h1>VideoBox 작업판</h1>
           <p className="lede">프로젝트 · 타임라인 · 검수 · 출력</p>
         </div>
+
+        {projects.length === 0 && loadState === "ready" ? (
+          <ProjectOnboarding onProjectCreated={handleProjectCreated} />
+        ) : null}
 
         <section className="sidebar-section" aria-labelledby="projects-heading">
           <div className="sidebar-header">

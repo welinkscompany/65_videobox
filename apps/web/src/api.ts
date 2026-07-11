@@ -377,6 +377,12 @@ export type FinalRenderJob = {
   error_message?: string | null;
 };
 
+export type RegisteredAsset = {
+  asset_id: string;
+  asset_type: string;
+  storage_uri: string;
+};
+
 export type CapCutDraftExportArtifact = {
   export_id: string;
   timeline_id: string;
@@ -402,11 +408,29 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  createProject: (payload: { name: string }) =>
+    request<Project>("/api/projects", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
   listProjects: async (): Promise<Project[]> => {
     const payload = await request<{ projects: Project[] }>("/api/projects");
     return payload.projects;
   },
   getProject: (projectId: string) => request<Project>(`/api/projects/${projectId}`),
+  registerNarrationAudio: (projectId: string, payload: { source_path: string }) =>
+    request<RegisteredAsset>(`/api/projects/${projectId}/assets/narration-audio`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+  registerScriptDocument: (projectId: string, payload: { source_path: string }) =>
+    request<RegisteredAsset>(`/api/projects/${projectId}/assets/script-document`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
   listBrollAssets: async (projectId: string): Promise<BrollAsset[]> => {
     const payload = await request<{ assets: BrollAsset[] }>(
       `/api/projects/${projectId}/assets/broll-video`,
