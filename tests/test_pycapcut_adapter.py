@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import json
 from pathlib import Path
 
 import pytest
@@ -43,6 +44,14 @@ def test_export_timeline_writes_a_real_capcut_draft(tmp_path: Path) -> None:
 
     timeline = {
         "narration_source_uri": narration_asset.storage_uri,
+        "export_overlays": [
+            {
+                "overlay_type": "explanation_card",
+                "text": "Overlay draft proof",
+                "start_sec": 1.0,
+                "end_sec": 3.0,
+            }
+        ],
         "tracks": [
             {
                 "track_type": "narration",
@@ -101,6 +110,7 @@ def test_export_timeline_writes_a_real_capcut_draft(tmp_path: Path) -> None:
     draft_content = draft_path / "draft_content.json"
     assert draft_content.exists()
     assert draft_content.stat().st_size > 0
+    assert "Overlay draft proof" in json.dumps(json.loads(draft_content.read_text(encoding="utf-8")), ensure_ascii=False)
 
 
 def test_export_timeline_requires_narration_clips(tmp_path: Path) -> None:
