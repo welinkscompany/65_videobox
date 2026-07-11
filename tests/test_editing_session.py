@@ -780,6 +780,24 @@ def test_partial_regeneration_pipeline_keeps_scope_limited_to_selected_segments(
                 }
             ],
             "review_flags": [],
+            "caption_segments": [
+                {
+                    "segment_id": "seg_001",
+                    "text": "Original caption one",
+                    "start_sec": 0.0,
+                    "end_sec": 1.0,
+                    "review_required": False,
+                    "cleanup_decision": "keep",
+                },
+                {
+                    "segment_id": "seg_002",
+                    "text": "Original caption two",
+                    "start_sec": 1.0,
+                    "end_sec": 2.0,
+                    "review_required": False,
+                    "cleanup_decision": "keep",
+                },
+            ],
             "applied_recommendations": [
                 {
                     "recommendation_id": "rec_broll_seg_001",
@@ -867,6 +885,20 @@ def test_partial_regeneration_pipeline_keeps_scope_limited_to_selected_segments(
     assert [clip["segment_id"] for clip in broll_track["clips"]] == ["seg_001", "seg_002"]
     manual_clip = next(clip for clip in broll_track["clips"] if clip["segment_id"] == "seg_002")
     assert manual_clip["asset_uri"].endswith("/assets/asset_manual_002")
+    runner.approve_timeline_review(project_id=project.project_id, timeline_job_id=started["job_id"])
+    subtitle_job = runner.start_subtitle_render(
+        project_id=project.project_id,
+        timeline_job_id=started["job_id"],
+    )
+    subtitle = runner.get_subtitle_result(project_id=project.project_id, job_id=subtitle_job["job_id"])
+    subtitle_path = store.resolve_storage_uri(
+        project_id=project.project_id,
+        storage_uri=subtitle["subtitle"]["file_uri"],
+    )
+    subtitle_text = subtitle_path.read_text(encoding="utf-8")
+
+    assert "Manual caption two" in subtitle_text
+    assert "Original caption two" not in subtitle_text
 
 
 def test_partial_regeneration_pipeline_runs_broll_refresh_when_no_manual_override_exists(tmp_path: Path) -> None:

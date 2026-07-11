@@ -21,6 +21,11 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $frontendRoot = Join-Path $repoRoot "apps\web"
+$backendPython = Join-Path $repoRoot ".venv\Scripts\python.exe"
+if (-not (Test-Path -LiteralPath $backendPython)) {
+    throw "VideoBox backend venv Python not found: $backendPython"
+}
+$pytestCommand = "& `"$backendPython`" -m pytest"
 
 $reviewActionBackendExpr = if ($BackendPattern -and $Mode -eq "review-action-backend") {
     $BackendPattern
@@ -137,7 +142,7 @@ switch ($Mode) {
     "review-action-backend" {
         Invoke-Step `
             -Label "Backend review-action maintenance slice" `
-            -Command "pytest tests/test_api.py -q -k `"$reviewActionBackendExpr`"" `
+            -Command "$pytestCommand tests/test_api.py -q -k `"$reviewActionBackendExpr`"" `
             -WorkingDirectory $repoRoot
     }
     "review-action-frontend" {
@@ -149,13 +154,13 @@ switch ($Mode) {
     "output-gating" {
         Invoke-Step `
             -Label "Backend output gating slice" `
-            -Command "pytest tests/test_api.py -q -k `"$outputGatingExpr`"" `
+            -Command "$pytestCommand tests/test_api.py -q -k `"$outputGatingExpr`"" `
             -WorkingDirectory $repoRoot
     }
     "preflight-backend" {
         Invoke-Step `
             -Label "Backend preflight slice" `
-            -Command "pytest tests/test_api.py -q -k `"$preflightBackendExpr`"" `
+            -Command "$pytestCommand tests/test_api.py -q -k `"$preflightBackendExpr`"" `
             -WorkingDirectory $repoRoot
     }
     "preflight-frontend" {
@@ -167,11 +172,11 @@ switch ($Mode) {
     "current-focused" {
         Invoke-Step `
             -Label "Backend output gating slice" `
-            -Command "pytest tests/test_api.py -q -k `"$outputGatingExpr`"" `
+            -Command "$pytestCommand tests/test_api.py -q -k `"$outputGatingExpr`"" `
             -WorkingDirectory $repoRoot
         Invoke-Step `
             -Label "Backend preflight slice" `
-            -Command "pytest tests/test_api.py -q -k `"$preflightBackendExpr`"" `
+            -Command "$pytestCommand tests/test_api.py -q -k `"$preflightBackendExpr`"" `
             -WorkingDirectory $repoRoot
         Invoke-Step `
             -Label "Frontend preflight slice" `
@@ -182,12 +187,12 @@ switch ($Mode) {
         Invoke-ParallelSteps -Steps @(
             @{
                 Label = "Backend output gating slice"
-                Command = "pytest tests/test_api.py -q -k `"$outputGatingExpr`""
+                Command = "$pytestCommand tests/test_api.py -q -k `"$outputGatingExpr`""
                 WorkingDirectory = $repoRoot
             },
             @{
                 Label = "Backend preflight slice"
-                Command = "pytest tests/test_api.py -q -k `"$preflightBackendExpr`""
+                Command = "$pytestCommand tests/test_api.py -q -k `"$preflightBackendExpr`""
                 WorkingDirectory = $repoRoot
             },
             @{
@@ -204,17 +209,17 @@ switch ($Mode) {
             -WorkingDirectory $frontendRoot
         Invoke-Step `
             -Label "Full backend regression" `
-            -Command "pytest -q" `
+            -Command "$pytestCommand -q" `
             -WorkingDirectory $repoRoot
     }
     "all" {
         Invoke-Step `
             -Label "Backend output gating slice" `
-            -Command "pytest tests/test_api.py -q -k `"$outputGatingExpr`"" `
+            -Command "$pytestCommand tests/test_api.py -q -k `"$outputGatingExpr`"" `
             -WorkingDirectory $repoRoot
         Invoke-Step `
             -Label "Backend preflight slice" `
-            -Command "pytest tests/test_api.py -q -k `"$preflightBackendExpr`"" `
+            -Command "$pytestCommand tests/test_api.py -q -k `"$preflightBackendExpr`"" `
             -WorkingDirectory $repoRoot
         Invoke-Step `
             -Label "Frontend preflight slice" `
@@ -226,7 +231,7 @@ switch ($Mode) {
             -WorkingDirectory $frontendRoot
         Invoke-Step `
             -Label "Full backend regression" `
-            -Command "pytest -q" `
+            -Command "$pytestCommand -q" `
             -WorkingDirectory $repoRoot
     }
     "status" {

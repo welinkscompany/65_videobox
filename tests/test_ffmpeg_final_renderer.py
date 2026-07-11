@@ -111,6 +111,47 @@ def test_render_timeline_loops_short_broll_and_pads_short_tts_to_the_timeline_wi
 
 
 @pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg/ffprobe not installed on this machine")
+def test_render_timeline_materializes_image_overlay_during_its_window(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Render Image Overlay Project")
+    narration_file = tmp_path / "narration.wav"
+    _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=4", str(narration_file)])
+    narration_asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.NARRATION_AUDIO, source_path=narration_file)
+    broll_file = tmp_path / "black_broll.mp4"
+    _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=black:s=320x240:r=15:d=4", str(broll_file)])
+    broll_asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=broll_file)
+    image_file = tmp_path / "yellow_overlay.png"
+    _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=yellow:s=80x60", "-frames:v", "1", str(image_file)])
+    image_asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.IMAGE, source_path=image_file)
+    timeline = {
+        "narration_source_uri": narration_asset.storage_uri,
+        "export_overlays": [{
+            "overlay_type": "visual_overlay",
+            "asset_id": image_asset.asset_id,
+            "start_sec": 1.0,
+            "end_sec": 3.0,
+        }],
+        "tracks": [
+            {"track_type": "narration", "clips": [{"asset_uri": f"local://projects/{project.project_id}/assets/{narration_asset.asset_id}", "start_sec": 0.0, "end_sec": 4.0}]},
+            {"track_type": "broll", "clips": [{"asset_uri": f"local://projects/{project.project_id}/assets/{broll_asset.asset_id}", "start_sec": 0.0, "end_sec": 4.0}]},
+        ],
+    }
+    output_path = tmp_path / "image_overlay.mp4"
+
+    FfmpegFinalRenderer(store=store, video_width=320, video_height=240, video_fps=15).render_timeline_to_mp4(
+        project_id=project.project_id,
+        timeline=timeline,
+        output_path=output_path,
+    )
+
+    before = _frame_rgb(output_path, at_sec=0.5, width=320, height=240)
+    during = _frame_rgb(output_path, at_sec=2.0, width=320, height=240)
+
+    assert max(before) < 8
+    assert max(during) > 200
+
+
+@pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg/ffprobe not installed on this machine")
 def test_render_timeline_to_mp4_produces_a_real_playable_video(tmp_path: Path) -> None:
     store = LocalProjectStore(tmp_path)
     project = store.bootstrap_project(name="Render End To End Project")
@@ -285,3 +326,29 @@ def test_render_timeline_to_mp4_reports_progress_milestones(tmp_path: Path) -> N
 def _generate(command: list[str]) -> None:
     result = subprocess.run(command, capture_output=True, text=True, timeout=60)
     assert result.returncode == 0, result.stderr
+
+
+def _frame_rgb(video_path: Path, *, at_sec: float, width: int, height: int) -> bytes:
+    result = subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-ss",
+            str(at_sec),
+            "-i",
+            str(video_path),
+            "-frames:v",
+            "1",
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "rgb24",
+            "pipe:1",
+        ],
+        capture_output=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+    assert len(result.stdout) == width * height * 3
+    return result.stdout

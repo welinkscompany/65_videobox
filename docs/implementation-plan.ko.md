@@ -1,6 +1,6 @@
 # VideoBox 실행용 구현 계획서
 
-> 현재 worktree 기준 구현 상태와 next slice 판단은 `## 12. 2026-07-01 현재 구현 체크포인트`와 `## 13. 다음 실제 작업`을 우선 적용한다. 그 외 상위 milestone/범위/순서 섹션은 제품·구현 계획의 기준을 설명하는 문서다.
+> 현재 worktree 기준 구현 상태와 next slice 판단은 `## 12. 2026-07-11 production-readiness blocker slice 1`와 `## 13. 다음 실제 작업`을 우선 적용한다. 그 외 상위 milestone/범위/순서 섹션은 제품·구현 계획의 기준을 설명하는 문서다.
 > 개발 운영 상위 규칙은 저장소 루트 `AGENTS.md`와 `docs/development-fast-path.ko.md`의 `## 10. 고정 운영 규정`을 프로젝트 전역 기본값으로 적용한다. 즉, 이 계획서를 실행할 때의 작업 우선순위, 선택적 TDD/서브에이전트/리뷰 사용, 표준 검증 경로, hot path 구분, 커밋/푸시, 진행률 보고, turn closeout 형식은 해당 규정을 따른다.
 
 ## 1. 목적
@@ -472,6 +472,29 @@
 
 ## 12. 2026-07-01 현재 구현 체크포인트
 
+### 2026-07-11 production-readiness blocker slice 1 authoritative checkpoint
+
+이번 checkpoint는 `docs/superpowers/plans/2026-07-11-production-readiness-blocker-slice-1.md`의 9개 Task와 여섯 blocker 계약을 기준으로 한다. 2026-07-11 현재 HEAD `f02dde1` 이후 worktree 변경까지 포함한 검증 결과는 아래와 같다.
+
+| blocker | 현재 계약과 증거 |
+| --- | --- |
+| 빈 첫 화면 | 프로젝트 생성 뒤 narration/script ingest를 독립 실행한다. 하나가 실패해도 생성된 프로젝트와 다른 ingest 성공은 유지하고 실패한 항목만 다시 등록한다. `project-onboarding.test.tsx`가 create/ingest와 failure/retry를 검증한다. |
+| assetless BGM | 실물 `selected_asset_id` 없는 mood recommendation은 metadata로만 남고 BGM clip 또는 `music/suggested` URI를 만들지 않는다. |
+| nullable output | failed final render/real CapCut draft는 nullable artifact와 error message를 반환하며 UI는 error card, retry, ErrorBoundary로 복구한다. |
+| partial caption | partial regeneration candidate의 `caption_segments`가 승인 후 SRT에 쓰이고 final renderer에는 그 timeline의 최신 SRT가 전달된다. |
+| short source duration | FFmpeg는 short B-roll을 loop하고 audio를 `apad/trim`한다. real CapCut draft는 B-roll repetition과 project-local persistent WAV silence segment로 source를 늘리지 않고 target window를 채운다. |
+| export overlays | FFmpeg는 text 및 image overlay를 실제 frame에 materialize하고, real CapCut draft는 text track과 image video track/material을 가진다. |
+
+검증 증거:
+
+- frontend: `npm test -- --run` 82 passed, `npm run build` 성공. ErrorBoundary intentional throw와 기존 App test의 React `act(...)` warning은 stderr에 남지만 테스트 실패는 아니다.
+- backend: `.venv\\Scripts\\python.exe -m pytest -q -p no:cacheprovider`에서 Python 3.12.10, 621 passed.
+- actual Korean smoke: `production-readiness-korean-10m.wav` 600.000초, SHA-256 `a0c7f05a7052be735dce56df38a45ae167a9b24cad122a3c518ef9025701ee0f`; API ingest→edit→partial caption→SRT→FFmpeg MP4 9개 check true (MP4 internal subtitle 및 distinguishable short B-roll loop 포함); final MP4 600.000초, SHA-256 `45e430cae559e94b0b62eb2bf5f8178f74c0472a9fbadebb134ccb9bf9425c79`.
+
+진행률은 이 계획서의 39개 implementation milestone bullet을 재판정한 값이다. 36 완료, 3 부분, 0 미구현으로 판정한다. strict 완료율은 `36 / 39 = 92.3%`, 부분 항목을 0.5로 계산한 weighted 진행률은 `(36 + 3 × 0.5) / 39 = 96.2%`, weighted 잔여율은 `3.8%`다. 부분 3개는 개인 음성 clone 품질, 효과음 추천/선택, 긴 영상의 사람 검수 운영 품질이며 이번 blocker slice의 완료 조건은 아니다.
+
+이하 기존 2026-07-01 체크포인트는 historical reference다.
+
 현재 기준 아래 범위는 코드와 검증으로 실제 연결되어 있다.
 
 - `editing session` 저장/조회/수정 API
@@ -748,6 +771,16 @@
 따라서 이후 작업 우선순위는 review-action 연결 자체가 아니라, 더 상위 출력/편집 흐름 고도화 쪽으로 넘어가야 한다.
 
 ## 13. 다음 실제 작업
+
+### 2026-07-11 기준
+
+production-readiness blocker slice 1의 9개 Task는 구현·회귀·600초 smoke·SSOT 갱신까지 완료했다. 다음 goal은 새 기능을 넓히기보다 아래 중 하나를 좁게 선택한다.
+
+1. 실제 사용자 음성 clone TTS 품질과 긴 영상 발화/무음 QA를 별도 provider acceptance 기준으로 고정한다.
+2. 효과음 추천·선택·output materialization을 BGM과 같은 real-asset only 계약으로 구현한다.
+3. 10분 이상 실제 프로젝트 3건의 수동 CapCut open/edit/export UX 검증을 수행하고 생성 source 경로, overlay layout, Korean typography를 점검한다.
+
+이하 기존 next-task 목록은 historical reference다.
 
 현재 기준 다음 실제 작업은 아래 순서로 재고정한다.
 

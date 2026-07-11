@@ -125,3 +125,128 @@ def test_export_timeline_requires_narration_clips(tmp_path: Path) -> None:
             drafts_root=tmp_path / "capcut_drafts",
             draft_name="empty_export",
         )
+
+
+@pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg/ffprobe not installed on this machine")
+def test_export_timeline_repeats_short_broll_and_keeps_short_tts_in_its_timeline_window(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="CapCut Duration Contract")
+
+    tts_file = tmp_path / "short_tts.wav"
+    _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=1", str(tts_file)])
+    tts_asset = store.register_asset(
+        project_id=project.project_id, asset_type=AssetType.GENERATED_TTS_AUDIO, source_path=tts_file
+    )
+    broll_file = tmp_path / "short_broll.mp4"
+    _generate(
+        ["ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc=duration=1:size=320x240:rate=15", str(broll_file)]
+    )
+    broll_asset = store.register_asset(
+        project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=broll_file
+    )
+    timeline = {
+        "tracks": [
+            {
+                "track_type": "narration",
+                "clips": [
+                    {
+                        "asset_uri": f"local://projects/{project.project_id}/assets/{tts_asset.asset_id}",
+                        "start_sec": 0.0,
+                        "end_sec": 4.0,
+                    }
+                ],
+            },
+            {
+                "track_type": "broll",
+                "clips": [
+                    {
+                        "asset_uri": f"local://projects/{project.project_id}/assets/{broll_asset.asset_id}",
+                        "start_sec": 0.0,
+                        "end_sec": 4.0,
+                    }
+                ],
+            },
+        ],
+    }
+
+    draft_path = PyCapCutRealExportAdapter(store=store).export_timeline(
+        project_id=project.project_id,
+        timeline=timeline,
+        drafts_root=tmp_path / "capcut_drafts",
+        draft_name="duration_contract",
+    )
+    content = json.loads((draft_path / "draft_content.json").read_text(encoding="utf-8"))
+    tracks = {track["name"]: track["segments"] for track in content["tracks"]}
+
+    assert tracks["voiceover"][0]["target_timerange"] == {"start": 0, "duration": 1_000_000}
+    assert tracks["voiceover"][0]["speed"] == pytest.approx(1.0)
+    assert tracks["voiceover"][1]["target_timerange"] == {
+        "start": 1_000_000,
+        "duration": 3_000_000,
+    }
+    silence_material = next(
+        material
+        for material in content["materials"]["audios"]
+        if Path(material["path"]).name.startswith("videobox_silence_")
+    )
+    assert tracks["voiceover"][1]["material_id"] == silence_material["id"]
+    assert [segment["target_timerange"] for segment in tracks["broll"]] == [
+        {"start": 0, "duration": 1_000_000},
+        {"start": 1_000_000, "duration": 1_000_000},
+        {"start": 2_000_000, "duration": 1_000_000},
+        {"start": 3_000_000, "duration": 1_000_000},
+    ]
+
+
+@pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg/ffprobe not installed on this machine")
+def test_export_timeline_materializes_image_overlay_in_real_capcut_draft(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="CapCut Image Overlay Contract")
+    narration_file = tmp_path / "narration.wav"
+    _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=4", str(narration_file)])
+    narration_asset = store.register_asset(
+        project_id=project.project_id, asset_type=AssetType.NARRATION_AUDIO, source_path=narration_file
+    )
+    image_file = tmp_path / "overlay.png"
+    _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=red:size=32x24", "-frames:v", "1", str(image_file)])
+    image_asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.IMAGE, source_path=image_file)
+    timeline = {
+        "narration_source_uri": narration_asset.storage_uri,
+        "export_overlays": [
+            {
+                "overlay_type": "image_overlay",
+                "asset_id": image_asset.asset_id,
+                "start_sec": 1.0,
+                "end_sec": 3.0,
+            }
+        ],
+        "tracks": [
+            {
+                "track_type": "narration",
+                "clips": [
+                    {
+                        "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+                        "start_sec": 0.0,
+                        "end_sec": 4.0,
+                    }
+                ],
+            }
+        ],
+    }
+
+    draft_path = PyCapCutRealExportAdapter(store=store).export_timeline(
+        project_id=project.project_id,
+        timeline=timeline,
+        drafts_root=tmp_path / "capcut_drafts",
+        draft_name="image_overlay_contract",
+    )
+    content = json.loads((draft_path / "draft_content.json").read_text(encoding="utf-8"))
+    tracks = {track["name"]: track["segments"] for track in content["tracks"]}
+    image_material = next(material for material in content["materials"]["videos"] if material["path"].endswith("overlay.png"))
+
+    assert len(tracks["videobox_image_overlays"]) == 1
+    assert tracks["videobox_image_overlays"][0]["target_timerange"] == {
+        "start": 1_000_000,
+        "duration": 2_000_000,
+    }
+    assert tracks["videobox_image_overlays"][0]["material_id"] == image_material["id"]

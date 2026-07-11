@@ -65,6 +65,7 @@ import { ProjectOnboarding } from "./ProjectOnboarding";
 
 export function App() {
   const [projects, setProjects] = useState<Project[]>([]);
+  const [onboardingProject, setOnboardingProject] = useState<Project | null>(null);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [selectedSection, setSelectedSection] = useState<
     "overview" | "timeline" | "review" | "editing" | "settings"
@@ -1474,6 +1475,7 @@ export function App() {
     setProjects((current) => [project, ...current.filter((item) => item.project_id !== project.project_id)]);
     setSelectedProjectId(project.project_id);
     setLoadState("ready");
+    setOnboardingProject(project);
   }
 
   return (
@@ -1485,14 +1487,32 @@ export function App() {
           <p className="lede">프로젝트 · 타임라인 · 검수 · 출력</p>
         </div>
 
-        {projects.length === 0 && loadState === "ready" ? (
-          <ProjectOnboarding onProjectCreated={handleProjectCreated} />
+        {(projects.length === 0 || onboardingProject !== null) && loadState === "ready" ? (
+          <ProjectOnboarding
+            onProjectCreated={handleProjectCreated}
+            onIngestComplete={() => setOnboardingProject(null)}
+            existingProject={onboardingProject ?? undefined}
+          />
         ) : null}
 
         <section className="sidebar-section" aria-labelledby="projects-heading">
           <div className="sidebar-header">
             <p className="section-kicker">프로젝트</p>
             <h2 id="projects-heading">목록</h2>
+            {selectedProjectId ? (
+              <button
+                className="action-button subtle"
+                onClick={() => {
+                  const project = projects.find((item) => item.project_id === selectedProjectId);
+                  if (project) {
+                    setOnboardingProject(project);
+                  }
+                }}
+                type="button"
+              >
+                소스 등록
+              </button>
+            ) : null}
           </div>
           <div className="project-list">
             {projects.map((project) => (

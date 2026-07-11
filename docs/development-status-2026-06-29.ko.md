@@ -1,8 +1,30 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 210. 2026-07-06 operational readiness complete`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
-> 이 문서의 `## 1`부터 `## 209`까지는 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 210`만 기준으로 본다.
+> 현재 authoritative 상태/next slice 판단은 `## 217. 2026-07-11 production-readiness blocker slice 1 closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 이 문서의 `## 1`부터 `## 216`까지는 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 217`만 기준으로 본다.
 > 단, `2일 내 1차 데모 완성` 실행 레일은 `## 189`의 장기 우선순위를 그대로 넓게 집행하지 않고, `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`의 축소된 실행 계획을 우선 적용한다.
+
+## 217. 2026-07-11 production-readiness blocker slice 1 closeout
+
+이번 closeout의 기준 문서는 `docs/superpowers/plans/2026-07-11-production-readiness-blocker-slice-1.md`다. six blocker와 Task 1–9를 실제 worktree 기준으로 닫았다.
+
+- first-project onboarding은 프로젝트 생성 후 narration/script 등록을 독립 상태로 처리한다. 부분 실패는 생성된 프로젝트를 되돌리지 않고 해당 소스만 retry한다.
+- assetless BGM은 timeline media clip으로 자동 적용하지 않는다.
+- final render와 real CapCut draft failure는 nullable artifact/error message로 API와 UI에 전달되고 ErrorBoundary가 예외 render를 격리한다.
+- partial caption의 `caption_segments`는 candidate timeline, SRT, final subtitle input까지 유지된다.
+- short B-roll/TTS는 FFmpeg에서 loop/pad/trim하며 real CapCut draft에는 B-roll 반복과 project-local persistent silence material로 target duration을 유지한다.
+- `export_overlays`는 FFmpeg real frame(text/image)과 real CapCut draft text/image material에 반영된다.
+
+검증:
+
+- frontend `npm test -- --run`: 82 passed; `npm run build`: success.
+- backend `.venv\\Scripts\\python.exe -m pytest -q -p no:cacheprovider`: Python 3.12.10, 621 passed.
+- Korean 600초 real smoke: fixture SHA-256 `a0c7f05a7052be735dce56df38a45ae167a9b24cad122a3c518ef9025701ee0f`, final MP4 600.000초 SHA-256 `45e430cae559e94b0b62eb2bf5f8178f74c0472a9fbadebb134ccb9bf9425c79`, ingest/edit/SRT/MP4 9개 checks 모두 true.
+- 대용량 Korean WAV/MP4 smoke artifact는 Git에 포함하지 않는다.
+
+전체 implementation milestone 39개 재판정: 완료 36, 부분 3, 미구현 0. strict `92.3%`, partial=0.5 weighted `96.2%`, weighted remaining `3.8%`. 부분 항목은 personal voice clone 품질, SFX 추천/선택, 실제 장기 프로젝트의 사람 검수 UX다.
+
+다음 goal은 personal voice TTS acceptance, SFX real-asset 계약, 또는 다중 10분 프로젝트의 수동 CapCut QA 중 하나를 독립 slice로 선택한다.
 
 ## 216. 2026-07-07 output readiness UI closeout
 

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
+import wave
 
 import pytest
 
+from videobox_capcut_export.pycapcut_adapter import PyCapCutRealExportAdapter
 from videobox_core_engine.local_pipeline import LocalPipelineRunner
 from videobox_domain_models.jobs import JobStatus, JobType
 from videobox_storage.local_project_store import LocalProjectStore
@@ -34,7 +37,11 @@ def _build_approved_timeline_job(store: LocalProjectStore, runner: LocalPipeline
     raw_audio_asset_dir = store.project_root(project_id)
     raw_audio_path = raw_audio_asset_dir / "narration_source.wav"
     raw_audio_path.parent.mkdir(parents=True, exist_ok=True)
-    raw_audio_path.write_bytes(b"fake wav data")
+    with wave.open(str(raw_audio_path), "wb") as output:
+        output.setnchannels(1)
+        output.setsampwidth(2)
+        output.setframerate(8_000)
+        output.writeframes(b"\x00\x00" * 8_000)
     narration_asset = runner.register_narration_asset(project_id=project_id, source_path=raw_audio_path)
 
     timeline = runner.timeline_builder.build(
@@ -125,3 +132,19 @@ def test_start_capcut_draft_export_raises_clear_error_when_not_configured(tmp_pa
 
     with pytest.raises(RuntimeError, match="not configured"):
         runner.start_capcut_draft_export(project_id=project.project_id, timeline_job_id=timeline_job_id)
+
+
+def test_real_capcut_draft_keeps_short_tts_silence_material_after_temp_export_is_removed(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Persisted CapCut Silence Material Project")
+    runner = LocalPipelineRunner(store, pycapcut_exporter=PyCapCutRealExportAdapter(store=store))
+    timeline_job_id = _build_approved_timeline_job(store, runner, project.project_id)
+
+    result = runner.start_capcut_draft_export(project_id=project.project_id, timeline_job_id=timeline_job_id)
+    persisted = runner.get_capcut_draft_export_result(project_id=project.project_id, job_id=result["job_id"])
+    draft_path = store.resolve_storage_uri(project_id=project.project_id, storage_uri=persisted["export"]["file_uri"])
+    content = json.loads((draft_path / "draft_content.json").read_text(encoding="utf-8"))
+
+    audio_paths = [Path(material["path"]) for material in content["materials"]["audios"]]
+    assert any(path.name.startswith("videobox_silence_") for path in audio_paths)
+    assert all(path.is_file() for path in audio_paths)

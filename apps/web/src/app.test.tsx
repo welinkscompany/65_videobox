@@ -4833,4 +4833,16 @@ describe("App", () => {
     expect(screen.getByRole("button", { name: /타임라인 승인/i })).toBeDisabled();
     expect(screen.getByRole("button", { name: /자막 생성/i })).toBeEnabled();
   });
+
+  it("reopens narration and script ingest for the selected project after a refresh", async () => {
+    vi.stubGlobal("fetch", createFetchMock());
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "소스 등록" }));
+
+    expect(await screen.findByRole("heading", { name: "기존 프로젝트 소스 등록" })).toBeInTheDocument();
+    expect(screen.getByLabelText("나레이션 로컬 경로")).toBeInTheDocument();
+    expect(screen.getByLabelText("스크립트 로컬 경로")).toBeInTheDocument();
+  });
 });
