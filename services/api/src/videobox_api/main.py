@@ -62,6 +62,9 @@ def create_app(
     capcut_draft_export_config: CapCutDraftExportConfig | None = None,
     tts_engine_config: TTSEngineConfig | None = None,
     local_first_runtime_service_factory=None,
+    stt_provider=None,
+    tts_provider=None,
+    final_renderer=None,
 ) -> FastAPI:
     app = FastAPI(title="VideoBox API", version="0.1.0")
     store = LocalProjectStore(projects_root or DEFAULT_PROJECTS_ROOT)
@@ -90,9 +93,10 @@ def create_app(
         review_guidance_builder=LocalFirstReviewGuidanceBuilder(runtime_service=runtime_service),
         output_operator_copy_builder=LocalFirstOutputOperatorCopyBuilder(runtime_service=runtime_service),
         auto_cut_planner=AutoCutPlanner(config=resolved_auto_cut_config),
-        stt_provider=_build_stt_provider(resolved_whisper_stt_config),
+        stt_provider=stt_provider or _build_stt_provider(resolved_whisper_stt_config),
         pycapcut_exporter=_build_pycapcut_exporter(resolved_capcut_draft_export_config, store=store),
-        tts_provider=_build_tts_provider(resolved_tts_engine_config),
+        tts_provider=tts_provider or _build_tts_provider(resolved_tts_engine_config),
+        final_renderer=final_renderer,
     )
     orchestrator = ApiOrchestrator(store, pipeline=pipeline)
     app.state.local_runtime_config = resolved_local_runtime_config
@@ -103,6 +107,9 @@ def create_app(
     app.state.build_local_first_runtime_service = build_local_first_runtime_service
     app.state.local_first_runtime_service_factory = runtime_service_factory
     app.state.local_http_client = urlopen
+    app.state.stt_provider = pipeline.stt_provider
+    app.state.tts_provider = pipeline.tts_provider
+    app.state.final_renderer = pipeline.final_renderer
 
     @app.get("/health")
     def health() -> dict[str, str]:

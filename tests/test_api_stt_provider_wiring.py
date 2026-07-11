@@ -24,6 +24,23 @@ def test_create_app_with_whisper_enabled_wires_real_provider(tmp_path: Path) -> 
     assert app.state.whisper_stt_config.enabled is True
 
 
+def test_create_app_uses_explicit_smoke_providers_and_final_renderer(tmp_path: Path) -> None:
+    deterministic_stt = object()
+    deterministic_tts = object()
+    final_renderer = object()
+
+    app = create_app(
+        projects_root=tmp_path,
+        stt_provider=deterministic_stt,
+        tts_provider=deterministic_tts,
+        final_renderer=final_renderer,
+    )
+
+    assert app.state.stt_provider is deterministic_stt
+    assert app.state.tts_provider is deterministic_tts
+    assert app.state.final_renderer is final_renderer
+
+
 def test_build_stt_provider_respects_enabled_flag() -> None:
     from videobox_api.main import _build_stt_provider
 
