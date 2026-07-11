@@ -107,9 +107,13 @@ class TimelineBuilder:
                     )
                 )
             for recommendation in by_segment.get(segment_id, []):
+                rec_type = _canonical_recommendation_type(recommendation.get("recommendation_type"))
+                selected_asset_id = str(recommendation.get("selected_asset_id") or "").strip()
+                if rec_type == "bgm" and not selected_asset_id:
+                    pending_recommendations.append(recommendation)
+                    continue
                 if bool(recommendation.get("auto_apply_allowed")) and not bool(recommendation.get("review_required")):
                     applied_recommendations.append(recommendation)
-                    rec_type = _canonical_recommendation_type(recommendation.get("recommendation_type"))
                     if rec_type == "broll" and recommendation.get("selected_asset_id"):
                         broll_clips.append(
                             TimelineClip(
@@ -127,7 +131,7 @@ class TimelineBuilder:
                             TimelineClip(
                                 clip_id=f"clip_bgm_{len(music_clips) + 1:03d}",
                                 segment_id=segment_id,
-                                asset_uri=f"local://projects/{project_id}/music/{recommendation['selected_asset_id'] or 'suggested'}",
+                                asset_uri=f"local://projects/{project_id}/assets/{selected_asset_id}",
                                 start_sec=float(segment["start_sec"]),
                                 end_sec=float(segment["end_sec"]),
                                 clip_type="bgm",

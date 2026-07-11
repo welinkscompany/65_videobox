@@ -38,5 +38,31 @@ def test_timeline_builder_creates_review_focused_timeline() -> None:
     assert len(timeline.review_flags) == 2
 
 
+def test_timeline_builder_does_not_auto_apply_bgm_without_a_real_music_asset() -> None:
+    builder = TimelineBuilder()
+    segment = SegmentRecord.create(
+        project_id="proj_001",
+        text="Narration line",
+        start_sec=0.0,
+        end_sec=4.2,
+    )
+    recommendation = RecommendationRecord.create(
+        project_id="proj_001",
+        target_segment_id=segment.segment_id,
+        recommendation_type=RecommendationType.BGM,
+        reason="Recommended mood only; no local music asset is available.",
+        score=0.88,
+    )
+
+    timeline = builder.build(
+        project_id="proj_001",
+        segments=[segment],
+        recommendations=[recommendation],
+    )
+
+    assert not any(track.track_type == "bgm" for track in timeline.tracks)
+    assert all("music/suggested" not in clip.asset_uri for track in timeline.tracks for clip in track.clips)
+
+
 def test_default_projects_root_targets_project_workspace() -> None:
     assert str(DEFAULT_PROJECTS_ROOT).endswith("20_project\\65_videobox-project")

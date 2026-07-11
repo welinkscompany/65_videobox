@@ -6177,7 +6177,7 @@ def test_music_recommendation_local_first_path_preserves_downstream_timeline_beh
 
     assert timeline_result.status_code == 200
     assert music_result.status_code == 200
-    assert any(track["track_type"] == "bgm" for track in timeline_result.json()["timeline"]["tracks"])
+    assert not any(track["track_type"] == "bgm" for track in timeline_result.json()["timeline"]["tracks"])
     assert music_result.json()["recommendations"][0]["payload"]["music_mood"] == "cinematic pulse"
     assert len(local_provider.calls) == 3
 
