@@ -7,6 +7,7 @@ from typing import Any
 from pycapcut.audio_segment import AudioSegment
 from pycapcut.local_materials import AudioMaterial, VideoMaterial
 from pycapcut.script_file import ScriptFile
+from pycapcut.text_segment import TextSegment
 from pycapcut.time_util import Timerange
 from pycapcut.track import TrackType
 from pycapcut.video_segment import VideoSegment
@@ -73,6 +74,9 @@ class PyCapCutRealExportAdapter:
         script.add_track(TrackType.video, "broll")
         if bgm_clips:
             script.add_track(TrackType.audio, "bgm")
+        export_overlays = [item for item in timeline.get("export_overlays", []) if isinstance(item, dict)]
+        if export_overlays:
+            script.add_track(TrackType.text, "videobox_overlays")
 
         for clip in narration_clips:
             self._add_narration_segment(script=script, project_id=project_id, timeline=timeline, clip=clip)
@@ -80,6 +84,8 @@ class PyCapCutRealExportAdapter:
             self._add_broll_segment(script=script, project_id=project_id, clip=clip)
         for clip in bgm_clips:
             self._add_bgm_segment(script=script, project_id=project_id, clip=clip)
+        for overlay in export_overlays:
+            self._add_text_overlay(script=script, overlay=overlay)
 
         if subtitle_file_path is not None:
             script.import_srt(str(subtitle_file_path), "subtitle")
@@ -162,6 +168,19 @@ class PyCapCutRealExportAdapter:
             volume=0.25,
         )
         script.add_segment(segment, "bgm")
+
+    def _add_text_overlay(self, *, script: ScriptFile, overlay: dict[str, Any]) -> None:
+        text = str(overlay.get("text") or overlay.get("title") or overlay.get("body") or "").strip()
+        if not text:
+            return
+        start_sec = float(overlay.get("start_sec") or 0.0)
+        end_sec = float(overlay.get("end_sec") or start_sec)
+        if end_sec <= start_sec:
+            return
+        script.add_segment(
+            TextSegment(text, Timerange(start=_seconds_to_us(start_sec), duration=_seconds_to_us(end_sec - start_sec))),
+            "videobox_overlays",
+        )
 
 
 __all__ = ["PyCapCutExportError", "PyCapCutRealExportAdapter"]
