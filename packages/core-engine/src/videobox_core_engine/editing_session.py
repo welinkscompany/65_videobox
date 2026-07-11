@@ -12,6 +12,7 @@ ALLOWED_PARTIAL_REGEN_FIELDS = {
     "image_overlay",
     "table_overlay",
     "music",
+    "sfx",
     "tts_replacement",
 }
 
@@ -24,6 +25,7 @@ PARTIAL_REGEN_STEPS_BY_FIELD = {
     "image_overlay": ("overlay_refresh", "timeline_build"),
     "table_overlay": ("overlay_refresh", "timeline_build"),
     "music": ("music_refresh", "timeline_build"),
+    "sfx": ("sfx_refresh", "timeline_build"),
     "tts_replacement": ("tts_refresh", "timeline_build"),
 }
 
@@ -55,6 +57,7 @@ def build_editing_session(
                 "broll_override": None,
                 "visual_overlays": [],
                 "music_override": None,
+                "sfx_override": None,
                 "tts_replacement": None,
             }
         )
@@ -151,6 +154,28 @@ def clear_segment_broll_override(
                 "segment_id": segment_id,
             }
         )
+        return updated
+    raise KeyError(f"Segment not found in editing session: {segment_id}")
+
+
+def update_segment_sfx_override(*, session: dict[str, Any], segment_id: str, asset_id: str) -> dict[str, Any]:
+    updated = deepcopy(session)
+    for segment in updated.get("segments", []):
+        if str(segment.get("segment_id")) != segment_id:
+            continue
+        segment["sfx_override"] = {"asset_id": asset_id.strip()}
+        updated.setdefault("history", []).append({"mutation_type": "sfx_override_update", "segment_id": segment_id, "asset_id": asset_id.strip()})
+        return updated
+    raise KeyError(f"Segment not found in editing session: {segment_id}")
+
+
+def clear_segment_sfx_override(*, session: dict[str, Any], segment_id: str) -> dict[str, Any]:
+    updated = deepcopy(session)
+    for segment in updated.get("segments", []):
+        if str(segment.get("segment_id")) != segment_id:
+            continue
+        segment["sfx_override"] = None
+        updated.setdefault("history", []).append({"mutation_type": "sfx_override_clear", "segment_id": segment_id})
         return updated
     raise KeyError(f"Segment not found in editing session: {segment_id}")
 

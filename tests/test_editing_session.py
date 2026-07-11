@@ -217,6 +217,21 @@ def test_update_segment_broll_override_records_history() -> None:
     assert updated["history"][-1]["mutation_type"] == "broll_override_update"
 
 
+def test_update_segment_sfx_override_records_history() -> None:
+    from videobox_core_engine.editing_session import build_editing_session, update_segment_sfx_override
+
+    session = build_editing_session(
+        project_id="project_001",
+        timeline={"timeline_id": "timeline_001"},
+        segments=[{"segment_id": "seg_001", "text": "Caption", "start_sec": 0.0, "end_sec": 1.0, "review_required": False, "cleanup_decision": "keep"}],
+    )
+
+    updated = update_segment_sfx_override(session=session, segment_id="seg_001", asset_id="asset_sfx_001")
+
+    assert updated["segments"][0]["sfx_override"] == {"asset_id": "asset_sfx_001"}
+    assert updated["history"][-1]["mutation_type"] == "sfx_override_update"
+
+
 def test_clear_segment_broll_override_records_history() -> None:
     from videobox_core_engine.editing_session import build_editing_session
     from videobox_core_engine.editing_session import clear_segment_broll_override
