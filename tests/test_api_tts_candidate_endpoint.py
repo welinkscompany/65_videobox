@@ -138,3 +138,33 @@ def test_tts_candidate_endpoint_serializes_pending_operator_review_with_fake_pro
     assert response.status_code == 201
     assert response.json()["technical_status"] == "accepted"
     assert response.json()["operator_review_status"] == "pending"
+
+
+def test_tts_candidate_listening_review_decision_persists_across_reads(tmp_path: Path) -> None:
+    voice_sample_path = tmp_path / "voice_sample.wav"
+    voice_sample_path.write_bytes(b"fake voice sample bytes")
+    client = TestClient(create_app(projects_root=tmp_path, tts_provider=_DeterministicWaveTTSProvider()))
+    project_id = client.post("/api/projects", json={"name": "Listening review"}).json()["project_id"]
+    voice_sample_asset_id = client.post(
+        f"/api/projects/{project_id}/assets/voice-sample",
+        json={"source_path": str(voice_sample_path)},
+    ).json()["asset_id"]
+    candidate = client.post(
+        f"/api/projects/{project_id}/tts-candidates",
+        json={
+            "segment_text": "청취 승인 대상입니다.",
+            "voice_sample_asset_id": voice_sample_asset_id,
+            "segment_id": "seg_001",
+            "target_duration_sec": 3.0,
+        },
+    ).json()
+
+    approved = client.patch(
+        f"/api/projects/{project_id}/tts-candidates/{candidate['candidate_id']}/listening-review",
+        json={"decision": "approved"},
+    )
+    restored = client.get(f"/api/projects/{project_id}/segments/seg_001/tts-candidates")
+
+    assert approved.status_code == 200
+    assert approved.json()["operator_review_status"] == "approved"
+    assert restored.json()["candidates"][0]["operator_review_status"] == "approved"

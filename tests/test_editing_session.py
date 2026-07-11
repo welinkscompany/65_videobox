@@ -4,6 +4,8 @@ import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from videobox_core_engine.local_pipeline import LocalPipelineRunner as _LocalPipelineRunner
 from videobox_domain_models.assets import AssetType
 from videobox_storage.local_project_store import LocalProjectStore
@@ -636,6 +638,75 @@ def test_select_and_clear_segment_tts_replacement_records_history() -> None:
     assert selected["history"][-1]["mutation_type"] == "tts_replacement_select"
     assert cleared["segments"][0]["tts_replacement"] is None
     assert cleared["history"][-1]["mutation_type"] == "tts_replacement_clear"
+
+
+def test_pending_or_rejected_tts_candidate_cannot_replace_narration_until_listening_approved(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="TTS Listening Gate")
+    runner = _LocalPipelineRunner(store)
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id="timeline_001",
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "기존 나레이션을 유지합니다.",
+                    "start_sec": 0.0,
+                    "end_sec": 3.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+    candidate = store.save_tts_candidate(
+        project_id=project.project_id,
+        segment_id="seg_001",
+        asset_id="asset_tts_001",
+        source_text="생성된 후보입니다.",
+        acceptance=SimpleNamespace(
+            technical_status="accepted",
+            operator_review_status="pending",
+            target_duration_sec=3.0,
+            actual_duration_sec=3.0,
+            failure_code=None,
+        ),
+    )
+
+    with pytest.raises(ValueError, match="listening approval"):
+        runner.select_editing_session_segment_tts_replacement(
+            project_id=project.project_id,
+            session_id=session["session_id"],
+            segment_id="seg_001",
+            recommendation_id=candidate["candidate_id"],
+            asset_id=candidate["asset_id"],
+        )
+
+    assert store.get_editing_session(project_id=project.project_id, session_id=session["session_id"])["segments"][0]["tts_replacement"] is None
+
+    store.update_tts_candidate_listening_review(
+        project_id=project.project_id,
+        candidate_id=candidate["candidate_id"],
+        decision="approved",
+    )
+    selected = runner.select_editing_session_segment_tts_replacement(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+        segment_id="seg_001",
+        recommendation_id=candidate["candidate_id"],
+        asset_id=candidate["asset_id"],
+    )
+
+    assert selected["segments"][0]["tts_replacement"] == {
+        "recommendation_id": candidate["candidate_id"],
+        "asset_id": candidate["asset_id"],
+    }
 
 
 def test_update_segment_visual_overlay_preserves_other_overlay_types() -> None:

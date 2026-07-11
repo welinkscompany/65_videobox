@@ -324,6 +324,19 @@ class ApiOrchestrator:
     def list_tts_replacement_candidates(self, *, project_id: str, segment_id: str) -> list[dict[str, Any]]:
         return self.pipeline.list_tts_replacement_candidates(project_id=project_id, segment_id=segment_id)
 
+    def review_tts_replacement_candidate(
+        self,
+        *,
+        project_id: str,
+        candidate_id: str,
+        decision: str,
+    ) -> dict[str, Any]:
+        return self.pipeline.review_tts_replacement_candidate(
+            project_id=project_id,
+            candidate_id=candidate_id,
+            decision=decision,
+        )
+
     def plan_auto_cut_segments(
         self,
         *,

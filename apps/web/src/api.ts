@@ -884,6 +884,17 @@ export const api = {
     request<{ candidates: TtsCandidateRecord[] }>(
       `/api/projects/${projectId}/segments/${segmentId}/tts-candidates`,
     ),
+  reviewTtsCandidate: (projectId: string, candidateId: string, decision: "approved" | "rejected") =>
+    request<TtsCandidateRecord>(
+      `/api/projects/${projectId}/tts-candidates/${candidateId}/listening-review`,
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ decision }),
+      },
+    ),
   assetContentUrl: (projectId: string, assetId: string) =>
     `/api/projects/${projectId}/assets/${assetId}/content`,
   assetThumbnailUrl: (projectId: string, assetId: string) =>

@@ -280,6 +280,19 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
     def list_tts_replacement_candidates(self, *, project_id: str, segment_id: str) -> list[dict[str, Any]]:
         return self.store.list_tts_candidates(project_id=project_id, segment_id=segment_id)
 
+    def review_tts_replacement_candidate(
+        self,
+        *,
+        project_id: str,
+        candidate_id: str,
+        decision: str,
+    ) -> dict[str, Any]:
+        return self.store.update_tts_candidate_listening_review(
+            project_id=project_id,
+            candidate_id=candidate_id,
+            decision=decision,
+        )
+
     def run_auto_cut_detection(self, *, project_id: str, raw_video_asset_id: str) -> dict[str, Any]:
         asset = self.store.get_asset(project_id=project_id, asset_id=raw_video_asset_id)
         if asset["asset_type"] != AssetType.RAW_VIDEO.value:

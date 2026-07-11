@@ -281,6 +281,13 @@ def run_smoke(*, narration: Path, work_root: Path, ffmpeg_binary: str, ffprobe_b
             tts_candidate["technical_status"] == "accepted"
             and tts_candidate["operator_review_status"] == "pending"
         )
+        approved_tts_candidate = _assert_status(client.patch(
+            f"/api/projects/{project_id}/tts-candidates/{tts_candidate['candidate_id']}/listening-review",
+            json={"decision": "approved"},
+        ), 200)
+        checks["tts_candidate_listening_approved"] = (
+            approved_tts_candidate["operator_review_status"] == "approved"
+        )
         broll_recommendation = _assert_status(client.post(
             f"/api/projects/{project_id}/jobs/broll-recommendation", json={"segment_analysis_job_id": analysis["job_id"]}), 202)
         music_recommendation = _assert_status(client.post(
@@ -300,7 +307,7 @@ def run_smoke(*, narration: Path, work_root: Path, ffmpeg_binary: str, ffprobe_b
         session_id = session["session_id"]
         _assert_status(client.patch(
             f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/tts-replacement",
-            json={"recommendation_id": "tts_smoke_candidate", "asset_id": tts_candidate["asset_id"]},
+            json={"recommendation_id": tts_candidate["candidate_id"], "asset_id": tts_candidate["asset_id"]},
         ), 200)
         sfx_session = _assert_status(client.patch(
             f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/sfx",

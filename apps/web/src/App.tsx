@@ -99,6 +99,7 @@ export function App() {
   const [ttsCandidateError, setTtsCandidateError] = useState<string | null>(null);
   const [ttsCandidates, setTtsCandidates] = useState<TtsCandidateRecord[]>([]);
   const [isLoadingTtsCandidates, setIsLoadingTtsCandidates] = useState(false);
+  const [isReviewingTtsCandidate, setIsReviewingTtsCandidate] = useState<string | null>(null);
   const [brollAssets, setBrollAssets] = useState<BrollAsset[]>([]);
   const [brollAssetLoadError, setBrollAssetLoadError] = useState<string | null>(null);
   const [brollFolderPath, setBrollFolderPath] = useState(
@@ -1086,7 +1087,6 @@ export function App() {
         target_duration_sec: targetDurationSec,
       });
       if (asset.technical_status === "accepted") {
-        updateEditingDraft(segmentId, { ttsAssetId: asset.asset_id });
         setTtsCandidateMessage(`기술 검증 통과 · 청취 승인 대기 · ${asset.asset_id}`);
       } else {
         setTtsCandidateMessage(`후보 거부 · ${asset.failure_code ?? "기술 검증 실패"}`);
@@ -1525,6 +1525,37 @@ export function App() {
       );
     } finally {
       setIsRegisteringVoiceSample(false);
+    }
+  }
+
+  async function handleReviewTtsCandidate(
+    candidateId: string,
+    decision: "approved" | "rejected",
+  ) {
+    if (!selectedProjectId) {
+      return;
+    }
+    setIsReviewingTtsCandidate(candidateId);
+    setTtsCandidateError(null);
+    try {
+      const candidate = await api.reviewTtsCandidate(selectedProjectId, candidateId, decision);
+      setTtsCandidates((current) => {
+        const matched = current.some((item) => item.candidate_id === candidate.candidate_id);
+        return matched
+          ? current.map((item) => (item.candidate_id === candidate.candidate_id ? candidate : item))
+          : [candidate, ...current];
+      });
+      setTtsCandidateMessage(
+        decision === "approved"
+          ? `청취 승인 완료 · 후보를 선택해 나레이션에 적용하세요 · ${candidate.asset_id}`
+          : `청취 거부 완료 · 기존 나레이션을 유지합니다 · ${candidate.asset_id}`,
+      );
+    } catch (error) {
+      setTtsCandidateError(
+        error instanceof Error ? `TTS 청취 승인 실패 · ${error.message}` : "TTS 청취 승인 실패",
+      );
+    } finally {
+      setIsReviewingTtsCandidate(null);
     }
   }
 
@@ -3535,9 +3566,13 @@ export function App() {
                         </span>
                         <p className="meta-copy">{formatDisplayText(candidate.source_text)}</p>
                         <p className="meta-copy">
-                          {candidate.technical_status === "accepted"
-                            ? "기술 검증 통과 · 청취 승인 대기"
-                            : `선택 불가 · ${candidate.failure_code ?? "기술 검증 실패"}`}
+                          {candidate.technical_status !== "accepted"
+                            ? `선택 불가 · ${candidate.failure_code ?? "기술 검증 실패"}`
+                            : candidate.operator_review_status === "approved"
+                              ? "기술 검증 통과 · 청취 승인됨"
+                              : candidate.operator_review_status === "rejected"
+                                ? "청취 거부됨 · 기존 나레이션 유지"
+                                : "기술 검증 통과 · 청취 승인 대기"}
                         </p>
                         <audio
                           controls
@@ -3545,9 +3580,13 @@ export function App() {
                         />
                         <button
                           className="action-button"
-                          disabled={candidate.technical_status !== "accepted"}
+                          disabled={
+                            candidate.technical_status !== "accepted" ||
+                            candidate.operator_review_status !== "approved"
+                          }
                           onClick={() =>
                             updateEditingDraft(selectedEditingSegment.segment_id, {
+                              ttsRecommendationId: candidate.candidate_id,
                               ttsAssetId: candidate.asset_id,
                             })
                           }
@@ -3555,6 +3594,39 @@ export function App() {
                         >
                           이 후보 선택
                         </button>
+                        {candidate.technical_status === "accepted" &&
+                        candidate.operator_review_status === "pending" ? (
+                          <>
+                            <button
+                              className="action-button"
+                              disabled={isReviewingTtsCandidate === candidate.candidate_id}
+                              onClick={() =>
+                                void handleReviewTtsCandidate(
+                                  candidate.candidate_id,
+                                  "approved",
+                                )
+                              }
+                              type="button"
+                            >
+                              {isReviewingTtsCandidate === candidate.candidate_id
+                                ? "청취 결정 저장 중"
+                                : "청취 승인"}
+                            </button>
+                            <button
+                              className="action-button"
+                              disabled={isReviewingTtsCandidate === candidate.candidate_id}
+                              onClick={() =>
+                                void handleReviewTtsCandidate(
+                                  candidate.candidate_id,
+                                  "rejected",
+                                )
+                              }
+                              type="button"
+                            >
+                              청취 거부
+                            </button>
+                          </>
+                        ) : null}
                       </div>
                     ))}
                   </div>

@@ -338,6 +338,18 @@ class TTSReplacementRequest(BaseModel):
         return self
 
 
+class TTSListeningReviewRequest(BaseModel):
+    decision: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_decision(self) -> "TTSListeningReviewRequest":
+        decision = self.decision.strip().lower()
+        if decision not in {"approved", "rejected"}:
+            raise ValueError("decision must be approved or rejected.")
+        self.decision = decision
+        return self
+
+
 class PartialRegenerationRequest(BaseModel):
     segment_ids: list[str] = Field(min_length=1)
     fields: list[str] = Field(min_length=1)

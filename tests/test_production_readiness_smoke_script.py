@@ -94,10 +94,11 @@ def test_smoke_harness_observes_broll_loop_and_muxed_subtitle_instead_of_marking
     assert 'checks["revised_caption_in_final_mp4"]' in source
 
 
-def test_smoke_harness_proves_pending_personal_voice_tts_reaches_final_and_capcut_outputs() -> None:
+def test_smoke_harness_requires_listening_approved_personal_voice_tts_for_final_and_capcut_outputs() -> None:
     source = SCRIPT_PATH.read_text(encoding="utf-8")
 
     assert 'checks["tts_candidate_pending_operator_review"]' in source
+    assert 'checks["tts_candidate_listening_approved"]' in source
     assert 'checks["approved_tts_in_final_and_capcut"]' in source
     assert '"tts_replacement"' in source
     assert '"target_duration_sec"' in source

@@ -796,6 +796,14 @@ production-readiness blocker slice 1의 9개 Task는 구현·회귀·600초 smok
 - 검증: frontend 86 passed/build success, backend Python 3.12 633 passed (API 389 + 기타 244 분할 실행), 600초 Korean smoke 13 checks true.
 - 전체 milestone: 39개 중 38 완료, 1 부분. strict 97.4%, weighted 98.7%, weighted remaining 1.3%로 유지한다. 실제 사용자 녹음의 human listening approval과 다중 프로젝트 CapCut UX QA는 아직 사람이 수행해야 한다.
 
+### 2026-07-12 개인 음성 TTS 청취 승인 게이트 완료
+
+- 기술 검증을 통과한 `tts_candidate_*`는 SQLite의 `operator_review_status`가 `approved`일 때만 개인 음성 나레이션 대체에 사용할 수 있다. pending/rejected 후보는 기존 나레이션을 유지한다.
+- UI에서 재생 후 청취 승인/거부를 저장하며, 새로고침 뒤에도 후보 상태를 다시 읽고 복원한다. 승인 전 후보 선택은 비활성화된다.
+- legacy/imported 일반 TTS 교체는 개인 음성 후보가 아니므로 기존 편집 호환성을 유지한다.
+- 실제 600초 한국어 smoke에서 `tts_candidate_listening_approved`, SRT, FFmpeg MP4, real CapCut draft 반영을 확인했다.
+- 전체 milestone 진행률은 38/39 완료, 1 부분으로 유지한다: strict 97.4%, weighted 98.7%, remaining 1.3%. 남은 것은 실제 사용자가 자신의 음성을 듣고 품질을 판정하는 운영 QA와 다중 실제 프로젝트 CapCut UX QA다.
+
 이하 기존 next-task 목록은 historical reference다.
 
 현재 기준 다음 실제 작업은 아래 순서로 재고정한다.

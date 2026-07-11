@@ -883,6 +883,45 @@ class LocalProjectStore:
         )
         return [dict(row) for row in rows]
 
+    def get_tts_candidate(self, *, project_id: str, candidate_id: str) -> dict[str, Any]:
+        row = self._fetchone(
+            project_id,
+            """
+            SELECT candidate_id, project_id, segment_id, asset_id, source_text,
+                   technical_status, operator_review_status, target_duration_sec,
+                   actual_duration_sec, failure_code, created_at
+            FROM tts_candidates
+            WHERE candidate_id = ?
+            """,
+            (candidate_id,),
+        )
+        if row is None:
+            raise KeyError(f"TTS candidate not found: {candidate_id}")
+        return dict(row)
+
+    def update_tts_candidate_listening_review(
+        self,
+        *,
+        project_id: str,
+        candidate_id: str,
+        decision: str,
+    ) -> dict[str, Any]:
+        normalized_decision = str(decision or "").strip().lower()
+        if normalized_decision not in {"approved", "rejected"}:
+            raise ValueError("Listening review decision must be approved or rejected.")
+        candidate = self.get_tts_candidate(project_id=project_id, candidate_id=candidate_id)
+        if candidate["technical_status"] != "accepted":
+            raise ValueError("Only technically accepted TTS candidates can receive a listening review.")
+        if candidate["operator_review_status"] != "pending":
+            raise ValueError("TTS candidate listening review has already been decided.")
+        self._execute(
+            project_id,
+            "UPDATE tts_candidates SET operator_review_status = ? WHERE candidate_id = ?",
+            (normalized_decision, candidate_id),
+        )
+        candidate["operator_review_status"] = normalized_decision
+        return candidate
+
     def save_gemini_provider_key(
         self,
         *,

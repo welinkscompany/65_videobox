@@ -523,6 +523,38 @@ class EditingSessionRegenerationMixin:
         recommendation_id: str,
         asset_id: str,
     ) -> dict[str, Any]:
+        try:
+            candidate = self.store.get_tts_candidate(
+                project_id=project_id,
+                candidate_id=recommendation_id,
+            )
+        except KeyError:
+            if recommendation_id.startswith("tts_candidate_"):
+                raise
+            candidate = None
+        if candidate is None:
+            # Legacy/imported narration replacements are not personal-voice candidates.
+            # Only persisted personal-voice candidate IDs require listening approval.
+            session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+            updated_session = select_segment_tts_replacement(
+                session=session,
+                segment_id=segment_id,
+                recommendation_id=recommendation_id,
+                asset_id=asset_id,
+            )
+            return self.store.update_editing_session(
+                project_id=project_id,
+                session_id=session_id,
+                session_payload=updated_session,
+            )
+        if candidate["segment_id"] != segment_id:
+            raise ValueError("TTS candidate does not belong to the requested segment.")
+        if candidate["asset_id"] != asset_id:
+            raise ValueError("TTS candidate asset does not match the requested replacement.")
+        if candidate["technical_status"] != "accepted":
+            raise ValueError("TTS candidate failed technical acceptance and cannot replace narration.")
+        if candidate["operator_review_status"] != "approved":
+            raise ValueError("TTS candidate requires listening approval before it can replace narration.")
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
         updated_session = select_segment_tts_replacement(
             session=session,

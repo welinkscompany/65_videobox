@@ -632,6 +632,7 @@ function createFetchMock({
   finalRenderResult,
   capcutDraftResult,
   ttsCandidates = [],
+  ttsListeningReviewStatuses,
   voiceSampleUploadStatus,
   voiceSamples = { assets: [] },
 }: {
@@ -654,6 +655,7 @@ function createFetchMock({
   finalRenderResult?: Record<string, unknown>;
   capcutDraftResult?: Record<string, unknown>;
   ttsCandidates?: TtsCandidateRecord[];
+  ttsListeningReviewStatuses?: number[];
   voiceSampleUploadStatus?: number;
   voiceSamples?: { assets: Array<Record<string, unknown>> };
 } = {}) {
@@ -666,6 +668,7 @@ function createFetchMock({
     reviewSnapshot: ReviewSnapshot;
     candidateReviewSnapshot: ReviewSnapshot;
     candidateTimelineReviewStatus: string;
+    ttsCandidates: TtsCandidateRecord[];
   } = {
     timeline: structuredClone(timeline.timeline),
     editingSession: structuredClone(editingSession) as EditingSession,
@@ -675,6 +678,7 @@ function createFetchMock({
     reviewSnapshot: structuredClone(reviewSnapshot),
     candidateReviewSnapshot: structuredClone(candidateReviewSnapshot),
     candidateTimelineReviewStatus: partialRegenerationResult.timeline.review_status,
+    ttsCandidates: structuredClone(ttsCandidates),
   };
 
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -733,8 +737,26 @@ function createFetchMock({
       state.voiceSamples = { assets: [uploadedAsset, ...state.voiceSamples.assets] };
       return new Response(JSON.stringify(uploadedAsset), { status: 201 });
     }
+    const listeningReviewMatch = url.match(
+      /\/api\/projects\/project_001\/tts-candidates\/([^/]+)\/listening-review$/,
+    );
+    if (listeningReviewMatch && init?.method === "PATCH") {
+      const status = ttsListeningReviewStatuses?.shift() ?? 200;
+      if (status >= 400) {
+        return new Response("listening review failed", { status });
+      }
+      const decision = JSON.parse(String(init.body ?? "{}")) as { decision?: string };
+      const candidate = state.ttsCandidates.find(
+        (item) => item.candidate_id === listeningReviewMatch[1],
+      );
+      if (!candidate) {
+        return new Response("candidate not found", { status: 404 });
+      }
+      candidate.operator_review_status = decision.decision === "rejected" ? "rejected" : "approved";
+      return new Response(JSON.stringify(candidate));
+    }
     if (/\/api\/projects\/project_001\/segments\/[^/]+\/tts-candidates$/.test(url)) {
-      return new Response(JSON.stringify({ candidates: ttsCandidates }));
+      return new Response(JSON.stringify({ candidates: state.ttsCandidates }));
     }
     if (
       url.endsWith("/api/projects/project_001/jobs/build-timeline") &&
@@ -1468,6 +1490,93 @@ it("does not copy a rejected TTS candidate into the editing draft", async () => 
 
   expect(await screen.findByText(/선택 불가 · duration_mismatch/i)).toBeInTheDocument();
   expect(screen.getByRole("button", { name: /이 후보 선택/i })).toBeDisabled();
+});
+
+it("requires listening approval before selecting a TTS candidate and restores the approval after reload", async () => {
+  const fetchMock = createFetchMock({
+    ttsCandidates: [
+      {
+        candidate_id: "tts_candidate_approved_001",
+        project_id: "project_001",
+        segment_id: "seg_002",
+        asset_id: "asset_tts_approved",
+        source_text: "청취 승인 전 개인 음성 후보",
+        technical_status: "accepted",
+        operator_review_status: "pending",
+        target_duration_sec: 3,
+        actual_duration_sec: 3,
+        failure_code: null,
+        created_at: "2026-07-12T00:00:00Z",
+      },
+    ],
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  const view = render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
+  fireEvent.click(await screen.findByRole("button", { name: /편집 시작/i }));
+
+  expect(await screen.findByText(/기술 검증 통과 · 청취 승인 대기/i)).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /이 후보 선택/i })).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: "청취 승인" }));
+
+  await waitFor(() =>
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/projects/project_001/tts-candidates/tts_candidate_approved_001/listening-review",
+      expect.objectContaining({ method: "PATCH" }),
+    ),
+  );
+  await waitFor(() =>
+    expect(screen.queryByRole("button", { name: "청취 승인" })).not.toBeInTheDocument(),
+  );
+  expect(screen.getByRole("button", { name: /이 후보 선택/i })).toBeEnabled();
+  fireEvent.click(screen.getByRole("button", { name: /이 후보 선택/i }));
+  expect(screen.getByLabelText("TTS 추천 ID")).toHaveValue(
+    "tts_candidate_approved_001",
+  );
+  expect(screen.getByLabelText("TTS 자산 ID")).toHaveValue("asset_tts_approved");
+
+  view.unmount();
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
+  fireEvent.click(await screen.findByRole("button", { name: /편집 시작/i }));
+  await waitFor(() =>
+    expect(screen.queryByRole("button", { name: "청취 승인" })).not.toBeInTheDocument(),
+  );
+  expect(screen.getByRole("button", { name: /이 후보 선택/i })).toBeEnabled();
+});
+
+it("recovers after a failed TTS listening approval save", async () => {
+  const fetchMock = createFetchMock({
+    ttsListeningReviewStatuses: [500, 200],
+    ttsCandidates: [
+      {
+        candidate_id: "tts_candidate_retry_001",
+        project_id: "project_001",
+        segment_id: "seg_002",
+        asset_id: "asset_tts_retry",
+        source_text: "재시도 청취 후보",
+        technical_status: "accepted",
+        operator_review_status: "pending",
+        target_duration_sec: 3,
+        actual_duration_sec: 3,
+        failure_code: null,
+        created_at: "2026-07-12T00:00:00Z",
+      },
+    ],
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
+  fireEvent.click(await screen.findByRole("button", { name: /편집 시작/i }));
+
+  fireEvent.click(await screen.findByRole("button", { name: "청취 승인" }));
+  expect(await screen.findByText(/TTS 청취 승인 실패/i)).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /이 후보 선택/i })).toBeDisabled();
+
+  fireEvent.click(screen.getByRole("button", { name: "청취 승인" }));
+  expect(await screen.findByText(/기술 검증 통과 · 청취 승인됨/i)).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /이 후보 선택/i })).toBeEnabled();
 });
 
 describe("App", () => {

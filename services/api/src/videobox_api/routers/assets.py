@@ -21,6 +21,7 @@ from videobox_api.models import (
     TTSCandidateResponse,
     TTSCandidateRecordResponse,
     TTSCandidateRequest,
+    TTSListeningReviewRequest,
 )
 from videobox_api.orchestration import ApiOrchestrator
 from videobox_storage.local_project_store import LocalProjectStore
@@ -211,6 +212,22 @@ def build_assets_router(orchestrator: ApiOrchestrator, store: LocalProjectStore)
         return TTSCandidateListResponse(
             candidates=[TTSCandidateRecordResponse(**candidate) for candidate in candidates]
         )
+
+    @router.patch("/api/projects/{project_id}/tts-candidates/{candidate_id}/listening-review")
+    def review_tts_candidate(
+        project_id: str,
+        candidate_id: str,
+        payload: TTSListeningReviewRequest,
+    ) -> TTSCandidateRecordResponse:
+        try:
+            candidate = orchestrator.review_tts_replacement_candidate(
+                project_id=project_id,
+                candidate_id=candidate_id,
+                decision=payload.decision,
+            )
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return TTSCandidateRecordResponse(**candidate)
 
     @router.get("/api/projects/{project_id}/assets/{asset_id}/content")
     def get_asset_content(project_id: str, asset_id: str) -> FileResponse:

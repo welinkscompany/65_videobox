@@ -298,7 +298,7 @@ UI부터 만들면 아래 문제가 바로 생긴다.
 3. stale restore warning cleanup
 4. 기존 refresh-resume 계약 회귀 유지
 
-현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
+ 현재 이 단계에서 다음 핵심 남은 일은 다시 아래로 정리된다.
 
 - 이번 브랜치의 상위 계획서 기준 다음 대형 goal 재선정
 - refresh-resume보다 더 큰 제품 milestone로 넘어갈 때 필요한 다음 SSOT 문서 갱신
@@ -8402,6 +8402,14 @@ focused 검증 메모:
 - 문서 최신화 이후 실제 중복이 확인된 작은 정리 리팩터링 후보를 안전 범위에서만 다시 좁힌다
 - dead helper, 임시 메모, 역할이 끝난 중복 파일 중 삭제보다 역할 명시가 맞는지 먼저 판단한다
 - 최종 closeout 직전 broad 재검증이 정말 필요한지 마지막으로 판단한다
+
+## 221. 2026-07-12 개인 음성 TTS 청취 승인 게이트 closeout
+
+- `PATCH /api/projects/{project_id}/tts-candidates/{candidate_id}/listening-review`가 기술 검증 통과 후보의 `approved`/`rejected` 결정을 SQLite에 저장하고 후보 목록 재조회에 유지한다.
+- `tts_candidate_*` ID는 세그먼트·자산 일치와 `technical_status=accepted`, `operator_review_status=approved`를 모두 만족해야 editing session의 TTS replacement가 된다. pending/rejected 후보는 기존 narration을 바꾸지 않는다.
+- 편집 UI는 승인 전 선택을 비활성화하고, 승인/거부·실패 후 재시도·새로고침 복원 테스트를 갖췄다. legacy/imported 일반 TTS replacement는 개인 음성 후보가 아니므로 호환성을 유지한다.
+- 검증: frontend 88 passed + build, backend 635 passed 분할(API 195+194, 기타 246), 600초 Korean smoke 14/14 true. `python-multipart` import의 known PendingDeprecationWarning만 남았다.
+- 전체 milestone: 39개 중 38 완료, 1 부분. strict 97.4%, weighted 98.7%, weighted remaining 1.3%. 실제 사용자 청취 품질 판정과 다중 실제 프로젝트 CapCut UX QA는 계속 사람이 수행해야 한다.
 
 ## 220. 2026-07-12 personal voice file upload readiness
 
