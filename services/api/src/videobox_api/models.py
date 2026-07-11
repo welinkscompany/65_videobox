@@ -381,6 +381,7 @@ class EditingSessionSegmentResponse(BaseModel):
     broll_override: dict[str, object] | None = None
     visual_overlays: list[dict[str, object]] = Field(default_factory=list)
     music_override: dict[str, object] | None = None
+    sfx_override: dict[str, object] | None = None
     tts_replacement: dict[str, object] | None = None
 
 

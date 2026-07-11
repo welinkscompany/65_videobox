@@ -40,6 +40,7 @@ from videobox_core_engine.editing_session import (
     build_partial_regeneration_request,
     clear_segment_broll_override,
     clear_segment_music_override,
+    clear_segment_sfx_override,
     clear_segment_visual_overlays,
     clear_segment_tts_replacement,
     remove_segment_explanation_card,
@@ -52,6 +53,7 @@ from videobox_core_engine.editing_session import (
     update_segment_caption,
     update_segment_cut_action,
     update_segment_music_override,
+    update_segment_sfx_override,
     update_segment_table_overlay,
     update_segment_visual_overlay,
 )
@@ -503,6 +505,14 @@ class EditingSessionRegenerationMixin:
             session_id=session_id,
             session_payload=updated_session,
         )
+
+    def update_editing_session_segment_sfx_override(self, *, project_id: str, session_id: str, segment_id: str, asset_id: str) -> dict[str, Any]:
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        return self.store.update_editing_session(project_id=project_id, session_id=session_id, session_payload=update_segment_sfx_override(session=session, segment_id=segment_id, asset_id=asset_id))
+
+    def clear_editing_session_segment_sfx_override(self, *, project_id: str, session_id: str, segment_id: str) -> dict[str, Any]:
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        return self.store.update_editing_session(project_id=project_id, session_id=session_id, session_payload=clear_segment_sfx_override(session=session, segment_id=segment_id))
 
     def select_editing_session_segment_tts_replacement(
         self,

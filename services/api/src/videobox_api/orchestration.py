@@ -499,6 +499,9 @@ class ApiOrchestrator:
             asset_id=asset_id,
         )
 
+    def update_segment_sfx_override(self, *, project_id: str, session_id: str, segment_id: str, asset_id: str) -> dict[str, Any]:
+        return self.pipeline.update_editing_session_segment_sfx_override(project_id=project_id, session_id=session_id, segment_id=segment_id, asset_id=asset_id)
+
     def clear_segment_broll_override(
         self,
         *,

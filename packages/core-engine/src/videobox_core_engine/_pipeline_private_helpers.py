@@ -625,6 +625,13 @@ class _PipelinePrivateHelpersMixin:
                     target_segment_ids=target_segment_ids,
                 )
                 continue
+            if step == "sfx_refresh":
+                self._execute_partial_regeneration_sfx_refresh_step(
+                    state=state,
+                    session_segments=session_segments,
+                    target_segment_ids=target_segment_ids,
+                )
+                continue
             if step == "overlay_refresh":
                 self._execute_partial_regeneration_overlay_refresh_step(
                     state=state,
@@ -899,6 +906,35 @@ class _PipelinePrivateHelpersMixin:
                     fallback_provider="rule_based_fallback",
                 )
             )
+
+    def _execute_partial_regeneration_sfx_refresh_step(
+        self,
+        *,
+        state: dict[str, Any],
+        session_segments: dict[str, dict[str, Any]],
+        target_segment_ids: set[str],
+    ) -> None:
+        state["recommendations"] = [
+            item for item in state["recommendations"]
+            if not (
+                _canonical_runtime_recommendation_type(item.get("recommendation_type")) == RecommendationType.SFX.value
+                and str(item.get("target_segment_id") or "").strip() in target_segment_ids
+            )
+        ]
+        for segment_id in sorted(target_segment_ids):
+            session_segment = session_segments.get(segment_id)
+            override = session_segment.get("sfx_override") if session_segment else None
+            if not isinstance(override, dict) or not str(override.get("asset_id") or "").strip():
+                continue
+            recommendation = self._manual_recommendation_payload(
+                segment_id=segment_id,
+                recommendation_type=RecommendationType.SFX,
+                asset_id=str(override["asset_id"]),
+                reason="Manual SFX override from editing session requires operator review.",
+            )
+            recommendation["auto_apply_allowed"] = False
+            recommendation["review_required"] = True
+            state["recommendations"].append(recommendation)
 
     def _execute_partial_regeneration_overlay_refresh_step(
         self,
