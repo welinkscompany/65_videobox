@@ -98,6 +98,7 @@ def test_render_timeline_loops_short_broll_and_pads_short_tts_to_the_timeline_wi
     broll_asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=broll_file)
     timeline = {
         "narration_source_uri": narration_asset.storage_uri,
+        "export_overlays": [{"text": "Overlay proof", "start_sec": 0.5, "end_sec": 3.5}],
         "tracks": [
             {"track_type": "narration", "clips": [{"asset_uri": f"local://projects/{project.project_id}/assets/{narration_asset.asset_id}", "start_sec": 0.0, "end_sec": 4.0}]},
             {"track_type": "broll", "clips": [{"asset_uri": f"local://projects/{project.project_id}/assets/{broll_asset.asset_id}", "start_sec": 0.0, "end_sec": 4.0}]},

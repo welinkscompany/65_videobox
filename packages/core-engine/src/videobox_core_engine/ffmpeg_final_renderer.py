@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import subprocess
 import tempfile
+import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -31,6 +32,7 @@ class FfmpegFinalRenderer:
     video_height: int = 720
     video_fps: int = 30
     bgm_volume: float = 0.25
+    overlay_font_file: str = os.environ.get("VIDEBOX_OVERLAY_FONT", r"C:\Windows\Fonts\malgun.ttf")
 
     def _run(self, command: list[str]) -> subprocess.CompletedProcess:
         try:
@@ -117,6 +119,33 @@ class FfmpegFinalRenderer:
         if result.returncode != 0:
             raise FinalRenderError(f"ffmpeg failed concatenating segments into '{output_path}': {result.stderr[-800:]}")
 
+    def _apply_export_overlays(self, *, video_path: Path, overlays: list[dict[str, Any]], work_dir: Path) -> Path:
+        filters: list[str] = []
+        for overlay in overlays:
+            text = str(overlay.get("text") or overlay.get("title") or overlay.get("body") or "").strip()
+            if not text:
+                continue
+            start_sec = float(overlay.get("start_sec") or 0.0)
+            end_sec = float(overlay.get("end_sec") or start_sec)
+            if end_sec <= start_sec:
+                continue
+            escaped = text.replace("\\", "\\\\").replace("'", "\\'").replace(":", "\\:")
+            font_file = self.overlay_font_file.replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
+            filters.append(
+                f"drawtext=fontfile='{font_file}':text='{escaped}':x=(w-text_w)/2:y=h-(text_h*3):fontsize=36:fontcolor=white:"
+                f"box=1:boxcolor=black@0.65:boxborderw=12:enable='between(t,{start_sec},{end_sec})'"
+            )
+        if not filters:
+            return video_path
+        overlaid_path = work_dir / "broll_with_overlays.mp4"
+        result = self._run([
+            self.ffmpeg_binary, "-y", "-i", str(video_path), "-vf", ",".join(filters), "-an",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", str(overlaid_path),
+        ])
+        if result.returncode != 0:
+            raise FinalRenderError(f"ffmpeg failed applying export overlays: {result.stderr[-800:]}")
+        return overlaid_path
+
     def render_timeline_to_mp4(
         self,
         *,
@@ -176,6 +205,11 @@ class FfmpegFinalRenderer:
                 broll_segment_paths.append(segment_path)
             video_path = work_dir / "broll_full.mp4"
             self._concat(segment_paths=broll_segment_paths, output_path=video_path, work_dir=work_dir)
+            video_path = self._apply_export_overlays(
+                video_path=video_path,
+                overlays=[item for item in timeline.get("export_overlays", []) if isinstance(item, dict)],
+                work_dir=work_dir,
+            )
             report_progress(60)
 
             audio_path = narration_path
