@@ -350,6 +350,18 @@ export type TtsCandidateRequest = {
   segment_text: string;
   voice_sample_asset_id: string;
   segment_id?: string;
+  target_duration_sec?: number;
+};
+
+export type TtsCandidateResponse = AssetResponse & {
+  candidate_id?: string | null;
+  segment_id?: string | null;
+  source_text?: string | null;
+  technical_status: string;
+  operator_review_status: string;
+  target_duration_sec?: number | null;
+  actual_duration_sec?: number | null;
+  failure_code?: string | null;
 };
 
 export type TtsCandidateRecord = {
@@ -358,6 +370,11 @@ export type TtsCandidateRecord = {
   segment_id: string;
   asset_id: string;
   source_text: string;
+  technical_status: string;
+  operator_review_status: string;
+  target_duration_sec?: number | null;
+  actual_duration_sec?: number | null;
+  failure_code?: string | null;
   created_at: string;
 };
 
@@ -822,7 +839,7 @@ export const api = {
       body: JSON.stringify(payload),
     }),
   generateTtsCandidate: (projectId: string, payload: TtsCandidateRequest) =>
-    request<AssetResponse>(`/api/projects/${projectId}/tts-candidates`, {
+    request<TtsCandidateResponse>(`/api/projects/${projectId}/tts-candidates`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

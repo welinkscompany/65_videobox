@@ -188,6 +188,11 @@ PROJECT_SCHEMA_STATEMENTS = (
         segment_id TEXT NOT NULL,
         asset_id TEXT NOT NULL,
         source_text TEXT NOT NULL,
+        technical_status TEXT NOT NULL DEFAULT 'legacy_unverified',
+        operator_review_status TEXT NOT NULL DEFAULT 'pending',
+        target_duration_sec REAL,
+        actual_duration_sec REAL,
+        failure_code TEXT,
         created_at TEXT NOT NULL
     )
     """,

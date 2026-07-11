@@ -33,6 +33,7 @@ class TTSCandidateRequest(BaseModel):
     segment_text: str = Field(min_length=1)
     voice_sample_asset_id: str = Field(min_length=1)
     segment_id: str | None = None
+    target_duration_sec: float | None = Field(default=None, gt=0)
 
 
 class TTSCandidateRecordResponse(BaseModel):
@@ -41,6 +42,11 @@ class TTSCandidateRecordResponse(BaseModel):
     segment_id: str
     asset_id: str
     source_text: str
+    technical_status: str = "legacy_unverified"
+    operator_review_status: str = "pending"
+    target_duration_sec: float | None = None
+    actual_duration_sec: float | None = None
+    failure_code: str | None = None
     created_at: str
 
 
@@ -74,6 +80,17 @@ class AssetResponse(BaseModel):
     asset_id: str
     asset_type: str
     storage_uri: str
+
+
+class TTSCandidateResponse(AssetResponse):
+    candidate_id: str | None = None
+    segment_id: str | None = None
+    source_text: str | None = None
+    technical_status: str = "legacy_unverified"
+    operator_review_status: str = "pending"
+    target_duration_sec: float | None = None
+    actual_duration_sec: float | None = None
+    failure_code: str | None = None
 
 
 class AssetArchiveItemResponse(AssetResponse):

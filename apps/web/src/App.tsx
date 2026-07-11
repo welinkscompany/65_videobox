@@ -1047,7 +1047,7 @@ export function App() {
     }
   }
 
-  async function handleGenerateTtsCandidate(segmentId: string, segmentText: string) {
+  async function handleGenerateTtsCandidate(segmentId: string, segmentText: string, targetDurationSec: number) {
     if (!selectedProjectId || !ttsCandidateVoiceSampleId.trim() || !segmentText.trim()) {
       return;
     }
@@ -1059,9 +1059,14 @@ export function App() {
         segment_text: segmentText,
         voice_sample_asset_id: ttsCandidateVoiceSampleId.trim(),
         segment_id: segmentId,
+        target_duration_sec: targetDurationSec,
       });
-      updateEditingDraft(segmentId, { ttsAssetId: asset.asset_id });
-      setTtsCandidateMessage(`생성됨 · ${asset.asset_id} (TTS 자산 ID에 채워짐)`);
+      if (asset.technical_status === "accepted") {
+        updateEditingDraft(segmentId, { ttsAssetId: asset.asset_id });
+        setTtsCandidateMessage(`기술 검증 통과 · 청취 승인 대기 · ${asset.asset_id}`);
+      } else {
+        setTtsCandidateMessage(`후보 거부 · ${asset.failure_code ?? "기술 검증 실패"}`);
+      }
       await loadTtsCandidates(segmentId);
     } catch (error) {
       setTtsCandidateError(
@@ -3373,6 +3378,7 @@ export function App() {
                       void handleGenerateTtsCandidate(
                         selectedEditingSegment.segment_id,
                         selectedEditingSegment.caption_text,
+                        selectedEditingSegment.end_sec - selectedEditingSegment.start_sec,
                       )
                     }
                     type="button"
@@ -3396,12 +3402,18 @@ export function App() {
                           {`후보 ${index + 1} · ${candidate.candidate_id}`}
                         </span>
                         <p className="meta-copy">{formatDisplayText(candidate.source_text)}</p>
+                        <p className="meta-copy">
+                          {candidate.technical_status === "accepted"
+                            ? "기술 검증 통과 · 청취 승인 대기"
+                            : `선택 불가 · ${candidate.failure_code ?? "기술 검증 실패"}`}
+                        </p>
                         <audio
                           controls
                           src={api.assetContentUrl(selectedProjectId!, candidate.asset_id)}
                         />
                         <button
                           className="action-button"
+                          disabled={candidate.technical_status !== "accepted"}
                           onClick={() =>
                             updateEditingDraft(selectedEditingSegment.segment_id, {
                               ttsAssetId: candidate.asset_id,

@@ -798,6 +798,7 @@ class LocalProjectStore:
         segment_id: str,
         asset_id: str,
         source_text: str,
+        acceptance: Any | None = None,
     ) -> dict[str, Any]:
         sequence = self._count_rows(project_id, "tts_candidates") + 1
         candidate_id = f"tts_candidate_{sequence:03d}"
@@ -806,10 +807,24 @@ class LocalProjectStore:
             project_id,
             """
             INSERT INTO tts_candidates (
-                candidate_id, project_id, segment_id, asset_id, source_text, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?)
+                candidate_id, project_id, segment_id, asset_id, source_text,
+                technical_status, operator_review_status, target_duration_sec,
+                actual_duration_sec, failure_code, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (candidate_id, project_id, segment_id, asset_id, source_text, created_at),
+            (
+                candidate_id,
+                project_id,
+                segment_id,
+                asset_id,
+                source_text,
+                getattr(acceptance, "technical_status", "legacy_unverified"),
+                getattr(acceptance, "operator_review_status", "pending"),
+                getattr(acceptance, "target_duration_sec", None),
+                getattr(acceptance, "actual_duration_sec", None),
+                getattr(acceptance, "failure_code", None),
+                created_at,
+            ),
         )
         return {
             "candidate_id": candidate_id,
@@ -817,6 +832,11 @@ class LocalProjectStore:
             "segment_id": segment_id,
             "asset_id": asset_id,
             "source_text": source_text,
+            "technical_status": getattr(acceptance, "technical_status", "legacy_unverified"),
+            "operator_review_status": getattr(acceptance, "operator_review_status", "pending"),
+            "target_duration_sec": getattr(acceptance, "target_duration_sec", None),
+            "actual_duration_sec": getattr(acceptance, "actual_duration_sec", None),
+            "failure_code": getattr(acceptance, "failure_code", None),
             "created_at": created_at,
         }
 
@@ -824,7 +844,9 @@ class LocalProjectStore:
         rows = self._fetchall(
             project_id,
             """
-            SELECT candidate_id, project_id, segment_id, asset_id, source_text, created_at
+            SELECT candidate_id, project_id, segment_id, asset_id, source_text,
+                   technical_status, operator_review_status, target_duration_sec,
+                   actual_duration_sec, failure_code, created_at
             FROM tts_candidates
             WHERE segment_id = ?
             ORDER BY created_at ASC, candidate_id ASC
@@ -2630,6 +2652,7 @@ class LocalProjectStore:
             connection.execute(statement)
         self._ensure_recommendation_decision_state_column(connection)
         self._ensure_job_progress_percent_column(connection)
+        self._ensure_tts_candidate_acceptance_columns(connection)
         connection.commit()
         connection.row_factory = sqlite3.Row
         return connection
@@ -2649,6 +2672,21 @@ class LocalProjectStore:
         }
         if "progress_percent" not in existing_columns:
             connection.execute("ALTER TABLE jobs ADD COLUMN progress_percent INTEGER")
+
+    def _ensure_tts_candidate_acceptance_columns(self, connection: sqlite3.Connection) -> None:
+        existing_columns = {
+            str(row[1]) for row in connection.execute("PRAGMA table_info(tts_candidates)").fetchall()
+        }
+        additions = (
+            ("technical_status", "TEXT NOT NULL DEFAULT 'legacy_unverified'"),
+            ("operator_review_status", "TEXT NOT NULL DEFAULT 'pending'"),
+            ("target_duration_sec", "REAL"),
+            ("actual_duration_sec", "REAL"),
+            ("failure_code", "TEXT"),
+        )
+        for column_name, column_definition in additions:
+            if column_name not in existing_columns:
+                connection.execute(f"ALTER TABLE tts_candidates ADD COLUMN {column_name} {column_definition}")
 
     def _derive_recommendation_decision_state(self, recommendation: dict[str, Any]) -> str:
         if _normalize_boolish(recommendation.get("auto_apply_allowed")) and not _normalize_boolish(

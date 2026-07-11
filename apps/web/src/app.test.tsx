@@ -630,6 +630,7 @@ function createFetchMock({
   jobs = jobsResponse,
   finalRenderResult,
   capcutDraftResult,
+  ttsCandidates = [],
 }: {
   geminiKeys?: { keys: Array<Record<string, unknown>> };
   brollAssets?: { assets: BrollAsset[] };
@@ -649,6 +650,7 @@ function createFetchMock({
   jobs?: typeof jobsResponse;
   finalRenderResult?: Record<string, unknown>;
   capcutDraftResult?: Record<string, unknown>;
+  ttsCandidates?: TtsCandidateRecord[];
 } = {}) {
   const state: {
     timeline: TimelinePayload;
@@ -707,7 +709,7 @@ function createFetchMock({
       return new Response(JSON.stringify(state.brollAssets));
     }
     if (/\/api\/projects\/project_001\/segments\/[^/]+\/tts-candidates$/.test(url)) {
-      return new Response(JSON.stringify({ candidates: [] }));
+      return new Response(JSON.stringify({ candidates: ttsCandidates }));
     }
     if (
       url.endsWith("/api/projects/project_001/jobs/build-timeline") &&
@@ -1413,6 +1415,35 @@ function createFetchMock({
     return Promise.reject(new Error(`Unhandled fetch: ${url}`));
   });
 }
+
+it("does not copy a rejected TTS candidate into the editing draft", async () => {
+  const fetchMock = createFetchMock({
+    ttsCandidates: [
+      {
+        candidate_id: "tts_candidate_001",
+        project_id: "project_001",
+        segment_id: "seg_002",
+        asset_id: "asset_tts_rejected",
+        source_text: "거부된 개인 음성 후보",
+        technical_status: "rejected",
+        operator_review_status: "pending",
+        target_duration_sec: 3,
+        actual_duration_sec: 1,
+        failure_code: "duration_mismatch",
+        created_at: "2026-07-12T00:00:00Z",
+      },
+    ],
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  render(<App />);
+
+  fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
+  fireEvent.click(await screen.findByRole("button", { name: /편집 시작/i }));
+
+  expect(await screen.findByText(/선택 불가 · duration_mismatch/i)).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /이 후보 선택/i })).toBeDisabled();
+});
 
 describe("App", () => {
   it("renders a final-render failure with a null artifact without unmounting the dashboard", async () => {

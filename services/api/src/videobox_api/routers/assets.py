@@ -17,6 +17,7 @@ from videobox_api.models import (
     BrollAssetRegistrationRequest,
     BrollBatchAssetRegistrationRequest,
     TTSCandidateListResponse,
+    TTSCandidateResponse,
     TTSCandidateRecordResponse,
     TTSCandidateRequest,
 )
@@ -130,17 +131,18 @@ def build_assets_router(orchestrator: ApiOrchestrator, store: LocalProjectStore)
         )
 
     @router.post("/api/projects/{project_id}/tts-candidates", status_code=status.HTTP_201_CREATED)
-    def generate_tts_candidate(project_id: str, payload: TTSCandidateRequest) -> AssetResponse:
+    def generate_tts_candidate(project_id: str, payload: TTSCandidateRequest) -> TTSCandidateResponse:
         try:
             asset = orchestrator.generate_tts_replacement_candidate(
                 project_id=project_id,
                 segment_text=payload.segment_text,
                 voice_sample_asset_id=payload.voice_sample_asset_id,
                 segment_id=payload.segment_id,
+                target_duration_sec=payload.target_duration_sec,
             )
         except Exception as exc:
             raise _http_error(exc) from exc
-        return AssetResponse(**asset)
+        return TTSCandidateResponse(**asset)
 
     @router.get("/api/projects/{project_id}/segments/{segment_id}/tts-candidates")
     def list_tts_candidates(project_id: str, segment_id: str) -> TTSCandidateListResponse:

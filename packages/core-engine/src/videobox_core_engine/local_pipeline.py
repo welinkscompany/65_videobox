@@ -36,6 +36,7 @@ from videobox_core_engine.auto_cut import AutoCutPlanner
 from videobox_core_engine.ffmpeg_auto_cut_executor import FfmpegAutoCutExecutor
 from videobox_core_engine.ffmpeg_final_renderer import FfmpegFinalRenderer
 from videobox_core_engine.thumbnail_generator import ThumbnailGenerationError, generate_video_thumbnail
+from videobox_core_engine.tts_acceptance import assess_tts_audio
 from videobox_core_engine.editing_session import (
     build_editing_session,
     build_partial_regeneration_request,
@@ -215,6 +216,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         segment_text: str,
         voice_sample_asset_id: str,
         segment_id: str | None = None,
+        target_duration_sec: float | None = None,
     ) -> dict[str, Any]:
         if self.tts_provider is None:
             raise RuntimeError(
@@ -227,31 +229,44 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         voice_sample_path = self.store.resolve_storage_uri(
             project_id=project_id, storage_uri=voice_sample_asset["storage_uri"]
         )
-        with tempfile.TemporaryDirectory(prefix="videobox_tts_candidate_") as raw_work_dir:
-            output_path = Path(raw_work_dir) / "tts_candidate.mp3"
-            tts_result = self.tts_provider.synthesize(
-                TTSRequest(
-                    text=segment_text,
-                    voice_sample_uri=str(voice_sample_path),
-                    output_path=output_path,
+        try:
+            with tempfile.TemporaryDirectory(prefix="videobox_tts_candidate_") as raw_work_dir:
+                output_path = Path(raw_work_dir) / "tts_candidate.wav"
+                tts_result = self.tts_provider.synthesize(
+                    TTSRequest(
+                        text=segment_text,
+                        voice_sample_uri=str(voice_sample_path),
+                        output_path=output_path,
+                        target_duration_sec=target_duration_sec,
+                    )
                 )
-            )
-            asset = self.store.register_asset(
-                project_id=project_id,
-                asset_type=AssetType.GENERATED_TTS_AUDIO,
-                source_path=output_path,
-                metadata={"provider_name": tts_result.provider_name, "source_text": segment_text},
-            )
+                acceptance = (
+                    assess_tts_audio(path=output_path, target_duration_sec=target_duration_sec)
+                    if target_duration_sec is not None
+                    else None
+                )
+                asset = self.store.register_asset(
+                    project_id=project_id,
+                    asset_type=AssetType.GENERATED_TTS_AUDIO,
+                    source_path=output_path,
+                    metadata={"provider_name": tts_result.provider_name, "source_text": segment_text},
+                )
+        except Exception as exc:
+            raise RuntimeError(
+                "TTS candidate generation failed; original narration remains selected."
+            ) from exc
         # Recorded as a comparable A/B candidate only when the caller
         # associates it with a segment; ad-hoc previews without a segment_id
         # still work exactly as before, just without a saved comparison row.
         if segment_id:
-            self.store.save_tts_candidate(
+            candidate = self.store.save_tts_candidate(
                 project_id=project_id,
                 segment_id=segment_id,
                 asset_id=asset.asset_id,
                 source_text=segment_text,
+                acceptance=acceptance,
             )
+            return {**self._asset_payload(asset), **candidate}
         return self._asset_payload(asset)
 
     def list_tts_replacement_candidates(self, *, project_id: str, segment_id: str) -> list[dict[str, Any]]:

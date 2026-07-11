@@ -304,12 +304,14 @@ class ApiOrchestrator:
         segment_text: str,
         voice_sample_asset_id: str,
         segment_id: str | None = None,
+        target_duration_sec: float | None = None,
     ) -> dict[str, Any]:
         return self.pipeline.generate_tts_replacement_candidate(
             project_id=project_id,
             segment_text=segment_text,
             voice_sample_asset_id=voice_sample_asset_id,
             segment_id=segment_id,
+            target_duration_sec=target_duration_sec,
         )
 
     def list_tts_replacement_candidates(self, *, project_id: str, segment_id: str) -> list[dict[str, Any]]:
