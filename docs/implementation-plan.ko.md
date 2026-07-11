@@ -789,6 +789,13 @@ production-readiness blocker slice 1의 9개 Task는 구현·회귀·600초 smok
 - 전체 milestone: 39개 중 38 완료, 1 부분. strict 97.4%, partial=0.5 weighted 98.7%, weighted remaining 1.3%.
 - 남은 부분은 실제 사용자 녹음 human listening approval과 다중 실제 프로젝트 CapCut UX QA다.
 
+### 2026-07-12 개인 음성 파일 입력 readiness 완료
+
+웹 설정 화면에서 WAV/MP3/M4A/WebM/Ogg/FLAC 음성 파일을 선택해 multipart upload로 등록할 수 있다. 서버는 128 MiB 상한과 1 MiB chunk staging을 적용하고, 등록 뒤 임시 파일을 제거한다. 기존 직접 경로 등록은 호환 경로로 남기며, 최근 등록 voice sample asset은 새로고침 후 목록 API에서 복원되어 TTS candidate 생성에 다시 사용된다. microphone 자동 녹음은 범위 밖이다.
+
+- 검증: frontend 86 passed/build success, backend Python 3.12 633 passed (API 389 + 기타 244 분할 실행), 600초 Korean smoke 13 checks true.
+- 전체 milestone: 39개 중 38 완료, 1 부분. strict 97.4%, weighted 98.7%, weighted remaining 1.3%로 유지한다. 실제 사용자 녹음의 human listening approval과 다중 프로젝트 CapCut UX QA는 아직 사람이 수행해야 한다.
+
 이하 기존 next-task 목록은 historical reference다.
 
 현재 기준 다음 실제 작업은 아래 순서로 재고정한다.

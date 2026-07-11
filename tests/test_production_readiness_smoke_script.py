@@ -101,6 +101,8 @@ def test_smoke_harness_proves_pending_personal_voice_tts_reaches_final_and_capcu
     assert 'checks["approved_tts_in_final_and_capcut"]' in source
     assert '"tts_replacement"' in source
     assert '"target_duration_sec"' in source
+    assert 'assets/voice-sample/upload' in source
+    assert 'checks["voice_sample_uploaded"]' in source
 
 
 def test_smoke_harness_decodes_ffmpeg_subtitles_as_utf8_on_windows() -> None:

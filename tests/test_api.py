@@ -27626,3 +27626,25 @@ def test_provider_trace_audit_endpoint_deduplicates_repeated_unpersisted_review_
         if entry["artifact_type"] == "review_guidance_attempt"
     ]
     assert len(attempt_entries) == 1
+
+
+def test_voice_sample_upload_registers_project_owned_audio_and_rejects_empty_files(tmp_path: Path) -> None:
+    client = TestClient(create_app(projects_root=tmp_path))
+    project_id = client.post("/api/projects", json={"name": "Voice upload"}).json()["project_id"]
+
+    uploaded = client.post(
+        f"/api/projects/{project_id}/assets/voice-sample/upload",
+        files={"file": ("my voice.wav", b"RIFFvoice-sample", "audio/wav")},
+    )
+    empty = client.post(
+        f"/api/projects/{project_id}/assets/voice-sample/upload",
+        files={"file": ("empty.wav", b"", "audio/wav")},
+    )
+    restored = client.get(f"/api/projects/{project_id}/assets/voice-sample")
+
+    assert uploaded.status_code == 201
+    assert uploaded.json()["asset_type"] == "voice_sample_audio"
+    assert empty.status_code == 400
+    assert "empty" in empty.json()["detail"].lower()
+    assert restored.status_code == 200
+    assert [asset["asset_id"] for asset in restored.json()["assets"]] == [uploaded.json()["asset_id"]]

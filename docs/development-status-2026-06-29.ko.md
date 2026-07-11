@@ -8403,6 +8403,14 @@ focused 검증 메모:
 - dead helper, 임시 메모, 역할이 끝난 중복 파일 중 삭제보다 역할 명시가 맞는지 먼저 판단한다
 - 최종 closeout 직전 broad 재검증이 정말 필요한지 마지막으로 판단한다
 
+## 220. 2026-07-12 personal voice file upload readiness
+
+- 완료: 브라우저 file picker → multipart upload → `voice_sample_audio` 등록 → TTS candidate voice-sample ID 자동 반영을 구현했다. 기존 path 직접 등록은 유지한다.
+- 안전성: 지원 확장자만 허용하고 empty file은 400으로 거부한다. 최대 128 MiB, 1 MiB chunk staging, 등록 뒤 임시 업로드 삭제를 적용했다.
+- 복구: voice sample 목록 API로 최근 asset ID를 새로고침 후 복원하며 UI upload 실패 뒤 선택 파일명은 유지된다.
+- 검증: frontend 86 passed/build success, backend Python 3.12 633 passed (API 389 + 기타 244), 600초 Korean smoke 13 checks true.
+- 전체 milestone: 39개 중 38 완료, 1 부분. strict 97.4%, partial=0.5 weighted 98.7%, weighted remaining 1.3%. 실제 human listening approval 및 다중 프로젝트 CapCut UX QA는 남는다.
+
 ## 219. 2026-07-12 SFX real-asset recommendation/materialization acceptance
 
 - 완료: assetless SFX 추천은 materialization하지 않으며, 실제 SFX asset 선택은 editing session → `sfx_refresh` → pending review → 개별 승인 → SFX timeline track으로 이어진다.

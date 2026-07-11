@@ -632,6 +632,8 @@ function createFetchMock({
   finalRenderResult,
   capcutDraftResult,
   ttsCandidates = [],
+  voiceSampleUploadStatus,
+  voiceSamples = { assets: [] },
 }: {
   geminiKeys?: { keys: Array<Record<string, unknown>> };
   brollAssets?: { assets: BrollAsset[] };
@@ -652,12 +654,15 @@ function createFetchMock({
   finalRenderResult?: Record<string, unknown>;
   capcutDraftResult?: Record<string, unknown>;
   ttsCandidates?: TtsCandidateRecord[];
+  voiceSampleUploadStatus?: number;
+  voiceSamples?: { assets: Array<Record<string, unknown>> };
 } = {}) {
   const state: {
     timeline: TimelinePayload;
     editingSession: EditingSession;
     geminiKeys: { keys: Array<Record<string, unknown>> };
     brollAssets: { assets: BrollAsset[] };
+    voiceSamples: { assets: Array<Record<string, unknown>> };
     reviewSnapshot: ReviewSnapshot;
     candidateReviewSnapshot: ReviewSnapshot;
     candidateTimelineReviewStatus: string;
@@ -666,6 +671,7 @@ function createFetchMock({
     editingSession: structuredClone(editingSession) as EditingSession,
     geminiKeys: structuredClone(geminiKeys),
     brollAssets: structuredClone(brollAssets),
+    voiceSamples: structuredClone(voiceSamples),
     reviewSnapshot: structuredClone(reviewSnapshot),
     candidateReviewSnapshot: structuredClone(candidateReviewSnapshot),
     candidateTimelineReviewStatus: partialRegenerationResult.timeline.review_status,
@@ -708,6 +714,24 @@ function createFetchMock({
     }
     if (url.endsWith("/api/projects/project_001/assets/broll-video")) {
       return new Response(JSON.stringify(state.brollAssets));
+    }
+    if (url.endsWith("/api/projects/project_001/assets/voice-sample") && !init?.method) {
+      return new Response(JSON.stringify(state.voiceSamples));
+    }
+    if (
+      url.endsWith("/api/projects/project_001/assets/voice-sample/upload") &&
+      init?.method === "POST"
+    ) {
+      if (voiceSampleUploadStatus != null && voiceSampleUploadStatus >= 400) {
+        return new Response("voice upload failed", { status: voiceSampleUploadStatus });
+      }
+      const uploadedAsset = {
+        asset_id: "asset_voice_uploaded_001",
+        asset_type: "voice_sample_audio",
+        storage_uri: "local://projects/project_001/assets/imported/my-voice.wav",
+      };
+      state.voiceSamples = { assets: [uploadedAsset, ...state.voiceSamples.assets] };
+      return new Response(JSON.stringify(uploadedAsset), { status: 201 });
     }
     if (/\/api\/projects\/project_001\/segments\/[^/]+\/tts-candidates$/.test(url)) {
       return new Response(JSON.stringify({ candidates: ttsCandidates }));
@@ -1447,6 +1471,62 @@ it("does not copy a rejected TTS candidate into the editing draft", async () => 
 });
 
 describe("App", () => {
+  it("uploads a selected voice sample and makes its asset ID available to TTS generation", async () => {
+    const fetchMock = createFetchMock();
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^설정$/i }));
+    const picker = screen.getByLabelText("음성 샘플 파일 선택");
+    fireEvent.change(picker, {
+      target: { files: [new File(["voice"], "my voice.wav", { type: "audio/wav" })] },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "선택한 파일 업로드" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/projects/project_001/assets/voice-sample/upload",
+        expect.objectContaining({ method: "POST", body: expect.any(FormData) }),
+      ),
+    );
+    expect(await screen.findByDisplayValue("asset_voice_uploaded_001")).toBeInTheDocument();
+  });
+
+  it("keeps the selected voice file recoverable after an upload failure", async () => {
+    const fetchMock = createFetchMock({ voiceSampleUploadStatus: 500 });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^설정$/i }));
+    const picker = screen.getByLabelText("음성 샘플 파일 선택");
+    fireEvent.change(picker, {
+      target: { files: [new File(["voice"], "retry.wav", { type: "audio/wav" })] },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "선택한 파일 업로드" }));
+
+    expect(await screen.findByText(/음성 샘플 업로드 실패/i)).toBeInTheDocument();
+    expect(screen.getByText("선택됨 · retry.wav")).toBeInTheDocument();
+  });
+
+  it("restores the latest registered voice sample ID after refresh", async () => {
+    const fetchMock = createFetchMock({
+      voiceSamples: {
+        assets: [
+          {
+            asset_id: "asset_voice_restored_001",
+            asset_type: "voice_sample_audio",
+            storage_uri: "local://projects/project_001/assets/imported/restored.wav",
+          },
+        ],
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^설정$/i }));
+    expect(await screen.findByDisplayValue("asset_voice_restored_001")).toBeInTheDocument();
+  });
+
   it("renders a final-render failure with a null artifact without unmounting the dashboard", async () => {
     const fetchMock = createFetchMock({
       finalRenderResult: {

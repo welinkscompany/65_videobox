@@ -88,6 +88,7 @@ export function App() {
   const [finalRenderJob, setFinalRenderJob] = useState<FinalRenderJob | null>(null);
   const [capcutDraftJob, setCapcutDraftJob] = useState<CapCutDraftExportJob | null>(null);
   const [voiceSamplePath, setVoiceSamplePath] = useState("");
+  const [voiceSampleFile, setVoiceSampleFile] = useState<File | null>(null);
   const [voiceSampleAssetId, setVoiceSampleAssetId] = useState("");
   const [isRegisteringVoiceSample, setIsRegisteringVoiceSample] = useState(false);
   const [voiceSampleMessage, setVoiceSampleMessage] = useState<string | null>(null);
@@ -172,6 +173,29 @@ export function App() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!selectedProjectId) {
+      return () => {
+        cancelled = true;
+      };
+    }
+    void api.listVoiceSamples(selectedProjectId).then(
+      (assets) => {
+        if (cancelled || assets.length === 0) {
+          return;
+        }
+        const latestAssetId = assets[0].asset_id;
+        setVoiceSampleAssetId((current) => current || latestAssetId);
+        setTtsCandidateVoiceSampleId((current) => current || latestAssetId);
+      },
+      () => undefined,
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedProjectId]);
 
   useEffect(() => {
     if (!selectedProjectId) {
@@ -1483,6 +1507,27 @@ export function App() {
     setOnboardingProject(project);
   }
 
+  async function handleUploadVoiceSample() {
+    if (!selectedProjectId || !voiceSampleFile) {
+      return;
+    }
+    setIsRegisteringVoiceSample(true);
+    setVoiceSampleError(null);
+    setVoiceSampleMessage(null);
+    try {
+      const asset = await api.uploadVoiceSample(selectedProjectId, voiceSampleFile);
+      setVoiceSampleAssetId(asset.asset_id);
+      setTtsCandidateVoiceSampleId(asset.asset_id);
+      setVoiceSampleMessage(`업로드·등록됨 · ${asset.asset_id}`);
+    } catch (error) {
+      setVoiceSampleError(
+        error instanceof Error ? `음성 샘플 업로드 실패 · ${error.message}` : "음성 샘플 업로드 실패",
+      );
+    } finally {
+      setIsRegisteringVoiceSample(false);
+    }
+  }
+
   return (
     <div className="shell">
       <aside className="sidebar" aria-label="프로젝트 탐색">
@@ -1909,6 +1954,28 @@ export function App() {
                   <p className="section-kicker">TTS</p>
                   <h2>음성 샘플</h2>
                 </div>
+              </div>
+              <label className="field">
+                <span>음성 샘플 파일 선택</span>
+                <input
+                  accept="audio/*,.m4a,.webm"
+                  onChange={(event) => {
+                    setVoiceSampleFile(event.target.files?.[0] ?? null);
+                    setVoiceSampleError(null);
+                  }}
+                  type="file"
+                />
+              </label>
+              {voiceSampleFile ? <p className="meta-copy">선택됨 · {voiceSampleFile.name}</p> : null}
+              <div className="action-row">
+                <button
+                  className="action-button primary"
+                  disabled={!selectedProjectId || !voiceSampleFile || isRegisteringVoiceSample}
+                  onClick={() => void handleUploadVoiceSample()}
+                  type="button"
+                >
+                  {isRegisteringVoiceSample ? "업로드 중" : "선택한 파일 업로드"}
+                </button>
               </div>
               <label className="field">
                 <span>음성 샘플 파일 경로</span>

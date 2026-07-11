@@ -246,8 +246,12 @@ def run_smoke(*, narration: Path, work_root: Path, ffmpeg_binary: str, ffprobe_b
         project_id = project["project_id"]
         narration_asset = _assert_status(client.post(
             f"/api/projects/{project_id}/assets/narration-audio", json={"source_path": str(narration)}), 201)
-        voice_sample_asset = _assert_status(client.post(
-            f"/api/projects/{project_id}/assets/voice-sample", json={"source_path": str(narration)}), 201)
+        with narration.open("rb") as voice_sample_file:
+            voice_sample_asset = _assert_status(client.post(
+                f"/api/projects/{project_id}/assets/voice-sample/upload",
+                files={"file": (narration.name, voice_sample_file, "audio/wav")},
+            ), 201)
+        checks["voice_sample_uploaded"] = voice_sample_asset["asset_type"] == "voice_sample_audio"
         script_asset = _assert_status(client.post(
             f"/api/projects/{project_id}/assets/script-document", json={"source_path": str(script_path)}), 201)
         broll_asset = _assert_status(client.post(

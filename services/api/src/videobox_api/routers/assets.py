@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+from uuid import uuid4
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, File, UploadFile, status
 from fastapi.responses import FileResponse
 
 from videobox_api.errors import _http_error
@@ -23,6 +24,9 @@ from videobox_api.models import (
 )
 from videobox_api.orchestration import ApiOrchestrator
 from videobox_storage.local_project_store import LocalProjectStore
+
+MAX_VOICE_SAMPLE_UPLOAD_BYTES = 128 * 1024 * 1024
+VOICE_SAMPLE_UPLOAD_CHUNK_BYTES = 1024 * 1024
 
 
 def build_assets_router(orchestrator: ApiOrchestrator, store: LocalProjectStore) -> APIRouter:
@@ -132,6 +136,50 @@ def build_assets_router(orchestrator: ApiOrchestrator, store: LocalProjectStore)
             )
         except Exception as exc:
             raise _http_error(exc) from exc
+        return AssetResponse(
+            asset_id=asset.asset_id,
+            asset_type=asset.asset_type,
+            storage_uri=asset.storage_uri,
+        )
+
+    @router.get("/api/projects/{project_id}/assets/voice-sample")
+    def list_voice_sample_assets(project_id: str) -> AssetListResponse:
+        try:
+            assets = orchestrator.list_voice_sample_assets(project_id=project_id)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return AssetListResponse(assets=[AssetArchiveItemResponse(**asset) for asset in assets])
+
+    @router.post("/api/projects/{project_id}/assets/voice-sample/upload", status_code=status.HTTP_201_CREATED)
+    async def upload_voice_sample(
+        project_id: str,
+        file: UploadFile = File(...),
+    ) -> AssetResponse:
+        filename = Path(file.filename or "").name
+        suffix = Path(filename).suffix.lower()
+        if not filename or suffix not in {".wav", ".mp3", ".m4a", ".webm", ".ogg", ".flac"}:
+            raise _http_error(ValueError("Voice sample must be an audio file with a supported extension."))
+        staged_path = store.project_root(project_id) / "tmp" / "voice_sample_uploads" / f"{uuid4().hex}{suffix}"
+        try:
+            staged_path.parent.mkdir(parents=True, exist_ok=True)
+            total_bytes = 0
+            with staged_path.open("wb") as staged_file:
+                while chunk := await file.read(VOICE_SAMPLE_UPLOAD_CHUNK_BYTES):
+                    total_bytes += len(chunk)
+                    if total_bytes > MAX_VOICE_SAMPLE_UPLOAD_BYTES:
+                        raise ValueError("Voice sample upload exceeds the 128 MiB limit.")
+                    staged_file.write(chunk)
+            if total_bytes == 0:
+                raise ValueError("Voice sample upload is empty.")
+            asset = orchestrator.register_voice_sample_asset(
+                project_id=project_id,
+                source_path=staged_path,
+            )
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        finally:
+            await file.close()
+            staged_path.unlink(missing_ok=True)
         return AssetResponse(
             asset_id=asset.asset_id,
             asset_type=asset.asset_type,

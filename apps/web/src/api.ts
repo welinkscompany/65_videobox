@@ -858,6 +858,20 @@ export const api = {
       },
       body: JSON.stringify(payload),
     }),
+  uploadVoiceSample: (projectId: string, file: File) => {
+    const payload = new FormData();
+    payload.append("file", file);
+    return request<AssetResponse>(`/api/projects/${projectId}/assets/voice-sample/upload`, {
+      method: "POST",
+      body: payload,
+    });
+  },
+  listVoiceSamples: async (projectId: string): Promise<AssetResponse[]> => {
+    const payload = await request<{ assets: AssetResponse[] }>(
+      `/api/projects/${projectId}/assets/voice-sample`,
+    );
+    return payload.assets;
+  },
   generateTtsCandidate: (projectId: string, payload: TtsCandidateRequest) =>
     request<TtsCandidateResponse>(`/api/projects/${projectId}/tts-candidates`, {
       method: "POST",
