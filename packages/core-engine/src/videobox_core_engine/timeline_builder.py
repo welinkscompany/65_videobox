@@ -154,6 +154,7 @@ class TimelineBuilder:
             output_mode="review",
             tracks=tracks,
             review_flags=review_flags,
+            segments=normalized_segments,
             narration_source_uri=narration_source_uri,
             export_overlays=export_overlays or [],
             applied_recommendations=applied_recommendations,

@@ -489,6 +489,16 @@ class _PipelinePrivateHelpersMixin:
         project_id: str,
         timeline: dict[str, Any],
     ) -> list[dict[str, Any]]:
+        persisted_segments = timeline.get("segments")
+        if isinstance(persisted_segments, list):
+            normalized_segments = [
+                deepcopy(segment)
+                for segment in persisted_segments
+                if isinstance(segment, dict)
+                if str(segment.get("segment_id") or "").strip()
+            ]
+            if normalized_segments:
+                return normalized_segments
         all_segments = self.store.list_segments(project_id=project_id)
         segment_lookup = {
             str(segment.get("segment_id") or "").strip(): segment
@@ -654,6 +664,7 @@ class _PipelinePrivateHelpersMixin:
                 }
                 for flag in timeline.review_flags
             ],
+            "segments": timeline.segments,
             "applied_recommendations": timeline.applied_recommendations,
             "pending_recommendations": timeline.pending_recommendations,
             "recommendation_decisions": timeline.recommendation_decisions,

@@ -714,6 +714,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 }
                 for flag in timeline.review_flags
             ],
+            "segments": timeline.segments,
             "applied_recommendations": timeline.applied_recommendations,
             "pending_recommendations": timeline.pending_recommendations,
             "recommendation_decisions": timeline.recommendation_decisions,
