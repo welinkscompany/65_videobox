@@ -2682,6 +2682,7 @@ export function App() {
                   </span>
                   <span>{selectedEditingDraft.imageAssetId || "이미지 없음"}</span>
                   <span>{selectedEditingDraft.tableText || "표 없음"}</span>
+                  <span>{selectedEditingDraft.sfxAssetId || "효과음 없음"}</span>
                   <span>{selectedEditingDraft.ttsAssetId || "TTS 없음"}</span>
                   {editingMutationFeedback ? (
                     <p
@@ -3015,6 +3016,70 @@ export function App() {
                       type="button"
                     >
                       음악 해제
+                    </button>
+                  ) : null}
+                  <label className="field">
+                    <span>효과음 자산 ID</span>
+                    <input
+                      onChange={(event) =>
+                        updateEditingDraft(selectedEditingSegment.segment_id, {
+                          sfxAssetId: event.target.value,
+                        })
+                      }
+                      value={selectedEditingDraft.sfxAssetId}
+                    />
+                  </label>
+                  <button
+                    className="action-button"
+                    disabled={
+                      !selectedProjectId ||
+                      !activeEditingSessionId ||
+                      !selectedEditingDraft.sfxAssetId ||
+                      isSavingEditingMutation === `${selectedEditingSegment.segment_id}-sfx`
+                    }
+                    onClick={() =>
+                      void applyEditingMutation(
+                        `${selectedEditingSegment.segment_id}-sfx`,
+                        () =>
+                          api.updateEditingSessionSfxOverride(
+                            selectedProjectId!,
+                            activeEditingSessionId!,
+                            selectedEditingSegment.segment_id,
+                            { asset_id: selectedEditingDraft.sfxAssetId },
+                          ),
+                        { addRegenerationField: "sfx", feedbackAction: "저장" },
+                      )
+                    }
+                    type="button"
+                  >
+                    효과음 저장
+                  </button>
+                  {!selectedEditingDraft.sfxAssetId ? (
+                    <p className="meta-copy">효과음 ID 필요 · 부분 재생성 후 검수가 필요합니다.</p>
+                  ) : null}
+                  {selectedEditingSegment.sfx_override ? (
+                    <button
+                      className="action-button"
+                      disabled={
+                        !selectedProjectId ||
+                        !activeEditingSessionId ||
+                        isSavingEditingMutation === `${selectedEditingSegment.segment_id}-sfx`
+                      }
+                      onClick={() =>
+                        void applyEditingMutation(
+                          `${selectedEditingSegment.segment_id}-sfx`,
+                          () =>
+                            api.clearEditingSessionSfxOverride(
+                              selectedProjectId!,
+                              activeEditingSessionId!,
+                              selectedEditingSegment.segment_id,
+                            ),
+                          { feedbackAction: "해제", removeRegenerationField: "sfx" },
+                        )
+                      }
+                      type="button"
+                    >
+                      효과음 해제
                     </button>
                   ) : null}
                   <label className="field">

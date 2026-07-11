@@ -376,6 +376,7 @@ class _PipelinePrivateHelpersMixin:
         self,
         *,
         project_id: str,
+        timeline_job_id: str,
         timeline: dict[str, Any],
         recommendation_id: str,
         auto_apply_allowed: bool,
@@ -394,13 +395,33 @@ class _PipelinePrivateHelpersMixin:
                 timeline_id=str(timeline["timeline_id"]),
                 timeline_payload=timeline,
             )
-            self.store.update_recommendation_review(
-                project_id=project_id,
-                recommendation_id=recommendation_id,
-                auto_apply_allowed=auto_apply_allowed,
-                review_required=review_required,
-                decision_state=decision_state,
+            job = self.store.get_job(project_id=project_id, job_id=timeline_job_id)
+            if str(job.get("job_type") or "") == JobType.PARTIAL_REGENERATION.value:
+                partial_regeneration_id = str(job.get("output_ref") or "").strip()
+                if not partial_regeneration_id:
+                    raise ValueError("Partial regeneration review decision requires an output reference.")
+                self.store.update_partial_regeneration_run(
+                    project_id=project_id,
+                    partial_regeneration_id=partial_regeneration_id,
+                    payload={"timeline": timeline},
+                )
+            provider_trace = rollback_recommendation.get("provider_trace")
+            if not isinstance(provider_trace, dict):
+                payload = rollback_recommendation.get("payload")
+                provider_trace = payload.get("provider_trace") if isinstance(payload, dict) else {}
+            is_editing_session_manual_recommendation = (
+                isinstance(provider_trace, dict)
+                and str(provider_trace.get("final_provider") or "").strip()
+                == "editing_session_manual"
             )
+            if not is_editing_session_manual_recommendation:
+                self.store.update_recommendation_review(
+                    project_id=project_id,
+                    recommendation_id=recommendation_id,
+                    auto_apply_allowed=auto_apply_allowed,
+                    review_required=review_required,
+                    decision_state=decision_state,
+                )
             status = "blocked" if review_flags or pending_recommendations else "draft"
             self.store.save_review_state(
                 project_id=project_id,

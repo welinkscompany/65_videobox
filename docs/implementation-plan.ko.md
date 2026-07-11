@@ -780,6 +780,15 @@ production-readiness blocker slice 1의 9개 Task는 구현·회귀·600초 smok
 2. 효과음 추천·선택·output materialization을 BGM과 같은 real-asset only 계약으로 구현한다.
 3. 10분 이상 실제 프로젝트 3건의 수동 CapCut open/edit/export UX 검증을 수행하고 생성 source 경로, overlay layout, Korean typography를 점검한다.
 
+### 2026-07-12 SFX real-asset acceptance 완료
+
+효과음 slice는 실제 등록 asset이 없는 추천을 timeline에 넣지 않고, 편집 세션의 실제 SFX 선택만 partial regeneration에서 `sfx_review_required` 검수 대상으로 만든다. 개별 승인 뒤 candidate partial timeline과 원본 timeline 저장본을 함께 갱신하여 SFX track이 FFmpeg final MP4 및 real CapCut draft에 유지된다. 웹 편집 화면은 효과음 asset ID 저장·해제와 새로고침 복구를 지원한다.
+
+- 검증: frontend 83 passed/build success, backend Python 3.12 632 passed (API 388 + 기타 244 분할 실행), 600초 Korean smoke 12 checks true.
+- smoke final MP4 SHA-256: `036bc6ccfbcd5aba814e44aceb9b654f41ead6c9613d9ebfd4eb2dc8f672a93e`.
+- 전체 milestone: 39개 중 38 완료, 1 부분. strict 97.4%, partial=0.5 weighted 98.7%, weighted remaining 1.3%.
+- 남은 부분은 실제 사용자 녹음 human listening approval과 다중 실제 프로젝트 CapCut UX QA다.
+
 이하 기존 next-task 목록은 historical reference다.
 
 현재 기준 다음 실제 작업은 아래 순서로 재고정한다.

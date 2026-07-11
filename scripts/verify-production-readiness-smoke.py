@@ -139,6 +139,10 @@ def _create_short_broll(path: Path, *, ffmpeg_binary: str) -> None:
     )
 
 
+def _create_sfx(path: Path, *, ffmpeg_binary: str) -> None:
+    _run([ffmpeg_binary, "-y", "-f", "lavfi", "-i", "sine=frequency=880:duration=1", str(path)], timeout=120)
+
+
 def _prepare_projects_root(work_root: Path) -> Path:
     projects_root = work_root / "projects"
     if projects_root.exists():
@@ -216,6 +220,8 @@ def run_smoke(*, narration: Path, work_root: Path, ffmpeg_binary: str, ffprobe_b
     script_path.write_text("\n".join(SOURCE_CAPTIONS), encoding="utf-8")
     broll_path = work_root / "short-broll.mp4"
     _create_short_broll(broll_path, ffmpeg_binary=ffmpeg_binary)
+    sfx_path = work_root / "smoke-impact.wav"
+    _create_sfx(sfx_path, ffmpeg_binary=ffmpeg_binary)
 
     store = LocalProjectStore(projects_root)
     renderer = FfmpegFinalRenderer(
@@ -248,6 +254,8 @@ def run_smoke(*, narration: Path, work_root: Path, ffmpeg_binary: str, ffprobe_b
             f"/api/projects/{project_id}/assets/broll-video",
             json={"source_path": str(broll_path), "title": "3 second looping smoke broll", "tags": ["smoke"]},
         ), 201)
+        sfx_asset = _assert_status(client.post(
+            f"/api/projects/{project_id}/assets/sfx", json={"source_path": str(sfx_path)}), 201)
         checks["ingest"] = True
 
         transcription = _assert_status(client.post(
@@ -290,6 +298,12 @@ def run_smoke(*, narration: Path, work_root: Path, ffmpeg_binary: str, ffprobe_b
             f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/tts-replacement",
             json={"recommendation_id": "tts_smoke_candidate", "asset_id": tts_candidate["asset_id"]},
         ), 200)
+        sfx_session = _assert_status(client.patch(
+            f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/sfx",
+            json={"asset_id": sfx_asset["asset_id"]},
+        ), 200)
+        if sfx_session["segments"][0].get("sfx_override", {}).get("asset_id") != sfx_asset["asset_id"]:
+            raise AssertionError(f"SFX selection did not persist to editing session: {sfx_session['segments'][0]}")
         for segment in session["segments"]:
             segment_id = segment["segment_id"]
             _assert_status(client.patch(
@@ -309,12 +323,27 @@ def run_smoke(*, narration: Path, work_root: Path, ffmpeg_binary: str, ffprobe_b
             f"/api/projects/{project_id}/editing-sessions/{session_id}/partial-regeneration",
             json={
                 "segment_ids": ["seg_001", revised_segment_id],
-                "fields": ["caption", "broll", "visual_overlay", "tts_replacement"],
+                "fields": ["caption", "broll", "visual_overlay", "tts_replacement", "sfx"],
             },
         ), 202)
         partial = _assert_status(client.get(
             f"/api/projects/{project_id}/partial-regenerations/{regenerated['job_id']}"), 200)
+        if "sfx_refresh" not in partial["downstream_steps"]:
+            raise AssertionError(f"SFX partial regeneration step missing: {partial['downstream_steps']}")
         candidate_timeline_job_id = partial["job_id"]
+        candidate_review = _assert_status(
+            client.get(f"/api/projects/{project_id}/review-snapshots/{candidate_timeline_job_id}"), 200
+        )
+        sfx_pending = [
+            item for item in candidate_review["pending_recommendations"]
+            if item.get("recommendation_type") == "sfx"
+        ]
+        if not sfx_pending:
+            raise AssertionError(f"SFX selection did not produce a pending review recommendation: {candidate_review['pending_recommendations']}")
+        sfx_recommendation_id = sfx_pending[0]["recommendation_id"]
+        _assert_status(client.post(
+            f"/api/projects/{project_id}/review-snapshots/{candidate_timeline_job_id}/recommendations/{sfx_recommendation_id}/approve"
+        ), 200)
         _assert_status(client.post(
             f"/api/projects/{project_id}/review-approvals/{candidate_timeline_job_id}/approve"), 202)
         checks["edit_and_approval"] = True
@@ -327,6 +356,10 @@ def run_smoke(*, narration: Path, work_root: Path, ffmpeg_binary: str, ffprobe_b
             and item.get("payload", {}).get("selected_asset_uri")
             for item in candidate_timeline.get("applied_recommendations", [])
             if isinstance(item, dict)
+        )
+        checks["approved_sfx_in_final_and_capcut"] = any(
+            item.get("recommendation_type") == "sfx" and item.get("selected_asset_id") == sfx_asset["asset_id"]
+            for item in candidate_timeline.get("applied_recommendations", []) if isinstance(item, dict)
         )
 
         subtitle_job = _assert_status(client.post(
@@ -374,6 +407,9 @@ def run_smoke(*, narration: Path, work_root: Path, ffmpeg_binary: str, ffprobe_b
         draft_content = (draft_path / "draft_content.json").read_text(encoding="utf-8")
         checks["approved_tts_in_final_and_capcut"] = (
             checks["approved_tts_in_final_and_capcut"] and "tts_candidate.wav" in draft_content
+        )
+        checks["approved_sfx_in_final_and_capcut"] = (
+            checks["approved_sfx_in_final_and_capcut"] and "smoke-impact.wav" in draft_content
         )
 
     if not all(checks.values()):

@@ -232,6 +232,56 @@ def test_update_segment_sfx_override_records_history() -> None:
     assert updated["history"][-1]["mutation_type"] == "sfx_override_update"
 
 
+def test_approved_sfx_recommendation_materializes_target_timeline_track() -> None:
+    from videobox_core_engine.review_action_mutations import apply_approved_recommendation_to_timeline
+
+    timeline = {
+        "project_id": "project_001",
+        "tracks": [
+            {
+                "track_id": "narration_primary",
+                "track_type": "narration",
+                "clips": [
+                    {
+                        "clip_id": "clip_narration_001",
+                        "segment_id": "seg_001",
+                        "asset_uri": "local://projects/project_001/segments/seg_001",
+                        "start_sec": 1.0,
+                        "end_sec": 3.0,
+                        "clip_type": "narration",
+                    }
+                ],
+            }
+        ],
+    }
+
+    apply_approved_recommendation_to_timeline(
+        timeline=timeline,
+        decided_recommendation={
+            "recommendation_id": "manual_sfx_seg_001",
+            "target_segment_id": "seg_001",
+            "recommendation_type": "sfx",
+            "selected_asset_id": "asset_sfx_001",
+        },
+    )
+
+    assert timeline["tracks"][-1] == {
+        "track_id": "sfx_overlay",
+        "track_type": "sfx",
+        "clips": [
+            {
+                "clip_id": "clip_sfx_001",
+                "segment_id": "seg_001",
+                "asset_uri": "local://projects/project_001/assets/asset_sfx_001",
+                "start_sec": 1.0,
+                "end_sec": 3.0,
+                "clip_type": "sfx",
+                "recommendation_id": "manual_sfx_seg_001",
+            }
+        ],
+    }
+
+
 def test_clear_segment_broll_override_records_history() -> None:
     from videobox_core_engine.editing_session import build_editing_session
     from videobox_core_engine.editing_session import clear_segment_broll_override

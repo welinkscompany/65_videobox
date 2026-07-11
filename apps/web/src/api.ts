@@ -119,6 +119,7 @@ export type EditingSessionSegment = {
   broll_override: Record<string, unknown> | null;
   visual_overlays: Record<string, unknown>[];
   music_override: Record<string, unknown> | null;
+  sfx_override?: Record<string, unknown> | null;
   tts_replacement: Record<string, unknown> | null;
 };
 
@@ -640,6 +641,25 @@ export const api = {
       {
         method: "DELETE",
       },
+    ),
+  updateEditingSessionSfxOverride: (
+    projectId: string,
+    sessionId: string,
+    segmentId: string,
+    payload: BrollOverrideRequest,
+  ) =>
+    request<EditingSession>(
+      `/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/sfx`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      },
+    ),
+  clearEditingSessionSfxOverride: (projectId: string, sessionId: string, segmentId: string) =>
+    request<EditingSession>(
+      `/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/sfx`,
+      { method: "DELETE" },
     ),
   updateEditingSessionExplanationCard: (
     projectId: string,

@@ -8403,6 +8403,15 @@ focused 검증 메모:
 - dead helper, 임시 메모, 역할이 끝난 중복 파일 중 삭제보다 역할 명시가 맞는지 먼저 판단한다
 - 최종 closeout 직전 broad 재검증이 정말 필요한지 마지막으로 판단한다
 
+## 219. 2026-07-12 SFX real-asset recommendation/materialization acceptance
+
+- 완료: assetless SFX 추천은 materialization하지 않으며, 실제 SFX asset 선택은 editing session → `sfx_refresh` → pending review → 개별 승인 → SFX timeline track으로 이어진다.
+- 수정: review snapshot/API/storage canonical sets에 SFX를 추가했고, partial regeneration job의 embedded candidate timeline도 승인 결정으로 함께 갱신한다. 따라서 승인 직후 final renderer/real CapCut export가 같은 SFX track을 읽는다.
+- UI: 편집 화면의 효과음 asset ID 저장·해제, default partial regeneration field, review/track label을 추가했다.
+- 검증: frontend 83 passed/build success, backend Python 3.12 632 passed (API 388 + 기타 244), 600초 deterministic Korean smoke 12 checks true; final MP4 SHA-256 `036bc6ccfbcd5aba814e44aceb9b654f41ead6c9613d9ebfd4eb2dc8f672a93e`.
+- 전체 milestone: 39개 중 38 완료, 1 부분. strict 97.4%, partial=0.5 weighted 98.7%, weighted remaining 1.3%.
+- 남은 부분: 실제 사용자 음성 human listening approval, 다중 실제 프로젝트의 CapCut open/edit/export UX QA.
+
 ## 218. 2026-07-12 personal voice TTS acceptance
 
 - 완료: technical acceptance, original-narration fallback, target duration, pending listening review UI/API, Korean 10-minute FFmpeg + real CapCut smoke.

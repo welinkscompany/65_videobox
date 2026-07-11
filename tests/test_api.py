@@ -150,9 +150,9 @@ def test_build_targeted_segments_matches_trimmed_request_segment_ids() -> None:
                     "cut_action": "keep",
                     "review_required": False,
                     "broll_override": None,
-                    "visual_overlays": [],
-                    "music_override": None,
-                    "tts_replacement": None,
+                "visual_overlays": [],
+                "music_override": None,
+                "tts_replacement": None,
                 }
             ]
         },
@@ -166,9 +166,9 @@ def test_build_targeted_segments_matches_trimmed_request_segment_ids() -> None:
             "cut_action": "keep",
             "review_required": False,
             "broll_override": None,
-            "visual_overlays": [],
-            "music_override": None,
-            "tts_replacement": None,
+                "visual_overlays": [],
+                "music_override": None,
+                "tts_replacement": None,
         }
     ]
 
@@ -3572,6 +3572,7 @@ def test_editing_session_api_normalizes_legacy_string_false_segment_review_requi
             "broll_override": None,
             "visual_overlays": [],
             "music_override": None,
+            "sfx_override": None,
             "tts_replacement": None,
         }
     ]
@@ -3675,6 +3676,7 @@ def test_editing_session_api_preserves_string_false_segment_review_required_afte
             "broll_override": None,
             "visual_overlays": [],
             "music_override": None,
+            "sfx_override": None,
             "tts_replacement": None,
         }
     ]

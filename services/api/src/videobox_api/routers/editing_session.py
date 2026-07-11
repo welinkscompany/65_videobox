@@ -124,6 +124,22 @@ def build_editing_session_router(orchestrator: ApiOrchestrator, store: LocalProj
             raise _http_error(exc) from exc
         return EditingSessionResponse(**result)
 
+    @router.delete("/api/projects/{project_id}/editing-sessions/{session_id}/segments/{segment_id}/sfx")
+    def delete_editing_session_sfx_override(
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+    ) -> EditingSessionResponse:
+        try:
+            result = orchestrator.clear_segment_sfx_override(
+                project_id=project_id,
+                session_id=session_id,
+                segment_id=segment_id,
+            )
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return EditingSessionResponse(**result)
+
     @router.delete("/api/projects/{project_id}/editing-sessions/{session_id}/segments/{segment_id}/broll")
     def delete_editing_session_broll_override(
         project_id: str,

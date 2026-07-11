@@ -133,7 +133,16 @@ def apply_approved_recommendation_to_timeline(
     timeline: dict[str, Any],
     decided_recommendation: dict[str, Any],
 ) -> None:
-    if _canonical_recommendation_type(decided_recommendation.get("recommendation_type")) != "tts_replacement":
+    recommendation_type = _canonical_recommendation_type(
+        decided_recommendation.get("recommendation_type")
+    )
+    if recommendation_type == "sfx":
+        _apply_approved_sfx_recommendation_to_timeline(
+            timeline=timeline,
+            decided_recommendation=decided_recommendation,
+        )
+        return
+    if recommendation_type != "tts_replacement":
         return
     payload = decided_recommendation.get("payload")
     if not isinstance(payload, dict):
@@ -161,3 +170,66 @@ def apply_approved_recommendation_to_timeline(
                 clip["asset_uri"] = selected_asset_uri
     if not matched_clip:
         raise ValueError("Approved TTS replacement requires a matching target narration clip.")
+
+
+def _apply_approved_sfx_recommendation_to_timeline(
+    *,
+    timeline: dict[str, Any],
+    decided_recommendation: dict[str, Any],
+) -> None:
+    project_id = str(timeline.get("project_id") or "").strip()
+    recommendation_id = str(decided_recommendation.get("recommendation_id") or "").strip()
+    target_segment_id = str(decided_recommendation.get("target_segment_id") or "").strip()
+    selected_asset_id = str(decided_recommendation.get("selected_asset_id") or "").strip()
+    if not project_id:
+        raise ValueError("Approved SFX recommendation requires timeline.project_id.")
+    if not recommendation_id or not target_segment_id or not selected_asset_id:
+        raise ValueError("Approved SFX recommendation requires id, target segment, and selected asset.")
+
+    tracks = timeline.get("tracks")
+    if not isinstance(tracks, list):
+        raise ValueError("Approved SFX recommendation requires timeline tracks.")
+    target_clip: dict[str, Any] | None = None
+    sfx_track: dict[str, Any] | None = None
+    for track in tracks:
+        if not isinstance(track, dict):
+            continue
+        track_type = _canonical_track_type(track.get("track_type"))
+        if track_type == "sfx" and sfx_track is None:
+            sfx_track = track
+        if track_type != "narration":
+            continue
+        clips = track.get("clips")
+        if not isinstance(clips, list):
+            continue
+        for clip in clips:
+            if isinstance(clip, dict) and str(clip.get("segment_id") or "").strip() == target_segment_id:
+                target_clip = clip
+                break
+        if target_clip is not None:
+            break
+    if target_clip is None:
+        raise ValueError("Approved SFX recommendation requires a matching target narration clip.")
+
+    if sfx_track is None:
+        sfx_track = {"track_id": "sfx_overlay", "track_type": "sfx", "clips": []}
+        tracks.append(sfx_track)
+    sfx_clips = sfx_track.get("clips")
+    if not isinstance(sfx_clips, list):
+        raise ValueError("Approved SFX recommendation requires an editable SFX track.")
+    if any(
+        isinstance(clip, dict) and str(clip.get("recommendation_id") or "").strip() == recommendation_id
+        for clip in sfx_clips
+    ):
+        return
+    sfx_clips.append(
+        {
+            "clip_id": f"clip_sfx_{len(sfx_clips) + 1:03d}",
+            "segment_id": target_segment_id,
+            "asset_uri": f"local://projects/{project_id}/assets/{selected_asset_id}",
+            "start_sec": float(target_clip["start_sec"]),
+            "end_sec": float(target_clip["end_sec"]),
+            "clip_type": "sfx",
+            "recommendation_id": recommendation_id,
+        }
+    )

@@ -44,13 +44,15 @@ def _canonical_track_type(value: object) -> str:
 VALID_STORE_BLOCKING_REVIEW_FLAG_CODES = {
     "segment_review_required",
     "broll_review_required",
+    "sfx_review_required",
     "tts_replacement_review_required",
 }
-VALID_STORE_TRACK_TYPES = {"narration", "broll", "bgm"}
+VALID_STORE_TRACK_TYPES = {"narration", "broll", "bgm", "sfx"}
 VALID_STORE_BLOCKING_RECOMMENDATION_TYPES = {
     RecommendationType.TTS_REPLACEMENT.value,
     RecommendationType.BROLL.value,
     RecommendationType.BGM.value,
+    RecommendationType.SFX.value,
     RecommendationType.OVERLAY.value,
 }
 
@@ -790,6 +792,32 @@ class LocalProjectStore:
         if not file_path.exists():
             raise KeyError(f"Partial regeneration run not found: {partial_regeneration_id}")
         return json.loads(file_path.read_text(encoding="utf-8"))
+
+    def update_partial_regeneration_run(
+        self,
+        *,
+        project_id: str,
+        partial_regeneration_id: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        existing = self.get_partial_regeneration_run(
+            project_id=project_id,
+            partial_regeneration_id=partial_regeneration_id,
+        )
+        updated = {
+            **existing,
+            **deepcopy(payload),
+            "partial_regeneration_id": partial_regeneration_id,
+            "created_at": str(existing["created_at"]),
+        }
+        file_path = (
+            self.project_root(project_id)
+            / "analysis"
+            / "partial_regenerations"
+            / f"{partial_regeneration_id}.json"
+        )
+        file_path.write_text(json.dumps(updated, indent=2, ensure_ascii=True), encoding="utf-8")
+        return updated
 
     def save_tts_candidate(
         self,

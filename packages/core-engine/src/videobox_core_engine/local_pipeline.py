@@ -941,6 +941,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         )
         self._persist_pending_recommendation_decision(
             project_id=project_id,
+            timeline_job_id=timeline_job_id,
             timeline=timeline,
             recommendation_id=recommendation_id,
             auto_apply_allowed=True,
@@ -973,6 +974,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         )
         self._persist_pending_recommendation_decision(
             project_id=project_id,
+            timeline_job_id=timeline_job_id,
             timeline=timeline,
             recommendation_id=recommendation_id,
             auto_apply_allowed=False,
