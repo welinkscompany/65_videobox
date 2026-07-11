@@ -489,14 +489,28 @@ class _PipelinePrivateHelpersMixin:
         project_id: str,
         timeline: dict[str, Any],
     ) -> list[dict[str, Any]]:
-        persisted_segments = timeline.get("segments")
+        persisted_segments = timeline.get("caption_segments")
         if isinstance(persisted_segments, list):
-            normalized_segments = [
-                deepcopy(segment)
-                for segment in persisted_segments
-                if isinstance(segment, dict)
-                if str(segment.get("segment_id") or "").strip()
-            ]
+            normalized_segments = []
+            for segment in persisted_segments:
+                if not isinstance(segment, dict):
+                    continue
+                normalized = deepcopy(segment)
+                if not str(normalized.get("segment_id") or "").strip():
+                    continue
+                normalized["segment_id"] = str(normalized["segment_id"]).strip()
+                normalized["text"] = str(
+                    normalized.get("text")
+                    or normalized.get("narration_text")
+                    or normalized.get("transcript_text")
+                    or normalized.get("script_text")
+                    or normalized.get("summary")
+                    or ""
+                )
+                normalized["review_required"] = _normalize_runtime_boolish(
+                    normalized.get("review_required", False)
+                )
+                normalized_segments.append(normalized)
             if normalized_segments:
                 return normalized_segments
         all_segments = self.store.list_segments(project_id=project_id)
@@ -664,7 +678,7 @@ class _PipelinePrivateHelpersMixin:
                 }
                 for flag in timeline.review_flags
             ],
-            "segments": timeline.segments,
+            "caption_segments": timeline.caption_segments,
             "applied_recommendations": timeline.applied_recommendations,
             "pending_recommendations": timeline.pending_recommendations,
             "recommendation_decisions": timeline.recommendation_decisions,

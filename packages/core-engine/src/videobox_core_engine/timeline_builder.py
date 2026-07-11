@@ -131,7 +131,7 @@ class TimelineBuilder:
                             TimelineClip(
                                 clip_id=f"clip_bgm_{len(music_clips) + 1:03d}",
                                 segment_id=segment_id,
-                                asset_uri=f"local://projects/{project_id}/assets/{selected_asset_id}",
+                                asset_uri=f"local://projects/{project_id}/music/{selected_asset_id}",
                                 start_sec=float(segment["start_sec"]),
                                 end_sec=float(segment["end_sec"]),
                                 clip_type="bgm",
@@ -154,7 +154,7 @@ class TimelineBuilder:
             output_mode="review",
             tracks=tracks,
             review_flags=review_flags,
-            segments=normalized_segments,
+            caption_segments=normalized_segments,
             narration_source_uri=narration_source_uri,
             export_overlays=export_overlays or [],
             applied_recommendations=applied_recommendations,

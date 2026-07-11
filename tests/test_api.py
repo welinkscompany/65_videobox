@@ -6568,9 +6568,10 @@ def test_timeline_and_review_snapshot_flow(tmp_path: Path) -> None:
     assert timeline_payload["job_id"].startswith("timeline_build_job_")
     assert timeline_payload["timeline"]["project_id"] == project_id
     assert len(timeline_payload["timeline"]["tracks"]) >= 1
-    assert {"narration", "broll", "bgm"}.issubset(
+    assert {"narration", "broll"}.issubset(
         {track["track_type"] for track in timeline_payload["timeline"]["tracks"]}
     )
+    assert not any(track["track_type"] == "bgm" for track in timeline_payload["timeline"]["tracks"])
     assert len(review_payload["segments"]) >= 2
     assert len(review_payload["applied_recommendations"]) >= 2
     assert len(review_payload["pending_recommendations"]) == 0
@@ -6582,9 +6583,10 @@ def test_timeline_and_review_snapshot_flow(tmp_path: Path) -> None:
     assert timeline_files
     timeline_json = json.loads(timeline_files[0].read_text(encoding="utf-8"))
     assert timeline_json["project_id"] == project_id
-    assert {"narration", "broll", "bgm"}.issubset(
+    assert {"narration", "broll"}.issubset(
         {track["track_type"] for track in timeline_json["tracks"]}
     )
+    assert not any(track["track_type"] == "bgm" for track in timeline_json["tracks"])
 
 
 def test_review_snapshot_uses_local_first_runtime_before_gemini(
@@ -22107,13 +22109,7 @@ def test_editing_session_api_matches_trimmed_source_segment_id_for_music_refresh
 
     assert result_response.status_code == 200
     result_payload = result_response.json()
-    bgm_track = next(track for track in result_payload["timeline"]["tracks"] if track["track_type"] == "bgm")
-    clip_segment_ids = [clip["segment_id"] for clip in bgm_track["clips"]]
-    assert "seg_001" in clip_segment_ids
-    assert any(
-        item["target_segment_id"] == "seg_001"
-        for item in result_payload["timeline"]["applied_recommendations"]
-    )
+    assert not any(track["track_type"] == "bgm" for track in result_payload["timeline"]["tracks"])
 
 
 def test_editing_session_api_filters_unknown_overlay_type_when_running_partial_regeneration(
@@ -23333,7 +23329,6 @@ def test_approved_timeline_can_generate_subtitles_preview_and_export(
         "voiceover",
         "broll",
         "subtitle",
-        "bgm",
     ]
 
 
