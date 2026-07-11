@@ -83,6 +83,30 @@ def test_resolve_broll_clip_source_resolves_asset_style_uri_via_store(tmp_path: 
     )
     assert resolved.trim_start_sec == 0.0
     assert resolved.trim_duration_sec == 4.0
+    assert resolved.target_duration_sec == 4.0
+
+
+@pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg/ffprobe not installed on this machine")
+def test_render_timeline_loops_short_broll_and_pads_short_tts_to_the_timeline_window(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Render Short Source Duration Project")
+    narration_file = tmp_path / "short_tts.wav"
+    _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=1", str(narration_file)])
+    narration_asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.NARRATION_AUDIO, source_path=narration_file)
+    broll_file = tmp_path / "short_broll.mp4"
+    _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc=duration=1:size=320x240:rate=15", str(broll_file)])
+    broll_asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=broll_file)
+    timeline = {
+        "narration_source_uri": narration_asset.storage_uri,
+        "tracks": [
+            {"track_type": "narration", "clips": [{"asset_uri": f"local://projects/{project.project_id}/assets/{narration_asset.asset_id}", "start_sec": 0.0, "end_sec": 4.0}]},
+            {"track_type": "broll", "clips": [{"asset_uri": f"local://projects/{project.project_id}/assets/{broll_asset.asset_id}", "start_sec": 0.0, "end_sec": 4.0}]},
+        ],
+    }
+    output_path = tmp_path / "duration_safe.mp4"
+    FfmpegFinalRenderer(store=store).render_timeline_to_mp4(project_id=project.project_id, timeline=timeline, output_path=output_path)
+    probe = subprocess.run(["ffprobe", "-v", "quiet", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(output_path)], capture_output=True, text=True, timeout=30)
+    assert float(probe.stdout.strip()) == pytest.approx(4.0, abs=0.6)
 
 
 @pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg/ffprobe not installed on this machine")

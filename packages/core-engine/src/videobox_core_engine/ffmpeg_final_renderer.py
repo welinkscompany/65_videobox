@@ -63,9 +63,12 @@ class FfmpegFinalRenderer:
         command = [self.ffmpeg_binary, "-y"]
         if source.trim_start_sec:
             command += ["-ss", str(source.trim_start_sec)]
+        if video and source.target_duration_sec is not None:
+            command += ["-stream_loop", "-1"]
         command += ["-i", str(source.path)]
-        if source.trim_duration_sec is not None:
-            command += ["-t", str(source.trim_duration_sec)]
+        output_duration_sec = source.target_duration_sec if source.target_duration_sec is not None else source.trim_duration_sec
+        if output_duration_sec is not None:
+            command += ["-t", str(output_duration_sec)]
         if video:
             command += [
                 "-an",
@@ -82,7 +85,10 @@ class FfmpegFinalRenderer:
                 "20",
             ]
         else:
-            command += ["-vn", "-ar", "48000", "-ac", "2", "-c:a", "pcm_s16le"]
+            command += ["-vn"]
+            if output_duration_sec is not None:
+                command += ["-af", f"apad,atrim=duration={output_duration_sec}"]
+            command += ["-ar", "48000", "-ac", "2", "-c:a", "pcm_s16le"]
         command.append(str(output_path))
         result = self._run(command)
         if result.returncode != 0:
