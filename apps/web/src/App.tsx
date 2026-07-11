@@ -932,7 +932,7 @@ export function App() {
       setJobs(jobItems);
       setFinalRenderJob(finalRender);
       if (finalRender.status === "failed") {
-        setErrorMessage("완성본 렌더 실패");
+        setErrorMessage(`완성본 렌더 실패: ${finalRender.error_message ?? "결과 파일을 만들지 못했습니다."}`);
       }
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "알 수 없는 오류");
@@ -959,7 +959,9 @@ export function App() {
       setJobs(jobItems);
       setCapcutDraftJob(capcutDraftExport);
       if (capcutDraftExport.status === "failed") {
-        setErrorMessage("CapCut 초안 내보내기 실패");
+        setErrorMessage(
+          `CapCut 초안 내보내기 실패: ${capcutDraftExport.error_message ?? "결과 파일을 만들지 못했습니다."}`,
+        );
       }
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "알 수 없는 오류");
@@ -1611,6 +1613,26 @@ export function App() {
             >
               {isExportingCapcutDraft ? "CapCut 초안 내보내는 중" : "CapCut 초안(실제)"}
             </button>
+            {finalRenderJob?.status === "failed" ? (
+              <button
+                className="action-button subtle"
+                disabled={!canGenerateOutputs || isRenderingFinal}
+                onClick={() => void handleFinalRender()}
+                type="button"
+              >
+                완성본 렌더 다시 시도
+              </button>
+            ) : null}
+            {capcutDraftJob?.status === "failed" ? (
+              <button
+                className="action-button subtle"
+                disabled={!canGenerateOutputs || isExportingCapcutDraft}
+                onClick={() => void handleCapcutDraftExport()}
+                type="button"
+              >
+                CapCut 초안 다시 시도
+              </button>
+            ) : null}
             <button
               className={canApproveTimeline ? "action-button success" : "action-button"}
               disabled={!canApproveTimeline || isApprovingTimeline}
@@ -1805,7 +1827,13 @@ export function App() {
                 </div>
                 <div>
                   <dt>완성본 파일</dt>
-                  <dd>{finalRenderJob ? formatDisplayText(finalRenderJob.render.file_uri) : "미시작"}</dd>
+                  <dd>
+                    {finalRenderJob?.render
+                      ? formatDisplayText(finalRenderJob.render.file_uri)
+                      : finalRenderJob?.status === "failed"
+                        ? "완성본 렌더 실패"
+                        : "미시작"}
+                  </dd>
                 </div>
                 <div>
                   <dt>CapCut 초안(실제)</dt>
@@ -1813,9 +1841,25 @@ export function App() {
                 </div>
                 <div>
                   <dt>CapCut 초안 파일</dt>
-                  <dd>{capcutDraftJob ? formatDisplayText(capcutDraftJob.export.file_uri) : "미시작"}</dd>
+                  <dd>
+                    {capcutDraftJob?.export
+                      ? formatDisplayText(capcutDraftJob.export.file_uri)
+                      : capcutDraftJob?.status === "failed"
+                        ? "CapCut 초안 내보내기 실패"
+                        : "미시작"}
+                  </dd>
                 </div>
               </dl>
+              {finalRenderJob?.status === "failed" ? (
+                <p className="error-banner">
+                  완성본 렌더 실패: {finalRenderJob.error_message ?? "결과 파일을 만들지 못했습니다."}
+                </p>
+              ) : null}
+              {capcutDraftJob?.status === "failed" ? (
+                <p className="error-banner">
+                  CapCut 초안 내보내기 실패: {capcutDraftJob.error_message ?? "결과 파일을 만들지 못했습니다."}
+                </p>
+              ) : null}
             </article>
 
           </section>

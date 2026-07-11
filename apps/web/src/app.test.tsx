@@ -628,6 +628,8 @@ function createFetchMock({
   partialRegenerationResult = partialRegenerationResultResponse,
   partialRegenerationPreflight = partialRegenerationPreflightResponse,
   jobs = jobsResponse,
+  finalRenderResult,
+  capcutDraftResult,
 }: {
   geminiKeys?: { keys: Array<Record<string, unknown>> };
   brollAssets?: { assets: BrollAsset[] };
@@ -645,6 +647,8 @@ function createFetchMock({
   partialRegenerationResult?: typeof partialRegenerationResultResponse;
   partialRegenerationPreflight?: typeof partialRegenerationPreflightResponse;
   jobs?: typeof jobsResponse;
+  finalRenderResult?: Record<string, unknown>;
+  capcutDraftResult?: Record<string, unknown>;
 } = {}) {
   const state: {
     timeline: TimelinePayload;
@@ -747,6 +751,66 @@ function createFetchMock({
           job_id: "subtitle_render_job_008",
           status: "succeeded",
         }),
+      );
+    }
+    if (
+      url.endsWith("/api/projects/project_001/jobs/final-render") &&
+      init?.method === "POST"
+    ) {
+      return new Response(
+        JSON.stringify({
+          job_id: String(finalRenderResult?.job_id ?? "final_render_job_009"),
+          status: "running",
+        }),
+        { status: 202 },
+      );
+    }
+    if (url.endsWith("/api/projects/project_001/final-renders/final_render_job_009")) {
+      return new Response(
+        JSON.stringify(
+          finalRenderResult ?? {
+            job_id: "final_render_job_009",
+            status: "succeeded",
+            render: {
+              export_id: "final_render_001",
+              timeline_id: "timeline_001",
+              export_type: "final_render",
+              file_uri: "local://projects/project_001/exports/final/output.mp4",
+              status: "succeeded",
+            },
+            error_message: null,
+          },
+        ),
+      );
+    }
+    if (
+      url.endsWith("/api/projects/project_001/jobs/capcut-draft-export") &&
+      init?.method === "POST"
+    ) {
+      return new Response(
+        JSON.stringify({
+          job_id: String(capcutDraftResult?.job_id ?? "capcut_draft_job_009"),
+          status: "running",
+        }),
+        { status: 202 },
+      );
+    }
+    if (url.endsWith("/api/projects/project_001/capcut-draft-exports/capcut_draft_job_009")) {
+      return new Response(
+        JSON.stringify(
+          capcutDraftResult ?? {
+            job_id: "capcut_draft_job_009",
+            status: "succeeded",
+            export: {
+              export_id: "capcut_draft_001",
+              timeline_id: "timeline_001",
+              export_type: "capcut_draft",
+              file_uri: "local://projects/project_001/exports/capcut-draft/draft",
+              status: "succeeded",
+            },
+            error_message: null,
+          },
+        ),
       );
     }
     if (url.endsWith("/api/projects/project_001/timelines/timeline_build_job_005")) {
@@ -1351,6 +1415,90 @@ function createFetchMock({
 }
 
 describe("App", () => {
+  it("renders a final-render failure with a null artifact without unmounting the dashboard", async () => {
+    const fetchMock = createFetchMock({
+      finalRenderResult: {
+        job_id: "final_render_job_009",
+        status: "failed",
+        render: null,
+        error_message: "FFmpeg could not resolve the requested B-roll source.",
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    await screen.findByText("timeline_001");
+    fireEvent.click(await screen.findByRole("button", { name: "완성본 렌더" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/projects/project_001/jobs/final-render",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+
+    expect(await screen.findByText("완성본 렌더 실패")).toBeInTheDocument();
+    expect(screen.getByText(/B-roll source/)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "VideoBox 작업판" })).toBeInTheDocument();
+  });
+
+  it("renders a CapCut draft failure with a null artifact without unmounting the dashboard", async () => {
+    const fetchMock = createFetchMock({
+      capcutDraftResult: {
+        job_id: "capcut_draft_job_009",
+        status: "failed",
+        export: null,
+        error_message: "CapCut draft package could not be written.",
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    await screen.findByText("timeline_001");
+
+    fireEvent.click(screen.getByRole("button", { name: "CapCut 초안(실제)" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/projects/project_001/jobs/capcut-draft-export",
+        expect.any(Object),
+      );
+    });
+
+    expect(await screen.findByText("CapCut 초안 내보내기 실패")).toBeInTheDocument();
+    expect(screen.getByText(/CapCut draft package/)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "VideoBox 작업판" })).toBeInTheDocument();
+  });
+
+  it("offers a retry action after a failed final render", async () => {
+    const fetchMock = createFetchMock({
+      finalRenderResult: {
+        job_id: "final_render_job_009",
+        status: "failed",
+        render: null,
+        error_message: "FFmpeg failed.",
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+    await screen.findByText("timeline_001");
+
+    fireEvent.click(screen.getByRole("button", { name: "완성본 렌더" }));
+    await screen.findByText("완성본 렌더 실패");
+
+    fireEvent.click(screen.getByRole("button", { name: "완성본 렌더 다시 시도" }));
+
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.filter(
+          ([url, init]) =>
+            String(url).endsWith("/api/projects/project_001/jobs/final-render") && init?.method === "POST",
+        ),
+      ).toHaveLength(2);
+    });
+  });
+
   it("renders the dashboard with Korean short labels instead of explanatory English copy", async () => {
     vi.stubGlobal("fetch", createFetchMock());
 

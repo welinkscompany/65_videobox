@@ -373,7 +373,8 @@ export type FinalRenderArtifact = {
 export type FinalRenderJob = {
   job_id: string;
   status: string;
-  render: FinalRenderArtifact;
+  render: FinalRenderArtifact | null;
+  error_message?: string | null;
 };
 
 export type CapCutDraftExportArtifact = {
@@ -388,7 +389,8 @@ export type CapCutDraftExportArtifact = {
 export type CapCutDraftExportJob = {
   job_id: string;
   status: string;
-  export: CapCutDraftExportArtifact;
+  export: CapCutDraftExportArtifact | null;
+  error_message?: string | null;
 };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
