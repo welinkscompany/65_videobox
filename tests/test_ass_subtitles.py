@@ -3,6 +3,16 @@ from __future__ import annotations
 from videobox_core_engine.ass_subtitles import render_editing_session_ass
 
 
+def test_render_editing_session_ass_uses_default_style_when_session_style_is_null() -> None:
+    ass = render_editing_session_ass(
+        {"caption_style": None, "segments": [{"caption_text": "기본 자막", "start_sec": 0.0, "end_sec": 1.0}]},
+        video_width=320,
+        video_height=180,
+    )
+
+    assert "기본 자막" in ass
+
+
 def test_ass_keeps_editing_session_caption_text_timing_and_style() -> None:
     ass = render_editing_session_ass(
         {

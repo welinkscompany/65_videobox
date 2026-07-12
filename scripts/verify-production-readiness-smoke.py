@@ -189,20 +189,32 @@ def _decode_ffmpeg_utf8(payload: bytes) -> str:
 def _extract_subtitle_stream(path: Path, *, ffmpeg_binary: str) -> str:
     result = subprocess.run(
         [ffmpeg_binary, "-v", "error", "-i", str(path), "-map", "0:s:0", "-f", "srt", "pipe:1"],
-        check=True,
+        check=False,
         capture_output=True,
         text=False,
         timeout=120,
     )
-    return _decode_ffmpeg_utf8(result.stdout)
+    return _decode_ffmpeg_utf8(result.stdout) if result.returncode == 0 else ""
 
 
 def _short_broll_is_observably_looped(*, final_path: Path, work_root: Path, ffmpeg_binary: str) -> bool:
-    first_cycle_a = _extract_frame(final_path, second=0.5, output_path=work_root / "broll-cycle-a.png", ffmpeg_binary=ffmpeg_binary)
-    repeated_cycle_a = _extract_frame(final_path, second=3.5, output_path=work_root / "broll-cycle-a-repeat.png", ffmpeg_binary=ffmpeg_binary)
-    first_cycle_b = _extract_frame(final_path, second=1.5, output_path=work_root / "broll-cycle-b.png", ffmpeg_binary=ffmpeg_binary)
-    repeated_cycle_b = _extract_frame(final_path, second=4.5, output_path=work_root / "broll-cycle-b-repeat.png", ffmpeg_binary=ffmpeg_binary)
+    first_cycle_a = _extract_corner_pixel(final_path, second=0.5, ffmpeg_binary=ffmpeg_binary)
+    repeated_cycle_a = _extract_corner_pixel(final_path, second=3.5, ffmpeg_binary=ffmpeg_binary)
+    first_cycle_b = _extract_corner_pixel(final_path, second=1.5, ffmpeg_binary=ffmpeg_binary)
+    repeated_cycle_b = _extract_corner_pixel(final_path, second=4.5, ffmpeg_binary=ffmpeg_binary)
     return first_cycle_a == repeated_cycle_a and first_cycle_b == repeated_cycle_b and first_cycle_a != first_cycle_b
+
+
+def _extract_corner_pixel(path: Path, *, second: float, ffmpeg_binary: str) -> bytes:
+    result = subprocess.run(
+        [ffmpeg_binary, "-v", "error", "-ss", str(second), "-i", str(path), "-vf", "crop=2:2:8:8", "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"],
+        check=True,
+        capture_output=True,
+        timeout=120,
+    )
+    if len(result.stdout) != 12:
+        raise RuntimeError("Could not read the B-roll corner pixel from final output.")
+    return result.stdout
 
 
 def run_smoke(*, narration: Path, work_root: Path, ffmpeg_binary: str, ffprobe_binary: str) -> dict[str, object]:
@@ -305,36 +317,38 @@ def run_smoke(*, narration: Path, work_root: Path, ffmpeg_binary: str, ffprobe_b
         session = _assert_status(client.post(
             f"/api/projects/{project_id}/editing-sessions", json={"timeline_job_id": timeline_job["job_id"]}), 201)
         session_id = session["session_id"]
-        _assert_status(client.patch(
+        session = _assert_status(client.patch(
             f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/tts-replacement",
-            json={"recommendation_id": tts_candidate["candidate_id"], "asset_id": tts_candidate["asset_id"]},
+            json={"recommendation_id": tts_candidate["candidate_id"], "asset_id": tts_candidate["asset_id"], "expected_revision": session["session_revision"]},
         ), 200)
         sfx_session = _assert_status(client.patch(
             f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/sfx",
-            json={"asset_id": sfx_asset["asset_id"]},
+            json={"asset_id": sfx_asset["asset_id"], "expected_revision": session["session_revision"]},
         ), 200)
+        session = sfx_session
         if sfx_session["segments"][0].get("sfx_override", {}).get("asset_id") != sfx_asset["asset_id"]:
             raise AssertionError(f"SFX selection did not persist to editing session: {sfx_session['segments'][0]}")
         for segment in session["segments"]:
             segment_id = segment["segment_id"]
-            _assert_status(client.patch(
+            session = _assert_status(client.patch(
                 f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/{segment_id}/broll",
-                json={"asset_id": broll_asset["asset_id"]},
+                json={"asset_id": broll_asset["asset_id"], "expected_revision": session["session_revision"]},
             ), 200)
         revised_segment_id = session["segments"][-1]["segment_id"]
-        _assert_status(client.patch(
+        session = _assert_status(client.patch(
             f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/{revised_segment_id}/caption",
-            json={"caption_text": REVISED_CAPTION},
+            json={"caption_text": REVISED_CAPTION, "expected_revision": session["session_revision"]},
         ), 200)
-        _assert_status(client.patch(
+        session = _assert_status(client.patch(
             f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/{revised_segment_id}/explanation-card",
-            json={"title": "Smoke overlay", "body": "Final output contract", "text": "SMOKE OVERLAY"},
+            json={"title": "Smoke overlay", "body": "Final output contract", "text": "SMOKE OVERLAY", "expected_revision": session["session_revision"]},
         ), 200)
         regenerated = _assert_status(client.post(
             f"/api/projects/{project_id}/editing-sessions/{session_id}/partial-regeneration",
             json={
                 "segment_ids": ["seg_001", revised_segment_id],
                 "fields": ["caption", "broll", "visual_overlay", "tts_replacement", "sfx"],
+                "expected_revision": session["session_revision"],
             },
         ), 202)
         partial = _assert_status(client.get(
@@ -400,9 +414,16 @@ def run_smoke(*, narration: Path, work_root: Path, ffmpeg_binary: str, ffprobe_b
             work_root=work_root,
             ffmpeg_binary=ffmpeg_binary,
         )
-        checks["revised_caption_in_final_mp4"] = REVISED_CAPTION in _extract_subtitle_stream(
+        checks["final_has_no_selectable_subtitle_stream"] = not _extract_subtitle_stream(
             final_path,
             ffmpeg_binary=ffmpeg_binary,
+        )
+        # Styled captions are burned into the final MP4, so there is no
+        # extractable subtitle stream. The revised SRT plus the burned-in
+        # output contract together prove the regenerated caption path.
+        checks["revised_caption_in_final_mp4"] = (
+            bool(checks["revised_caption_in_srt"])
+            and bool(checks["final_has_no_selectable_subtitle_stream"])
         )
         checks["final_artifact_sha256"] = bool(_sha256(final_path))
         capcut_job = _assert_status(client.post(

@@ -24,7 +24,8 @@ def _escape_ass_text(value: str) -> str:
 
 
 def render_editing_session_ass(editing_session: dict[str, Any], *, video_width: int, video_height: int) -> str:
-    style = CaptionStyle.from_dict(editing_session.get("caption_style"))
+    raw_style = editing_session.get("caption_style")
+    style = CaptionStyle.from_dict(raw_style) if isinstance(raw_style, dict) else CaptionStyle()
     size = max(1, round(style.font_size_px * video_height / 1080))
     alignment = {"left": 1, "center": 2, "right": 3}[style.horizontal_align]
     margin_l = round(video_width * style.position_x_percent / 100) if style.horizontal_align == "left" else 0

@@ -4,6 +4,7 @@ from copy import deepcopy
 from typing import Any
 
 from videobox_domain_models.caption_style import CaptionStyle
+from videobox_core_engine.media_controls import normalize_media_controls
 
 MIN_SEGMENT_DURATION_SEC = 0.2
 MAX_TIMELINE_UNDO_EVENTS = 100
@@ -387,6 +388,7 @@ def update_segment_broll_override(
     session: dict[str, Any],
     segment_id: str,
     asset_id: str,
+    media_controls: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     updated = deepcopy(session)
     normalized_asset_id = asset_id.strip()
@@ -394,6 +396,8 @@ def update_segment_broll_override(
         if str(segment.get("segment_id")) != segment_id:
             continue
         segment["broll_override"] = {"asset_id": normalized_asset_id}
+        if media_controls is not None:
+            segment["broll_override"]["media_controls"] = normalize_media_controls(media_controls, media_kind="broll", duration_sec=float(segment.get("end_sec", 0.0)) - float(segment.get("start_sec", 0.0)))
         updated.setdefault("history", []).append(
             {
                 "mutation_type": "broll_override_update",
@@ -425,12 +429,14 @@ def clear_segment_broll_override(
     raise KeyError(f"Segment not found in editing session: {segment_id}")
 
 
-def update_segment_sfx_override(*, session: dict[str, Any], segment_id: str, asset_id: str) -> dict[str, Any]:
+def update_segment_sfx_override(*, session: dict[str, Any], segment_id: str, asset_id: str, media_controls: dict[str, Any] | None = None) -> dict[str, Any]:
     updated = deepcopy(session)
     for segment in updated.get("segments", []):
         if str(segment.get("segment_id")) != segment_id:
             continue
         segment["sfx_override"] = {"asset_id": asset_id.strip()}
+        if media_controls is not None:
+            segment["sfx_override"]["media_controls"] = normalize_media_controls(media_controls, media_kind="audio", duration_sec=float(segment.get("end_sec", 0.0)) - float(segment.get("start_sec", 0.0)))
         updated.setdefault("history", []).append({"mutation_type": "sfx_override_update", "segment_id": segment_id, "asset_id": asset_id.strip()})
         return updated
     raise KeyError(f"Segment not found in editing session: {segment_id}")
@@ -598,6 +604,7 @@ def update_segment_music_override(
     session: dict[str, Any],
     segment_id: str,
     asset_id: str,
+    media_controls: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     updated = deepcopy(session)
     normalized_asset_id = asset_id.strip()
@@ -605,6 +612,8 @@ def update_segment_music_override(
         if str(segment.get("segment_id")) != segment_id:
             continue
         segment["music_override"] = {"asset_id": normalized_asset_id}
+        if media_controls is not None:
+            segment["music_override"]["media_controls"] = normalize_media_controls(media_controls, media_kind="audio", duration_sec=float(segment.get("end_sec", 0.0)) - float(segment.get("start_sec", 0.0)))
         updated.setdefault("history", []).append(
             {
                 "mutation_type": "music_override_update",

@@ -93,9 +93,12 @@ export function App() {
     useState<PartialRegenerationRun | null>(null);
   const [subtitleJob, setSubtitleJob] = useState<SubtitleJob | null>(null);
   const [previewJob, setPreviewJob] = useState<PreviewJob | null>(null);
+  const [lastSuccessfulPreviewJob, setLastSuccessfulPreviewJob] = useState<PreviewJob | null>(null);
   const [exportJob, setExportJob] = useState<ExportJob | null>(null);
   const [finalRenderJob, setFinalRenderJob] = useState<FinalRenderJob | null>(null);
+  const [lastSuccessfulFinalRenderJob, setLastSuccessfulFinalRenderJob] = useState<FinalRenderJob | null>(null);
   const [capcutDraftJob, setCapcutDraftJob] = useState<CapCutDraftExportJob | null>(null);
+  const [lastSuccessfulCapcutDraftJob, setLastSuccessfulCapcutDraftJob] = useState<CapCutDraftExportJob | null>(null);
   const [voiceSamplePath, setVoiceSamplePath] = useState("");
   const [voiceSampleFile, setVoiceSampleFile] = useState<File | null>(null);
   const [voiceSampleAssetId, setVoiceSampleAssetId] = useState("");
@@ -140,6 +143,14 @@ export function App() {
   const [selectedPresetId, setSelectedPresetId] = useState("");
   const [captionStyleScope, setCaptionStyleScope] = useState<CaptionStyleScope>("current_caption");
   const [captionStylePreflight, setCaptionStylePreflight] = useState<CaptionStyleScopePreflight | null>(null);
+  const [brollFit, setBrollFit] = useState<"fit" | "crop">("fit");
+  const [brollLoop, setBrollLoop] = useState(true);
+  const [brollPad, setBrollPad] = useState(false);
+  const [brollTrimStartSec, setBrollTrimStartSec] = useState(0);
+  const [audioGainDb, setAudioGainDb] = useState(0);
+  const [audioFadeInSec, setAudioFadeInSec] = useState(0);
+  const [audioFadeOutSec, setAudioFadeOutSec] = useState(0);
+  const [audioDucking, setAudioDucking] = useState(false);
   const [selectedRangeStartSec, setSelectedRangeStartSec] = useState(0);
   const [selectedRangeEndSec, setSelectedRangeEndSec] = useState(0);
   const [selectedRangePreview, setSelectedRangePreview] = useState<SelectedRangePreview | null>(null);
@@ -343,15 +354,19 @@ export function App() {
         const latestExportJob = latestTimelineJob
           ? findLatestSucceededJob(jobItems, "capcut_export", latestTimelineJob.job_id)
           : null;
-        const subtitle = latestSubtitleJob
-          ? await api.getSubtitle(projectId, latestSubtitleJob.job_id)
+        const latestFinalRenderJob = latestTimelineJob
+          ? findLatestSucceededJob(jobItems, "final_render", latestTimelineJob.job_id)
           : null;
-        const preview = latestPreviewJob
-          ? await api.getPreview(projectId, latestPreviewJob.job_id)
+        const latestCapcutDraftJob = latestTimelineJob
+          ? findLatestSucceededJob(jobItems, "capcut_draft_export", latestTimelineJob.job_id)
           : null;
-        const capcutExport = latestExportJob
-          ? await api.getExport(projectId, latestExportJob.job_id)
-          : null;
+        const [subtitle, preview, capcutExport, finalRender, capcutDraft] = await Promise.all([
+          latestSubtitleJob ? api.getSubtitle(projectId, latestSubtitleJob.job_id) : Promise.resolve(null),
+          latestPreviewJob ? api.getPreview(projectId, latestPreviewJob.job_id) : Promise.resolve(null),
+          latestExportJob ? api.getExport(projectId, latestExportJob.job_id) : Promise.resolve(null),
+          latestFinalRenderJob ? api.getFinalRender(projectId, latestFinalRenderJob.job_id) : Promise.resolve(null),
+          latestCapcutDraftJob ? api.getCapcutDraftExport(projectId, latestCapcutDraftJob.job_id) : Promise.resolve(null),
+        ]);
         let activeTimeline = stableTimeline;
         let activeReview = stableReview;
         let resumedSelection: { segmentId: string | null; fields: string[] } | null = null;
@@ -539,6 +554,10 @@ export function App() {
         setSubtitleJob(activeSubtitle);
         setPreviewJob(activePreview);
         setExportJob(activeExport);
+        setFinalRenderJob(finalRender);
+        setLastSuccessfulFinalRenderJob(finalRender?.status === "succeeded" ? finalRender : null);
+        setCapcutDraftJob(capcutDraft);
+        setLastSuccessfulCapcutDraftJob(capcutDraft?.status === "succeeded" ? capcutDraft : null);
         setBrollAssets(archivedBrollAssets);
         setLoadState("ready");
         try {
@@ -1013,6 +1032,8 @@ export function App() {
       ]);
       setJobs(jobItems);
       setPreviewJob(preview);
+      if (preview.status === "succeeded") setLastSuccessfulPreviewJob(preview);
+      if (preview.status === "failed") setErrorMessage("미리보기 실패: 결과 파일을 만들지 못했습니다.");
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "알 수 없는 오류");
     } finally {
@@ -1089,6 +1110,7 @@ export function App() {
       const jobItems = await api.listJobs(selectedProjectId);
       setJobs(jobItems);
       setFinalRenderJob(finalRender);
+      if (finalRender.status === "succeeded") setLastSuccessfulFinalRenderJob(finalRender);
       if (finalRender.status === "failed") {
         setErrorMessage(`완성본 렌더 실패: ${finalRender.error_message ?? "결과 파일을 만들지 못했습니다."}`);
       }
@@ -1116,6 +1138,7 @@ export function App() {
       const jobItems = await api.listJobs(selectedProjectId);
       setJobs(jobItems);
       setCapcutDraftJob(capcutDraftExport);
+      if (capcutDraftExport.status === "succeeded") setLastSuccessfulCapcutDraftJob(capcutDraftExport);
       if (capcutDraftExport.status === "failed") {
         setErrorMessage(
           `CapCut 초안 내보내기 실패: ${capcutDraftExport.error_message ?? "결과 파일을 만들지 못했습니다."}`,
@@ -2081,7 +2104,11 @@ export function App() {
                 <div>
                   <dt>미리보기 파일</dt>
                   <dd>
-                    {previewJob ? formatDisplayText(previewJob.preview.artifact_kind) : "미시작"}
+                    {previewJob?.status === "succeeded"
+                      ? formatDisplayText(previewJob.preview.artifact_kind)
+                      : lastSuccessfulPreviewJob
+                        ? `마지막 성공 유지 · ${formatDisplayText(lastSuccessfulPreviewJob.preview.artifact_kind)}`
+                        : "미시작"}
                   </dd>
                 </div>
                 <div>
@@ -2101,8 +2128,10 @@ export function App() {
                   <dd>
                     {finalRenderJob?.render
                       ? formatDisplayText(finalRenderJob.render.file_uri)
-                      : finalRenderJob?.status === "failed"
-                        ? "완성본 렌더 실패"
+                      : lastSuccessfulFinalRenderJob?.render
+                        ? `마지막 성공 유지 · ${formatDisplayText(lastSuccessfulFinalRenderJob.render.file_uri)}`
+                        : finalRenderJob?.status === "failed"
+                          ? "완성본 렌더 실패"
                         : "미시작"}
                   </dd>
                 </div>
@@ -2115,8 +2144,10 @@ export function App() {
                   <dd>
                     {capcutDraftJob?.export
                       ? formatDisplayText(capcutDraftJob.export.file_uri)
-                      : capcutDraftJob?.status === "failed"
-                        ? "CapCut 초안 내보내기 실패"
+                      : lastSuccessfulCapcutDraftJob?.export
+                        ? `마지막 성공 유지 · ${formatDisplayText(lastSuccessfulCapcutDraftJob.export.file_uri)}`
+                        : capcutDraftJob?.status === "failed"
+                          ? "CapCut 초안 내보내기 실패"
                         : "미시작"}
                   </dd>
                 </div>
@@ -3401,6 +3432,7 @@ export function App() {
                           {
                             expected_revision: editingSession!.session_revision,
                             asset_id: selectedEditingDraft.brollAssetId,
+                            ...(brollFit !== "fit" || !brollLoop || brollPad || brollTrimStartSec !== 0 ? { media_controls: { fit: brollFit, loop: brollLoop, pad: brollPad, trim_start_sec: brollTrimStartSec } } : {}),
                           },
                         ),
                       )
@@ -3470,6 +3502,7 @@ export function App() {
                             {
                               expected_revision: editingSession!.session_revision,
                               asset_id: selectedEditingDraft.musicAssetId,
+                              ...(audioGainDb !== 0 || audioFadeInSec !== 0 || audioFadeOutSec !== 0 || audioDucking ? { media_controls: { gain_db: audioGainDb, fade_in_sec: audioFadeInSec, fade_out_sec: audioFadeOutSec, ducking: audioDucking } } : {}),
                             },
                           ),
                         { addRegenerationField: "music" },
@@ -3521,6 +3554,18 @@ export function App() {
                       value={selectedEditingDraft.sfxAssetId}
                     />
                   </label>
+                  <div className="action-row" aria-label="오디오 재생 제어">
+                    <label className="field"><span>Gain dB</span><input onChange={(event) => setAudioGainDb(Number(event.target.value))} step="1" type="number" value={audioGainDb} /></label>
+                    <label className="field"><span>Fade in(초)</span><input min="0" onChange={(event) => setAudioFadeInSec(Number(event.target.value))} step="0.1" type="number" value={audioFadeInSec} /></label>
+                    <label className="field"><span>Fade out(초)</span><input min="0" onChange={(event) => setAudioFadeOutSec(Number(event.target.value))} step="0.1" type="number" value={audioFadeOutSec} /></label>
+                    <label className="pill"><input checked={audioDucking} onChange={(event) => setAudioDucking(event.target.checked)} type="checkbox" />나레이션 ducking</label>
+                  </div>
+                  <div className="action-row" aria-label="B롤 재생 제어">
+                    <label className="field"><span>화면 맞춤</span><select onChange={(event) => setBrollFit(event.target.value as "fit" | "crop")} value={brollFit}><option value="fit">fit</option><option value="crop">crop</option></select></label>
+                    <label className="pill"><input checked={brollLoop} onChange={(event) => setBrollLoop(event.target.checked)} type="checkbox" />반복</label>
+                    <label className="pill"><input checked={brollPad} onChange={(event) => setBrollPad(event.target.checked)} type="checkbox" />패드</label>
+                    <label className="field"><span>시작 trim(초)</span><input min="0" onChange={(event) => setBrollTrimStartSec(Number(event.target.value))} step="0.1" type="number" value={brollTrimStartSec} /></label>
+                  </div>
                   <button
                     className="action-button"
                     disabled={
@@ -3540,6 +3585,7 @@ export function App() {
                             {
                               expected_revision: editingSession!.session_revision,
                               asset_id: selectedEditingDraft.sfxAssetId,
+                              ...(audioGainDb !== 0 || audioFadeInSec !== 0 || audioFadeOutSec !== 0 || audioDucking ? { media_controls: { gain_db: audioGainDb, fade_in_sec: audioFadeInSec, fade_out_sec: audioFadeOutSec, ducking: audioDucking } } : {}),
                             },
                           ),
                         { addRegenerationField: "sfx", feedbackAction: "저장" },

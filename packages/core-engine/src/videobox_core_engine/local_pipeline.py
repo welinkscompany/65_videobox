@@ -737,6 +737,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                             "end_sec": clip.end_sec,
                             "clip_type": clip.clip_type,
                             "recommendation_id": clip.recommendation_id,
+                            "media_controls": clip.media_controls,
                         }
                         for clip in track.clips
                     ],

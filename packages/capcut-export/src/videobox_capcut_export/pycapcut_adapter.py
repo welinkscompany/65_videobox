@@ -3,11 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 from pathlib import Path
+import subprocess
 from typing import Any
 import wave
 
 from pycapcut.audio_segment import AudioSegment
-from pycapcut.local_materials import AudioMaterial, VideoMaterial
+from pycapcut.local_materials import AudioMaterial, CropSettings, VideoMaterial
 from pycapcut.script_file import ScriptFile
 from pycapcut.segment import ClipSettings
 from pycapcut.text_segment import TextBackground, TextBorder, TextSegment, TextStyle
@@ -16,6 +17,7 @@ from pycapcut.track import TrackType
 from pycapcut.video_segment import VideoSegment
 
 from videobox_core_engine.canonical_track import canonical_track_type
+from videobox_core_engine.media_controls import normalize_media_controls
 from videobox_domain_models.caption_style import CaptionStyle
 from videobox_storage.timeline_clip_source_resolution import (
     TimelineClipSourceError,
@@ -68,6 +70,8 @@ class PyCapCutRealExportAdapter:
     video_width: int = 1280
     video_height: int = 720
     video_fps: int = 30
+    ffmpeg_binary: str = "ffmpeg"
+    render_timeout_seconds: int = 1800
 
     def export_timeline(
         self,
@@ -118,6 +122,7 @@ class PyCapCutRealExportAdapter:
         if image_overlays:
             script.add_track(TrackType.video, "videobox_image_overlays", relative_index=1)
 
+        warnings: list[str] = []
         for clip in narration_clips:
             self._add_narration_segment(
                 script=script,
@@ -129,18 +134,17 @@ class PyCapCutRealExportAdapter:
         for clip in broll_clips:
             self._add_broll_segment(script=script, project_id=project_id, clip=clip)
         for clip in bgm_clips:
-            self._add_bgm_segment(script=script, project_id=project_id, clip=clip)
+            self._add_bgm_segment(script=script, project_id=project_id, clip=clip, warnings=warnings)
         for clip in sfx_clips:
-            self._add_sfx_segment(script=script, project_id=project_id, clip=clip)
+            self._add_sfx_segment(script=script, project_id=project_id, clip=clip, warnings=warnings)
         for overlay in export_overlays:
             self._add_text_overlay(script=script, overlay=overlay)
         for overlay in image_overlays:
             self._add_image_overlay(script=script, project_id=project_id, overlay=overlay)
 
-        warnings: list[str] = []
         if editing_session is not None:
             script.add_track(TrackType.text, "subtitle")
-            warnings = self._add_styled_captions(script=script, editing_session=editing_session)
+            warnings.extend(self._add_styled_captions(script=script, editing_session=editing_session))
         elif subtitle_file_path is not None:
             script.import_srt(str(subtitle_file_path), "subtitle")
 
@@ -148,7 +152,8 @@ class PyCapCutRealExportAdapter:
         return CapCutDraftExportResult(draft_path=draft_path, capcut_compatibility_warnings=warnings)
 
     def _add_styled_captions(self, *, script: ScriptFile, editing_session: dict[str, Any]) -> list[str]:
-        style = CaptionStyle.from_dict(editing_session.get("caption_style"))
+        raw_style = editing_session.get("caption_style")
+        style = CaptionStyle.from_dict(raw_style) if isinstance(raw_style, dict) else CaptionStyle()
         warnings = []
         if style.shadow_blur_px:
             warnings.append("shadow_blur_px is not supported by CapCut export")
@@ -312,57 +317,152 @@ class PyCapCutRealExportAdapter:
 
     def _add_broll_segment(self, *, script: ScriptFile, project_id: str, clip: dict[str, Any]) -> None:
         resolved = resolve_broll_clip_source(store=self.store, project_id=project_id, clip=clip)
-        material = VideoMaterial(str(resolved.path))
-        placement_start_us = _seconds_to_us(float(clip["start_sec"]))
-        needed_duration_us = _seconds_to_us(
+        target_duration_sec = (
             resolved.target_duration_sec
             if resolved.target_duration_sec is not None
             else resolved.trim_duration_sec or 0.0
         )
+        controls = normalize_media_controls(
+            clip.get("media_controls"), media_kind="broll", duration_sec=max(target_duration_sec, 0.001)
+        )
+        crop_settings = self._broll_crop_settings(path=resolved.path, fit=controls["fit"])
+        material = VideoMaterial(str(resolved.path), crop_settings=crop_settings)
+        placement_start_us = _seconds_to_us(float(clip["start_sec"]))
+        needed_duration_us = _seconds_to_us(target_duration_sec)
         if needed_duration_us <= 0:
             raise PyCapCutExportError("B-roll clip must have a positive target duration.")
         if material.duration <= 0:
             raise PyCapCutExportError(f"B-roll source has no usable duration: {resolved.path}")
 
-        # PyCapCut rejects a source timerange longer than a material.  Repeat
-        # the source as adjacent, non-overlapping segments instead of relying
-        # on a single stretched segment, which keeps the draft editable in
-        # CapCut and fills the requested timeline window exactly.
+        source_start_us = _seconds_to_us(resolved.trim_start_sec + controls["trim_start_sec"])
+        source_available_us = material.duration - source_start_us
+        if source_available_us <= 0:
+            raise PyCapCutExportError(
+                f"B-roll trim starts after the source ends: {resolved.path}. Reduce trim_start_sec."
+            )
+
+        # PyCapCut rejects a source timerange longer than a material. Keep
+        # each source pass editable and use a project-local black pad when
+        # looping is intentionally disabled.
         elapsed_us = 0
-        while elapsed_us < needed_duration_us:
-            segment_duration_us = min(material.duration, needed_duration_us - elapsed_us)
+        while elapsed_us < needed_duration_us and controls["loop"]:
+            segment_duration_us = min(source_available_us, needed_duration_us - elapsed_us)
             segment = VideoSegment(
                 material,
                 Timerange(start=placement_start_us + elapsed_us, duration=segment_duration_us),
-                source_timerange=Timerange(start=0, duration=segment_duration_us),
+                source_timerange=Timerange(start=source_start_us, duration=segment_duration_us),
             )
             script.add_segment(segment, "broll")
             elapsed_us += segment_duration_us
+        if not controls["loop"]:
+            segment_duration_us = min(source_available_us, needed_duration_us)
+            script.add_segment(
+                VideoSegment(
+                    material,
+                    Timerange(start=placement_start_us, duration=segment_duration_us),
+                    source_timerange=Timerange(start=source_start_us, duration=segment_duration_us),
+                ),
+                "broll",
+            )
+            elapsed_us = segment_duration_us
+        if elapsed_us >= needed_duration_us:
+            return
+        if not controls["pad"]:
+            raise PyCapCutExportError(
+                "B-roll source is shorter than its timeline window. Enable loop or pad to preserve timeline duration."
+            )
+        padding_duration_us = needed_duration_us - elapsed_us
+        pad_material = VideoMaterial(str(self._create_black_pad_material(project_id=project_id, duration_us=padding_duration_us)))
+        script.add_segment(
+            VideoSegment(
+                pad_material,
+                Timerange(start=placement_start_us + elapsed_us, duration=padding_duration_us),
+                source_timerange=Timerange(start=0, duration=padding_duration_us),
+            ),
+            "broll",
+        )
 
-    def _add_bgm_segment(self, *, script: ScriptFile, project_id: str, clip: dict[str, Any]) -> None:
+    def _broll_crop_settings(self, *, path: Path, fit: str) -> CropSettings:
+        if fit == "fit":
+            return CropSettings()
+        source = VideoMaterial(str(path))
+        source_ratio = source.width / source.height
+        target_ratio = self.video_width / self.video_height
+        if source_ratio > target_ratio:
+            inset = (1 - target_ratio / source_ratio) / 2
+            return CropSettings(upper_left_x=inset, upper_right_x=1 - inset, lower_left_x=inset, lower_right_x=1 - inset)
+        inset = (1 - source_ratio / target_ratio) / 2
+        return CropSettings(upper_left_y=inset, upper_right_y=inset, lower_left_y=1 - inset, lower_right_y=1 - inset)
+
+    def _create_black_pad_material(self, *, project_id: str, duration_us: int) -> Path:
+        material_path = (
+            self.store.project_root(project_id)
+            / "capcut_draft_materials"
+            / f"videobox_black_pad_{duration_us}_{self.video_width}x{self.video_height}.mp4"
+        )
+        if material_path.is_file():
+            return material_path
+        material_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            result = subprocess.run(
+                [
+                    self.ffmpeg_binary,
+                    "-y",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    f"color=c=black:s={self.video_width}x{self.video_height}:r={self.video_fps}",
+                    "-t",
+                    str(duration_us / _MICROSECONDS_PER_SECOND),
+                    "-an",
+                    "-c:v",
+                    "libx264",
+                    "-pix_fmt",
+                    "yuv420p",
+                    str(material_path),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=self.render_timeout_seconds,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+            raise PyCapCutExportError("Unable to create the B-roll pad material. Install/configure ffmpeg.") from exc
+        if result.returncode != 0:
+            raise PyCapCutExportError(f"Unable to create B-roll pad material: {result.stderr[-800:]}")
+        return material_path
+
+    def _add_bgm_segment(self, *, script: ScriptFile, project_id: str, clip: dict[str, Any], warnings: list[str]) -> None:
         path = resolve_generic_asset_uri(store=self.store, project_id=project_id, asset_uri=str(clip.get("asset_uri") or ""))
         material = AudioMaterial(str(path))
         placement_start_us = _seconds_to_us(float(clip.get("start_sec", 0.0)))
         needed_duration_us = _seconds_to_us(float(clip.get("end_sec", 0.0)) - float(clip.get("start_sec", 0.0)))
         source_duration_us = min(needed_duration_us, material.duration) or material.duration
+        controls = normalize_media_controls(clip.get("media_controls"), media_kind="audio", duration_sec=max(needed_duration_us / _MICROSECONDS_PER_SECOND, 0.001))
         segment = AudioSegment(
             material,
             Timerange(start=placement_start_us, duration=needed_duration_us),
             source_timerange=Timerange(start=0, duration=source_duration_us),
-            volume=0.25,
+            volume=0.25 * (10 ** (controls["gain_db"] / 20)),
         )
+        if controls["fade_in_sec"] or controls["fade_out_sec"]:
+            segment.add_fade(_seconds_to_us(controls["fade_in_sec"]), _seconds_to_us(controls["fade_out_sec"]))
+        if controls["ducking"]:
+            warnings.append("ducking is not natively supported by CapCut draft export; apply it in CapCut after import")
         script.add_segment(segment, "bgm")
 
-    def _add_sfx_segment(self, *, script: ScriptFile, project_id: str, clip: dict[str, Any]) -> None:
+    def _add_sfx_segment(self, *, script: ScriptFile, project_id: str, clip: dict[str, Any], warnings: list[str]) -> None:
         path = resolve_generic_asset_uri(store=self.store, project_id=project_id, asset_uri=str(clip.get("asset_uri") or ""))
         material = AudioMaterial(str(path))
         placement_start_us = _seconds_to_us(float(clip.get("start_sec", 0.0)))
         needed_duration_us = _seconds_to_us(float(clip.get("end_sec", 0.0)) - float(clip.get("start_sec", 0.0)))
         source_duration_us = min(needed_duration_us, material.duration) or material.duration
-        script.add_segment(
-            AudioSegment(material, Timerange(start=placement_start_us, duration=needed_duration_us), source_timerange=Timerange(start=0, duration=source_duration_us)),
-            "sfx",
-        )
+        controls = normalize_media_controls(clip.get("media_controls"), media_kind="audio", duration_sec=max(needed_duration_us / _MICROSECONDS_PER_SECOND, 0.001))
+        segment = AudioSegment(material, Timerange(start=placement_start_us, duration=needed_duration_us), source_timerange=Timerange(start=0, duration=source_duration_us), volume=10 ** (controls["gain_db"] / 20))
+        if controls["fade_in_sec"] or controls["fade_out_sec"]:
+            segment.add_fade(_seconds_to_us(controls["fade_in_sec"]), _seconds_to_us(controls["fade_out_sec"]))
+        if controls["ducking"]:
+            warnings.append("ducking is not natively supported by CapCut draft export; apply it in CapCut after import")
+        script.add_segment(segment, "sfx")
 
     def _add_text_overlay(self, *, script: ScriptFile, overlay: dict[str, Any]) -> None:
         text = str(overlay.get("text") or overlay.get("title") or overlay.get("body") or "").strip()

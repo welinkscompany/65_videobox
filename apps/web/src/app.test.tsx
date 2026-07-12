@@ -1665,6 +1665,43 @@ describe("App", () => {
     expect(await screen.findByDisplayValue("asset_voice_restored_001")).toBeInTheDocument();
   });
 
+  it("restores the last successful final and CapCut artifacts after reload", async () => {
+    const restoredJobs = structuredClone(jobsResponse);
+    restoredJobs.jobs.push(
+      {
+        job_id: "final_render_job_009",
+        job_type: "final_render",
+        status: "succeeded",
+        input_ref: "timeline_build_job_005",
+        output_ref: "final_render_001",
+        error_message: null,
+        started_at: "2026-07-12T00:00:00Z",
+        finished_at: "2026-07-12T00:01:00Z",
+      },
+      {
+        job_id: "capcut_draft_job_009",
+        job_type: "capcut_draft_export",
+        status: "succeeded",
+        input_ref: "timeline_build_job_005",
+        output_ref: "capcut_draft_001",
+        error_message: null,
+        started_at: "2026-07-12T00:01:00Z",
+        finished_at: "2026-07-12T00:02:00Z",
+      },
+    );
+    const fetchMock = createFetchMock({ jobs: restoredJobs });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const firstRender = render(<App />);
+    expect(await screen.findByText(/exports\/final\/output.mp4/i)).toBeInTheDocument();
+    expect(screen.getByText(/exports\/capcut-draft\/draft/i)).toBeInTheDocument();
+    firstRender.unmount();
+
+    render(<App />);
+    expect(await screen.findByText(/exports\/final\/output.mp4/i)).toBeInTheDocument();
+    expect(screen.getByText(/exports\/capcut-draft\/draft/i)).toBeInTheDocument();
+  });
+
   it("renders a final-render failure with a null artifact without unmounting the dashboard", async () => {
     const fetchMock = createFetchMock({
       finalRenderResult: {

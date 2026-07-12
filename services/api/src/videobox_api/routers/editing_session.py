@@ -241,6 +241,7 @@ def build_editing_session_router(orchestrator: ApiOrchestrator, store: LocalProj
                 session_id=session_id,
                 segment_id=segment_id,
                 asset_id=payload.asset_id,
+                media_controls=payload.media_controls,
                 expected_revision=payload.expected_revision,
             )
         except EditingSessionConflict as exc:
@@ -252,7 +253,7 @@ def build_editing_session_router(orchestrator: ApiOrchestrator, store: LocalProj
     @router.patch("/api/projects/{project_id}/editing-sessions/{session_id}/segments/{segment_id}/sfx")
     def patch_editing_session_sfx_override(project_id: str, session_id: str, segment_id: str, payload: BrollOverrideRequest) -> EditingSessionResponse:
         try:
-            result = orchestrator.update_segment_sfx_override(project_id=project_id, session_id=session_id, segment_id=segment_id, asset_id=payload.asset_id, expected_revision=payload.expected_revision)
+            result = orchestrator.update_segment_sfx_override(project_id=project_id, session_id=session_id, segment_id=segment_id, asset_id=payload.asset_id, media_controls=payload.media_controls, expected_revision=payload.expected_revision)
         except EditingSessionConflict as exc:
             return _editing_session_conflict_response(exc)
         except Exception as exc:
@@ -595,6 +596,7 @@ def build_editing_session_router(orchestrator: ApiOrchestrator, store: LocalProj
                 session_id=session_id,
                 segment_id=segment_id,
                 asset_id=payload.asset_id,
+                media_controls=payload.media_controls,
                 expected_revision=payload.expected_revision,
             )
         except EditingSessionConflict as exc:

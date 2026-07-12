@@ -217,10 +217,12 @@ export type CutActionOverrideRequest = RevisionedEditingSessionMutation & {
 
 export type BrollOverrideRequest = RevisionedEditingSessionMutation & {
   asset_id: string;
+  media_controls?: Record<string, unknown>;
 };
 
 export type MusicOverrideRequest = RevisionedEditingSessionMutation & {
   asset_id: string;
+  media_controls?: Record<string, unknown>;
 };
 
 export type ExplanationCardRequest = RevisionedEditingSessionMutation & {

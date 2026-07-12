@@ -46,3 +46,11 @@ def test_output_gating_fast_path_includes_duplicate_tts_output_consumer_regressi
     script_text = script_path.read_text(encoding="utf-8")
 
     assert "review_approval_duplicate_tts_narration_clips_flow_through_preview_and_export_outputs" in script_text
+
+
+def test_fast_path_exposes_the_600_second_release_smoke_mode() -> None:
+    script_path = Path(__file__).resolve().parents[1] / "scripts" / "dev-fast-path.ps1"
+    script_text = script_path.read_text(encoding="utf-8")
+
+    assert '"smoke"' in script_text
+    assert "verify-production-readiness-smoke.py" in script_text

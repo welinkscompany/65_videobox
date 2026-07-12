@@ -13,8 +13,62 @@ from videobox_core_engine.ffmpeg_final_renderer import (
 from videobox_core_engine.ass_subtitles import render_editing_session_ass
 from videobox_domain_models.assets import AssetType
 from videobox_storage.local_project_store import LocalProjectStore
+from videobox_storage.timeline_clip_source_resolution import ResolvedClipSource
 
 FFMPEG_AVAILABLE = shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
+
+
+def test_broll_extract_maps_trim_crop_loop_and_pad_into_one_ffmpeg_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    renderer = FfmpegFinalRenderer(store=store, video_width=320, video_height=240)
+    commands: list[list[str]] = []
+    monkeypatch.setattr(
+        FfmpegFinalRenderer,
+        "_run",
+        lambda _self, command: (commands.append(command) or subprocess.CompletedProcess(command, 0, "", "")),
+    )
+    monkeypatch.setattr(FfmpegFinalRenderer, "_probe_media_duration", lambda _self, _path: 1.3)
+
+    renderer._extract_segment(
+        source=ResolvedClipSource(path=tmp_path / "short.mp4", trim_start_sec=0.1, trim_duration_sec=1.0, target_duration_sec=4.0),
+        output_path=tmp_path / "segment.mp4",
+        video=True,
+        media_controls={"fit": "crop", "loop": False, "pad": True, "trim_start_sec": 0.2},
+    )
+
+    command = commands[0]
+    assert command[2:4] == ["-ss", "0.30000000000000004"]
+    assert "-stream_loop" not in command
+    filter_value = command[command.index("-vf") + 1]
+    assert "force_original_aspect_ratio=increase" in filter_value
+    assert "tpad=stop_mode=add:stop_duration=3.0" in filter_value
+
+
+def test_export_overlay_blocks_a_missing_font_before_starting_ffmpeg(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    renderer = FfmpegFinalRenderer(store=store, overlay_font_file=str(tmp_path / "missing-font.ttf"))
+
+    with pytest.raises(FinalRenderError, match="Overlay font is missing"):
+        renderer._apply_export_overlays(
+            project_id="project_001",
+            video_path=tmp_path / "video.mp4",
+            overlays=[{"text": "Visible message", "start_sec": 0.0, "end_sec": 1.0}],
+            work_dir=tmp_path,
+        )
+
+
+def test_final_renderer_explains_missing_broll_media_before_rendering(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Missing B-roll")
+    renderer = FfmpegFinalRenderer(store=store)
+
+    with pytest.raises(FinalRenderError, match="Unable to resolve B-roll media"):
+        renderer._resolve_broll_clip_source(
+            project_id=project.project_id,
+            clip={"asset_uri": f"local://projects/{project.project_id}/assets/asset_missing", "start_sec": 0.0, "end_sec": 1.0},
+        )
 
 
 @pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg/ffprobe not installed on this machine")

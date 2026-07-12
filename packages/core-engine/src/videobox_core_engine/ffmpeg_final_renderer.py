@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from videobox_core_engine.canonical_track import canonical_track_type
+from videobox_core_engine.media_controls import normalize_media_controls
 from videobox_storage.local_project_store import LocalProjectStore
 from videobox_storage.timeline_clip_source_resolution import (
     ResolvedClipSource,
@@ -33,6 +34,7 @@ class FfmpegFinalRenderer:
     video_fps: int = 30
     bgm_volume: float = 0.25
     overlay_font_file: str = os.environ.get("VIDEBOX_OVERLAY_FONT", r"C:\Windows\Fonts\malgun.ttf")
+    ffprobe_binary: str = "ffprobe"
 
     def _run(self, command: list[str]) -> subprocess.CompletedProcess:
         try:
@@ -47,6 +49,35 @@ class FfmpegFinalRenderer:
         except subprocess.TimeoutExpired as exc:
             raise FinalRenderError(f"ffmpeg timed out after {self.render_timeout_seconds}s.") from exc
 
+    def _probe_media_duration(self, path: Path) -> float:
+        try:
+            result = subprocess.run(
+                [
+                    self.ffprobe_binary,
+                    "-v",
+                    "error",
+                    "-show_entries",
+                    "format=duration",
+                    "-of",
+                    "default=noprint_wrappers=1:nokey=1",
+                    str(path),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=min(self.render_timeout_seconds, 60),
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+            raise FinalRenderError("Unable to inspect B-roll duration. Install/configure ffprobe.") from exc
+        if result.returncode != 0:
+            raise FinalRenderError(f"Unable to inspect B-roll duration for '{path}': {result.stderr[-800:]}")
+        try:
+            duration = float(result.stdout.strip())
+        except ValueError as exc:
+            raise FinalRenderError(f"B-roll source has no readable duration: '{path}'.") from exc
+        if duration <= 0:
+            raise FinalRenderError(f"B-roll source has no usable duration: '{path}'.")
+        return duration
+
     def _resolve_narration_clip_source(
         self, *, project_id: str, timeline: dict[str, Any], clip: dict[str, Any]
     ) -> ResolvedClipSource:
@@ -56,12 +87,22 @@ class FfmpegFinalRenderer:
             raise FinalRenderError(str(exc)) from exc
 
     def _resolve_broll_clip_source(self, *, project_id: str, clip: dict[str, Any]) -> ResolvedClipSource:
-        return resolve_broll_clip_source(store=self.store, project_id=project_id, clip=clip)
+        try:
+            return resolve_broll_clip_source(store=self.store, project_id=project_id, clip=clip)
+        except (TimelineClipSourceError, KeyError, OSError, ValueError) as exc:
+            raise FinalRenderError(
+                f"Unable to resolve B-roll media for '{clip.get('asset_uri')}'. Re-select or re-import the asset."
+            ) from exc
 
     def _resolve_generic_asset_uri(self, *, project_id: str, asset_uri: str) -> Path:
-        return resolve_generic_asset_uri(store=self.store, project_id=project_id, asset_uri=asset_uri)
+        try:
+            return resolve_generic_asset_uri(store=self.store, project_id=project_id, asset_uri=asset_uri)
+        except (TimelineClipSourceError, KeyError, OSError, ValueError) as exc:
+            raise FinalRenderError(
+                f"Unable to resolve media asset '{asset_uri}'. Re-select or re-import the asset."
+            ) from exc
 
-    def _extract_segment(self, *, source: ResolvedClipSource, output_path: Path, video: bool) -> None:
+    def _extract_segment(self, *, source: ResolvedClipSource, output_path: Path, video: bool, media_controls: dict[str, Any] | None = None) -> None:
         command = [self.ffmpeg_binary, "-y"]
         if source.trim_start_sec:
             command += ["-ss", str(source.trim_start_sec)]
@@ -72,11 +113,33 @@ class FfmpegFinalRenderer:
         if output_duration_sec is not None:
             command += ["-t", str(output_duration_sec)]
         if video:
+            controls = normalize_media_controls(media_controls, media_kind="broll", duration_sec=float(output_duration_sec or 0.001))
+            if controls["trim_start_sec"]:
+                command = [self.ffmpeg_binary, "-y", "-ss", str(float(source.trim_start_sec or 0.0) + controls["trim_start_sec"])] + command[2:]
+            if not controls["loop"]:
+                command = [item for index, item in enumerate(command) if not (item == "-stream_loop" or (index and command[index - 1] == "-stream_loop"))]
+            available_duration_sec = self._probe_media_duration(source.path) - float(source.trim_start_sec or 0.0) - controls["trim_start_sec"]
+            if available_duration_sec <= 0:
+                raise FinalRenderError(f"B-roll trim starts after the source ends: '{source.path}'. Reduce trim_start_sec.")
+            needs_padding = bool(
+                output_duration_sec is not None
+                and not controls["loop"]
+                and float(output_duration_sec) > available_duration_sec
+            )
+            if needs_padding and not controls["pad"]:
+                raise FinalRenderError(
+                    "B-roll source is shorter than its timeline window. Enable loop or pad to preserve timeline duration."
+                )
+            if controls["fit"] == "crop":
+                video_filter = f"scale={self.video_width}:{self.video_height}:force_original_aspect_ratio=increase,crop={self.video_width}:{self.video_height},setsar=1"
+            else:
+                video_filter = f"scale={self.video_width}:{self.video_height}:force_original_aspect_ratio=decrease,pad={self.video_width}:{self.video_height}:(ow-iw)/2:(oh-ih)/2,setsar=1"
+            if needs_padding:
+                video_filter += f",tpad=stop_mode=add:stop_duration={float(output_duration_sec) - available_duration_sec}"
             command += [
                 "-an",
                 "-vf",
-                f"scale={self.video_width}:{self.video_height}:force_original_aspect_ratio=decrease,"
-                f"pad={self.video_width}:{self.video_height}:(ow-iw)/2:(oh-ih)/2,setsar=1",
+                video_filter,
                 "-r",
                 str(self.video_fps),
                 "-c:v",
@@ -147,6 +210,10 @@ class FfmpegFinalRenderer:
             text = str(overlay.get("text") or overlay.get("title") or overlay.get("body") or "").strip()
             if not text:
                 continue
+            if not Path(self.overlay_font_file).is_file():
+                raise FinalRenderError(
+                    f"Overlay font is missing: '{self.overlay_font_file}'. Install the font or set VIDEOBOX_OVERLAY_FONT."
+                )
             escaped = text.replace("\\", "\\\\").replace("'", "\\'").replace(":", "\\:")
             font_file = self.overlay_font_file.replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
             text_filters.append(
@@ -250,7 +317,7 @@ class FfmpegFinalRenderer:
             for index, clip in enumerate(broll_clips, start=1):
                 source = self._resolve_broll_clip_source(project_id=project_id, clip=clip)
                 segment_path = work_dir / f"broll_{index:03d}.mp4"
-                self._extract_segment(source=source, output_path=segment_path, video=True)
+                self._extract_segment(source=source, output_path=segment_path, video=True, media_controls=clip.get("media_controls") if isinstance(clip.get("media_controls"), dict) else None)
                 broll_segment_paths.append(segment_path)
             video_path = work_dir / "broll_full.mp4"
             self._concat(segment_paths=broll_segment_paths, output_path=video_path, work_dir=work_dir)
@@ -268,6 +335,17 @@ class FfmpegFinalRenderer:
                     project_id=project_id, asset_uri=str(bgm_clips[0].get("asset_uri") or "")
                 )
                 mixed_path = work_dir / "audio_with_bgm.wav"
+                bgm_clip = bgm_clips[0]
+                bgm_duration = float(bgm_clip.get("end_sec", 0.0)) - float(bgm_clip.get("start_sec", 0.0))
+                bgm_controls = normalize_media_controls(bgm_clip.get("media_controls"), media_kind="audio", duration_sec=max(bgm_duration, 0.001))
+                bgm_filter = f"volume={bgm_controls['gain_db']}dB"
+                if bgm_controls["fade_in_sec"]:
+                    bgm_filter += f",afade=t=in:st=0:d={bgm_controls['fade_in_sec']}"
+                if bgm_controls["fade_out_sec"]:
+                    bgm_filter += f",afade=t=out:st={max(0.0, bgm_duration - bgm_controls['fade_out_sec'])}:d={bgm_controls['fade_out_sec']}"
+                mix_filter = f"[1:a]{bgm_filter}[bgm];[0:a][bgm]amix=inputs=2:duration=first[aout]"
+                if bgm_controls["ducking"]:
+                    mix_filter = f"[1:a]{bgm_filter}[bgm];[bgm][0:a]sidechaincompress=threshold=0.05:ratio=8[ducked];[0:a][ducked]amix=inputs=2:duration=first[aout]"
                 command = [
                     self.ffmpeg_binary,
                     "-y",
@@ -278,7 +356,7 @@ class FfmpegFinalRenderer:
                     "-i",
                     str(bgm_source),
                     "-filter_complex",
-                    f"[1:a]volume={self.bgm_volume}[bgm];[0:a][bgm]amix=inputs=2:duration=first[aout]",
+                    mix_filter,
                     "-map",
                     "[aout]",
                     str(mixed_path),
@@ -299,7 +377,13 @@ class FfmpegFinalRenderer:
                     command += ["-i", str(source)]
                     start_ms = int(float(clip.get("start_sec", 0.0)) * 1000)
                     duration_sec = float(clip.get("end_sec", 0.0)) - float(clip.get("start_sec", 0.0))
-                    filter_parts.append(f"[{index}:a]atrim=duration={duration_sec},adelay={start_ms}|{start_ms}[sfx{index}]")
+                    controls = normalize_media_controls(clip.get("media_controls"), media_kind="audio", duration_sec=max(duration_sec, 0.001))
+                    sfx_filter = f"[{index}:a]volume={controls['gain_db']}dB,atrim=duration={duration_sec}"
+                    if controls["fade_in_sec"]:
+                        sfx_filter += f",afade=t=in:st=0:d={controls['fade_in_sec']}"
+                    if controls["fade_out_sec"]:
+                        sfx_filter += f",afade=t=out:st={max(0.0, duration_sec - controls['fade_out_sec'])}:d={controls['fade_out_sec']}"
+                    filter_parts.append(f"{sfx_filter},adelay={start_ms}|{start_ms}[sfx{index}]")
                     mix_inputs += f"[sfx{index}]"
                 filter_parts.append(f"{mix_inputs}amix=inputs={len(sfx_clips) + 1}:duration=first[aout]")
                 command += ["-filter_complex", ";".join(filter_parts), "-map", "[aout]", str(mixed_path)]

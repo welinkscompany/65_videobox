@@ -541,6 +541,7 @@ class ApiOrchestrator:
         session_id: str,
         segment_id: str,
         asset_id: str,
+        media_controls: dict[str, Any] | None = None,
         expected_revision: int,
     ) -> dict[str, Any]:
         return self.pipeline.update_editing_session_segment_broll_override(
@@ -548,11 +549,12 @@ class ApiOrchestrator:
             session_id=session_id,
             segment_id=segment_id,
             asset_id=asset_id,
+            media_controls=media_controls,
             expected_revision=expected_revision,
         )
 
-    def update_segment_sfx_override(self, *, project_id: str, session_id: str, segment_id: str, asset_id: str, expected_revision: int) -> dict[str, Any]:
-        return self.pipeline.update_editing_session_segment_sfx_override(project_id=project_id, session_id=session_id, segment_id=segment_id, asset_id=asset_id, expected_revision=expected_revision)
+    def update_segment_sfx_override(self, *, project_id: str, session_id: str, segment_id: str, asset_id: str, media_controls: dict[str, Any] | None = None, expected_revision: int) -> dict[str, Any]:
+        return self.pipeline.update_editing_session_segment_sfx_override(project_id=project_id, session_id=session_id, segment_id=segment_id, asset_id=asset_id, media_controls=media_controls, expected_revision=expected_revision)
 
     def clear_segment_sfx_override(
         self,
@@ -766,6 +768,7 @@ class ApiOrchestrator:
         session_id: str,
         segment_id: str,
         asset_id: str,
+        media_controls: dict[str, Any] | None = None,
         expected_revision: int,
     ) -> dict[str, Any]:
         return self.pipeline.update_editing_session_segment_music_override(
@@ -773,6 +776,7 @@ class ApiOrchestrator:
             session_id=session_id,
             segment_id=segment_id,
             asset_id=asset_id,
+            media_controls=media_controls,
             expected_revision=expected_revision,
         )
 

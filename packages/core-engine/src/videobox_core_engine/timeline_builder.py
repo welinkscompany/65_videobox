@@ -12,6 +12,7 @@ from videobox_core_engine.canonical_source_uri import (
 )
 from videobox_domain_models.recommendations import RecommendationRecord
 from videobox_domain_models.segments import SegmentRecord
+from videobox_core_engine.media_controls import normalize_media_controls
 from videobox_timeline_schema.models import (
     TimelineClip,
     TimelineRecord,
@@ -125,6 +126,7 @@ class TimelineBuilder:
                                 end_sec=float(segment["end_sec"]),
                                 clip_type="broll",
                                 recommendation_id=str(recommendation["recommendation_id"]),
+                                media_controls=self._media_controls(recommendation, media_kind="broll", duration_sec=float(segment["end_sec"]) - float(segment["start_sec"])),
                             )
                         )
                     if rec_type == "bgm":
@@ -137,6 +139,7 @@ class TimelineBuilder:
                                 end_sec=float(segment["end_sec"]),
                                 clip_type="bgm",
                                 recommendation_id=str(recommendation["recommendation_id"]),
+                                media_controls=self._media_controls(recommendation, media_kind="audio", duration_sec=float(segment["end_sec"]) - float(segment["start_sec"])),
                             )
                         )
                     if rec_type == "sfx":
@@ -149,6 +152,7 @@ class TimelineBuilder:
                                 end_sec=float(segment["end_sec"]),
                                 clip_type="sfx",
                                 recommendation_id=str(recommendation["recommendation_id"]),
+                                media_controls=self._media_controls(recommendation, media_kind="audio", duration_sec=float(segment["end_sec"]) - float(segment["start_sec"])),
                             )
                         )
                 else:
@@ -216,6 +220,11 @@ class TimelineBuilder:
         payload["auto_apply_allowed"] = _normalize_boolish(payload.get("auto_apply_allowed", False))
         payload["review_required"] = _normalize_boolish(payload.get("review_required", False))
         return payload
+
+    def _media_controls(self, recommendation: dict[str, object], *, media_kind: str, duration_sec: float) -> dict[str, object]:
+        payload = recommendation.get("payload")
+        controls = payload.get("media_controls") if isinstance(payload, dict) else {}
+        return normalize_media_controls(controls, media_kind=media_kind, duration_sec=duration_sec)
 
     def build_review_snapshot(
         self,

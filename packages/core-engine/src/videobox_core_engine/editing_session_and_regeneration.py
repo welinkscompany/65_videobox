@@ -222,6 +222,7 @@ class EditingSessionRegenerationMixin:
         session_id: str,
         segment_id: str,
         asset_id: str,
+        media_controls: dict[str, Any] | None = None,
         expected_revision: int,
     ) -> dict[str, Any]:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
@@ -229,6 +230,7 @@ class EditingSessionRegenerationMixin:
             session=session,
             segment_id=segment_id,
             asset_id=asset_id,
+            media_controls=media_controls,
         )
         return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=updated_session, expected_revision=expected_revision)
 
@@ -528,6 +530,7 @@ class EditingSessionRegenerationMixin:
         session_id: str,
         segment_id: str,
         asset_id: str,
+        media_controls: dict[str, Any] | None = None,
         expected_revision: int,
     ) -> dict[str, Any]:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
@@ -535,6 +538,7 @@ class EditingSessionRegenerationMixin:
             session=session,
             segment_id=segment_id,
             asset_id=asset_id,
+            media_controls=media_controls,
         )
         return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=updated_session, expected_revision=expected_revision)
 
@@ -553,9 +557,9 @@ class EditingSessionRegenerationMixin:
         )
         return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=updated_session, expected_revision=expected_revision)
 
-    def update_editing_session_segment_sfx_override(self, *, project_id: str, session_id: str, segment_id: str, asset_id: str, expected_revision: int) -> dict[str, Any]:
+    def update_editing_session_segment_sfx_override(self, *, project_id: str, session_id: str, segment_id: str, asset_id: str, media_controls: dict[str, Any] | None = None, expected_revision: int) -> dict[str, Any]:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
-        return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=update_segment_sfx_override(session=session, segment_id=segment_id, asset_id=asset_id), expected_revision=expected_revision)
+        return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=update_segment_sfx_override(session=session, segment_id=segment_id, asset_id=asset_id, media_controls=media_controls), expected_revision=expected_revision)
 
     def clear_editing_session_segment_sfx_override(self, *, project_id: str, session_id: str, segment_id: str, expected_revision: int) -> dict[str, Any]:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
@@ -569,6 +573,7 @@ class EditingSessionRegenerationMixin:
         segment_id: str,
         recommendation_id: str,
         asset_id: str,
+        media_controls: dict[str, Any] | None = None,
         expected_revision: int,
     ) -> dict[str, Any]:
         try:

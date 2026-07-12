@@ -116,10 +116,10 @@ Expected: PASS.
 
 **Files:** ffmpeg_final_renderer.py, pycapcut_adapter.py, App.tsx, styles.css, output tests, docs/development-status-2026-06-29.ko.md.
 
-- [ ] Step 1 — Write RED tests for BGM/SFX gain/fade, B-roll crop/fit/loop, missing font/media blocks, visible CapCut warnings.
-- [ ] Step 2 — Add normalized gain_db, fade_in_sec, fade_out_sec, loop, ducking and map once in both adapters while preserving loop/pad/trim.
-- [ ] Step 3 — Preview/final/CapCut errors retain last successful artifact and use existing UI error boundary.
-- [ ] Step 4 — Release verify.
+- [x] Step 1 — Write RED tests for BGM/SFX gain/fade, B-roll crop/fit/loop, missing font/media blocks, visible CapCut warnings.
+- [x] Step 2 — Add normalized gain_db, fade_in_sec, fade_out_sec, loop, ducking and map once in both adapters while preserving loop/pad/trim.
+- [x] Step 3 — Preview/final/CapCut errors retain last successful artifact and use existing UI error boundary.
+- [x] Step 4 — Release verify.
 
 Run: .venv\Scripts\python.exe -m pytest -q
 Run: npm --prefix apps/web test
@@ -127,7 +127,7 @@ Run: npm --prefix apps/web run build
 Run: ./scripts/dev-fast-path.ps1 -Mode smoke
 Expected: PASS. Run a 600-second Korean ingest → edit → SRT → styled MP4 → real CapCut draft smoke; record paths/warnings.
 
-- [ ] Step 5 — Update SSOT, run git status --short and git diff --check, then commit feat: complete detailed editor upgrade.
+- [x] Step 5 — Update SSOT, run git status --short and git diff --check, then commit feat: complete detailed editor upgrade.
 
 ## Coverage self-review
 

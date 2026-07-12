@@ -267,6 +267,7 @@ class CutActionOverrideRequest(BaseModel):
 class BrollOverrideRequest(BaseModel):
     expected_revision: int = Field(ge=1)
     asset_id: str = Field(min_length=1)
+    media_controls: dict[str, object] | None = None
 
     @model_validator(mode="after")
     def validate_asset_id(self) -> "BrollOverrideRequest":

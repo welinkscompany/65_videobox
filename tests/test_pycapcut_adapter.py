@@ -302,3 +302,46 @@ def test_real_capcut_draft_materializes_sfx_audio_track(tmp_path: Path) -> None:
     content = json.loads((draft_path / "draft_content.json").read_text(encoding="utf-8"))
     stored_sfx_path = store.resolve_storage_uri(project_id=project.project_id, storage_uri=sfx_asset.storage_uri)
     assert any(Path(material["path"]) == stored_sfx_path for material in content["materials"]["audios"])
+
+
+@pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg/ffprobe not installed on this machine")
+def test_real_capcut_draft_preserves_broll_trim_crop_loop_pad_and_audio_controls(tmp_path: Path) -> None:
+    """The editable draft must carry the same controls as the final renderer."""
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="CapCut Media Control Contract")
+    narration_path = tmp_path / "narration.wav"
+    _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=4", str(narration_path)])
+    narration_asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.NARRATION_AUDIO, source_path=narration_path)
+    broll_path = tmp_path / "portrait_broll.mp4"
+    _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc=duration=1:size=240x320:rate=15", str(broll_path)])
+    broll_asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=broll_path)
+    bgm_path = tmp_path / "bgm.wav"
+    _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "sine=frequency=220:duration=4", str(bgm_path)])
+    bgm_asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.BGM, source_path=bgm_path)
+
+    result = PyCapCutRealExportAdapter(store=store, video_width=320, video_height=240).export_timeline(
+        project_id=project.project_id,
+        timeline={
+            "narration_source_uri": narration_asset.storage_uri,
+            "tracks": [
+                {"track_type": "narration", "clips": [{"asset_uri": f"local://projects/{project.project_id}/segments/seg_001", "start_sec": 0.0, "end_sec": 4.0}]},
+                {"track_type": "broll", "clips": [{"asset_uri": f"local://projects/{project.project_id}/assets/{broll_asset.asset_id}", "start_sec": 0.0, "end_sec": 4.0, "media_controls": {"fit": "crop", "loop": False, "pad": True, "trim_start_sec": 0.2}}]},
+                {"track_type": "bgm", "clips": [{"asset_uri": f"local://projects/{project.project_id}/assets/{bgm_asset.asset_id}", "start_sec": 0.0, "end_sec": 4.0, "media_controls": {"gain_db": -6, "fade_in_sec": 0.5, "fade_out_sec": 0.5, "ducking": True}}]},
+            ],
+        },
+        drafts_root=tmp_path / "drafts",
+        draft_name="media-control-contract",
+        editing_session={"caption_style": {}, "segments": []},
+    )
+
+    content = json.loads((result.draft_path / "draft_content.json").read_text(encoding="utf-8"))
+    tracks = {track["name"]: track["segments"] for track in content["tracks"]}
+    broll_segments = tracks["broll"]
+    assert sum(segment["target_timerange"]["duration"] for segment in broll_segments) == 4_000_000
+    assert broll_segments[0]["source_timerange"]["start"] == 200_000
+    broll_material = next(material for material in content["materials"]["videos"] if material["path"].endswith("portrait_broll.mp4"))
+    assert broll_material["crop"]["upper_left_y"] > 0
+    assert any(Path(material["path"]).name.startswith("videobox_black_pad_") for material in content["materials"]["videos"])
+    assert tracks["bgm"][0]["volume"] == pytest.approx(0.25 * 10 ** (-6 / 20))
+    assert tracks["bgm"][0]["extra_material_refs"]
+    assert "ducking is not natively supported by CapCut draft export; apply it in CapCut after import" in result.capcut_compatibility_warnings

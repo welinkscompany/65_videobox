@@ -17,6 +17,7 @@ class TimelineClip:
     end_sec: float
     clip_type: str = "narration"
     recommendation_id: str | None = None
+    media_controls: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass(slots=True, frozen=True)

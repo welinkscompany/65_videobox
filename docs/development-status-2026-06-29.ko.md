@@ -1,8 +1,35 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 221. 2026-07-12 detailed editor Task 4 closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
-> 이 문서의 기존 날짜 기반 섹션은 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 221`만 기준으로 본다.
+> 현재 authoritative 상태/next slice 판단은 `## 222. 2026-07-12 detailed editor Task 5 closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 이 문서의 기존 날짜 기반 섹션은 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 222`만 기준으로 본다.
 > 단, `2일 내 1차 데모 완성` 실행 레일은 `## 189`의 장기 우선순위를 그대로 넓게 집행하지 않고, `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`의 축소된 실행 계획을 우선 적용한다.
+
+## 222. 2026-07-12 detailed editor Task 5 closeout
+
+상세 편집기 구현 계획의 Task 5, media controls·output error recovery·release evidence를 TDD로 완료했다. 이로써 `docs/superpowers/plans/2026-07-12-detailed-editor-upgrade-implementation.md`의 Task 1–5가 모두 완료됐다.
+
+- BGM/SFX control은 `gain_db`, `fade_in_sec`, `fade_out_sec`, `ducking`을 정규화해 FFmpeg filter와 real CapCut draft audio segment에 동일하게 반영한다. CapCut이 native ducking을 지원하지 않는 한계는 draft warning으로 명시한다.
+- B-roll control은 `fit/crop`, `loop`, `pad`, `trim_start_sec`을 정규화한다. loop 해제 뒤 짧은 source는 pad가 켜진 경우 FFmpeg black-frame pad와 project-local CapCut black pad material로 timeline window를 정확히 채우고, pad도 끈 경우에는 output 전에 복구 방법이 포함된 오류로 차단한다.
+- 텍스트 overlay font와 B-roll/일반 media asset 누락은 FFmpeg 실행 전 사용자가 re-import/re-select 할 수 있는 메시지로 차단한다.
+- preview/final/CapCut 실패는 nullable artifact를 안전하게 표시하고 재시도 동선을 제공한다. 마지막 성공 preview/final/CapCut artifact는 실패 뒤 유지되며, final/CapCut success job은 새로고침 뒤 jobs API에서 다시 복구한다.
+
+검증:
+
+- RED→GREEN 계약: `tests/test_media_controls.py`, `tests/test_ffmpeg_final_renderer.py`, `tests/test_pycapcut_adapter.py`, `apps/web/src/app.test.tsx`의 media control·missing font/media·failure/retry/reload 경로.
+- full backend: `.venv\\Scripts\\python.exe -m pytest -q` — Python 3.12, 674 passed, warning 1건(`python_multipart` PendingDeprecationWarning).
+- frontend: `npm --prefix apps/web test` — 96 passed; `npm --prefix apps/web run build` — success. 기존 ErrorBoundary intentional throw와 일부 React `act(...)` stderr는 test failure가 아니다.
+- real smoke: `./scripts/dev-fast-path.ps1 -Mode smoke` — 600초 Korean ingest → edit → SRT → styled MP4 → real CapCut draft의 15개 checks 모두 true.
+  - narration: `artifacts/task5-korean-600.wav`, SHA-256 `a0c7f05a7052be735dce56df38a45ae167a9b24cad122a3c518ef9025701ee0f`
+  - SRT: `artifacts/task5-smoke/projects/projects/production-readiness-korean-smoke/subtitles/subtitle_001.srt`
+  - final MP4: `artifacts/task5-smoke/projects/projects/production-readiness-korean-smoke/exports/final_render/export_001/output.mp4`, SHA-256 `448c74034c3981ff7aa5264d12655eba6096b1653261e93d1ffae41a26342f29`
+  - real CapCut: `artifacts/task5-smoke/projects/projects/production-readiness-korean-smoke/exports/capcut_draft/export_002/timeline_002/draft_content.json`
+  - warning: CapCut draft에서 ducking은 native control이 아니므로 CapCut import 뒤 적용하라는 compatibility warning을 반환한다.
+- 대용량 `artifacts/task5-korean-600.wav` 및 smoke output은 Git에 포함하지 않는다.
+
+진행률:
+
+- 상세 편집기 구현 계획 5개 Task 중 Task 1–5 완료로 strict 100%, remaining 0%다.
+- 다음 작업은 기능 구현이 아니라 실제 CapCut desktop에서 10분 프로젝트를 열고, ducking warning을 포함한 수동 open/edit/export UX QA를 3건 수행하는 운영 검증을 우선 권장한다.
 
 ## 221. 2026-07-12 detailed editor Task 4 closeout
 

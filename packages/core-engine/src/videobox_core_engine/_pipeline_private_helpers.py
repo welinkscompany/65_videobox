@@ -725,6 +725,7 @@ class _PipelinePrivateHelpersMixin:
                             "end_sec": clip.end_sec,
                             "clip_type": clip.clip_type,
                             "recommendation_id": clip.recommendation_id,
+                            "media_controls": clip.media_controls,
                         }
                         for clip in track.clips
                     ],
@@ -870,9 +871,10 @@ class _PipelinePrivateHelpersMixin:
             state["recommendations"].append(
                 self._manual_recommendation_payload(
                     segment_id=segment_id,
-                    recommendation_type=RecommendationType.BROLL,
-                    asset_id=str(override["asset_id"]),
-                    reason="Manual B-roll override from editing session.",
+                recommendation_type=RecommendationType.BROLL,
+                asset_id=str(override["asset_id"]),
+                reason="Manual B-roll override from editing session.",
+                media_controls=override.get("media_controls"),
                 )
             )
 
@@ -930,9 +932,10 @@ class _PipelinePrivateHelpersMixin:
             state["recommendations"].append(
                 self._manual_recommendation_payload(
                     segment_id=segment_id,
-                    recommendation_type=RecommendationType.BGM,
-                    asset_id=str(override["asset_id"]),
-                    reason="Manual music override from editing session.",
+                recommendation_type=RecommendationType.BGM,
+                asset_id=str(override["asset_id"]),
+                reason="Manual music override from editing session.",
+                media_controls=override.get("media_controls"),
                 )
             )
 
@@ -985,6 +988,7 @@ class _PipelinePrivateHelpersMixin:
                 recommendation_type=RecommendationType.SFX,
                 asset_id=str(override["asset_id"]),
                 reason="Manual SFX override from editing session requires operator review.",
+                media_controls=override.get("media_controls"),
             )
             recommendation["auto_apply_allowed"] = False
             recommendation["review_required"] = True
@@ -1126,6 +1130,7 @@ class _PipelinePrivateHelpersMixin:
         recommendation_type: RecommendationType,
         asset_id: str,
         reason: str,
+        media_controls: object = None,
     ) -> dict[str, Any]:
         provider_trace = build_provider_trace(final_provider="editing_session_manual")
         return {
@@ -1137,7 +1142,7 @@ class _PipelinePrivateHelpersMixin:
             "reason": reason,
             "auto_apply_allowed": True,
             "review_required": False,
-            "payload": {"provider_trace": provider_trace},
+            "payload": {"provider_trace": provider_trace, "media_controls": deepcopy(media_controls) if isinstance(media_controls, dict) else {}},
             "created_at": self.store._now_iso(),
             "provider_trace": provider_trace,
         }

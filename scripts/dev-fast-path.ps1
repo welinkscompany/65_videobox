@@ -9,7 +9,8 @@ param(
         "current-focused",
         "current-focused-parallel",
         "broader",
-        "all"
+        "all",
+        "smoke"
     )]
     [string]$Mode = "current-focused",
     [string]$BackendPattern = "",
@@ -232,6 +233,21 @@ switch ($Mode) {
         Invoke-Step `
             -Label "Full backend regression" `
             -Command "$pytestCommand -q" `
+            -WorkingDirectory $repoRoot
+    }
+    "smoke" {
+        $artifactRoot = Join-Path $repoRoot "artifacts"
+        $samplePath = Join-Path $artifactRoot "task5-korean-600.wav"
+        if (-not (Test-Path -LiteralPath $samplePath)) {
+            New-Item -ItemType Directory -Force -Path $artifactRoot | Out-Null
+            & (Join-Path $PSScriptRoot "New-ProductionReadinessKoreanSample.ps1") -OutputPath $samplePath
+            if ($LASTEXITCODE -ne 0) {
+                throw "Could not generate the required 600-second Korean smoke narration."
+            }
+        }
+        Invoke-Step `
+            -Label "600-second Korean production readiness smoke" `
+            -Command "& `"$backendPython`" scripts/verify-production-readiness-smoke.py --narration `"$samplePath`" --work-root artifacts/task5-smoke" `
             -WorkingDirectory $repoRoot
     }
     "status" {
