@@ -1,9 +1,14 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   api,
+  ApiConflictError,
   type BrollAsset,
   type CapCutDraftExportJob,
+  type CaptionStyleScope,
+  type CaptionStyleScopePreflight,
+  type EditorFavorite,
+  type EditorPreset,
   type EditingSession,
   type EditingSessionSegment,
   type ExportJob,
@@ -76,6 +81,9 @@ export function App() {
   const [reviewSnapshot, setReviewSnapshot] = useState<ReviewSnapshot | null>(null);
   const [editingSession, setEditingSession] = useState<EditingSession | null>(null);
   const [editingDrafts, setEditingDrafts] = useState<Record<string, EditingSegmentDraft>>({});
+  const editingDraftsRef = useRef<Record<string, EditingSegmentDraft>>({});
+  const editingUserEditsRef = useRef<Record<string, Partial<EditingSegmentDraft>>>({});
+  const preserveEditingDraftsForSessionIdRef = useRef<string | null>(null);
   const [selectedEditingSegmentId, setSelectedEditingSegmentId] = useState<string | null>(null);
   const [selectedRegenerationFields, setSelectedRegenerationFields] = useState<string[]>([]);
   const [partialRegenerationPreflight, setPartialRegenerationPreflight] =
@@ -121,9 +129,20 @@ export function App() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [editingMutationFeedback, setEditingMutationFeedback] =
     useState<EditingMutationFeedback>(null);
+  const [pendingEditingConflict, setPendingEditingConflict] = useState<{
+    session: EditingSession;
+    drafts: Record<string, Partial<EditingSegmentDraft>>;
+  } | null>(null);
+  const [editorPresets, setEditorPresets] = useState<EditorPreset[]>([]);
+  const [editorFavorites, setEditorFavorites] = useState<EditorFavorite[]>([]);
+  const [recentPresetIds, setRecentPresetIds] = useState<string[]>([]);
+  const [selectedPresetId, setSelectedPresetId] = useState("");
+  const [captionStyleScope, setCaptionStyleScope] = useState<CaptionStyleScope>("current_caption");
+  const [captionStylePreflight, setCaptionStylePreflight] = useState<CaptionStyleScopePreflight | null>(null);
   const [isRebuildingTimeline, setIsRebuildingTimeline] = useState(false);
   const [isApprovingTimeline, setIsApprovingTimeline] = useState(false);
   const [isReopeningTimeline, setIsReopeningTimeline] = useState(false);
+
   const [isRenderingSubtitle, setIsRenderingSubtitle] = useState(false);
   const [isRenderingPreview, setIsRenderingPreview] = useState(false);
   const [isExportingCapcut, setIsExportingCapcut] = useState(false);
@@ -174,6 +193,50 @@ export function App() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!selectedProjectId) {
+      setEditorPresets([]);
+      setEditorFavorites([]);
+      setRecentPresetIds([]);
+      return;
+    }
+    let cancelled = false;
+    void Promise.all([
+      api.listEditorPresets(selectedProjectId),
+      api.listEditorFavorites(selectedProjectId),
+      api.listRecentEditorPresetIds(selectedProjectId),
+    ]).then(([presets, favorites, recent]) => {
+      if (cancelled) return;
+      setEditorPresets(presets);
+      setEditorFavorites(favorites);
+      setRecentPresetIds(recent);
+      setSelectedPresetId((current) => current || presets[0]?.preset_id || "");
+    }).catch((error) => {
+      if (!cancelled) setErrorMessage(error instanceof Error ? error.message : "프리셋을 불러오지 못했습니다");
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedProjectId]);
+
+  useEffect(() => {
+    if (!selectedProjectId || !editingSession || !selectedPresetId) return;
+    const preset = editorPresets.find((item) => item.preset_id === selectedPresetId);
+    if (!preset) return;
+    const timer = window.setTimeout(() => {
+      const segmentIds = captionStyleScope === "whole_project" || captionStyleScope === "project_default"
+        ? []
+        : selectedEditingSegmentId ? [selectedEditingSegmentId] : [];
+      void api.previewEditingSessionCaptionStyleScope(selectedProjectId, editingSession.session_id, {
+        expected_revision: editingSession.session_revision,
+        scope: captionStyleScope,
+        segment_ids: segmentIds,
+        style: preset.style,
+      }).then(setCaptionStylePreflight).catch(() => undefined);
+    }, 800);
+    return () => window.clearTimeout(timer);
+  }, [captionStyleScope, editingSession, editorPresets, selectedEditingSegmentId, selectedPresetId, selectedProjectId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -648,7 +711,20 @@ export function App() {
 
   function applyEditingSessionState(session: EditingSession) {
     setEditingSession(session);
-    setEditingDrafts(buildEditingDrafts(session));
+    const drafts = buildEditingDrafts(session);
+    if (preserveEditingDraftsForSessionIdRef.current === session.session_id) {
+      const merged = Object.fromEntries(
+        Object.entries(drafts).map(([segmentId, draft]) => [
+          segmentId,
+          editingDraftsRef.current[segmentId] ?? draft,
+        ]),
+      ) as Record<string, EditingSegmentDraft>;
+      editingDraftsRef.current = merged;
+      setEditingDrafts(merged);
+    } else {
+      editingDraftsRef.current = drafts;
+      setEditingDrafts(drafts);
+    }
     const selection = buildDefaultEditingSelection(session);
     setSelectedEditingSegmentId((current) => current ?? selection.segmentId);
     setSelectedRegenerationFields((current) =>
@@ -656,17 +732,55 @@ export function App() {
     );
   }
 
+  function applyLatestEditingSessionAfterConflict(
+    session: EditingSession,
+    preservedEdits: Record<string, Partial<EditingSegmentDraft>>,
+  ) {
+    preserveEditingDraftsForSessionIdRef.current = session.session_id;
+    setEditingSession(session);
+    const refreshed = buildEditingDrafts(session);
+    const next = Object.fromEntries(
+      Object.entries(refreshed).map(([segmentId, draft]) => [
+        segmentId,
+        { ...draft, ...preservedEdits[segmentId] },
+      ]),
+    ) as Record<string, EditingSegmentDraft>;
+    editingDraftsRef.current = next;
+    setEditingDrafts(next);
+    const preservedSegmentId = session.segments.find((segment) => {
+      const latestDraft = refreshed[segment.segment_id];
+      const preserved = preservedEdits[segment.segment_id];
+      return Boolean(preserved && Object.keys(preserved).length > 0);
+    })?.segment_id;
+    setSelectedEditingSegmentId(
+      preservedSegmentId ??
+        (selectedEditingSegmentId &&
+        session.segments.some((segment) => segment.segment_id === selectedEditingSegmentId)
+          ? selectedEditingSegmentId
+          : buildDefaultEditingSelection(session).segmentId),
+    );
+  }
+
   function updateEditingDraft(
     segmentId: string,
     patch: Partial<EditingSegmentDraft>,
   ) {
-    setEditingDrafts((current) => ({
-      ...current,
+    const next = {
+      ...editingDraftsRef.current,
       [segmentId]: {
-        ...current[segmentId],
+        ...editingDraftsRef.current[segmentId],
         ...patch,
       },
-    }));
+    };
+    editingUserEditsRef.current = {
+      ...editingUserEditsRef.current,
+      [segmentId]: {
+        ...editingUserEditsRef.current[segmentId],
+        ...patch,
+      },
+    };
+    editingDraftsRef.current = next;
+    setEditingDrafts(next);
   }
 
   async function applyEditingMutation(
@@ -685,6 +799,7 @@ export function App() {
     setEditingMutationFeedback(null);
     try {
       const session = await action();
+      editingUserEditsRef.current = {};
       applyEditingSessionState(session);
       if (options?.addRegenerationField) {
         setSelectedRegenerationFields((current) =>
@@ -710,12 +825,23 @@ export function App() {
         message: `${feedbackLabel} ${feedbackAction}됨`,
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "알 수 없는 오류";
-      setErrorMessage(message);
-      setEditingMutationFeedback({
-        kind: "error",
-        message: `${feedbackLabel} ${feedbackAction} 실패 · ${message}`,
-      });
+      if (error instanceof ApiConflictError) {
+        setPendingEditingConflict({
+          session: error.latestSession as EditingSession,
+          drafts: { ...editingUserEditsRef.current },
+        });
+        setEditingMutationFeedback({
+          kind: "error",
+          message: "다른 편집 내용이 있습니다 · 내 입력은 유지됩니다",
+        });
+      } else {
+        const message = error instanceof Error ? error.message : "알 수 없는 오류";
+        setErrorMessage(message);
+        setEditingMutationFeedback({
+          kind: "error",
+          message: `${feedbackLabel} ${feedbackAction} 실패 · ${message}`,
+        });
+      }
     } finally {
       setIsSavingEditingMutation(null);
     }
@@ -2491,6 +2617,109 @@ export function App() {
                       <dd>{preservedEditingSegments.length}</dd>
                     </div>
                   </dl>
+                  <div className="editor-library" aria-label="자막 스타일 라이브러리">
+                    <h3>자막 스타일</h3>
+                    <label className="field">
+                      <span>프리셋</span>
+                      <select
+                        onChange={(event) => {
+                          setSelectedPresetId(event.target.value);
+                          setCaptionStylePreflight(null);
+                        }}
+                        value={selectedPresetId}
+                      >
+                        {editorPresets.map((preset) => (
+                          <option key={preset.preset_id} value={preset.preset_id}>
+                            {preset.name}{recentPresetIds.includes(preset.preset_id) ? " · 최근" : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <button
+                      className="action-button subtle"
+                      disabled={!selectedProjectId || !selectedPresetId}
+                      onClick={() => {
+                        if (!selectedProjectId || !selectedPresetId) return;
+                        const favoriteId = `project:${selectedProjectId}:${selectedPresetId}`;
+                        const enabled = !editorFavorites.some((item) => item.favorite_id === favoriteId);
+                        void api.toggleEditorFavorite(selectedProjectId, favoriteId, {
+                          favorite_type: "preset",
+                          enabled,
+                        }).then(() => setEditorFavorites((current) => enabled
+                          ? [...current.filter((item) => item.favorite_id !== favoriteId), { favorite_id: favoriteId, favorite_type: "preset" }]
+                          : current.filter((item) => item.favorite_id !== favoriteId),
+                        )).catch((error) => setErrorMessage(error instanceof Error ? error.message : "즐겨찾기를 저장하지 못했습니다"));
+                      }}
+                      type="button"
+                    >
+                      {editorFavorites.some((item) => item.favorite_id === `project:${selectedProjectId}:${selectedPresetId}`)
+                        ? "프리셋 즐겨찾기 해제"
+                        : "프리셋 즐겨찾기"}
+                    </button>
+                    <label className="field">
+                      <span>적용 범위</span>
+                      <select
+                        onChange={(event) => {
+                          setCaptionStyleScope(event.target.value as CaptionStyleScope);
+                          setCaptionStylePreflight(null);
+                        }}
+                        value={captionStyleScope}
+                      >
+                        <option value="current_caption">현재 자막</option>
+                        <option value="selected_captions">선택 자막</option>
+                        <option value="from_current">현재부터</option>
+                        <option value="whole_project">전체 프로젝트</option>
+                        <option value="project_default">프로젝트 기본값</option>
+                      </select>
+                    </label>
+                    {selectedPresetId && !editorPresets.some((preset) => preset.preset_id === selectedPresetId) ? (
+                      <p className="error-copy">선택한 프리셋을 찾을 수 없습니다.</p>
+                    ) : null}
+                    <button
+                      className="action-button subtle"
+                      disabled={!selectedProjectId || !activeEditingSessionId || !selectedPresetId}
+                      onClick={() => {
+                        const preset = editorPresets.find((item) => item.preset_id === selectedPresetId);
+                        if (!preset || !selectedProjectId || !activeEditingSessionId) return;
+                        const segmentIds = captionStyleScope === "whole_project" || captionStyleScope === "project_default"
+                          ? []
+                          : captionStyleScope === "selected_captions"
+                            ? selectedRegenerationFields.length > 0 && selectedEditingSegmentId ? [selectedEditingSegmentId] : []
+                            : selectedEditingSegmentId ? [selectedEditingSegmentId] : [];
+                        void api.previewEditingSessionCaptionStyleScope(selectedProjectId, activeEditingSessionId, {
+                          expected_revision: editingSession.session_revision,
+                          scope: captionStyleScope,
+                          segment_ids: segmentIds,
+                          style: preset.style,
+                        }).then(setCaptionStylePreflight).catch((error) => setErrorMessage(error instanceof Error ? error.message : "범위를 확인하지 못했습니다"));
+                      }}
+                      type="button"
+                    >
+                      적용 범위 확인
+                    </button>
+                    {captionStylePreflight ? (
+                      <div className="confirmation-card">
+                        <p>{`영향 자막 ${captionStylePreflight.affected_segment_ids.length}개`}</p>
+                        <button
+                          className="action-button primary"
+                          onClick={() => {
+                            const preset = editorPresets.find((item) => item.preset_id === selectedPresetId);
+                            if (!preset || !selectedProjectId || !activeEditingSessionId) return;
+                            void applyEditingMutation("caption-style", () => api.updateEditingSessionCaptionStyle(selectedProjectId, activeEditingSessionId, {
+                              expected_revision: editingSession.session_revision,
+                              scope: captionStyleScope,
+                              segment_ids: captionStylePreflight.affected_segment_ids,
+                              style: preset.style,
+                            }));
+                            void api.markRecentEditorPreset(selectedProjectId, preset.preset_id).then(setRecentPresetIds);
+                          }}
+                          type="button"
+                        >
+                          영향 범위에 적용
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
                   <label className="field">
                     <span>대상 세그먼트</span>
                     <select
@@ -2794,6 +3023,21 @@ export function App() {
                       {editingMutationFeedback.message}
                     </p>
                   ) : null}
+                  {pendingEditingConflict ? (
+                    <button
+                      className="action-button subtle"
+                      onClick={() => {
+                        applyLatestEditingSessionAfterConflict(
+                          pendingEditingConflict.session,
+                          pendingEditingConflict.drafts,
+                        );
+                        setPendingEditingConflict(null);
+                      }}
+                      type="button"
+                    >
+                      최신 내용 적용
+                    </button>
+                  ) : null}
                   <label className="field">
                     <span>자막</span>
                     <input
@@ -2969,6 +3213,27 @@ export function App() {
                       })}
                     </select>
                   </label>
+                  <button
+                    className="action-button subtle"
+                    disabled={!selectedProjectId || !selectedEditingDraft.brollAssetId}
+                    onClick={() => {
+                      if (!selectedProjectId || !selectedEditingDraft.brollAssetId) return;
+                      const favoriteId = `pack:local:${selectedEditingDraft.brollAssetId}`;
+                      const enabled = !editorFavorites.some((item) => item.favorite_id === favoriteId);
+                      void api.toggleEditorFavorite(selectedProjectId, favoriteId, {
+                        favorite_type: "media",
+                        enabled,
+                      }).then(() => setEditorFavorites((current) => enabled
+                        ? [...current.filter((item) => item.favorite_id !== favoriteId), { favorite_id: favoriteId, favorite_type: "media" }]
+                        : current.filter((item) => item.favorite_id !== favoriteId),
+                      )).catch((error) => setErrorMessage(error instanceof Error ? error.message : "B롤 즐겨찾기를 저장하지 못했습니다"));
+                    }}
+                    type="button"
+                  >
+                    {editorFavorites.some((item) => item.favorite_id === `pack:local:${selectedEditingDraft.brollAssetId}`)
+                      ? "B롤 즐겨찾기 해제"
+                      : "B롤 즐겨찾기"}
+                  </button>
                   <div className="track-card">
                     <h3>선택 B롤</h3>
                     {selectedBrollAsset ? (
@@ -2981,7 +3246,7 @@ export function App() {
                       </>
                     ) : selectedEditingDraft.brollAssetId ? (
                       <>
-                        <strong>수동 ID</strong>
+                        <strong>선택한 B롤 자산을 찾을 수 없습니다</strong>
                         <span>{selectedEditingDraft.brollAssetId}</span>
                       </>
                     ) : (

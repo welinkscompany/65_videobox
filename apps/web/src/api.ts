@@ -170,6 +170,18 @@ export type CreateEditingSessionRequest = {
   timeline_job_id: string;
 };
 
+export type EditorPreset = {
+  preset_id: string;
+  name: string;
+  scope: "built_in" | "project" | "global";
+  style: CaptionStyleSnapshot;
+};
+
+export type EditorFavorite = {
+  favorite_id: string;
+  favorite_type: "media" | "preset";
+};
+
 type RevisionedEditingSessionMutation = {
   expected_revision: number;
 };
@@ -466,6 +478,29 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  listEditorPresets: (projectId: string) =>
+    request<EditorPreset[]>(`/api/projects/${projectId}/editor-library/presets`),
+  listEditorFavorites: (projectId: string) =>
+    request<EditorFavorite[]>(`/api/projects/${projectId}/editor-library/favorites`),
+  listRecentEditorPresetIds: (projectId: string) =>
+    request<string[]>(`/api/projects/${projectId}/editor-library/recent-presets`),
+  markRecentEditorPreset: (projectId: string, presetId: string) =>
+    request<string[]>(`/api/projects/${projectId}/editor-library/recent-presets/${presetId}`, {
+      method: "PUT",
+    }),
+  toggleEditorFavorite: (
+    projectId: string,
+    favoriteId: string,
+    payload: { favorite_type: EditorFavorite["favorite_type"]; enabled: boolean },
+  ) =>
+    request<EditorFavorite & { enabled: boolean }>(
+      `/api/projects/${projectId}/editor-library/favorites/${favoriteId}`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      },
+    ),
   createProject: (payload: { name: string }) =>
     request<Project>("/api/projects", {
       method: "POST",
@@ -603,7 +638,7 @@ export const api = {
   ) =>
     request<CaptionStyleScopePreflight>(
       `/api/projects/${projectId}/editing-sessions/${sessionId}/caption-style/preflight`,
-      { method: 'POST', body: JSON.stringify(payload) },
+      { method: 'POST', headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) },
     ),
   updateEditingSessionCaptionStyle: (
     projectId: string,
@@ -612,7 +647,7 @@ export const api = {
   ) =>
     request<EditingSession>(
       `/api/projects/${projectId}/editing-sessions/${sessionId}/caption-style`,
-      { method: 'PATCH', body: JSON.stringify(payload) },
+      { method: 'PATCH', headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) },
     ),
   updateEditingSessionCaption: (
     projectId: string,

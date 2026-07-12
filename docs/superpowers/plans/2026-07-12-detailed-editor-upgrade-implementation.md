@@ -91,11 +91,11 @@ git commit -m "feat: persist revisioned caption styles"
 
 **Files:** user_library_store.py, API files, apps/web/src/api.ts, App.tsx, styles.css, app.test.tsx, test_user_library_store.py, test_api_editor_favorites.py.
 
-- [ ] Step 1 — Write RED tests for immutable built-ins, project/global snapshots, idempotent favorite toggle, missing display, and 409 UI recovery without loss.
-- [ ] Step 2 — Run RED: .venv\Scripts\python.exe -m pytest tests/test_user_library_store.py tests/test_api_editor_favorites.py -q; npm --prefix apps/web test -- --run src/app.test.tsx. Expected: FAIL.
-- [ ] Step 3 — Implement UserLibraryStore at <projects_root>/../videobox-user-library. Use IDs project:<project_id>:<preset_id> and pack:<pack_id>:<asset_id>.
-- [ ] Step 4 — Add panel, scope preflight confirmation, favorite/recent, 800ms debounce, retry, stale compare/reload, restored selection, approximate preview label.
-- [ ] Step 5 — Verify and commit.
+- [x] Step 1 — Write RED tests for immutable built-ins, project/global snapshots, idempotent favorite toggle, missing display, and 409 UI recovery without loss.
+- [x] Step 2 — Run RED: .venv\Scripts\python.exe -m pytest tests/test_user_library_store.py tests/test_api_editor_favorites.py -q; npm --prefix apps/web test -- --run src/app.test.tsx. Expected: FAIL.
+- [x] Step 3 — Implement UserLibraryStore at <projects_root>/../videobox-user-library. Use IDs project:<project_id>:<preset_id> and pack:<pack_id>:<asset_id>.
+- [x] Step 4 — Add panel, scope preflight confirmation, favorite/recent, 800ms debounce, retry, stale compare/reload, restored selection, approximate preview label.
+- [x] Step 5 — Verify and commit.
 
 Run: .venv\Scripts\python.exe -m pytest tests/test_user_library_store.py tests/test_api_editor_favorites.py -q; npm --prefix apps/web test; npm --prefix apps/web run build
 Expected: PASS.

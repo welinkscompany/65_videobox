@@ -15,6 +15,7 @@ from videobox_api.response_normalizers import (
 )
 from videobox_api.routers.assets import build_assets_router
 from videobox_api.routers.editing_session import build_editing_session_router
+from videobox_api.routers.editor_library import build_editor_library_router
 from videobox_api.routers.gemini_keys import build_gemini_keys_router
 from videobox_api.routers.jobs import build_jobs_router
 from videobox_api.routers.outputs import build_outputs_router
@@ -38,6 +39,7 @@ from videobox_core_engine.settings import (
 from videobox_provider_interfaces.gemini import GeminiHTTPTransport, GeminiRESTStructuredProvider
 from videobox_provider_interfaces.llm import LLMProviderConfig
 from videobox_storage.local_project_store import LocalProjectStore
+from videobox_storage.user_library_store import UserLibraryStore
 
 # Re-exported for backward compatibility: tests/test_api.py and a few other
 # test modules import these names directly from videobox_api.main rather
@@ -69,6 +71,7 @@ def create_app(
 ) -> FastAPI:
     app = FastAPI(title="VideoBox API", version="0.1.0")
     store = LocalProjectStore(projects_root or DEFAULT_PROJECTS_ROOT)
+    user_library_store = UserLibraryStore(store.projects_root.parent / "videobox-user-library")
     resolved_local_runtime_config = local_runtime_config or LocalOpenAICompatibleRuntimeConfig()
     runtime_service_factory = local_first_runtime_service_factory or (
         lambda project_store: build_local_first_runtime_service(
@@ -123,6 +126,7 @@ def create_app(
     app.include_router(build_jobs_router(orchestrator))
     app.include_router(build_timeline_router(orchestrator))
     app.include_router(build_editing_session_router(orchestrator, store))
+    app.include_router(build_editor_library_router(user_library_store))
     app.include_router(build_review_router(orchestrator))
     app.include_router(build_outputs_router(orchestrator))
     app.include_router(build_gemini_keys_router(orchestrator))

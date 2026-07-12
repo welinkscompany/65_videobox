@@ -60,4 +60,25 @@ describe("caption style API conflicts", () => {
     );
     vi.unstubAllGlobals();
   });
+
+  it("loads editor presets and toggles canonical media favorites", async () => {
+    const fetchMock = vi.fn().mockImplementation(
+      () => Promise.resolve(new Response(JSON.stringify([]), { status: 200 })),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.listEditorPresets("project_001");
+    await api.toggleEditorFavorite("project_001", "pack:starter:asset_001", {
+      favorite_type: "media",
+      enabled: true,
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/projects/project_001/editor-library/presets", undefined);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/projects/project_001/editor-library/favorites/pack:starter:asset_001",
+      expect.objectContaining({ method: "PUT" }),
+    );
+    vi.unstubAllGlobals();
+  });
 });

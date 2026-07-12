@@ -220,6 +220,17 @@ class CreateEditingSessionRequest(BaseModel):
     timeline_job_id: str = Field(min_length=1)
 
 
+class EditorPresetRequest(BaseModel):
+    name: str = Field(min_length=1)
+    style: dict[str, Any]
+    global_scope: bool = False
+
+
+class EditorFavoriteRequest(BaseModel):
+    favorite_type: str = Field(pattern="^(media|preset)$")
+    enabled: bool
+
+
 class CaptionOverrideRequest(BaseModel):
     expected_revision: int = Field(ge=1)
     caption_text: str = Field(min_length=1)

@@ -1,8 +1,30 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 219. 2026-07-12 detailed editor Task 2 closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
-> 이 문서의 `## 1`부터 `## 218`까지는 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 219`만 기준으로 본다.
+> 현재 authoritative 상태/next slice 판단은 `## 220. 2026-07-12 detailed editor Task 3 closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 이 문서의 `## 1`부터 `## 219`까지는 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 220`만 기준으로 본다.
 > 단, `2일 내 1차 데모 완성` 실행 레일은 `## 189`의 장기 우선순위를 그대로 넓게 집행하지 않고, `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`의 축소된 실행 계획을 우선 적용한다.
+
+## 220. 2026-07-12 detailed editor Task 3 closeout
+
+상세 편집기 구현 계획의 Task 3, preset/favorites/browser recovery를 TDD로 완료했다.
+
+- built-in caption preset은 불변이며 project/global snapshot은 project artifact 밖 `videobox-user-library/user_library.json`에 저장된다. 최근 preset도 재시작 뒤 보존한다.
+- favorite은 idempotent PUT이며 preset은 `project:<project_id>:<preset_id>`, local B-roll은 `pack:local:<asset_id>` canonical ID를 사용한다.
+- 편집 화면은 preset/최근 항목, 즐겨찾기 토글, scope preflight와 명시적 적용 확인을 제공한다. preset/scope 변경 뒤 800ms debounce로 영향을 다시 계산한다.
+- 409은 latest session을 안내하고, 사용자가 최신 내용을 적용하면 직접 수정한 draft field와 해당 선택 segment를 보존한다. 누락 preset/B-roll은 명확한 오류 문구로 표시한다.
+
+검증:
+
+- RED: UserLibraryStore recent/global snapshot 부재, preset/B-roll favorite UI 부재, 409 latest-session draft 손실을 먼저 재현했다.
+- focused storage/API: `.venv\\Scripts\\python.exe -m pytest tests/test_user_library_store.py tests/test_api_editor_favorites.py -q` — 4 passed (Starlette deprecation warning 1건).
+- full backend: `.venv\\Scripts\\python.exe -m pytest -q` — Python 3.12, 657 passed (동일 경고 1건).
+- frontend: `npm --prefix apps/web test` — 94 passed; `npm --prefix apps/web run build` success.
+- `git diff --check` success.
+
+진행률:
+
+- 상세 편집기 구현 계획 5개 Task 중 Task 1–3 완료로 strict 60%, remaining 40%다.
+- 다음 Task는 fixed-track timeline 및 selected-range preview를 다루는 Task 4다.
 
 ## 219. 2026-07-12 detailed editor Task 2 closeout
 

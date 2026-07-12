@@ -625,6 +625,7 @@ function createFetchMock({
   candidateReviewStatus,
   candidatePreflightStatus,
   editingMutationStatus,
+  editingMutationConflictSession,
   reviewSnapshot = reviewSnapshotResponse,
   candidateReviewSnapshot = candidateReviewSnapshotResponse,
   partialRegenerationResult = partialRegenerationResultResponse,
@@ -648,6 +649,7 @@ function createFetchMock({
   candidateReviewStatus?: number;
   candidatePreflightStatus?: number;
   editingMutationStatus?: number;
+  editingMutationConflictSession?: EditingSession;
   reviewSnapshot?: ReviewSnapshot;
   candidateReviewSnapshot?: ReviewSnapshot;
   partialRegenerationResult?: typeof partialRegenerationResultResponse;
@@ -1025,12 +1027,38 @@ function createFetchMock({
       }
       return new Response(JSON.stringify(latestEditingSession));
     }
+    if (url.endsWith("/caption-style/preflight") && init?.method === "POST") {
+      return new Response(JSON.stringify({ affected_segment_ids: ["seg_002"] }));
+    }
+    if (url.endsWith("/caption-style") && init?.method === "PATCH") {
+      return new Response(JSON.stringify(state.editingSession));
+    }
+    if (url.endsWith("/api/projects/project_001/editor-library/presets")) {
+      return new Response(JSON.stringify([
+        { preset_id: "builtin:clean", name: "Clean", scope: "built_in", style: { font_size: 42 } },
+      ]));
+    }
+    if (url.endsWith("/api/projects/project_001/editor-library/favorites")) {
+      return new Response(JSON.stringify([]));
+    }
+    if (/\/api\/projects\/project_001\/editor-library\/favorites\//.test(url) && init?.method === "PUT") {
+      return new Response(JSON.stringify({ favorite_id: url.split("/").pop(), favorite_type: "preset", enabled: true }));
+    }
+    if (url.endsWith("/api/projects/project_001/editor-library/recent-presets")) {
+      return new Response(JSON.stringify([]));
+    }
     if (
       url.endsWith(
         "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/caption",
       ) &&
       init?.method === "PATCH"
     ) {
+      if (editingMutationConflictSession) {
+        return new Response(
+          JSON.stringify({ latest_session: editingMutationConflictSession }),
+          { status: 409 },
+        );
+      }
       if (editingMutationStatus != null && editingMutationStatus >= 400) {
         return new Response("caption save failed", { status: editingMutationStatus });
       }
@@ -2803,6 +2831,67 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: /자막 저장/i }));
 
     expect(await screen.findByText(/자막 저장 실패/i)).toBeInTheDocument();
+  });
+
+  it("reloads the latest session after a 409 without discarding the operator caption draft", async () => {
+    const latestSession = {
+      ...structuredClone(editingSessionResponse),
+      session_revision: 2,
+      segments: editingSessionResponse.segments.map((segment) =>
+        segment.segment_id === "seg_002"
+          ? { ...segment, caption_text: "Other operator update" }
+          : segment,
+      ),
+    };
+    await renderStartedEditingSession(createFetchMock({ editingMutationConflictSession: latestSession }));
+
+    fireEvent.click(screen.getByRole("button", { name: /seg_002/i }));
+    const captionInput = screen.getByDisplayValue("Team meeting overview");
+    fireEvent.input(captionInput, {
+      target: { value: "Keep my unsaved caption" },
+    });
+    expect(await screen.findByText("Keep my unsaved caption")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /자막 저장/i }));
+
+    expect(await screen.findByText(/다른 편집 내용이 있습니다/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /최신 내용 적용/i }));
+    expect(await screen.findByDisplayValue("Keep my unsaved caption")).toBeInTheDocument();
+  });
+
+  it("marks the selected caption preset as a project-scoped favorite", async () => {
+    const fetchMock = await renderStartedEditingSession();
+
+    fireEvent.click(await screen.findByRole("button", { name: /프리셋 즐겨찾기/i }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/projects/project_001/editor-library/favorites/project:project_001:builtin:clean",
+        expect.objectContaining({
+          method: "PUT",
+          body: JSON.stringify({ favorite_type: "preset", enabled: true }),
+        }),
+      ),
+    );
+  });
+
+  it("marks a selected B-roll asset with a canonical media-pack favorite id", async () => {
+    const fetchMock = await renderStartedEditingSession();
+    fireEvent.click(screen.getByRole("button", { name: /seg_002/i }));
+    fireEvent.change(screen.getByRole("combobox", { name: /B롤 선택/i }), {
+      target: { value: "asset_manual_002" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /B롤 즐겨찾기/i }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/projects/project_001/editor-library/favorites/pack:local:asset_manual_002",
+        expect.objectContaining({
+          method: "PUT",
+          body: JSON.stringify({ favorite_type: "media", enabled: true }),
+        }),
+      ),
+    );
   });
 
   it("filters archived B-roll assets by display name tags and asset id before saving", async () => {
