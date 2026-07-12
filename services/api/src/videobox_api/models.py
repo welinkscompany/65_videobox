@@ -652,6 +652,16 @@ class CapCutDraftExportArtifactResponse(BaseModel):
     status: str
     created_at: str | None = None
     notes: list[str] = Field(default_factory=list)
+    handoff: "CapCutDraftHandoffResponse | None" = None
+
+
+class CapCutDraftHandoffResponse(BaseModel):
+    status: str
+    source_file_uri: str
+    registered_project_path: str | None = None
+    error_message: str | None = None
+    registered_at: str | None = None
+    reused: bool = False
 
 
 class CapCutDraftExportJobResponse(StartJobResponse):

@@ -8,6 +8,7 @@ import wave
 import pytest
 
 from videobox_capcut_export.pycapcut_adapter import CapCutDraftExportResult, PyCapCutRealExportAdapter
+from videobox_core_engine.capcut_handoff import CapCutHandoffService
 from videobox_core_engine.local_pipeline import LocalPipelineRunner
 from videobox_domain_models.jobs import JobStatus, JobType
 from videobox_storage.local_project_store import LocalProjectStore
@@ -164,6 +165,32 @@ def test_capcut_draft_export_persists_adapter_compatibility_warnings(tmp_path: P
 
     persisted = runner.get_capcut_draft_export_result(project_id=project.project_id, job_id=result["job_id"])
     assert persisted["export"]["notes"] == ["ducking warning"]
+
+
+def test_register_capcut_draft_handoff_persists_source_and_registered_project_paths(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="CapCut handoff persistence")
+    local_app_data = tmp_path / "LocalAppData"
+    executable = local_app_data / "CapCut" / "Apps" / "8.7.0" / "CapCut.exe"
+    executable.parent.mkdir(parents=True)
+    executable.write_bytes(b"capcut")
+    (local_app_data / "CapCut" / "User Data" / "Projects" / "com.lveditor.draft").mkdir(parents=True)
+    runner = LocalPipelineRunner(
+        store,
+        pycapcut_exporter=_FakePyCapCutExporter(),
+        capcut_handoff_service=CapCutHandoffService(local_app_data=local_app_data),
+    )
+    timeline_job_id = _build_approved_timeline_job(store, runner, project.project_id)
+    export_job = runner.start_capcut_draft_export(project_id=project.project_id, timeline_job_id=timeline_job_id)
+
+    handoff = runner.register_capcut_draft_handoff(project_id=project.project_id, job_id=export_job["job_id"])
+    persisted = runner.get_capcut_draft_export_result(project_id=project.project_id, job_id=export_job["job_id"])
+
+    assert handoff["status"] == "ready"
+    assert handoff["source_file_uri"] == persisted["export"]["file_uri"]
+    assert handoff["registered_project_path"].endswith(f"videobox-{persisted['export']['export_id']}")
+    assert persisted["export"]["handoff"] == handoff
+    assert Path(handoff["registered_project_path"]).joinpath("draft_content.json").is_file()
 
 
 def test_capcut_draft_export_result_preserves_failed_job_reason_with_null_artifact(tmp_path: Path) -> None:

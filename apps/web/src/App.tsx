@@ -99,6 +99,7 @@ export function App() {
   const [lastSuccessfulFinalRenderJob, setLastSuccessfulFinalRenderJob] = useState<FinalRenderJob | null>(null);
   const [capcutDraftJob, setCapcutDraftJob] = useState<CapCutDraftExportJob | null>(null);
   const [lastSuccessfulCapcutDraftJob, setLastSuccessfulCapcutDraftJob] = useState<CapCutDraftExportJob | null>(null);
+  const [isRegisteringCapcutHandoff, setIsRegisteringCapcutHandoff] = useState(false);
   const [voiceSamplePath, setVoiceSamplePath] = useState("");
   const [voiceSampleFile, setVoiceSampleFile] = useState<File | null>(null);
   const [voiceSampleAssetId, setVoiceSampleAssetId] = useState("");
@@ -1682,6 +1683,24 @@ export function App() {
     }), { addRegenerationField: "timeline_structure" });
   }
 
+  async function handleCapcutDraftHandoff() {
+    if (!selectedProjectId || !capcutDraftJob?.export) return;
+    setIsRegisteringCapcutHandoff(true);
+    try {
+      const result = await api.registerCapcutDraftHandoff(selectedProjectId, capcutDraftJob.job_id);
+      setCapcutDraftJob((current) =>
+        current?.export ? { ...current, export: { ...current.export, handoff: result.handoff } } : current,
+      );
+      if (result.handoff.status === "failed") {
+        setErrorMessage(`CapCut 등록 실패: ${result.handoff.error_message ?? "등록 경로를 준비하지 못했습니다."}`);
+      }
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "CapCut 프로젝트 등록에 실패했습니다.");
+    } finally {
+      setIsRegisteringCapcutHandoff(false);
+    }
+  }
+
   function handleProjectCreated(project: Project) {
     setProjects((current) => [project, ...current.filter((item) => item.project_id !== project.project_id)]);
     setSelectedProjectId(project.project_id);
@@ -1927,6 +1946,20 @@ export function App() {
                 CapCut 초안 다시 시도
               </button>
             ) : null}
+            {capcutDraftJob?.export && capcutDraftJob.export.handoff?.status !== "ready" ? (
+              <button
+                className="action-button subtle"
+                disabled={isRegisteringCapcutHandoff}
+                onClick={() => void handleCapcutDraftHandoff()}
+                type="button"
+              >
+            {isRegisteringCapcutHandoff
+              ? "CapCut 등록 중"
+              : capcutDraftJob.export.handoff?.status === "failed"
+                ? "CapCut 등록 다시 시도"
+                : "CapCut에 등록"}
+              </button>
+            ) : null}
             <button
               className={canApproveTimeline ? "action-button success" : "action-button"}
               disabled={!canApproveTimeline || isApprovingTimeline}
@@ -2162,6 +2195,17 @@ export function App() {
                   </ul>
                 </div>
               ) : null}
+          {capcutDraftJob?.export?.handoff?.status === "ready" ? (
+                <div className="loading-banner" role="status">
+                  <strong>CapCut에 열기 준비</strong>
+                  <p>{formatDisplayText(capcutDraftJob.export.handoff.registered_project_path ?? "등록 경로 없음")}</p>
+                </div>
+          ) : null}
+          {capcutDraftJob?.export?.handoff?.status === "failed" ? (
+            <p className="error-banner">
+              CapCut 등록 실패: {formatDisplayText(capcutDraftJob.export.handoff.error_message ?? "알 수 없는 오류")}
+            </p>
+          ) : null}
               {finalRenderJob?.status === "failed" ? (
                 <p className="error-banner">
                   완성본 렌더 실패: {finalRenderJob.error_message ?? "결과 파일을 만들지 못했습니다."}

@@ -63,6 +63,7 @@ def create_app(
     whisper_stt_config: WhisperSTTConfig | None = None,
     capcut_draft_export_config: CapCutDraftExportConfig | None = None,
     tts_engine_config: TTSEngineConfig | None = None,
+    capcut_handoff_service=None,
     local_first_runtime_service_factory=None,
     stt_provider=None,
     tts_provider=None,
@@ -101,6 +102,7 @@ def create_app(
         pycapcut_exporter=pycapcut_exporter or _build_pycapcut_exporter(
             resolved_capcut_draft_export_config, store=store
         ),
+        capcut_handoff_service=capcut_handoff_service,
         tts_provider=tts_provider or _build_tts_provider(resolved_tts_engine_config),
         final_renderer=final_renderer,
     )

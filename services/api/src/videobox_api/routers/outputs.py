@@ -7,6 +7,7 @@ from fastapi import APIRouter, status
 from videobox_api.errors import _http_error
 from videobox_api.models import (
     CapCutDraftExportArtifactResponse,
+    CapCutDraftHandoffResponse,
     CapCutDraftExportJobResponse,
     ExportArtifactResponse,
     ExportJobResponse,
@@ -161,6 +162,14 @@ def build_outputs_router(orchestrator: ApiOrchestrator) -> APIRouter:
             export=CapCutDraftExportArtifactResponse(**result["export"]) if result["export"] else None,
             error_message=result.get("error_message"),
         )
+
+    @router.post("/api/projects/{project_id}/capcut-draft-exports/{job_id}/handoff")
+    def register_capcut_draft_handoff(project_id: str, job_id: str) -> dict[str, CapCutDraftHandoffResponse]:
+        try:
+            handoff = orchestrator.register_capcut_draft_handoff(project_id=project_id, job_id=job_id)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return {"handoff": CapCutDraftHandoffResponse(**handoff)}
 
     @router.get("/api/projects/{project_id}/provider-traces")
     def get_provider_trace_audit(

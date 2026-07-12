@@ -33,6 +33,7 @@ from videobox_core_engine.canonical_track import (
 )
 from videobox_capcut_export import CapCutExportAdapter
 from videobox_core_engine.auto_cut import AutoCutPlanner
+from videobox_core_engine.capcut_handoff import CapCutHandoffError, CapCutHandoffService
 from videobox_core_engine.ffmpeg_auto_cut_executor import FfmpegAutoCutExecutor
 from videobox_core_engine.ffmpeg_final_renderer import FfmpegFinalRenderer
 from videobox_core_engine.ass_subtitles import render_editing_session_ass
@@ -115,6 +116,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         auto_cut_executor: FfmpegAutoCutExecutor | None = None,
         final_renderer: FfmpegFinalRenderer | None = None,
         pycapcut_exporter: Any | None = None,
+        capcut_handoff_service: CapCutHandoffService | None = None,
         tts_provider: Any | None = None,
         transcript_aligner: TranscriptAligner | None = None,
     ) -> None:
@@ -135,6 +137,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         # aren't installed by default, so this stays unset unless the caller
         # (create_app, when CapCutDraftExportConfig.enabled) explicitly injects one.
         self.pycapcut_exporter = pycapcut_exporter
+        self.capcut_handoff_service = capcut_handoff_service or CapCutHandoffService()
         # No eager default: gtts needs network access, elevenlabs needs an API
         # key, and local_xtts needs a heavy optional install — none of these
         # should run implicitly for callers/tests that don't opt in.
@@ -1449,4 +1452,39 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
             "export": export,
             "error_message": job.get("error_message"),
         }
+
+    def register_capcut_draft_handoff(self, *, project_id: str, job_id: str) -> dict[str, Any]:
+        result = self.get_capcut_draft_export_result(project_id=project_id, job_id=job_id)
+        export = result["export"]
+        if export is None:
+            raise RuntimeError("CapCut 초안 결과가 없어 등록할 수 없습니다. 실제 CapCut 초안 내보내기를 다시 실행하세요.")
+        source_path = self.store.resolve_storage_uri(project_id=project_id, storage_uri=export["file_uri"])
+        try:
+            registered = self.capcut_handoff_service.register(
+                source_draft_path=source_path,
+                export_id=str(export["export_id"]),
+            )
+            handoff = {
+                "status": registered.status,
+                "source_file_uri": export["file_uri"],
+                "registered_project_path": str(registered.registered_path),
+                "error_message": None,
+                "registered_at": registered.registered_at,
+                "reused": registered.reused,
+            }
+        except CapCutHandoffError as exc:
+            handoff = {
+                "status": "failed",
+                "source_file_uri": export["file_uri"],
+                "registered_project_path": None,
+                "error_message": str(exc),
+                "registered_at": None,
+                "reused": False,
+            }
+        self.store.update_capcut_draft_handoff(
+            project_id=project_id,
+            export_id=str(export["export_id"]),
+            handoff=handoff,
+        )
+        return handoff
 

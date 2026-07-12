@@ -471,6 +471,16 @@ export type CapCutDraftExportArtifact = {
   status: string;
   created_at?: string | null;
   notes: string[];
+  handoff?: CapCutDraftHandoff | null;
+};
+
+export type CapCutDraftHandoff = {
+  status: string;
+  source_file_uri: string;
+  registered_project_path?: string | null;
+  error_message?: string | null;
+  registered_at?: string | null;
+  reused: boolean;
 };
 
 export type CapCutDraftExportJob = {
@@ -1080,6 +1090,11 @@ export const api = {
     ),
   getCapcutDraftExport: (projectId: string, jobId: string) =>
     request<CapCutDraftExportJob>(`/api/projects/${projectId}/capcut-draft-exports/${jobId}`),
+  registerCapcutDraftHandoff: (projectId: string, jobId: string) =>
+    request<{ handoff: CapCutDraftHandoff }>(
+      `/api/projects/${projectId}/capcut-draft-exports/${jobId}/handoff`,
+      { method: "POST" },
+    ),
   retryJob: (projectId: string, jobId: string) =>
     request<{ job_id: string; status: string }>(`/api/projects/${projectId}/jobs/${jobId}/retry`, {
       method: "POST",

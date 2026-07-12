@@ -1549,8 +1549,28 @@ class LocalProjectStore:
             "file_uri": row["file_uri"],
             "status": row["status"],
             "notes": list(metadata.get("notes") or []),
+            "handoff": metadata.get("handoff"),
             "created_at": row["created_at"],
         }
+
+    def update_capcut_draft_handoff(
+        self, *, project_id: str, export_id: str, handoff: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = self._fetchone(
+            project_id,
+            "SELECT metadata_json FROM exports WHERE export_id = ? AND export_type = ?",
+            (export_id, "capcut_draft_export"),
+        )
+        if row is None:
+            raise KeyError(f"CapCut draft export not found: {export_id}")
+        metadata = json.loads(str(row["metadata_json"] or "{}"))
+        metadata["handoff"] = handoff
+        self._execute(
+            project_id,
+            "UPDATE exports SET metadata_json = ? WHERE export_id = ?",
+            (json.dumps(metadata, ensure_ascii=True), export_id),
+        )
+        return self.get_capcut_draft_export(project_id=project_id, export_id=export_id)
 
     def create_job(
         self,

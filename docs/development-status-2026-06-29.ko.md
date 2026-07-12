@@ -1,8 +1,23 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 225. 2026-07-12 actual CapCut Desktop operating QA closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
-> 이 문서의 기존 날짜 기반 섹션은 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 225`만 기준으로 본다.
+> 현재 authoritative 상태/next slice 판단은 `## 226. 2026-07-12 CapCut local-project handoff registration closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 이 문서의 기존 날짜 기반 섹션은 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 226`만 기준으로 본다.
 > 단, `2일 내 1차 데모 완성` 실행 레일은 `## 189`의 장기 우선순위를 그대로 넓게 집행하지 않고, `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`의 축소된 실행 계획을 우선 적용한다.
+
+## 226. 2026-07-12 CapCut local-project handoff registration closeout
+
+VideoBox 원본 `draft_content.json`은 수정하지 않는다. `CapCutHandoffService`가 `%LOCALAPPDATA%\\CapCut\\User Data\\Projects\\com.lveditor.draft\\videobox-<export_id>`에 별도 copy만 등록한다.
+
+- 지원 범위는 `%LOCALAPPDATA%\\CapCut\\Apps` 아래 `CapCut.exe`가 있고, local project root가 존재하며 쓰기 가능한 Windows CapCut Desktop이다. CapCut 미설치, project root 미발견, 권한 거부는 각각 복구 안내가 포함된 failed handoff 상태로 저장한다.
+- 완전한 destination은 idempotent하게 재사용하고, 불완전 destination과 임시 copy 실패는 안전하게 제거한다. source artifact, artifact export, 이전 failure reason은 덮어쓰지 않는다.
+- API는 handoff source URI, registered path, ready/failed, error message, registration timestamp, reused 값을 persisted export metadata로 읽고 쓴다. create_app tests에는 injected `CapCutHandoffService(local_app_data=...)`를 써 실제 localhost LLM이나 로컬 CapCut 환경에 의존하지 않는다.
+- 웹은 ready path와 실패/재시도, 새로고침 복구를 2개 contract UI test로 고정했다. 실패 시 `CapCut 등록 실패`와 복구 사유, `CapCut 등록 다시 시도`를 노출하면서 기존 draft artifact/error card를 유지한다.
+- 실제 proof: 기존 VideoBox 600초 Korean loop draft를 handoff service로 등록했다. 첫 등록은 `ready/reused=False`, 두 번째는 `ready/reused=True`였고 registered path에 `draft_content.json`이 존재했다. CapCut Desktop에서 검색 후 `videobox-handoff-loop-20260712`을 열어 해당 registered path와 10분 timeline/한국어 caption/오디오 track을 확인했다. 이 과정에서 수동 project-folder copy는 하지 않았다.
+- verification: focused backend `18 passed`, full Python 3.12 backend `693 passed`, frontend `99 passed`, production build 성공. `git diff --check` clean; `artifacts/`는 untracked로 유지한다.
+
+다음 권장 작업:
+
+- 기능을 더 넓히기보다, 실행 중이 아닌 사용자 PC와 CapCut 버전 변화를 실제 환경에서 확인할 수 있도록 handoff diagnostics 화면(설치 경로/쓰기 상태/복구 안내)을 먼저 추가한다. 실제 3개 fixture final MP4 3/3 증적 확장은 그 다음 운영 QA로 분리한다.
 
 ## 225. 2026-07-12 actual CapCut Desktop operating QA closeout
 

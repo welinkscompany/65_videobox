@@ -633,6 +633,7 @@ function createFetchMock({
   jobs = jobsResponse,
   finalRenderResult,
   capcutDraftResult,
+  capcutHandoffResult,
   ttsCandidates = [],
   ttsListeningReviewStatuses,
   voiceSampleUploadStatus,
@@ -657,6 +658,7 @@ function createFetchMock({
   jobs?: typeof jobsResponse;
   finalRenderResult?: Record<string, unknown>;
   capcutDraftResult?: Record<string, unknown>;
+  capcutHandoffResult?: Record<string, unknown>;
   ttsCandidates?: TtsCandidateRecord[];
   ttsListeningReviewStatuses?: number[];
   voiceSampleUploadStatus?: number;
@@ -862,6 +864,25 @@ function createFetchMock({
               notes: ["ducking is not natively supported by CapCut draft export; apply it in CapCut after import"],
             },
             error_message: null,
+          },
+        ),
+      );
+    }
+    if (
+      url.endsWith("/api/projects/project_001/capcut-draft-exports/capcut_draft_job_009/handoff") &&
+      init?.method === "POST"
+    ) {
+      return new Response(
+        JSON.stringify(
+          capcutHandoffResult ?? {
+            handoff: {
+              status: "ready",
+              source_file_uri: "local://projects/project_001/exports/capcut-draft/draft",
+              registered_project_path: "C:/CapCut/User Data/Projects/com.lveditor.draft/videobox-export_001",
+              error_message: null,
+              registered_at: "2026-07-12T00:02:30Z",
+              reused: false,
+            },
           },
         ),
       );
@@ -1742,6 +1763,105 @@ describe("App", () => {
 
     expect(await screen.findByText(/exports\/capcut-draft\/draft/i)).toBeInTheDocument();
     expect(screen.queryByText(/CapCut에서 후처리 필요/i)).not.toBeInTheDocument();
+  });
+
+  it("restores a registered CapCut project path after reload", async () => {
+    const restoredJobs = structuredClone(jobsResponse);
+    restoredJobs.jobs.push({
+      job_id: "capcut_draft_job_009",
+      job_type: "capcut_draft_export",
+      status: "succeeded",
+      input_ref: "timeline_build_job_005",
+      output_ref: "capcut_draft_001",
+      error_message: null,
+      started_at: "2026-07-12T00:01:00Z",
+      finished_at: "2026-07-12T00:02:00Z",
+    });
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock({
+        jobs: restoredJobs,
+        capcutDraftResult: {
+          job_id: "capcut_draft_job_009",
+          status: "succeeded",
+          export: {
+            export_id: "capcut_draft_001",
+            timeline_id: "timeline_001",
+            export_type: "capcut_draft_export",
+            file_uri: "local://projects/project_001/exports/capcut-draft/draft",
+            status: "succeeded",
+            notes: [],
+            handoff: {
+              status: "ready",
+              source_file_uri: "local://projects/project_001/exports/capcut-draft/draft",
+              registered_project_path: "C:/CapCut/User Data/Projects/com.lveditor.draft/videobox-export_001",
+              error_message: null,
+              registered_at: "2026-07-12T00:02:30Z",
+              reused: false,
+            },
+          },
+          error_message: null,
+        },
+      }),
+    );
+
+    render(<App />);
+
+    expect(await screen.findByText("CapCut에 열기 준비")).toBeInTheDocument();
+    expect(screen.getByText(/videobox export 001/i)).toBeInTheDocument();
+  });
+
+  it("shows a Korean CapCut registration failure and retries it without losing the draft", async () => {
+    const restoredJobs = structuredClone(jobsResponse);
+    restoredJobs.jobs.push({
+      job_id: "capcut_draft_job_009",
+      job_type: "capcut_draft_export",
+      status: "succeeded",
+      input_ref: "timeline_build_job_005",
+      output_ref: "capcut_draft_001",
+      error_message: null,
+      started_at: "2026-07-12T00:01:00Z",
+      finished_at: "2026-07-12T00:02:00Z",
+    });
+    const fetchMock = createFetchMock({
+      jobs: restoredJobs,
+      capcutDraftResult: {
+        job_id: "capcut_draft_job_009",
+        status: "succeeded",
+        export: {
+          export_id: "capcut_draft_001",
+          timeline_id: "timeline_001",
+          export_type: "capcut_draft_export",
+          file_uri: "local://projects/project_001/exports/capcut-draft/draft",
+          status: "succeeded",
+          notes: [],
+          handoff: {
+            status: "failed",
+            source_file_uri: "local://projects/project_001/exports/capcut-draft/draft",
+            registered_project_path: null,
+            error_message: "CapCut 설치를 확인한 뒤 다시 시도하세요.",
+            registered_at: null,
+            reused: false,
+          },
+        },
+        error_message: null,
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    expect(await screen.findByText(/CapCut 등록 실패: CapCut 설치를 확인/i)).toBeInTheDocument();
+    expect(screen.getByText(/exports\/capcut-draft\/draft/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "CapCut 등록 다시 시도" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/projects/project_001/capcut-draft-exports/capcut_draft_job_009/handoff",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    expect(await screen.findByText("CapCut에 열기 준비")).toBeInTheDocument();
   });
 
   it("renders a final-render failure with a null artifact without unmounting the dashboard", async () => {
