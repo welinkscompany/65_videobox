@@ -483,6 +483,17 @@ export type CapCutDraftHandoff = {
   reused: boolean;
 };
 
+export type CapCutHandoffDiagnostics = {
+  status: string;
+  installation_path?: string | null;
+  detected_version?: string | null;
+  project_root_path: string;
+  project_root_exists: boolean;
+  write_access: boolean;
+  recovery_message?: string | null;
+  checked_at: string;
+};
+
 export type CapCutDraftExportJob = {
   job_id: string;
   status: string;
@@ -1095,6 +1106,7 @@ export const api = {
       `/api/projects/${projectId}/capcut-draft-exports/${jobId}/handoff`,
       { method: "POST" },
     ),
+  getCapcutHandoffDiagnostics: () => request<CapCutHandoffDiagnostics>("/api/capcut/handoff-diagnostics"),
   retryJob: (projectId: string, jobId: string) =>
     request<{ job_id: string; status: string }>(`/api/projects/${projectId}/jobs/${jobId}/retry`, {
       method: "POST",

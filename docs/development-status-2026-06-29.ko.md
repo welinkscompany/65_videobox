@@ -1,8 +1,23 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 226. 2026-07-12 CapCut local-project handoff registration closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
-> 이 문서의 기존 날짜 기반 섹션은 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 226`만 기준으로 본다.
+> 현재 authoritative 상태/next slice 판단은 `## 227. 2026-07-13 CapCut handoff diagnostics closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 이 문서의 기존 날짜 기반 섹션은 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 227`만 기준으로 본다.
 > 단, `2일 내 1차 데모 완성` 실행 레일은 `## 189`의 장기 우선순위를 그대로 넓게 집행하지 않고, `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`의 축소된 실행 계획을 우선 적용한다.
+
+## 227. 2026-07-13 CapCut handoff diagnostics closeout
+
+CapCut handoff를 시도하기 전 PC 준비 상태를 확인하는 별도 read path를 추가했다. 이 진단은 source draft, export artifact, registered project copy를 읽거나 변경하지 않으며 CapCut app도 실행하지 않는다. write access는 실제 ACL 신뢰성을 위해 즉시 삭제되는 temporary file probe로만 검사한다.
+
+- API: `GET /api/capcut/handoff-diagnostics`는 highest detected version의 `CapCut.exe` path/version, expected local project root, root existence, write access, status, Korean recovery message, checked time을 반환한다.
+- failure: CapCut 미설치면 설치 확인, local project root 미생성이면 CapCut 1회 실행, 권한/디스크 문제면 project root 권한·공간 확인이라는 한글 복구 안내를 반환한다. handoff registration 자체는 수행하지 않는다.
+- deterministic test: `create_app`은 injected `CapCutHandoffService(local_app_data=...)`로 fake Windows path를 사용하며 localhost LLM과 현재 PC CapCut을 호출하지 않는다.
+- UI: `CapCut 연결 진단` 카드는 ready일 때 설치 버전/경로/project root/write result를, failed일 때 복구 안내와 `다시 진단` 버튼을 보여준다. initial load와 retry, page reload contract를 frontend test로 고정했다.
+- live proof: 현재 Windows에서 `8.9.1.3802`, `C:\\Users\\atgro\\AppData\\Local\\CapCut\\Apps\\8.9.1.3802\\CapCut.exe`, expected project root 존재, write access `true`, status `ready`를 확인했다.
+- verification: focused backend `16 passed`, focused CapCut frontend `7 passed`, full Python 3.12 backend `698 passed`, frontend `101 passed`, production build success. `git diff --check` clean이며 `artifacts/`는 untracked로 유지한다.
+
+다음 권장 작업:
+
+- 제품 기능 확대보다 실제 운영 증거를 강화하는 것이 맞다. `crop_pad_overlay`, `audio_ducking` 두 600초 fixture를 CapCut에서 실제 MP4까지 export해 3/3 final-render proof를 닫는 QA slice를 우선한다.
 
 ## 226. 2026-07-12 CapCut local-project handoff registration closeout
 

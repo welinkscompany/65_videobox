@@ -1488,3 +1488,16 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         )
         return handoff
 
+    def get_capcut_handoff_diagnostics(self) -> dict[str, Any]:
+        diagnostics = self.capcut_handoff_service.diagnose()
+        return {
+            "status": diagnostics.status,
+            "installation_path": str(diagnostics.installation_path) if diagnostics.installation_path else None,
+            "detected_version": diagnostics.detected_version,
+            "project_root_path": str(diagnostics.project_root_path),
+            "project_root_exists": diagnostics.project_root_exists,
+            "write_access": diagnostics.write_access,
+            "recovery_message": diagnostics.recovery_message,
+            "checked_at": diagnostics.checked_at,
+        }
+

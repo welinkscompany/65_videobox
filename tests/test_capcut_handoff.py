@@ -99,6 +99,64 @@ def test_register_reports_recovery_guidance_when_capcut_project_root_is_not_writ
         service.register(source_draft_path=source, export_id="export_002")
 
 
+def test_diagnose_reports_the_highest_supported_version_and_removes_its_write_probe(tmp_path: Path) -> None:
+    service, project_root = _configured_service(tmp_path)
+    newer_executable = service.local_app_data / "CapCut" / "Apps" / "8.10.0.1" / "CapCut.exe"
+    newer_executable.parent.mkdir(parents=True)
+    newer_executable.write_bytes(b"capcut-newer")
+
+    result = service.diagnose()
+
+    assert result.status == "ready"
+    assert result.installation_path == newer_executable
+    assert result.detected_version == "8.10.0.1"
+    assert result.project_root_path == project_root
+    assert result.project_root_exists is True
+    assert result.write_access is True
+    assert result.recovery_message is None
+    assert not list(project_root.glob(".videobox-write-check-*"))
+
+
+@pytest.mark.parametrize(
+    ("setup", "expected_message"),
+    [
+        ("missing_capcut", "CapCut 설치를 확인"),
+        ("missing_project_root", "CapCut을 한 번 실행"),
+    ],
+)
+def test_diagnose_returns_korean_recovery_for_missing_capcut_prerequisites(
+    tmp_path: Path, setup: str, expected_message: str
+) -> None:
+    local_app_data = tmp_path / "LocalAppData"
+    if setup == "missing_project_root":
+        executable = local_app_data / "CapCut" / "Apps" / "8.7.0" / "CapCut.exe"
+        executable.parent.mkdir(parents=True)
+        executable.write_bytes(b"capcut")
+
+    result = CapCutHandoffService(local_app_data=local_app_data).diagnose()
+
+    assert result.status == "failed"
+    assert result.write_access is False
+    assert expected_message in (result.recovery_message or "")
+
+
+def test_diagnose_returns_korean_recovery_when_write_probe_is_denied(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service, _ = _configured_service(tmp_path)
+
+    def denied_write_probe(*args: object, **kwargs: object) -> None:
+        raise PermissionError("access denied")
+
+    monkeypatch.setattr("videobox_core_engine.capcut_handoff.tempfile.NamedTemporaryFile", denied_write_probe)
+
+    result = service.diagnose()
+
+    assert result.status == "failed"
+    assert result.write_access is False
+    assert "권한과 디스크 공간" in (result.recovery_message or "")
+
+
 @pytest.mark.parametrize(
     ("setup", "message"),
     [

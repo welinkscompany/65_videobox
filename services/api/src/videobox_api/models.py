@@ -664,6 +664,17 @@ class CapCutDraftHandoffResponse(BaseModel):
     reused: bool = False
 
 
+class CapCutHandoffDiagnosticsResponse(BaseModel):
+    status: str
+    installation_path: str | None = None
+    detected_version: str | None = None
+    project_root_path: str
+    project_root_exists: bool
+    write_access: bool
+    recovery_message: str | None = None
+    checked_at: str
+
+
 class CapCutDraftExportJobResponse(StartJobResponse):
     export: CapCutDraftExportArtifactResponse | None = None
     error_message: str | None = None

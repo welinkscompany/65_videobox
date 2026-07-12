@@ -5,6 +5,7 @@ import {
   ApiConflictError,
   type BrollAsset,
   type CapCutDraftExportJob,
+  type CapCutHandoffDiagnostics,
   type CaptionStyleScope,
   type CaptionStyleScopePreflight,
   type EditorFavorite,
@@ -100,6 +101,9 @@ export function App() {
   const [capcutDraftJob, setCapcutDraftJob] = useState<CapCutDraftExportJob | null>(null);
   const [lastSuccessfulCapcutDraftJob, setLastSuccessfulCapcutDraftJob] = useState<CapCutDraftExportJob | null>(null);
   const [isRegisteringCapcutHandoff, setIsRegisteringCapcutHandoff] = useState(false);
+  const [capcutHandoffDiagnostics, setCapcutHandoffDiagnostics] = useState<CapCutHandoffDiagnostics | null>(null);
+  const [isLoadingCapcutHandoffDiagnostics, setIsLoadingCapcutHandoffDiagnostics] = useState(false);
+  const [capcutHandoffDiagnosticsError, setCapcutHandoffDiagnosticsError] = useState<string | null>(null);
   const [voiceSamplePath, setVoiceSamplePath] = useState("");
   const [voiceSampleFile, setVoiceSampleFile] = useState<File | null>(null);
   const [voiceSampleAssetId, setVoiceSampleAssetId] = useState("");
@@ -181,6 +185,21 @@ export function App() {
   const [isSavingGeminiKey, setIsSavingGeminiKey] = useState(false);
   const [togglingGeminiKeyId, setTogglingGeminiKeyId] = useState<string | null>(null);
 
+  async function refreshCapcutHandoffDiagnostics() {
+    setIsLoadingCapcutHandoffDiagnostics(true);
+    try {
+      const diagnostics = await api.getCapcutHandoffDiagnostics();
+      setCapcutHandoffDiagnostics(diagnostics);
+      setCapcutHandoffDiagnosticsError(null);
+    } catch (error) {
+      setCapcutHandoffDiagnosticsError(
+        error instanceof Error ? error.message : "CapCut 연결 상태를 확인하지 못했습니다.",
+      );
+    } finally {
+      setIsLoadingCapcutHandoffDiagnostics(false);
+    }
+  }
+
   useEffect(() => {
     let cancelled = false;
 
@@ -208,6 +227,10 @@ export function App() {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  useEffect(() => {
+    void refreshCapcutHandoffDiagnostics();
   }, []);
 
   useEffect(() => {
@@ -2195,6 +2218,56 @@ export function App() {
                   </ul>
                 </div>
               ) : null}
+              <div className="diagnostics-card" role="status">
+                <div className="panel-header">
+                  <div>
+                    <p className="section-kicker">CapCut</p>
+                    <h3>CapCut 연결 진단</h3>
+                  </div>
+                  <button
+                    className="action-button subtle"
+                    type="button"
+                    disabled={isLoadingCapcutHandoffDiagnostics}
+                    onClick={() => void refreshCapcutHandoffDiagnostics()}
+                  >
+                    {isLoadingCapcutHandoffDiagnostics ? "진단 중" : "다시 진단"}
+                  </button>
+                </div>
+                {capcutHandoffDiagnostics ? (
+                  <>
+                    <strong>
+                      {capcutHandoffDiagnostics.status === "ready" ? "연결 준비 완료" : "연결 준비 필요"}
+                    </strong>
+                    <dl className="summary-list">
+                      <div>
+                        <dt>설치 버전</dt>
+                        <dd>{formatDisplayText(capcutHandoffDiagnostics.detected_version ?? "미감지")}</dd>
+                      </div>
+                      <div>
+                        <dt>설치 경로</dt>
+                        <dd>{formatDisplayText(capcutHandoffDiagnostics.installation_path ?? "미감지")}</dd>
+                      </div>
+                      <div>
+                        <dt>프로젝트 경로</dt>
+                        <dd>{formatDisplayText(capcutHandoffDiagnostics.project_root_path)}</dd>
+                      </div>
+                      <div>
+                        <dt>쓰기 권한</dt>
+                        <dd>{capcutHandoffDiagnostics.write_access ? "확인됨" : "확인 필요"}</dd>
+                      </div>
+                    </dl>
+                    {capcutHandoffDiagnostics.status !== "ready" ? (
+                      <p className="error-banner">
+                        {formatDisplayText(capcutHandoffDiagnostics.recovery_message ?? "CapCut 연결 상태를 다시 확인하세요.")}
+                      </p>
+                    ) : null}
+                  </>
+                ) : capcutHandoffDiagnosticsError ? (
+                  <p className="error-banner">{capcutHandoffDiagnosticsError}</p>
+                ) : (
+                  <p>CapCut 연결 상태를 확인하는 중입니다.</p>
+                )}
+              </div>
           {capcutDraftJob?.export?.handoff?.status === "ready" ? (
                 <div className="loading-banner" role="status">
                   <strong>CapCut에 열기 준비</strong>

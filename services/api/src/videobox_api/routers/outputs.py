@@ -6,6 +6,7 @@ from fastapi import APIRouter, status
 
 from videobox_api.errors import _http_error
 from videobox_api.models import (
+    CapCutHandoffDiagnosticsResponse,
     CapCutDraftExportArtifactResponse,
     CapCutDraftHandoffResponse,
     CapCutDraftExportJobResponse,
@@ -28,6 +29,14 @@ from videobox_api.orchestration import ApiOrchestrator
 
 def build_outputs_router(orchestrator: ApiOrchestrator) -> APIRouter:
     router = APIRouter()
+
+    @router.get("/api/capcut/handoff-diagnostics")
+    def get_capcut_handoff_diagnostics() -> CapCutHandoffDiagnosticsResponse:
+        try:
+            diagnostics = orchestrator.get_capcut_handoff_diagnostics()
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return CapCutHandoffDiagnosticsResponse(**diagnostics)
 
     @router.post("/api/projects/{project_id}/jobs/subtitle-render", status_code=status.HTTP_202_ACCEPTED)
     def start_subtitle_render(project_id: str, payload: OutputJobRequest) -> StartJobResponse:

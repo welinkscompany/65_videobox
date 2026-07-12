@@ -103,6 +103,32 @@ def test_capcut_draft_handoff_api_persists_failed_registration_with_recovery_rea
     assert "CapCut 설치를 확인" in body["handoff"]["error_message"]
 
 
+def test_capcut_handoff_diagnostics_api_reports_injected_windows_readiness_without_llm_call(tmp_path: Path) -> None:
+    local_app_data = tmp_path / "LocalAppData"
+    executable = local_app_data / "CapCut" / "Apps" / "8.10.0.1" / "CapCut.exe"
+    executable.parent.mkdir(parents=True)
+    executable.write_bytes(b"capcut")
+    project_root = local_app_data / "CapCut" / "User Data" / "Projects" / "com.lveditor.draft"
+    project_root.mkdir(parents=True)
+    app = create_app(
+        projects_root=tmp_path / "projects",
+        capcut_handoff_service=CapCutHandoffService(local_app_data=local_app_data),
+    )
+
+    response = TestClient(app).get("/api/capcut/handoff-diagnostics")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ready"
+    assert body["installation_path"] == str(executable)
+    assert body["detected_version"] == "8.10.0.1"
+    assert body["project_root_path"] == str(project_root)
+    assert body["project_root_exists"] is True
+    assert body["write_access"] is True
+    assert body["recovery_message"] is None
+    assert body["checked_at"]
+
+
 def _clean_high_confidence_transcribe(self, request):  # noqa: ANN001
     return STTResult(
         text="Office overview. A quick walkthrough.",

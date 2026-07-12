@@ -913,6 +913,9 @@ class ApiOrchestrator:
     def register_capcut_draft_handoff(self, *, project_id: str, job_id: str) -> dict[str, Any]:
         return self.pipeline.register_capcut_draft_handoff(project_id=project_id, job_id=job_id)
 
+    def get_capcut_handoff_diagnostics(self) -> dict[str, Any]:
+        return self.pipeline.get_capcut_handoff_diagnostics()
+
     def get_provider_trace_audit(
         self,
         *,

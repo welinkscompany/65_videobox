@@ -1,6 +1,6 @@
 # VideoBox 실행용 구현 계획서
 
-> 현재 worktree 기준 구현 상태와 next slice 판단은 `## 19. 2026-07-12 CapCut local-project handoff registration closeout`을 우선 적용한다. 그 외 상위 milestone/범위/순서 섹션은 제품·구현 계획의 기준을 설명하는 문서다.
+> 현재 worktree 기준 구현 상태와 next slice 판단은 `## 20. 2026-07-13 CapCut handoff diagnostics closeout`을 우선 적용한다. 그 외 상위 milestone/범위/순서 섹션은 제품·구현 계획의 기준을 설명하는 문서다.
 > 개발 운영 상위 규칙은 저장소 루트 `AGENTS.md`와 `docs/development-fast-path.ko.md`의 `## 10. 고정 운영 규정`을 프로젝트 전역 기본값으로 적용한다. 즉, 이 계획서를 실행할 때의 작업 우선순위, 선택적 TDD/서브에이전트/리뷰 사용, 표준 검증 경로, hot path 구분, 커밋/푸시, 진행률 보고, turn closeout 형식은 해당 규정을 따른다.
 
 ## 1. 목적
@@ -1027,3 +1027,11 @@ production-readiness blocker slice 1의 9개 Task는 구현·회귀·600초 smok
 - CapCut export API는 `handoff.status`, source artifact URI, registered project path, 오류 사유, 등록 시각, reused 여부를 영속화한다. 웹 출력 패널은 `CapCut에 열기 준비`, 등록 경로, 실패 사유, `CapCut 등록 다시 시도`를 새로고침 뒤에도 표시한다.
 - 실제 Windows CapCut Desktop에서 `videobox-handoff-loop-20260712`을 검색해 열었다. CapCut detail path는 `C:\\Users\\atgro\\AppData\\Local\\CapCut\\User Data\\Projects\\com.lveditor.draft\\videobox-handoff-loop-20260712`이고, 수동 폴더 복사 없이 10분 타임라인, 한국어 자막, 오디오 트랙이 열렸다. 같은 registration을 두 번 호출해 첫 호출 `reused=False`, 두 번째 호출 `reused=True`도 확인했다.
 - 최신 검증: Python 3.12 backend `693 passed`, frontend `99 passed`, production build 성공. artifacts는 Git에 포함하지 않는다.
+
+## 20. 2026-07-13 CapCut handoff diagnostics closeout
+
+- `GET /api/capcut/handoff-diagnostics`는 project/export/source draft를 변경하거나 CapCut을 실행하지 않고 현재 Windows handoff 준비 상태만 반환한다. 권한 검증은 즉시 삭제되는 temporary file probe로 실제 쓰기 가능 여부를 확인한다.
+- response는 선택된 최고 버전 `CapCut.exe` 설치 경로와 버전, 예상 local project root, root 존재, 쓰기 권한, `ready`/`failed`, 한글 복구 안내, 검사 시각을 포함한다.
+- 웹 출력 패널의 `CapCut 연결 진단` 카드는 설치·프로젝트 경로와 쓰기 상태를 보여주며, failure일 때 `다시 진단`으로 상태를 새로 읽는다. 카드 상태는 page reload 때도 API에서 다시 복구된다.
+- live Windows proof: CapCut `8.9.1.3802`, `C:\\Users\\atgro\\AppData\\Local\\CapCut\\Apps\\8.9.1.3802\\CapCut.exe`, `C:\\Users\\atgro\\AppData\\Local\\CapCut\\User Data\\Projects\\com.lveditor.draft`, write access `true`, status `ready`를 확인했다.
+- 최신 검증: Python 3.12 backend `698 passed`, frontend `101 passed`, production build 성공. `artifacts/`는 Git에 포함하지 않는다.

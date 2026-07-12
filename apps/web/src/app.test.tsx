@@ -30,6 +30,17 @@ const projectResponse = {
   root_storage_uri: "local://projects/project_001",
 };
 
+const capcutDiagnosticsReadyResponse = {
+  status: "ready",
+  installation_path: "C:/Users/operator/AppData/Local/CapCut/Apps/8.10.0.1/CapCut.exe",
+  detected_version: "8.10.0.1",
+  project_root_path: "C:/Users/operator/AppData/Local/CapCut/User Data/Projects/com.lveditor.draft",
+  project_root_exists: true,
+  write_access: true,
+  recovery_message: null,
+  checked_at: "2026-07-13T00:00:00Z",
+};
+
 const jobsResponse = {
   jobs: [
     {
@@ -634,6 +645,8 @@ function createFetchMock({
   finalRenderResult,
   capcutDraftResult,
   capcutHandoffResult,
+  capcutDiagnostics = capcutDiagnosticsReadyResponse,
+  capcutDiagnosticsResponses,
   ttsCandidates = [],
   ttsListeningReviewStatuses,
   voiceSampleUploadStatus,
@@ -659,6 +672,8 @@ function createFetchMock({
   finalRenderResult?: Record<string, unknown>;
   capcutDraftResult?: Record<string, unknown>;
   capcutHandoffResult?: Record<string, unknown>;
+  capcutDiagnostics?: Record<string, unknown>;
+  capcutDiagnosticsResponses?: Array<Record<string, unknown>>;
   ttsCandidates?: TtsCandidateRecord[];
   ttsListeningReviewStatuses?: number[];
   voiceSampleUploadStatus?: number;
@@ -688,6 +703,9 @@ function createFetchMock({
 
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
+    if (url.endsWith("/api/capcut/handoff-diagnostics")) {
+      return new Response(JSON.stringify(capcutDiagnosticsResponses?.shift() ?? capcutDiagnostics));
+    }
     if (url.endsWith("/api/projects")) {
       return new Response(JSON.stringify(projectsResponse));
     }
@@ -1809,6 +1827,51 @@ describe("App", () => {
 
     expect(await screen.findByText("CapCut에 열기 준비")).toBeInTheDocument();
     expect(screen.getByText(/videobox export 001/i)).toBeInTheDocument();
+  });
+
+  it("shows and restores CapCut connection readiness details after reload", async () => {
+    const fetchMock = createFetchMock();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const firstRender = render(<App />);
+    expect(await screen.findByText("CapCut 연결 진단")).toBeInTheDocument();
+    expect(screen.getByText("연결 준비 완료")).toBeInTheDocument();
+    expect(screen.getByText("8.10.0.1")).toBeInTheDocument();
+    expect(screen.getByText(/CapCut\/Apps\/8.10.0.1\/CapCut.exe/i)).toBeInTheDocument();
+    firstRender.unmount();
+
+    render(<App />);
+    expect(await screen.findByText("CapCut 연결 진단")).toBeInTheDocument();
+    expect(screen.getByText("연결 준비 완료")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith("/api/capcut/handoff-diagnostics", undefined);
+  });
+
+  it("shows Korean CapCut diagnostic recovery guidance and retries the machine check", async () => {
+    const failedDiagnostics = {
+      status: "failed",
+      installation_path: null,
+      detected_version: null,
+      project_root_path: "C:/Users/operator/AppData/Local/CapCut/User Data/Projects/com.lveditor.draft",
+      project_root_exists: false,
+      write_access: false,
+      recovery_message: "CapCut을 한 번 실행해 프로젝트 폴더를 만든 뒤 다시 진단하세요.",
+      checked_at: "2026-07-13T00:00:00Z",
+    };
+    const fetchMock = createFetchMock({
+      capcutDiagnosticsResponses: [failedDiagnostics, capcutDiagnosticsReadyResponse],
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+
+    expect(await screen.findByText("CapCut 연결 진단")).toBeInTheDocument();
+    expect(screen.getByText("연결 준비 필요")).toBeInTheDocument();
+    expect(screen.getByText(/CapCut을 한 번 실행해 프로젝트 폴더를 만든 뒤/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "다시 진단" }));
+
+    expect(await screen.findByText("연결 준비 완료")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith("/api/capcut/handoff-diagnostics", undefined),
+    );
   });
 
   it("shows a Korean CapCut registration failure and retries it without losing the draft", async () => {
