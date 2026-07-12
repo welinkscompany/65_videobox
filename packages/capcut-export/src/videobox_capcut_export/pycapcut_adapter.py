@@ -10,12 +10,13 @@ from pycapcut.audio_segment import AudioSegment
 from pycapcut.local_materials import AudioMaterial, VideoMaterial
 from pycapcut.script_file import ScriptFile
 from pycapcut.segment import ClipSettings
-from pycapcut.text_segment import TextSegment
+from pycapcut.text_segment import TextBackground, TextBorder, TextSegment, TextStyle
 from pycapcut.time_util import Timerange
 from pycapcut.track import TrackType
 from pycapcut.video_segment import VideoSegment
 
 from videobox_core_engine.canonical_track import canonical_track_type
+from videobox_domain_models.caption_style import CaptionStyle
 from videobox_storage.timeline_clip_source_resolution import (
     TimelineClipSourceError,
     resolve_broll_clip_source,
@@ -28,6 +29,25 @@ _MICROSECONDS_PER_SECOND = 1_000_000
 
 class PyCapCutExportError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True, slots=True)
+class CapCutDraftExportResult:
+    draft_path: Path
+    capcut_compatibility_warnings: list[str]
+
+    def __fspath__(self) -> str:
+        return str(self.draft_path)
+
+    @property
+    def name(self) -> str:
+        return self.draft_path.name
+
+    def exists(self) -> bool:
+        return self.draft_path.exists()
+
+    def __truediv__(self, value: str) -> Path:
+        return self.draft_path / value
 
 
 def _seconds_to_us(seconds: float) -> int:
@@ -57,7 +77,8 @@ class PyCapCutRealExportAdapter:
         drafts_root: Path,
         draft_name: str,
         subtitle_file_path: Path | None = None,
-    ) -> Path:
+        editing_session: dict[str, Any] | None = None,
+    ) -> CapCutDraftExportResult:
         narration_clips, broll_clips, bgm_clips, sfx_clips = self._collect_clips(timeline)
         if not narration_clips:
             raise PyCapCutExportError("Timeline has no narration clips to export.")
@@ -116,11 +137,39 @@ class PyCapCutRealExportAdapter:
         for overlay in image_overlays:
             self._add_image_overlay(script=script, project_id=project_id, overlay=overlay)
 
-        if subtitle_file_path is not None:
+        warnings: list[str] = []
+        if editing_session is not None:
+            script.add_track(TrackType.text, "subtitle")
+            warnings = self._add_styled_captions(script=script, editing_session=editing_session)
+        elif subtitle_file_path is not None:
             script.import_srt(str(subtitle_file_path), "subtitle")
 
         script.save()
-        return draft_path
+        return CapCutDraftExportResult(draft_path=draft_path, capcut_compatibility_warnings=warnings)
+
+    def _add_styled_captions(self, *, script: ScriptFile, editing_session: dict[str, Any]) -> list[str]:
+        style = CaptionStyle.from_dict(editing_session.get("caption_style"))
+        warnings = []
+        if style.shadow_blur_px:
+            warnings.append("shadow_blur_px is not supported by CapCut export")
+        red, green, blue, _alpha = style.rgba_floats(style.text_color)
+        border_red, border_green, border_blue, border_alpha = style.rgba_floats(style.outline_color)
+        background_red, background_green, background_blue, background_alpha = style.rgba_floats(style.background_color)
+        alignment = {"left": 0, "center": 1, "right": 2}[style.horizontal_align]
+        capcut_style = TextStyle(size=style.font_size_px / 6, color=(red, green, blue), align=alignment, auto_wrapping=True)
+        border = TextBorder(color=(border_red, border_green, border_blue), alpha=border_alpha, width=style.outline_width_px * 10)
+        background = None
+        if background_alpha:
+            background = TextBackground(color=f"#{background_red * 255:02.0f}{background_green * 255:02.0f}{background_blue * 255:02.0f}", alpha=background_alpha)
+        for segment in editing_session.get("segments", []):
+            if not isinstance(segment, dict):
+                continue
+            text = str(segment.get("caption_text") or "").strip()
+            start = float(segment.get("start_sec") or 0)
+            end = float(segment.get("end_sec") or 0)
+            if text and end > start:
+                script.add_segment(TextSegment(text, Timerange(start=_seconds_to_us(start), duration=_seconds_to_us(end - start)), style=capcut_style, border=border, background=background), "subtitle")
+        return warnings
 
     def _collect_clips(
         self, timeline: dict[str, Any]
@@ -359,4 +408,4 @@ class PyCapCutRealExportAdapter:
         )
 
 
-__all__ = ["PyCapCutExportError", "PyCapCutRealExportAdapter"]
+__all__ = ["CapCutDraftExportResult", "PyCapCutExportError", "PyCapCutRealExportAdapter"]

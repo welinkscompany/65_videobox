@@ -14,6 +14,29 @@ from videobox_storage.local_project_store import LocalProjectStore
 FFMPEG_AVAILABLE = shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
 
 
+@pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg/ffprobe not installed on this machine")
+def test_export_timeline_maps_editing_session_caption_style_to_real_capcut_text_segment(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Styled Caption CapCut Draft")
+    narration_path = tmp_path / "narration.wav"
+    _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=2", str(narration_path)])
+    narration_asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.NARRATION_AUDIO, source_path=narration_path)
+    result = PyCapCutRealExportAdapter(store=store).export_timeline(
+        project_id=project.project_id,
+        timeline={"narration_source_uri": narration_asset.storage_uri, "tracks": [{"track_type": "narration", "clips": [{"asset_uri": f"local://projects/{project.project_id}/segments/seg_001", "start_sec": 0.0, "end_sec": 2.0}]}]},
+        editing_session={"caption_style": {"font_size_px": 64, "text_color": "#00FF00FF", "outline_width_px": 3, "background_color": "#000000AA", "shadow_blur_px": 2}, "segments": [{"caption_text": "CAPTION STYLE", "start_sec": 0.2, "end_sec": 1.5}]},
+        drafts_root=tmp_path / "drafts",
+        draft_name="styled-caption",
+    )
+
+    content = json.loads((result.draft_path / "draft_content.json").read_text(encoding="utf-8"))
+    captions = next(track["segments"] for track in content["tracks"] if track["name"] == "subtitle")
+    material = next(item for item in content["materials"]["texts"] if "CAPTION STYLE" in item["content"])
+    assert captions[0]["target_timerange"] == {"start": 200_000, "duration": 1_300_000}
+    assert '"color": [0.0, 1.0, 0.0]' in material["content"]
+    assert "shadow_blur_px is not supported by CapCut export" in result.capcut_compatibility_warnings
+
+
 def _generate(command: list[str]) -> None:
     result = subprocess.run(command, capture_output=True, text=True, timeout=60)
     assert result.returncode == 0, result.stderr

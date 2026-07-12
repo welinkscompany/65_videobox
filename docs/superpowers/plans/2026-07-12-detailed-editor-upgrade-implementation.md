@@ -34,7 +34,7 @@
 
 **Files:** caption_style.py, ass_subtitles.py, test_caption_style.py, test_ass_subtitles.py, test_ffmpeg_final_renderer.py, test_pycapcut_adapter.py.
 
-- [ ] Step 1 — Write failing contracts.
+- [x] Step 1 — Write failing contracts.
 
 ~~~
 def test_caption_style_rejects_invalid_rgba_and_clamps_safe_area() -> None:
@@ -47,18 +47,18 @@ def test_ass_contains_style_and_caption_timing() -> None:
     assert "Dialogue:" in ass and "테스트" in ass and "Style: Default" in ass
 ~~~
 
-- [ ] Step 2 — Run RED.
+- [x] Step 2 — Run RED.
 
 Run: .venv\Scripts\python.exe -m pytest tests/test_caption_style.py tests/test_ass_subtitles.py -q
 Expected: import failure.
 
-- [ ] Step 3 — Implement canonical model and serializer. Validate RGBA, size, safe area, width/alignment. Convert RRGGBBAA to ASS AABBGGRR; escape ASS text; format seconds as H:MM:SS.cc.
+- [x] Step 3 — Implement canonical model and serializer. Validate RGBA, size, safe area, width/alignment. Convert CSS RRGGBBAA to ASS AABBGGRR with inverted alpha; escape ASS text; format seconds as H:MM:SS.cc.
 
-- [ ] Step 4 — Extend RED tests for actual output. Assert FFmpeg has subtitles=<caption.ass>; inspect draft_content.json for text style color, size, outline, background.
+- [x] Step 4 — Extend RED tests for actual output. Assert FFmpeg has subtitles=<caption.ass>; inspect draft_content.json for text style color, size, outline, background.
 
-- [ ] Step 5 — Implement adapters. Add subtitle_ass_path and FFmpeg libass burn-in. Create pycapcut TextStyle, TextBorder, TextBackground and TextSegment per caption. Non-default shadow returns capcut_compatibility_warnings.
+- [x] Step 5 — Implement adapters. Add subtitle_ass_path and FFmpeg libass burn-in. Create pycapcut TextStyle, TextBorder, TextBackground and TextSegment per caption. Non-default shadow returns capcut_compatibility_warnings.
 
-- [ ] Step 6 — Verify and commit.
+- [x] Step 6 — Verify and commit.
 
 Run: .venv\Scripts\python.exe -m pytest tests/test_caption_style.py tests/test_ass_subtitles.py tests/test_ffmpeg_final_renderer.py tests/test_pycapcut_adapter.py -q
 Expected: PASS.

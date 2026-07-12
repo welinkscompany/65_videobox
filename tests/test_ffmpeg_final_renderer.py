@@ -10,10 +10,35 @@ from videobox_core_engine.ffmpeg_final_renderer import (
     FfmpegFinalRenderer,
     FinalRenderError,
 )
+from videobox_core_engine.ass_subtitles import render_editing_session_ass
 from videobox_domain_models.assets import AssetType
 from videobox_storage.local_project_store import LocalProjectStore
 
 FFMPEG_AVAILABLE = shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
+
+
+@pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg/ffprobe not installed on this machine")
+def test_render_timeline_burns_editing_session_ass_without_subtitle_stream(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Styled Caption Render")
+    narration_file = tmp_path / "narration.wav"
+    _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=2", str(narration_file)])
+    narration_asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.NARRATION_AUDIO, source_path=narration_file)
+    broll_file = tmp_path / "broll.mp4"
+    _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=black:s=320x240:r=15:d=2", str(broll_file)])
+    broll_asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=broll_file)
+    session = {"caption_style": {"font_family": "Arial", "font_size_px": 64, "text_color": "#FF0000FF"}, "segments": [{"caption_text": "STYLE", "start_sec": 0.2, "end_sec": 1.8}]}
+    ass_path = tmp_path / "captions.ass"
+    ass_path.write_text(render_editing_session_ass(session, video_width=320, video_height=240), encoding="utf-8")
+    output_path = tmp_path / "styled.mp4"
+    timeline = {"narration_source_uri": narration_asset.storage_uri, "tracks": [{"track_type": "narration", "clips": [{"asset_uri": f"local://projects/{project.project_id}/segments/seg_001", "start_sec": 0.0, "end_sec": 2.0}]}, {"track_type": "broll", "clips": [{"asset_uri": f"local://projects/{project.project_id}/assets/{broll_asset.asset_id}", "start_sec": 0.0, "end_sec": 2.0}]}]}
+
+    FfmpegFinalRenderer(store=store, video_width=320, video_height=240, video_fps=15).render_timeline_to_mp4(project_id=project.project_id, timeline=timeline, output_path=output_path, subtitle_ass_path=ass_path)
+
+    frame = _frame_rgb(output_path, at_sec=1.0, width=320, height=240)
+    assert max(frame[0::3]) > 180
+    probe = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "s", "-show_entries", "stream=index", "-of", "csv=p=0", str(output_path)], capture_output=True, text=True, timeout=30)
+    assert probe.stdout.strip() == ""
 
 
 def test_resolve_narration_clip_source_uses_narration_source_uri_for_segment_style_asset_uri(

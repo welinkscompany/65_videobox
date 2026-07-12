@@ -1,8 +1,31 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 217. 2026-07-11 production-readiness blocker slice 1 closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
-> 이 문서의 `## 1`부터 `## 216`까지는 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 217`만 기준으로 본다.
+> 현재 authoritative 상태/next slice 판단은 `## 218. 2026-07-12 detailed editor Task 1 closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 이 문서의 `## 1`부터 `## 217`까지는 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 218`만 기준으로 본다.
 > 단, `2일 내 1차 데모 완성` 실행 레일은 `## 189`의 장기 우선순위를 그대로 넓게 집행하지 않고, `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`의 축소된 실행 계획을 우선 적용한다.
+
+## 218. 2026-07-12 detailed editor Task 1 closeout
+
+상세 편집기 구현 계획 `docs/superpowers/plans/2026-07-12-detailed-editor-upgrade-implementation.md`의 Task 1 자막 스타일 출력 수직 슬라이스를 TDD로 완료했다.
+
+- editing session의 `caption_style`은 project JSON 저장과 저장소 재조회에서 유지된다.
+- `subtitle.srt`는 기존 text/timing artifact로 유지하고, 새 `caption.ass`는 스타일 전용 artifact로 생성한다.
+- FFmpeg final renderer는 ASS가 주어지면 libass burn-in MP4를 만들고 selectable subtitle stream을 mux하지 않는다.
+- real pycapcut draft는 SRT import 대신 caption별 `TextSegment`를 만든다. color, size, outline, background를 draft JSON에서 검증했고, `shadow_blur_px`는 `capcut_compatibility_warnings`로 명시한다.
+- output pipeline은 현재 timeline과 일치하는 latest editing session만 FFmpeg/CapCut 출력에 전달한다. 다른 timeline session을 출력에 섞지 않는다.
+
+검증:
+
+- RED: 새 ASS/caption-style 모듈 부재와 pipeline 전달 부재를 각각 재현했다.
+- focused backend: caption style, ASS, FFmpeg, real pycapcut, final-render pipeline, CapCut pipeline 24 passed.
+- full backend: `.venv\\Scripts\\python.exe -m pytest -q`에서 642 passed, Python 3.12.
+- frontend impact: `npm --prefix apps/web test` 88 passed; `npm --prefix apps/web run build` success.
+- real output: black B-roll 위 styled ASS caption burn-in MP4와 real CapCut `draft_content.json`의 styled text material을 자동 테스트로 검증했다.
+
+진행률:
+
+- 상세 편집기 구현 계획은 5개 Task 중 Task 1 완료로 strict 20%, remaining 80%다.
+- 기존 production-readiness 39 milestone 진행률은 이 별도 확장 작업 때문에 재산정하지 않는다. 현재 남은 editor Task 2는 revisioned style mutation/API와 scope preflight다.
 
 ## 217. 2026-07-11 production-readiness blocker slice 1 closeout
 

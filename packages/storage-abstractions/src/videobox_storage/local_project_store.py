@@ -2883,6 +2883,7 @@ class LocalProjectStore:
             "session_id": session_id,
             "project_id": project_id,
             "timeline_id": timeline_id,
+            "caption_style": session_payload.get("caption_style"),
             "segments": session_payload.get("segments", []),
             "history": session_payload.get("history", []),
             "created_at": created_value,

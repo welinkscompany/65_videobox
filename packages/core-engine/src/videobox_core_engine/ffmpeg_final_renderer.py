@@ -198,6 +198,7 @@ class FfmpegFinalRenderer:
         timeline: dict[str, Any],
         output_path: Path,
         subtitle_file_path: Path | None = None,
+        subtitle_ass_path: Path | None = None,
         on_progress: Callable[[int], None] | None = None,
     ) -> Path:
         def report_progress(percent: int) -> None:
@@ -317,15 +318,18 @@ class FfmpegFinalRenderer:
                 "-i",
                 str(audio_path),
             ]
-            if subtitle_file_path is not None:
+            if subtitle_file_path is not None and subtitle_ass_path is None:
                 command += ["-i", str(subtitle_file_path), "-c:s", "mov_text", "-map", "2:s"]
+            if subtitle_ass_path is not None:
+                escaped_ass_path = subtitle_ass_path.resolve().as_posix().replace(":", r"\:").replace("'", r"\'")
+                command += ["-vf", f"subtitles=filename='{escaped_ass_path}'"]
             command += [
                 "-map",
                 "0:v",
                 "-map",
                 "1:a",
                 "-c:v",
-                "copy",
+                "libx264" if subtitle_ass_path is not None else "copy",
                 "-c:a",
                 "aac",
                 "-shortest",

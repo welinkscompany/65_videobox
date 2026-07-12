@@ -25,8 +25,9 @@ class _FakePyCapCutExporter:
         drafts_root: Path,
         draft_name: str,
         subtitle_file_path: Path | None = None,
+        editing_session: dict[str, Any] | None = None,
     ) -> Path:
-        self.received_calls.append({"project_id": project_id, "draft_name": draft_name})
+        self.received_calls.append({"project_id": project_id, "draft_name": draft_name, "editing_session": editing_session})
         draft_path = drafts_root / draft_name
         draft_path.mkdir(parents=True, exist_ok=True)
         (draft_path / "draft_content.json").write_text("{}", encoding="utf-8")
@@ -132,6 +133,20 @@ def test_start_capcut_draft_export_raises_clear_error_when_not_configured(tmp_pa
 
     with pytest.raises(RuntimeError, match="not configured"):
         runner.start_capcut_draft_export(project_id=project.project_id, timeline_job_id=timeline_job_id)
+
+
+def test_start_capcut_draft_export_passes_matching_editing_session_to_adapter(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="CapCut Styled Session")
+    fake_exporter = _FakePyCapCutExporter()
+    runner = LocalPipelineRunner(store, pycapcut_exporter=fake_exporter)
+    timeline_job_id = _build_approved_timeline_job(store, runner, project.project_id)
+    timeline_id = runner.get_timeline_result(project_id=project.project_id, job_id=timeline_job_id)["timeline"]["timeline_id"]
+    store.save_editing_session(project_id=project.project_id, timeline_id=timeline_id, session_payload={"project_id": project.project_id, "timeline_id": timeline_id, "caption_style": {"text_color": "#00FF00FF"}, "segments": [{"segment_id": "seg_001", "caption_text": "CapCut style", "start_sec": 0.0, "end_sec": 2.0}], "history": []})
+
+    runner.start_capcut_draft_export(project_id=project.project_id, timeline_job_id=timeline_job_id)
+
+    assert fake_exporter.received_calls[0]["editing_session"]["caption_style"]["text_color"] == "#00FF00FF"
 
 
 def test_real_capcut_draft_keeps_short_tts_silence_material_after_temp_export_is_removed(tmp_path: Path) -> None:

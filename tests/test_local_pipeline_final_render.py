@@ -11,6 +11,8 @@ from videobox_storage.local_project_store import LocalProjectStore
 class _FakeFinalRenderer:
     def __init__(self) -> None:
         self.received_calls: list[dict[str, Any]] = []
+        self.video_width = 1280
+        self.video_height = 720
 
     def render_timeline_to_mp4(
         self,
@@ -19,6 +21,7 @@ class _FakeFinalRenderer:
         timeline: dict[str, Any],
         output_path: Path,
         subtitle_file_path: Path | None = None,
+        subtitle_ass_path: Path | None = None,
         on_progress: Any = None,
     ) -> Path:
         self.received_calls.append(
@@ -27,6 +30,8 @@ class _FakeFinalRenderer:
                 "timeline": timeline,
                 "output_path": output_path,
                 "subtitle_file_path": subtitle_file_path,
+                "subtitle_ass_path": subtitle_ass_path,
+                "subtitle_ass_text": subtitle_ass_path.read_text(encoding="utf-8") if subtitle_ass_path else None,
             }
         )
         if on_progress is not None:
@@ -167,3 +172,21 @@ def test_start_final_render_passes_latest_subtitle_file_path_to_renderer(tmp_pat
         project_id=project.project_id, storage_uri=persisted_subtitle["file_uri"]
     )
     assert received_subtitle_path.exists()
+
+
+def test_start_final_render_derives_ass_from_matching_editing_session(tmp_path: Path) -> None:
+    raw_audio = tmp_path / "narration.wav"
+    raw_audio.write_bytes(b"fake wav data")
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Final Render Styled Session")
+    fake_renderer = _FakeFinalRenderer()
+    runner = LocalPipelineRunner(store, final_renderer=fake_renderer)
+    narration_asset = runner.register_narration_asset(project_id=project.project_id, source_path=raw_audio)
+    timeline_job = _build_approved_timeline_job(store, runner, project.project_id, narration_asset)
+    store.save_editing_session(project_id=project.project_id, timeline_id=timeline_job["timeline_id"], session_payload={"project_id": project.project_id, "timeline_id": timeline_job["timeline_id"], "caption_style": {"text_color": "#FF0000FF"}, "segments": [{"segment_id": "seg_001", "caption_text": "Styled output", "start_sec": 0.0, "end_sec": 2.0}], "history": []})
+
+    runner.start_final_render(project_id=project.project_id, timeline_job_id=timeline_job["job_id"])
+
+    ass_path = fake_renderer.received_calls[0]["subtitle_ass_path"]
+    assert ass_path is not None
+    assert "Styled output" in fake_renderer.received_calls[0]["subtitle_ass_text"]

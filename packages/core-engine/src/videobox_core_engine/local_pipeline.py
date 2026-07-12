@@ -35,6 +35,7 @@ from videobox_capcut_export import CapCutExportAdapter
 from videobox_core_engine.auto_cut import AutoCutPlanner
 from videobox_core_engine.ffmpeg_auto_cut_executor import FfmpegAutoCutExecutor
 from videobox_core_engine.ffmpeg_final_renderer import FfmpegFinalRenderer
+from videobox_core_engine.ass_subtitles import render_editing_session_ass
 from videobox_core_engine.thumbnail_generator import ThumbnailGenerationError, generate_video_thumbnail
 from videobox_core_engine.tts_acceptance import assess_tts_audio
 from videobox_core_engine.editing_session import (
@@ -1278,13 +1279,26 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 if latest_subtitle
                 else None
             )
+            editing_session = self._editing_session_for_output_timeline(project_id=project_id, timeline=timeline)
             with tempfile.TemporaryDirectory(prefix="videobox_final_render_") as raw_render_dir:
                 render_output_path = Path(raw_render_dir) / "output.mp4"
+                subtitle_ass_path = None
+                if editing_session is not None:
+                    subtitle_ass_path = Path(raw_render_dir) / "captions.ass"
+                    subtitle_ass_path.write_text(
+                        render_editing_session_ass(
+                            editing_session,
+                            video_width=self.final_renderer.video_width,
+                            video_height=self.final_renderer.video_height,
+                        ),
+                        encoding="utf-8",
+                    )
                 self.final_renderer.render_timeline_to_mp4(
                     project_id=project_id,
                     timeline=timeline,
                     output_path=render_output_path,
                     subtitle_file_path=subtitle_file_path,
+                    subtitle_ass_path=subtitle_ass_path,
                     on_progress=lambda percent: self.store.update_job_progress(
                         project_id=project_id, job_id=job["job_id"], progress_percent=percent
                     ),
@@ -1370,6 +1384,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 if latest_subtitle
                 else None
             )
+            editing_session = self._editing_session_for_output_timeline(project_id=project_id, timeline=timeline)
             with tempfile.TemporaryDirectory(prefix="videobox_capcut_draft_") as raw_drafts_root:
                 draft_path = self.pycapcut_exporter.export_timeline(
                     project_id=project_id,
@@ -1377,11 +1392,12 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                     drafts_root=Path(raw_drafts_root),
                     draft_name=str(timeline["timeline_id"]),
                     subtitle_file_path=subtitle_file_path,
+                    editing_session=editing_session,
                 )
                 persisted = self.store.save_capcut_draft_export(
                     project_id=project_id,
                     timeline_id=str(timeline["timeline_id"]),
-                    source_draft_path=draft_path,
+                    source_draft_path=getattr(draft_path, "draft_path", draft_path),
                 )
         except Exception as exc:
             failed_job = self.store.update_job(
@@ -1403,6 +1419,17 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
             status=JobStatus.SUCCEEDED,
             output_ref=persisted["export_id"],
         )
+
+    def _editing_session_for_output_timeline(
+        self, *, project_id: str, timeline: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        try:
+            session = self.store.get_latest_editing_session(project_id=project_id)
+        except KeyError:
+            return None
+        if str(session.get("timeline_id") or "") != str(timeline.get("timeline_id") or ""):
+            return None
+        return session
 
     def get_capcut_draft_export_result(self, *, project_id: str, job_id: str) -> dict[str, Any]:
         job = self.store.get_job(project_id=project_id, job_id=job_id)
