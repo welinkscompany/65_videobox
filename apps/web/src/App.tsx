@@ -21,6 +21,7 @@ import {
   type Project,
   type RecommendationItem,
   type ReviewSnapshot,
+  type SelectedRangePreview,
   type SubtitleJob,
   type TimelineJob,
   type TtsCandidateRecord,
@@ -139,6 +140,9 @@ export function App() {
   const [selectedPresetId, setSelectedPresetId] = useState("");
   const [captionStyleScope, setCaptionStyleScope] = useState<CaptionStyleScope>("current_caption");
   const [captionStylePreflight, setCaptionStylePreflight] = useState<CaptionStyleScopePreflight | null>(null);
+  const [selectedRangeStartSec, setSelectedRangeStartSec] = useState(0);
+  const [selectedRangeEndSec, setSelectedRangeEndSec] = useState(0);
+  const [selectedRangePreview, setSelectedRangePreview] = useState<SelectedRangePreview | null>(null);
   const [isRebuildingTimeline, setIsRebuildingTimeline] = useState(false);
   const [isApprovingTimeline, setIsApprovingTimeline] = useState(false);
   const [isReopeningTimeline, setIsReopeningTimeline] = useState(false);
@@ -1597,6 +1601,11 @@ export function App() {
     const nextSegment =
       editingSession?.segments.find((segment) => segment.segment_id === segmentId) ?? null;
     setSelectedRegenerationFields(buildDefaultRegenerationFields(nextSegment));
+    if (nextSegment) {
+      setSelectedRangeStartSec(nextSegment.start_sec);
+      setSelectedRangeEndSec(nextSegment.end_sec);
+      setSelectedRangePreview(null);
+    }
     setPartialRegenerationRestoreWarning(null);
     setPartialRegenerationPreflight(null);
     setPartialRegenerationRun(null);
@@ -1625,7 +1634,30 @@ export function App() {
     "image_overlay",
     "table_overlay",
     "tts_replacement",
+    "timeline_structure",
   ] as const;
+
+  function moveSelectedTimelineSegment(offset: -1 | 1) {
+    if (!editingSession || !selectedEditingSegmentId || !selectedProjectId || !activeEditingSessionId) return;
+    const currentIndex = editingSession.segments.findIndex((segment) => segment.segment_id === selectedEditingSegmentId);
+    const destinationIndex = currentIndex + offset;
+    if (currentIndex < 0 || destinationIndex < 0 || destinationIndex >= editingSession.segments.length) return;
+    const reordered = [...editingSession.segments];
+    const [moved] = reordered.splice(currentIndex, 1);
+    reordered.splice(destinationIndex, 0, moved);
+    let cursor = Math.min(...editingSession.segments.map((segment) => segment.start_sec));
+    const bounds_by_id: Record<string, { start_sec: number; end_sec: number }> = {};
+    for (const segment of reordered) {
+      const duration = segment.end_sec - segment.start_sec;
+      bounds_by_id[segment.segment_id] = { start_sec: cursor, end_sec: cursor + duration };
+      cursor += duration;
+    }
+    void applyEditingMutation("timeline-reorder", () => api.reorderEditingSessionSegments(selectedProjectId, activeEditingSessionId, {
+      expected_revision: editingSession.session_revision,
+      segment_ids: reordered.map((segment) => segment.segment_id),
+      bounds_by_id,
+    }), { addRegenerationField: "timeline_structure" });
+  }
 
   function handleProjectCreated(project: Project) {
     setProjects((current) => [project, ...current.filter((item) => item.project_id !== project.project_id)]);
@@ -2617,6 +2649,88 @@ export function App() {
                       <dd>{preservedEditingSegments.length}</dd>
                     </div>
                   </dl>
+                  <section className="editor-library" aria-label="고정 트랙 타임라인">
+                    <h3>고정 트랙 타임라인</h3>
+                    <p className="meta-copy">나레이션·B롤·BGM·SFX·오버레이만 사용합니다. 임의 트랙은 추가할 수 없습니다.</p>
+                    <div className="segment-list" aria-label="고정 역할 트랙">
+                      {[
+                        ["narration", "나레이션"],
+                        ["broll", "B롤"],
+                        ["bgm", "BGM"],
+                        ["sfx", "SFX"],
+                        ["overlay", "오버레이"],
+                      ].map(([role, label]) => (
+                        <span className="pill" key={role}>{label}</span>
+                      ))}
+                    </div>
+                    <div className="action-row">
+                      <button
+                        className="action-button subtle"
+                        disabled={!selectedEditingSegment || !selectedProjectId || !activeEditingSessionId || Boolean(isSavingEditingMutation)}
+                        onClick={() => selectedEditingSegment && void applyEditingMutation("timeline-split", () => api.splitEditingSessionSegment(selectedProjectId!, activeEditingSessionId!, selectedEditingSegment.segment_id, {
+                          expected_revision: editingSession.session_revision,
+                          split_sec: (selectedEditingSegment.start_sec + selectedEditingSegment.end_sec) / 2,
+                        }), { addRegenerationField: "timeline_structure" })}
+                        type="button"
+                      >분할</button>
+                      <button
+                        className="action-button subtle"
+                        disabled={!selectedEditingSegment || editingSession.segments[0]?.segment_id === selectedEditingSegment.segment_id || Boolean(isSavingEditingMutation)}
+                        onClick={() => moveSelectedTimelineSegment(-1)}
+                        type="button"
+                      >앞으로 이동</button>
+                      <button
+                        className="action-button subtle"
+                        disabled={!selectedEditingSegment || editingSession.segments[editingSession.segments.length - 1]?.segment_id === selectedEditingSegment.segment_id || Boolean(isSavingEditingMutation)}
+                        onClick={() => moveSelectedTimelineSegment(1)}
+                        type="button"
+                      >뒤로 이동</button>
+                      <button
+                        className="action-button subtle"
+                        disabled={!selectedEditingSegment || !selectedProjectId || !activeEditingSessionId || editingSession.segments[editingSession.segments.length - 1]?.segment_id === selectedEditingSegment?.segment_id || Boolean(isSavingEditingMutation)}
+                        onClick={() => {
+                          if (!selectedEditingSegment || !selectedProjectId || !activeEditingSessionId) return;
+                          const index = editingSession.segments.findIndex((segment) => segment.segment_id === selectedEditingSegment.segment_id);
+                          const right = editingSession.segments[index + 1];
+                          if (right) void applyEditingMutation("timeline-merge", () => api.mergeEditingSessionSegments(selectedProjectId, activeEditingSessionId, {
+                            expected_revision: editingSession.session_revision, left_segment_id: selectedEditingSegment.segment_id, right_segment_id: right.segment_id,
+                          }), { addRegenerationField: "timeline_structure" });
+                        }}
+                        type="button"
+                      >다음과 병합</button>
+                      <button
+                        className="action-button subtle"
+                        disabled={!selectedProjectId || !activeEditingSessionId || !(editingSession.undo_count ?? editingSession.history.some((entry) => entry.inverse_payload)) || Boolean(isSavingEditingMutation)}
+                        onClick={() => void applyEditingMutation("timeline-undo", () => api.undoEditingSession(selectedProjectId!, activeEditingSessionId!, editingSession.session_revision), { addRegenerationField: "timeline_structure" })}
+                        type="button"
+                      >실행 취소</button>
+                      <button
+                        className="action-button subtle"
+                        disabled={!selectedProjectId || !activeEditingSessionId || !(editingSession.redo_count ?? 0) || Boolean(isSavingEditingMutation)}
+                        onClick={() => void applyEditingMutation("timeline-redo", () => api.redoEditingSession(selectedProjectId!, activeEditingSessionId!, editingSession.session_revision), { addRegenerationField: "timeline_structure" })}
+                        type="button"
+                      >다시 실행</button>
+                    </div>
+                    <div className="action-row">
+                      <label className="field"><span>선택 시작(초)</span><input min="0" onChange={(event) => setSelectedRangeStartSec(Number(event.target.value))} step="0.1" type="number" value={selectedRangeStartSec} /></label>
+                      <label className="field"><span>선택 종료(초)</span><input min="0" onChange={(event) => setSelectedRangeEndSec(Number(event.target.value))} step="0.1" type="number" value={selectedRangeEndSec} /></label>
+                      <button
+                        className="action-button"
+                        disabled={!selectedEditingSegment || !selectedProjectId || !activeEditingSessionId || Boolean(isSavingEditingMutation)}
+                        onClick={() => selectedEditingSegment && void applyEditingMutation("timeline-bounds", () => api.updateEditingSessionSegmentBounds(selectedProjectId!, activeEditingSessionId!, selectedEditingSegment.segment_id, {
+                          expected_revision: editingSession.session_revision, start_sec: selectedRangeStartSec, end_sec: selectedRangeEndSec,
+                        }), { addRegenerationField: "timeline_structure" })}
+                        type="button"
+                      >구간 길이 저장</button>
+                      <button
+                        className="action-button"
+                        disabled={!selectedProjectId || !activeEditingSessionId}
+                        onClick={() => void api.previewEditingSessionSelectedRange(selectedProjectId!, activeEditingSessionId!, { start_sec: selectedRangeStartSec, end_sec: selectedRangeEndSec }).then(setSelectedRangePreview).catch((error) => setErrorMessage(error instanceof Error ? error.message : "선택 구간 미리보기를 만들지 못했습니다"))}
+                        type="button"
+                      >선택 구간 미리보기</button>
+                    </div>
+                    {selectedRangePreview ? <div className="confirmation-card"><p>{`선택 ${formatSeconds(selectedRangePreview.start_sec, selectedRangePreview.end_sec)} · 자막 ${selectedRangePreview.captions.length}개 · 오버레이 ${selectedRangePreview.overlays.length}개`}</p><div aria-label="범위 미리보기" className="range-preview-stage">{selectedRangePreview.overlays.map((overlay, index) => <span className="range-preview-overlay" key={`${String(overlay.segment_id ?? "overlay")}-${index}`}>{String(overlay.text ?? overlay.title ?? overlay.overlay_type ?? "오버레이")}</span>)}{selectedRangePreview.captions.map((caption) => <p className="range-preview-caption" key={caption.segment_id} style={{ color: String(caption.caption_style.text_color ?? caption.caption_style.font_color ?? "#ffffff"), fontSize: Number(caption.caption_style.font_size_px ?? caption.caption_style.font_size ?? 32) }}>{caption.caption_text}</p>)}</div><p className="meta-copy">적용 자막 스타일과 관련 오버레이를 포함한 범위 미리보기입니다.</p></div> : null}
+                  </section>
                   <div className="editor-library" aria-label="자막 스타일 라이브러리">
                     <h3>자막 스타일</h3>
                     <label className="field">

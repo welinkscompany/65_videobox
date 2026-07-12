@@ -597,6 +597,39 @@ class _PipelinePrivateHelpersMixin:
                 if str(segment.get("segment_id") or "").strip()
             ]
 
+        if "timeline_structure" in target_fields:
+            source_by_id = {
+                str(segment.get("segment_id") or "").strip(): segment
+                for segment in source_segments
+                if str(segment.get("segment_id") or "").strip()
+            }
+            structured_segments: list[dict[str, Any]] = []
+            for session_segment in session.get("segments", []):
+                if not isinstance(session_segment, dict):
+                    continue
+                segment_id = str(session_segment.get("segment_id") or "").strip()
+                if not segment_id:
+                    continue
+                lineage = session_segment.get("lineage")
+                root_segment_id = (
+                    str(lineage.get("root_segment_id") or "").strip()
+                    if isinstance(lineage, dict)
+                    else ""
+                ) or segment_id
+                source_segment = source_by_id.get(root_segment_id, {})
+                structured_segments.append(
+                    {
+                        **deepcopy(source_segment),
+                        "segment_id": segment_id,
+                        "text": str(session_segment.get("caption_text") or source_segment.get("text") or ""),
+                        "start_sec": float(session_segment.get("start_sec") or 0.0),
+                        "end_sec": float(session_segment.get("end_sec") or 0.0),
+                        "cleanup_decision": _normalize_runtime_cut_action(session_segment.get("cut_action") or source_segment.get("cleanup_decision")),
+                        "editing_session_lineage": deepcopy(lineage) if isinstance(lineage, dict) else {"root_segment_id": root_segment_id},
+                    }
+                )
+            source_segments = structured_segments
+
         source_pending_recommendations = _normalized_runtime_pending_recommendations(
             source_timeline.get("pending_recommendations", [])
         )

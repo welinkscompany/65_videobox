@@ -470,6 +470,30 @@ class ApiOrchestrator:
     def get_latest_editing_session(self, *, project_id: str) -> dict[str, Any]:
         return self.pipeline.get_latest_editing_session(project_id=project_id)
 
+    def get_editing_session_fixed_timeline(self, *, project_id: str, session_id: str) -> dict[str, Any]:
+        return self.pipeline.get_editing_session_fixed_timeline(project_id=project_id, session_id=session_id)
+
+    def preview_editing_session_selected_range(self, *, project_id: str, session_id: str, start_sec: float, end_sec: float) -> dict[str, Any]:
+        return self.pipeline.preview_editing_session_selected_range(project_id=project_id, session_id=session_id, start_sec=start_sec, end_sec=end_sec)
+
+    def split_editing_session_segment(self, *, project_id: str, session_id: str, segment_id: str, split_sec: float, expected_revision: int) -> dict[str, Any]:
+        return self.pipeline.split_editing_session_segment(project_id=project_id, session_id=session_id, segment_id=segment_id, split_sec=split_sec, expected_revision=expected_revision)
+
+    def merge_editing_session_segments(self, *, project_id: str, session_id: str, left_segment_id: str, right_segment_id: str, expected_revision: int) -> dict[str, Any]:
+        return self.pipeline.merge_editing_session_segments(project_id=project_id, session_id=session_id, left_segment_id=left_segment_id, right_segment_id=right_segment_id, expected_revision=expected_revision)
+
+    def set_editing_session_segment_bounds(self, *, project_id: str, session_id: str, segment_id: str, start_sec: float, end_sec: float, expected_revision: int) -> dict[str, Any]:
+        return self.pipeline.set_editing_session_segment_bounds(project_id=project_id, session_id=session_id, segment_id=segment_id, start_sec=start_sec, end_sec=end_sec, expected_revision=expected_revision)
+
+    def reorder_editing_session_segments(self, *, project_id: str, session_id: str, segment_ids: list[str], bounds_by_id: dict[str, dict[str, float]] | None, expected_revision: int) -> dict[str, Any]:
+        return self.pipeline.reorder_editing_session_segments(project_id=project_id, session_id=session_id, segment_ids=segment_ids, bounds_by_id=bounds_by_id, expected_revision=expected_revision)
+
+    def undo_editing_session(self, *, project_id: str, session_id: str, expected_revision: int) -> dict[str, Any]:
+        return self.pipeline.undo_editing_session(project_id=project_id, session_id=session_id, expected_revision=expected_revision)
+
+    def redo_editing_session(self, *, project_id: str, session_id: str, expected_revision: int) -> dict[str, Any]:
+        return self.pipeline.redo_editing_session(project_id=project_id, session_id=session_id, expected_revision=expected_revision)
+
     def preview_caption_style_scope(self, *, project_id: str, session_id: str, scope: str, segment_ids: list[str]) -> dict[str, Any]:
         return self.pipeline.preview_editing_session_caption_style_scope(project_id=project_id, session_id=session_id, scope=scope, segment_ids=segment_ids)
 

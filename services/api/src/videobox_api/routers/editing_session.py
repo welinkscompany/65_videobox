@@ -11,12 +11,18 @@ from videobox_api.models import (
     CreateEditingSessionRequest,
     CutActionOverrideRequest,
     EditingSessionResponse,
+    EditingSessionRevisionRequest,
     ExplanationCardRequest,
     ImageOverlayRequest,
     PartialRegenerationJobResponse,
     PartialRegenerationPreflightRequest,
     PartialRegenerationRequest,
     PartialRegenerationResponse,
+    SegmentBoundsRequest,
+    SegmentMergeRequest,
+    SegmentOrderRequest,
+    SegmentSplitRequest,
+    SelectedRangePreviewRequest,
     TableOverlayRequest,
     TimelinePayloadResponse,
     TTSReplacementRequest,
@@ -73,6 +79,22 @@ def build_editing_session_router(orchestrator: ApiOrchestrator, store: LocalProj
             raise _http_error(exc) from exc
         return EditingSessionResponse(**result)
 
+    @router.get("/api/projects/{project_id}/editing-sessions/{session_id}/fixed-timeline")
+    def get_editing_session_fixed_timeline(project_id: str, session_id: str) -> dict[str, object]:
+        try:
+            return orchestrator.get_editing_session_fixed_timeline(project_id=project_id, session_id=session_id)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+
+    @router.post("/api/projects/{project_id}/editing-sessions/{session_id}/selected-range-preview")
+    def preview_editing_session_selected_range(project_id: str, session_id: str, payload: SelectedRangePreviewRequest) -> dict[str, object]:
+        try:
+            return orchestrator.preview_editing_session_selected_range(project_id=project_id, session_id=session_id, start_sec=payload.start_sec, end_sec=payload.end_sec)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        except Exception as exc:
+            raise _http_error(exc) from exc
+
     @router.post("/api/projects/{project_id}/editing-sessions/{session_id}/caption-style/preflight")
     def preview_caption_style_scope(project_id: str, session_id: str, payload: CaptionStyleMutationRequest) -> dict[str, object]:
         try:
@@ -109,6 +131,78 @@ def build_editing_session_router(orchestrator: ApiOrchestrator, store: LocalProj
             )
         except EditingSessionConflict as exc:
             return _editing_session_conflict_response(exc)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return EditingSessionResponse(**result)
+
+    @router.post("/api/projects/{project_id}/editing-sessions/{session_id}/segments/{segment_id}/split")
+    def split_editing_session_segment(project_id: str, session_id: str, segment_id: str, payload: SegmentSplitRequest) -> EditingSessionResponse:
+        try:
+            result = orchestrator.split_editing_session_segment(project_id=project_id, session_id=session_id, segment_id=segment_id, split_sec=payload.split_sec, expected_revision=payload.expected_revision)
+        except EditingSessionConflict as exc:
+            return _editing_session_conflict_response(exc)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return EditingSessionResponse(**result)
+
+    @router.post("/api/projects/{project_id}/editing-sessions/{session_id}/segments/merge")
+    def merge_editing_session_segments(project_id: str, session_id: str, payload: SegmentMergeRequest) -> EditingSessionResponse:
+        try:
+            result = orchestrator.merge_editing_session_segments(project_id=project_id, session_id=session_id, left_segment_id=payload.left_segment_id, right_segment_id=payload.right_segment_id, expected_revision=payload.expected_revision)
+        except EditingSessionConflict as exc:
+            return _editing_session_conflict_response(exc)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return EditingSessionResponse(**result)
+
+    @router.patch("/api/projects/{project_id}/editing-sessions/{session_id}/segments/{segment_id}/bounds")
+    def patch_editing_session_segment_bounds(project_id: str, session_id: str, segment_id: str, payload: SegmentBoundsRequest) -> EditingSessionResponse:
+        try:
+            result = orchestrator.set_editing_session_segment_bounds(project_id=project_id, session_id=session_id, segment_id=segment_id, start_sec=payload.start_sec, end_sec=payload.end_sec, expected_revision=payload.expected_revision)
+        except EditingSessionConflict as exc:
+            return _editing_session_conflict_response(exc)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return EditingSessionResponse(**result)
+
+    @router.put("/api/projects/{project_id}/editing-sessions/{session_id}/segment-order")
+    def put_editing_session_segment_order(project_id: str, session_id: str, payload: SegmentOrderRequest) -> EditingSessionResponse:
+        try:
+            result = orchestrator.reorder_editing_session_segments(project_id=project_id, session_id=session_id, segment_ids=payload.segment_ids, bounds_by_id=payload.bounds_by_id, expected_revision=payload.expected_revision)
+        except EditingSessionConflict as exc:
+            return _editing_session_conflict_response(exc)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return EditingSessionResponse(**result)
+
+    @router.post("/api/projects/{project_id}/editing-sessions/{session_id}/undo")
+    def undo_editing_session(project_id: str, session_id: str, payload: EditingSessionRevisionRequest) -> EditingSessionResponse:
+        try:
+            result = orchestrator.undo_editing_session(project_id=project_id, session_id=session_id, expected_revision=payload.expected_revision)
+        except EditingSessionConflict as exc:
+            return _editing_session_conflict_response(exc)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return EditingSessionResponse(**result)
+
+    @router.post("/api/projects/{project_id}/editing-sessions/{session_id}/redo")
+    def redo_editing_session(project_id: str, session_id: str, payload: EditingSessionRevisionRequest) -> EditingSessionResponse:
+        try:
+            result = orchestrator.redo_editing_session(project_id=project_id, session_id=session_id, expected_revision=payload.expected_revision)
+        except EditingSessionConflict as exc:
+            return _editing_session_conflict_response(exc)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
         except Exception as exc:
             raise _http_error(exc) from exc
         return EditingSessionResponse(**result)

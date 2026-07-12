@@ -443,6 +443,7 @@ export function formatFieldLabel(field: string) {
     image_overlay: "이미지",
     table_overlay: "표",
     tts_replacement: "TTS",
+    timeline_structure: "타임라인 구조",
   };
   return labels[field] ?? field.replace(/_/g, " ");
 }

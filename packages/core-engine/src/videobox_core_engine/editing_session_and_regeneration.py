@@ -38,6 +38,8 @@ from videobox_core_engine.ffmpeg_auto_cut_executor import FfmpegAutoCutExecutor
 from videobox_core_engine.ffmpeg_final_renderer import FfmpegFinalRenderer
 from videobox_core_engine.editing_session import (
     build_editing_session,
+    build_fixed_track_timeline,
+    build_selected_range_preview,
     preview_caption_style_scope,
     update_caption_style,
     build_partial_regeneration_request,
@@ -45,11 +47,17 @@ from videobox_core_engine.editing_session import (
     clear_segment_music_override,
     clear_segment_sfx_override,
     clear_segment_visual_overlays,
+    merge_adjacent_segments,
+    redo,
+    reorder_segments,
     clear_segment_tts_replacement,
     remove_segment_explanation_card,
     remove_segment_image_overlay,
     remove_segment_table_overlay,
     select_segment_tts_replacement,
+    set_segment_bounds,
+    split_segment,
+    undo,
     update_segment_explanation_card,
     update_segment_image_overlay,
     update_segment_broll_override,
@@ -130,6 +138,38 @@ class EditingSessionRegenerationMixin:
     def preview_editing_session_caption_style_scope(self, *, project_id: str, session_id: str, scope: str, segment_ids: list[str]) -> dict[str, Any]:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
         return {"affected_segment_ids": preview_caption_style_scope(session=session, scope=scope, segment_ids=segment_ids)}
+
+    def get_editing_session_fixed_timeline(self, *, project_id: str, session_id: str) -> dict[str, Any]:
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        return build_fixed_track_timeline(session=session)
+
+    def preview_editing_session_selected_range(self, *, project_id: str, session_id: str, start_sec: float, end_sec: float) -> dict[str, Any]:
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        return build_selected_range_preview(session=session, start_sec=start_sec, end_sec=end_sec)
+
+    def split_editing_session_segment(self, *, project_id: str, session_id: str, segment_id: str, split_sec: float, expected_revision: int) -> dict[str, Any]:
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=split_segment(session=session, segment_id=segment_id, split_sec=split_sec), expected_revision=expected_revision)
+
+    def merge_editing_session_segments(self, *, project_id: str, session_id: str, left_segment_id: str, right_segment_id: str, expected_revision: int) -> dict[str, Any]:
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=merge_adjacent_segments(session=session, left_segment_id=left_segment_id, right_segment_id=right_segment_id), expected_revision=expected_revision)
+
+    def set_editing_session_segment_bounds(self, *, project_id: str, session_id: str, segment_id: str, start_sec: float, end_sec: float, expected_revision: int) -> dict[str, Any]:
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=set_segment_bounds(session=session, segment_id=segment_id, start_sec=start_sec, end_sec=end_sec), expected_revision=expected_revision)
+
+    def reorder_editing_session_segments(self, *, project_id: str, session_id: str, segment_ids: list[str], bounds_by_id: dict[str, dict[str, float]] | None, expected_revision: int) -> dict[str, Any]:
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=reorder_segments(session=session, segment_ids=segment_ids, bounds_by_id=bounds_by_id), expected_revision=expected_revision)
+
+    def undo_editing_session(self, *, project_id: str, session_id: str, expected_revision: int) -> dict[str, Any]:
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=undo(session=session), expected_revision=expected_revision)
+
+    def redo_editing_session(self, *, project_id: str, session_id: str, expected_revision: int) -> dict[str, Any]:
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=redo(session=session), expected_revision=expected_revision)
 
     def update_editing_session_caption_style(self, *, project_id: str, session_id: str, style: dict[str, Any], scope: str, segment_ids: list[str], expected_revision: int) -> dict[str, Any]:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)

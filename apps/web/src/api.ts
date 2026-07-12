@@ -152,6 +152,8 @@ export type EditingSessionHistoryEntry = {
   asset_id?: string | null;
   overlay_type?: string | null;
   recommendation_id?: string | null;
+  inverse_payload?: Record<string, unknown> | null;
+  forward_payload?: Record<string, unknown> | null;
 };
 
 export type EditingSession = {
@@ -162,6 +164,8 @@ export type EditingSession = {
   caption_style?: CaptionStyleSnapshot | null;
   segments: EditingSessionSegment[];
   history: EditingSessionHistoryEntry[];
+  undo_count?: number;
+  redo_count?: number;
   created_at?: string | null;
   updated_at?: string | null;
 };
@@ -184,6 +188,23 @@ export type EditorFavorite = {
 
 type RevisionedEditingSessionMutation = {
   expected_revision: number;
+};
+
+export type SegmentSplitRequest = RevisionedEditingSessionMutation & { split_sec: number };
+export type SegmentBoundsRequest = RevisionedEditingSessionMutation & { start_sec: number; end_sec: number };
+export type SegmentOrderRequest = RevisionedEditingSessionMutation & {
+  segment_ids: string[];
+  bounds_by_id?: Record<string, { start_sec: number; end_sec: number }>;
+};
+export type FixedTimeline = {
+  tracks: Array<{ role: "narration" | "broll" | "bgm" | "sfx" | "overlay"; clips: Record<string, unknown>[] }>;
+};
+export type SelectedRangePreview = {
+  start_sec: number;
+  end_sec: number;
+  captions: Array<{ segment_id: string; caption_text: string; caption_style: CaptionStyleSnapshot }>;
+  overlays: Array<Record<string, unknown>>;
+  timeline: FixedTimeline;
 };
 
 export type CaptionOverrideRequest = RevisionedEditingSessionMutation & {
@@ -631,6 +652,36 @@ export const api = {
     }
     return (await response.json()) as EditingSession;
   },
+  getEditingSessionFixedTimeline: (projectId: string, sessionId: string) =>
+    request<FixedTimeline>(`/api/projects/${projectId}/editing-sessions/${sessionId}/fixed-timeline`),
+  previewEditingSessionSelectedRange: (projectId: string, sessionId: string, payload: { start_sec: number; end_sec: number }) =>
+    request<SelectedRangePreview>(`/api/projects/${projectId}/editing-sessions/${sessionId}/selected-range-preview`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+    }),
+  splitEditingSessionSegment: (projectId: string, sessionId: string, segmentId: string, payload: SegmentSplitRequest) =>
+    request<EditingSession>(`/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/split`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+    }),
+  mergeEditingSessionSegments: (projectId: string, sessionId: string, payload: RevisionedEditingSessionMutation & { left_segment_id: string; right_segment_id: string }) =>
+    request<EditingSession>(`/api/projects/${projectId}/editing-sessions/${sessionId}/segments/merge`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+    }),
+  updateEditingSessionSegmentBounds: (projectId: string, sessionId: string, segmentId: string, payload: SegmentBoundsRequest) =>
+    request<EditingSession>(`/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/bounds`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+    }),
+  reorderEditingSessionSegments: (projectId: string, sessionId: string, payload: SegmentOrderRequest) =>
+    request<EditingSession>(`/api/projects/${projectId}/editing-sessions/${sessionId}/segment-order`, {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+    }),
+  undoEditingSession: (projectId: string, sessionId: string, expectedRevision: number) =>
+    request<EditingSession>(`/api/projects/${projectId}/editing-sessions/${sessionId}/undo`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ expected_revision: expectedRevision }),
+    }),
+  redoEditingSession: (projectId: string, sessionId: string, expectedRevision: number) =>
+    request<EditingSession>(`/api/projects/${projectId}/editing-sessions/${sessionId}/redo`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ expected_revision: expectedRevision }),
+    }),
   previewEditingSessionCaptionStyleScope: (
     projectId: string,
     sessionId: string,

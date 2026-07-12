@@ -5169,4 +5169,20 @@ describe("App", () => {
     expect(screen.getByLabelText("나레이션 로컬 경로")).toBeInTheDocument();
     expect(screen.getByLabelText("스크립트 로컬 경로")).toBeInTheDocument();
   });
+
+  it("shows the fixed five-track timeline controls after restoring an editing session", async () => {
+    vi.stubGlobal("fetch", createFetchMock());
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
+
+    expect(await screen.findByRole("heading", { name: "고정 트랙 타임라인" })).toBeInTheDocument();
+    expect(screen.getByText("나레이션")).toBeInTheDocument();
+    expect(screen.getAllByText("B롤").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("BGM").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("SFX").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("오버레이").length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "분할" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "실행 취소" })).toBeInTheDocument();
+  });
 });

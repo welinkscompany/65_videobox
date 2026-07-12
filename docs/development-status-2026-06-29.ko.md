@@ -1,8 +1,31 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 220. 2026-07-12 detailed editor Task 3 closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
-> 이 문서의 `## 1`부터 `## 219`까지는 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 220`만 기준으로 본다.
+> 현재 authoritative 상태/next slice 판단은 `## 221. 2026-07-12 detailed editor Task 4 closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 이 문서의 기존 날짜 기반 섹션은 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 221`만 기준으로 본다.
 > 단, `2일 내 1차 데모 완성` 실행 레일은 `## 189`의 장기 우선순위를 그대로 넓게 집행하지 않고, `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`의 축소된 실행 계획을 우선 적용한다.
+
+## 221. 2026-07-12 detailed editor Task 4 closeout
+
+상세 편집기 구현 계획의 Task 4, fixed-track timeline과 selected-range preview를 TDD로 완료했다.
+
+- editing session은 구조 편집의 유일 SSOT다. segment split은 양쪽 0.2초 이상을 강제하고, merge는 목록상 인접하며 시간 경계가 맞닿은 경우만 허용한다. bounds 변경과 reorder relayout은 전체 overlap을 거부한다.
+- split/merge는 caption, B-roll, BGM, SFX, TTS, overlay payload를 deep-copy하고 root/parent/source lineage와 media lineage를 남긴다. merge에서 하나의 legacy override 필드로 표현할 수 없는 미디어도 media lineage에서 잃지 않는다.
+- undo/redo는 snapshot inverse/forward payload를 session JSON과 SQLite canonical snapshot에 보존하며 최근 100개 구조 편집만 유지한다. render/import audit event는 stack에 넣지 않는다. 모든 구조 mutation은 기존 CAS revision/409 recovery를 사용한다.
+- UI/API는 narration, B-roll, BGM, SFX, overlay의 5개 고정 역할 track만 노출한다. 분할·인접 병합·앞/뒤 재배치·bounds·undo/redo와 선택 범위 미리보기를 제공한다. 미리보기에는 선택 범위 자막의 저장된 색상/크기 및 관련 overlay를 표시한다.
+- `timeline_structure` partial regeneration field는 세션의 구조/순서/timing을 새 timeline build에 전달한다. 따라서 편집 세션의 구조 변경이 재생성 뒤 출력 timeline으로 이어진다.
+
+검증:
+
+- RED: domain 함수 부재 5건, persistence undo stack 부재, API split route 404, structural regeneration field 미지원, fixed-track UI 부재를 먼저 재현했다.
+- focused: `.venv\\Scripts\\python.exe -m pytest tests\\test_editor_timeline_mutations.py tests\\test_editing_session.py -q` — 47 passed (known Starlette PendingDeprecationWarning 1건).
+- full backend: `.venv\\Scripts\\python.exe -m pytest -q` — Python 3.12, 665 passed (동일 경고 1건).
+- frontend: `npm --prefix apps/web test` — 95 passed; `npm --prefix apps/web run build` success.
+- `git diff --check` success.
+
+진행률:
+
+- 상세 편집기 구현 계획 5개 Task 중 Task 1–4 완료로 strict 80%, remaining 20%다.
+- 다음 Task는 media controls, output error recovery, release evidence를 다루는 Task 5다.
 
 ## 220. 2026-07-12 detailed editor Task 3 closeout
 

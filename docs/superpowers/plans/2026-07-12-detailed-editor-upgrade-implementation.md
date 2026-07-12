@@ -104,10 +104,10 @@ Expected: PASS.
 
 **Files:** test_editor_timeline_mutations.py; editing_session_and_regeneration.py; ffmpeg_final_renderer.py; API files; apps/web API/App/styles/tests.
 
-- [ ] Step 1 — Write RED tests for 0.2-second split bounds, adjacent-only merge, no overlap, lineage, 100-event undo/redo, styled selected-range preview.
-- [ ] Step 2 — Implement split_segment, merge_adjacent_segments, reorder_segments, set_segment_bounds, undo, redo. Carry caption/B-roll/music/SFX/TTS/overlay identity; reject arbitrary tracks/overlap.
-- [ ] Step 3 — Add API/UI after domain tests green. Events contain inverse payload; render/import is not undoable; render only five fixed role tracks.
-- [ ] Step 4 — Verify and commit.
+- [x] Step 1 — Write RED tests for 0.2-second split bounds, adjacent-only merge, no overlap, lineage, 100-event undo/redo, styled selected-range preview.
+- [x] Step 2 — Implement split_segment, merge_adjacent_segments, reorder_segments, set_segment_bounds, undo, redo. Carry caption/B-roll/music/SFX/TTS/overlay identity; reject arbitrary tracks/overlap.
+- [x] Step 3 — Add API/UI after domain tests green. Events contain inverse payload; render/import is not undoable; render only five fixed role tracks.
+- [x] Step 4 — Verify and commit.
 
 Run: .venv\Scripts\python.exe -m pytest tests/test_editor_timeline_mutations.py tests/test_editing_session.py tests/test_api.py -q; npm --prefix apps/web test; npm --prefix apps/web run build
 Expected: PASS.

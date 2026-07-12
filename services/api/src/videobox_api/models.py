@@ -277,6 +277,38 @@ class BrollOverrideRequest(BaseModel):
         return self
 
 
+class SegmentSplitRequest(BaseModel):
+    expected_revision: int = Field(ge=1)
+    split_sec: float = Field(ge=0)
+
+
+class SegmentMergeRequest(BaseModel):
+    expected_revision: int = Field(ge=1)
+    left_segment_id: str = Field(min_length=1)
+    right_segment_id: str = Field(min_length=1)
+
+
+class SegmentBoundsRequest(BaseModel):
+    expected_revision: int = Field(ge=1)
+    start_sec: float = Field(ge=0)
+    end_sec: float = Field(gt=0)
+
+
+class SegmentOrderRequest(BaseModel):
+    expected_revision: int = Field(ge=1)
+    segment_ids: list[str] = Field(min_length=1)
+    bounds_by_id: dict[str, dict[str, float]] | None = None
+
+
+class EditingSessionRevisionRequest(BaseModel):
+    expected_revision: int = Field(ge=1)
+
+
+class SelectedRangePreviewRequest(BaseModel):
+    start_sec: float = Field(ge=0)
+    end_sec: float = Field(gt=0)
+
+
 class VisualOverlayRequest(BaseModel):
     expected_revision: int = Field(ge=1)
     overlay_type: str = Field(min_length=1)
@@ -438,6 +470,8 @@ class EditingSessionHistoryEntryResponse(BaseModel):
     asset_id: str | None = None
     overlay_type: str | None = None
     recommendation_id: str | None = None
+    inverse_payload: dict[str, object] | None = None
+    forward_payload: dict[str, object] | None = None
 
 
 class EditingSessionResponse(BaseModel):
@@ -448,6 +482,8 @@ class EditingSessionResponse(BaseModel):
     caption_style: dict[str, object] | None = None
     segments: list[EditingSessionSegmentResponse]
     history: list[EditingSessionHistoryEntryResponse] = Field(default_factory=list)
+    undo_count: int = 0
+    redo_count: int = 0
     created_at: str | None = None
     updated_at: str | None = None
 

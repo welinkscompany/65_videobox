@@ -2080,6 +2080,8 @@ class LocalProjectStore:
             recovery_path.replace(file_path)
         payload["summary"] = json.loads(row["summary_json"] or "{}")
         payload["session_revision"] = int(row["session_revision"])
+        payload["undo_count"] = len(payload.get("undo_stack", []))
+        payload["redo_count"] = len(payload.get("redo_stack", []))
         payload["created_at"] = row["created_at"]
         payload["updated_at"] = row["updated_at"]
         return payload
@@ -2926,6 +2928,8 @@ class LocalProjectStore:
             "caption_style": session_payload.get("caption_style"),
             "segments": session_payload.get("segments", []),
             "history": session_payload.get("history", []),
+            "undo_stack": session_payload.get("undo_stack", []),
+            "redo_stack": session_payload.get("redo_stack", []),
             "created_at": created_value,
             "updated_at": updated_at,
         }
@@ -2933,6 +2937,8 @@ class LocalProjectStore:
             {
                 "segment_count": len(payload["segments"]),
                 "history_count": len(payload["history"]),
+                "undo_count": len(payload["undo_stack"]),
+                "redo_count": len(payload["redo_stack"]),
             },
             ensure_ascii=True,
         )

@@ -5,6 +5,10 @@ from typing import Any
 
 from videobox_domain_models.caption_style import CaptionStyle
 
+MIN_SEGMENT_DURATION_SEC = 0.2
+MAX_TIMELINE_UNDO_EVENTS = 100
+FIXED_TIMELINE_TRACK_ROLES = ("narration", "broll", "bgm", "sfx", "overlay")
+
 ALLOWED_PARTIAL_REGEN_FIELDS = {
     "caption",
     "cut_action",
@@ -16,6 +20,7 @@ ALLOWED_PARTIAL_REGEN_FIELDS = {
     "music",
     "sfx",
     "tts_replacement",
+    "timeline_structure",
 }
 
 PARTIAL_REGEN_STEPS_BY_FIELD = {
@@ -29,6 +34,7 @@ PARTIAL_REGEN_STEPS_BY_FIELD = {
     "music": ("music_refresh", "timeline_build"),
     "sfx": ("sfx_refresh", "timeline_build"),
     "tts_replacement": ("tts_refresh", "timeline_build"),
+    "timeline_structure": ("timeline_build",),
 }
 
 
@@ -68,8 +74,226 @@ def build_editing_session(
         "timeline_id": timeline["timeline_id"],
         "segments": editable_segments,
         "history": [],
+        "undo_stack": [],
+        "redo_stack": [],
         "session_revision": 1,
     }
+
+
+def _segment_index(*, session: dict[str, Any], segment_id: str) -> int:
+    for index, segment in enumerate(session.get("segments", [])):
+        if isinstance(segment, dict) and str(segment.get("segment_id")) == segment_id:
+            return index
+    raise KeyError(f"Segment not found in editing session: {segment_id}")
+
+
+def _validate_segment_bounds(*, segments: list[dict[str, Any]]) -> None:
+    normalized: list[tuple[float, float, str]] = []
+    for segment in segments:
+        start_sec = float(segment.get("start_sec", 0.0))
+        end_sec = float(segment.get("end_sec", 0.0))
+        if start_sec < 0 or end_sec - start_sec < MIN_SEGMENT_DURATION_SEC:
+            raise ValueError(f"Segment duration must be at least {MIN_SEGMENT_DURATION_SEC} seconds.")
+        normalized.append((start_sec, end_sec, str(segment.get("segment_id") or "")))
+    ordered = sorted(normalized)
+    for previous, current in zip(ordered, ordered[1:]):
+        if previous[1] > current[0]:
+            raise ValueError(f"Segment bounds overlap: {previous[2]} and {current[2]}.")
+
+
+def _event_snapshot(session: dict[str, Any]) -> dict[str, Any]:
+    return {"segments": deepcopy(session.get("segments", []))}
+
+
+def _record_undoable_mutation(*, before: dict[str, Any], updated: dict[str, Any], mutation_type: str, segment_id: str) -> dict[str, Any]:
+    event = {
+        "mutation_type": mutation_type,
+        "segment_id": segment_id,
+        "inverse_payload": _event_snapshot(before),
+        "forward_payload": _event_snapshot(updated),
+    }
+    updated.setdefault("history", []).append(deepcopy(event))
+    undo_stack = list(deepcopy(before.get("undo_stack", [])))
+    undo_stack.append(event)
+    updated["undo_stack"] = undo_stack[-MAX_TIMELINE_UNDO_EVENTS:]
+    updated["redo_stack"] = []
+    return updated
+
+
+def _lineage_for_split(segment: dict[str, Any], *, parent_segment_id: str) -> dict[str, Any]:
+    existing = segment.get("lineage") if isinstance(segment.get("lineage"), dict) else {}
+    return {
+        "root_segment_id": str(existing.get("root_segment_id") or parent_segment_id),
+        "parent_segment_id": parent_segment_id,
+        "source_segment_ids": list(existing.get("source_segment_ids") or [parent_segment_id]),
+    }
+
+
+def _asset_ids(segment: dict[str, Any], *, field: str) -> list[str]:
+    output: list[str] = []
+    existing = segment.get("media_lineage")
+    if isinstance(existing, dict):
+        output.extend(str(value) for value in existing.get(field, []) if str(value))
+    legacy_field = {"broll": "broll_override", "music": "music_override", "sfx": "sfx_override", "tts": "tts_replacement"}[field]
+    legacy = segment.get(legacy_field)
+    if isinstance(legacy, dict) and str(legacy.get("asset_id") or ""):
+        output.append(str(legacy["asset_id"]))
+    return list(dict.fromkeys(output))
+
+
+def _media_lineage(*segments: dict[str, Any]) -> dict[str, list[str]]:
+    return {field: list(dict.fromkeys(asset_id for segment in segments for asset_id in _asset_ids(segment, field=field))) for field in ("broll", "music", "sfx", "tts")}
+
+
+def split_segment(*, session: dict[str, Any], segment_id: str, split_sec: float) -> dict[str, Any]:
+    updated = deepcopy(session)
+    index = _segment_index(session=updated, segment_id=segment_id)
+    original = updated["segments"][index]
+    start_sec, end_sec = float(original["start_sec"]), float(original["end_sec"])
+    split_sec = float(split_sec)
+    if split_sec - start_sec < MIN_SEGMENT_DURATION_SEC or end_sec - split_sec < MIN_SEGMENT_DURATION_SEC:
+        raise ValueError(f"Split must leave at least {MIN_SEGMENT_DURATION_SEC} seconds on both sides.")
+    known_ids = {str(item.get("segment_id")) for item in updated["segments"] if isinstance(item, dict)}
+    suffix = 2
+    split_id = f"{segment_id}__split_{suffix}"
+    while split_id in known_ids:
+        suffix += 1
+        split_id = f"{segment_id}__split_{suffix}"
+    left, right = deepcopy(original), deepcopy(original)
+    left["end_sec"] = split_sec
+    right["segment_id"] = split_id
+    right["start_sec"] = split_sec
+    left["lineage"] = _lineage_for_split(original, parent_segment_id=segment_id)
+    right["lineage"] = _lineage_for_split(original, parent_segment_id=segment_id)
+    left["caption_needs_review"] = True
+    right["caption_needs_review"] = True
+    updated["segments"][index : index + 1] = [left, right]
+    _validate_segment_bounds(segments=updated["segments"])
+    return _record_undoable_mutation(before=session, updated=updated, mutation_type="segment_split", segment_id=segment_id)
+
+
+def merge_adjacent_segments(*, session: dict[str, Any], left_segment_id: str, right_segment_id: str) -> dict[str, Any]:
+    updated = deepcopy(session)
+    left_index = _segment_index(session=updated, segment_id=left_segment_id)
+    right_index = _segment_index(session=updated, segment_id=right_segment_id)
+    if right_index != left_index + 1:
+        raise ValueError("Only adjacent segments can be merged.")
+    left, right = updated["segments"][left_index], updated["segments"][right_index]
+    if abs(float(left["end_sec"]) - float(right["start_sec"])) > 0.000001:
+        raise ValueError("Only adjacent touching segments can be merged.")
+    merged = deepcopy(left)
+    merged["end_sec"] = float(right["end_sec"])
+    merged["caption_text"] = f"{str(left.get('caption_text') or '').strip()}\n{str(right.get('caption_text') or '').strip()}".strip()
+    left_lineage = left.get("lineage") if isinstance(left.get("lineage"), dict) else {}
+    right_lineage = right.get("lineage") if isinstance(right.get("lineage"), dict) else {}
+    merged["lineage"] = {
+        "root_segment_id": str(left_lineage.get("root_segment_id") or left_segment_id),
+        "source_segment_ids": list(dict.fromkeys(list(left_lineage.get("source_segment_ids") or [left_segment_id]) + list(right_lineage.get("source_segment_ids") or [right_segment_id]))),
+    }
+    merged["media_lineage"] = _media_lineage(left, right)
+    merged["caption_needs_review"] = bool(left.get("caption_needs_review") or right.get("caption_needs_review"))
+    updated["segments"][left_index : right_index + 1] = [merged]
+    _validate_segment_bounds(segments=updated["segments"])
+    return _record_undoable_mutation(before=session, updated=updated, mutation_type="segment_merge", segment_id=left_segment_id)
+
+
+def set_segment_bounds(*, session: dict[str, Any], segment_id: str, start_sec: float, end_sec: float) -> dict[str, Any]:
+    updated = deepcopy(session)
+    index = _segment_index(session=updated, segment_id=segment_id)
+    updated["segments"][index]["start_sec"] = float(start_sec)
+    updated["segments"][index]["end_sec"] = float(end_sec)
+    _validate_segment_bounds(segments=updated["segments"])
+    return _record_undoable_mutation(before=session, updated=updated, mutation_type="segment_bounds_update", segment_id=segment_id)
+
+
+def reorder_segments(*, session: dict[str, Any], segment_ids: list[str], bounds_by_id: dict[str, dict[str, float]] | None = None) -> dict[str, Any]:
+    updated = deepcopy(session)
+    existing = {str(segment.get("segment_id")): segment for segment in updated.get("segments", []) if isinstance(segment, dict)}
+    if len(segment_ids) != len(existing) or set(segment_ids) != set(existing):
+        raise ValueError("Segment order must be a complete permutation of the current segments.")
+    if list(segment_ids) != [str(segment.get("segment_id")) for segment in updated["segments"]] and bounds_by_id is None:
+        raise ValueError("Reorder requires a complete non-overlapping bounds_by_id relayout.")
+    reordered = [deepcopy(existing[segment_id]) for segment_id in segment_ids]
+    if bounds_by_id is not None:
+        if set(bounds_by_id) != set(existing):
+            raise ValueError("bounds_by_id must define every segment.")
+        for segment in reordered:
+            bounds = bounds_by_id[str(segment["segment_id"])]
+            segment["start_sec"] = float(bounds["start_sec"])
+            segment["end_sec"] = float(bounds["end_sec"])
+    _validate_segment_bounds(segments=reordered)
+    updated["segments"] = reordered
+    return _record_undoable_mutation(before=session, updated=updated, mutation_type="segment_reorder", segment_id=",".join(segment_ids))
+
+
+def undo(*, session: dict[str, Any]) -> dict[str, Any]:
+    undo_stack = list(deepcopy(session.get("undo_stack", [])))
+    if not undo_stack:
+        raise ValueError("There is no editing operation to undo.")
+    event = undo_stack.pop()
+    updated = deepcopy(session)
+    updated["segments"] = deepcopy(event["inverse_payload"]["segments"])
+    updated["undo_stack"] = undo_stack
+    updated["redo_stack"] = list(deepcopy(session.get("redo_stack", []))) + [event]
+    updated.setdefault("history", []).append({"mutation_type": "undo", "segment_id": str(event.get("segment_id") or "")})
+    return updated
+
+
+def redo(*, session: dict[str, Any]) -> dict[str, Any]:
+    redo_stack = list(deepcopy(session.get("redo_stack", [])))
+    if not redo_stack:
+        raise ValueError("There is no editing operation to redo.")
+    event = redo_stack.pop()
+    updated = deepcopy(session)
+    updated["segments"] = deepcopy(event["forward_payload"]["segments"])
+    updated["redo_stack"] = redo_stack
+    updated["undo_stack"] = (list(deepcopy(session.get("undo_stack", []))) + [event])[-MAX_TIMELINE_UNDO_EVENTS:]
+    updated.setdefault("history", []).append({"mutation_type": "redo", "segment_id": str(event.get("segment_id") or "")})
+    return updated
+
+
+def record_non_undoable_operation(*, session: dict[str, Any], operation_type: str) -> dict[str, Any]:
+    if operation_type not in {"render", "import"}:
+        raise ValueError("Only render and import may be recorded as non-undoable operations.")
+    updated = deepcopy(session)
+    updated.setdefault("history", []).append({"mutation_type": operation_type, "segment_id": ""})
+    return updated
+
+
+def build_fixed_track_timeline(*, session: dict[str, Any]) -> dict[str, Any]:
+    tracks: dict[str, list[dict[str, Any]]] = {role: [] for role in FIXED_TIMELINE_TRACK_ROLES}
+    for segment in session.get("segments", []):
+        if not isinstance(segment, dict):
+            continue
+        clip = {"segment_id": segment.get("segment_id"), "start_sec": segment.get("start_sec"), "end_sec": segment.get("end_sec")}
+        tracks["narration"].append({**clip, "caption_text": segment.get("caption_text")})
+        for role, field in (("broll", "broll_override"), ("bgm", "music_override"), ("sfx", "sfx_override")):
+            if segment.get(field) is not None:
+                tracks[role].append({**clip, "asset": deepcopy(segment[field])})
+        for overlay in segment.get("visual_overlays", []):
+            if isinstance(overlay, dict):
+                tracks["overlay"].append({**clip, "overlay": deepcopy(overlay)})
+    return {"tracks": [{"role": role, "clips": tracks[role]} for role in FIXED_TIMELINE_TRACK_ROLES]}
+
+
+def build_selected_range_preview(*, session: dict[str, Any], start_sec: float, end_sec: float) -> dict[str, Any]:
+    start_sec, end_sec = float(start_sec), float(end_sec)
+    if start_sec < 0 or end_sec <= start_sec:
+        raise ValueError("Selected preview range must have a positive duration.")
+    captions: list[dict[str, Any]] = []
+    overlays: list[dict[str, Any]] = []
+    selected_segments: list[dict[str, Any]] = []
+    for segment in session.get("segments", []):
+        if not isinstance(segment, dict) or float(segment.get("end_sec", 0.0)) <= start_sec or float(segment.get("start_sec", 0.0)) >= end_sec:
+            continue
+        selected_segments.append(deepcopy(segment))
+        captions.append({"segment_id": segment["segment_id"], "caption_text": segment.get("caption_text", ""), "start_sec": max(start_sec, float(segment["start_sec"])), "end_sec": min(end_sec, float(segment["end_sec"])), "caption_style": deepcopy(segment.get("caption_style") or session.get("caption_style") or {})})
+        for overlay in segment.get("visual_overlays", []):
+            if isinstance(overlay, dict):
+                overlays.append({"segment_id": segment["segment_id"], **deepcopy(overlay)})
+    selected_session = deepcopy(session)
+    selected_session["segments"] = selected_segments
+    return {"start_sec": start_sec, "end_sec": end_sec, "caption_style": deepcopy(session.get("caption_style") or {}), "captions": captions, "overlays": overlays, "timeline": build_fixed_track_timeline(session=selected_session)}
 
 
 def preview_caption_style_scope(*, session: dict[str, Any], scope: str, segment_ids: list[str]) -> list[str]:
