@@ -1,8 +1,30 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 223. 2026-07-12 long-form CapCut draft QA closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
-> 이 문서의 기존 날짜 기반 섹션은 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 223`만 기준으로 본다.
+> 현재 authoritative 상태/next slice 판단은 `## 224. 2026-07-12 CapCut output observability and recovery UX closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 이 문서의 기존 날짜 기반 섹션은 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 224`만 기준으로 본다.
 > 단, `2일 내 1차 데모 완성` 실행 레일은 `## 189`의 장기 우선순위를 그대로 넓게 집행하지 않고, `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`의 축소된 실행 계획을 우선 적용한다.
+
+## 224. 2026-07-12 CapCut output observability and recovery UX closeout
+
+CapCut real draft output의 관찰·복구 UX slice를 TDD로 완료했다.
+
+- CapCut draft artifact contract은 persisted `notes`(compatibility warning)를 API response와 frontend type까지 보존한다.
+- output panel은 artifact 경로, warning, nullable artifact 상태, 실제 실패 원인을 한글로 표시한다. warning은 오류 배너가 아니라 `CapCut에서 후처리 필요` 상태로 구분한다.
+- 실패 상태에서만 `CapCut 초안 다시 시도` 버튼이 보이며, 최신 성공 artifact와 warning은 새로고침 뒤에도 jobs API에서 복구된다.
+- failed job의 `error_message`는 pipeline read-path와 API response에서 누락되지 않게 보존했다.
+
+검증:
+
+- RED: 새로고침 뒤 warning 표시 요구 E2E가 UI 누락 상태에서 실패했다.
+- focused: CapCut API/pipeline contract 8 passed, UI restore/failure boundary 2 passed.
+- full backend: `.venv\\Scripts\\python.exe -m pytest -q` — Python 3.12, 683 passed, `python_multipart` PendingDeprecationWarning 1건.
+- frontend: `npm --prefix apps/web test` — 97 passed; `npm --prefix apps/web run build` — success. ErrorBoundary intentional throw 및 기존 React `act(...)` stderr는 test failure가 아니다.
+- `git diff --check` success. 기존 `artifacts/`는 생성 검증물로 Git에 포함하지 않는다.
+
+진행률/다음:
+
+- 상세 편집기 구현 계획 5개 Task는 기존대로 strict 100%, remaining 0%다. 이번 slice는 완료된 output recovery 범위의 관찰성 보강이다.
+- 다음 권장 작업은 신규 편집 기능이 아니라 실제 CapCut desktop에서 기존 3개 10분 draft를 열고 warning 안내가 충분한지, asset path/overlay/한국어 typography/수동 export가 가능한지를 기록하는 운영 QA다.
 
 ## 223. 2026-07-12 long-form CapCut draft QA closeout
 

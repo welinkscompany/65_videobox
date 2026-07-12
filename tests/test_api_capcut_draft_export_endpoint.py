@@ -11,7 +11,9 @@ from fastapi.testclient import TestClient
 
 from videobox_api.main import create_app
 from videobox_core_engine.settings import CapCutDraftExportConfig
+from videobox_domain_models.jobs import JobStatus, JobType
 from videobox_provider_interfaces.stt import STTResult, STTSegment
+from videobox_storage.local_project_store import LocalProjectStore
 
 FFMPEG_AVAILABLE = shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
 PYCAPCUT_AVAILABLE = importlib.util.find_spec("pycapcut") is not None
@@ -30,6 +32,34 @@ def _poll_until_finished(get_result, *, timeout_seconds: float = 30.0):
             return body
         time.sleep(0.1)
     raise TimeoutError("Job did not finish in time.")
+
+
+def test_capcut_draft_export_result_api_preserves_null_artifact_and_failure_reason(tmp_path: Path) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "CapCut failure API contract"}).json()["project_id"]
+    store = LocalProjectStore(tmp_path)
+    job = store.create_job(
+        project_id=project_id,
+        job_type=JobType.CAPCUT_DRAFT_EXPORT,
+        input_ref="timeline_build_job_001",
+    )
+    store.update_job(
+        project_id=project_id,
+        job_id=job["job_id"],
+        status=JobStatus.FAILED,
+        error_message="CapCut draft package could not be written.",
+    )
+
+    response = client.get(f"/api/projects/{project_id}/capcut-draft-exports/{job['job_id']}")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "job_id": job["job_id"],
+        "status": "failed",
+        "export": None,
+        "error_message": "CapCut draft package could not be written.",
+    }
 
 
 def _clean_high_confidence_transcribe(self, request):  # noqa: ANN001

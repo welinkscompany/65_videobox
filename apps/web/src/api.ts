@@ -470,6 +470,7 @@ export type CapCutDraftExportArtifact = {
   file_uri: string;
   status: string;
   created_at?: string | null;
+  notes: string[];
 };
 
 export type CapCutDraftExportJob = {

@@ -656,6 +656,7 @@ class CapCutDraftExportArtifactResponse(BaseModel):
 
 class CapCutDraftExportJobResponse(StartJobResponse):
     export: CapCutDraftExportArtifactResponse | None = None
+    error_message: str | None = None
 
 
 class ProviderTraceAuditSummaryResponse(BaseModel):

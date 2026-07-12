@@ -1,6 +1,6 @@
 # VideoBox 실행용 구현 계획서
 
-> 현재 worktree 기준 구현 상태와 next slice 판단은 `## 12. 2026-07-11 production-readiness blocker slice 1`와 `## 13. 다음 실제 작업`을 우선 적용한다. 그 외 상위 milestone/범위/순서 섹션은 제품·구현 계획의 기준을 설명하는 문서다.
+> 현재 worktree 기준 구현 상태와 next slice 판단은 `## 17. 2026-07-12 CapCut output observability and recovery UX closeout`을 우선 적용한다. 그 외 상위 milestone/범위/순서 섹션은 제품·구현 계획의 기준을 설명하는 문서다.
 > 개발 운영 상위 규칙은 저장소 루트 `AGENTS.md`와 `docs/development-fast-path.ko.md`의 `## 10. 고정 운영 규정`을 프로젝트 전역 기본값으로 적용한다. 즉, 이 계획서를 실행할 때의 작업 우선순위, 선택적 TDD/서브에이전트/리뷰 사용, 표준 검증 경로, hot path 구분, 커밋/푸시, 진행률 보고, turn closeout 형식은 해당 규정을 따른다.
 
 ## 1. 목적
@@ -1005,3 +1005,10 @@ production-readiness blocker slice 1의 9개 Task는 구현·회귀·600초 smok
 - auto QA는 B-roll loop/crop/pad/trim, image/text overlay, BGM/SFX gain/fade/ducking, 승인 개인 음성 TTS와 persisted ducking warning을 확인한다.
 - 실행 명령은 `./scripts/dev-fast-path.ps1 -Mode long-form-capcut-qa`다. 생성 artifact는 `artifacts/long-form-capcut-qa/`에만 두고 Git에는 넣지 않는다.
 - 이는 desktop CapCut 사용성 검증이 아니다. manifest의 `desktop_capcut_opened: false`와 같이 명시하며, 실제 CapCut 3건의 open/edit/export QA는 다음 사람 검증으로 남긴다.
+
+## 17. 2026-07-12 CapCut output observability and recovery UX closeout
+
+- real CapCut draft export의 persisted `notes` compatibility warning과 nullable artifact/error_message를 API → frontend type → output panel까지 같은 계약으로 연결했다.
+- UI는 artifact 경로와 마지막 성공 artifact를 유지하고, warning을 오류와 분리한 `CapCut에서 후처리 필요` 안내로 표시한다. retry는 failed 상태에서만 노출한다.
+- 새로고침 복구, 빈 warning, null artifact, failed API response는 frontend 및 backend contract test로 확인했다.
+- 현재 HEAD 검증: Python 3.12 backend `683 passed`, frontend `97 passed`, production build success. 실제 desktop CapCut open/edit/export는 여전히 사람 운영 QA 범위다.

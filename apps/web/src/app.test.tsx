@@ -859,6 +859,7 @@ function createFetchMock({
               export_type: "capcut_draft",
               file_uri: "local://projects/project_001/exports/capcut-draft/draft",
               status: "succeeded",
+              notes: ["ducking is not natively supported by CapCut draft export; apply it in CapCut after import"],
             },
             error_message: null,
           },
@@ -1695,11 +1696,52 @@ describe("App", () => {
     const firstRender = render(<App />);
     expect(await screen.findByText(/exports\/final\/output.mp4/i)).toBeInTheDocument();
     expect(screen.getByText(/exports\/capcut-draft\/draft/i)).toBeInTheDocument();
+    expect(screen.getByText(/CapCut에서 후처리 필요/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "CapCut 초안 다시 시도" })).not.toBeInTheDocument();
     firstRender.unmount();
 
     render(<App />);
     expect(await screen.findByText(/exports\/final\/output.mp4/i)).toBeInTheDocument();
     expect(screen.getByText(/exports\/capcut-draft\/draft/i)).toBeInTheDocument();
+    expect(screen.getByText(/CapCut에서 후처리 필요/i)).toBeInTheDocument();
+  });
+
+  it("does not render a CapCut after-processing warning when the persisted notes are empty", async () => {
+    const restoredJobs = structuredClone(jobsResponse);
+    restoredJobs.jobs.push({
+      job_id: "capcut_draft_job_009",
+      job_type: "capcut_draft_export",
+      status: "succeeded",
+      input_ref: "timeline_build_job_005",
+      output_ref: "capcut_draft_001",
+      error_message: null,
+      started_at: "2026-07-12T00:01:00Z",
+      finished_at: "2026-07-12T00:02:00Z",
+    });
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock({
+        jobs: restoredJobs,
+        capcutDraftResult: {
+          job_id: "capcut_draft_job_009",
+          status: "succeeded",
+          export: {
+            export_id: "capcut_draft_001",
+            timeline_id: "timeline_001",
+            export_type: "capcut_draft_export",
+            file_uri: "local://projects/project_001/exports/capcut-draft/draft",
+            status: "succeeded",
+            notes: [],
+          },
+          error_message: null,
+        },
+      }),
+    );
+
+    render(<App />);
+
+    expect(await screen.findByText(/exports\/capcut-draft\/draft/i)).toBeInTheDocument();
+    expect(screen.queryByText(/CapCut에서 후처리 필요/i)).not.toBeInTheDocument();
   });
 
   it("renders a final-render failure with a null artifact without unmounting the dashboard", async () => {
@@ -1755,6 +1797,7 @@ describe("App", () => {
 
     expect(await screen.findByText("CapCut 초안 내보내기 실패")).toBeInTheDocument();
     expect(screen.getByText(/CapCut draft package/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "CapCut 초안 다시 시도" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "VideoBox 작업판" })).toBeInTheDocument();
   });
 

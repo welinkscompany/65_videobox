@@ -2152,6 +2152,16 @@ export function App() {
                   </dd>
                 </div>
               </dl>
+              {(capcutDraftJob?.export?.notes ?? lastSuccessfulCapcutDraftJob?.export?.notes ?? []).length > 0 ? (
+                <div className="warning-banner" role="status">
+                  <strong>CapCut에서 후처리 필요</strong>
+                  <ul>
+                    {(capcutDraftJob?.export?.notes ?? lastSuccessfulCapcutDraftJob?.export?.notes ?? []).map((note) => (
+                      <li key={note}>{note}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
               {finalRenderJob?.status === "failed" ? (
                 <p className="error-banner">
                   완성본 렌더 실패: {finalRenderJob.error_message ?? "결과 파일을 만들지 못했습니다."}

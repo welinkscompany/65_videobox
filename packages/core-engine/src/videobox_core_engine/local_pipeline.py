@@ -1436,7 +1436,17 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
     def get_capcut_draft_export_result(self, *, project_id: str, job_id: str) -> dict[str, Any]:
         job = self.store.get_job(project_id=project_id, job_id=job_id)
         if not job["output_ref"]:
-            return {"job_id": job["job_id"], "status": job["status"], "export": None}
+            return {
+                "job_id": job["job_id"],
+                "status": job["status"],
+                "export": None,
+                "error_message": job.get("error_message"),
+            }
         export = self.store.get_capcut_draft_export(project_id=project_id, export_id=job["output_ref"])
-        return {"job_id": job["job_id"], "status": job["status"], "export": export}
+        return {
+            "job_id": job["job_id"],
+            "status": job["status"],
+            "export": export,
+            "error_message": job.get("error_message"),
+        }
 

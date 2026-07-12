@@ -214,6 +214,7 @@ button {
 
 .loading-banner,
 .error-banner,
+.warning-banner,
 .empty-state {
   margin: 0;
   padding: 14px 16px;
@@ -228,6 +229,20 @@ button {
 .error-banner {
   background: var(--danger-soft);
   color: var(--danger);
+}
+
+.warning-banner {
+  background: #fff3cd;
+  color: #765300;
+}
+
+.warning-banner strong {
+  display: block;
+}
+
+.warning-banner ul {
+  margin: 8px 0 0;
+  padding-left: 20px;
 }
 
 .status-grid,

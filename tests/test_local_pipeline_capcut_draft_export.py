@@ -166,6 +166,32 @@ def test_capcut_draft_export_persists_adapter_compatibility_warnings(tmp_path: P
     assert persisted["export"]["notes"] == ["ducking warning"]
 
 
+def test_capcut_draft_export_result_preserves_failed_job_reason_with_null_artifact(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="CapCut failure recovery")
+    runner = LocalPipelineRunner(store)
+    job = store.create_job(
+        project_id=project.project_id,
+        job_type=JobType.CAPCUT_DRAFT_EXPORT,
+        input_ref="timeline_build_job_001",
+    )
+    store.update_job(
+        project_id=project.project_id,
+        job_id=job["job_id"],
+        status=JobStatus.FAILED,
+        error_message="CapCut draft package could not be written.",
+    )
+
+    result = runner.get_capcut_draft_export_result(project_id=project.project_id, job_id=job["job_id"])
+
+    assert result == {
+        "job_id": job["job_id"],
+        "status": "failed",
+        "export": None,
+        "error_message": "CapCut draft package could not be written.",
+    }
+
+
 def test_real_capcut_draft_keeps_short_tts_silence_material_after_temp_export_is_removed(tmp_path: Path) -> None:
     store = LocalProjectStore(tmp_path)
     project = store.bootstrap_project(name="Persisted CapCut Silence Material Project")

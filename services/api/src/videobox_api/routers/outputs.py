@@ -159,6 +159,7 @@ def build_outputs_router(orchestrator: ApiOrchestrator) -> APIRouter:
             job_id=result["job_id"],
             status=result["status"],
             export=CapCutDraftExportArtifactResponse(**result["export"]) if result["export"] else None,
+            error_message=result.get("error_message"),
         )
 
     @router.get("/api/projects/{project_id}/provider-traces")
