@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 import shutil
 import tempfile
 from collections.abc import Callable
@@ -19,6 +20,7 @@ class CapCutHandoffDiagnostics:
     status: str
     installation_path: Path | None
     detected_version: str | None
+    is_supported: bool
     project_root_path: Path
     project_root_exists: bool
     write_access: bool
@@ -54,19 +56,28 @@ class CapCutHandoffService:
 
         project_root = self._project_root()
         destination = project_root / f"videobox-{export_id}"
-        if self._is_complete_draft(destination):
+        if self._is_owned_destination(destination=destination, export_id=export_id) and self._is_complete_draft(destination):
             return self._record(source=source, destination=destination, reused=True)
         if destination.exists():
+            if not self._is_owned_destination(destination=destination, export_id=export_id):
+                raise CapCutHandoffError(
+                    "동일한 CapCut 프로젝트 폴더가 이미 있습니다. 해당 폴더를 확인하거나 이름을 바꾼 뒤 다시 시도하세요."
+                )
             shutil.rmtree(destination)
 
         temporary = project_root / f".{destination.name}.{uuid4().hex}.tmp"
+        created_destination = False
         try:
             self._copytree(source, temporary)
             if not self._is_complete_draft(temporary):
                 raise OSError("copied CapCut draft is incomplete")
             temporary.replace(destination)
+            created_destination = True
+            self._write_ownership_marker(destination=destination, export_id=export_id)
         except Exception as exc:
             shutil.rmtree(temporary, ignore_errors=True)
+            if created_destination:
+                shutil.rmtree(destination, ignore_errors=True)
             raise CapCutHandoffError(
                 "CapCut 프로젝트 등록에 실패했습니다. 디스크 공간과 프로젝트 폴더 권한을 확인한 뒤 다시 시도하세요."
             ) from exc
@@ -79,15 +90,28 @@ class CapCutHandoffService:
             return self._diagnostics(
                 installation_path=None,
                 detected_version=None,
+                is_supported=False,
                 project_root_path=project_root,
                 project_root_exists=project_root.is_dir(),
                 write_access=False,
                 recovery_message="CapCut 설치를 확인한 뒤 다시 진단하세요.",
             )
+        detected_version = self._version_for(installation)
+        if not self._is_supported_version(detected_version):
+            return self._diagnostics(
+                installation_path=installation,
+                detected_version=detected_version,
+                is_supported=False,
+                project_root_path=project_root,
+                project_root_exists=project_root.is_dir(),
+                write_access=False,
+                recovery_message="지원하는 CapCut 버전을 확인한 뒤 다시 진단하세요.",
+            )
         if not project_root.is_dir():
             return self._diagnostics(
                 installation_path=installation,
-                detected_version=self._version_for(installation),
+                detected_version=detected_version,
+                is_supported=True,
                 project_root_path=project_root,
                 project_root_exists=False,
                 write_access=False,
@@ -99,7 +123,8 @@ class CapCutHandoffService:
         except OSError:
             return self._diagnostics(
                 installation_path=installation,
-                detected_version=self._version_for(installation),
+                detected_version=detected_version,
+                is_supported=True,
                 project_root_path=project_root,
                 project_root_exists=True,
                 write_access=False,
@@ -107,7 +132,8 @@ class CapCutHandoffService:
             )
         return self._diagnostics(
             installation_path=installation,
-            detected_version=self._version_for(installation),
+            detected_version=detected_version,
+            is_supported=True,
             project_root_path=project_root,
             project_root_exists=True,
             write_access=True,
@@ -118,6 +144,8 @@ class CapCutHandoffService:
         diagnostics = self.diagnose()
         if diagnostics.installation_path is None:
             raise CapCutHandoffError("CapCut 설치를 확인한 뒤 다시 시도하세요.")
+        if not diagnostics.is_supported:
+            raise CapCutHandoffError("지원하는 CapCut 버전을 확인한 뒤 다시 시도하세요.")
         if not diagnostics.project_root_exists:
             raise CapCutHandoffError("CapCut 프로젝트 폴더를 확인한 뒤 CapCut을 한 번 실행하세요.")
         if not diagnostics.write_access:
@@ -144,10 +172,38 @@ class CapCutHandoffService:
         return (1 if version else 0, tuple(int(part) for part in version.split(".")) if version else (), str(executable))
 
     @staticmethod
+    def _is_supported_version(version: str | None) -> bool:
+        return version is not None and any(version.startswith(prefix) for prefix in ("8.7.", "8.9."))
+
+    def _ownership_marker_path(self, export_id: str) -> Path:
+        return self.local_app_data / "VideoBox" / "capcut-handoffs" / f"{export_id}.json"
+
+    def _is_owned_destination(self, *, destination: Path, export_id: str) -> bool:
+        marker_path = self._ownership_marker_path(export_id)
+        if not marker_path.is_file():
+            return False
+        try:
+            marker = json.loads(marker_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return False
+        return marker == {"export_id": export_id, "registered_path": str(destination)}
+
+    def _write_ownership_marker(self, *, destination: Path, export_id: str) -> None:
+        marker_path = self._ownership_marker_path(export_id)
+        marker_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = marker_path.with_suffix(".tmp")
+        temporary.write_text(
+            json.dumps({"export_id": export_id, "registered_path": str(destination)}),
+            encoding="utf-8",
+        )
+        temporary.replace(marker_path)
+
+    @staticmethod
     def _diagnostics(
         *,
         installation_path: Path | None,
         detected_version: str | None,
+        is_supported: bool,
         project_root_path: Path,
         project_root_exists: bool,
         write_access: bool,
@@ -157,6 +213,7 @@ class CapCutHandoffService:
             status="ready" if recovery_message is None else "failed",
             installation_path=installation_path,
             detected_version=detected_version,
+            is_supported=is_supported,
             project_root_path=project_root_path,
             project_root_exists=project_root_exists,
             write_access=write_access,

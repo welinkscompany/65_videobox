@@ -58,11 +58,10 @@ def test_register_replaces_incomplete_collision_and_removes_partial_directory(tm
     incomplete.mkdir()
     (incomplete / "partial.tmp").write_text("broken", encoding="utf-8")
 
-    result = service.register(source_draft_path=source, export_id="export_002")
+    with pytest.raises(CapCutHandoffError, match="동일한 CapCut 프로젝트 폴더"):
+        service.register(source_draft_path=source, export_id="export_002")
 
-    assert result.reused is False
-    assert (result.registered_path / "draft_content.json").is_file()
-    assert not (result.registered_path / "partial.tmp").exists()
+    assert (incomplete / "partial.tmp").is_file()
     assert not list(project_root.glob(".videobox-export_002.*.tmp"))
 
 
@@ -84,6 +83,24 @@ def test_register_rolls_back_temporary_copy_failure_without_touching_source(tmp_
     assert not list(project_root.glob(".videobox-export_002.*.tmp"))
 
 
+def test_register_removes_just_created_destination_when_ownership_marker_write_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service, project_root = _configured_service(tmp_path)
+    source = _write_draft(tmp_path / "source" / "timeline_002")
+
+    def failing_marker_write(*args: object, **kwargs: object) -> None:
+        raise OSError("marker disk full")
+
+    monkeypatch.setattr(service, "_write_ownership_marker", failing_marker_write)
+
+    with pytest.raises(CapCutHandoffError, match="CapCut 프로젝트 등록에 실패"):
+        service.register(source_draft_path=source, export_id="export_002")
+
+    assert (source / "draft_content.json").is_file()
+    assert not (project_root / "videobox-export_002").exists()
+
+
 def test_register_reports_recovery_guidance_when_capcut_project_root_is_not_writable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -101,7 +118,7 @@ def test_register_reports_recovery_guidance_when_capcut_project_root_is_not_writ
 
 def test_diagnose_reports_the_highest_supported_version_and_removes_its_write_probe(tmp_path: Path) -> None:
     service, project_root = _configured_service(tmp_path)
-    newer_executable = service.local_app_data / "CapCut" / "Apps" / "8.10.0.1" / "CapCut.exe"
+    newer_executable = service.local_app_data / "CapCut" / "Apps" / "8.9.1.3802" / "CapCut.exe"
     newer_executable.parent.mkdir(parents=True)
     newer_executable.write_bytes(b"capcut-newer")
 
@@ -109,12 +126,26 @@ def test_diagnose_reports_the_highest_supported_version_and_removes_its_write_pr
 
     assert result.status == "ready"
     assert result.installation_path == newer_executable
-    assert result.detected_version == "8.10.0.1"
+    assert result.detected_version == "8.9.1.3802"
     assert result.project_root_path == project_root
     assert result.project_root_exists is True
     assert result.write_access is True
     assert result.recovery_message is None
     assert not list(project_root.glob(".videobox-write-check-*"))
+
+
+def test_diagnose_marks_unverified_capcut_version_as_unsupported(tmp_path: Path) -> None:
+    service, _ = _configured_service(tmp_path)
+    executable = service.local_app_data / "CapCut" / "Apps" / "9.0.0.1" / "CapCut.exe"
+    executable.parent.mkdir(parents=True)
+    executable.write_bytes(b"unverified")
+
+    result = service.diagnose()
+
+    assert result.status == "failed"
+    assert result.is_supported is False
+    assert result.detected_version == "9.0.0.1"
+    assert "지원하는 CapCut 버전" in (result.recovery_message or "")
 
 
 @pytest.mark.parametrize(

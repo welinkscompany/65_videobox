@@ -128,6 +128,13 @@ export function findLatestSucceededJob(jobs: JobRecord[], jobType: string, input
   return candidates.length > 0 ? candidates[0] : null;
 }
 
+export function findLatestJob(jobs: JobRecord[], jobType: string, inputRef?: string | null) {
+  const candidates = jobs
+    .filter((job) => job.job_type === jobType && (inputRef == null || job.input_ref === inputRef))
+    .sort((left, right) => getLatestJobTimestamp(right).localeCompare(getLatestJobTimestamp(left)));
+  return candidates.length > 0 ? candidates[0] : null;
+}
+
 export function getLatestJobTimestamp(job: JobRecord) {
   return job.finished_at ?? job.started_at ?? "";
 }

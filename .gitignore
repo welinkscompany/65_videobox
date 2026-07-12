@@ -26,6 +26,7 @@ build/
 .superpowers/
 
 # App runtime artifacts
+artifacts/
 tmp/
 .tmp/
 cache/

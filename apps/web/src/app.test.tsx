@@ -4,6 +4,7 @@ import { App } from "./App";
 import type {
   BrollAsset,
   EditingSession,
+  JobRecord,
   PartialRegenerationPreflight,
   RecommendationItem,
   ReviewSnapshot,
@@ -11,6 +12,8 @@ import type {
   TimelinePayload,
   TtsCandidateRecord,
 } from "./api";
+
+type JobFixture = Omit<JobRecord, "project_id">;
 
 const projectsResponse = {
   projects: [
@@ -32,8 +35,9 @@ const projectResponse = {
 
 const capcutDiagnosticsReadyResponse = {
   status: "ready",
-  installation_path: "C:/Users/operator/AppData/Local/CapCut/Apps/8.10.0.1/CapCut.exe",
-  detected_version: "8.10.0.1",
+  installation_path: "C:/Users/operator/AppData/Local/CapCut/Apps/8.9.1.3802/CapCut.exe",
+  detected_version: "8.9.1.3802",
+  is_supported: true,
   project_root_path: "C:/Users/operator/AppData/Local/CapCut/User Data/Projects/com.lveditor.draft",
   project_root_exists: true,
   write_access: true,
@@ -41,7 +45,7 @@ const capcutDiagnosticsReadyResponse = {
   checked_at: "2026-07-13T00:00:00Z",
 };
 
-const jobsResponse = {
+const jobsResponse: { jobs: JobFixture[] } = {
   jobs: [
     {
       job_id: "transcription_job_001",
@@ -644,6 +648,7 @@ function createFetchMock({
   jobs = jobsResponse,
   finalRenderResult,
   capcutDraftResult,
+  capcutDraftResults,
   capcutHandoffResult,
   capcutDiagnostics = capcutDiagnosticsReadyResponse,
   capcutDiagnosticsResponses,
@@ -671,6 +676,7 @@ function createFetchMock({
   jobs?: typeof jobsResponse;
   finalRenderResult?: Record<string, unknown>;
   capcutDraftResult?: Record<string, unknown>;
+  capcutDraftResults?: Record<string, Record<string, unknown>>;
   capcutHandoffResult?: Record<string, unknown>;
   capcutDiagnostics?: Record<string, unknown>;
   capcutDiagnosticsResponses?: Array<Record<string, unknown>>;
@@ -867,10 +873,11 @@ function createFetchMock({
         { status: 202 },
       );
     }
-    if (url.endsWith("/api/projects/project_001/capcut-draft-exports/capcut_draft_job_009")) {
+    const capcutDraftMatch = url.match(/\/api\/projects\/project_001\/capcut-draft-exports\/(capcut_draft_job_\d+)$/);
+    if (capcutDraftMatch) {
       return new Response(
         JSON.stringify(
-          capcutDraftResult ?? {
+          capcutDraftResults?.[capcutDraftMatch[1]] ?? capcutDraftResult ?? {
             job_id: "capcut_draft_job_009",
             status: "succeeded",
             export: {
@@ -1836,8 +1843,8 @@ describe("App", () => {
     const firstRender = render(<App />);
     expect(await screen.findByText("CapCut 연결 진단")).toBeInTheDocument();
     expect(screen.getByText("연결 준비 완료")).toBeInTheDocument();
-    expect(screen.getByText("8.10.0.1")).toBeInTheDocument();
-    expect(screen.getByText(/CapCut\/Apps\/8.10.0.1\/CapCut.exe/i)).toBeInTheDocument();
+    expect(screen.getByText("8.9.1.3802 · 지원됨")).toBeInTheDocument();
+    expect(screen.getByText(/CapCut\/Apps\/8.9.1.3802\/CapCut.exe/i)).toBeInTheDocument();
     firstRender.unmount();
 
     render(<App />);
@@ -1851,6 +1858,7 @@ describe("App", () => {
       status: "failed",
       installation_path: null,
       detected_version: null,
+      is_supported: false,
       project_root_path: "C:/Users/operator/AppData/Local/CapCut/User Data/Projects/com.lveditor.draft",
       project_root_exists: false,
       write_access: false,
@@ -1925,6 +1933,67 @@ describe("App", () => {
       ),
     );
     expect(await screen.findByText("CapCut에 열기 준비")).toBeInTheDocument();
+  });
+
+  it("restores the latest failed CapCut draft export while preserving the earlier successful artifact", async () => {
+    const restoredJobs: { jobs: JobFixture[] } = {
+      jobs: jobsResponse.jobs.filter((job) => job.job_type !== "capcut_draft_export"),
+    };
+    restoredJobs.jobs.push(
+      {
+        job_id: "capcut_draft_job_008",
+        job_type: "capcut_draft_export",
+        status: "succeeded",
+        input_ref: "timeline_build_job_005",
+        output_ref: "capcut_draft_001",
+        error_message: null,
+        started_at: "2026-07-13T00:01:00Z",
+        finished_at: "2026-07-13T00:02:00Z",
+      },
+      {
+        job_id: "capcut_draft_job_009",
+        job_type: "capcut_draft_export",
+        status: "failed",
+        input_ref: "timeline_build_job_005",
+        output_ref: null,
+        error_message: "CapCut draft package could not be written.",
+        started_at: "2026-07-13T00:03:00Z",
+        finished_at: "2026-07-13T00:04:00Z",
+      },
+    );
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock({
+        jobs: restoredJobs,
+        capcutDraftResults: {
+          capcut_draft_job_008: {
+            job_id: "capcut_draft_job_008",
+            status: "succeeded",
+            export: {
+              export_id: "capcut_draft_001",
+              timeline_id: "timeline_001",
+              export_type: "capcut_draft_export",
+              file_uri: "local://projects/project_001/exports/capcut-draft/draft",
+              status: "succeeded",
+              notes: [],
+            },
+            error_message: null,
+          },
+          capcut_draft_job_009: {
+            job_id: "capcut_draft_job_009",
+            status: "failed",
+            export: null,
+            error_message: "CapCut draft package could not be written.",
+          },
+        },
+      }),
+    );
+
+    render(<App />);
+
+    expect(await screen.findByText(/CapCut 초안 내보내기 실패/)).toBeInTheDocument();
+    expect(screen.getByText(/CapCut draft package could not be written/i)).toBeInTheDocument();
+    expect(screen.getByText(/마지막 성공 유지.*exports\/capcut-draft\/draft/i)).toBeInTheDocument();
   });
 
   it("renders a final-render failure with a null artifact without unmounting the dashboard", async () => {

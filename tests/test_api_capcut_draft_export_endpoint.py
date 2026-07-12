@@ -105,7 +105,7 @@ def test_capcut_draft_handoff_api_persists_failed_registration_with_recovery_rea
 
 def test_capcut_handoff_diagnostics_api_reports_injected_windows_readiness_without_llm_call(tmp_path: Path) -> None:
     local_app_data = tmp_path / "LocalAppData"
-    executable = local_app_data / "CapCut" / "Apps" / "8.10.0.1" / "CapCut.exe"
+    executable = local_app_data / "CapCut" / "Apps" / "8.9.1.3802" / "CapCut.exe"
     executable.parent.mkdir(parents=True)
     executable.write_bytes(b"capcut")
     project_root = local_app_data / "CapCut" / "User Data" / "Projects" / "com.lveditor.draft"
@@ -121,7 +121,8 @@ def test_capcut_handoff_diagnostics_api_reports_injected_windows_readiness_witho
     body = response.json()
     assert body["status"] == "ready"
     assert body["installation_path"] == str(executable)
-    assert body["detected_version"] == "8.10.0.1"
+    assert body["detected_version"] == "8.9.1.3802"
+    assert body["is_supported"] is True
     assert body["project_root_path"] == str(project_root)
     assert body["project_root_exists"] is True
     assert body["write_access"] is True

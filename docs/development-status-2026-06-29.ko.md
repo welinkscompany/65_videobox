@@ -1,8 +1,25 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 228. 2026-07-13 long-form CapCut 3/3 final-render operating QA closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
-> 이 문서의 기존 날짜 기반 섹션은 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 228`만 기준으로 본다.
+> 현재 authoritative 상태/next slice 판단은 `## 229. 2026-07-13 release audit protocol closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 이 문서의 기존 날짜 기반 섹션은 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 229`만 기준으로 본다.
 > 단, `2일 내 1차 데모 완성` 실행 레일은 `## 189`의 장기 우선순위를 그대로 넓게 집행하지 않고, `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`의 축소된 실행 계획을 우선 적용한다.
+
+## 229. 2026-07-13 release audit protocol closeout
+
+개발 종료 전 반복할 6개 gate를 `docs/superpowers/plans/2026-07-13-release-audit-protocol.ko.md`에 만들고, 현재 HEAD에 실제 적용했다. 고정 운영 규정은 `docs/development-fast-path.ko.md` 10.12에 연결했다.
+
+- Gate 1 코드리뷰: Critical 1건과 Important 2건을 발견·수정했다. CapCut handoff는 ownership marker가 없는 동명 destination을 더 이상 지우지 않으며, marker 기록 실패 뒤 방금 만든 destination만 rollback한다. `8.7.x`와 `8.9.x`만 tested/supported로 판정하고 그 밖의 버전은 ready로 오기하지 않는다. reload는 최신 failed CapCut draft export의 error/retry를 복구하면서 마지막 성공 artifact를 함께 보존한다.
+- Gate 2 갭 검증: 명시된 CapCut 3/3 long-form output, diagnostics, persisted nullable failure 경로를 코드·계약 테스트·local proof로 연결했다. 실제 사용자 녹음의 listening approval, 일반 사용자 PC 1대의 CapCut handoff smoke는 자동화로 대체할 수 없는 human acceptance로 남긴다.
+- Gate 3 역방향 동작: `loop`, `crop_pad_overlay`, `audio_ducking`의 local final MP4가 모두 FFprobe `600.026848`초 및 이전 closeout의 SHA-256과 일치했다. 각 profile에서 local CapCut draft, VideoBox final MP4, `draft_content.json`, timeline, editing session, SRT가 존재함을 확인했다.
+- Gate 4 전체 시스템: `.venv\\Scripts\\python.exe -m pytest -q`는 tool timeout을 피해 별도 프로세스로 끝까지 확인해 `700 passed, 1 warning in 160.49s`였다. `npm --prefix apps/web test`는 `102 passed`, `npm --prefix apps/web run build`는 성공했다. frontend test의 `act(...)` warning과 error-boundary test의 의도된 error console은 exit 0이며 새 release blocker가 아니라 test hygiene minor로 남긴다.
+- Gate 5 문서·지침: 최신 authoritative pointer를 이 section으로 이동했고 protocol·운영 규정·historical QA log를 분리했다.
+- Gate 6 파일 정리: `artifacts/`는 약 1GB의 QA/reproduction evidence이므로 보존하고 `.gitignore`에 명시했다. 비-artifact backup/tmp/orig/rej/pyc 후보는 없었고 `safe-to-delete` 0건이므로 삭제하지 않았다. `git check-ignore`로 artifacts exclusion을 확인했다.
+- 현재 live diagnostics: CapCut `8.9.1.3802`, supported `true`, project root exists `true`, write access `true`, status `ready`.
+- closeout 직전 Git 상태: `git diff --check` clean, upstream divergence `0/0`. commit 대상 외 artifact untracked 항목은 `.gitignore`로 숨겨져 있다.
+
+다음 권장 작업:
+
+- 새 기능보다 human acceptance 2건(실제 사용자 녹음 listening approval, 일반 사용자 PC의 CapCut handoff diagnostics)을 수행한 뒤, 현 release audit protocol을 다시 적용해 운영 배포 판단을 내린다.
 
 ## 228. 2026-07-13 long-form CapCut 3/3 final-render operating QA closeout
 

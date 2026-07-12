@@ -1494,6 +1494,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
             "status": diagnostics.status,
             "installation_path": str(diagnostics.installation_path) if diagnostics.installation_path else None,
             "detected_version": diagnostics.detected_version,
+            "is_supported": diagnostics.is_supported,
             "project_root_path": str(diagnostics.project_root_path),
             "project_root_exists": diagnostics.project_root_exists,
             "write_access": diagnostics.write_access,

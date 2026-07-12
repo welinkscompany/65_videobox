@@ -668,6 +668,7 @@ class CapCutHandoffDiagnosticsResponse(BaseModel):
     status: str
     installation_path: str | None = None
     detected_version: str | None = None
+    is_supported: bool
     project_root_path: str
     project_root_exists: bool
     write_access: bool

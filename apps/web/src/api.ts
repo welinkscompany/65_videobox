@@ -487,6 +487,7 @@ export type CapCutHandoffDiagnostics = {
   status: string;
   installation_path?: string | null;
   detected_version?: string | null;
+  is_supported: boolean;
   project_root_path: string;
   project_root_exists: boolean;
   write_access: boolean;

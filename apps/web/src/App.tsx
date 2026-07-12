@@ -37,6 +37,7 @@ import {
   type EditingMutationFeedback,
   type EditingSegmentDraft,
   findLatestSucceededJob,
+  findLatestJob,
   findLatestTimelineJob,
   formatAffectedOutputArea,
   formatBrollAssetLabel,
@@ -384,12 +385,20 @@ export function App() {
         const latestCapcutDraftJob = latestTimelineJob
           ? findLatestSucceededJob(jobItems, "capcut_draft_export", latestTimelineJob.job_id)
           : null;
-        const [subtitle, preview, capcutExport, finalRender, capcutDraft] = await Promise.all([
+        const latestCapcutDraftAttemptJob = latestTimelineJob
+          ? findLatestJob(jobItems, "capcut_draft_export", latestTimelineJob.job_id)
+          : null;
+        const [subtitle, preview, capcutExport, finalRender, capcutDraft, lastSuccessfulCapcutDraft] = await Promise.all([
           latestSubtitleJob ? api.getSubtitle(projectId, latestSubtitleJob.job_id) : Promise.resolve(null),
           latestPreviewJob ? api.getPreview(projectId, latestPreviewJob.job_id) : Promise.resolve(null),
           latestExportJob ? api.getExport(projectId, latestExportJob.job_id) : Promise.resolve(null),
           latestFinalRenderJob ? api.getFinalRender(projectId, latestFinalRenderJob.job_id) : Promise.resolve(null),
-          latestCapcutDraftJob ? api.getCapcutDraftExport(projectId, latestCapcutDraftJob.job_id) : Promise.resolve(null),
+          latestCapcutDraftAttemptJob
+            ? api.getCapcutDraftExport(projectId, latestCapcutDraftAttemptJob.job_id)
+            : Promise.resolve(null),
+          latestCapcutDraftJob && latestCapcutDraftJob.job_id !== latestCapcutDraftAttemptJob?.job_id
+            ? api.getCapcutDraftExport(projectId, latestCapcutDraftJob.job_id)
+            : Promise.resolve(null),
         ]);
         let activeTimeline = stableTimeline;
         let activeReview = stableReview;
@@ -581,7 +590,9 @@ export function App() {
         setFinalRenderJob(finalRender);
         setLastSuccessfulFinalRenderJob(finalRender?.status === "succeeded" ? finalRender : null);
         setCapcutDraftJob(capcutDraft);
-        setLastSuccessfulCapcutDraftJob(capcutDraft?.status === "succeeded" ? capcutDraft : null);
+        setLastSuccessfulCapcutDraftJob(
+          capcutDraft?.status === "succeeded" ? capcutDraft : lastSuccessfulCapcutDraft,
+        );
         setBrollAssets(archivedBrollAssets);
         setLoadState("ready");
         try {
@@ -2241,7 +2252,10 @@ export function App() {
                     <dl className="summary-list">
                       <div>
                         <dt>설치 버전</dt>
-                        <dd>{formatDisplayText(capcutHandoffDiagnostics.detected_version ?? "미감지")}</dd>
+                        <dd>
+                          {formatDisplayText(capcutHandoffDiagnostics.detected_version ?? "미감지")}
+                          {capcutHandoffDiagnostics.is_supported ? " · 지원됨" : " · 미지원"}
+                        </dd>
                       </div>
                       <div>
                         <dt>설치 경로</dt>
@@ -2274,19 +2288,19 @@ export function App() {
                   <p>{formatDisplayText(capcutDraftJob.export.handoff.registered_project_path ?? "등록 경로 없음")}</p>
                 </div>
           ) : null}
-          {capcutDraftJob?.export?.handoff?.status === "failed" ? (
-            <p className="error-banner">
-              CapCut 등록 실패: {formatDisplayText(capcutDraftJob.export.handoff.error_message ?? "알 수 없는 오류")}
-            </p>
-          ) : null}
-              {finalRenderJob?.status === "failed" ? (
+              {capcutDraftJob?.export?.handoff?.status === "failed" ? (
                 <p className="error-banner">
-                  완성본 렌더 실패: {finalRenderJob.error_message ?? "결과 파일을 만들지 못했습니다."}
+                  CapCut 등록 실패: {formatDisplayText(capcutDraftJob.export.handoff.error_message ?? "알 수 없는 오류")}
                 </p>
               ) : null}
               {capcutDraftJob?.status === "failed" ? (
                 <p className="error-banner">
                   CapCut 초안 내보내기 실패: {capcutDraftJob.error_message ?? "결과 파일을 만들지 못했습니다."}
+                </p>
+              ) : null}
+              {finalRenderJob?.status === "failed" ? (
+                <p className="error-banner">
+                  완성본 렌더 실패: {finalRenderJob.error_message ?? "결과 파일을 만들지 못했습니다."}
                 </p>
               ) : null}
             </article>
