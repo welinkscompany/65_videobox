@@ -23,6 +23,7 @@ build/
 .mypy_cache/
 .coverage
 .ruff_cache/
+.superpowers/
 
 # App runtime artifacts
 tmp/
