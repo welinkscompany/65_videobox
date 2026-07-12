@@ -1,8 +1,45 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 224. 2026-07-12 CapCut output observability and recovery UX closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
-> 이 문서의 기존 날짜 기반 섹션은 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 224`만 기준으로 본다.
+> 현재 authoritative 상태/next slice 판단은 `## 225. 2026-07-12 actual CapCut Desktop operating QA closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 이 문서의 기존 날짜 기반 섹션은 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 225`만 기준으로 본다.
 > 단, `2일 내 1차 데모 완성` 실행 레일은 `## 189`의 장기 우선순위를 그대로 넓게 집행하지 않고, `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`의 축소된 실행 계획을 우선 적용한다.
+
+## 225. 2026-07-12 actual CapCut Desktop operating QA closeout
+
+CapCut Desktop `8.7.0.3685`에서 long-form 600초 real draft 3개를 실제로 열어 운영 QA를 수행했다. VideoBox artifact 원본은 수정하지 않았고, CapCut이 인식하는 로컬 project root에 아래 QA 복사본을 만들었다.
+
+- `videobox-qa-crop-pad-overlay-20260712`
+- `videobox-qa-audio-ducking-20260712`
+- `videobox-qa-loop-20260712`
+
+실제 open 결과:
+
+- `crop_pad_overlay`: project path가 CapCut inspector에 표시됐고 10:00:00 타임라인이 열렸다. 한국어 첫/최종 자막, `SMOKE IMAGE OVERLAY`/`SMOKE OVERLAY`, 이미지 asset, `videobox_black_pad_*` material 두 구간을 확인했다. 이는 crop + `trim_start_sec=0.2` + pad contract가 CapCut timeline surface까지 전달된 증거다.
+- `audio_ducking`: 10분 narration/TTS, `smoke-bgm.wav`, `smoke-impact.wav`의 별도 audio track이 모두 열렸다. native ducking automation은 CapCut draft에 존재하지 않으므로 수동 후처리 필요 warning이 여전히 정당하다.
+- `loop`: 10분 B-roll timeline clip, 한국어 자막/`SMOKE OVERLAY`, narration/TTS/SFX가 열렸고 video clip inspector도 표시됐다. loop fixture의 desktop draft open이 확인됐다.
+
+수동 export 증적:
+
+- `loop` draft에서 CapCut export dialog를 열어 1080P, H.264, MP4, 24fps, 10분 0초/예상 548MB 설정을 확인한 뒤 실제 export를 실행했다.
+- CapCut 완료 화면의 `동영상이 데스크톱이나 노트북에 저장됐습니다`를 확인했고, output은 `C:\\Users\\atgro\\AppData\\Local\\CapCut\\Videos\\videobox-qa-loop-20260712.mp4`다.
+- FFprobe: duration `600.026848` seconds, size `73,526,175` bytes; SHA-256 `3DF607575BE81F1FD0050F1635B831E1C71D7DB6C7DA45E933D7848C23DF53F8`.
+- `crop_pad_overlay`와 `audio_ducking`도 CapCut editor의 export button/dialog가 열리는 것을 확인했지만, 중복 10분 MP4 생성은 하지 않았다. 따라서 두 project는 *export-ready UI 확인*, loop는 *실제 local MP4 완료*로 구분한다.
+
+사용성/복구 판정:
+
+- output artifact path는 VideoBox UI에서 표시·복구하도록 이미 계약화돼 있고, 이번 3개 CapCut open에서는 missing asset/failure가 발생하지 않았다. 따라서 genuine Desktop failure 뒤 VideoBox retry 흐름은 이번 수동 QA에서 재현하지 않았으며, API/UI null artifact·error_message·retry 계약은 `## 224`의 자동 test 증적으로만 확인됐다.
+- `CapCut에서 후처리 필요`라는 한국어 heading은 ducking이 오류가 아니라 수동 편집 항목이라는 목적을 전달한다. 다만 현재 persisted ducking detail은 영어 원문이라, 한국어 사용자에게 실행 지시까지 완결하려면 known warning의 한국어 설명/행동 지시를 추가하는 것이 다음 UX 보강 사항이다.
+- 현재 handoff는 CapCut default project root에 draft directory를 등록해야 열렸다. VideoBox에서 이 복사/등록을 자동화하지 않으므로, 실제 사용자 배포 전에는 `CapCut project folder에 복사` 안내 또는 one-click handoff를 제품화해야 한다.
+
+제한:
+
+- Desktop CapCut에서 원본 VideoBox artifact를 직접 double-click/import하는 경로는 확인하지 않았고, CapCut project root에 QA copy를 둔 방식만 확인했다.
+- 세 fixture 각각의 최종 MP4를 모두 렌더한 것은 아니다. 실제 full export 완료 증적은 loop 1건이며, 3건 모두의 draft open/editability는 확인했다.
+- QA output과 CapCut local project copy는 개발 머신 로컬 상태이며 Git에 포함하지 않는다.
+
+다음 권장 작업:
+
+- 기능을 넓히기보다 CapCut handoff registration 자동화와 persisted compatibility warning의 한국어 action copy를 작은 UX slice로 구현하고, crop/audio fixture도 실제 MP4 export까지 확장해 3/3 final render 증적으로 닫는다.
 
 ## 224. 2026-07-12 CapCut output observability and recovery UX closeout
 

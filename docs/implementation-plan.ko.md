@@ -1,6 +1,6 @@
 # VideoBox 실행용 구현 계획서
 
-> 현재 worktree 기준 구현 상태와 next slice 판단은 `## 17. 2026-07-12 CapCut output observability and recovery UX closeout`을 우선 적용한다. 그 외 상위 milestone/범위/순서 섹션은 제품·구현 계획의 기준을 설명하는 문서다.
+> 현재 worktree 기준 구현 상태와 next slice 판단은 `## 18. 2026-07-12 actual CapCut Desktop operating QA closeout`을 우선 적용한다. 그 외 상위 milestone/범위/순서 섹션은 제품·구현 계획의 기준을 설명하는 문서다.
 > 개발 운영 상위 규칙은 저장소 루트 `AGENTS.md`와 `docs/development-fast-path.ko.md`의 `## 10. 고정 운영 규정`을 프로젝트 전역 기본값으로 적용한다. 즉, 이 계획서를 실행할 때의 작업 우선순위, 선택적 TDD/서브에이전트/리뷰 사용, 표준 검증 경로, hot path 구분, 커밋/푸시, 진행률 보고, turn closeout 형식은 해당 규정을 따른다.
 
 ## 1. 목적
@@ -1012,3 +1012,9 @@ production-readiness blocker slice 1의 9개 Task는 구현·회귀·600초 smok
 - UI는 artifact 경로와 마지막 성공 artifact를 유지하고, warning을 오류와 분리한 `CapCut에서 후처리 필요` 안내로 표시한다. retry는 failed 상태에서만 노출한다.
 - 새로고침 복구, 빈 warning, null artifact, failed API response는 frontend 및 backend contract test로 확인했다.
 - 현재 HEAD 검증: Python 3.12 backend `683 passed`, frontend `97 passed`, production build success. 실제 desktop CapCut open/edit/export는 여전히 사람 운영 QA 범위다.
+
+## 18. 2026-07-12 actual CapCut Desktop operating QA closeout
+
+- CapCut Desktop `8.7.0.3685`에서 `loop`, `crop_pad_overlay`, `audio_ducking` 3개 600초 real draft를 실제 open했다. asset track, 10분 timeline, 한국어 caption, overlay, B-roll control surface, BGM/SFX/TTS track이 모두 로드됐다.
+- `loop`은 CapCut UI에서 1080P/H.264/MP4/24fps로 실제 export 완료했고 `C:\\Users\\atgro\\AppData\\Local\\CapCut\\Videos\\videobox-qa-loop-20260712.mp4`의 FFprobe duration은 `600.026848` seconds다. 나머지 두 draft는 open/edit/export dialog까지만 확인했다.
+- 현재 handoff는 CapCut default project root에 draft folder를 등록해야 한다. direct import/one-click handoff는 아직 구현되지 않았고, ducking detail warning의 한국어 action copy도 후속 UX slice다.
