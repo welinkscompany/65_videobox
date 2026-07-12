@@ -1399,6 +1399,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                     project_id=project_id,
                     timeline_id=str(timeline["timeline_id"]),
                     source_draft_path=getattr(draft_path, "draft_path", draft_path),
+                    notes=list(getattr(draft_path, "capcut_compatibility_warnings", [])),
                 )
         except Exception as exc:
             failed_job = self.store.update_job(

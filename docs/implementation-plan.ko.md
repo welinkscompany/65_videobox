@@ -998,3 +998,10 @@ production-readiness blocker slice 1의 9개 Task는 구현·회귀·600초 smok
 - Task 5는 BGM/SFX gain/fade/ducking, B-roll crop/fit/loop/pad/trim을 FFmpeg 및 real CapCut draft에 연결하고, missing font/media 차단과 preview/final/CapCut artifact recovery/reload를 추가했다.
 - 현재 HEAD 검증: backend Python 3.12 `674 passed`, frontend `96 passed`/build success, `dev-fast-path.ps1 -Mode smoke` 600초 Korean 15 checks true. smoke final MP4 SHA-256은 `448c74034c3981ff7aa5264d12655eba6096b1653261e93d1ffae41a26342f29`다.
 - 다음 권장 작업은 새 편집 기능 확대가 아니라 실제 CapCut desktop에서 10분 프로젝트 3건을 열고, B-roll pad와 ducking compatibility warning을 포함한 수동 open/edit/export UX QA를 기록하는 운영 검증이다.
+
+## 16. 2026-07-12 long-form CapCut draft QA closeout
+
+- `loop`, `crop_pad_overlay`, `audio_ducking` 3개 deterministic 600초 fixture가 ingest → editing session → partial regeneration → SRT → styled MP4 → real CapCut `draft_content.json`을 반복 실행한다.
+- auto QA는 B-roll loop/crop/pad/trim, image/text overlay, BGM/SFX gain/fade/ducking, 승인 개인 음성 TTS와 persisted ducking warning을 확인한다.
+- 실행 명령은 `./scripts/dev-fast-path.ps1 -Mode long-form-capcut-qa`다. 생성 artifact는 `artifacts/long-form-capcut-qa/`에만 두고 Git에는 넣지 않는다.
+- 이는 desktop CapCut 사용성 검증이 아니다. manifest의 `desktop_capcut_opened: false`와 같이 명시하며, 실제 CapCut 3건의 open/edit/export QA는 다음 사람 검증으로 남긴다.

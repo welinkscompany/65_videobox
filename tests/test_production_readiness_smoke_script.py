@@ -123,3 +123,16 @@ def test_smoke_harness_recreates_only_its_projects_subdirectory_for_a_repeat_run
     assert recreated == projects_root
     assert recreated.is_dir()
     assert list(recreated.iterdir()) == []
+
+
+def test_long_form_fixture_profiles_define_real_media_controls_and_desktop_scope() -> None:
+    smoke = _load_smoke_module()
+
+    assert tuple(smoke.LONG_FORM_PROFILE_NAMES) == ("loop", "crop_pad_overlay", "audio_ducking")
+    assert smoke.get_long_form_fixture("loop")["broll_controls"]["loop"] is True
+    crop_pad = smoke.get_long_form_fixture("crop_pad_overlay")
+    assert crop_pad["broll_controls"] == {"fit": "crop", "loop": False, "pad": True, "trim_start_sec": 0.2}
+    assert crop_pad["include_image_overlay"] is True
+    audio = smoke.get_long_form_fixture("audio_ducking")
+    assert audio["audio_controls"] == {"gain_db": -6.0, "fade_in_sec": 0.5, "fade_out_sec": 0.5, "ducking": True}
+    assert audio["desktop_capcut_opened"] is False

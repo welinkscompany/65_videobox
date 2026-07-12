@@ -335,7 +335,15 @@ class PyCapCutRealExportAdapter:
             raise PyCapCutExportError(f"B-roll source has no usable duration: {resolved.path}")
 
         source_start_us = _seconds_to_us(resolved.trim_start_sec + controls["trim_start_sec"])
-        source_available_us = material.duration - source_start_us
+        # MediaInfo and CapCut's serialised duration can differ by up to two
+        # final video frames after a non-zero trim. Preserve legacy untrimmed
+        # loop duration exactly, but leave headroom for the trim boundary.
+        trim_headroom_us = (
+            2 * round(_MICROSECONDS_PER_SECOND / self.video_fps)
+            if controls["trim_start_sec"]
+            else 0
+        )
+        source_available_us = material.duration - source_start_us - trim_headroom_us
         if source_available_us <= 0:
             raise PyCapCutExportError(
                 f"B-roll trim starts after the source ends: {resolved.path}. Reduce trim_start_sec."
@@ -372,7 +380,10 @@ class PyCapCutRealExportAdapter:
                 "B-roll source is shorter than its timeline window. Enable loop or pad to preserve timeline duration."
             )
         padding_duration_us = needed_duration_us - elapsed_us
-        pad_material = VideoMaterial(str(self._create_black_pad_material(project_id=project_id, duration_us=padding_duration_us)))
+        pad_source_duration_us = padding_duration_us + (2 * round(_MICROSECONDS_PER_SECOND / self.video_fps))
+        pad_material = VideoMaterial(
+            str(self._create_black_pad_material(project_id=project_id, duration_us=pad_source_duration_us))
+        )
         script.add_segment(
             VideoSegment(
                 pad_material,

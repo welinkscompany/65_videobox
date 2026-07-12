@@ -22173,7 +22173,7 @@ def test_editing_session_api_replaces_trimmed_stale_applied_bgm_recommendation_w
     result_payload = result_response.json()
     bgm_track = next(track for track in result_payload["timeline"]["tracks"] if track["track_type"] == "bgm")
     assert [clip["asset_uri"] for clip in bgm_track["clips"]] == [
-        f"local://projects/{project_id}/music/music_manual_001"
+            f"local://projects/{project_id}/assets/music_manual_001"
     ]
     assert [item["recommendation_id"] for item in result_payload["timeline"]["applied_recommendations"]] == [
         "manual_bgm_seg_001"
@@ -22244,7 +22244,7 @@ def test_editing_session_api_replaces_trimmed_target_segment_id_stale_applied_bg
     result_payload = result_response.json()
     bgm_track = next(track for track in result_payload["timeline"]["tracks"] if track["track_type"] == "bgm")
     assert [clip["asset_uri"] for clip in bgm_track["clips"]] == [
-        f"local://projects/{project_id}/music/music_manual_001"
+            f"local://projects/{project_id}/assets/music_manual_001"
     ]
     assert [item["recommendation_id"] for item in result_payload["timeline"]["applied_recommendations"]] == [
         "manual_bgm_seg_001"

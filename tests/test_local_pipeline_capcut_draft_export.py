@@ -7,7 +7,7 @@ import wave
 
 import pytest
 
-from videobox_capcut_export.pycapcut_adapter import PyCapCutRealExportAdapter
+from videobox_capcut_export.pycapcut_adapter import CapCutDraftExportResult, PyCapCutRealExportAdapter
 from videobox_core_engine.local_pipeline import LocalPipelineRunner
 from videobox_domain_models.jobs import JobStatus, JobType
 from videobox_storage.local_project_store import LocalProjectStore
@@ -147,6 +147,23 @@ def test_start_capcut_draft_export_passes_matching_editing_session_to_adapter(tm
     runner.start_capcut_draft_export(project_id=project.project_id, timeline_job_id=timeline_job_id)
 
     assert fake_exporter.received_calls[0]["editing_session"]["caption_style"]["text_color"] == "#00FF00FF"
+
+
+def test_capcut_draft_export_persists_adapter_compatibility_warnings(tmp_path: Path) -> None:
+    class WarningExporter(_FakePyCapCutExporter):
+        def export_timeline(self, **kwargs: Any) -> CapCutDraftExportResult:
+            draft_path = super().export_timeline(**kwargs)
+            return CapCutDraftExportResult(draft_path=draft_path, capcut_compatibility_warnings=["ducking warning"])
+
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="CapCut warning persistence")
+    runner = LocalPipelineRunner(store, pycapcut_exporter=WarningExporter())
+    timeline_job_id = _build_approved_timeline_job(store, runner, project.project_id)
+
+    result = runner.start_capcut_draft_export(project_id=project.project_id, timeline_job_id=timeline_job_id)
+
+    persisted = runner.get_capcut_draft_export_result(project_id=project.project_id, job_id=result["job_id"])
+    assert persisted["export"]["notes"] == ["ducking warning"]
 
 
 def test_real_capcut_draft_keeps_short_tts_silence_material_after_temp_export_is_removed(tmp_path: Path) -> None:

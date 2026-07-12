@@ -1,8 +1,31 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 222. 2026-07-12 detailed editor Task 5 closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
-> 이 문서의 기존 날짜 기반 섹션은 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 222`만 기준으로 본다.
+> 현재 authoritative 상태/next slice 판단은 `## 223. 2026-07-12 long-form CapCut draft QA closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 이 문서의 기존 날짜 기반 섹션은 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 223`만 기준으로 본다.
 > 단, `2일 내 1차 데모 완성` 실행 레일은 `## 189`의 장기 우선순위를 그대로 넓게 집행하지 않고, `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`의 축소된 실행 계획을 우선 적용한다.
+
+## 223. 2026-07-12 long-form CapCut draft QA closeout
+
+자동 CapCut draft QA slice를 완료했다. 이것은 CapCut desktop 앱을 열거나 조작하는 검증이 아니라, 실제 VideoBox API·FFmpeg·pycapcut draft artifact의 구조/경로/길이/경고를 3개 600초 fixture로 반복 검증하는 범위다.
+
+- `loop`: 짧은 B-roll의 반복과 styled MP4/SRT/real draft를 검증한다.
+- `crop_pad_overlay`: B-roll crop·trim·pad와 이미지·텍스트 overlay의 final MP4/draft 반영을 검증한다.
+- `audio_ducking`: BGM/SFX gain·fade·ducking, 승인 개인 음성 TTS, CapCut ducking compatibility warning 영속화를 검증한다.
+- runner: `scripts/verify-long-form-capcut-draft-qa.py`; fast-path: `./scripts/dev-fast-path.ps1 -Mode long-form-capcut-qa`.
+
+검증 증적:
+
+- loop final SHA-256 `448c74034c3981ff7aa5264d12655eba6096b1653261e93d1ffae41a26342f29`
+- crop/pad/overlay final SHA-256 `f4d9826f9a8bcfafc9fb960209d6ba590e579b8a13d84efddca26032d05e8f7c`
+- audio/ducking final SHA-256 `3d4291f1325bbc0e4449938bb84d4ff92793369c14112649fb999f7024ee2617`
+- artifact root: `artifacts/long-form-capcut-qa/<profile>/`; 각 profile에 SRT, `output.mp4`, `draft_content.json`이 저장된다.
+- audio fixture의 persisted warning: `ducking is not natively supported by CapCut draft export; apply it in CapCut after import`.
+
+제한/다음 운영 QA:
+
+- `desktop_capcut_opened`은 모든 manifest에서 명시적으로 `false`다. 자동화가 실제 CapCut desktop open/edit/export 성공을 주장하지 않는다.
+- 남은 사람 작업은 CapCut desktop에서 위 3개 draft를 직접 열어 asset path, B-roll pad, overlay layout, 한국어 typography, ducking 안내 후 수동 편집/내보내기를 확인하는 것이다.
+- 대용량 `artifacts/`는 Git에 포함하지 않는다.
 
 ## 222. 2026-07-12 detailed editor Task 5 closeout
 

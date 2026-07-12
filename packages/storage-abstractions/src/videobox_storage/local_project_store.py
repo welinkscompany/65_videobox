@@ -1484,6 +1484,7 @@ class LocalProjectStore:
         project_id: str,
         timeline_id: str,
         source_draft_path: Path,
+        notes: list[str] | None = None,
     ) -> dict[str, Any]:
         sequence = self._next_export_sequence(project_id)
         export_id = f"export_{sequence:03d}"
@@ -1515,7 +1516,7 @@ class LocalProjectStore:
                     "capcut_draft_export",
                     file_uri,
                     "succeeded",
-                    json.dumps({}, ensure_ascii=True),
+                    json.dumps({"notes": notes or []}, ensure_ascii=True),
                     created_at,
                 ),
             )
@@ -1529,7 +1530,7 @@ class LocalProjectStore:
         row = self._fetchone(
             project_id,
             """
-            SELECT export_id, project_id, timeline_id, export_type, file_uri, status, created_at
+            SELECT export_id, project_id, timeline_id, export_type, file_uri, status, metadata_json, created_at
             FROM exports
             WHERE export_id = ?
             """,
@@ -1540,12 +1541,14 @@ class LocalProjectStore:
         file_path = self.resolve_storage_uri(project_id=project_id, storage_uri=str(row["file_uri"]))
         if not file_path.exists():
             raise KeyError(f"Export artifact missing: {export_id}")
+        metadata = json.loads(str(row["metadata_json"] or "{}"))
         return {
             "export_id": row["export_id"],
             "timeline_id": row["timeline_id"],
             "export_type": row["export_type"],
             "file_uri": row["file_uri"],
             "status": row["status"],
+            "notes": list(metadata.get("notes") or []),
             "created_at": row["created_at"],
         }
 

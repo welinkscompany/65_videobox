@@ -10,7 +10,8 @@ param(
         "current-focused-parallel",
         "broader",
         "all",
-        "smoke"
+        "smoke",
+        "long-form-capcut-qa"
     )]
     [string]$Mode = "current-focused",
     [string]$BackendPattern = "",
@@ -248,6 +249,21 @@ switch ($Mode) {
         Invoke-Step `
             -Label "600-second Korean production readiness smoke" `
             -Command "& `"$backendPython`" scripts/verify-production-readiness-smoke.py --narration `"$samplePath`" --work-root artifacts/task5-smoke" `
+            -WorkingDirectory $repoRoot
+    }
+    "long-form-capcut-qa" {
+        $artifactRoot = Join-Path $repoRoot "artifacts"
+        $samplePath = Join-Path $artifactRoot "task5-korean-600.wav"
+        if (-not (Test-Path -LiteralPath $samplePath)) {
+            New-Item -ItemType Directory -Force -Path $artifactRoot | Out-Null
+            & (Join-Path $PSScriptRoot "New-ProductionReadinessKoreanSample.ps1") -OutputPath $samplePath
+            if ($LASTEXITCODE -ne 0) {
+                throw "Could not generate the required 600-second Korean long-form QA narration."
+            }
+        }
+        Invoke-Step `
+            -Label "Three-fixture long-form CapCut draft QA" `
+            -Command "& `"$backendPython`" scripts/verify-long-form-capcut-draft-qa.py --narration `"$samplePath`" --work-root artifacts/long-form-capcut-qa" `
             -WorkingDirectory $repoRoot
     }
     "status" {

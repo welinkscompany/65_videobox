@@ -651,6 +651,7 @@ class CapCutDraftExportArtifactResponse(BaseModel):
     file_uri: str
     status: str
     created_at: str | None = None
+    notes: list[str] = Field(default_factory=list)
 
 
 class CapCutDraftExportJobResponse(StartJobResponse):

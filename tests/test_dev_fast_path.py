@@ -54,3 +54,11 @@ def test_fast_path_exposes_the_600_second_release_smoke_mode() -> None:
 
     assert '"smoke"' in script_text
     assert "verify-production-readiness-smoke.py" in script_text
+
+
+def test_fast_path_exposes_the_three_fixture_long_form_capcut_qa_mode() -> None:
+    script_path = Path(__file__).resolve().parents[1] / "scripts" / "dev-fast-path.ps1"
+    script_text = script_path.read_text(encoding="utf-8")
+
+    assert '"long-form-capcut-qa"' in script_text
+    assert "verify-long-form-capcut-draft-qa.py" in script_text

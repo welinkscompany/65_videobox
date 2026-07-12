@@ -33,6 +33,7 @@ from fastapi.testclient import TestClient
 from videobox_api.main import create_app
 from videobox_capcut_export.pycapcut_adapter import PyCapCutRealExportAdapter
 from videobox_core_engine.ffmpeg_final_renderer import FfmpegFinalRenderer
+from videobox_domain_models.assets import AssetType
 from videobox_provider_interfaces.llm import LLMProviderError
 from videobox_provider_interfaces.stt import STTRequest, STTResult, STTSegment
 from videobox_provider_interfaces.tts import TTSRequest, TTSResult
@@ -45,6 +46,34 @@ SOURCE_CAPTIONS = [
     "첫 번째 한국어 제작 구간입니다.",
     "편집기에서 장면 전환과 음량을 차례로 확인합니다.",
 ]
+LONG_FORM_PROFILE_NAMES = ("loop", "crop_pad_overlay", "audio_ducking")
+_LONG_FORM_FIXTURES: dict[str, dict[str, Any]] = {
+    "loop": {
+        "broll_controls": {"fit": "fit", "loop": True, "pad": False, "trim_start_sec": 0.0},
+        "include_image_overlay": False,
+        "audio_controls": None,
+        "desktop_capcut_opened": False,
+    },
+    "crop_pad_overlay": {
+        "broll_controls": {"fit": "crop", "loop": False, "pad": True, "trim_start_sec": 0.2},
+        "include_image_overlay": True,
+        "audio_controls": None,
+        "desktop_capcut_opened": False,
+    },
+    "audio_ducking": {
+        "broll_controls": {"fit": "fit", "loop": True, "pad": False, "trim_start_sec": 0.0},
+        "include_image_overlay": False,
+        "audio_controls": {"gain_db": -6.0, "fade_in_sec": 0.5, "fade_out_sec": 0.5, "ducking": True},
+        "desktop_capcut_opened": False,
+    },
+}
+
+
+def get_long_form_fixture(name: str) -> dict[str, Any]:
+    try:
+        return dict(_LONG_FORM_FIXTURES[name])
+    except KeyError as exc:
+        raise ValueError(f"Unknown long-form QA fixture: {name}") from exc
 
 
 class DeterministicOfflineRuntime:
@@ -143,6 +172,17 @@ def _create_sfx(path: Path, *, ffmpeg_binary: str) -> None:
     _run([ffmpeg_binary, "-y", "-f", "lavfi", "-i", "sine=frequency=880:duration=1", str(path)], timeout=120)
 
 
+def _create_bgm(path: Path, *, ffmpeg_binary: str) -> None:
+    _run([ffmpeg_binary, "-y", "-f", "lavfi", "-i", "sine=frequency=220:duration=3", str(path)], timeout=120)
+
+
+def _create_overlay_image(path: Path, *, ffmpeg_binary: str) -> None:
+    _run(
+        [ffmpeg_binary, "-y", "-f", "lavfi", "-i", "color=c=yellow:s=48x32", "-frames:v", "1", str(path)],
+        timeout=120,
+    )
+
+
 def _prepare_projects_root(work_root: Path) -> Path:
     projects_root = work_root / "projects"
     if projects_root.exists():
@@ -217,7 +257,15 @@ def _extract_corner_pixel(path: Path, *, second: float, ffmpeg_binary: str) -> b
     return result.stdout
 
 
-def run_smoke(*, narration: Path, work_root: Path, ffmpeg_binary: str, ffprobe_binary: str) -> dict[str, object]:
+def run_smoke(
+    *,
+    narration: Path,
+    work_root: Path,
+    ffmpeg_binary: str,
+    ffprobe_binary: str,
+    fixture_name: str = "loop",
+) -> dict[str, object]:
+    fixture = get_long_form_fixture(fixture_name)
     narration = narration.resolve()
     if not narration.is_file():
         raise FileNotFoundError(f"Narration source does not exist: {narration}")
@@ -234,6 +282,12 @@ def run_smoke(*, narration: Path, work_root: Path, ffmpeg_binary: str, ffprobe_b
     _create_short_broll(broll_path, ffmpeg_binary=ffmpeg_binary)
     sfx_path = work_root / "smoke-impact.wav"
     _create_sfx(sfx_path, ffmpeg_binary=ffmpeg_binary)
+    bgm_path = work_root / "smoke-bgm.wav"
+    if fixture["audio_controls"] is not None:
+        _create_bgm(bgm_path, ffmpeg_binary=ffmpeg_binary)
+    overlay_image_path = work_root / "smoke-overlay.png"
+    if fixture["include_image_overlay"]:
+        _create_overlay_image(overlay_image_path, ffmpeg_binary=ffmpeg_binary)
 
     store = LocalProjectStore(projects_root)
     renderer = FfmpegFinalRenderer(
@@ -254,7 +308,7 @@ def run_smoke(*, narration: Path, work_root: Path, ffmpeg_binary: str, ffprobe_b
     )
     checks: dict[str, bool] = {}
     with TestClient(app) as client:
-        project = _assert_status(client.post("/api/projects", json={"name": "Production readiness Korean smoke"}), 201)
+        project = _assert_status(client.post("/api/projects", json={"name": f"Production readiness Korean smoke {fixture_name}"}), 201)
         project_id = project["project_id"]
         narration_asset = _assert_status(client.post(
             f"/api/projects/{project_id}/assets/narration-audio", json={"source_path": str(narration)}), 201)
@@ -272,6 +326,18 @@ def run_smoke(*, narration: Path, work_root: Path, ffmpeg_binary: str, ffprobe_b
         ), 201)
         sfx_asset = _assert_status(client.post(
             f"/api/projects/{project_id}/assets/sfx", json={"source_path": str(sfx_path)}), 201)
+        bgm_asset = None
+        if fixture["audio_controls"] is not None:
+            registered_bgm = store.register_asset(
+                project_id=project_id, asset_type=AssetType.BGM, source_path=bgm_path
+            )
+            bgm_asset = {"asset_id": registered_bgm.asset_id, "storage_uri": registered_bgm.storage_uri}
+        image_asset = None
+        if fixture["include_image_overlay"]:
+            registered_image = store.register_asset(
+                project_id=project_id, asset_type=AssetType.IMAGE, source_path=overlay_image_path
+            )
+            image_asset = {"asset_id": registered_image.asset_id, "storage_uri": registered_image.storage_uri}
         checks["ingest"] = True
 
         transcription = _assert_status(client.post(
@@ -323,7 +389,11 @@ def run_smoke(*, narration: Path, work_root: Path, ffmpeg_binary: str, ffprobe_b
         ), 200)
         sfx_session = _assert_status(client.patch(
             f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/sfx",
-            json={"asset_id": sfx_asset["asset_id"], "expected_revision": session["session_revision"]},
+            json={
+                "asset_id": sfx_asset["asset_id"],
+                "media_controls": fixture["audio_controls"],
+                "expected_revision": session["session_revision"],
+            },
         ), 200)
         session = sfx_session
         if sfx_session["segments"][0].get("sfx_override", {}).get("asset_id") != sfx_asset["asset_id"]:
@@ -332,7 +402,29 @@ def run_smoke(*, narration: Path, work_root: Path, ffmpeg_binary: str, ffprobe_b
             segment_id = segment["segment_id"]
             session = _assert_status(client.patch(
                 f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/{segment_id}/broll",
-                json={"asset_id": broll_asset["asset_id"], "expected_revision": session["session_revision"]},
+                json={
+                    "asset_id": broll_asset["asset_id"],
+                    "media_controls": fixture["broll_controls"],
+                    "expected_revision": session["session_revision"],
+                },
+            ), 200)
+        if bgm_asset is not None:
+            session = _assert_status(client.patch(
+                f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/music",
+                json={
+                    "asset_id": bgm_asset["asset_id"],
+                    "media_controls": fixture["audio_controls"],
+                    "expected_revision": session["session_revision"],
+                },
+            ), 200)
+        if image_asset is not None:
+            session = _assert_status(client.patch(
+                f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/image-overlay",
+                json={
+                    "asset_id": image_asset["asset_id"],
+                    "text": "SMOKE IMAGE OVERLAY",
+                    "expected_revision": session["session_revision"],
+                },
             ), 200)
         revised_segment_id = session["segments"][-1]["segment_id"]
         session = _assert_status(client.patch(
@@ -347,7 +439,7 @@ def run_smoke(*, narration: Path, work_root: Path, ffmpeg_binary: str, ffprobe_b
             f"/api/projects/{project_id}/editing-sessions/{session_id}/partial-regeneration",
             json={
                 "segment_ids": ["seg_001", revised_segment_id],
-                "fields": ["caption", "broll", "visual_overlay", "tts_replacement", "sfx"],
+                "fields": ["caption", "broll", "visual_overlay", "tts_replacement", "sfx"] + (["music"] if bgm_asset is not None else []),
                 "expected_revision": session["session_revision"],
             },
         ), 202)
@@ -386,6 +478,41 @@ def run_smoke(*, narration: Path, work_root: Path, ffmpeg_binary: str, ffprobe_b
             item.get("recommendation_type") == "sfx" and item.get("selected_asset_id") == sfx_asset["asset_id"]
             for item in candidate_timeline.get("applied_recommendations", []) if isinstance(item, dict)
         )
+        broll_controls = [
+            clip.get("media_controls")
+            for track in candidate_timeline.get("tracks", [])
+            if track.get("track_type") == "broll"
+            for clip in track.get("clips", [])
+            if isinstance(clip, dict)
+        ]
+        broll_controls.extend(
+            item.get("payload", {}).get("media_controls")
+            for item in candidate_timeline.get("applied_recommendations", [])
+            if isinstance(item, dict) and item.get("recommendation_type") == "broll"
+        )
+        checks["broll_controls_in_timeline"] = any(
+            isinstance(controls, dict)
+            and all(controls.get(key) == value for key, value in fixture["broll_controls"].items())
+            for controls in broll_controls
+        )
+        if bgm_asset is not None:
+            audio_controls = [
+                clip.get("media_controls")
+                for track in candidate_timeline.get("tracks", [])
+                if track.get("track_type") in {"bgm", "sfx"}
+                for clip in track.get("clips", [])
+                if isinstance(clip, dict)
+            ]
+            audio_controls.extend(
+                item.get("payload", {}).get("media_controls")
+                for item in candidate_timeline.get("applied_recommendations", [])
+                if isinstance(item, dict) and item.get("recommendation_type") in {"bgm", "sfx"}
+            )
+            checks["audio_controls_in_timeline"] = any(
+                isinstance(controls, dict)
+                and all(controls.get(key) == value for key, value in fixture["audio_controls"].items())
+                for controls in audio_controls
+            )
 
         subtitle_job = _assert_status(client.post(
             f"/api/projects/{project_id}/jobs/subtitle-render", json={"timeline_job_id": candidate_timeline_job_id}), 202)
@@ -409,10 +536,13 @@ def run_smoke(*, narration: Path, work_root: Path, ffmpeg_binary: str, ffprobe_b
         before_overlay = _extract_frame(final_path, second=10, output_path=work_root / "before-overlay.png", ffmpeg_binary=ffmpeg_binary)
         during_overlay = _extract_frame(final_path, second=310, output_path=work_root / "during-overlay.png", ffmpeg_binary=ffmpeg_binary)
         checks["overlay_changes_frame"] = before_overlay != during_overlay
-        checks["short_broll_loops"] = _short_broll_is_observably_looped(
-            final_path=final_path,
-            work_root=work_root,
-            ffmpeg_binary=ffmpeg_binary,
+        checks["short_broll_loops"] = (
+            not fixture["broll_controls"]["loop"]
+            or _short_broll_is_observably_looped(
+                final_path=final_path,
+                work_root=work_root,
+                ffmpeg_binary=ffmpeg_binary,
+            )
         )
         checks["final_has_no_selectable_subtitle_stream"] = not _extract_subtitle_stream(
             final_path,
@@ -443,13 +573,31 @@ def run_smoke(*, narration: Path, work_root: Path, ffmpeg_binary: str, ffprobe_b
         checks["approved_sfx_in_final_and_capcut"] = (
             checks["approved_sfx_in_final_and_capcut"] and "smoke-impact.wav" in draft_content
         )
+        checks["broll_controls_in_capcut_draft"] = "short-broll.mp4" in draft_content
+        if bgm_asset is not None:
+            checks["audio_controls_in_capcut_draft"] = "smoke-bgm.wav" in draft_content
+            checks["capcut_ducking_warning_preserved"] = any(
+                "ducking is not natively supported" in note
+                for note in capcut["export"].get("notes") or []
+            )
+        if image_asset is not None:
+            checks["image_overlay_in_final_and_capcut"] = (
+                "smoke-overlay.png" in draft_content and bool(checks["overlay_changes_frame"])
+            )
 
     if not all(checks.values()):
         raise AssertionError(f"Smoke checks failed: {checks}")
     return {
+        "fixture_name": fixture_name,
+        "desktop_capcut_opened": fixture["desktop_capcut_opened"],
         "checks": checks,
         "narration": {"path": str(narration), "sha256": _sha256(narration)},
+        "srt": {"path": str(subtitle_path)},
         "final_mp4": {"path": str(final_path), "sha256": _sha256(final_path)},
+        "capcut_draft": {
+            "path": str(draft_path / "draft_content.json"),
+            "warnings": list(capcut["export"].get("notes") or []),
+        },
     }
 
 

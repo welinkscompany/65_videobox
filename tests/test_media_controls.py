@@ -68,3 +68,28 @@ def test_editing_session_media_override_persists_normalized_controls() -> None:
 
     assert broll["segments"][0]["broll_override"]["media_controls"]["fit"] == "crop"
     assert music["segments"][0]["music_override"]["media_controls"]["gain_db"] == -8.0
+
+
+def test_manual_music_asset_uses_resolvable_asset_uri_in_the_render_timeline() -> None:
+    from videobox_core_engine.timeline_builder import TimelineBuilder
+
+    timeline = TimelineBuilder().build(
+        project_id="project_001",
+        segments=[{"segment_id": "seg_001", "start_sec": 0.0, "end_sec": 4.0, "text": "music"}],
+        recommendations=[
+            {
+                "recommendation_id": "manual_bgm_seg_001",
+                "target_segment_id": "seg_001",
+                "recommendation_type": "bgm",
+                "selected_asset_id": "asset_bgm_001",
+                "score": 1.0,
+                "reason": "manual",
+                "auto_apply_allowed": True,
+                "review_required": False,
+                "payload": {"media_controls": {"gain_db": -6}},
+            }
+        ],
+    )
+
+    bgm_clip = next(clip for track in timeline.tracks if track.track_type == "bgm" for clip in track.clips)
+    assert bgm_clip.asset_uri == "local://projects/project_001/assets/asset_bgm_001"
