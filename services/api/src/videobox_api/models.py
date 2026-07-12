@@ -221,6 +221,7 @@ class CreateEditingSessionRequest(BaseModel):
 
 
 class CaptionOverrideRequest(BaseModel):
+    expected_revision: int = Field(ge=1)
     caption_text: str = Field(min_length=1)
 
     @model_validator(mode="after")
@@ -232,7 +233,15 @@ class CaptionOverrideRequest(BaseModel):
         return self
 
 
+class CaptionStyleMutationRequest(BaseModel):
+    expected_revision: int = Field(ge=1)
+    scope: str = Field(pattern="^(current_caption|selected_captions|from_current|whole_project|project_default)$")
+    segment_ids: list[str] = Field(default_factory=list)
+    style: dict[str, Any]
+
+
 class CutActionOverrideRequest(BaseModel):
+    expected_revision: int = Field(ge=1)
     cut_action: str = Field(min_length=1)
 
     @model_validator(mode="after")
@@ -245,6 +254,7 @@ class CutActionOverrideRequest(BaseModel):
 
 
 class BrollOverrideRequest(BaseModel):
+    expected_revision: int = Field(ge=1)
     asset_id: str = Field(min_length=1)
 
     @model_validator(mode="after")
@@ -257,6 +267,7 @@ class BrollOverrideRequest(BaseModel):
 
 
 class VisualOverlayRequest(BaseModel):
+    expected_revision: int = Field(ge=1)
     overlay_type: str = Field(min_length=1)
     asset_id: str = Field(min_length=1)
 
@@ -274,6 +285,7 @@ class VisualOverlayRequest(BaseModel):
 
 
 class ExplanationCardRequest(BaseModel):
+    expected_revision: int = Field(ge=1)
     title: str = ""
     body: str = ""
     text: str = Field(min_length=1)
@@ -292,6 +304,7 @@ class ExplanationCardRequest(BaseModel):
 
 
 class ImageOverlayRequest(BaseModel):
+    expected_revision: int = Field(ge=1)
     asset_id: str = Field(min_length=1)
     text: str = ""
 
@@ -306,6 +319,7 @@ class ImageOverlayRequest(BaseModel):
 
 
 class TableOverlayRequest(BaseModel):
+    expected_revision: int = Field(ge=1)
     columns: list[str] = Field(default_factory=list)
     rows: list[list[str]] = Field(default_factory=list)
     text: str = Field(min_length=1)
@@ -322,6 +336,7 @@ class TableOverlayRequest(BaseModel):
 
 
 class TTSReplacementRequest(BaseModel):
+    expected_revision: int = Field(ge=1)
     recommendation_id: str = Field(min_length=1)
     asset_id: str = Field(min_length=1)
 
@@ -351,6 +366,12 @@ class TTSListeningReviewRequest(BaseModel):
 
 
 class PartialRegenerationRequest(BaseModel):
+    expected_revision: int = Field(ge=1)
+    segment_ids: list[str] = Field(min_length=1)
+    fields: list[str] = Field(min_length=1)
+
+
+class PartialRegenerationPreflightRequest(BaseModel):
     segment_ids: list[str] = Field(min_length=1)
     fields: list[str] = Field(min_length=1)
 
@@ -395,6 +416,7 @@ class EditingSessionSegmentResponse(BaseModel):
     music_override: dict[str, object] | None = None
     sfx_override: dict[str, object] | None = None
     tts_replacement: dict[str, object] | None = None
+    caption_style: dict[str, object] | None = None
 
 
 class EditingSessionHistoryEntryResponse(BaseModel):
@@ -411,6 +433,8 @@ class EditingSessionResponse(BaseModel):
     session_id: str
     project_id: str
     timeline_id: str
+    session_revision: int
+    caption_style: dict[str, object] | None = None
     segments: list[EditingSessionSegmentResponse]
     history: list[EditingSessionHistoryEntryResponse] = Field(default_factory=list)
     created_at: str | None = None

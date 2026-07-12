@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import json
+import re
 import sqlite3
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
+from fastapi.testclient import TestClient as FastAPITestClient
 
 from videobox_api.main import (
     _build_preflight_review_prediction,
@@ -39,6 +40,54 @@ from videobox_provider_interfaces.llm import (
 )
 from videobox_provider_interfaces.stt import STTResult, STTSegment
 from videobox_storage.local_project_store import LocalProjectStore
+
+
+class TestClient(FastAPITestClient):
+    """Model the editor's normal read-then-mutate optimistic-lock workflow.
+
+    Workflow-oriented API tests predate revisioned editing sessions.  They are
+    not concurrency tests, so they intentionally use the latest revision just
+    as the actual editor does.  Tests that exercise conflicts pass an explicit
+    revision and are never changed by this helper.
+    """
+
+    _editing_session_mutation = re.compile(
+        r"^/api/projects/(?P<project_id>[^/]+)/editing-sessions/(?P<session_id>[^/]+)(?:/.*)?$"
+    )
+
+    def request(self, method: str, url: object, **kwargs: object):  # type: ignore[override]
+        method_upper = method.upper()
+        url_path = str(url).split("?", 1)[0]
+        match = self._editing_session_mutation.match(url_path)
+        is_partial_regeneration_start = url_path.endswith("/partial-regeneration")
+        is_mutation = method_upper in {"PATCH", "DELETE"} or (
+            method_upper == "POST" and is_partial_regeneration_start
+        )
+        if not match or not is_mutation:
+            return super().request(method, url, **kwargs)
+
+        request_json = kwargs.get("json")
+        request_params = kwargs.get("params")
+        if (isinstance(request_json, dict) and "expected_revision" in request_json) or (
+            isinstance(request_params, dict) and "expected_revision" in request_params
+        ):
+            return super().request(method, url, **kwargs)
+
+        latest = super().get(
+            f"/api/projects/{match.group('project_id')}/editing-sessions/{match.group('session_id')}"
+        )
+        if latest.status_code != 200:
+            return super().request(method, url, **kwargs)
+        revision = latest.json()["session_revision"]
+        if method_upper == "DELETE":
+            params = dict(request_params) if isinstance(request_params, dict) else {}
+            params["expected_revision"] = revision
+            kwargs["params"] = params
+        elif isinstance(request_json, dict):
+            body = dict(request_json)
+            body["expected_revision"] = revision
+            kwargs["json"] = body
+        return super().request(method, url, **kwargs)
 
 
 @dataclass
@@ -3574,6 +3623,7 @@ def test_editing_session_api_normalizes_legacy_string_false_segment_review_requi
             "music_override": None,
             "sfx_override": None,
             "tts_replacement": None,
+            "caption_style": None,
         }
     ]
 
@@ -3678,6 +3728,7 @@ def test_editing_session_api_preserves_string_false_segment_review_required_afte
             "music_override": None,
             "sfx_override": None,
             "tts_replacement": None,
+            "caption_style": None,
         }
     ]
 
@@ -15046,11 +15097,12 @@ def test_editing_session_api_can_create_and_patch_caption_override(tmp_path: Pat
     )
 
     assert create_response.status_code == 201
-    session_id = create_response.json()["session_id"]
+    session = create_response.json()
+    session_id = session["session_id"]
 
     patch_response = client.patch(
         f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/caption",
-        json={"caption_text": "Manual caption fix"},
+        json={"caption_text": "Manual caption fix", "expected_revision": session["session_revision"]},
     )
 
     assert patch_response.status_code == 200
@@ -15069,14 +15121,90 @@ def test_editing_session_api_rejects_blank_caption_override(tmp_path: Path) -> N
         f"/api/projects/{project_id}/editing-sessions",
         json={"timeline_job_id": timeline_job_id},
     )
-    session_id = create_response.json()["session_id"]
+    session = create_response.json()
+    session_id = session["session_id"]
 
     patch_response = client.patch(
         f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/caption",
-        json={"caption_text": "   "},
+        json={"caption_text": "   ", "expected_revision": session["session_revision"]},
     )
 
     assert patch_response.status_code == 422
+
+
+def test_caption_style_api_preflight_then_mutation_is_revisioned_and_persisted(tmp_path: Path) -> None:
+    client = TestClient(create_app(projects_root=tmp_path))
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+    create_response = client.post(f"/api/projects/{project_id}/editing-sessions", json={"timeline_job_id": timeline_job_id})
+    assert create_response.status_code == 201, create_response.text
+    session = create_response.json()
+    payload = {
+        "expected_revision": session["session_revision"],
+        "scope": "current_caption",
+        "segment_ids": ["seg_001"],
+        "style": {"text_color": "#00FF00FF", "font_size_px": 64},
+    }
+
+    preflight = client.post(f"/api/projects/{project_id}/editing-sessions/{session['session_id']}/caption-style/preflight", json=payload)
+    assert preflight.status_code == 200
+    assert preflight.json()["affected_segment_ids"] == ["seg_001"]
+
+    response = client.patch(f"/api/projects/{project_id}/editing-sessions/{session['session_id']}/caption-style", json=payload)
+    assert response.status_code == 200
+    assert response.json()["session_revision"] == session["session_revision"] + 1
+    assert response.json()["segments"][0]["caption_style"]["text_color"] == "#00FF00FF"
+    assert client.get(f"/api/projects/{project_id}/editing-sessions/{session['session_id']}").json()["segments"][0]["caption_style"]["font_size_px"] == 64
+
+
+def test_caption_style_api_rejects_stale_revision_without_mutating_session(tmp_path: Path) -> None:
+    client = TestClient(create_app(projects_root=tmp_path))
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+    create_response = client.post(f"/api/projects/{project_id}/editing-sessions", json={"timeline_job_id": timeline_job_id})
+    assert create_response.status_code == 201, create_response.text
+    session = create_response.json()
+    payload = {"expected_revision": session["session_revision"], "scope": "whole_project", "segment_ids": [], "style": {"text_color": "#FF0000FF"}}
+    assert client.patch(f"/api/projects/{project_id}/editing-sessions/{session['session_id']}/caption-style", json=payload).status_code == 200
+
+    stale = client.patch(f"/api/projects/{project_id}/editing-sessions/{session['session_id']}/caption-style", json=payload)
+    assert stale.status_code == 409
+    assert stale.json()["latest_session"]["caption_style"]["text_color"] == "#FF0000FF"
+
+
+def test_caption_override_rejects_stale_revision_with_latest_session(tmp_path: Path) -> None:
+    client = TestClient(create_app(projects_root=tmp_path))
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+    session = client.post(
+        f"/api/projects/{project_id}/editing-sessions",
+        json={"timeline_job_id": timeline_job_id},
+    ).json()
+    url = f"/api/projects/{project_id}/editing-sessions/{session['session_id']}/segments/seg_001/caption"
+
+    saved = client.patch(
+        url,
+        json={"caption_text": "first edit", "expected_revision": session["session_revision"]},
+    )
+    assert saved.status_code == 200, saved.text
+
+    stale = client.patch(
+        url,
+        json={"caption_text": "lost edit", "expected_revision": session["session_revision"]},
+    )
+    assert stale.status_code == 409
+    assert stale.json()["latest_session"]["segments"][0]["caption_text"] == "first edit"
+
+
+def test_caption_style_api_rejects_invalid_style_without_changing_revision_or_snapshot(tmp_path: Path) -> None:
+    client = TestClient(create_app(projects_root=tmp_path))
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+    session = client.post(f"/api/projects/{project_id}/editing-sessions", json={"timeline_job_id": timeline_job_id}).json()
+    valid = {"expected_revision": session["session_revision"], "scope": "whole_project", "segment_ids": [], "style": {"text_color": "#00FF00FF"}}
+    saved = client.patch(f"/api/projects/{project_id}/editing-sessions/{session['session_id']}/caption-style", json=valid).json()
+    invalid = client.patch(f"/api/projects/{project_id}/editing-sessions/{session['session_id']}/caption-style", json={"expected_revision": saved["session_revision"], "scope": "whole_project", "segment_ids": [], "style": {"text_color": "#BAD"}})
+
+    assert invalid.status_code == 422
+    reloaded = client.get(f"/api/projects/{project_id}/editing-sessions/{session['session_id']}").json()
+    assert reloaded["session_revision"] == saved["session_revision"]
+    assert reloaded["caption_style"]["text_color"] == "#00FF00FF"
 
 
 def test_editing_session_api_can_fetch_cut_and_broll_updates(tmp_path: Path) -> None:
@@ -15088,15 +15216,16 @@ def test_editing_session_api_can_fetch_cut_and_broll_updates(tmp_path: Path) -> 
         f"/api/projects/{project_id}/editing-sessions",
         json={"timeline_job_id": timeline_job_id},
     )
-    session_id = create_response.json()["session_id"]
+    session = create_response.json()
+    session_id = session["session_id"]
 
     cut_response = client.patch(
         f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/cut-action",
-        json={"cut_action": "remove"},
+        json={"cut_action": "remove", "expected_revision": session["session_revision"]},
     )
     broll_response = client.patch(
         f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/broll",
-        json={"asset_id": "asset_manual_001"},
+        json={"asset_id": "asset_manual_001", "expected_revision": cut_response.json()["session_revision"]},
     )
     get_response = client.get(
         f"/api/projects/{project_id}/editing-sessions/{session_id}",
@@ -15121,14 +15250,16 @@ def test_editing_session_api_can_clear_broll_override(tmp_path: Path) -> None:
         f"/api/projects/{project_id}/editing-sessions",
         json={"timeline_job_id": timeline_job_id},
     )
-    session_id = create_response.json()["session_id"]
+    session = create_response.json()
+    session_id = session["session_id"]
 
     client.patch(
         f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/broll",
-        json={"asset_id": "asset_manual_001"},
+        json={"asset_id": "asset_manual_001", "expected_revision": session["session_revision"]},
     )
     clear_response = client.delete(
         f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/broll",
+        params={"expected_revision": session["session_revision"] + 1},
     )
 
     assert clear_response.status_code == 200
@@ -15153,11 +15284,11 @@ def test_editing_session_api_can_fetch_latest_session_by_updated_at(tmp_path: Pa
 
     client.patch(
         f"/api/projects/{project_id}/editing-sessions/{first_session['session_id']}/segments/seg_001/caption",
-        json={"caption_text": "Older session touched first"},
+        json={"caption_text": "Older session touched first", "expected_revision": first_session["session_revision"]},
     )
     latest_update_response = client.patch(
         f"/api/projects/{project_id}/editing-sessions/{second_session['session_id']}/segments/seg_001/caption",
-        json={"caption_text": "Latest session should win"},
+        json={"caption_text": "Latest session should win", "expected_revision": second_session["session_revision"]},
     )
 
     response = client.get(f"/api/projects/{project_id}/editing-sessions/latest")
@@ -15179,11 +15310,13 @@ def test_editing_session_api_can_start_partial_regeneration_job(tmp_path: Path) 
         f"/api/projects/{project_id}/editing-sessions",
         json={"timeline_job_id": timeline_job_id},
     )
-    session_id = create_response.json()["session_id"]
+    session = create_response.json()
+    session_id = session["session_id"]
 
     response = client.post(
         f"/api/projects/{project_id}/editing-sessions/{session_id}/partial-regeneration",
         json={
+            "expected_revision": create_response.json()["session_revision"],
             "segment_ids": ["seg_001"],
             "fields": ["broll", "visual_overlay"],
         },
@@ -15201,6 +15334,40 @@ def test_editing_session_api_can_start_partial_regeneration_job(tmp_path: Path) 
         "overlay_refresh",
         "timeline_build",
     ]
+
+
+def test_editing_session_api_rejects_stale_partial_regeneration_before_creating_job(
+    tmp_path: Path,
+) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+    session = client.post(
+        f"/api/projects/{project_id}/editing-sessions",
+        json={"timeline_job_id": timeline_job_id},
+    ).json()
+
+    changed = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session['session_id']}/segments/seg_001/caption",
+        json={
+            "caption_text": "Manual text wins over stale regeneration.",
+            "expected_revision": session["session_revision"],
+        },
+    )
+    assert changed.status_code == 200
+
+    response = client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session['session_id']}/partial-regeneration",
+        json={
+            "expected_revision": session["session_revision"],
+            "segment_ids": ["seg_001"],
+            "fields": ["caption"],
+            "expected_revision": session["session_revision"],
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["latest_session"]["session_revision"] == changed.json()["session_revision"]
 
 
 def test_editing_session_api_surfaces_draft_prediction_when_starting_partial_regeneration(
@@ -15262,6 +15429,7 @@ def test_editing_session_api_surfaces_draft_prediction_when_starting_partial_reg
     response = client.post(
         f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration",
         json={
+            "expected_revision": session["session_revision"],
             "segment_ids": ["seg_001"],
             "fields": ["caption"],
         },
@@ -15292,18 +15460,25 @@ def test_editing_session_api_surfaces_blocked_prediction_when_starting_partial_r
     )
     session_id = create_response.json()["session_id"]
 
-    client.patch(
+    caption_response = client.patch(
         f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_002/caption",
-        json={"caption_text": "Team meeting overview with corrected label"},
+        json={
+            "caption_text": "Team meeting overview with corrected label",
+            "expected_revision": create_response.json()["session_revision"],
+        },
     )
-    client.patch(
+    broll_response = client.patch(
         f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_002/broll",
-        json={"asset_id": "asset_manual_002"},
+        json={
+            "asset_id": "asset_manual_002",
+            "expected_revision": caption_response.json()["session_revision"],
+        },
     )
 
     response = client.post(
         f"/api/projects/{project_id}/editing-sessions/{session_id}/partial-regeneration",
         json={
+            "expected_revision": broll_response.json()["session_revision"],
             "segment_ids": ["seg_002"],
             "fields": ["caption", "broll", "visual_overlay"],
         },
@@ -15337,15 +15512,16 @@ def test_editing_session_api_can_preview_partial_regeneration_scope_without_crea
         f"/api/projects/{project_id}/editing-sessions",
         json={"timeline_job_id": timeline_job_id},
     )
-    session_id = create_response.json()["session_id"]
+    session = create_response.json()
+    session_id = session["session_id"]
 
     client.patch(
         f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_002/caption",
-        json={"caption_text": "Team meeting overview with corrected label"},
+        json={"caption_text": "Team meeting overview with corrected label", "expected_revision": session["session_revision"]},
     )
     client.patch(
         f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_002/broll",
-        json={"asset_id": "asset_manual_002"},
+        json={"asset_id": "asset_manual_002", "expected_revision": session["session_revision"] + 1},
     )
 
     before_jobs = client.get(f"/api/projects/{project_id}/jobs").json()["jobs"]
@@ -15409,13 +15585,15 @@ def test_editing_session_api_marks_preflight_blocked_for_manual_tts_rerun_scope_
         f"/api/projects/{project_id}/editing-sessions",
         json={"timeline_job_id": timeline_job_id},
     )
-    session_id = create_response.json()["session_id"]
+    session = create_response.json()
+    session_id = session["session_id"]
 
     client.patch(
         f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_002/tts-replacement",
         json={
             "recommendation_id": "rec_tts_review_002",
             "asset_id": "asset_tts_review_002",
+            "expected_revision": session["session_revision"],
         },
     )
     before_jobs = client.get(f"/api/projects/{project_id}/jobs").json()["jobs"]
@@ -19052,6 +19230,7 @@ def test_editing_session_api_ignores_nested_segment_id_source_review_flag_when_r
         json={
             "segment_ids": ["seg_001"],
             "fields": ["caption"],
+            "expected_revision": session["session_revision"],
         },
     )
 
@@ -20214,6 +20393,7 @@ def test_editing_session_api_ignores_non_dict_session_segments_in_partial_regene
         json={
             "segment_ids": ["seg_001"],
             "fields": ["caption"],
+            "expected_revision": session["session_revision"],
         },
     )
 

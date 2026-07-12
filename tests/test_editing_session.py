@@ -98,6 +98,111 @@ def test_save_editing_session_persists_current_state_and_history(tmp_path: Path)
     assert loaded["history"][0]["mutation_type"] == "caption_update"
 
 
+def test_editing_session_compare_and_swap_rejects_stale_write_without_replacing_json(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Editing Session CAS Project")
+    saved = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id="timeline_001",
+        session_payload={"session_revision": 1, "segments": [{"segment_id": "seg_001", "caption_text": "original"}], "history": []},
+    )
+    updated = {**saved, "session_revision": 2, "segments": [{"segment_id": "seg_001", "caption_text": "fresh"}]}
+    store.update_editing_session(
+        project_id=project.project_id, session_id=saved["session_id"], session_payload=updated, expected_revision=1
+    )
+
+    from videobox_storage.local_project_store import EditingSessionRevisionConflict
+    with pytest.raises(EditingSessionRevisionConflict):
+        store.update_editing_session(
+            project_id=project.project_id,
+            session_id=saved["session_id"],
+            session_payload={**saved, "session_revision": 2, "segments": [{"segment_id": "seg_001", "caption_text": "stale"}]},
+            expected_revision=1,
+        )
+
+    assert store.get_editing_session(project_id=project.project_id, session_id=saved["session_id"])["segments"][0]["caption_text"] == "fresh"
+
+
+def test_editing_session_recovers_canonical_db_snapshot_when_json_replace_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Editing Session Recovery Project")
+    saved = store.save_editing_session(project_id=project.project_id, timeline_id="timeline_001", session_payload={"segments": [{"segment_id": "seg_001", "caption_text": "old"}], "history": []})
+    import pathlib
+    original_replace = pathlib.Path.replace
+    monkeypatch.setattr(pathlib.Path, "replace", lambda self, target: (_ for _ in ()).throw(OSError("injected replace failure")))
+    with pytest.raises(OSError, match="injected"):
+        store.update_editing_session(project_id=project.project_id, session_id=saved["session_id"], expected_revision=saved["session_revision"], session_payload={**saved, "session_revision": saved["session_revision"] + 1, "segments": [{"segment_id": "seg_001", "caption_text": "new"}]})
+    monkeypatch.setattr(pathlib.Path, "replace", original_replace)
+    recovered = store.get_editing_session(project_id=project.project_id, session_id=saved["session_id"])
+    assert recovered["session_revision"] == saved["session_revision"] + 1
+    assert recovered["segments"][0]["caption_text"] == "new"
+
+
+def test_generic_editing_session_mutation_increments_revision(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Editing Session Revision Project")
+    saved = store.save_editing_session(project_id=project.project_id, timeline_id="timeline_001", session_payload={"segments": [], "history": []})
+    updated = store.update_editing_session(project_id=project.project_id, session_id=saved["session_id"], session_payload={**saved, "history": [{"mutation_type": "caption_update"}]})
+    assert updated["session_revision"] == saved["session_revision"] + 1
+
+
+def test_caption_style_scope_rules_resolve_snapshots_without_changing_default_for_single_caption() -> None:
+    from videobox_core_engine.editing_session import preview_caption_style_scope, update_caption_style
+    session = {"caption_style": {"text_color": "#FFFFFFFF"}, "session_revision": 1, "segments": [
+        {"segment_id": "a"}, {"segment_id": "b"}, {"segment_id": "c"}
+    ], "history": []}
+    assert preview_caption_style_scope(session=session, scope="current_caption", segment_ids=["b"]) == ["b"]
+    assert preview_caption_style_scope(session=session, scope="selected_captions", segment_ids=["c", "a"]) == ["a", "c"]
+    assert preview_caption_style_scope(session=session, scope="from_current", segment_ids=["b"]) == ["b", "c"]
+    assert preview_caption_style_scope(session=session, scope="whole_project", segment_ids=[]) == ["a", "b", "c"]
+    assert preview_caption_style_scope(session=session, scope="project_default", segment_ids=[]) == []
+    with pytest.raises(ValueError, match="whole_project does not accept segment_ids"):
+        preview_caption_style_scope(session=session, scope="whole_project", segment_ids=["a"])
+    with pytest.raises(ValueError, match="project_default does not accept segment_ids"):
+        preview_caption_style_scope(session=session, scope="project_default", segment_ids=["a"])
+    changed = update_caption_style(session=session, style={"text_color": "#00FF00FF"}, scope="current_caption", segment_ids=["b"])
+    assert changed["caption_style"]["text_color"] == "#FFFFFFFF"
+    assert changed["segments"][1]["caption_style"]["text_color"] == "#00FF00FF"
+
+
+def test_partial_regeneration_conflict_returns_latest_manual_caption_and_style_without_stale_timeline_save() -> None:
+    from videobox_core_engine.editing_session_and_regeneration import EditingSessionConflict, EditingSessionRegenerationMixin
+    from videobox_storage.local_project_store import EditingSessionRevisionConflict
+
+    stale = {"session_id": "session_001", "timeline_id": "timeline_001", "session_revision": 1, "segments": [{"segment_id": "seg_001", "caption_text": "old", "caption_style": {"text_color": "#FFFFFFFF"}}], "history": []}
+    latest = {**stale, "session_revision": 2, "segments": [{"segment_id": "seg_001", "caption_text": "manual", "caption_style": {"text_color": "#00FF00FF"}}]}
+
+    class Store:
+        def __init__(self) -> None: self.calls = 0; self.persisted = None
+        def get_editing_session(self, **_: object) -> dict: return latest if self.calls else stale
+        def create_job(self, **_: object) -> dict: return {"job_id": "job_001"}
+        def update_editing_session(self, **kwargs: object) -> dict:
+            self.calls += 1
+            if self.calls == 1: raise EditingSessionRevisionConflict("stale")
+            self.persisted = kwargs["session_payload"]
+            return {**self.persisted, "updated_at": "now"}
+        def save_partial_regeneration_run(self, **kwargs: object) -> dict: return {"partial_regeneration_id": "regen_001"}
+        def update_job(self, **_: object) -> None: pass
+
+    class Runner(EditingSessionRegenerationMixin):
+        def __init__(self) -> None: self.store = Store()
+        def _execute_partial_regeneration(self, **_: object) -> dict: return {"timeline_id": "timeline_002", "timeline": {}, "segment_ids": ["seg_001"], "fields": ["caption"], "downstream_steps": []}
+
+    runner = Runner()
+    with pytest.raises(EditingSessionConflict) as exc_info:
+        runner.start_editing_session_partial_regeneration(
+            project_id="project_001",
+            session_id="session_001",
+            segment_ids=["seg_001"],
+            fields=["caption"],
+            expected_revision=stale["session_revision"],
+        )
+
+    assert exc_info.value.latest_session["segments"][0]["caption_text"] == "manual"
+    assert exc_info.value.latest_session["segments"][0]["caption_style"]["text_color"] == "#00FF00FF"
+    assert runner.store.persisted is None
+
+
 def test_save_editing_session_recovers_when_table_is_missing_on_existing_project(tmp_path: Path) -> None:
     store = LocalProjectStore(tmp_path)
     project = store.bootstrap_project(name="Editing Session Migration Project")
@@ -686,6 +791,7 @@ def test_pending_or_rejected_tts_candidate_cannot_replace_narration_until_listen
             segment_id="seg_001",
             recommendation_id=candidate["candidate_id"],
             asset_id=candidate["asset_id"],
+            expected_revision=session["session_revision"],
         )
 
     assert store.get_editing_session(project_id=project.project_id, session_id=session["session_id"])["segments"][0]["tts_replacement"] is None
@@ -701,6 +807,7 @@ def test_pending_or_rejected_tts_candidate_cannot_replace_narration_until_listen
         segment_id="seg_001",
         recommendation_id=candidate["candidate_id"],
         asset_id=candidate["asset_id"],
+        expected_revision=session["session_revision"],
     )
 
     assert selected["segments"][0]["tts_replacement"] == {
@@ -997,6 +1104,7 @@ def test_partial_regeneration_pipeline_keeps_scope_limited_to_selected_segments(
         session_id=saved_session["session_id"],
         segment_ids=["seg_002"],
         fields=["caption", "broll"],
+        expected_revision=saved_session["session_revision"],
     )
     result = runner.get_partial_regeneration_result(
         project_id=project.project_id,
@@ -1150,6 +1258,7 @@ def test_partial_regeneration_pipeline_runs_broll_refresh_when_no_manual_overrid
         session_id=saved_session["session_id"],
         segment_ids=["seg_002"],
         fields=["broll"],
+        expected_revision=saved_session["session_revision"],
     )
     result = runner.get_partial_regeneration_result(
         project_id=project.project_id,
@@ -1235,6 +1344,7 @@ def test_partial_regeneration_pipeline_marks_job_failed_when_refresh_step_errors
             session_id=saved_session["session_id"],
             segment_ids=["seg_001"],
             fields=["broll"],
+            expected_revision=saved_session["session_revision"],
         )
 
     failed_job = store.list_jobs(project_id=project.project_id)[0]
@@ -1339,18 +1449,25 @@ def test_partial_regeneration_pipeline_carries_forward_previous_regeneration_res
         session_id=saved_session["session_id"],
         segment_ids=["seg_002"],
         fields=["broll"],
+        expected_revision=saved_session["session_revision"],
     )
-    runner.update_editing_session_segment_caption(
+    after_first = runner.get_editing_session(
+        project_id=project.project_id,
+        session_id=saved_session["session_id"],
+    )
+    updated_session = runner.update_editing_session_segment_caption(
         project_id=project.project_id,
         session_id=saved_session["session_id"],
         segment_id="seg_002",
         caption_text="Caption two updated",
+        expected_revision=after_first["session_revision"],
     )
     second = runner.start_editing_session_partial_regeneration(
         project_id=project.project_id,
         session_id=saved_session["session_id"],
         segment_ids=["seg_002"],
         fields=["caption"],
+        expected_revision=updated_session["session_revision"],
     )
     first_result = runner.get_partial_regeneration_result(project_id=project.project_id, job_id=first["job_id"])
     second_result = runner.get_partial_regeneration_result(project_id=project.project_id, job_id=second["job_id"])
@@ -1432,6 +1549,7 @@ def test_partial_regeneration_pipeline_preserves_overlay_shape_when_refreshing_v
         session_id=saved_session["session_id"],
         segment_ids=["seg_001"],
         fields=["visual_overlay"],
+        expected_revision=saved_session["session_revision"],
     )
     result = runner.get_partial_regeneration_result(project_id=project.project_id, job_id=started["job_id"])
 
@@ -1545,6 +1663,7 @@ def test_partial_regeneration_pipeline_clears_target_visual_overlays_when_sessio
         session_id=saved_session["session_id"],
         segment_ids=["seg_001"],
         fields=["visual_overlay"],
+        expected_revision=saved_session["session_revision"],
     )
     result = runner.get_partial_regeneration_result(project_id=project.project_id, job_id=started["job_id"])
 
@@ -1666,6 +1785,7 @@ def test_partial_regeneration_pipeline_preserves_explanation_overlay_shape(tmp_p
         session_id=saved_session["session_id"],
         segment_ids=["seg_001"],
         fields=["explanation_card"],
+        expected_revision=saved_session["session_revision"],
     )
     result = runner.get_partial_regeneration_result(project_id=project.project_id, job_id=started["job_id"])
 
@@ -1782,6 +1902,7 @@ def test_partial_regeneration_pipeline_preserves_image_and_table_overlay_shapes(
         session_id=saved_session["session_id"],
         segment_ids=["seg_001"],
         fields=["image_overlay", "table_overlay"],
+        expected_revision=saved_session["session_revision"],
     )
     result = runner.get_partial_regeneration_result(project_id=project.project_id, job_id=started["job_id"])
 
@@ -1901,6 +2022,7 @@ def test_partial_regeneration_pipeline_applies_tts_replacement_as_review_blocked
         session_id=saved_session["session_id"],
         segment_ids=["seg_001"],
         fields=["tts_replacement"],
+        expected_revision=saved_session["session_revision"],
     )
     result = runner.get_partial_regeneration_result(project_id=project.project_id, job_id=started["job_id"])
 
@@ -2033,6 +2155,7 @@ def test_partial_regeneration_pipeline_applies_approved_tts_replacement_to_targe
         session_id=saved_session["session_id"],
         segment_ids=["seg_001"],
         fields=["tts_replacement"],
+        expected_revision=saved_session["session_revision"],
     )
     result = runner.get_partial_regeneration_result(project_id=project.project_id, job_id=started["job_id"])
 

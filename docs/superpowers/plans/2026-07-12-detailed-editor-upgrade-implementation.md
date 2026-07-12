@@ -72,12 +72,12 @@ git commit -m "feat: render caption style through mp4 and capcut"
 
 **Files:** local_project_store.py, editing_session_and_regeneration.py, models.py, main.py, test_api_caption_style_endpoint.py, test_editing_session.py, test_api.py.
 
-- [ ] Step 1 — Write RED API tests: PATCH caption-style accepts style, scope, segment_ids, expected_revision; increments revision; stale repeat returns 409 plus latest_session.
-- [ ] Step 2 — Run RED: .venv\Scripts\python.exe -m pytest tests/test_api_caption_style_endpoint.py -q. Expected: 404 or request-model failure.
-- [ ] Step 3 — Add session_revision INTEGER NOT NULL DEFAULT 1. Write payload, DB row, history in one transaction using revision compare-and-swap; zero updated rows raises EditingSessionConflict.
-- [ ] Step 4 — Add preflight/mutation scopes: current_caption, selected_captions, from_current, whole_project, project_default. Persist resolved snapshots.
-- [ ] Step 5 — Test 422 preserves revision, restart preserves style/revision, partial regeneration retains manual text/style.
-- [ ] Step 6 — Verify and commit.
+- [x] Step 1 — Write RED API tests: PATCH caption-style accepts style, scope, segment_ids, expected_revision; increments revision; stale repeat returns 409 plus latest_session.
+- [x] Step 2 — Run RED: .venv\Scripts\python.exe -m pytest tests/test_api_caption_style_endpoint.py -q. Expected: 404 or request-model failure.
+- [x] Step 3 — Add session_revision INTEGER NOT NULL DEFAULT 1. Write payload, DB row, history in one transaction using revision compare-and-swap; zero updated rows raises EditingSessionConflict.
+- [x] Step 4 — Add preflight/mutation scopes: current_caption, selected_captions, from_current, whole_project, project_default. Persist resolved snapshots.
+- [x] Step 5 — Test 422 preserves revision, restart preserves style/revision, partial regeneration retains manual text/style.
+- [x] Step 6 — Verify and commit.
 
 Run: .venv\Scripts\python.exe -m pytest tests/test_api_caption_style_endpoint.py tests/test_editing_session.py tests/test_api.py -q
 Expected: PASS.

@@ -795,6 +795,7 @@ export function App() {
         selectedProjectId,
         editingSession.session_id,
         {
+          expected_revision: editingSession.session_revision,
           segment_ids: [selectedEditingSegmentId],
           fields: selectedRegenerationFields,
         },
@@ -2817,7 +2818,10 @@ export function App() {
                           selectedProjectId!,
                           activeEditingSessionId!,
                           selectedEditingSegment.segment_id,
-                          { caption_text: selectedEditingDraft.captionText },
+                          {
+                            expected_revision: editingSession!.session_revision,
+                            caption_text: selectedEditingDraft.captionText,
+                          },
                         ),
                       )
                     }
@@ -2853,7 +2857,10 @@ export function App() {
                           selectedProjectId!,
                           activeEditingSessionId!,
                           selectedEditingSegment.segment_id,
-                          { cut_action: selectedEditingDraft.cutAction },
+                          {
+                            expected_revision: editingSession!.session_revision,
+                            cut_action: selectedEditingDraft.cutAction,
+                          },
                         ),
                       )
                     }
@@ -3012,7 +3019,10 @@ export function App() {
                           selectedProjectId!,
                           activeEditingSessionId!,
                           selectedEditingSegment.segment_id,
-                          { asset_id: selectedEditingDraft.brollAssetId },
+                          {
+                            expected_revision: editingSession!.session_revision,
+                            asset_id: selectedEditingDraft.brollAssetId,
+                          },
                         ),
                       )
                     }
@@ -3036,6 +3046,7 @@ export function App() {
                               selectedProjectId!,
                               activeEditingSessionId!,
                               selectedEditingSegment.segment_id,
+                              editingSession!.session_revision,
                             ),
                           { feedbackAction: "해제", removeRegenerationField: "broll" },
                         )
@@ -3077,7 +3088,10 @@ export function App() {
                             selectedProjectId!,
                             activeEditingSessionId!,
                             selectedEditingSegment.segment_id,
-                            { asset_id: selectedEditingDraft.musicAssetId },
+                            {
+                              expected_revision: editingSession!.session_revision,
+                              asset_id: selectedEditingDraft.musicAssetId,
+                            },
                           ),
                         { addRegenerationField: "music" },
                       )
@@ -3107,6 +3121,7 @@ export function App() {
                               selectedProjectId!,
                               activeEditingSessionId!,
                               selectedEditingSegment.segment_id,
+                              editingSession!.session_revision,
                             ),
                           { feedbackAction: "해제", removeRegenerationField: "music" },
                         )
@@ -3143,7 +3158,10 @@ export function App() {
                             selectedProjectId!,
                             activeEditingSessionId!,
                             selectedEditingSegment.segment_id,
-                            { asset_id: selectedEditingDraft.sfxAssetId },
+                            {
+                              expected_revision: editingSession!.session_revision,
+                              asset_id: selectedEditingDraft.sfxAssetId,
+                            },
                           ),
                         { addRegenerationField: "sfx", feedbackAction: "저장" },
                       )
@@ -3171,6 +3189,7 @@ export function App() {
                               selectedProjectId!,
                               activeEditingSessionId!,
                               selectedEditingSegment.segment_id,
+                              editingSession!.session_revision,
                             ),
                           { feedbackAction: "해제", removeRegenerationField: "sfx" },
                         )
@@ -3233,6 +3252,7 @@ export function App() {
                           activeEditingSessionId!,
                           selectedEditingSegment.segment_id,
                           {
+                            expected_revision: editingSession!.session_revision,
                             title: selectedEditingDraft.explanationTitle,
                             body: selectedEditingDraft.explanationBody,
                             text: selectedEditingDraft.explanationText,
@@ -3270,6 +3290,7 @@ export function App() {
                               selectedProjectId!,
                               activeEditingSessionId!,
                               selectedEditingSegment.segment_id,
+                              editingSession!.session_revision,
                             ),
                           { feedbackAction: "삭제" },
                         )
@@ -3321,6 +3342,7 @@ export function App() {
                           activeEditingSessionId!,
                           selectedEditingSegment.segment_id,
                           {
+                            expected_revision: editingSession!.session_revision,
                             asset_id: selectedEditingDraft.imageAssetId,
                             text: selectedEditingDraft.imageText,
                           },
@@ -3353,6 +3375,7 @@ export function App() {
                             selectedProjectId!,
                             activeEditingSessionId!,
                             selectedEditingSegment.segment_id,
+                            editingSession!.session_revision,
                           ),
                         { feedbackAction: "삭제" },
                         )
@@ -3415,6 +3438,7 @@ export function App() {
                           activeEditingSessionId!,
                           selectedEditingSegment.segment_id,
                           {
+                            expected_revision: editingSession!.session_revision,
                             columns: selectedEditingDraft.tableColumns
                               .split(",")
                               .map((item) => item.trim())
@@ -3459,6 +3483,7 @@ export function App() {
                             selectedProjectId!,
                             activeEditingSessionId!,
                             selectedEditingSegment.segment_id,
+                            editingSession!.session_revision,
                           ),
                         { feedbackAction: "삭제" },
                         )
@@ -3511,6 +3536,7 @@ export function App() {
                           activeEditingSessionId!,
                           selectedEditingSegment.segment_id,
                           {
+                            expected_revision: editingSession!.session_revision,
                             recommendation_id: selectedEditingDraft.ttsRecommendationId,
                             asset_id: selectedEditingDraft.ttsAssetId,
                           },
@@ -3644,6 +3670,7 @@ export function App() {
                             selectedProjectId!,
                             activeEditingSessionId!,
                             selectedEditingSegment.segment_id,
+                            editingSession!.session_revision,
                           ),
                         { feedbackAction: "해제" },
                         )

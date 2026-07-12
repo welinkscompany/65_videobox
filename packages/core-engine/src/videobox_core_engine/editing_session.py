@@ -3,6 +3,8 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
+from videobox_domain_models.caption_style import CaptionStyle
+
 ALLOWED_PARTIAL_REGEN_FIELDS = {
     "caption",
     "cut_action",
@@ -66,7 +68,48 @@ def build_editing_session(
         "timeline_id": timeline["timeline_id"],
         "segments": editable_segments,
         "history": [],
+        "session_revision": 1,
     }
+
+
+def preview_caption_style_scope(*, session: dict[str, Any], scope: str, segment_ids: list[str]) -> list[str]:
+    segments = [item for item in session.get("segments", []) if isinstance(item, dict)]
+    requested = {str(item).strip() for item in segment_ids if str(item).strip()}
+    known_ids = {str(item.get("segment_id")) for item in segments}
+    if scope in {"current_caption", "from_current"} and len(requested) != 1:
+        raise ValueError(f"{scope} requires exactly one caption.")
+    if scope == "selected_captions" and not requested:
+        raise ValueError("selected_captions requires one or more captions.")
+    if scope in {"whole_project", "project_default"} and requested:
+        raise ValueError(f"{scope} does not accept segment_ids.")
+    if scope in {"current_caption", "selected_captions", "from_current"} and not requested.issubset(known_ids):
+        raise KeyError("Requested caption is not in this editing session.")
+    if scope == "whole_project":
+        return [str(item["segment_id"]) for item in segments]
+    if scope == "project_default":
+        return []
+    if scope in {"current_caption", "selected_captions"}:
+        return [str(item["segment_id"]) for item in segments if str(item.get("segment_id")) in requested]
+    if scope == "from_current":
+        index = next((i for i, item in enumerate(segments) if str(item.get("segment_id")) in requested), None)
+        return [] if index is None else [str(item["segment_id"]) for item in segments[index:]]
+    raise ValueError("Unsupported caption style scope.")
+
+
+def update_caption_style(*, session: dict[str, Any], style: dict[str, Any], scope: str, segment_ids: list[str]) -> dict[str, Any]:
+    updated = deepcopy(session)
+    target_ids = preview_caption_style_scope(session=updated, scope=scope, segment_ids=segment_ids)
+    if scope != "project_default" and not target_ids:
+        raise KeyError("No captions selected for caption style update.")
+    resolved_style = CaptionStyle.from_dict(style).to_dict()
+    if scope in {"whole_project", "project_default"}:
+        updated["caption_style"] = dict(resolved_style)
+    for segment in updated.get("segments", []):
+        if isinstance(segment, dict) and str(segment.get("segment_id")) in target_ids:
+            segment["caption_style"] = dict(resolved_style)
+    updated.setdefault("history", []).append({"mutation_type": "caption_style_update", "segment_id": ",".join(target_ids)})
+    updated["session_revision"] = int(updated.get("session_revision") or 1) + 1
+    return updated
 
 
 def update_segment_caption(

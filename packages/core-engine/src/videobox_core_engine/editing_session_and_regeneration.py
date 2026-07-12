@@ -32,11 +32,14 @@ from videobox_core_engine.canonical_track import (
     VALID_CANONICAL_TRACK_TYPES as VALID_RUNTIME_TRACK_TYPES,
 )
 from videobox_capcut_export import CapCutExportAdapter
+from videobox_storage.local_project_store import EditingSessionRevisionConflict
 from videobox_core_engine.auto_cut import AutoCutPlanner
 from videobox_core_engine.ffmpeg_auto_cut_executor import FfmpegAutoCutExecutor
 from videobox_core_engine.ffmpeg_final_renderer import FfmpegFinalRenderer
 from videobox_core_engine.editing_session import (
     build_editing_session,
+    preview_caption_style_scope,
+    update_caption_style,
     build_partial_regeneration_request,
     clear_segment_broll_override,
     clear_segment_music_override,
@@ -94,7 +97,44 @@ from videobox_core_engine._pipeline_shared_helpers import (
 )
 
 
+class EditingSessionConflict(RuntimeError):
+    def __init__(self, latest_session: dict[str, Any]) -> None:
+        super().__init__("Editing session revision is stale.")
+        self.latest_session = latest_session
+
+
 class EditingSessionRegenerationMixin:
+    def _save_editing_session_with_revision(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        session: dict[str, Any],
+        updated_session: dict[str, Any],
+        expected_revision: int,
+    ) -> dict[str, Any]:
+        if int(session.get("session_revision") or 1) != expected_revision:
+            raise EditingSessionConflict(session)
+        try:
+            return self.store.update_editing_session(
+                project_id=project_id,
+                session_id=session_id,
+                session_payload=updated_session,
+                expected_revision=expected_revision,
+            )
+        except EditingSessionRevisionConflict:
+            raise EditingSessionConflict(
+                self.store.get_editing_session(project_id=project_id, session_id=session_id)
+            ) from None
+
+    def preview_editing_session_caption_style_scope(self, *, project_id: str, session_id: str, scope: str, segment_ids: list[str]) -> dict[str, Any]:
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        return {"affected_segment_ids": preview_caption_style_scope(session=session, scope=scope, segment_ids=segment_ids)}
+
+    def update_editing_session_caption_style(self, *, project_id: str, session_id: str, style: dict[str, Any], scope: str, segment_ids: list[str], expected_revision: int) -> dict[str, Any]:
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        updated = update_caption_style(session=session, style=style, scope=scope, segment_ids=segment_ids)
+        return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=updated, expected_revision=expected_revision)
     def update_editing_session_segment_caption(
         self,
         *,
@@ -102,6 +142,7 @@ class EditingSessionRegenerationMixin:
         session_id: str,
         segment_id: str,
         caption_text: str,
+        expected_revision: int,
     ) -> dict[str, Any]:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
         updated_session = update_segment_caption(
@@ -109,11 +150,7 @@ class EditingSessionRegenerationMixin:
             segment_id=segment_id,
             caption_text=caption_text,
         )
-        return self.store.update_editing_session(
-            project_id=project_id,
-            session_id=session_id,
-            session_payload=updated_session,
-        )
+        return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=updated_session, expected_revision=expected_revision)
 
     def get_editing_session(self, *, project_id: str, session_id: str) -> dict[str, Any]:
         return self.store.get_editing_session(project_id=project_id, session_id=session_id)
@@ -128,6 +165,7 @@ class EditingSessionRegenerationMixin:
         session_id: str,
         segment_id: str,
         cut_action: str,
+        expected_revision: int,
     ) -> dict[str, Any]:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
         updated_session = update_segment_cut_action(
@@ -135,11 +173,7 @@ class EditingSessionRegenerationMixin:
             segment_id=segment_id,
             cut_action=cut_action,
         )
-        return self.store.update_editing_session(
-            project_id=project_id,
-            session_id=session_id,
-            session_payload=updated_session,
-        )
+        return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=updated_session, expected_revision=expected_revision)
 
     def update_editing_session_segment_broll_override(
         self,
@@ -148,6 +182,7 @@ class EditingSessionRegenerationMixin:
         session_id: str,
         segment_id: str,
         asset_id: str,
+        expected_revision: int,
     ) -> dict[str, Any]:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
         updated_session = update_segment_broll_override(
@@ -155,11 +190,7 @@ class EditingSessionRegenerationMixin:
             segment_id=segment_id,
             asset_id=asset_id,
         )
-        return self.store.update_editing_session(
-            project_id=project_id,
-            session_id=session_id,
-            session_payload=updated_session,
-        )
+        return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=updated_session, expected_revision=expected_revision)
 
     def clear_editing_session_segment_broll_override(
         self,
@@ -167,17 +198,14 @@ class EditingSessionRegenerationMixin:
         project_id: str,
         session_id: str,
         segment_id: str,
+        expected_revision: int,
     ) -> dict[str, Any]:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
         updated_session = clear_segment_broll_override(
             session=session,
             segment_id=segment_id,
         )
-        return self.store.update_editing_session(
-            project_id=project_id,
-            session_id=session_id,
-            session_payload=updated_session,
-        )
+        return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=updated_session, expected_revision=expected_revision)
 
     def build_editing_session_partial_regeneration_request(
         self,
@@ -201,8 +229,12 @@ class EditingSessionRegenerationMixin:
         session_id: str,
         segment_ids: list[str],
         fields: list[str],
+        expected_revision: int,
     ) -> dict[str, Any]:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        captured_revision = int(session.get("session_revision") or 1)
+        if captured_revision != expected_revision:
+            raise EditingSessionConflict(session)
         request = build_partial_regeneration_request(
             session=session,
             segment_ids=segment_ids,
@@ -220,12 +252,17 @@ class EditingSessionRegenerationMixin:
                 session=session,
                 request=request,
             )
-            refreshed_session = self.store.update_editing_session(
-                project_id=project_id,
-                session_id=session_id,
-                session_payload=session,
-                timeline_id=result["timeline_id"],
-            )
+            try:
+                refreshed_session = self.store.update_editing_session(
+                    project_id=project_id,
+                    session_id=session_id,
+                    session_payload=session,
+                    timeline_id=result["timeline_id"],
+                    expected_revision=captured_revision,
+                )
+            except EditingSessionRevisionConflict:
+                latest_session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+                raise EditingSessionConflict(latest_session) from None
             persisted = self.store.save_partial_regeneration_run(
                 project_id=project_id,
                 payload={
@@ -312,6 +349,7 @@ class EditingSessionRegenerationMixin:
         segment_id: str,
         overlay_type: str,
         asset_id: str,
+        expected_revision: int,
     ) -> dict[str, Any]:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
         updated_session = update_segment_visual_overlay(
@@ -320,11 +358,7 @@ class EditingSessionRegenerationMixin:
             overlay_type=overlay_type,
             asset_id=asset_id,
         )
-        return self.store.update_editing_session(
-            project_id=project_id,
-            session_id=session_id,
-            session_payload=updated_session,
-        )
+        return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=updated_session, expected_revision=expected_revision)
 
     def clear_editing_session_segment_visual_overlays(
         self,
@@ -332,17 +366,14 @@ class EditingSessionRegenerationMixin:
         project_id: str,
         session_id: str,
         segment_id: str,
+        expected_revision: int,
     ) -> dict[str, Any]:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
         updated_session = clear_segment_visual_overlays(
             session=session,
             segment_id=segment_id,
         )
-        return self.store.update_editing_session(
-            project_id=project_id,
-            session_id=session_id,
-            session_payload=updated_session,
-        )
+        return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=updated_session, expected_revision=expected_revision)
 
     def update_editing_session_segment_explanation_card(
         self,
@@ -353,6 +384,7 @@ class EditingSessionRegenerationMixin:
         title: str,
         body: str,
         text: str,
+        expected_revision: int,
     ) -> dict[str, Any]:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
         updated_session = update_segment_explanation_card(
@@ -362,11 +394,7 @@ class EditingSessionRegenerationMixin:
             body=body,
             text=text,
         )
-        return self.store.update_editing_session(
-            project_id=project_id,
-            session_id=session_id,
-            session_payload=updated_session,
-        )
+        return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=updated_session, expected_revision=expected_revision)
 
     def remove_editing_session_segment_explanation_card(
         self,
@@ -374,17 +402,14 @@ class EditingSessionRegenerationMixin:
         project_id: str,
         session_id: str,
         segment_id: str,
+        expected_revision: int,
     ) -> dict[str, Any]:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
         updated_session = remove_segment_explanation_card(
             session=session,
             segment_id=segment_id,
         )
-        return self.store.update_editing_session(
-            project_id=project_id,
-            session_id=session_id,
-            session_payload=updated_session,
-        )
+        return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=updated_session, expected_revision=expected_revision)
 
     def update_editing_session_segment_image_overlay(
         self,
@@ -394,6 +419,7 @@ class EditingSessionRegenerationMixin:
         segment_id: str,
         asset_id: str,
         text: str,
+        expected_revision: int,
     ) -> dict[str, Any]:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
         updated_session = update_segment_image_overlay(
@@ -402,11 +428,7 @@ class EditingSessionRegenerationMixin:
             asset_id=asset_id,
             text=text,
         )
-        return self.store.update_editing_session(
-            project_id=project_id,
-            session_id=session_id,
-            session_payload=updated_session,
-        )
+        return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=updated_session, expected_revision=expected_revision)
 
     def update_editing_session_segment_table_overlay(
         self,
@@ -417,6 +439,7 @@ class EditingSessionRegenerationMixin:
         columns: list[str],
         rows: list[list[str]],
         text: str,
+        expected_revision: int,
     ) -> dict[str, Any]:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
         updated_session = update_segment_table_overlay(
@@ -426,11 +449,7 @@ class EditingSessionRegenerationMixin:
             rows=rows,
             text=text,
         )
-        return self.store.update_editing_session(
-            project_id=project_id,
-            session_id=session_id,
-            session_payload=updated_session,
-        )
+        return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=updated_session, expected_revision=expected_revision)
 
     def remove_editing_session_segment_image_overlay(
         self,
@@ -438,17 +457,14 @@ class EditingSessionRegenerationMixin:
         project_id: str,
         session_id: str,
         segment_id: str,
+        expected_revision: int,
     ) -> dict[str, Any]:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
         updated_session = remove_segment_image_overlay(
             session=session,
             segment_id=segment_id,
         )
-        return self.store.update_editing_session(
-            project_id=project_id,
-            session_id=session_id,
-            session_payload=updated_session,
-        )
+        return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=updated_session, expected_revision=expected_revision)
 
     def remove_editing_session_segment_table_overlay(
         self,
@@ -456,17 +472,14 @@ class EditingSessionRegenerationMixin:
         project_id: str,
         session_id: str,
         segment_id: str,
+        expected_revision: int,
     ) -> dict[str, Any]:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
         updated_session = remove_segment_table_overlay(
             session=session,
             segment_id=segment_id,
         )
-        return self.store.update_editing_session(
-            project_id=project_id,
-            session_id=session_id,
-            session_payload=updated_session,
-        )
+        return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=updated_session, expected_revision=expected_revision)
 
     def update_editing_session_segment_music_override(
         self,
@@ -475,6 +488,7 @@ class EditingSessionRegenerationMixin:
         session_id: str,
         segment_id: str,
         asset_id: str,
+        expected_revision: int,
     ) -> dict[str, Any]:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
         updated_session = update_segment_music_override(
@@ -482,11 +496,7 @@ class EditingSessionRegenerationMixin:
             segment_id=segment_id,
             asset_id=asset_id,
         )
-        return self.store.update_editing_session(
-            project_id=project_id,
-            session_id=session_id,
-            session_payload=updated_session,
-        )
+        return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=updated_session, expected_revision=expected_revision)
 
     def clear_editing_session_segment_music_override(
         self,
@@ -494,25 +504,22 @@ class EditingSessionRegenerationMixin:
         project_id: str,
         session_id: str,
         segment_id: str,
+        expected_revision: int,
     ) -> dict[str, Any]:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
         updated_session = clear_segment_music_override(
             session=session,
             segment_id=segment_id,
         )
-        return self.store.update_editing_session(
-            project_id=project_id,
-            session_id=session_id,
-            session_payload=updated_session,
-        )
+        return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=updated_session, expected_revision=expected_revision)
 
-    def update_editing_session_segment_sfx_override(self, *, project_id: str, session_id: str, segment_id: str, asset_id: str) -> dict[str, Any]:
+    def update_editing_session_segment_sfx_override(self, *, project_id: str, session_id: str, segment_id: str, asset_id: str, expected_revision: int) -> dict[str, Any]:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
-        return self.store.update_editing_session(project_id=project_id, session_id=session_id, session_payload=update_segment_sfx_override(session=session, segment_id=segment_id, asset_id=asset_id))
+        return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=update_segment_sfx_override(session=session, segment_id=segment_id, asset_id=asset_id), expected_revision=expected_revision)
 
-    def clear_editing_session_segment_sfx_override(self, *, project_id: str, session_id: str, segment_id: str) -> dict[str, Any]:
+    def clear_editing_session_segment_sfx_override(self, *, project_id: str, session_id: str, segment_id: str, expected_revision: int) -> dict[str, Any]:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
-        return self.store.update_editing_session(project_id=project_id, session_id=session_id, session_payload=clear_segment_sfx_override(session=session, segment_id=segment_id))
+        return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=clear_segment_sfx_override(session=session, segment_id=segment_id), expected_revision=expected_revision)
 
     def select_editing_session_segment_tts_replacement(
         self,
@@ -522,6 +529,7 @@ class EditingSessionRegenerationMixin:
         segment_id: str,
         recommendation_id: str,
         asset_id: str,
+        expected_revision: int,
     ) -> dict[str, Any]:
         try:
             candidate = self.store.get_tts_candidate(
@@ -542,11 +550,7 @@ class EditingSessionRegenerationMixin:
                 recommendation_id=recommendation_id,
                 asset_id=asset_id,
             )
-            return self.store.update_editing_session(
-                project_id=project_id,
-                session_id=session_id,
-                session_payload=updated_session,
-            )
+            return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=updated_session, expected_revision=expected_revision)
         if candidate["segment_id"] != segment_id:
             raise ValueError("TTS candidate does not belong to the requested segment.")
         if candidate["asset_id"] != asset_id:
@@ -562,11 +566,7 @@ class EditingSessionRegenerationMixin:
             recommendation_id=recommendation_id,
             asset_id=asset_id,
         )
-        return self.store.update_editing_session(
-            project_id=project_id,
-            session_id=session_id,
-            session_payload=updated_session,
-        )
+        return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=updated_session, expected_revision=expected_revision)
 
     def clear_editing_session_segment_tts_replacement(
         self,
@@ -574,15 +574,12 @@ class EditingSessionRegenerationMixin:
         project_id: str,
         session_id: str,
         segment_id: str,
+        expected_revision: int,
     ) -> dict[str, Any]:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
         updated_session = clear_segment_tts_replacement(
             session=session,
             segment_id=segment_id,
         )
-        return self.store.update_editing_session(
-            project_id=project_id,
-            session_id=session_id,
-            session_payload=updated_session,
-        )
+        return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=updated_session, expected_revision=expected_revision)
 

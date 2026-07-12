@@ -470,6 +470,12 @@ class ApiOrchestrator:
     def get_latest_editing_session(self, *, project_id: str) -> dict[str, Any]:
         return self.pipeline.get_latest_editing_session(project_id=project_id)
 
+    def preview_caption_style_scope(self, *, project_id: str, session_id: str, scope: str, segment_ids: list[str]) -> dict[str, Any]:
+        return self.pipeline.preview_editing_session_caption_style_scope(project_id=project_id, session_id=session_id, scope=scope, segment_ids=segment_ids)
+
+    def update_caption_style(self, *, project_id: str, session_id: str, style: dict[str, Any], scope: str, segment_ids: list[str], expected_revision: int) -> dict[str, Any]:
+        return self.pipeline.update_editing_session_caption_style(project_id=project_id, session_id=session_id, style=style, scope=scope, segment_ids=segment_ids, expected_revision=expected_revision)
+
     def update_segment_caption(
         self,
         *,
@@ -477,12 +483,14 @@ class ApiOrchestrator:
         session_id: str,
         segment_id: str,
         caption_text: str,
+        expected_revision: int,
     ) -> dict[str, Any]:
         return self.pipeline.update_editing_session_segment_caption(
             project_id=project_id,
             session_id=session_id,
             segment_id=segment_id,
             caption_text=caption_text,
+            expected_revision=expected_revision,
         )
 
     def update_segment_cut_action(
@@ -492,12 +500,14 @@ class ApiOrchestrator:
         session_id: str,
         segment_id: str,
         cut_action: str,
+        expected_revision: int,
     ) -> dict[str, Any]:
         return self.pipeline.update_editing_session_segment_cut_action(
             project_id=project_id,
             session_id=session_id,
             segment_id=segment_id,
             cut_action=cut_action,
+            expected_revision=expected_revision,
         )
 
     def update_segment_broll_override(
@@ -507,16 +517,33 @@ class ApiOrchestrator:
         session_id: str,
         segment_id: str,
         asset_id: str,
+        expected_revision: int,
     ) -> dict[str, Any]:
         return self.pipeline.update_editing_session_segment_broll_override(
             project_id=project_id,
             session_id=session_id,
             segment_id=segment_id,
             asset_id=asset_id,
+            expected_revision=expected_revision,
         )
 
-    def update_segment_sfx_override(self, *, project_id: str, session_id: str, segment_id: str, asset_id: str) -> dict[str, Any]:
-        return self.pipeline.update_editing_session_segment_sfx_override(project_id=project_id, session_id=session_id, segment_id=segment_id, asset_id=asset_id)
+    def update_segment_sfx_override(self, *, project_id: str, session_id: str, segment_id: str, asset_id: str, expected_revision: int) -> dict[str, Any]:
+        return self.pipeline.update_editing_session_segment_sfx_override(project_id=project_id, session_id=session_id, segment_id=segment_id, asset_id=asset_id, expected_revision=expected_revision)
+
+    def clear_segment_sfx_override(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+        expected_revision: int,
+    ) -> dict[str, Any]:
+        return self.pipeline.clear_editing_session_segment_sfx_override(
+            project_id=project_id,
+            session_id=session_id,
+            segment_id=segment_id,
+            expected_revision=expected_revision,
+        )
 
     def clear_segment_broll_override(
         self,
@@ -524,11 +551,13 @@ class ApiOrchestrator:
         project_id: str,
         session_id: str,
         segment_id: str,
+        expected_revision: int,
     ) -> dict[str, Any]:
         return self.pipeline.clear_editing_session_segment_broll_override(
             project_id=project_id,
             session_id=session_id,
             segment_id=segment_id,
+            expected_revision=expected_revision,
         )
 
     def build_editing_session_partial_regeneration_request(
@@ -553,12 +582,14 @@ class ApiOrchestrator:
         session_id: str,
         segment_ids: list[str],
         fields: list[str],
+        expected_revision: int,
     ) -> dict[str, Any]:
         return self.pipeline.start_editing_session_partial_regeneration(
             project_id=project_id,
             session_id=session_id,
             segment_ids=segment_ids,
             fields=fields,
+            expected_revision=expected_revision,
         )
 
     def get_partial_regeneration_result(self, *, project_id: str, job_id: str) -> dict[str, Any]:
@@ -572,6 +603,7 @@ class ApiOrchestrator:
         segment_id: str,
         overlay_type: str,
         asset_id: str,
+        expected_revision: int,
     ) -> dict[str, Any]:
         return self.pipeline.update_editing_session_segment_visual_overlay(
             project_id=project_id,
@@ -579,6 +611,7 @@ class ApiOrchestrator:
             segment_id=segment_id,
             overlay_type=overlay_type,
             asset_id=asset_id,
+            expected_revision=expected_revision,
         )
 
     def clear_segment_visual_overlays(
@@ -587,11 +620,13 @@ class ApiOrchestrator:
         project_id: str,
         session_id: str,
         segment_id: str,
+        expected_revision: int,
     ) -> dict[str, Any]:
         return self.pipeline.clear_editing_session_segment_visual_overlays(
             project_id=project_id,
             session_id=session_id,
             segment_id=segment_id,
+            expected_revision=expected_revision,
         )
 
     def update_segment_explanation_card(
@@ -603,6 +638,7 @@ class ApiOrchestrator:
         title: str,
         body: str,
         text: str,
+        expected_revision: int,
     ) -> dict[str, Any]:
         return self.pipeline.update_editing_session_segment_explanation_card(
             project_id=project_id,
@@ -611,6 +647,7 @@ class ApiOrchestrator:
             title=title,
             body=body,
             text=text,
+            expected_revision=expected_revision,
         )
 
     def remove_segment_explanation_card(
@@ -619,11 +656,13 @@ class ApiOrchestrator:
         project_id: str,
         session_id: str,
         segment_id: str,
+        expected_revision: int,
     ) -> dict[str, Any]:
         return self.pipeline.remove_editing_session_segment_explanation_card(
             project_id=project_id,
             session_id=session_id,
             segment_id=segment_id,
+            expected_revision=expected_revision,
         )
 
     def update_segment_image_overlay(
@@ -634,6 +673,7 @@ class ApiOrchestrator:
         segment_id: str,
         asset_id: str,
         text: str,
+        expected_revision: int,
     ) -> dict[str, Any]:
         return self.pipeline.update_editing_session_segment_image_overlay(
             project_id=project_id,
@@ -641,6 +681,7 @@ class ApiOrchestrator:
             segment_id=segment_id,
             asset_id=asset_id,
             text=text,
+            expected_revision=expected_revision,
         )
 
     def update_segment_table_overlay(
@@ -652,6 +693,7 @@ class ApiOrchestrator:
         columns: list[str],
         rows: list[list[str]],
         text: str,
+        expected_revision: int,
     ) -> dict[str, Any]:
         return self.pipeline.update_editing_session_segment_table_overlay(
             project_id=project_id,
@@ -660,6 +702,7 @@ class ApiOrchestrator:
             columns=columns,
             rows=rows,
             text=text,
+            expected_revision=expected_revision,
         )
 
     def remove_segment_image_overlay(
@@ -668,11 +711,13 @@ class ApiOrchestrator:
         project_id: str,
         session_id: str,
         segment_id: str,
+        expected_revision: int,
     ) -> dict[str, Any]:
         return self.pipeline.remove_editing_session_segment_image_overlay(
             project_id=project_id,
             session_id=session_id,
             segment_id=segment_id,
+            expected_revision=expected_revision,
         )
 
     def remove_segment_table_overlay(
@@ -681,11 +726,13 @@ class ApiOrchestrator:
         project_id: str,
         session_id: str,
         segment_id: str,
+        expected_revision: int,
     ) -> dict[str, Any]:
         return self.pipeline.remove_editing_session_segment_table_overlay(
             project_id=project_id,
             session_id=session_id,
             segment_id=segment_id,
+            expected_revision=expected_revision,
         )
 
     def update_segment_music_override(
@@ -695,12 +742,14 @@ class ApiOrchestrator:
         session_id: str,
         segment_id: str,
         asset_id: str,
+        expected_revision: int,
     ) -> dict[str, Any]:
         return self.pipeline.update_editing_session_segment_music_override(
             project_id=project_id,
             session_id=session_id,
             segment_id=segment_id,
             asset_id=asset_id,
+            expected_revision=expected_revision,
         )
 
     def clear_segment_music_override(
@@ -709,11 +758,13 @@ class ApiOrchestrator:
         project_id: str,
         session_id: str,
         segment_id: str,
+        expected_revision: int,
     ) -> dict[str, Any]:
         return self.pipeline.clear_editing_session_segment_music_override(
             project_id=project_id,
             session_id=session_id,
             segment_id=segment_id,
+            expected_revision=expected_revision,
         )
 
     def select_segment_tts_replacement(
@@ -724,6 +775,7 @@ class ApiOrchestrator:
         segment_id: str,
         recommendation_id: str,
         asset_id: str,
+        expected_revision: int,
     ) -> dict[str, Any]:
         return self.pipeline.select_editing_session_segment_tts_replacement(
             project_id=project_id,
@@ -731,6 +783,7 @@ class ApiOrchestrator:
             segment_id=segment_id,
             recommendation_id=recommendation_id,
             asset_id=asset_id,
+            expected_revision=expected_revision,
         )
 
     def clear_segment_tts_replacement(
@@ -739,11 +792,13 @@ class ApiOrchestrator:
         project_id: str,
         session_id: str,
         segment_id: str,
+        expected_revision: int,
     ) -> dict[str, Any]:
         return self.pipeline.clear_editing_session_segment_tts_replacement(
             project_id=project_id,
             session_id=session_id,
             segment_id=segment_id,
+            expected_revision=expected_revision,
         )
 
     def get_review_snapshot(self, *, project_id: str, job_id: str) -> dict[str, Any]:

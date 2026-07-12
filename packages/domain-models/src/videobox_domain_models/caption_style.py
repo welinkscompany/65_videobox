@@ -40,9 +40,14 @@ class CaptionStyle:
 
     @classmethod
     def from_dict(cls, raw: object) -> "CaptionStyle":
-        values = raw if isinstance(raw, dict) else {}
+        if not isinstance(raw, dict):
+            raise ValueError("Caption style must be an object.")
+        values = raw
         allowed = {field.name for field in cls.__dataclass_fields__.values()}
-        return cls(**{key: value for key, value in values.items() if key in allowed})
+        unknown = sorted(str(key) for key in values if key not in allowed)
+        if unknown:
+            raise ValueError(f"Unsupported caption style fields: {', '.join(unknown)}")
+        return cls(**values)
 
     def to_dict(self) -> dict[str, object]:
         return {field: getattr(self, field) for field in self.__dataclass_fields__}

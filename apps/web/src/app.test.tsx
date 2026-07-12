@@ -266,6 +266,7 @@ const editingSessionResponse = {
   project_id: "project_001",
   timeline_id: "timeline_001",
   session_id: "editing_session_001",
+  session_revision: 1,
   created_at: "2026-06-28T00:00:14Z",
   updated_at: "2026-06-28T00:00:17Z",
   segments: [
@@ -1072,7 +1073,7 @@ function createFetchMock({
       return new Response(JSON.stringify(state.editingSession));
     }
     if (
-      url.endsWith(
+      url.startsWith(
         "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/music",
       ) &&
       init?.method === "DELETE"
@@ -1115,7 +1116,7 @@ function createFetchMock({
       return new Response(JSON.stringify(state.editingSession));
     }
     if (
-      url.endsWith(
+      url.startsWith(
         "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/broll",
       ) &&
       init?.method === "DELETE"
@@ -1168,7 +1169,7 @@ function createFetchMock({
       return new Response(JSON.stringify(state.editingSession));
     }
     if (
-      url.endsWith(
+      url.startsWith(
         "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/explanation-card",
       ) &&
       init?.method === "DELETE"
@@ -1221,7 +1222,7 @@ function createFetchMock({
       return new Response(JSON.stringify(state.editingSession));
     }
     if (
-      url.endsWith(
+      url.startsWith(
         "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/image-overlay",
       ) &&
       init?.method === "DELETE"
@@ -1276,7 +1277,7 @@ function createFetchMock({
       return new Response(JSON.stringify(state.editingSession));
     }
     if (
-      url.endsWith(
+      url.startsWith(
         "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/table-overlay",
       ) &&
       init?.method === "DELETE"
@@ -1323,7 +1324,7 @@ function createFetchMock({
       return new Response(JSON.stringify(state.editingSession));
     }
     if (
-      url.endsWith(
+      url.startsWith(
         "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/tts-replacement",
       ) &&
       init?.method === "DELETE"
@@ -2455,6 +2456,7 @@ describe("App", () => {
         expect.objectContaining({
           method: "POST",
           body: JSON.stringify({
+            expected_revision: 1,
             segment_ids: ["seg_002"],
             fields: ["broll", "explanation_card"],
           }),
@@ -2573,6 +2575,7 @@ describe("App", () => {
         expect.objectContaining({
           method: "PATCH",
           body: JSON.stringify({
+            expected_revision: 1,
             title: "Meeting context",
             body: "Summarize the active discussion.",
             text: "Meeting context: capture the approved discussion points.",
@@ -2585,6 +2588,7 @@ describe("App", () => {
       expect.objectContaining({
         method: "PATCH",
         body: JSON.stringify({
+          expected_revision: 1,
           asset_id: "asset_image_002",
           text: "Image overlay summary for the discussion.",
         }),
@@ -2595,6 +2599,7 @@ describe("App", () => {
       expect.objectContaining({
         method: "PATCH",
         body: JSON.stringify({
+          expected_revision: 1,
           columns: ["Topic", "Owner"],
           rows: [
             ["Launch plan", "Louis"],
@@ -2609,6 +2614,7 @@ describe("App", () => {
       expect.objectContaining({
         method: "PATCH",
         body: JSON.stringify({
+          expected_revision: 1,
           recommendation_id: "rec_tts_002",
           asset_id: "tts_asset_002",
         }),
@@ -2768,7 +2774,10 @@ describe("App", () => {
         "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/broll",
         expect.objectContaining({
           method: "PATCH",
-          body: JSON.stringify({ asset_id: "asset_broll_archive_002" }),
+          body: JSON.stringify({
+            expected_revision: 1,
+            asset_id: "asset_broll_archive_002",
+          }),
         }),
       );
     });
@@ -2826,7 +2835,10 @@ describe("App", () => {
         "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/broll",
         expect.objectContaining({
           method: "PATCH",
-          body: JSON.stringify({ asset_id: "asset_broll_archive_001" }),
+          body: JSON.stringify({
+            expected_revision: 1,
+            asset_id: "asset_broll_archive_001",
+          }),
         }),
       );
     });
@@ -2888,7 +2900,7 @@ describe("App", () => {
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/explanation-card",
+        "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/explanation-card?expected_revision=1",
         expect.objectContaining({
           method: "DELETE",
         }),
@@ -2915,7 +2927,7 @@ describe("App", () => {
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/image-overlay",
+        "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/image-overlay?expected_revision=1",
         expect.objectContaining({
           method: "DELETE",
         }),
@@ -2942,7 +2954,7 @@ describe("App", () => {
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/table-overlay",
+        "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/table-overlay?expected_revision=1",
         expect.objectContaining({
           method: "DELETE",
         }),
@@ -2972,7 +2984,7 @@ describe("App", () => {
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/tts-replacement",
+        "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/tts-replacement?expected_revision=1",
         expect.objectContaining({
           method: "DELETE",
         }),
@@ -3003,6 +3015,7 @@ describe("App", () => {
         expect.objectContaining({
           method: "PATCH",
           body: JSON.stringify({
+            expected_revision: 1,
             asset_id: "music_manual_002",
           }),
         }),
@@ -3356,7 +3369,7 @@ describe("App", () => {
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/music",
+        "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/music?expected_revision=1",
         expect.objectContaining({
           method: "DELETE",
         }),
@@ -3378,7 +3391,7 @@ describe("App", () => {
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/broll",
+        "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/broll?expected_revision=1",
         expect.objectContaining({
           method: "DELETE",
         }),
@@ -3474,7 +3487,7 @@ describe("App", () => {
     const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (
-        url.endsWith(
+        url.startsWith(
           "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/tts-replacement",
         ) &&
         init?.method === "DELETE"
@@ -3814,6 +3827,7 @@ describe("App", () => {
         expect.objectContaining({
           method: "PATCH",
           body: JSON.stringify({
+            expected_revision: 1,
             caption_text: "Team meeting overview refreshed",
           }),
         }),

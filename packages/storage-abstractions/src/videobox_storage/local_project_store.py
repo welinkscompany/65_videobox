@@ -5,6 +5,7 @@ from copy import deepcopy
 import re
 import shutil
 import sqlite3
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -21,6 +22,10 @@ from videobox_storage.sqlite_schema import PROJECT_SCHEMA_STATEMENTS
 # Heavy exports (rendered mp4s, CapCut drafts) can be large; keep only the most
 # recent N per export_type per project so disk usage does not grow unbounded.
 DEFAULT_EXPORT_RETENTION_COUNT = 5
+
+
+class EditingSessionRevisionConflict(RuntimeError):
+    """The persisted editing-session revision did not match the requested CAS revision."""
 
 
 def _normalize_boolish(value: object) -> bool:
@@ -638,8 +643,14 @@ class LocalProjectStore:
         session_id: str,
         session_payload: dict[str, Any],
         timeline_id: str | None = None,
+        expected_revision: int | None = None,
     ) -> dict[str, Any]:
         existing = self.get_editing_session(project_id=project_id, session_id=session_id)
+        current_revision = int(existing.get("session_revision") or 1)
+        expected_revision = current_revision if expected_revision is None else expected_revision
+        session_payload = deepcopy(session_payload)
+        if int(session_payload.get("session_revision") or 0) <= current_revision:
+            session_payload["session_revision"] = current_revision + 1
         created_at = str(existing.get("created_at") or self._now_iso())
         return self._write_editing_session(
             project_id=project_id,
@@ -648,6 +659,7 @@ class LocalProjectStore:
             session_payload=session_payload,
             is_new=False,
             created_at=created_at,
+            expected_revision=expected_revision,
         )
 
     def save_review_state(
@@ -2043,7 +2055,7 @@ class LocalProjectStore:
         row = self._fetchone(
             project_id,
             """
-            SELECT session_id, project_id, timeline_id, file_uri, summary_json, created_at, updated_at
+            SELECT session_id, project_id, timeline_id, file_uri, summary_json, session_revision, session_json, created_at, updated_at
             FROM editing_sessions
             WHERE session_id = ?
             """,
@@ -2052,10 +2064,22 @@ class LocalProjectStore:
         if row is None:
             raise KeyError(f"Editing session not found: {session_id}")
         file_path = self.resolve_storage_uri(project_id=project_id, storage_uri=str(row["file_uri"]))
-        if not file_path.exists():
-            raise KeyError(f"Editing session JSON missing: {session_id}")
-        payload = json.loads(file_path.read_text(encoding="utf-8"))
+        canonical_json = str(row["session_json"] or "")
+        try:
+            payload = json.loads(canonical_json) if canonical_json and canonical_json != "{}" else {}
+        except json.JSONDecodeError:
+            payload = {}
+        if not payload:
+            if not file_path.exists():
+                raise KeyError(f"Editing session JSON missing: {session_id}")
+            payload = json.loads(file_path.read_text(encoding="utf-8"))
+        elif (not file_path.exists()) or file_path.read_text(encoding="utf-8") != canonical_json:
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            recovery_path = file_path.with_name(f".{file_path.name}.{uuid.uuid4().hex}.tmp")
+            recovery_path.write_text(canonical_json, encoding="utf-8")
+            recovery_path.replace(file_path)
         payload["summary"] = json.loads(row["summary_json"] or "{}")
+        payload["session_revision"] = int(row["session_revision"])
         payload["created_at"] = row["created_at"]
         payload["updated_at"] = row["updated_at"]
         return payload
@@ -2719,6 +2743,8 @@ class LocalProjectStore:
             connection.execute(statement)
         self._ensure_recommendation_decision_state_column(connection)
         self._ensure_job_progress_percent_column(connection)
+        self._ensure_editing_session_revision_column(connection)
+        self._ensure_editing_session_json_column(connection)
         self._ensure_tts_candidate_acceptance_columns(connection)
         connection.commit()
         connection.row_factory = sqlite3.Row
@@ -2739,6 +2765,18 @@ class LocalProjectStore:
         }
         if "progress_percent" not in existing_columns:
             connection.execute("ALTER TABLE jobs ADD COLUMN progress_percent INTEGER")
+
+    def _ensure_editing_session_revision_column(self, connection: sqlite3.Connection) -> None:
+        existing_columns = {
+            str(row[1]) for row in connection.execute("PRAGMA table_info(editing_sessions)").fetchall()
+        }
+        if "session_revision" not in existing_columns:
+            connection.execute("ALTER TABLE editing_sessions ADD COLUMN session_revision INTEGER NOT NULL DEFAULT 1")
+
+    def _ensure_editing_session_json_column(self, connection: sqlite3.Connection) -> None:
+        existing_columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(editing_sessions)").fetchall()}
+        if "session_json" not in existing_columns:
+            connection.execute("ALTER TABLE editing_sessions ADD COLUMN session_json TEXT NOT NULL DEFAULT '{}'")
 
     def _ensure_tts_candidate_acceptance_columns(self, connection: sqlite3.Connection) -> None:
         existing_columns = {
@@ -2874,6 +2912,7 @@ class LocalProjectStore:
         session_payload: dict[str, Any],
         is_new: bool,
         created_at: str | None = None,
+        expected_revision: int | None = None,
     ) -> dict[str, Any]:
         session_path = self.project_root(project_id) / "editing_sessions" / f"{session_id}.json"
         file_uri = self._path_to_uri(project_id, session_path)
@@ -2883,13 +2922,13 @@ class LocalProjectStore:
             "session_id": session_id,
             "project_id": project_id,
             "timeline_id": timeline_id,
+            "session_revision": int(session_payload.get("session_revision") or 1),
             "caption_style": session_payload.get("caption_style"),
             "segments": session_payload.get("segments", []),
             "history": session_payload.get("history", []),
             "created_at": created_value,
             "updated_at": updated_at,
         }
-        session_path.write_text(json.dumps(payload, indent=2, ensure_ascii=True), encoding="utf-8")
         summary_json = json.dumps(
             {
                 "segment_count": len(payload["segments"]),
@@ -2897,7 +2936,9 @@ class LocalProjectStore:
             },
             ensure_ascii=True,
         )
+        serialized_payload = json.dumps(payload, indent=2, ensure_ascii=True)
         if is_new:
+            session_path.write_text(serialized_payload, encoding="utf-8")
             self._execute(
                 project_id,
                 """
@@ -2907,9 +2948,11 @@ class LocalProjectStore:
                     timeline_id,
                     file_uri,
                     summary_json,
+                    session_revision,
+                    session_json,
                     created_at,
                     updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     session_id,
@@ -2917,24 +2960,47 @@ class LocalProjectStore:
                     timeline_id,
                     file_uri,
                     summary_json,
+                    payload["session_revision"],
+                    serialized_payload,
                     created_value,
                     updated_at,
                 ),
             )
         else:
-            self._execute(
-                project_id,
-                """
-                UPDATE editing_sessions
-                SET summary_json = ?, updated_at = ?
-                WHERE session_id = ?
-                """,
-                (
-                    summary_json,
-                    updated_at,
-                    session_id,
-                ),
-            )
+            connection = self._connection(project_id)
+            temporary_path = session_path.with_name(f".{session_path.name}.{uuid.uuid4().hex}.tmp")
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                cursor = connection.execute(
+                    """
+                    UPDATE editing_sessions
+                    SET summary_json = ?, session_revision = ?, session_json = ?, updated_at = ?
+                    WHERE session_id = ? AND (? IS NULL OR session_revision = ?)
+                    """,
+                    (
+                        summary_json,
+                        payload["session_revision"],
+                        serialized_payload,
+                        updated_at,
+                        session_id,
+                        expected_revision,
+                        expected_revision,
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    connection.rollback()
+                    raise EditingSessionRevisionConflict("Editing session revision is stale.")
+                connection.commit()
+                temporary_path.write_text(serialized_payload, encoding="utf-8")
+                temporary_path.replace(session_path)
+            except Exception:
+                if connection.in_transaction:
+                    connection.rollback()
+                if temporary_path.exists():
+                    temporary_path.unlink()
+                raise
+            finally:
+                connection.close()
         return self.get_editing_session(project_id=project_id, session_id=session_id)
 
     def _timeline_file_path(self, *, project_id: str, timeline_id: str) -> Path:

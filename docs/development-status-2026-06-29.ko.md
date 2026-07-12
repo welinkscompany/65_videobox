@@ -1,8 +1,31 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 218. 2026-07-12 detailed editor Task 1 closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
-> 이 문서의 `## 1`부터 `## 217`까지는 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 218`만 기준으로 본다.
+> 현재 authoritative 상태/next slice 판단은 `## 219. 2026-07-12 detailed editor Task 2 closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 이 문서의 `## 1`부터 `## 218`까지는 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 219`만 기준으로 본다.
 > 단, `2일 내 1차 데모 완성` 실행 레일은 `## 189`의 장기 우선순위를 그대로 넓게 집행하지 않고, `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`의 축소된 실행 계획을 우선 적용한다.
+
+## 219. 2026-07-12 detailed editor Task 2 closeout
+
+상세 편집기 구현 계획의 Task 2, revisioned caption style persistence와 scoped style API를 TDD로 완료했다.
+
+- editing session은 SQLite `session_revision`과 canonical `session_json`을 함께 보존한다. 변경은 compare-and-swap으로 저장되며 stale 요청은 최신 session을 포함한 409으로 반환한다.
+- caption style은 `current_caption`, `selected_captions`, `from_current`, `whole_project`, `project_default` scope를 preflight와 mutation에서 동일하게 해석한다. global/default scope의 무관한 segment ID와 알 수 없는 style 필드는 422으로 거부한다.
+- invalid style은 revision과 저장 payload를 변경하지 않는다. DB snapshot은 JSON cache write 실패 뒤에도 reload에서 복구된다.
+- partial caption regeneration은 stale revision에서 새 timeline을 최신 수동 자막/스타일에 연결하지 않고 conflict를 반환한다. restart/reload 및 manual caption/style 보존 계약을 테스트로 고정했다.
+- 실제 웹 편집기는 모든 PATCH/DELETE/partial regeneration 요청에 현재 `editingSession.session_revision`을 전달하며, 409 body는 `ApiConflictError.latestSession`으로 보존한다.
+
+검증:
+
+- RED: caption-style API, stale CAS, invalid style, DB/JSON recovery, partial regeneration conflict, unknown style/scope를 먼저 재현했다.
+- focused/backend API: `.venv\\Scripts\\python.exe -m pytest tests\\test_api.py -q` — 394 passed (Starlette deprecation warning 1건).
+- full backend: `.venv\\Scripts\\python.exe -m pytest -q` — Python 3.12, 653 passed (동일 경고 1건).
+- frontend: `npm --prefix apps/web test` — 90 passed; `npm --prefix apps/web run build` success.
+- `git diff --check` success.
+
+진행률:
+
+- 상세 편집기 구현 계획 5개 Task 중 Task 1–2 완료로 strict 40%, remaining 60%다.
+- 다음 Task는 preset/favorites/409 UI recovery를 다루는 Task 3이다. 현재 409 payload 보존은 완료됐지만, Task 3의 사용자 preset·즐겨찾기·복구 UI는 아직 시작하지 않았다.
 
 ## 218. 2026-07-12 detailed editor Task 1 closeout
 

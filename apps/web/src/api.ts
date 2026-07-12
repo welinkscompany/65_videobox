@@ -121,6 +121,27 @@ export type EditingSessionSegment = {
   music_override: Record<string, unknown> | null;
   sfx_override?: Record<string, unknown> | null;
   tts_replacement: Record<string, unknown> | null;
+  caption_style?: CaptionStyleSnapshot | null;
+};
+
+export type CaptionStyleSnapshot = Record<string, unknown>;
+
+export type CaptionStyleScope =
+  | 'current_caption'
+  | 'selected_captions'
+  | 'from_current'
+  | 'whole_project'
+  | 'project_default';
+
+export type CaptionStyleMutationRequest = {
+  expected_revision: number;
+  scope: CaptionStyleScope;
+  segment_ids: string[];
+  style: CaptionStyleSnapshot;
+};
+
+export type CaptionStyleScopePreflight = {
+  affected_segment_ids: string[];
 };
 
 export type EditingSessionHistoryEntry = {
@@ -137,6 +158,8 @@ export type EditingSession = {
   session_id: string;
   project_id: string;
   timeline_id: string;
+  session_revision: number;
+  caption_style?: CaptionStyleSnapshot | null;
   segments: EditingSessionSegment[];
   history: EditingSessionHistoryEntry[];
   created_at?: string | null;
@@ -147,45 +170,49 @@ export type CreateEditingSessionRequest = {
   timeline_job_id: string;
 };
 
-export type CaptionOverrideRequest = {
+type RevisionedEditingSessionMutation = {
+  expected_revision: number;
+};
+
+export type CaptionOverrideRequest = RevisionedEditingSessionMutation & {
   caption_text: string;
 };
 
-export type CutActionOverrideRequest = {
+export type CutActionOverrideRequest = RevisionedEditingSessionMutation & {
   cut_action: string;
 };
 
-export type BrollOverrideRequest = {
+export type BrollOverrideRequest = RevisionedEditingSessionMutation & {
   asset_id: string;
 };
 
-export type MusicOverrideRequest = {
+export type MusicOverrideRequest = RevisionedEditingSessionMutation & {
   asset_id: string;
 };
 
-export type ExplanationCardRequest = {
+export type ExplanationCardRequest = RevisionedEditingSessionMutation & {
   title: string;
   body: string;
   text: string;
 };
 
-export type ImageOverlayRequest = {
+export type ImageOverlayRequest = RevisionedEditingSessionMutation & {
   asset_id: string;
   text: string;
 };
 
-export type TableOverlayRequest = {
+export type TableOverlayRequest = RevisionedEditingSessionMutation & {
   columns: string[];
   rows: string[][];
   text: string;
 };
 
-export type TtsReplacementRequest = {
+export type TtsReplacementRequest = RevisionedEditingSessionMutation & {
   recommendation_id: string;
   asset_id: string;
 };
 
-export type PartialRegenerationRequest = {
+export type PartialRegenerationRequest = RevisionedEditingSessionMutation & {
   segment_ids: string[];
   fields: string[];
 };
@@ -417,9 +444,22 @@ export type CapCutDraftExportJob = {
   error_message?: string | null;
 };
 
+export class ApiConflictError<T> extends Error {
+  constructor(public readonly latestSession: T, public readonly path: string) {
+    super(`Editing session conflict: ${path}`);
+    this.name = "ApiConflictError";
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, init);
   if (!response.ok) {
+    if (response.status === 409) {
+      const payload = (await response.json()) as { latest_session?: T };
+      if (payload.latest_session !== undefined) {
+        throw new ApiConflictError(payload.latest_session, path);
+      }
+    }
     throw new Error(`Request failed: ${path} (${response.status})`);
   }
   return (await response.json()) as T;
@@ -556,6 +596,24 @@ export const api = {
     }
     return (await response.json()) as EditingSession;
   },
+  previewEditingSessionCaptionStyleScope: (
+    projectId: string,
+    sessionId: string,
+    payload: CaptionStyleMutationRequest,
+  ) =>
+    request<CaptionStyleScopePreflight>(
+      `/api/projects/${projectId}/editing-sessions/${sessionId}/caption-style/preflight`,
+      { method: 'POST', body: JSON.stringify(payload) },
+    ),
+  updateEditingSessionCaptionStyle: (
+    projectId: string,
+    sessionId: string,
+    payload: CaptionStyleMutationRequest,
+  ) =>
+    request<EditingSession>(
+      `/api/projects/${projectId}/editing-sessions/${sessionId}/caption-style`,
+      { method: 'PATCH', body: JSON.stringify(payload) },
+    ),
   updateEditingSessionCaption: (
     projectId: string,
     sessionId: string,
@@ -608,9 +666,10 @@ export const api = {
     projectId: string,
     sessionId: string,
     segmentId: string,
+    expectedRevision: number,
   ) =>
     request<EditingSession>(
-      `/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/broll`,
+      `/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/broll?expected_revision=${expectedRevision}`,
       {
         method: "DELETE",
       },
@@ -635,9 +694,10 @@ export const api = {
     projectId: string,
     sessionId: string,
     segmentId: string,
+    expectedRevision: number,
   ) =>
     request<EditingSession>(
-      `/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/music`,
+      `/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/music?expected_revision=${expectedRevision}`,
       {
         method: "DELETE",
       },
@@ -656,9 +716,14 @@ export const api = {
         body: JSON.stringify(payload),
       },
     ),
-  clearEditingSessionSfxOverride: (projectId: string, sessionId: string, segmentId: string) =>
+  clearEditingSessionSfxOverride: (
+    projectId: string,
+    sessionId: string,
+    segmentId: string,
+    expectedRevision: number,
+  ) =>
     request<EditingSession>(
-      `/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/sfx`,
+      `/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/sfx?expected_revision=${expectedRevision}`,
       { method: "DELETE" },
     ),
   updateEditingSessionExplanationCard: (
@@ -681,9 +746,10 @@ export const api = {
     projectId: string,
     sessionId: string,
     segmentId: string,
+    expectedRevision: number,
   ) =>
     request<EditingSession>(
-      `/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/explanation-card`,
+      `/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/explanation-card?expected_revision=${expectedRevision}`,
       {
         method: "DELETE",
       },
@@ -708,9 +774,10 @@ export const api = {
     projectId: string,
     sessionId: string,
     segmentId: string,
+    expectedRevision: number,
   ) =>
     request<EditingSession>(
-      `/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/image-overlay`,
+      `/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/image-overlay?expected_revision=${expectedRevision}`,
       {
         method: "DELETE",
       },
@@ -735,9 +802,10 @@ export const api = {
     projectId: string,
     sessionId: string,
     segmentId: string,
+    expectedRevision: number,
   ) =>
     request<EditingSession>(
-      `/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/table-overlay`,
+      `/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/table-overlay?expected_revision=${expectedRevision}`,
       {
         method: "DELETE",
       },
@@ -762,9 +830,10 @@ export const api = {
     projectId: string,
     sessionId: string,
     segmentId: string,
+    expectedRevision: number,
   ) =>
     request<EditingSession>(
-      `/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/tts-replacement`,
+      `/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/tts-replacement?expected_revision=${expectedRevision}`,
       {
         method: "DELETE",
       },
@@ -772,7 +841,7 @@ export const api = {
   previewPartialRegeneration: (
     projectId: string,
     sessionId: string,
-    payload: PartialRegenerationRequest,
+    payload: Omit<PartialRegenerationRequest, "expected_revision">,
   ) =>
     request<PartialRegenerationPreflight>(
       `/api/projects/${projectId}/editing-sessions/${sessionId}/partial-regeneration/preflight`,

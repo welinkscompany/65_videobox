@@ -10,6 +10,11 @@ def test_caption_style_rejects_short_rgba_hex() -> None:
         CaptionStyle(text_color="#fff")
 
 
+def test_caption_style_rejects_unknown_style_key() -> None:
+    with pytest.raises(ValueError, match="Unsupported caption style fields"):
+        CaptionStyle.from_dict({"text_color": "#FFFFFFFF", "unexpected": "no-op"})
+
+
 def test_caption_style_clamps_safe_area_position() -> None:
     style = CaptionStyle(position_y_percent=100, safe_area_enabled=True)
 
