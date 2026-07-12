@@ -1,6 +1,6 @@
 # VideoBox 실행용 구현 계획서
 
-> 현재 worktree 기준 구현 상태와 next slice 판단은 `## 20. 2026-07-13 CapCut handoff diagnostics closeout`을 우선 적용한다. 그 외 상위 milestone/범위/순서 섹션은 제품·구현 계획의 기준을 설명하는 문서다.
+> 현재 worktree 기준 구현 상태와 next slice 판단은 `## 21. 2026-07-13 long-form CapCut 3/3 final-render operating QA closeout`을 우선 적용한다. 그 외 상위 milestone/범위/순서 섹션은 제품·구현 계획의 기준을 설명하는 문서다.
 > 개발 운영 상위 규칙은 저장소 루트 `AGENTS.md`와 `docs/development-fast-path.ko.md`의 `## 10. 고정 운영 규정`을 프로젝트 전역 기본값으로 적용한다. 즉, 이 계획서를 실행할 때의 작업 우선순위, 선택적 TDD/서브에이전트/리뷰 사용, 표준 검증 경로, hot path 구분, 커밋/푸시, 진행률 보고, turn closeout 형식은 해당 규정을 따른다.
 
 ## 1. 목적
@@ -1035,3 +1035,11 @@ production-readiness blocker slice 1의 9개 Task는 구현·회귀·600초 smok
 - 웹 출력 패널의 `CapCut 연결 진단` 카드는 설치·프로젝트 경로와 쓰기 상태를 보여주며, failure일 때 `다시 진단`으로 상태를 새로 읽는다. 카드 상태는 page reload 때도 API에서 다시 복구된다.
 - live Windows proof: CapCut `8.9.1.3802`, `C:\\Users\\atgro\\AppData\\Local\\CapCut\\Apps\\8.9.1.3802\\CapCut.exe`, `C:\\Users\\atgro\\AppData\\Local\\CapCut\\User Data\\Projects\\com.lveditor.draft`, write access `true`, status `ready`를 확인했다.
 - 최신 검증: Python 3.12 backend `698 passed`, frontend `101 passed`, production build 성공. `artifacts/`는 Git에 포함하지 않는다.
+
+## 21. 2026-07-13 long-form CapCut 3/3 final-render operating QA closeout
+
+- CapCut Desktop `8.9.1.3802`에서 `loop`, `crop_pad_overlay`, `audio_ducking` 3개 600초 real draft를 모두 1080P/H.264/MP4/24fps로 실제 local MP4 export 완료했다.
+- `loop`: `videobox-qa-loop-20260712.mp4`, `600.026848` seconds, `73,526,175` bytes, SHA-256 `3DF607575BE81F1FD0050F1635B831E1C71D7DB6C7DA45E933D7848C23DF53F8`.
+- `crop_pad_overlay`: `videobox-qa-crop-pad-overlay-20260712.mp4`, `600.026848` seconds, `25,452,146` bytes, SHA-256 `839F83D911384B1BE72B8D983DA7AC16E34221CCE505935A0E31F8394187043B`. CapCut timeline에서 Korean caption, image/text overlay, black-pad B-roll track을 확인했다.
+- `audio_ducking`: `videobox-qa-audio-ducking-20260712.mp4`, `600.026848` seconds, `73,882,181` bytes, SHA-256 `B23B2D7E7DDC01D3BDD0F49B11126EC80BA8CF90E3349F2DC29BC6AE72EAA11B`. CapCut timeline에서 narration/TTS와 `smoke-bgm.wav`/`smoke-impact.wav` audio track을 확인했다.
+- output은 모두 `C:\\Users\\atgro\\AppData\\Local\\CapCut\\Videos\\`에만 두며 VideoBox source artifact 및 Git `artifacts/`는 수정·추가하지 않는다.

@@ -1,8 +1,22 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 227. 2026-07-13 CapCut handoff diagnostics closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
-> 이 문서의 기존 날짜 기반 섹션은 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 227`만 기준으로 본다.
+> 현재 authoritative 상태/next slice 판단은 `## 228. 2026-07-13 long-form CapCut 3/3 final-render operating QA closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 이 문서의 기존 날짜 기반 섹션은 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 228`만 기준으로 본다.
 > 단, `2일 내 1차 데모 완성` 실행 레일은 `## 189`의 장기 우선순위를 그대로 넓게 집행하지 않고, `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`의 축소된 실행 계획을 우선 적용한다.
+
+## 228. 2026-07-13 long-form CapCut 3/3 final-render operating QA closeout
+
+실제 CapCut Desktop `8.9.1.3802`에서 VideoBox long-form fixture `loop`, `crop_pad_overlay`, `audio_ducking` 3개를 모두 1080P/H.264/MP4/24fps로 local MP4 export했다. 이 QA는 draft open/editability가 아니라 final MP4까지 생성됐다는 운영 증거다.
+
+- `loop`: `C:\\Users\\atgro\\AppData\\Local\\CapCut\\Videos\\videobox-qa-loop-20260712.mp4`; FFprobe `600.026848` seconds, `73,526,175` bytes, SHA-256 `3DF607575BE81F1FD0050F1635B831E1C71D7DB6C7DA45E933D7848C23DF53F8`.
+- `crop_pad_overlay`: `C:\\Users\\atgro\\AppData\\Local\\CapCut\\Videos\\videobox-qa-crop-pad-overlay-20260712.mp4`; FFprobe `600.026848` seconds, `25,452,146` bytes, SHA-256 `839F83D911384B1BE72B8D983DA7AC16E34221CCE505935A0E31F8394187043B`. Inspector/timeline에서 10:00:00, caption, image/text overlay, B-roll crop/pad black-pad track을 확인했다.
+- `audio_ducking`: `C:\\Users\\atgro\\AppData\\Local\\CapCut\\Videos\\videobox-qa-audio-ducking-20260712.mp4`; FFprobe `600.026848` seconds, `73,882,181` bytes, SHA-256 `B23B2D7E7DDC01D3BDD0F49B11126EC80BA8CF90E3349F2DC29BC6AE72EAA11B`. Inspector/timeline에서 10:00:00, narration/TTS, `smoke-bgm.wav`, `smoke-impact.wav` track을 확인했다.
+- 두 신규 export의 CapCut 완료 화면은 모두 `동영상이 데스크톱이나 노트북에 저장됐습니다`를 표시했다. export 중 오류, missing asset, UI option drift는 발생하지 않았다.
+- CapCut video output은 개발 머신 local path이고 Git에 넣지 않는다. VideoBox source artifact도 수정하지 않았다.
+
+다음 권장 작업:
+
+- 3/3 CapCut final-render proof와 handoff diagnostics가 닫혔으므로, 다음 우선순위는 새 기능이 아니라 실제 사용자 녹음의 human listening approval과 일반 사용자 PC 1대의 handoff diagnostics smoke다. 이 두 항목은 자동화로 대체하지 않는 운영 acceptance 범위다.
 
 ## 227. 2026-07-13 CapCut handoff diagnostics closeout
 
