@@ -73,8 +73,14 @@ def test_editing_session_media_override_persists_normalized_controls() -> None:
 def test_manual_music_asset_uses_resolvable_asset_uri_in_the_render_timeline() -> None:
     from videobox_core_engine.timeline_builder import TimelineBuilder
 
+    asset_uri = "local://projects/project_001/assets/asset_bgm_001"
     timeline = TimelineBuilder().build(
         project_id="project_001",
+        asset_uri_validator=lambda asset_id, media_type, candidate_uri: (
+            asset_id == "asset_bgm_001"
+            and media_type == "bgm"
+            and candidate_uri == asset_uri
+        ),
         segments=[{"segment_id": "seg_001", "start_sec": 0.0, "end_sec": 4.0, "text": "music"}],
         recommendations=[
             {
@@ -86,7 +92,10 @@ def test_manual_music_asset_uses_resolvable_asset_uri_in_the_render_timeline() -
                 "reason": "manual",
                 "auto_apply_allowed": True,
                 "review_required": False,
-                "payload": {"media_controls": {"gain_db": -6}},
+                "payload": {
+                    "selected_asset_uri": asset_uri,
+                    "media_controls": {"gain_db": -6},
+                },
             }
         ],
     )
