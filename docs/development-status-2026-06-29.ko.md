@@ -1,8 +1,22 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 229. 2026-07-13 release audit protocol closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
-> 이 문서의 기존 날짜 기반 섹션은 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 229`만 기준으로 본다.
+> 현재 authoritative 상태/next slice 판단은 `## 230. 2026-07-13 human acceptance preparation`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 이 문서의 기존 날짜 기반 섹션은 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 230`만 기준으로 본다.
 > 단, `2일 내 1차 데모 완성` 실행 레일은 `## 189`의 장기 우선순위를 그대로 넓게 집행하지 않고, `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`의 축소된 실행 계획을 우선 적용한다.
+
+## 230. 2026-07-13 human acceptance preparation
+
+release audit의 다음 권장 작업인 human acceptance를 시작하기 전, 실제 입력과 실행 환경을 read-only로 점검했다. 실행 runbook은 `docs/handoffs/2026-07-13-human-acceptance-runbook.ko.md`에 고정했다.
+
+- 현재 `artifacts/`의 10분 한국어 WAV, `inputs/voice_samples/*.wav`, `tts_candidate.wav`는 모두 production smoke의 합성 음성이다. 실제 사용자 음성으로 오기하거나 청취 승인 근거로 사용하지 않는다.
+- 기본 `scripts/run_api.py`는 TTS provider를 활성화하지 않는다. 실제 personal-voice candidate acceptance에는 `local_xtts` runtime 또는 사용자가 동의한 사전 clone ElevenLabs voice 설정이 필요하다. gTTS는 voice clone fallback이 아니다.
+- UI/API/저장 계약은 준비되어 있다: upload → candidate generation → audio 청취 → pending listening review 승인/거부 → 승인 후보만 selection → timeline/output 경로다. 이 경로의 자동 contract는 이미 frontend/backend test 및 smoke로 확인됐지만 인간의 음질 판단을 대체하지 않는다.
+- 다른 Windows PC CapCut smoke는 supported `8.7.x`/`8.9.x`, diagnostics ready, actual draft export, handoff registration, 사용자의 Desktop open/editability 확인으로 수행한다. 개발 PC의 diagnostics probe는 외부 사용자 profile/ACL/설치 variant를 증명하지 못한다.
+- 현재 차단 입력: 실제 사용자 음성, enabled cloning provider, 다른 Windows PC 접근이 없다. 사용자가 CapCut을 강제 종료했으므로 자동 재실행하지 않는다.
+
+다음 권장 작업:
+
+- 사용자 동의 음성 파일과 cloning provider 준비가 되면 runbook A를, 외부 PC 접근이 가능해지면 runbook B를 실행한다. 둘 다 완료된 뒤 release audit protocol의 relevant gate만 재실행해 배포 판단을 갱신한다.
 
 ## 229. 2026-07-13 release audit protocol closeout
 
