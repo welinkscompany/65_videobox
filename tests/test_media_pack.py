@@ -16,6 +16,7 @@ def valid_manifest() -> dict[str, object]:
         "assets": [
             {
                 "asset_id": "music-001",
+                "pack_path": "assets/music-001.mp3",
                 "sha256": "b" * 64,
                 "media_type": "music",
                 "duration_seconds": 120.5,
@@ -45,6 +46,17 @@ def test_manifest_requires_namespaced_unique_ids_and_sha256() -> None:
     manifest = MediaPackManifest.from_dict(valid_manifest())
 
     assert manifest.assets[0].library_asset_id == "pack:starter-001:music-001"
+
+
+@pytest.mark.parametrize("pack_path", ["/absolute.mp3", "../escape.mp3", "assets/../escape.mp3", "C:/escape.mp3", r"C:\escape.mp3", "//server/share.mp3"])
+def test_manifest_rejects_unsafe_asset_pack_path(pack_path: str) -> None:
+    data = valid_manifest()
+    asset = data["assets"][0]
+    assert isinstance(asset, dict)
+    asset["pack_path"] = pack_path
+
+    with pytest.raises(ValueError, match="pack_path"):
+        MediaPackManifest.from_dict(data)
 
 
 @pytest.mark.parametrize("commercial_use", [False, "unknown", 1])

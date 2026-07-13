@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 import math
+from pathlib import PureWindowsPath
 import re
 from typing import Mapping
 from urllib.parse import urlparse
@@ -46,6 +47,15 @@ def _identifier(data: Mapping[str, object], field: str) -> str:
     if not _IDENTIFIER_PATTERN.fullmatch(value):
         raise ValueError(f"{field} is invalid")
     return value
+
+
+def _pack_path(data: Mapping[str, object]) -> str:
+    value = _non_empty_string(data, "pack_path")
+    path = value.replace("\\", "/")
+    windows_path = PureWindowsPath(value)
+    if windows_path.drive or windows_path.root or path.startswith("/") or path.startswith("//") or any(part in {"", ".", ".."} for part in path.split("/")):
+        raise ValueError("pack_path must be a safe relative path")
+    return path
 
 
 @dataclass(slots=True, frozen=True)
@@ -92,6 +102,7 @@ class MediaPackLicense:
 class MediaPackAsset:
     asset_id: str
     library_asset_id: str
+    pack_path: str
     sha256: str
     media_type: str
     duration_seconds: float
@@ -122,6 +133,7 @@ class MediaPackAsset:
         return cls(
             asset_id=asset_id,
             library_asset_id=f"pack:{pack_id}:{asset_id}",
+            pack_path=_pack_path(asset_data),
             sha256=_sha256(asset_data, "sha256"),
             media_type=media_type,
             duration_seconds=float(duration_seconds),
