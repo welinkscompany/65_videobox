@@ -3,7 +3,7 @@
 ## 현재 위치
 
 - branch: `codex/production-readiness-blocker-slice-1`
-- pushed HEAD: `633fd9d feat: verify starter media release contracts`
+- pushed HEAD: `2c5f903 test: align manual music timeline with asset validation`
 - 공식 계획: `docs/superpowers/plans/2026-07-12-starter-media-pack-implementation.md` Task 5
 - Task 1–4는 완료다. Task 5는 실제 무료 자산 선별·팩 생성·release smoke 전이며 완료가 아니다.
 
@@ -34,10 +34,10 @@ TDD 증거:
 ## 최신 검증
 
 - focused backend: `tests/test_starter_media_pack_release.py tests/test_media_pack_service.py tests/test_api_media_library.py` -> `34 passed` (reviewer run).
-- full backend: `.venv\\Scripts\\python.exe -m pytest -q` -> **`783 passed, 1 failed`**, `175.73s`.
+- full backend (review 시점): `.venv\\Scripts\\python.exe -m pytest -q` -> `783 passed, 1 failed`, `175.73s`.
   - failing test: `tests/test_media_controls.py::test_manual_music_asset_uses_resolvable_asset_uri_in_the_render_timeline`
   - symptom: `TimelineBuilder().build(...)` result에 `bgm` clip이 없어 `StopIteration`.
-  - 이 변경은 scripts/tests만 수정했으므로 원인 확정 전 unrelated fix를 하지 않았다. 다음 세션에서 BASE `633fd9d`로 focused RED/reverse trace 후 source를 확인한다.
+  - 원인: Task 3의 fail-closed BGM/SFX asset URI validator 계약과 오래된 test fixture가 어긋났다. `2c5f903`에서 test에 valid project-local URI와 validator를 명시했고 focused `tests/test_media_controls.py`는 `4 passed`다. 전체 backend 재실행은 아직 필요하다.
 - frontend: `npm --prefix apps/web test` -> `105 passed`.
 - frontend build: `npm --prefix apps/web run build` -> success.
 - `git diff 89bf98d..633fd9d --check` -> clean.
