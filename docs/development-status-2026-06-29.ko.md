@@ -1,8 +1,22 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 230. 2026-07-13 human acceptance preparation`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 231. 2026-07-13 starter media pack release-review handoff`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
 > 이 문서의 기존 날짜 기반 섹션은 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 230`만 기준으로 본다.
 > 단, `2일 내 1차 데모 완성` 실행 레일은 `## 189`의 장기 우선순위를 그대로 넓게 집행하지 않고, `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`의 축소된 실행 계획을 우선 적용한다.
+
+## 231. 2026-07-13 starter media pack release-review handoff
+
+스타터 미디어팩 Task 5의 release verifier 기반은 commit `633fd9d`로 push했다. 이것은 실물 팩 release 완료가 아니라, 그 전 검증 계약을 추가한 중간 slice다. 상세 재개 정보는 `docs/handoffs/2026-07-13-starter-media-pack-task5-review.ko.md`가 authoritative다.
+
+- 새 verifier는 CLI에서 music MP3 320 kbps, SFX PCM WAV 48 kHz mono, asset별 evidence snapshot hash, actual pack integrity를 install 전에 확인한다.
+- 독립 review는 **Critical 1건**(direct `MediaPackService.install()`이 CLI 검증을 우회)과 **Important 1건**(average bitrate만으로 VBR을 확실히 거르지 못함)을 발견했다. 둘 다 다음 slice의 RED-first 수정 대상이며, 이 상태로 Task 5 또는 배포를 완료 처리하지 않는다.
+- full backend은 `.venv\\Scripts\\python.exe -m pytest -q`에서 `783 passed, 1 failed, 1 warning in 175.73s`였다. 실패는 `tests/test_media_controls.py::test_manual_music_asset_uses_resolvable_asset_uri_in_the_render_timeline`의 missing BGM clip (`StopIteration`)이다. 이번 scripts-only diff가 원인인지 아직 증명하지 않았으므로 source trace 전에는 unrelated fix를 하지 않는다.
+- frontend는 `105 passed`, production build success였다. `act(...)` 및 intentional error-boundary console은 known test hygiene output이며 exit 0이다.
+- human acceptance는 `## 230` 및 해당 runbook대로 외부 입력 대기다.
+
+다음 권장 작업:
+
+- `docs/handoffs/2026-07-13-starter-media-pack-task5-review.ko.md`의 순서대로 service/API install gate Critical과 VBR Important를 TDD로 닫고, full backend failure를 root-cause trace한다. 그 뒤에만 실물 팩 build/release validation을 재개한다.
 
 ## 230. 2026-07-13 human acceptance preparation
 
