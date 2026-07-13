@@ -88,8 +88,8 @@ def test_timeline_builder_materializes_only_an_approved_sfx_asset() -> None:
                 "review_required": True,
                 "payload": {},
             }
-        ],
-    )
+            ],
+        )
     assert not any(track.track_type == "sfx" for track in assetless.tracks)
 
     approved = builder.build(
@@ -103,15 +103,39 @@ def test_timeline_builder_materializes_only_an_approved_sfx_asset() -> None:
                 "selected_asset_id": "asset_sfx_001",
                 "reason": "Approved impact SFX.",
                 "score": 0.9,
-                "auto_apply_allowed": True,
-                "review_required": False,
-                "payload": {},
+                    "auto_apply_allowed": True,
+                    "review_required": False,
+                    "payload": {"selected_asset_uri": "local://projects/proj_001/assets/imported/sfx.wav"},
             }
-        ],
+            ],
+        asset_uri_validator=lambda _asset_id, _asset_type, _uri: True,
     )
 
     sfx_track = next(track for track in approved.tracks if track.track_type == "sfx")
-    assert sfx_track.clips[0].asset_uri == "local://projects/proj_001/assets/asset_sfx_001"
+    assert sfx_track.clips[0].asset_uri == "local://projects/proj_001/assets/imported/sfx.wav"
+
+
+def test_timeline_builder_keeps_external_audio_recommendations_pending_when_project_asset_validation_fails() -> None:
+    segment = SegmentRecord.create(project_id="proj_001", text="Narration", start_sec=0.0, end_sec=1.0)
+    timeline = TimelineBuilder().build(
+        project_id="proj_001", segments=[segment],
+        recommendations=[{"recommendation_id": "rec_external", "target_segment_id": segment.segment_id, "recommendation_type": "bgm", "selected_asset_id": "asset_missing", "auto_apply_allowed": True, "review_required": False, "reason": "bad", "score": 1.0, "payload": {"selected_asset_uri": "file:///external/music.mp3"}}],
+        asset_uri_validator=lambda _asset_id, _asset_type, _uri: False,
+    )
+
+    assert not any(track.track_type == "bgm" for track in timeline.tracks)
+    assert [item["recommendation_id"] for item in timeline.pending_recommendations] == ["rec_external"]
+
+
+def test_timeline_builder_fails_closed_for_audio_autoapply_without_a_storage_validator() -> None:
+    segment = SegmentRecord.create(project_id="proj_001", text="Narration", start_sec=0.0, end_sec=1.0)
+    timeline = TimelineBuilder().build(
+        project_id="proj_001", segments=[segment],
+        recommendations=[{"recommendation_id": "rec_external_no_validator", "target_segment_id": segment.segment_id, "recommendation_type": "sfx", "selected_asset_id": "asset_sfx", "auto_apply_allowed": True, "review_required": False, "reason": "bad", "score": 1.0, "payload": {"selected_asset_uri": "file:///external/sfx.wav"}}],
+    )
+
+    assert not any(track.track_type == "sfx" for track in timeline.tracks)
+    assert [item["recommendation_id"] for item in timeline.pending_recommendations] == ["rec_external_no_validator"]
 
 
 def test_default_projects_root_targets_project_workspace() -> None:

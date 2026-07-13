@@ -18,6 +18,7 @@ from videobox_api.routers.editing_session import build_editing_session_router
 from videobox_api.routers.editor_library import build_editor_library_router
 from videobox_api.routers.gemini_keys import build_gemini_keys_router
 from videobox_api.routers.jobs import build_jobs_router
+from videobox_api.routers.media_library import build_media_library_router
 from videobox_api.routers.outputs import build_outputs_router
 from videobox_api.routers.projects import build_projects_router
 from videobox_api.routers.review import build_review_router
@@ -39,6 +40,7 @@ from videobox_core_engine.settings import (
 from videobox_provider_interfaces.gemini import GeminiHTTPTransport, GeminiRESTStructuredProvider
 from videobox_provider_interfaces.llm import LLMProviderConfig
 from videobox_storage.local_project_store import LocalProjectStore
+from videobox_storage.media_library_store import MediaLibraryStore
 from videobox_storage.user_library_store import UserLibraryStore
 
 # Re-exported for backward compatibility: tests/test_api.py and a few other
@@ -69,10 +71,14 @@ def create_app(
     tts_provider=None,
     final_renderer=None,
     pycapcut_exporter=None,
+    media_library_store: MediaLibraryStore | None = None,
 ) -> FastAPI:
     app = FastAPI(title="VideoBox API", version="0.1.0")
     store = LocalProjectStore(projects_root or DEFAULT_PROJECTS_ROOT)
     user_library_store = UserLibraryStore(store.projects_root.parent / "videobox-user-library")
+    resolved_media_library_store = media_library_store or MediaLibraryStore(
+        store.projects_root.parent / "videobox-user-library"
+    )
     resolved_local_runtime_config = local_runtime_config or LocalOpenAICompatibleRuntimeConfig()
     runtime_service_factory = local_first_runtime_service_factory or (
         lambda project_store: build_local_first_runtime_service(
@@ -118,6 +124,7 @@ def create_app(
     app.state.stt_provider = pipeline.stt_provider
     app.state.tts_provider = pipeline.tts_provider
     app.state.final_renderer = pipeline.final_renderer
+    app.state.media_library_store = resolved_media_library_store
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -129,6 +136,7 @@ def create_app(
     app.include_router(build_timeline_router(orchestrator))
     app.include_router(build_editing_session_router(orchestrator, store))
     app.include_router(build_editor_library_router(user_library_store))
+    app.include_router(build_media_library_router(store, resolved_media_library_store))
     app.include_router(build_review_router(orchestrator))
     app.include_router(build_outputs_router(orchestrator))
     app.include_router(build_gemini_keys_router(orchestrator))

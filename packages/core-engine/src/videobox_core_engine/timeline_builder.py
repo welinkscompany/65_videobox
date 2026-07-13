@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from uuid import uuid4
+from collections.abc import Callable
 
 from videobox_core_engine.canonical_recommendation import (
     canonical_recommendation_type as _canonical_recommendation_type,
@@ -36,6 +37,7 @@ class TimelineBuilder:
         recommendations: list[dict[str, object] | RecommendationRecord],
         narration_source_uri: str | None = None,
         export_overlays: list[dict[str, object]] | None = None,
+        asset_uri_validator: Callable[[str, str, str], bool] | None = None,
     ) -> TimelineRecord:
         normalized_segments = [self._segment_payload(segment) for segment in segments]
         normalized_recommendations = [
@@ -111,7 +113,11 @@ class TimelineBuilder:
             for recommendation in by_segment.get(segment_id, []):
                 rec_type = _canonical_recommendation_type(recommendation.get("recommendation_type"))
                 selected_asset_id = str(recommendation.get("selected_asset_id") or "").strip()
-                if rec_type == "bgm" and not selected_asset_id:
+                payload = recommendation.get("payload")
+                selected_asset_uri = _canonical_source_uri(
+                    payload.get("selected_asset_uri") if isinstance(payload, dict) else None
+                )
+                if rec_type in {"bgm", "sfx"} and (not selected_asset_id or not selected_asset_uri or asset_uri_validator is None or not asset_uri_validator(selected_asset_id, rec_type, selected_asset_uri)):
                     pending_recommendations.append(recommendation)
                     continue
                 if bool(recommendation.get("auto_apply_allowed")) and not bool(recommendation.get("review_required")):
@@ -134,7 +140,7 @@ class TimelineBuilder:
                             TimelineClip(
                                 clip_id=f"clip_bgm_{len(music_clips) + 1:03d}",
                                 segment_id=segment_id,
-                                asset_uri=f"local://projects/{project_id}/assets/{selected_asset_id}",
+                                asset_uri=selected_asset_uri,
                                 start_sec=float(segment["start_sec"]),
                                 end_sec=float(segment["end_sec"]),
                                 clip_type="bgm",
@@ -147,7 +153,7 @@ class TimelineBuilder:
                             TimelineClip(
                                 clip_id=f"clip_sfx_{len(sfx_clips) + 1:03d}",
                                 segment_id=segment_id,
-                                asset_uri=f"local://projects/{project_id}/assets/{selected_asset_id}",
+                                asset_uri=selected_asset_uri,
                                 start_sec=float(segment["start_sec"]),
                                 end_sec=float(segment["end_sec"]),
                                 clip_type="sfx",

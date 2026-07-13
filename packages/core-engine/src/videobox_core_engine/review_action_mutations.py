@@ -181,10 +181,16 @@ def _apply_approved_sfx_recommendation_to_timeline(
     recommendation_id = str(decided_recommendation.get("recommendation_id") or "").strip()
     target_segment_id = str(decided_recommendation.get("target_segment_id") or "").strip()
     selected_asset_id = str(decided_recommendation.get("selected_asset_id") or "").strip()
+    payload = decided_recommendation.get("payload")
+    selected_asset_uri = _canonical_source_uri(
+        payload.get("selected_asset_uri") if isinstance(payload, dict) else None
+    )
     if not project_id:
         raise ValueError("Approved SFX recommendation requires timeline.project_id.")
     if not recommendation_id or not target_segment_id or not selected_asset_id:
         raise ValueError("Approved SFX recommendation requires id, target segment, and selected asset.")
+    if not selected_asset_uri.startswith(f"local://projects/{project_id}/"):
+        raise ValueError("Approved SFX recommendation requires payload.selected_asset_uri for this project.")
 
     tracks = timeline.get("tracks")
     if not isinstance(tracks, list):
@@ -226,7 +232,7 @@ def _apply_approved_sfx_recommendation_to_timeline(
         {
             "clip_id": f"clip_sfx_{len(sfx_clips) + 1:03d}",
             "segment_id": target_segment_id,
-            "asset_uri": f"local://projects/{project_id}/assets/{selected_asset_id}",
+            "asset_uri": selected_asset_uri,
             "start_sec": float(target_clip["start_sec"]),
             "end_sec": float(target_clip["end_sec"]),
             "clip_type": "sfx",

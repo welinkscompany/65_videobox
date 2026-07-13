@@ -30,6 +30,7 @@ from videobox_core_engine.review_guidance import HeuristicReviewGuidanceBuilder,
 from videobox_core_engine.settings import AutoCutConfig, LocalOpenAICompatibleRuntimeConfig
 from videobox_core_engine.timeline_builder import TimelineBuilder
 from videobox_domain_models.jobs import JobStatus, JobType
+from videobox_domain_models.assets import AssetType
 from videobox_domain_models.recommendations import RecommendationType
 from videobox_provider_interfaces.llm import (
     LLMProviderConfig,
@@ -22150,9 +22151,15 @@ def test_editing_session_api_replaces_trimmed_stale_applied_bgm_recommendation_w
     )
     session_id = create_response.json()["session_id"]
 
+    music_source = tmp_path / "music-manual-001.mp3"
+    music_source.write_bytes(b"music")
+    music_asset = LocalProjectStore(tmp_path).register_asset(
+        project_id=project_id, asset_type=AssetType.BGM, source_path=music_source,
+    )
+
     client.patch(
         f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/music",
-        json={"asset_id": "music_manual_001"},
+        json={"asset_id": music_asset.asset_id},
     )
 
     response = client.post(
@@ -22173,7 +22180,7 @@ def test_editing_session_api_replaces_trimmed_stale_applied_bgm_recommendation_w
     result_payload = result_response.json()
     bgm_track = next(track for track in result_payload["timeline"]["tracks"] if track["track_type"] == "bgm")
     assert [clip["asset_uri"] for clip in bgm_track["clips"]] == [
-            f"local://projects/{project_id}/assets/music_manual_001"
+        music_asset.storage_uri
     ]
     assert [item["recommendation_id"] for item in result_payload["timeline"]["applied_recommendations"]] == [
         "manual_bgm_seg_001"
@@ -22221,9 +22228,15 @@ def test_editing_session_api_replaces_trimmed_target_segment_id_stale_applied_bg
     )
     session_id = create_response.json()["session_id"]
 
+    music_source = tmp_path / "music-manual-002.mp3"
+    music_source.write_bytes(b"music")
+    music_asset = LocalProjectStore(tmp_path).register_asset(
+        project_id=project_id, asset_type=AssetType.BGM, source_path=music_source,
+    )
+
     client.patch(
         f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/music",
-        json={"asset_id": "music_manual_001"},
+        json={"asset_id": music_asset.asset_id},
     )
 
     response = client.post(
@@ -22244,7 +22257,7 @@ def test_editing_session_api_replaces_trimmed_target_segment_id_stale_applied_bg
     result_payload = result_response.json()
     bgm_track = next(track for track in result_payload["timeline"]["tracks"] if track["track_type"] == "bgm")
     assert [clip["asset_uri"] for clip in bgm_track["clips"]] == [
-            f"local://projects/{project_id}/assets/music_manual_001"
+        music_asset.storage_uri
     ]
     assert [item["recommendation_id"] for item in result_payload["timeline"]["applied_recommendations"]] == [
         "manual_bgm_seg_001"
@@ -23100,9 +23113,14 @@ def test_editing_session_api_can_fetch_visual_overlay_and_music_updates(tmp_path
         f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/visual-overlay",
         json={"overlay_type": "image_card", "asset_id": "asset_image_001"},
     )
+    music_source = tmp_path / "music-manual-visual.mp3"
+    music_source.write_bytes(b"music")
+    music_asset = LocalProjectStore(tmp_path).register_asset(
+        project_id=project_id, asset_type=AssetType.BGM, source_path=music_source,
+    )
     music_response = client.patch(
         f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/music",
-        json={"asset_id": "music_manual_001"},
+        json={"asset_id": music_asset.asset_id},
     )
     get_response = client.get(
         f"/api/projects/{project_id}/editing-sessions/{session_id}",
@@ -23115,7 +23133,7 @@ def test_editing_session_api_can_fetch_visual_overlay_and_music_updates(tmp_path
     assert payload["segments"][0]["visual_overlays"] == [
         {"overlay_type": "image_card", "asset_id": "asset_image_001"}
     ]
-    assert payload["segments"][0]["music_override"] == {"asset_id": "music_manual_001"}
+    assert payload["segments"][0]["music_override"] == {"asset_id": music_asset.asset_id, "asset_uri": music_asset.storage_uri}
     assert payload["history"][-2]["mutation_type"] == "visual_overlay_update"
     assert payload["history"][-1]["mutation_type"] == "music_override_update"
 

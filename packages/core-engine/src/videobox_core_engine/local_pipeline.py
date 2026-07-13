@@ -723,6 +723,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
             segments=analysis["segments"],
             recommendations=recommendations,
             narration_source_uri=str(narration_asset["storage_uri"]),
+            asset_uri_validator=lambda asset_id, expected_type, uri: self._is_valid_project_audio_recommendation_uri(asset_id, expected_type, uri, project_id),
         )
         timeline_payload = {
             "project_id": timeline.project_id,

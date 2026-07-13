@@ -175,6 +175,13 @@ class MediaLibraryStore:
             return results
         return [item for item in results if normalized_query in " ".join(map(str, item.values())).lower()]
 
+    def get_verified_asset(self, *, library_asset_id: str) -> dict[str, Any] | None:
+        """Return one currently active, checksum-verified library asset."""
+        for asset in self.search():
+            if str(asset["library_asset_id"]) == library_asset_id:
+                return asset
+        return None
+
     def _is_currently_verified(self, path: Path, expected_sha256: str) -> bool:
         try:
             stat = path.stat()

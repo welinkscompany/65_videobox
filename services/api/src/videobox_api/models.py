@@ -463,6 +463,10 @@ class EditingSessionSegmentResponse(BaseModel):
     caption_style: dict[str, object] | None = None
 
 
+class MaterializeLibraryAssetRequest(BaseModel):
+    project_id: str
+
+
 class EditingSessionHistoryEntryResponse(BaseModel):
     mutation_type: str
     segment_id: str

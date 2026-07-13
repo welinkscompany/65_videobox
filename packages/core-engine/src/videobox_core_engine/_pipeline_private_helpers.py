@@ -93,6 +93,12 @@ from videobox_core_engine._pipeline_shared_helpers import (
 
 
 class _PipelinePrivateHelpersMixin:
+    def _is_valid_project_audio_recommendation_uri(self, asset_id: str, expected_type: str, uri: str, project_id: str) -> bool:
+        try:
+            asset = self.store.get_asset(project_id=project_id, asset_id=asset_id)
+            return asset.get("asset_type") == expected_type and asset.get("storage_uri") == uri and self.store.resolve_storage_uri(project_id=project_id, storage_uri=uri).is_file()
+        except (KeyError, ValueError):
+            return False
     def _asset_payload(self, asset: Any) -> dict[str, Any]:
         return {
             "asset_id": asset.asset_id,
@@ -346,6 +352,18 @@ class _PipelinePrivateHelpersMixin:
         )
         timeline["pending_recommendations"] = remaining_pending
         if decision == "approved":
+            if _canonical_runtime_recommendation_type(decided_recommendation.get("recommendation_type")) == RecommendationType.SFX.value:
+                payload = decided_recommendation.get("payload")
+                selected_asset_uri = str(payload.get("selected_asset_uri") or "").strip() if isinstance(payload, dict) else ""
+                selected_asset_id = str(decided_recommendation.get("selected_asset_id") or "").strip()
+                try:
+                    asset = self.store.get_asset(project_id=project_id, asset_id=selected_asset_id)
+                    if asset.get("asset_type") != "sfx" or asset.get("storage_uri") != selected_asset_uri:
+                        raise ValueError("asset_missing")
+                    if not self.store.resolve_storage_uri(project_id=project_id, storage_uri=selected_asset_uri).is_file():
+                        raise ValueError("asset_missing")
+                except (KeyError, ValueError):
+                    raise ValueError("asset_missing") from None
             timeline["applied_recommendations"] = [
                 *deepcopy(timeline.get("applied_recommendations", [])),
                 decided_recommendation,
@@ -708,6 +726,7 @@ class _PipelinePrivateHelpersMixin:
             recommendations=state["recommendations"],
             narration_source_uri=source_timeline.get("narration_source_uri"),
             export_overlays=state["export_overlays"],
+            asset_uri_validator=lambda asset_id, expected_type, uri: self._is_valid_project_audio_recommendation_uri(asset_id, expected_type, uri, project_id),
         )
         timeline_payload = {
             "project_id": timeline.project_id,
@@ -934,6 +953,7 @@ class _PipelinePrivateHelpersMixin:
                     segment_id=segment_id,
                 recommendation_type=RecommendationType.BGM,
                 asset_id=str(override["asset_id"]),
+                asset_uri=str(override.get("asset_uri") or ""),
                 reason="Manual music override from editing session.",
                 media_controls=override.get("media_controls"),
                 )
@@ -987,6 +1007,7 @@ class _PipelinePrivateHelpersMixin:
                 segment_id=segment_id,
                 recommendation_type=RecommendationType.SFX,
                 asset_id=str(override["asset_id"]),
+                asset_uri=str(override.get("asset_uri") or ""),
                 reason="Manual SFX override from editing session requires operator review.",
                 media_controls=override.get("media_controls"),
             )
@@ -1129,6 +1150,7 @@ class _PipelinePrivateHelpersMixin:
         segment_id: str,
         recommendation_type: RecommendationType,
         asset_id: str,
+        asset_uri: str = "",
         reason: str,
         media_controls: object = None,
     ) -> dict[str, Any]:
@@ -1142,7 +1164,7 @@ class _PipelinePrivateHelpersMixin:
             "reason": reason,
             "auto_apply_allowed": True,
             "review_required": False,
-            "payload": {"provider_trace": provider_trace, "media_controls": deepcopy(media_controls) if isinstance(media_controls, dict) else {}},
+            "payload": {"provider_trace": provider_trace, "selected_asset_uri": asset_uri, "media_controls": deepcopy(media_controls) if isinstance(media_controls, dict) else {}},
             "created_at": self.store._now_iso(),
             "provider_trace": provider_trace,
         }

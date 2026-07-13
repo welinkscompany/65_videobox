@@ -33,6 +33,7 @@ from videobox_core_engine.canonical_track import (
 )
 from videobox_capcut_export import CapCutExportAdapter
 from videobox_storage.local_project_store import EditingSessionRevisionConflict
+from videobox_domain_models.assets import AssetType
 from videobox_core_engine.auto_cut import AutoCutPlanner
 from videobox_core_engine.ffmpeg_auto_cut_executor import FfmpegAutoCutExecutor
 from videobox_core_engine.ffmpeg_final_renderer import FfmpegFinalRenderer
@@ -112,6 +113,19 @@ class EditingSessionConflict(RuntimeError):
 
 
 class EditingSessionRegenerationMixin:
+    def _resolve_project_audio_override(self, *, project_id: str, asset_id: str, expected_type: AssetType) -> str:
+        try:
+            asset = self.store.get_asset(project_id=project_id, asset_id=asset_id)
+            if asset.get("asset_type") != expected_type.value:
+                raise ValueError("asset_missing")
+            storage_uri = str(asset.get("storage_uri") or "")
+            resolved_path = self.store.resolve_storage_uri(project_id=project_id, storage_uri=storage_uri)
+            if not resolved_path.is_file():
+                raise ValueError("asset_missing")
+            return storage_uri
+        except (KeyError, ValueError):
+            raise ValueError("asset_missing") from None
+
     def _save_editing_session_with_revision(
         self,
         *,
@@ -534,10 +548,14 @@ class EditingSessionRegenerationMixin:
         expected_revision: int,
     ) -> dict[str, Any]:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        asset_uri = self._resolve_project_audio_override(
+            project_id=project_id, asset_id=asset_id, expected_type=AssetType.BGM,
+        )
         updated_session = update_segment_music_override(
             session=session,
             segment_id=segment_id,
             asset_id=asset_id,
+            asset_uri=asset_uri,
             media_controls=media_controls,
         )
         return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=updated_session, expected_revision=expected_revision)
@@ -559,7 +577,10 @@ class EditingSessionRegenerationMixin:
 
     def update_editing_session_segment_sfx_override(self, *, project_id: str, session_id: str, segment_id: str, asset_id: str, media_controls: dict[str, Any] | None = None, expected_revision: int) -> dict[str, Any]:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
-        return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=update_segment_sfx_override(session=session, segment_id=segment_id, asset_id=asset_id, media_controls=media_controls), expected_revision=expected_revision)
+        asset_uri = self._resolve_project_audio_override(
+            project_id=project_id, asset_id=asset_id, expected_type=AssetType.SFX,
+        )
+        return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=update_segment_sfx_override(session=session, segment_id=segment_id, asset_id=asset_id, asset_uri=asset_uri, media_controls=media_controls), expected_revision=expected_revision)
 
     def clear_editing_session_segment_sfx_override(self, *, project_id: str, session_id: str, segment_id: str, expected_revision: int) -> dict[str, Any]:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)

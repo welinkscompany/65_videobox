@@ -429,12 +429,14 @@ def clear_segment_broll_override(
     raise KeyError(f"Segment not found in editing session: {segment_id}")
 
 
-def update_segment_sfx_override(*, session: dict[str, Any], segment_id: str, asset_id: str, media_controls: dict[str, Any] | None = None) -> dict[str, Any]:
+def update_segment_sfx_override(*, session: dict[str, Any], segment_id: str, asset_id: str, asset_uri: str | None = None, media_controls: dict[str, Any] | None = None) -> dict[str, Any]:
     updated = deepcopy(session)
     for segment in updated.get("segments", []):
         if str(segment.get("segment_id")) != segment_id:
             continue
         segment["sfx_override"] = {"asset_id": asset_id.strip()}
+        if asset_uri:
+            segment["sfx_override"]["asset_uri"] = asset_uri
         if media_controls is not None:
             segment["sfx_override"]["media_controls"] = normalize_media_controls(media_controls, media_kind="audio", duration_sec=float(segment.get("end_sec", 0.0)) - float(segment.get("start_sec", 0.0)))
         updated.setdefault("history", []).append({"mutation_type": "sfx_override_update", "segment_id": segment_id, "asset_id": asset_id.strip()})
@@ -604,6 +606,7 @@ def update_segment_music_override(
     session: dict[str, Any],
     segment_id: str,
     asset_id: str,
+    asset_uri: str | None = None,
     media_controls: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     updated = deepcopy(session)
@@ -612,6 +615,8 @@ def update_segment_music_override(
         if str(segment.get("segment_id")) != segment_id:
             continue
         segment["music_override"] = {"asset_id": normalized_asset_id}
+        if asset_uri:
+            segment["music_override"]["asset_uri"] = asset_uri
         if media_controls is not None:
             segment["music_override"]["media_controls"] = normalize_media_controls(media_controls, media_kind="audio", duration_sec=float(segment.get("end_sec", 0.0)) - float(segment.get("start_sec", 0.0)))
         updated.setdefault("history", []).append(

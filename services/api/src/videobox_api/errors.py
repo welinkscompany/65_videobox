@@ -4,6 +4,8 @@ from fastapi import HTTPException, status
 
 
 def _http_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, ValueError) and str(exc) == "asset_missing":
+        return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="asset_missing")
     if isinstance(exc, FileNotFoundError):
         return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
     if isinstance(exc, LookupError | KeyError):
