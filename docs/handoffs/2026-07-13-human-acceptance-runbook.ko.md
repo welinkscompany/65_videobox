@@ -62,7 +62,8 @@ gTTS는 voice cloning provider가 아니므로 대체 수단이 아니다.
 ## 현재 차단 상태 (2026-07-13)
 
 - 실제 사용자 음성 입력: 없음.
-- enabled personal-voice cloning provider credentials/runtime: 없음.
+- local XTTS Python package와 Torch는 이 PC에 설치되어 있지만, XTTS-v2 model download(약 2GB)와 Coqui license acceptance는 아직 수행하지 않았다. 사용자 동의 없이 이 다운로드나 license acceptance를 실행하지 않는다.
+- ElevenLabs SDK/credential/사전 clone voice ID: 없음.
 - 개발 PC와 다른 Windows 사용자 PC: 현재 접근 권한 없음.
 - 개발 PC CapCut은 사용자가 강제 종료한 상태이며, 이 runbook은 자동 재실행하지 않는다.
 
