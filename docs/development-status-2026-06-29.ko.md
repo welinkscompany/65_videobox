@@ -1,8 +1,22 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 231. 2026-07-13 starter media pack release-review handoff`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 232. 2026-07-14 starter media pack release-gate remediation`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
 > 이 문서의 기존 날짜 기반 섹션은 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 230`만 기준으로 본다.
 > 단, `2일 내 1차 데모 완성` 실행 레일은 `## 189`의 장기 우선순위를 그대로 넓게 집행하지 않고, `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`의 축소된 실행 계획을 우선 적용한다.
+
+## 232. 2026-07-14 starter media pack release-gate remediation
+
+Task 5의 release verifier 코드리뷰 Critical/Important를 TDD로 보완했다. 이것은 **실물 starter pack release 완료가 아니며**, official license research·300–500 MiB 실제 asset build·10분 output smoke는 계속 다음 단계다.
+
+- `MediaPackService.install()`은 source directory에서 immutable evidence, codec/format, MP3 CBR frame contract를 staging copy 전에 검증한다. failure는 `release_contract`이며 library index/activation을 만들지 않는다. cleanup은 이번 시도에서 만든 inactive index만 제거하므로 기존 stale index를 지우지 않는다.
+- `media_pack_release` core-engine gate가 CLI verifier와 direct service의 단일 policy path다. legacy script wrapper는 parse/integrity adapter만 유지한다.
+- MP3 CBR 판정은 모든 MPEG-1 Layer III frame이 320kbps인지 검사한다. average 320kbps VBR, ID3v2.4 footer, ID3v2.3 experimental-flag edge case를 contract test로 고정했다.
+- TDD evidence: stale inactive index 삭제, source-before-staging gate, ID3v2.4 footer, ID3v2.3 experimental flag를 각각 RED로 재현 후 GREEN했다. focused backend `47 passed, 1 warning`; full Python 3.12 backend `793 passed, 1 warning in 186.66s`; frontend `105 passed`, production build success다.
+- human acceptance는 `## 230` 및 해당 runbook대로 외부 입력 대기이며 변경하지 않았다.
+
+다음 권장 작업:
+
+- remediation slice는 최종 full backend/frontend/build 검증까지 green이다. 다음에만 Task 5 Step 1 official-license research와 ignored real pack build를 시작한다.
 
 ## 231. 2026-07-13 starter media pack release-review handoff
 

@@ -74,6 +74,9 @@ def _installable_sparse_pack(root: Path) -> Path:
     asset = root / "assets" / "music-001.mp3"
     asset.parent.mkdir(parents=True)
     asset.write_bytes(b"synthetic music")
+    evidence = root / "evidence" / "music-001.txt"
+    evidence.parent.mkdir(parents=True)
+    evidence.write_text("Synthetic official license evidence", encoding="utf-8")
     padding = root / "padding.bin"
     with padding.open("wb") as handle:
         handle.truncate(300 * 1024**2 - asset.stat().st_size)
@@ -81,7 +84,7 @@ def _installable_sparse_pack(root: Path) -> Path:
     manifest = {
         "pack_id": "starter-001", "version": "1.0.0", "declared_bytes": declared_bytes,
         "sha256": pack_sha256,
-        "assets": [{"asset_id": "music-001", "pack_path": "assets/music-001.mp3", "sha256": hashlib.sha256(asset.read_bytes()).hexdigest(), "media_type": "music", "duration_seconds": 12.5, "source": "Synthetic", "creator": "Synthetic", "license": {"official_url": "https://example.test/license", "commercial_use": True, "redistribution": True, "evidence_timestamp": "2026-07-12T10:00:00Z", "evidence_sha256": "a" * 64}}],
+        "assets": [{"asset_id": "music-001", "pack_path": "assets/music-001.mp3", "sha256": hashlib.sha256(asset.read_bytes()).hexdigest(), "media_type": "music", "duration_seconds": 12.5, "source": "Synthetic", "creator": "Synthetic", "license": {"official_url": "https://example.test/license", "commercial_use": True, "redistribution": True, "evidence_timestamp": "2026-07-12T10:00:00Z", "evidence_sha256": hashlib.sha256(evidence.read_bytes()).hexdigest()}}],
     }
     (root / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
     return root
@@ -281,7 +284,12 @@ def test_preview_rejects_source_swapped_after_lookup_before_response(tmp_path: P
 
 def test_installed_sparse_pack_materializes_into_a_project_local_asset(tmp_path: Path) -> None:
     library = MediaLibraryStore(tmp_path / "library")
-    service = MediaPackService(user_library_root=tmp_path / "user-library", library_store=library, duration_probe=lambda _path: 12.5)
+    service = MediaPackService(
+        user_library_root=tmp_path / "user-library",
+        library_store=library,
+        duration_probe=lambda _path: 12.5,
+        media_probe=lambda _path: {"codec_name": "mp3", "bit_rate": "320000", "is_cbr": True},
+    )
     assert service.install(_installable_sparse_pack(tmp_path / "source-pack")).status == "installed"
     client = TestClient(create_app(projects_root=tmp_path / "projects", media_library_store=library))
     project_id = client.post("/api/projects", json={"name": "Installed pack materialization"}).json()["project_id"]

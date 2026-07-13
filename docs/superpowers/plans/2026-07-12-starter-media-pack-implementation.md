@@ -116,7 +116,7 @@ git commit -m "feat: add starter media library UI"
 **Files:** starter-media-pack/manifest.json, starter-media-pack/LICENSES.md, scripts/build-starter-media-pack.py, .gitignore, docs/implementation-plan.ko.md, docs/development-status-2026-06-29.ko.md.
 
 - [ ] Step 1 — Complete official-license research for every candidate. Store all Task 1 facts; reject unclear/non-commercial/non-redistributable terms and conversion-prohibited terms.
-- [ ] Step 2 — Write RED verifier tests for wrong music codec/bitrate, wrong SFX format, pack size outside 300–500MB, missing evidence.
+- [x] Step 2 — Write RED verifier tests for wrong music codec/bitrate, wrong SFX format, pack size outside 300–500MB, missing evidence. 2026-07-14: core service gate regression also covers missing/tampered evidence, wrong codec, average-320kbps VBR, source-before-staging rejection, and ID3v2.3/v2.4 CBR parser boundaries.
 - [ ] Step 3 — Build manifest/checksums/LICENSES reproducibly. Put archive/media only in ignored dist/starter-media-pack; never track binaries.
 - [ ] Step 4 — Release verify.
 

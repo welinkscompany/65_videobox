@@ -6,10 +6,12 @@ import math
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
+from collections.abc import Mapping
 from typing import Callable
 
 from videobox_domain_models.media_pack import MediaPackManifest
 from videobox_storage.media_library_store import MediaLibraryStore
+from videobox_core_engine.media_pack_release import ReleasePackValidationError, validate_release_contract
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,11 +55,12 @@ def compute_pack_integrity(directory: Path) -> tuple[int, str]:
 class MediaPackService:
     def __init__(
         self, *, user_library_root: Path, library_store: MediaLibraryStore,
-        duration_probe: Callable[[Path], float],
+        duration_probe: Callable[[Path], float], media_probe: Callable[[Path], Mapping[str, object]],
     ) -> None:
         self.user_library_root = Path(user_library_root)
         self.library_store = library_store
         self.duration_probe = duration_probe
+        self.media_probe = media_probe
 
     def install(
         self, source_directory: Path, *, before_activation: Callable[[Path], None] | None = None,
@@ -84,7 +87,9 @@ class MediaPackService:
         if staging.exists():
             shutil.rmtree(staging)
         created_destination = False
+        indexed_by_attempt = False
         try:
+            validate_release_contract(manifest=manifest, root=source_directory, media_probe=self.media_probe)
             version_root.mkdir(parents=True, exist_ok=True)
             shutil.copytree(source_directory, staging)
             declared_bytes, digest = compute_pack_integrity(staging)
@@ -101,17 +106,18 @@ class MediaPackService:
                 pack_id=manifest.pack_id, version=manifest.version, install_path=destination,
                 assets=indexed_assets, active=False,
             )
+            indexed_by_attempt = True
             if before_activation is not None:
                 before_activation(staging)
             staging.replace(destination)
             created_destination = True
             self.library_store.activate_pack(pack_id=manifest.pack_id, version=manifest.version, install_path=destination)
             return MediaPackInstallResult(status="installed", pack_id=manifest.pack_id, version=manifest.version)
-        except MediaPackValidationError as error:
-            self._cleanup_failed_attempt(staging=staging, destination=destination, created_destination=created_destination, pack_id=manifest.pack_id, version=manifest.version)
-            return MediaPackInstallResult(status="failed", pack_id=manifest.pack_id, version=manifest.version, error_code=error.error_code, message=str(error))
+        except (MediaPackValidationError, ReleasePackValidationError) as error:
+            self._cleanup_failed_attempt(staging=staging, destination=destination, created_destination=created_destination, indexed_by_attempt=indexed_by_attempt, pack_id=manifest.pack_id, version=manifest.version)
+            return MediaPackInstallResult(status="failed", pack_id=manifest.pack_id, version=manifest.version, error_code=getattr(error, "error_code", "release_contract"), message=str(error))
         except Exception as error:
-            self._cleanup_failed_attempt(staging=staging, destination=destination, created_destination=created_destination, pack_id=manifest.pack_id, version=manifest.version)
+            self._cleanup_failed_attempt(staging=staging, destination=destination, created_destination=created_destination, indexed_by_attempt=indexed_by_attempt, pack_id=manifest.pack_id, version=manifest.version)
             return MediaPackInstallResult(status="failed", pack_id=manifest.pack_id, version=manifest.version, error_code="install_failed", message=str(error))
 
     def _validate_assets(self, manifest: MediaPackManifest, staging: Path) -> list[dict[str, object]]:
@@ -145,17 +151,18 @@ class MediaPackService:
             })
         return indexed
 
-    def _cleanup_failed_attempt(self, *, staging: Path, destination: Path, created_destination: bool, pack_id: str, version: str) -> None:
+    def _cleanup_failed_attempt(self, *, staging: Path, destination: Path, created_destination: bool, indexed_by_attempt: bool, pack_id: str, version: str) -> None:
         try:
             if staging.exists():
                 shutil.rmtree(staging)
             if created_destination and destination.exists():
                 shutil.rmtree(destination)
         finally:
-            try:
-                self.library_store.remove_pack(pack_id=pack_id, version=version)
-            except Exception:
-                pass
+            if indexed_by_attempt:
+                try:
+                    self.library_store.remove_pack(pack_id=pack_id, version=version)
+                except Exception:
+                    pass
 
 
 def _sha256_file(path: Path) -> str:
