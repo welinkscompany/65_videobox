@@ -9,12 +9,12 @@
 Task 5 Step 1의 source-level licensing gate를 시작했다. `docs/starter-media-pack-license-research.ko.md`가 asset-level candidate URL, creator, selection timestamp, official-page raw HTML SHA-256, attribution, commercial/raw redistribution/conversion 판정의 SSOT다.
 
 - Pixabay, Mixkit, Uppbeat free tier는 일반적인 commercial video use와 달리 raw audio를 third party에게 pack으로 재배포하는 권한이 불명확하거나 금지되어 후보에서 제외했다.
-- CC0 candidate는 music 19개와 SFX 33개다. CC0 legal code와 OpenGameArt/FMA의 author asset page를 근거로 commercial use, raw redistribution, conversion을 true로 판단했다.
-- starter-v1 기준은 30 music/100 SFX이므로 현재 19/30, 33/100이고 research gate는 아직 green이 아니다. 실제 300–500 MiB build는 시작하지 않는다.
+- CC0 candidate는 music 30개와 SFX 100개다. CC0 legal code와 OpenGameArt/FMA의 author asset page를 근거로 commercial use, raw redistribution, conversion을 true로 판단했다.
+- 130 direct asset URLs와 36 official asset pages를 HTTPS 200으로 재확인했으므로 starter-v1 **license research gate는 green**이다. source-byte hash, format conversion, manifest integrity가 아직 없으므로 이는 pack release green이 아니다.
 
 다음 권장 작업:
 
-- 같은 per-asset evidence 기준으로 11 music/67 SFX를 더 조사하고, source archive처럼 개별 file identity가 불명확한 bundle은 추출 후 file list와 source hash가 확정될 때까지 승인하지 않는다.
+- 이제 approved source만 download해 source-byte SHA-256, duration, codec, converted-file evidence snapshot을 고정한 뒤에만 300–500 MiB build를 시작한다.
 
 ## 232. 2026-07-14 starter media pack release-gate remediation
 

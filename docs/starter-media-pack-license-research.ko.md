@@ -54,6 +54,24 @@
 
 **FMA extension judgement:** each row is CC0 1.0 and therefore commercial/raw redistribution/conversion=`true`, attribution=`false` (HoliznaCC0 recommended credit only).
 
+### 승인 확장 — OpenGameArt individual music
+
+각 행은 creator page의 Music + CC0 field와 individual direct file을 함께 확인했다. 모두 commercial/raw redistribution/conversion=`true`, attribution=`false`다.
+
+| candidate asset_id | title / creator | official page · evidence SHA-256 | direct source |
+| --- | --- | --- | --- |
+| `music-8bit-title-screen` | 8Bit Title Screen — Joth | [page](https://opengameart.org/content/8bit-title-screen) · `c8d435fe547111f59f77334a804b8f4c3035b71e58902f72f46ddb66a5520eda` | [MP3](https://opengameart.org/sites/default/files/8Bit%20Title%20Screen.mp3) |
+| `music-futuristic-resources` | Futuristic-Resources — section31 | [page](https://opengameart.org/content/futuristic-resources) · `ec72314790b7cfff3b8e109607780928b63d30e44a5d8f38ba0c4cc790891c25` | [OGG](https://opengameart.org/sites/default/files/S31-Futuristic-Resources.ogg) |
+| `music-grasslands-theme` | GrassLands Theme — DST | [page](https://opengameart.org/content/grasslands-theme) · `04008712810d46fa3526537aad0e0319e7f3e36f7b1769052a2c1fd6a479dd04` | [MP3](https://opengameart.org/sites/default/files/DST-GrassLands.mp3) |
+| `music-chase` | Chase — Adiutorium | [page](https://opengameart.org/content/chase-2) · `ee514f159e5f269598e4e7e0839ca046320ba4f9569e8b049867c84f0723cb15` | [MP3](https://opengameart.org/sites/default/files/chase.mp3) |
+| `music-intro` | Intro Music — RonyDkid | [page](https://opengameart.org/content/intro-music-0) · `e209659c60ed5e9769fdb6dc5050286ff9a1fad301f85fe7e6666db60d543639` | [MP3](https://opengameart.org/sites/default/files/game_1.mp3) |
+| `music-portal` | portal — oglsdl | [page](https://opengameart.org/content/portal) · `a561ad4f7d0ec3be07adb886105be94bd15ad292d2cd6e09c0bb4d62364a29cb` | [OGG](https://opengameart.org/sites/default/files/portal_1.ogg) |
+| `music-determination` | Determination — artisticdude | [page](https://opengameart.org/content/determination) · `9153f5076c1b7e48ffe75cc37c7d85dae20aa01de13c136eadb07f960049c750` | [MP3](https://opengameart.org/sites/default/files/determination.mp3) |
+| `music-005` | 005 — Some Weirdo | [page](https://opengameart.org/content/005) · `64b3d5273adbd72b4adaf8ae7e089fe3e3b232e78ece152ead024d5a957b7b11` | [OGG](https://opengameart.org/sites/default/files/005.ogg) |
+| `music-somnium` | Somnium — Adiutorium | [page](https://opengameart.org/content/somnium) · `b4401dc57bcea77cdabe6453fd5abde0c05555fc0c34b01cb0206a721dc3d0d5` | [MP3](https://opengameart.org/sites/default/files/somnium.mp3) |
+| `music-orien` | Orien — Tozan | [page](https://opengameart.org/content/orien) · `363004a16be218b2d2c44d218c97eaf0c518580536acde892db7875a9bd48dce` | [OGG](https://opengameart.org/sites/default/files/orien_2.ogg) |
+| `music-1-minute` | 1 minute. — thisismyusername | [page](https://opengameart.org/content/1-minute) · `390c926460d5fcf5a4479993d4f975cff58802fefdf8c03b8eaa6938ab661571` | [MP3](https://opengameart.org/sites/default/files/1%20minute.mp3) |
+
 ## 승인 후보 — SFX
 
 | candidate asset_id | title / creator | official asset page · evidence SHA-256 | source file | commercial | raw redistribute | convert/adapt | attribution |
@@ -99,8 +117,39 @@
 | `sfx-pop9` | pop9.ogg — cogitollc | same page/hash | [pop9.ogg](https://opengameart.org/sites/default/files/pop9.ogg) |
 | `sfx-pop10` | pop10.ogg — cogitollc | same page/hash | [pop10.ogg](https://opengameart.org/sites/default/files/pop10.ogg) |
 
+### 승인 확장 — Various Sound Effects (47 individual WAV)
+
+`Spring Spring`의 [official CC0 page](https://opengameart.org/content/various-sound-effects-0) raw HTML SHA-256은 `925a53041ff971e46ad4b5e8ac0857ce753ba0dcad4e6ddf30dac20031f14682`다. 아래 **각 token이 one asset**이며 direct source는 `https://opengameart.org/sites/default/files/<file>`이다. 모든 candidate의 commercial/raw redistribution/conversion=`true`, attribution=`false`다.
+
+`sfx-various-bangs=bangs.wav`, `sfx-various-beep1=beep1.wav`, `sfx-various-big-amber=big_amber.wav`, `sfx-various-break-stone=break_stone.wav`, `sfx-various-bup=bup.wav`, `sfx-various-cannonball-tap=cannonball_tap.wav`, `sfx-various-click=click_1.wav`, `sfx-various-crush=crush.wav`, `sfx-various-death=death_2.wav`, `sfx-various-dull-explosion=dull_explosion.wav`, `sfx-various-fall=fall_0.wav`, `sfx-various-important-item=get_important_item.wav`, `sfx-various-glug=glug.wav`, `sfx-various-moan=moan.wav`, `sfx-various-nom=nom.wav`, `sfx-various-player-hit=player_hit.wav`, `sfx-various-pop=pop.wav`, `sfx-various-powered-door=powered_door.wav`, `sfx-various-weeds=rustling_of_the_weeds.wav`, `sfx-various-scooter=scooter_p.wav`, `sfx-various-small-amber=small_amber.wav`, `sfx-various-rock-impact=small_rock_impact.wav`, `sfx-various-spear=spear.wav`, `sfx-various-steal=steal.wav`, `sfx-various-swim=swim_0.wav`, `sfx-various-tap-stone=tap_stone.wav`, `sfx-various-teleport=teleport_2.wav`, `sfx-various-tick=tick_0.wav`, `sfx-various-uff=uff.wav`, `sfx-various-ambient-impact=snd_ambient_impact1.wav`, `sfx-various-batwings=snd_batwings.wav`, `sfx-various-death1=snd_death1.wav`, `sfx-various-death2=snd_death2.wav`, `sfx-various-fillenergy=snd_fillenergy.wav`, `sfx-various-footsteps=snd_footsteps1.wav`, `sfx-various-fox-footstep=snd_fox_footstep.wav`, `sfx-various-getpowerup=snd_getpowerup.wav`, `sfx-various-menu-move=snd_menu_move.wav`, `sfx-various-menu-select=snd_menu_select.wav`, `sfx-various-npc-message=snd_npc_message.wav`, `sfx-various-slip-ice=snd_slip_on_ice.wav`, `sfx-various-splathit=snd_splathit.wav`, `sfx-various-splat=snd_splat.wav`, `sfx-various-splurt=snd_splurt.wav`, `sfx-various-sproing=snd_sproing.wav`, `sfx-various-throw=snd_throw1.wav`, `sfx-various-treasure=snd_treasure.wav`.
+
+### 승인 확장 — RPG / battle individual SFX (20)
+
+| candidate asset_id | creator / official page · evidence SHA-256 | direct source |
+| --- | --- | --- |
+| `sfx-rpg-baseballbat` | Delta12 Studio · [RPG Sound Effect Pack](https://opengameart.org/content/rpg-sound-effect-pack) · `e6b3928faa6f503a64336f7655e07855378511abfe5427b14fa01138fa2c8efb` | [baseballbat_1.ogg](https://opengameart.org/sites/default/files/baseballbat_1.ogg) |
+| `sfx-rpg-bee` | same page/hash | [bee_2.ogg](https://opengameart.org/sites/default/files/bee_2.ogg) |
+| `sfx-rpg-bat` | same page/hash | [bat.ogg](https://opengameart.org/sites/default/files/bat.ogg) |
+| `sfx-rpg-cancel` | same page/hash | [cancel_1.ogg](https://opengameart.org/sites/default/files/cancel_1.ogg) |
+| `sfx-rpg-door` | same page/hash | [door_1.ogg](https://opengameart.org/sites/default/files/door_1.ogg) |
+| `sfx-rpg-explosion` | same page/hash | [explosion_5.ogg](https://opengameart.org/sites/default/files/explosion_5.ogg) |
+| `sfx-rpg-explosion1` | same page/hash | [explosion1_3.ogg](https://opengameart.org/sites/default/files/explosion1_3.ogg) |
+| `sfx-rpg-grass` | same page/hash | [grass_1.ogg](https://opengameart.org/sites/default/files/grass_1.ogg) |
+| `sfx-rpg-hurt` | same page/hash | [hurt_1.ogg](https://opengameart.org/sites/default/files/hurt_1.ogg) |
+| `sfx-rpg-item` | same page/hash | [item_1.ogg](https://opengameart.org/sites/default/files/item_1.ogg) |
+| `sfx-rpg-punch` | same page/hash | [punch_1.ogg](https://opengameart.org/sites/default/files/punch_1.ogg) |
+| `sfx-rpg-steps` | same page/hash | [steps_1.ogg](https://opengameart.org/sites/default/files/steps_1.ogg) |
+| `sfx-sea-cannon-fire` | Thimras · [Battle at sea](https://opengameart.org/content/battle-at-sea) · `b0410a3d5da2474d71359d09cefd89b82d70683925353490ec5712992944753f` | [cannon_fire_1.ogg](https://opengameart.org/sites/default/files/cannon_fire_1.ogg) |
+| `sfx-sea-cannon-hit` | same page/hash | [cannon_hit_1.ogg](https://opengameart.org/sites/default/files/cannon_hit_1.ogg) |
+| `sfx-sea-cannon-hit-cannon` | same page/hash | [cannon_hit_cannon_1.ogg](https://opengameart.org/sites/default/files/cannon_hit_cannon_1.ogg) |
+| `sfx-sea-cannon-hit-ship` | same page/hash | [cannon_hit_ship_short.ogg](https://opengameart.org/sites/default/files/cannon_hit_ship_short.ogg) |
+| `sfx-sea-cannon-hit-wall` | same page/hash | [cannon_hit_wall_1.ogg](https://opengameart.org/sites/default/files/cannon_hit_wall_1.ogg) |
+| `sfx-sea-cannon-hit-wall-dry` | same page/hash | [cannon_hit_wall_no_splash.ogg](https://opengameart.org/sites/default/files/cannon_hit_wall_no_splash.ogg) |
+| `sfx-sea-cannon-miss` | same page/hash | [cannon_miss_1.ogg](https://opengameart.org/sites/default/files/cannon_miss_1.ogg) |
+| `sfx-sea-ship-destroyed` | same page/hash | [ship_destroyed_1.ogg](https://opengameart.org/sites/default/files/ship_destroyed_1.ogg) |
+
 ## Gate 판정과 다음 행동
 
-- **approved research candidate (19 music / 33 SFX): PASS.** 각 후보는 author page, creator, exact source file, CC0 license, official license evidence hash, commercial/raw redistribution/conversion 판단을 갖췄다.
-- **starter-v1 research gate (30 music / 100 SFX): NOT GREEN.** 19/30 music, 33/100 SFX만 asset-level evidence가 확정됐다. 따라서 300–500 MiB pack build는 아직 시작하지 않는다.
-- 다음 작업은 같은 기준으로 나머지 11 music·67 SFX를 asset-level ledger에 채운 뒤, 다운로드 source hash → transcode/probe → evidence text snapshot → manifest build 순서로 진행한다.
+- **approved research candidate (30 music / 100 SFX): PASS.** 각 후보는 author page, creator, exact source file, CC0 license, official license evidence hash, commercial/raw redistribution/conversion 판단을 갖췄다. Direct asset URL 130개와 official asset page URL 36개를 2026-07-14 HTTPS HEAD 200으로 다시 확인했다.
+- **starter-v1 research gate (30 music / 100 SFX): GREEN.** 이것은 license/provenance research만 green이라는 뜻이다. 실제 source bytes, duration, codec, converted bytes와 manifest integrity는 아직 검증되지 않았다.
+- 다음 작업은 이 ledger의 approved asset만 대상으로 source download SHA-256 → transcode/probe → evidence text snapshot → manifest build 순서로 진행한다. 이 순서를 건너뛰어 build artifact를 배포하지 않는다.
