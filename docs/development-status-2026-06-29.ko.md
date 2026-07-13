@@ -1,10 +1,25 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 233. 2026-07-14 starter media pack official-license research`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 234. 2026-07-14 starter media pack release`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
 > 이 문서의 기존 날짜 기반 섹션은 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 230`만 기준으로 본다.
 > 단, `2일 내 1차 데모 완성` 실행 레일은 `## 189`의 장기 우선순위를 그대로 넓게 집행하지 않고, `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`의 축소된 실행 계획을 우선 적용한다.
 
-## 233. 2026-07-14 starter media pack official-license research (in progress)
+## 234. 2026-07-14 starter media pack release
+
+Starter Media Pack Task 5 Step 3–5를 실제 source-byte build와 release 검증까지 완료했다. Git에 binary는 추가하지 않았으며 `dist/starter-media-pack` 및 `artifacts/starter-media-pack-sources`는 `.gitignore` 대상이다.
+
+- 승인 ledger의 정확한 집합(30 music / 100 SFX)만 사용했다. 130 source bytes의 SHA-256, converted SHA-256·duration·official URL·selection evidence hash는 각각 `evidence/<asset_id>.txt`와 `manifest.json`에 고정됐다.
+- `assets/` 130개만 library asset이며 music은 320kbps CBR MP3, SFX는 48kHz mono PCM WAV를 verifier가 실제 ffprobe/frame check로 확인한다. `source-archive/` 130개는 같은 승인 CC0 원본의 재현/감사용 보존본이며 manifest에 없으므로 검색·즐겨찾기·timeline materialize 대상이 아니다.
+- 최종 manifest integrity: `starter-v1@1.0.0`, `493,018,539` bytes (약 470.2MiB), SHA-256 `f0d5249c2c1b268587a672bdc59956158f3f557654e3073e070adc90e08d60b2`. `scripts/verify-starter-media-pack.py dist/starter-media-pack`은 `OK`다.
+- TDD: ledger 30/100 고정과 fingerprint, source archive 비선택성, source/converted SHA-256·duration·format evidence, low-rate music의 44.1kHz upsample→320kbps CBR, immutable metadata, 300–500MiB lower-bound, FMA User-Agent 403 재현을 RED→GREEN으로 추가했다.
+- 전체 검증: Python 3.12 backend `801 passed, 1 warning in 172.70s`; frontend `105 passed`; production build success. frontend stderr의 intentional ErrorBoundary 및 기존 React `act(...)` hygiene output은 exit 0이다.
+- 600-second Korean smoke: ingest → edit → SRT → final MP4 → CapCut draft 모든 checks true. SRT `artifacts/task5-smoke/projects/projects/production-readiness-korean-smoke-loop/subtitles/subtitle_001.srt`; MP4 SHA-256 `448c74034c3981ff7aa5264d12655eba6096b1653261e93d1ffae41a26342f29`; CapCut draft `artifacts/task5-smoke/projects/projects/production-readiness-korean-smoke-loop/exports/capcut_draft/export_002/timeline_002/draft_content.json`. 자동 smoke는 CapCut Desktop open을 주장하지 않는다.
+
+다음 권장 작업:
+
+- feature 작업은 완료됐다. 실제 운영 배포 전에는 기존 human acceptance runbook의 실제 사용자 음성 listening approval 및 별도 Windows PC CapCut Desktop open/edit/export 확인만 수행한다.
+
+## 233. 2026-07-14 starter media pack official-license research (historical)
 
 Task 5 Step 1의 source-level licensing gate를 시작했다. `docs/starter-media-pack-license-research.ko.md`가 asset-level candidate URL, creator, selection timestamp, official-page raw HTML SHA-256, attribution, commercial/raw redistribution/conversion 판정의 SSOT다.
 

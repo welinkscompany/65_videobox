@@ -117,8 +117,8 @@ git commit -m "feat: add starter media library UI"
 
 - [x] Step 1 — Complete official-license research for every candidate. Store all Task 1 facts; reject unclear/non-commercial/non-redistributable terms and conversion-prohibited terms. 2026-07-14: `docs/starter-media-pack-license-research.ko.md` records 30 music/100 SFX with creator, official page, direct file, CC0 evidence hash and attribution. 130 direct asset URLs and 36 official asset pages returned HTTPS 200. This marks the research gate only; source-byte/hash/transcode/manifest build remain the next gate.
 - [x] Step 2 — Write RED verifier tests for wrong music codec/bitrate, wrong SFX format, pack size outside 300–500MB, missing evidence. 2026-07-14: core service gate regression also covers missing/tampered evidence, wrong codec, average-320kbps VBR, source-before-staging rejection, and ID3v2.3/v2.4 CBR parser boundaries.
-- [ ] Step 3 — Build manifest/checksums/LICENSES reproducibly. Put archive/media only in ignored dist/starter-media-pack; never track binaries.
-- [ ] Step 4 — Release verify.
+- [x] Step 3 — Build manifest/checksums/LICENSES reproducibly. 2026-07-14: `scripts/build_starter_media_pack.py` downloaded only the approved 30 music/100 SFX source set, recorded source and converted SHA-256/duration/format in immutable evidence snapshots, and built ignored `dist/starter-media-pack`. The pack retains the exact CC0 source bytes in non-selectable `source-archive/` for provenance/reproducibility; manifest-listed `assets/` remains the only library surface. Actual manifest integrity is `493,018,539` bytes and `f0d5249c2c1b268587a672bdc59956158f3f557654e3073e070adc90e08d60b2`.
+- [x] Step 4 — Release verify. 2026-07-14: CLI/service verifier accepted `starter-v1@1.0.0`; full Python 3.12 backend, frontend test/build, and 600-second Korean output smoke are green.
 
 Run: .venv\Scripts\python.exe scripts\verify-starter-media-pack.py dist\starter-media-pack
 Run: .venv\Scripts\python.exe -m pytest -q
@@ -126,7 +126,7 @@ Run: npm --prefix apps/web test
 Run: npm --prefix apps/web run build
 Expected: PASS. Run one 600-second Korean ingest → materialize BGM/SFX → edit → SRT → MP4 → real CapCut draft smoke.
 
-- [ ] Step 5 — Update SSOT with source/evidence dates, pack hash/size, test totals, smoke paths, attribution; inspect git status and diff; commit feat: ship verified starter media pack.
+- [x] Step 5 — Update SSOT with source/evidence dates, pack hash/size, test totals, smoke paths, attribution; inspect git status and diff; commit feat: ship verified starter media pack.
 
 ## Coverage self-review
 

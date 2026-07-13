@@ -127,6 +127,22 @@ def test_reinstalling_verified_pack_is_idempotent(tmp_path: Path) -> None:
     assert [item["library_asset_id"] for item in service.library_store.search()] == ["pack:starter-001:music-001"]
 
 
+def test_source_archive_bytes_are_not_indexed_as_selectable_library_assets(tmp_path: Path) -> None:
+    source = _write_pack(tmp_path / "source")
+    archive = source / "source-archive" / "original-source.mp3"
+    archive.parent.mkdir()
+    archive.write_bytes(b"approved source bytes")
+    manifest_path = source / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["declared_bytes"], manifest["sha256"] = compute_pack_integrity(source)
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    result = _service(tmp_path).install(source)
+
+    assert result.status == "installed"
+    assert [item["library_asset_id"] for item in _service(tmp_path).library_store.search()] == ["pack:starter-001:music-001"]
+
+
 def test_pack_content_size_or_digest_mismatch_does_not_activate(tmp_path: Path) -> None:
     source = _write_pack(tmp_path / "source")
     manifest_path = source / "manifest.json"
