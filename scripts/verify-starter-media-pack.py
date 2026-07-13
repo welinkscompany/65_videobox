@@ -16,6 +16,7 @@ for source_path in (
 
 from videobox_core_engine.media_pack_service import MediaPackService
 from videobox_storage.media_library_store import MediaLibraryStore
+from starter_media_pack import ReleasePackValidationError, ffprobe_media, verify_release_pack
 
 
 def _probe_duration(path: Path, *, ffprobe_binary: str) -> float:
@@ -32,6 +33,14 @@ def main() -> int:
     parser.add_argument("--ffprobe", default="ffprobe")
     args = parser.parse_args()
     root = args.pack_directory.resolve()
+    try:
+        verify_release_pack(
+            root,
+            media_probe=lambda path: ffprobe_media(path, ffprobe_binary=args.ffprobe),
+        )
+    except ReleasePackValidationError as error:
+        print(f"FAILED [release_contract]: {error}")
+        return 1
     with tempfile.TemporaryDirectory(prefix="videobox-pack-verify-") as temporary_directory:
         temporary_root = Path(temporary_directory)
         service = MediaPackService(
