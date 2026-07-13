@@ -48,6 +48,22 @@ def test_manifest_requires_namespaced_unique_ids_and_sha256() -> None:
     assert manifest.assets[0].library_asset_id == "pack:starter-001:music-001"
 
 
+def test_manifest_carries_canonical_tags_and_required_attribution_metadata() -> None:
+    data = valid_manifest()
+    asset = data["assets"][0]
+    assert isinstance(asset, dict)
+    asset["tags"] = ["calm", "business"]
+    license_data = asset["license"]
+    assert isinstance(license_data, dict)
+    license_data.update({"attribution_required": True, "attribution_text": "Music by Example Creator"})
+
+    parsed = MediaPackManifest.from_dict(data).assets[0]
+
+    assert parsed.tags == ("calm", "business")
+    assert parsed.license.attribution_required is True
+    assert parsed.license.attribution_text == "Music by Example Creator"
+
+
 @pytest.mark.parametrize("pack_path", ["/absolute.mp3", "../escape.mp3", "assets/../escape.mp3", "C:/escape.mp3", r"C:\escape.mp3", "//server/share.mp3"])
 def test_manifest_rejects_unsafe_asset_pack_path(pack_path: str) -> None:
     data = valid_manifest()

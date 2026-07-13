@@ -33,6 +33,7 @@ def _indexed_library(tmp_path: Path) -> MediaLibraryStore:
                 "asset_id": "music-001",
                 "media_type": "music",
                 "duration_seconds": 12.5,
+                "tags": ["calm", "business"],
                 "sha256": digest,
                 "path": asset_path,
                 "source": "Synthetic source",
@@ -41,6 +42,8 @@ def _indexed_library(tmp_path: Path) -> MediaLibraryStore:
                     "official_url": "https://example.test/license",
                     "evidence_timestamp": "2026-07-12T10:00:00Z",
                     "evidence_sha256": "a" * 64,
+                    "attribution_required": True,
+                    "attribution_text": "Music by Synthetic creator",
                 },
             }
             ,
@@ -49,6 +52,7 @@ def _indexed_library(tmp_path: Path) -> MediaLibraryStore:
                 "asset_id": "sfx-001",
                 "media_type": "sfx",
                 "duration_seconds": 1.0,
+                "tags": ["impact"],
                 "sha256": sfx_digest,
                 "path": sfx_path,
                 "source": "Synthetic source",
@@ -57,6 +61,8 @@ def _indexed_library(tmp_path: Path) -> MediaLibraryStore:
                     "official_url": "https://example.test/license",
                     "evidence_timestamp": "2026-07-12T10:00:00Z",
                     "evidence_sha256": "a" * 64,
+                    "attribution_required": False,
+                    "attribution_text": "",
                 },
             },
         ],
@@ -105,6 +111,8 @@ def test_materialize_verified_library_music_registers_a_project_local_bgm_with_l
             "evidence_sha256": "a" * 64,
             "source": "Synthetic source",
             "creator": "Synthetic creator",
+            "attribution_required": True,
+            "attribution_text": "Music by Synthetic creator",
         },
     }
     assert library.list_recent_usage() == ["pack:starter-001:music-001"]
@@ -123,6 +131,152 @@ def test_materialize_missing_library_asset_returns_422_without_creating_project_
     assert response.status_code == 422
     assert response.json()["detail"] == "asset_missing"
     assert library.list_recent_usage() == []
+
+
+def test_media_library_list_and_favorite_api_expose_verified_assets_and_persist_global_favorites(tmp_path: Path) -> None:
+    library = _indexed_library(tmp_path)
+    client = TestClient(create_app(projects_root=tmp_path / "projects", media_library_store=library))
+
+    listed = client.get("/api/media-library/assets")
+
+    assert listed.status_code == 200
+    assert listed.json()["assets"] == [
+        {
+            "library_asset_id": "pack:starter-001:music-001",
+            "asset_id": "music-001",
+            "media_type": "music",
+            "duration_seconds": 12.5,
+            "version": "1.0.0",
+            "verified": True,
+            "available": True,
+            "source": "Synthetic source",
+            "creator": "Synthetic creator",
+            "official_license_url": "https://example.test/license",
+            "evidence_timestamp": "2026-07-12T10:00:00Z",
+            "tags": ["calm", "business"],
+            "attribution_required": True,
+            "attribution_text": "Music by Synthetic creator",
+        },
+        {
+            "library_asset_id": "pack:starter-001:sfx-001",
+            "asset_id": "sfx-001",
+            "media_type": "sfx",
+            "duration_seconds": 1.0,
+            "version": "1.0.0",
+            "verified": True,
+            "available": True,
+            "source": "Synthetic source",
+            "creator": "Synthetic creator",
+            "official_license_url": "https://example.test/license",
+            "evidence_timestamp": "2026-07-12T10:00:00Z",
+            "tags": ["impact"],
+            "attribution_required": False,
+            "attribution_text": "",
+        },
+    ]
+    favorite = client.put("/api/media-library/assets/pack:starter-001:music-001/favorite", json={"enabled": True})
+    assert favorite.status_code == 200
+    assert favorite.json() == {"asset_ids": ["pack:starter-001:music-001"]}
+    assert client.get("/api/media-library/favorites").json() == {"asset_ids": ["pack:starter-001:music-001"]}
+
+
+def test_verified_library_asset_preview_streams_without_creating_project_state(tmp_path: Path) -> None:
+    library = _indexed_library(tmp_path)
+    client = TestClient(create_app(projects_root=tmp_path / "projects", media_library_store=library))
+
+    preview = client.get("/api/media-library/assets/pack:starter-001:music-001/preview")
+
+    assert preview.status_code == 200
+    assert preview.content == b"synthetic music"
+    assert preview.headers["content-type"] == "audio/mpeg"
+
+
+def test_media_library_api_exposes_install_state_and_metadata_for_tag_duration_attribution_search(tmp_path: Path) -> None:
+    library = _indexed_library(tmp_path)
+    client = TestClient(create_app(projects_root=tmp_path / "projects", media_library_store=library))
+
+    state = client.get("/api/media-library/install-state")
+    listed = client.get("/api/media-library/assets")
+
+    assert state.json() == {"status": "installed", "installed_asset_count": 2}
+    music = listed.json()["assets"][0]
+    assert music["tags"] == ["calm", "business"]
+    assert music["duration_seconds"] == 12.5
+    assert music["attribution_required"] is True
+    assert music["attribution_text"] == "Music by Synthetic creator"
+
+
+def test_media_library_api_reports_not_installed_without_blocking_project_api(tmp_path: Path) -> None:
+    client = TestClient(create_app(projects_root=tmp_path / "projects"))
+
+    assert client.get("/api/media-library/install-state").json() == {"status": "not_installed", "installed_asset_count": 0}
+    assert client.post("/api/projects", json={"name": "Still editable"}).status_code == 201
+
+
+def test_tampered_library_asset_stays_visible_as_disabled_and_cannot_preview_or_materialize(tmp_path: Path) -> None:
+    library = _indexed_library(tmp_path)
+    client = TestClient(create_app(projects_root=tmp_path / "projects", media_library_store=library))
+    (tmp_path / "installed-pack" / "assets" / "music-001.mp3").write_bytes(b"tampered")
+
+    assets = client.get("/api/media-library/assets").json()["assets"]
+
+    tampered = next(asset for asset in assets if asset["asset_id"] == "music-001")
+    assert tampered["available"] is False
+    assert tampered["verified"] is False
+    assert client.get("/api/media-library/assets/pack:starter-001:music-001/preview").status_code == 422
+    project_id = client.post("/api/projects", json={"name": "Tampered media"}).json()["project_id"]
+    assert client.post("/api/media-library/assets/pack:starter-001:music-001/materialize", json={"project_id": project_id}).status_code == 422
+
+
+def test_media_library_favorite_rejects_unknown_or_unavailable_asset_ids(tmp_path: Path) -> None:
+    library = _indexed_library(tmp_path)
+    client = TestClient(create_app(projects_root=tmp_path / "projects", media_library_store=library))
+
+    response = client.put("/api/media-library/assets/pack:starter-001:missing/favorite", json={"enabled": True})
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "asset_missing"
+    assert library.list_favorites() == []
+
+
+def test_materialize_rejects_source_swapped_after_lookup_before_project_registration(tmp_path: Path, monkeypatch) -> None:
+    library = _indexed_library(tmp_path)
+    original_get = library.get_verified_asset
+    source = tmp_path / "installed-pack" / "assets" / "music-001.mp3"
+
+    def swap_after_lookup(*, library_asset_id: str):
+        asset = original_get(library_asset_id=library_asset_id)
+        source.write_bytes(b"swapped after verification")
+        return asset
+
+    monkeypatch.setattr(library, "get_verified_asset", swap_after_lookup)
+    client = TestClient(create_app(projects_root=tmp_path / "projects", media_library_store=library))
+    project_id = client.post("/api/projects", json={"name": "Swap guard"}).json()["project_id"]
+
+    response = client.post("/api/media-library/assets/pack:starter-001:music-001/materialize", json={"project_id": project_id})
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "asset_missing"
+    assert LocalProjectStore(tmp_path / "projects").list_assets(project_id=project_id) == []
+
+
+def test_preview_rejects_source_swapped_after_lookup_before_response(tmp_path: Path, monkeypatch) -> None:
+    library = _indexed_library(tmp_path)
+    original_get = library.get_verified_asset
+    source = tmp_path / "installed-pack" / "assets" / "music-001.mp3"
+
+    def swap_after_lookup(*, library_asset_id: str):
+        asset = original_get(library_asset_id=library_asset_id)
+        source.write_bytes(b"swapped after verification")
+        return asset
+
+    monkeypatch.setattr(library, "get_verified_asset", swap_after_lookup)
+    client = TestClient(create_app(projects_root=tmp_path / "projects", media_library_store=library))
+
+    response = client.get("/api/media-library/assets/pack:starter-001:music-001/preview")
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "asset_missing"
 
 
 def test_installed_sparse_pack_materializes_into_a_project_local_asset(tmp_path: Path) -> None:

@@ -416,6 +416,28 @@ export type TtsCandidateRequest = {
   target_duration_sec?: number;
 };
 
+export type MediaLibraryAsset = {
+  library_asset_id: string;
+  asset_id: string;
+  media_type: "music" | "sfx";
+  duration_seconds: number;
+  version: string;
+  verified: boolean;
+  available: boolean;
+  tags: string[];
+  source: string;
+  creator: string;
+  official_license_url: string;
+  evidence_timestamp?: string;
+  attribution_required: boolean;
+  attribution_text: string;
+};
+
+export type MediaLibraryInstallState = {
+  status: "not_installed" | "installed" | "degraded";
+  installed_asset_count: number;
+};
+
 export type TtsCandidateResponse = AssetResponse & {
   candidate_id?: string | null;
   segment_id?: string | null;
@@ -524,6 +546,20 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  getMediaLibraryInstallState: () => request<MediaLibraryInstallState>("/api/media-library/install-state"),
+  listMediaLibraryAssets: () => request<{ assets: MediaLibraryAsset[] }>("/api/media-library/assets"),
+  listMediaLibraryFavorites: () => request<{ asset_ids: string[] }>("/api/media-library/favorites"),
+  listRecentMediaLibraryAssetIds: () => request<{ asset_ids: string[] }>("/api/media-library/recent"),
+  setMediaLibraryFavorite: (libraryAssetId: string, enabled: boolean) =>
+    request<{ asset_ids: string[] }>(`/api/media-library/assets/${encodeURIComponent(libraryAssetId)}/favorite`, {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled }),
+    }),
+  materializeMediaLibraryAsset: (libraryAssetId: string, projectId: string) =>
+    request<AssetResponse>(`/api/media-library/assets/${encodeURIComponent(libraryAssetId)}/materialize`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project_id: projectId }),
+    }),
+  mediaLibraryPreviewUrl: (libraryAssetId: string) =>
+    `/api/media-library/assets/${encodeURIComponent(libraryAssetId)}/preview`,
   listEditorPresets: (projectId: string) =>
     request<EditorPreset[]>(`/api/projects/${projectId}/editor-library/presets`),
   listEditorFavorites: (projectId: string) =>

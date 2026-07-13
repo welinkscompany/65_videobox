@@ -656,6 +656,8 @@ function createFetchMock({
   ttsListeningReviewStatuses,
   voiceSampleUploadStatus,
   voiceSamples = { assets: [] },
+  mediaLibraryAssets = [],
+  mediaLibraryUnavailable = false,
 }: {
   geminiKeys?: { keys: Array<Record<string, unknown>> };
   brollAssets?: { assets: BrollAsset[] };
@@ -684,6 +686,8 @@ function createFetchMock({
   ttsListeningReviewStatuses?: number[];
   voiceSampleUploadStatus?: number;
   voiceSamples?: { assets: Array<Record<string, unknown>> };
+  mediaLibraryAssets?: Array<Record<string, unknown>>;
+  mediaLibraryUnavailable?: boolean;
 } = {}) {
   const state: {
     timeline: TimelinePayload;
@@ -695,6 +699,9 @@ function createFetchMock({
     candidateReviewSnapshot: ReviewSnapshot;
     candidateTimelineReviewStatus: string;
     ttsCandidates: TtsCandidateRecord[];
+    mediaLibraryAssets: Array<Record<string, unknown>>;
+    mediaLibraryFavorites: string[];
+    mediaLibraryRecent: string[];
   } = {
     timeline: structuredClone(timeline.timeline),
     editingSession: structuredClone(editingSession) as EditingSession,
@@ -705,12 +712,41 @@ function createFetchMock({
     candidateReviewSnapshot: structuredClone(candidateReviewSnapshot),
     candidateTimelineReviewStatus: partialRegenerationResult.timeline.review_status,
     ttsCandidates: structuredClone(ttsCandidates),
+    mediaLibraryAssets: structuredClone(mediaLibraryAssets),
+    mediaLibraryFavorites: [],
+    mediaLibraryRecent: [],
   };
 
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (url.endsWith("/api/capcut/handoff-diagnostics")) {
       return new Response(JSON.stringify(capcutDiagnosticsResponses?.shift() ?? capcutDiagnostics));
+    }
+    if (mediaLibraryUnavailable && url.startsWith("/api/media-library/")) {
+      return new Response("media library unavailable", { status: 503 });
+    }
+    if (url.endsWith("/api/media-library/assets")) {
+      return new Response(JSON.stringify({ assets: state.mediaLibraryAssets }));
+    }
+    if (url.endsWith("/api/media-library/install-state")) {
+      return new Response(JSON.stringify({ status: state.mediaLibraryAssets.length ? "installed" : "not_installed", installed_asset_count: state.mediaLibraryAssets.length }));
+    }
+    if (url.endsWith("/api/media-library/favorites")) {
+      return new Response(JSON.stringify({ asset_ids: state.mediaLibraryFavorites }));
+    }
+    if (url.endsWith("/api/media-library/recent")) {
+      return new Response(JSON.stringify({ asset_ids: state.mediaLibraryRecent }));
+    }
+    if (/\/api\/media-library\/assets\/.+\/favorite$/.test(url) && init?.method === "PUT") {
+      const assetId = decodeURIComponent(url.split("/").slice(-2)[0] ?? "");
+      state.mediaLibraryFavorites = state.mediaLibraryFavorites.includes(assetId)
+        ? state.mediaLibraryFavorites.filter((item) => item !== assetId)
+        : [assetId, ...state.mediaLibraryFavorites];
+      return new Response(JSON.stringify({ asset_ids: state.mediaLibraryFavorites }));
+    }
+    if (/\/api\/media-library\/assets\/.+\/materialize$/.test(url) && init?.method === "POST") {
+      state.mediaLibraryRecent = [decodeURIComponent(url.split("/").slice(-2)[0] ?? "")];
+      return new Response(JSON.stringify({ asset_id: "asset_materialized_music_001", asset_type: "bgm", storage_uri: "local://projects/project_001/assets/imported/music-001.mp3" }), { status: 201 });
     }
     if (url.endsWith("/api/projects")) {
       return new Response(JSON.stringify(projectsResponse));
@@ -5516,5 +5552,158 @@ describe("App", () => {
     expect(screen.getAllByText("오버레이").length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: "분할" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "실행 취소" })).toBeInTheDocument();
+  });
+
+  it("separates verified BGM and SFX library items, previews without mutation, persists favorites, and materializes before applying", async () => {
+    const fetchMock = createFetchMock({
+      mediaLibraryAssets: [
+        {
+          library_asset_id: "pack:starter-001:music-001",
+          asset_id: "music-001",
+          media_type: "music",
+          duration_seconds: 12.5,
+          version: "1.0.0",
+          verified: true,
+          available: true,
+          tags: ["calm", "office"],
+          source: "Synthetic source",
+          creator: "Synthetic creator",
+          official_license_url: "https://example.test/license",
+          attribution_required: true,
+          attribution_text: "Music by Synthetic creator",
+        },
+        {
+          library_asset_id: "pack:starter-001:sfx-missing",
+          asset_id: "sfx-missing",
+          media_type: "sfx",
+          duration_seconds: 1,
+          version: "1.0.0",
+          verified: false,
+          available: false,
+          tags: ["impact"],
+          source: "Synthetic source",
+          creator: "Synthetic creator",
+          official_license_url: "https://example.test/license",
+        },
+      ],
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
+    expect(await screen.findByRole("heading", { name: "BGM 라이브러리" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "SFX 라이브러리" })).toBeInTheDocument();
+    expect(screen.getByText("설치된 검증 미디어 2개")).toBeInTheDocument();
+    expect(screen.getByText("Starter pack 설치됨")).toBeInTheDocument();
+    expect(screen.getByText(/Synthetic creator · 1.0.0 · 12.5초/i)).toBeInTheDocument();
+    expect(screen.getByText(/표기 필요: Music by Synthetic creator/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "SFX 적용" })).toBeDisabled();
+
+    const search = screen.getByPlaceholderText("BGM, SFX, 태그 또는 길이");
+    fireEvent.change(search, { target: { value: "BGM" } });
+    expect(screen.getByText("music-001")).toBeInTheDocument();
+    expect(screen.queryByText("sfx-missing")).not.toBeInTheDocument();
+    fireEvent.change(search, { target: { value: "calm" } });
+    expect(screen.getByText("music-001")).toBeInTheDocument();
+    fireEvent.change(search, { target: { value: "12.5" } });
+    expect(screen.getByText("music-001")).toBeInTheDocument();
+    fireEvent.change(search, { target: { value: "" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "BGM 미리보기" }));
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      expect.stringMatching(/materialize|\/music$/),
+      expect.anything(),
+    );
+    expect(screen.getByText(/미리보기 선택됨/i)).toBeInTheDocument();
+    expect(screen.getByTestId("media-library-preview")).toHaveAttribute(
+      "src",
+      "/api/media-library/assets/pack%3Astarter-001%3Amusic-001/preview",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "BGM 즐겨찾기" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/media-library/assets/pack%3Astarter-001%3Amusic-001/favorite",
+      expect.objectContaining({ method: "PUT" }),
+    ));
+    fireEvent.click(screen.getByRole("button", { name: "즐겨찾기" }));
+    expect(screen.getByText("music-001")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "BGM 적용" }));
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/media-library/assets/pack%3Astarter-001%3Amusic-001/materialize",
+        expect.objectContaining({ method: "POST", body: JSON.stringify({ project_id: "project_001" }) }),
+      );
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/music",
+        expect.objectContaining({
+          method: "PATCH",
+          body: JSON.stringify({ expected_revision: 1, asset_id: "asset_materialized_music_001" }),
+        }),
+      );
+    });
+    fireEvent.click(screen.getByRole("button", { name: "최근" }));
+    expect(screen.getByText("music-001")).toBeInTheDocument();
+  });
+
+  it("keeps the restored editor usable when the global media library is unavailable", async () => {
+    vi.stubGlobal("fetch", createFetchMock({ mediaLibraryUnavailable: true }));
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
+
+    expect(await screen.findByText(/미디어 라이브러리를 사용할 수 없습니다/i)).toBeInTheDocument();
+    expect(screen.getByText("editing_session_001")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "분할" })).toBeEnabled();
+  });
+
+  it("restores media favorites and recent usage from the global library after an app reload", async () => {
+    const fetchMock = createFetchMock({
+      mediaLibraryAssets: [{
+        library_asset_id: "pack:starter-001:music-001",
+        asset_id: "music-001",
+        media_type: "music",
+        duration_seconds: 12.5,
+        version: "1.0.0",
+        verified: true,
+        available: true,
+        tags: ["calm"],
+        source: "Synthetic source",
+        creator: "Synthetic creator",
+        official_license_url: "https://example.test/license",
+        attribution_required: false,
+        attribution_text: "",
+      }],
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const firstRender = render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
+    fireEvent.click(await screen.findByRole("button", { name: "BGM 즐겨찾기" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/media-library/assets/pack%3Astarter-001%3Amusic-001/favorite",
+      expect.objectContaining({ method: "PUT" }),
+    ));
+    fireEvent.click(screen.getByRole("button", { name: "BGM 적용" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/media-library/assets/pack%3Astarter-001%3Amusic-001/materialize",
+      expect.objectContaining({ method: "POST" }),
+    ));
+
+    firstRender.unmount();
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
+    await screen.findByRole("button", { name: "즐겨찾기" });
+
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([url, init]) =>
+      String(url).endsWith("/api/media-library/favorites") && !init,
+    )).toHaveLength(2));
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([url, init]) =>
+      String(url).endsWith("/api/media-library/recent") && !init,
+    )).toHaveLength(3));
+    fireEvent.click(screen.getByRole("button", { name: "즐겨찾기" }));
+    expect(screen.getByText("music-001")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "최근" }));
+    expect(screen.getByText("music-001")).toBeInTheDocument();
   });
 });

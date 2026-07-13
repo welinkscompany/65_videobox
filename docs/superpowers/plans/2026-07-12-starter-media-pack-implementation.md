@@ -34,7 +34,7 @@
 
 **Files:** media_pack.py and tests/test_media_pack.py.
 
-- [ ] Step 1 — Write RED validation tests.
+- [x] Step 1 — Write RED validation tests.
 
 ~~~
 def test_manifest_rejects_asset_without_redistribution_right() -> None:
@@ -46,9 +46,9 @@ def test_manifest_requires_namespaced_unique_ids_and_sha256() -> None:
     assert manifest.assets[0].library_asset_id == "pack:starter-001:music-001"
 ~~~
 
-- [ ] Step 2 — Run RED: .venv\Scripts\python.exe -m pytest tests/test_media_pack.py -q. Expected: import failure.
-- [ ] Step 3 — Require pack ID, semantic version, bytes, SHA-256, media type/duration, source, creator, official license URL, evidence timestamp/hash, commercial_use true, redistribution true. Reject duplicates/unknown license status.
-- [ ] Step 4 — Verify and commit.
+- [x] Step 2 — Run RED: .venv\Scripts\python.exe -m pytest tests/test_media_pack.py -q. Expected: import failure.
+- [x] Step 3 — Require pack ID, semantic version, bytes, SHA-256, media type/duration, source, creator, official license URL, evidence timestamp/hash, commercial_use true, redistribution true. Reject duplicates/unknown license status.
+- [x] Step 4 — Verify and commit.
 
 Run: .venv\Scripts\python.exe -m pytest tests/test_media_pack.py -q
 Expected: PASS.
@@ -62,11 +62,11 @@ git commit -m "feat: validate starter media manifests"
 
 **Files:** media_library_store.py, media_pack_service.py, scripts/verify-starter-media-pack.py, tests/test_media_library_store.py, tests/test_media_pack_service.py.
 
-- [ ] Step 1 — Write RED tests for interrupted staged install, checksum mismatch/no activation, idempotent reinstall, inactive-only removal, unavailable library DB not blocking project edit.
-- [ ] Step 2 — Run RED: .venv\Scripts\python.exe -m pytest tests/test_media_library_store.py tests/test_media_pack_service.py -q. Expected: import failure.
-- [ ] Step 3 — Extract to <version>.staging, validate SHA-256 and ffprobe duration, transactionally index, atomically rename, then activate. Failure deletes only staging and returns structured error.
-- [ ] Step 4 — Store packs, assets, favorites, recent usage, immutable license evidence. Search returns active/verified/non-missing only.
-- [ ] Step 5 — Verify and commit.
+- [x] Step 1 — Write RED tests for interrupted staged install, checksum mismatch/no activation, idempotent reinstall, inactive-only removal, unavailable library DB not blocking project edit.
+- [x] Step 2 — Run RED: .venv\Scripts\python.exe -m pytest tests/test_media_library_store.py tests/test_media_pack_service.py -q. Expected: import failure.
+- [x] Step 3 — Extract to <version>.staging, validate SHA-256 and ffprobe duration, transactionally index, atomically rename, then activate. Failure deletes only staging and returns structured error.
+- [x] Step 4 — Store packs, assets, favorites, recent usage, immutable license evidence. Search returns active/verified/non-missing only.
+- [x] Step 5 — Verify and commit.
 
 Run: .venv\Scripts\python.exe -m pytest tests/test_media_library_store.py tests/test_media_pack_service.py -q
 Expected: PASS.
@@ -80,11 +80,11 @@ git commit -m "feat: install and verify starter media packs"
 
 **Files:** editing_session_and_regeneration.py, API files, test_api_media_library.py, test_editing_session.py, test_api.py, test_pycapcut_adapter.py, test_ffmpeg_final_renderer.py.
 
-- [ ] Step 1 — Write RED E2E: install synthetic pack, materialize pack:starter-001:music-001, apply music override, assert timeline/FFmpeg/CapCut use only local://projects/<id>/assets URI. Assert assetless recommendation returns 422 and changes no timeline.
-- [ ] Step 2 — Run RED: .venv\Scripts\python.exe -m pytest tests/test_api_media_library.py tests/test_editing_session.py -q. Expected: missing endpoint/service.
-- [ ] Step 3 — Implement POST /media-library/assets/{library_asset_id}/materialize. Infer only BGM/SFX, call LocalProjectStore.register_asset, persist source ID/pack/version/license snapshot, update recent/favorite only after success.
-- [ ] Step 4 — Require project asset_id and resolvable URI for automatic application; return asset_missing blocker; never substitute external pack path.
-- [ ] Step 5 — Verify reverse output and commit.
+- [x] Step 1 — Write RED E2E: install synthetic pack, materialize pack:starter-001:music-001, apply music override, assert timeline/FFmpeg/CapCut use only local://projects/<id>/assets URI. Assert assetless recommendation returns 422 and changes no timeline.
+- [x] Step 2 — Run RED: .venv\Scripts\python.exe -m pytest tests/test_api_media_library.py tests/test_editing_session.py -q. Expected: missing endpoint/service.
+- [x] Step 3 — Implement POST /media-library/assets/{library_asset_id}/materialize. Infer only BGM/SFX, call LocalProjectStore.register_asset, persist source ID/pack/version/license snapshot, update recent/favorite only after success.
+- [x] Step 4 — Require project asset_id and resolvable URI for automatic application; return asset_missing blocker; never substitute external pack path.
+- [x] Step 5 — Verify reverse output and commit.
 
 Run: .venv\Scripts\python.exe -m pytest tests/test_api_media_library.py tests/test_editing_session.py tests/test_ffmpeg_final_renderer.py tests/test_pycapcut_adapter.py -q
 Expected: PASS.
@@ -98,10 +98,10 @@ git commit -m "feat: materialize library media into projects"
 
 **Files:** apps/web/src/api.ts, App.tsx, styles.css, app.test.tsx.
 
-- [ ] Step 1 — Write RED Vitest cases for install state, BGM/SFX/tag/duration search, preview, favorite after reload, disabled apply for missing/unverified item, successful materialize-then-apply.
-- [ ] Step 2 — Implement separate BGM/SFX drawer with license/attribution/version, favorites/recent filters, preview without mutation, one Apply waiting for materialization before existing override mutation.
-- [ ] Step 3 — Global DB unavailability is non-blocking notice; missing pack asset cannot preview/apply; project editor stays usable.
-- [ ] Step 4 — Verify and commit.
+- [x] Step 1 — Write RED Vitest cases for install state, BGM/SFX/tag/duration search, preview, favorite after reload, disabled apply for missing/unverified item, successful materialize-then-apply.
+- [x] Step 2 — Implement separate BGM/SFX drawer with license/attribution/version, favorites/recent filters, preview without mutation, one Apply waiting for materialization before existing override mutation.
+- [x] Step 3 — Global DB unavailability is non-blocking notice; missing pack asset cannot preview/apply; project editor stays usable.
+- [x] Step 4 — Verify and commit.
 
 Run: npm --prefix apps/web test; npm --prefix apps/web run build
 Expected: PASS.

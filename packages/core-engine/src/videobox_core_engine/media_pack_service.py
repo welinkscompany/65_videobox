@@ -138,7 +138,10 @@ class MediaPackService:
                     "official_url": asset.license.official_url,
                     "evidence_timestamp": asset.license.evidence_timestamp.isoformat(),
                     "evidence_sha256": asset.license.evidence_sha256,
+                    "attribution_required": asset.license.attribution_required,
+                    "attribution_text": asset.license.attribution_text,
                 },
+                "tags": list(asset.tags),
             })
         return indexed
 

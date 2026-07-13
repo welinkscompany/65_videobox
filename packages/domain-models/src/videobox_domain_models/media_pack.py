@@ -17,6 +17,7 @@ _SEMVER_PATTERN = re.compile(
 )
 _IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _SHA256_PATTERN = re.compile(r"^[0-9a-fA-F]{64}$")
+_TAG_PATTERN = re.compile(r"^[a-z0-9]+(?:_[a-z0-9]+)*$")
 _MEDIA_TYPES = frozenset({"music", "sfx"})
 _MIN_PACK_BYTES = 300 * 1024**2
 _MAX_PACK_BYTES = 500 * 1024**2
@@ -65,6 +66,8 @@ class MediaPackLicense:
     redistribution: bool
     evidence_timestamp: datetime
     evidence_sha256: str
+    attribution_required: bool
+    attribution_text: str
 
     @classmethod
     def from_dict(cls, data: object) -> "MediaPackLicense":
@@ -89,12 +92,23 @@ class MediaPackLicense:
         if evidence_timestamp.tzinfo is None:
             raise ValueError("evidence_timestamp must include a timezone")
 
+        attribution_required = license_data.get("attribution_required", False)
+        if type(attribution_required) is not bool:
+            raise ValueError("attribution_required must be boolean")
+        attribution_text = license_data.get("attribution_text", "")
+        if not isinstance(attribution_text, str):
+            raise ValueError("attribution_text must be a string")
+        attribution_text = attribution_text.strip()
+        if attribution_required and not attribution_text:
+            raise ValueError("attribution_text is required when attribution_required")
         return cls(
             official_url=official_url,
             commercial_use=commercial_use,
             redistribution=redistribution,
             evidence_timestamp=evidence_timestamp,
             evidence_sha256=_sha256(license_data, "evidence_sha256"),
+            attribution_required=attribution_required,
+            attribution_text=attribution_text,
         )
 
 
@@ -108,6 +122,7 @@ class MediaPackAsset:
     duration_seconds: float
     source: str
     creator: str
+    tags: tuple[str, ...]
     license: MediaPackLicense
 
     @classmethod
@@ -130,6 +145,9 @@ class MediaPackAsset:
         ):
             raise ValueError("duration_seconds must be positive")
 
+        raw_tags = asset_data.get("tags", [])
+        if not isinstance(raw_tags, list) or any(not isinstance(tag, str) or not _TAG_PATTERN.fullmatch(tag) for tag in raw_tags):
+            raise ValueError("tags must contain canonical lower snake_case strings")
         return cls(
             asset_id=asset_id,
             library_asset_id=f"pack:{pack_id}:{asset_id}",
@@ -139,6 +157,7 @@ class MediaPackAsset:
             duration_seconds=float(duration_seconds),
             source=_non_empty_string(asset_data, "source"),
             creator=_non_empty_string(asset_data, "creator"),
+            tags=tuple(raw_tags),
             license=license_data,
         )
 

@@ -467,6 +467,10 @@ class MaterializeLibraryAssetRequest(BaseModel):
     project_id: str
 
 
+class LibraryFavoriteRequest(BaseModel):
+    enabled: bool
+
+
 class EditingSessionHistoryEntryResponse(BaseModel):
     mutation_type: str
     segment_id: str

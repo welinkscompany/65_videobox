@@ -27,6 +27,8 @@ import {
   type TimelineJob,
   type TtsCandidateRecord,
   type JobRecordWithProject,
+  type MediaLibraryAsset,
+  type MediaLibraryInstallState,
 } from "./api";
 import {
   buildDefaultEditingSelection,
@@ -157,6 +159,14 @@ export function App() {
   const [audioFadeInSec, setAudioFadeInSec] = useState(0);
   const [audioFadeOutSec, setAudioFadeOutSec] = useState(0);
   const [audioDucking, setAudioDucking] = useState(false);
+  const [mediaLibraryAssets, setMediaLibraryAssets] = useState<MediaLibraryAsset[]>([]);
+  const [mediaLibraryFavoriteIds, setMediaLibraryFavoriteIds] = useState<string[]>([]);
+  const [recentMediaLibraryAssetIds, setRecentMediaLibraryAssetIds] = useState<string[]>([]);
+  const [mediaLibraryError, setMediaLibraryError] = useState<string | null>(null);
+  const [mediaLibraryInstallState, setMediaLibraryInstallState] = useState<MediaLibraryInstallState | null>(null);
+  const [mediaLibraryFilter, setMediaLibraryFilter] = useState("");
+  const [mediaLibraryView, setMediaLibraryView] = useState<"all" | "favorites" | "recent">("all");
+  const [previewLibraryAssetId, setPreviewLibraryAssetId] = useState<string | null>(null);
   const [selectedRangeStartSec, setSelectedRangeStartSec] = useState(0);
   const [selectedRangeEndSec, setSelectedRangeEndSec] = useState(0);
   const [selectedRangePreview, setSelectedRangePreview] = useState<SelectedRangePreview | null>(null);
@@ -232,6 +242,24 @@ export function App() {
 
   useEffect(() => {
     void refreshCapcutHandoffDiagnostics();
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void Promise.all([api.getMediaLibraryInstallState(), api.listMediaLibraryAssets(), api.listMediaLibraryFavorites(), api.listRecentMediaLibraryAssetIds()]).then(
+      ([installState, assets, favorites, recent]) => {
+        if (cancelled) return;
+        setMediaLibraryAssets(assets.assets);
+        setMediaLibraryInstallState(installState);
+        setMediaLibraryFavoriteIds(favorites.asset_ids);
+        setRecentMediaLibraryAssetIds(recent.asset_ids);
+        setMediaLibraryError(null);
+      },
+      () => {
+        if (!cancelled) setMediaLibraryError("미디어 라이브러리를 사용할 수 없습니다. 프로젝트 편집은 계속할 수 있습니다.");
+      },
+    );
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
@@ -1564,6 +1592,41 @@ export function App() {
     return filteredBrollAssets;
   }, [filteredBrollAssets, selectedBrollAsset]);
   const activeEditingSessionId = editingSession?.session_id ?? null;
+  const visibleMediaLibraryAssets = useMemo(() => {
+    const search = mediaLibraryFilter.trim().toLowerCase();
+    return mediaLibraryAssets.filter((asset) => {
+      if (mediaLibraryView === "favorites" && !mediaLibraryFavoriteIds.includes(asset.library_asset_id)) return false;
+      if (mediaLibraryView === "recent" && !recentMediaLibraryAssetIds.includes(asset.library_asset_id)) return false;
+      const searchTerms = [asset.asset_id, asset.media_type === "music" ? "bgm music" : "sfx", ...asset.tags, String(asset.duration_seconds)].join(" ").toLowerCase();
+      return !search || searchTerms.includes(search);
+    });
+  }, [mediaLibraryAssets, mediaLibraryFavoriteIds, mediaLibraryFilter, mediaLibraryView, recentMediaLibraryAssetIds]);
+
+  async function toggleMediaLibraryFavorite(asset: MediaLibraryAsset) {
+    try {
+      const result = await api.setMediaLibraryFavorite(asset.library_asset_id, !mediaLibraryFavoriteIds.includes(asset.library_asset_id));
+      setMediaLibraryFavoriteIds(result.asset_ids);
+    } catch {
+      setMediaLibraryError("미디어 즐겨찾기를 저장할 수 없습니다. 프로젝트 편집은 계속할 수 있습니다.");
+    }
+  }
+
+  async function applyMediaLibraryAsset(asset: MediaLibraryAsset) {
+    if (!selectedProjectId || !activeEditingSessionId || !selectedEditingSegment || !editingSession || !asset.available || !asset.verified) return;
+    const field = asset.media_type === "music" ? "music" : "sfx";
+    await applyEditingMutation(
+      `${selectedEditingSegment.segment_id}-${field}`,
+      async () => {
+        const materialized = await api.materializeMediaLibraryAsset(asset.library_asset_id, selectedProjectId);
+        const recent = await api.listRecentMediaLibraryAssetIds();
+        setRecentMediaLibraryAssetIds(recent.asset_ids);
+        return asset.media_type === "music"
+          ? api.updateEditingSessionMusicOverride(selectedProjectId, activeEditingSessionId, selectedEditingSegment.segment_id, { expected_revision: editingSession.session_revision, asset_id: materialized.asset_id })
+          : api.updateEditingSessionSfxOverride(selectedProjectId, activeEditingSessionId, selectedEditingSegment.segment_id, { expected_revision: editingSession.session_revision, asset_id: materialized.asset_id });
+      },
+      { addRegenerationField: field, feedbackAction: "저장" },
+    );
+  }
   const changedSegmentIds = useMemo(
     () =>
       new Set(
@@ -2902,6 +2965,41 @@ export function App() {
                       >선택 구간 미리보기</button>
                     </div>
                     {selectedRangePreview ? <div className="confirmation-card"><p>{`선택 ${formatSeconds(selectedRangePreview.start_sec, selectedRangePreview.end_sec)} · 자막 ${selectedRangePreview.captions.length}개 · 오버레이 ${selectedRangePreview.overlays.length}개`}</p><div aria-label="범위 미리보기" className="range-preview-stage">{selectedRangePreview.overlays.map((overlay, index) => <span className="range-preview-overlay" key={`${String(overlay.segment_id ?? "overlay")}-${index}`}>{String(overlay.text ?? overlay.title ?? overlay.overlay_type ?? "오버레이")}</span>)}{selectedRangePreview.captions.map((caption) => <p className="range-preview-caption" key={caption.segment_id} style={{ color: String(caption.caption_style.text_color ?? caption.caption_style.font_color ?? "#ffffff"), fontSize: Number(caption.caption_style.font_size_px ?? caption.caption_style.font_size ?? 32) }}>{caption.caption_text}</p>)}</div><p className="meta-copy">적용 자막 스타일과 관련 오버레이를 포함한 범위 미리보기입니다.</p></div> : null}
+                  </section>
+                  <section className="media-library" aria-label="미디어 라이브러리">
+                    {mediaLibraryError ? <p className="warning-banner">{mediaLibraryError}</p> : null}
+                    <p className="meta-copy">{mediaLibraryInstallState?.status === "installed" ? "Starter pack 설치됨" : mediaLibraryInstallState?.status === "degraded" ? "Starter pack 복구 필요" : "Starter pack 미설치"}</p>
+                    <p className="meta-copy">{mediaLibraryAssets.length ? `설치된 검증 미디어 ${mediaLibraryAssets.length}개` : "설치된 검증 미디어가 없습니다."}</p>
+                    <div className="action-row" aria-label="미디어 라이브러리 필터">
+                      <label className="field"><span>검색</span><input onChange={(event) => setMediaLibraryFilter(event.target.value)} placeholder="BGM, SFX, 태그 또는 길이" value={mediaLibraryFilter} /></label>
+                      <button className="action-button subtle" onClick={() => setMediaLibraryView("all")} type="button">전체</button>
+                      <button className="action-button subtle" onClick={() => setMediaLibraryView("favorites")} type="button">즐겨찾기</button>
+                      <button className="action-button subtle" onClick={() => setMediaLibraryView("recent")} type="button">최근</button>
+                    </div>
+                    {(["music", "sfx"] as const).map((mediaType) => {
+                      const label = mediaType === "music" ? "BGM" : "SFX";
+                      const items = visibleMediaLibraryAssets.filter((asset) => asset.media_type === mediaType);
+                      return <section className="media-library-group" key={mediaType}>
+                        <h3>{label} 라이브러리</h3>
+                        {items.map((asset) => {
+                          const canApply = asset.available && asset.verified && Boolean(selectedEditingSegment) && !isSavingEditingMutation;
+                          const isFavorite = mediaLibraryFavoriteIds.includes(asset.library_asset_id);
+                          return <article className="media-library-card" key={asset.library_asset_id}>
+                            <strong>{asset.asset_id}</strong>
+                            <p className="meta-copy">{asset.creator} · {asset.version} · {asset.duration_seconds}초</p>
+                            <p className="meta-copy">출처: {asset.source} · 라이선스: <a href={asset.official_license_url} rel="noreferrer" target="_blank">확인</a></p>
+                            {asset.attribution_required ? <p className="meta-copy">표기 필요: {asset.attribution_text}</p> : null}
+                            <div className="action-row">
+                              <button className="action-button subtle" disabled={!asset.available || !asset.verified} onClick={() => setPreviewLibraryAssetId(asset.library_asset_id)} type="button">{label} 미리보기</button>
+                              <button className="action-button subtle" onClick={() => void toggleMediaLibraryFavorite(asset)} type="button">{label} 즐겨찾기{isFavorite ? " 해제" : ""}</button>
+                              <button className="action-button" disabled={!canApply} onClick={() => void applyMediaLibraryAsset(asset)} type="button">{label} 적용</button>
+                            </div>
+                            {!asset.available || !asset.verified ? <p className="meta-copy">파일 또는 검증 정보가 없어 미리보기·적용할 수 없습니다.</p> : null}
+                            {previewLibraryAssetId === asset.library_asset_id ? <><audio autoPlay controls data-testid="media-library-preview" src={api.mediaLibraryPreviewUrl(asset.library_asset_id)} /><p className="meta-copy">미리보기 선택됨 · 프로젝트에는 변경하지 않았습니다.</p></> : null}
+                          </article>;
+                        })}
+                      </section>;
+                    })}
                   </section>
                   <div className="editor-library" aria-label="자막 스타일 라이브러리">
                     <h3>자막 스타일</h3>

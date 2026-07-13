@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import sqlite3
 import hashlib
+import json
+import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Iterable
@@ -51,20 +53,23 @@ class MediaLibraryStore:
                     INSERT INTO media_assets (
                         pack_id, version, library_asset_id, asset_id, media_type, duration_seconds,
                         sha256, path, source, creator, official_license_url,
-                        evidence_timestamp, evidence_sha256
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        evidence_timestamp, evidence_sha256, tags_json, attribution_required, attribution_text
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(pack_id, version, library_asset_id) DO UPDATE SET
                         asset_id = excluded.asset_id, media_type = excluded.media_type,
                         duration_seconds = excluded.duration_seconds, sha256 = excluded.sha256,
                         path = excluded.path, source = excluded.source, creator = excluded.creator,
                         official_license_url = excluded.official_license_url,
-                        evidence_timestamp = excluded.evidence_timestamp, evidence_sha256 = excluded.evidence_sha256
+                        evidence_timestamp = excluded.evidence_timestamp, evidence_sha256 = excluded.evidence_sha256,
+                        tags_json = excluded.tags_json, attribution_required = excluded.attribution_required,
+                        attribution_text = excluded.attribution_text
                     """,
                     (
                         pack_id, version, asset["library_asset_id"], asset["asset_id"], asset["media_type"],
                         asset["duration_seconds"], asset["sha256"], str(asset["path"]), asset["source"],
                         asset["creator"], license_data["official_url"], license_data["evidence_timestamp"],
-                        license_data["evidence_sha256"],
+                        license_data["evidence_sha256"], json.dumps(asset.get("tags", [])),
+                        int(bool(license_data.get("attribution_required", False))), str(license_data.get("attribution_text", "")),
                     ),
                 )
                 # Evidence records are append-only: package evidence is never rewritten.
@@ -160,7 +165,7 @@ class MediaLibraryStore:
                 """
                 SELECT a.library_asset_id, a.asset_id, a.media_type, a.duration_seconds, a.sha256,
                        a.path, a.source, a.creator, a.official_license_url, a.evidence_timestamp,
-                       a.evidence_sha256, a.version
+                       a.evidence_sha256, a.version, a.tags_json, a.attribution_required, a.attribution_text
                 FROM media_assets a
                 JOIN media_packs p ON p.pack_id = a.pack_id AND p.version = a.version
                 WHERE p.active = 1 AND p.verified = 1
@@ -170,10 +175,48 @@ class MediaLibraryStore:
         finally:
             connection.close()
         normalized_query = (query or "").strip().lower()
-        results = [dict(row) for row in rows if self._is_currently_verified(Path(str(row["path"])), str(row["sha256"]))]
+        results = [self._normalize_asset_row(row) for row in rows if self._is_currently_verified(Path(str(row["path"])), str(row["sha256"]))]
         if not normalized_query:
             return results
         return [item for item in results if normalized_query in " ".join(map(str, item.values())).lower()]
+
+    def inspect_active_assets(self) -> list[dict[str, Any]]:
+        """Inspection-only view retaining missing/tampered entries for recovery UI."""
+        connection = self._connection()
+        try:
+            rows = connection.execute(
+                """SELECT a.library_asset_id, a.asset_id, a.media_type, a.duration_seconds, a.sha256,
+                           a.path, a.source, a.creator, a.official_license_url, a.evidence_timestamp,
+                           a.evidence_sha256, a.version, a.tags_json, a.attribution_required, a.attribution_text
+                    FROM media_assets a JOIN media_packs p ON p.pack_id = a.pack_id AND p.version = a.version
+                    WHERE p.active = 1 AND p.verified = 1 ORDER BY a.library_asset_id"""
+            ).fetchall()
+        finally:
+            connection.close()
+        assets = []
+        for row in rows:
+            item = self._normalize_asset_row(row)
+            path = Path(str(item["path"]))
+            item["verified"] = bool(path.is_file() and self._is_currently_verified(path, str(item["sha256"])))
+            # A physically present but checksum-invalid asset is unavailable to
+            # preview/apply; recovery UI can still inspect the row.
+            item["available"] = item["verified"]
+            assets.append(item)
+        return assets
+
+    def install_state(self) -> dict[str, object]:
+        assets = self.inspect_active_assets()
+        if not assets:
+            return {"status": "not_installed", "installed_asset_count": 0}
+        valid_count = sum(bool(item["verified"]) for item in assets)
+        return {"status": "installed" if valid_count == len(assets) else "degraded", "installed_asset_count": len(assets)}
+
+    @staticmethod
+    def _normalize_asset_row(row: sqlite3.Row) -> dict[str, Any]:
+        item = dict(row)
+        item["tags"] = json.loads(str(item.pop("tags_json", "[]")))
+        item["attribution_required"] = bool(item["attribution_required"])
+        return item
 
     def get_verified_asset(self, *, library_asset_id: str) -> dict[str, Any] | None:
         """Return one currently active, checksum-verified library asset."""
@@ -181,6 +224,41 @@ class MediaLibraryStore:
             if str(asset["library_asset_id"]) == library_asset_id:
                 return asset
         return None
+
+    def snapshot_verified_asset(self, *, library_asset_id: str) -> tuple[dict[str, Any], Path] | None:
+        """Copy verified bytes to a controlled snapshot and verify those bytes.
+
+        The caller must remove the returned file once it has been registered or
+        streamed.  This avoids using a pack path after its verification result.
+        """
+        asset = self.get_verified_asset(library_asset_id=library_asset_id)
+        if asset is None:
+            return None
+        source_path = Path(str(asset["path"]))
+        snapshot_root = self.root / "verified-snapshots"
+        snapshot_root.mkdir(parents=True, exist_ok=True)
+        snapshot_dir = Path(tempfile.mkdtemp(prefix="media-", dir=snapshot_root))
+        snapshot_path = snapshot_dir / source_path.name
+        try:
+            digest = hashlib.sha256()
+            with source_path.open("rb") as source, snapshot_path.open("wb") as destination:
+                while chunk := source.read(1024 * 1024):
+                    digest.update(chunk)
+                    destination.write(chunk)
+            if digest.hexdigest() != str(asset["sha256"]):
+                raise FileNotFoundError("asset_missing")
+            return asset, snapshot_path
+        except Exception:
+            self.remove_verified_snapshot(snapshot_path)
+            raise
+
+    @staticmethod
+    def remove_verified_snapshot(snapshot_path: Path) -> None:
+        snapshot_path.unlink(missing_ok=True)
+        try:
+            snapshot_path.parent.rmdir()
+        except OSError:
+            pass
 
     def _is_currently_verified(self, path: Path, expected_sha256: str) -> bool:
         try:
@@ -258,6 +336,7 @@ class MediaLibraryStore:
                 asset_id TEXT NOT NULL, media_type TEXT NOT NULL, duration_seconds REAL NOT NULL,
                 sha256 TEXT NOT NULL, path TEXT NOT NULL, source TEXT NOT NULL, creator TEXT NOT NULL,
                 official_license_url TEXT NOT NULL, evidence_timestamp TEXT NOT NULL, evidence_sha256 TEXT NOT NULL,
+                tags_json TEXT NOT NULL DEFAULT '[]', attribution_required INTEGER NOT NULL DEFAULT 0, attribution_text TEXT NOT NULL DEFAULT '',
                 PRIMARY KEY (pack_id, version, library_asset_id),
                 FOREIGN KEY (pack_id, version) REFERENCES media_packs(pack_id, version) ON DELETE CASCADE
             );
@@ -274,6 +353,15 @@ class MediaLibraryStore:
             );
             """
         )
+        for statement in (
+            "ALTER TABLE media_assets ADD COLUMN tags_json TEXT NOT NULL DEFAULT '[]'",
+            "ALTER TABLE media_assets ADD COLUMN attribution_required INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE media_assets ADD COLUMN attribution_text TEXT NOT NULL DEFAULT ''",
+        ):
+            try:
+                connection.execute(statement)
+            except sqlite3.OperationalError:
+                pass
         return connection
 
     @staticmethod
