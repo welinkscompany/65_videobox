@@ -1,8 +1,20 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 232. 2026-07-14 starter media pack release-gate remediation`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 233. 2026-07-14 starter media pack official-license research`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
 > 이 문서의 기존 날짜 기반 섹션은 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 230`만 기준으로 본다.
 > 단, `2일 내 1차 데모 완성` 실행 레일은 `## 189`의 장기 우선순위를 그대로 넓게 집행하지 않고, `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`의 축소된 실행 계획을 우선 적용한다.
+
+## 233. 2026-07-14 starter media pack official-license research (in progress)
+
+Task 5 Step 1의 source-level licensing gate를 시작했다. `docs/starter-media-pack-license-research.ko.md`가 asset-level candidate URL, creator, selection timestamp, official-page raw HTML SHA-256, attribution, commercial/raw redistribution/conversion 판정의 SSOT다.
+
+- Pixabay, Mixkit, Uppbeat free tier는 일반적인 commercial video use와 달리 raw audio를 third party에게 pack으로 재배포하는 권한이 불명확하거나 금지되어 후보에서 제외했다.
+- CC0 candidate는 music 19개와 SFX 33개다. CC0 legal code와 OpenGameArt/FMA의 author asset page를 근거로 commercial use, raw redistribution, conversion을 true로 판단했다.
+- starter-v1 기준은 30 music/100 SFX이므로 현재 19/30, 33/100이고 research gate는 아직 green이 아니다. 실제 300–500 MiB build는 시작하지 않는다.
+
+다음 권장 작업:
+
+- 같은 per-asset evidence 기준으로 11 music/67 SFX를 더 조사하고, source archive처럼 개별 file identity가 불명확한 bundle은 추출 후 file list와 source hash가 확정될 때까지 승인하지 않는다.
 
 ## 232. 2026-07-14 starter media pack release-gate remediation
 

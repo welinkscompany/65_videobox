@@ -5,7 +5,15 @@
 - branch: `codex/production-readiness-blocker-slice-1`
 - base HEAD: `53553f1`; 이 handoff와 release-gate 수정은 아직 이번 closeout commit 전이다.
 - 공식 계획: `docs/superpowers/plans/2026-07-12-starter-media-pack-implementation.md` Task 5
-- Task 1–4는 완료다. Task 5는 실제 무료 asset research·팩 생성·release smoke 전이며 완료가 아니다. 이번 slice는 Task 5 Step 2 verifier 계약과 이전 review blocker만 닫는다.
+- Task 1–4는 완료다. Task 5는 실제 무료 asset research·팩 생성·release smoke 전이며 완료가 아니다. Step 1 research는 진행 중이며 strict 30 music/100 SFX 중 19/30 music, 33/100 SFX만 asset-level evidence가 확정됐다.
+
+## Step 1 research 현재 증거
+
+- authoritative ledger: `docs/starter-media-pack-license-research.ko.md`.
+- 허용한 후보는 CC0만 사용한다. commercial use, raw-file redistribution, conversion/adaptation을 모두 허용하는 CC0 legal code와 creator가 올린 official asset page를 함께 기록했다.
+- OpenGameArt와 FMA의 candidate별 creator/page/direct file/selection timestamp/page raw-HTML SHA-256을 기록했다. 52 direct asset URL과 22 official asset page URL은 2026-07-14 HTTP 200으로 재확인했다.
+- Pixabay/Mixkit/Uppbeat free tier는 raw standalone audio 재배포가 금지되거나 계약상 명확하지 않아 제외했다. 단순히 YouTube 상업 사용이 가능하다는 이유로 starter pack source로 채택하지 않는다.
+- 아직 11 music/67 SFX가 모자라므로 `dist/starter-media-pack` build, transcode, manifest, smoke는 시작하지 않는다.
 
 ## 해결한 review blocker
 
@@ -27,9 +35,9 @@
 
 ## 아직 하지 않은 것 / 다음 세션 첫 작업
 
-1. remediation slice commit/push 뒤 Task 5 Step 1의 official license research를 시작한다.
-2. evidence가 완결된 asset만 ignored `dist/starter-media-pack`에 300–500 MiB real pack으로 build하고 CLI/service verifier를 통과시킨다.
-3. install → preview/favorite → materialize → 600-second Korean ingest/SRT/MP4/real CapCut draft smoke를 수행한다. 실제 pack 없이 Task 5 release 완료로 표시하지 않는다.
+1. per-asset evidence 기준으로 11 music/67 SFX를 더 조사한다. bundle은 개별 file identity와 direct source hash가 확정될 때까지 count에 넣지 않는다.
+2. strict 30/100 research gate 뒤에만 evidence text snapshot과 actual source hash를 고정하고 ignored `dist/starter-media-pack`에 300–500 MiB real pack을 build한다.
+3. 그 뒤 CLI/service verify → install → preview/favorite → materialize → 600-second Korean ingest/SRT/MP4/real CapCut draft smoke를 수행한다. 실제 pack 없이 Task 5 release 완료로 표시하지 않는다.
 
 ## 사람 인수 항목
 
