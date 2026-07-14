@@ -13,9 +13,9 @@
 - 기준 HEAD: `8eddb7f`
 - 계획 범위: 3개 순차 slice, 18개 TDD Task
 - 설계/계획 진행률: 100%, 잔여 0%
-- production code 구현 진행률: 1/18 Task (약 5.6%), 잔여 약 94.4%
-- 완료 작업: Slice 1 Task 1 local-only runtime 경계와 deterministic test guard
-- 다음 작업: Slice 1 Task 2 Vision, embedding, capability preflight provider
+- production code 구현 진행률: 2/18 Task (약 11.1%), 잔여 약 88.9%
+- 완료 작업: Slice 1 Task 1 local-only runtime 경계와 deterministic test guard, Task 2 Vision/embedding/capability preflight provider
+- 다음 작업: Slice 1 Task 3 durable MEDIA_ANALYSIS schema와 state machine
 - 계획 commit `3fda0ae`는 remote에 push됐다. 다음 세션 재개용 handoff는 `docs/handoffs/2026-07-14-local-media-director-plan-closeout.ko.md`다.
 
 확인된 구현 blocker는 text-only local provider, Gemini 자동 fallback, 외부 HTTP(S) runtime 허용, durable media-analysis 상태 부재, script-only session 부재, B/M/S mutation의 불완전한 undo, output SHA/revision 재검증 부재다. 계획은 이 순서대로 RED test를 먼저 만들고 provider → analysis → proposal → transaction → UI → output E2E를 연결한다.

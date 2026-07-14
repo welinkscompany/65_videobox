@@ -226,7 +226,7 @@ git commit -m "refactor: enforce local-only ai runtime"
 - Modify: packages/core-engine/src/videobox_core_engine/settings.py
 - Test: tests/test_local_media_ai_providers.py
 
-- [ ] **Step 1: provider protocol RED test 작성**
+- [x] **Step 1: provider protocol RED test 작성**
 
 ~~~python
 def test_vision_request_is_bounded_and_structured(fake_transport) -> None:
@@ -246,13 +246,13 @@ def test_embedding_uses_fifteen_second_timeout(fake_transport) -> None:
     assert fake_transport.calls[0].timeout_seconds == 15
 ~~~
 
-- [ ] **Step 2: RED 확인**
+- [x] **Step 2: RED 확인**
 
 Run: .venv\Scripts\python.exe -m pytest -q tests/test_local_media_ai_providers.py
 
 Expected: vision, embeddings, lm_studio module import failure.
 
-- [ ] **Step 3: 정확한 protocol과 adapter 구현**
+- [x] **Step 3: 정확한 protocol과 adapter 구현**
 
 ~~~python
 class VisionProvider(Protocol):
@@ -274,13 +274,13 @@ LMStudio transport는 redirect handler를 금지하고 요청 URL을 매번 allo
 
 Vision JSON schema는 place, action, time_of_day, weather, people_objects, emotion, mood, topic_links, scene, color_tone, camera, season, country_region layer와 summary, confidence, review_reasons를 고정한다. provider가 임의 필드를 추가하거나 필수 layer를 문자열 하나로 뭉개면 schema failure로 처리한다.
 
-- [ ] **Step 4: timeout, redirect, oversized image, unloaded model test GREEN**
+- [x] **Step 4: timeout, redirect, oversized image, unloaded model test GREEN**
 
 Run: .venv\Scripts\python.exe -m pytest -q tests/test_local_media_ai_providers.py
 
 Expected: PASS. resource/model unavailable은 blocked code, schema/JSON 오류는 failed code.
 
-- [ ] **Step 5: 커밋**
+- [x] **Step 5: 커밋**
 
 ~~~powershell
 git add packages/provider-interfaces packages/core-engine/src/videobox_core_engine/settings.py tests/test_local_media_ai_providers.py

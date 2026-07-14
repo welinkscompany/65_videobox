@@ -37,6 +37,15 @@ from videobox_provider_interfaces.visual_generation import (
     VisualGenerationRequest,
     VisualGenerationResponse,
 )
+from videobox_provider_interfaces.embeddings import EmbeddingProvider, EmbeddingRequest, EmbeddingResponse
+from videobox_provider_interfaces.vision import FIXED_VISION_LAYERS, FIXED_VISION_RESPONSE_SCHEMA, VisionAnalysisRequest, VisionAnalysisResponse, VisionProvider
+from videobox_provider_interfaces.lm_studio import (
+    LMStudioEmbeddingProvider,
+    LMStudioCapabilityProfile,
+    LMStudioHTTPTransport,
+    LMStudioProviderError,
+    LMStudioVisionProvider,
+)
 
 __all__ = [
     "LLMProvider",
@@ -70,4 +79,17 @@ __all__ = [
     "VisualGenerationRequest",
     "VisualGenerationResponse",
     "get_recommendation_guardrail",
+    "EmbeddingProvider",
+    "EmbeddingRequest",
+    "EmbeddingResponse",
+    "VisionProvider",
+    "FIXED_VISION_LAYERS",
+    "FIXED_VISION_RESPONSE_SCHEMA",
+    "VisionAnalysisRequest",
+    "VisionAnalysisResponse",
+    "LMStudioEmbeddingProvider",
+    "LMStudioCapabilityProfile",
+    "LMStudioHTTPTransport",
+    "LMStudioProviderError",
+    "LMStudioVisionProvider",
 ]
