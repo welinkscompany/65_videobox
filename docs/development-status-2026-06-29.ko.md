@@ -1,8 +1,26 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 234. 2026-07-14 starter media pack release`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
-> 이 문서의 기존 날짜 기반 섹션은 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 230`만 기준으로 본다.
+> 현재 authoritative 상태/next slice 판단은 `## 235. 2026-07-14 Local Media Director implementation planning`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 이 문서의 기존 날짜 기반 섹션은 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 235`만 기준으로 본다.
 > 단, `2일 내 1차 데모 완성` 실행 레일은 `## 189`의 장기 우선순위를 그대로 넓게 집행하지 않고, `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`의 축소된 실행 계획을 우선 적용한다.
+
+## 235. 2026-07-14 Local Media Director implementation planning
+
+사용자가 승인한 로컬 AI 디렉터 설계를 현재 코드와 역추적하고, backend architecture, frontend UX/component, verification/output 관점의 독립 감사를 반영해 실행 계획을 작성했다.
+
+- 승인 설계: `docs/superpowers/specs/2026-07-14-local-media-director-design.md`
+- 실행 계획: `docs/superpowers/plans/2026-07-14-local-media-director-implementation.md`
+- 기준 HEAD: `8eddb7f`
+- 계획 범위: 3개 순차 slice, 18개 TDD Task
+- 설계/계획 진행률: 100%, 잔여 0%
+- production code 구현 진행률: 0%, 잔여 100%
+- 다음 작업: Slice 1 Task 1 local-only runtime 경계와 deterministic test guard
+
+확인된 구현 blocker는 text-only local provider, Gemini 자동 fallback, 외부 HTTP(S) runtime 허용, durable media-analysis 상태 부재, script-only session 부재, B/M/S mutation의 불완전한 undo, output SHA/revision 재검증 부재다. 계획은 이 순서대로 RED test를 먼저 만들고 provider → analysis → proposal → transaction → UI → output E2E를 연결한다.
+
+UI는 4,396줄 `App.tsx`의 전면 rewrite를 하지 않고 `apps/web/src/features/director`와 `apps/web/src/features/media`에 새 책임을 분리한다. 현재 5,709줄 `app.test.tsx`에는 refresh/apply/materialize failure/ambiguity/manual fallback 통합 시나리오만 추가하고 세부 interaction은 component test로 분리한다.
+
+이번 상태는 문서 계획 closeout이다. production source와 test는 변경하지 않았으므로 전체 backend/frontend suite를 다시 실행하지 않았다. 문서 diff, placeholder, path/type consistency와 `git diff --check`를 계획 완료 gate로 사용한다.
 
 ## 234. 2026-07-14 starter media pack release
 

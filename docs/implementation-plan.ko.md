@@ -1,6 +1,6 @@
 # VideoBox 실행용 구현 계획서
 
-> 현재 worktree 기준 구현 상태와 next slice 판단은 `## 21. 2026-07-13 long-form CapCut 3/3 final-render operating QA closeout`을 우선 적용한다. 그 외 상위 milestone/범위/순서 섹션은 제품·구현 계획의 기준을 설명하는 문서다.
+> 현재 worktree 기준 구현 상태와 next slice 판단은 `## 22. 2026-07-14 Local Media Director implementation plan`을 우선 적용한다. 그 외 상위 milestone/범위/순서 섹션은 제품·구현 계획의 기준을 설명하는 문서다.
 > 개발 운영 상위 규칙은 저장소 루트 `AGENTS.md`와 `docs/development-fast-path.ko.md`의 `## 10. 고정 운영 규정`을 프로젝트 전역 기본값으로 적용한다. 즉, 이 계획서를 실행할 때의 작업 우선순위, 선택적 TDD/서브에이전트/리뷰 사용, 표준 검증 경로, hot path 구분, 커밋/푸시, 진행률 보고, turn closeout 형식은 해당 규정을 따른다.
 
 ## 1. 목적
@@ -209,7 +209,7 @@
 - 언어: Python 우선
 - 영상 처리: FFmpeg
 - 전사: WhisperX 또는 대체 STT provider
-- LLM: 로컬 Qwen 우선 + Gemini multi-key fallback + 선택적 OpenAI provider
+- LLM: LM Studio loopback 기반 로컬 text/vision/embedding provider만 자동 runtime에 사용. Gemini/OpenAI 자동 fallback 금지
 - TTS: 사용자 본인 목소리 기반 TTS provider
 - 비전/자산 분석: OpenCV + 자산 메타데이터 인덱싱
 - 데이터 저장: 로컬 DB 우선
@@ -1043,3 +1043,16 @@ production-readiness blocker slice 1의 9개 Task는 구현·회귀·600초 smok
 - `crop_pad_overlay`: `videobox-qa-crop-pad-overlay-20260712.mp4`, `600.026848` seconds, `25,452,146` bytes, SHA-256 `839F83D911384B1BE72B8D983DA7AC16E34221CCE505935A0E31F8394187043B`. CapCut timeline에서 Korean caption, image/text overlay, black-pad B-roll track을 확인했다.
 - `audio_ducking`: `videobox-qa-audio-ducking-20260712.mp4`, `600.026848` seconds, `73,882,181` bytes, SHA-256 `B23B2D7E7DDC01D3BDD0F49B11126EC80BA8CF90E3349F2DC29BC6AE72EAA11B`. CapCut timeline에서 narration/TTS와 `smoke-bgm.wav`/`smoke-impact.wav` audio track을 확인했다.
 - output은 모두 `C:\\Users\\atgro\\AppData\\Local\\CapCut\\Videos\\`에만 두며 VideoBox source artifact 및 Git `artifacts/`는 수정·추가하지 않는다.
+
+## 22. 2026-07-14 Local Media Director implementation plan
+
+- 승인 설계는 `docs/superpowers/specs/2026-07-14-local-media-director-design.md`다.
+- 실행 계획은 `docs/superpowers/plans/2026-07-14-local-media-director-implementation.md`다.
+- 계획은 18개 TDD Task를 세 순차 slice로 나눈다.
+  1. Local media intelligence foundation: LM Studio local-only provider, durable B-roll analysis, 자동 태깅/검수
+  2. Script-first proposal engine: narration 없는 provisional script session, B/M/S ranking, preview/materialize, atomic apply
+  3. Director workspace: 우측 대화 패널, 수동 편집, B/M/S reference, persistent conversation, 10-step undo/redo, responsive UI
+- 구현 시작 전 기준 HEAD는 `8eddb7f`다. 이 section은 계획 승인 상태이며 production code 구현 완료를 의미하지 않는다.
+- 다음 실행 단위는 Slice 1 Task 1 `local-only runtime 경계와 deterministic test guard`다.
+- 기존 `LocalFirstStructuredRuntime`의 Gemini 자동 fallback, 외부 HTTP(S) runtime 허용, text-only Qwen adapter는 승인 설계와 충돌하므로 Slice 1에서 RED test부터 교체한다.
+- Codex Sol/Terra/Luna 모델 선택은 개발 에이전트 실행 자원이며 VideoBox 제품 runtime 계약에는 포함하지 않는다.

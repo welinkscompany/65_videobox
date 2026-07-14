@@ -1,7 +1,7 @@
 # Local Media Director Design
 
 **Date:** 2026-07-14  
-**Status:** proposed for user review  
+**Status:** approved; implementation plan created
 **Scope:** VideoBox의 로컬 B-roll 자동 태깅·검색·추천, BGM/SFX 추천, 대화형 AI 디렉터와 수동 편집의 통합
 
 ## 1. 결정과 목표
