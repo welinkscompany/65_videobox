@@ -22,6 +22,11 @@
 
 UI는 4,396줄 `App.tsx`의 전면 rewrite를 하지 않고 `apps/web/src/features/director`와 `apps/web/src/features/media`에 새 책임을 분리한다. 현재 5,709줄 `app.test.tsx`에는 refresh/apply/materialize failure/ambiguity/manual fallback 통합 시나리오만 추가하고 세부 interaction은 component test로 분리한다.
 
+### 후속 판단 보류: OpenCut 및 Voice Capture & Narration
+
+- OpenCut은 현재 Task 4 및 Local Media Director 18개 Task의 구현 범위에 넣지 않는다. full editor 도입이 아니라 UX 참고 후보로만 보존하며, editing-session/FFmpeg/CapCut 계약 안정 후 별도 재분석한다.
+- 사용자 음성 녹음·업로드→local STT 전사→자막/대본 정렬은 후속 Voice Capture & Narration slice 후보로 보존한다. voice cloning/TTS는 명시 동의·보관/삭제·approval 계약을 먼저 설계한 뒤 별도 판단한다.
+
 이번 상태는 문서 계획 closeout이다. production source와 test는 변경하지 않았으므로 전체 backend/frontend suite를 다시 실행하지 않았다. 문서 diff, placeholder, path/type consistency와 `git diff --check`를 계획 완료 gate로 사용한다.
 
 ### Slice 1 Task 1 closeout (2026-07-14)

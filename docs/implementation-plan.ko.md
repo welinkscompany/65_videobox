@@ -337,6 +337,14 @@
 
 즉, 편집기 오픈소스는 `지금 바로 통째 반입`이 아니라 `편집 규칙이 고정된 직후`에 붙이는 것이 원칙이다.
 
+### 8.4.1 OpenCut 및 음성 제작 후속 판단 게이트
+
+- OpenCut은 현재 통째 도입·임베드·제품 의존성 후보가 아니다. 현행판은 재작성 중이고 classic은 archived 상태이므로, VideoBox의 FFmpeg preview·CapCut draft·editing-session SSOT를 대체하지 않는다.
+- 향후 timeline patch API와 FFmpeg preview 계약이 안정된 뒤에만 OpenCut을 다시 분석한다. 그때도 기본값은 코드 반입이 아니라 drag/trim, snapping, ripple, waveform, rational time 같은 UX interaction의 독립 재구현이다.
+- 재분석 gate는 실제 Editor API/headless 상태, 라이선스·의존성 SBOM, 보안, canonical timeline round-trip, CapCut export 영향, GPU fallback을 포함한다.
+- Voice Capture & Narration은 별도 후속 slice다. 브라우저 녹음과 파일 업로드를 narration asset으로 정규화하고, local STT 전사·대본 정렬·자막 생성을 연결한다.
+- voice sample 기반 TTS/voice cloning은 전사와 분리한다. 명시적 opt-in, 원본·전사·샘플의 삭제/보관 정책, preview→apply→undo, review/approval gate를 별도 설계·검증하기 전에는 자동 사용하지 않는다.
+
 ## 8.3 구현 완료 시 적용 여부 보고
 
 각 구현 작업이 끝나면 완료 보고에 아래를 반드시 포함한다.
