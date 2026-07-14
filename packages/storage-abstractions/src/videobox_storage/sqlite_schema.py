@@ -108,6 +108,16 @@ PROJECT_SCHEMA_STATEMENTS = (
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS media_analysis_cache (
+        cache_id TEXT PRIMARY KEY, project_id TEXT NOT NULL, asset_id TEXT NOT NULL,
+        source_sha256 TEXT NOT NULL, cache_key TEXT NOT NULL, state TEXT NOT NULL,
+        tags_stale INTEGER NOT NULL DEFAULT 0, embedding_stale INTEGER NOT NULL DEFAULT 0,
+        preview_stale INTEGER NOT NULL DEFAULT 0, proposal_index_stale INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL, stale_at TEXT,
+        UNIQUE(project_id, asset_id, source_sha256, cache_key)
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS media_scene_windows (
         scene_window_id TEXT PRIMARY KEY,
         analysis_id TEXT NOT NULL,

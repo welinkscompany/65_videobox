@@ -52,6 +52,17 @@ def test_media_analysis_recovery_returns_only_runs_it_requeued(tmp_path: Path) -
     assert store.get_media_analysis(project_id=project_id, analysis_id=queued["analysis_id"])["status"] == MediaAnalysisStatus.QUEUED.value
 
 
+def test_orphan_recovery_does_not_requeue_exhausted_attempt(tmp_path: Path) -> None:
+    store, project_id = _store(tmp_path)
+    job = store.create_media_analysis(project_id=project_id, asset_id="asset", idempotency_key="exhausted", cache_key="cache")
+    for _ in range(3):
+        claim = store.claim_media_analysis(project_id=project_id, analysis_id=job["analysis_id"]); assert claim
+        if claim["attempt"] < 3:
+            store.fail_media_analysis(project_id=project_id, analysis_id=job["analysis_id"], expected_attempt=claim["attempt"], error_code="retry", error_message="retry", next_retry_at="2000-01-01T00:00:00+00:00")
+    assert store.recover_orphaned_media_analysis_jobs(project_id=project_id) == []
+    assert store.get_media_analysis(project_id=project_id, analysis_id=job["analysis_id"])["status"] == MediaAnalysisStatus.FAILED.value
+
+
 def test_media_analysis_claim_is_atomic_and_reports_the_loser(tmp_path: Path) -> None:
     store, project_id = _store(tmp_path)
     job = store.create_media_analysis(
@@ -163,7 +174,8 @@ def test_media_analysis_only_allows_running_job_to_transition(tmp_path: Path) ->
     assert store.complete_media_analysis(
         project_id=project_id, analysis_id=job["analysis_id"], expected_attempt=0, result={"summary": "ignored"}
     ) is None
-    assert store.request_media_analysis_cancel(project_id=project_id, analysis_id=job["analysis_id"], expected_attempt=0) is None
+    cancelled = store.request_media_analysis_cancel(project_id=project_id, analysis_id=job["analysis_id"], expected_attempt=0)
+    assert cancelled is not None
     assert store.fail_media_analysis(
         project_id=project_id,
         analysis_id=job["analysis_id"],
@@ -171,7 +183,7 @@ def test_media_analysis_only_allows_running_job_to_transition(tmp_path: Path) ->
         error_code="ignored",
         error_message="ignored",
     ) is None
-    assert store.get_media_analysis(project_id=project_id, analysis_id=job["analysis_id"])["status"] == MediaAnalysisStatus.QUEUED.value
+    assert store.get_media_analysis(project_id=project_id, analysis_id=job["analysis_id"])["status"] == MediaAnalysisStatus.CANCELLED.value
 
 
 def test_media_analysis_returns_existing_run_for_same_idempotency_key(tmp_path: Path) -> None:

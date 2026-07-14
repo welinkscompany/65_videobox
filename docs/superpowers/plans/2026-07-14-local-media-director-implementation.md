@@ -350,7 +350,7 @@ git commit -m "feat: persist durable media analysis jobs"
 - Test: tests/test_media_analysis_jobs.py
 - Modify: packages/storage-abstractions/src/videobox_storage/local_project_store.py
 
-- [ ] **Step 1: extraction budget와 cancel-late-result RED test 작성**
+- [x] **Step 1: extraction budget와 cancel-late-result RED test 작성**
 
 ~~~python
 def test_probe_never_emits_more_than_six_bounded_frames(fake_ffmpeg) -> None:
@@ -366,13 +366,13 @@ def test_cancelled_job_discards_late_vision_result(service, blocking_vision) -> 
     assert service.get_analysis(PROJECT_ID, job.analysis_id).result is None
 ~~~
 
-- [ ] **Step 2: RED 확인**
+- [x] **Step 2: RED 확인**
 
 Run: .venv\Scripts\python.exe -m pytest -q tests/test_media_analysis_jobs.py
 
 Expected: media_probe/media_analysis import failure.
 
-- [ ] **Step 3: probe와 service 구현**
+- [x] **Step 3: probe와 service 구현**
 
 FFmpegMediaProbe는 duration, codec, resolution, aspect ratio, scene boundaries와 최대 6 representative frames를 만든다. subprocess timeout은 60초다. MediaAnalysisService는 concurrency 1 dispatcher를 사용하고 stage 사이 cancel flag를 확인한다. retry는 fake clock 기준 최대 2회, 5초/30초 backoff다.
 
@@ -395,13 +395,13 @@ quality gate는 JSON schema, 최소 tag layer 수, scene window bounds, confiden
 
 asset 삭제 시 derived frame/preview cache를 즉시 삭제한다. source가 외부에서 사라지면 기존 history와 analysis provenance는 보존하되 새 proposal/apply를 막는다. 사용되지 않은 stale cache는 fake clock으로 검증 가능한 30일 retention 뒤 prune한다.
 
-- [ ] **Step 4: duplicate, retry, cancel, cache invalidation GREEN**
+- [x] **Step 4: duplicate, retry, cancel, cache invalidation GREEN**
 
 Run: .venv\Scripts\python.exe -m pytest -q tests/test_media_analysis_jobs.py tests/test_media_analysis_store.py
 
 Expected: PASS, 실제 sleep 없이 fake clock으로 완료.
 
-- [ ] **Step 5: 커밋**
+- [x] **Step 5: 커밋**
 
 ~~~powershell
 git add packages/core-engine/src/videobox_core_engine/media_probe.py packages/core-engine/src/videobox_core_engine/media_analysis.py packages/storage-abstractions/src/videobox_storage/local_project_store.py tests/test_media_analysis_jobs.py

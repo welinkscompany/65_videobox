@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from copy import deepcopy
 import re
 import shutil
 import sqlite3
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from videobox_domain_models.assets import AssetRecord, AssetType
 from videobox_domain_models.ai_providers import GeminiKeyStatus
@@ -33,6 +34,14 @@ def _normalize_boolish(value: object) -> bool:
     if isinstance(value, str):
         return value.strip().lower() not in {"", "0", "false", "no", "off"}
     return bool(value)
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while chunk := handle.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _canonical_recommendation_type(value: object) -> str:
@@ -173,8 +182,9 @@ def _timeline_summary_json(payload: dict[str, Any]) -> str:
 
 
 class LocalProjectStore:
-    def __init__(self, projects_root: Path) -> None:
+    def __init__(self, projects_root: Path, now: Callable[[], datetime] | None = None) -> None:
         self.projects_root = Path(projects_root)
+        self._clock = now or (lambda: datetime.now(UTC))
 
     def bootstrap_project(self, name: str) -> ProjectRecord:
         project = ProjectRecord.create(name=name)
@@ -1704,11 +1714,11 @@ class LocalProjectStore:
                 """
                 UPDATE media_analysis_runs
                 SET status = ?, cancel_requested = 1, next_retry_at = NULL, updated_at = ?
-                WHERE analysis_id = ? AND project_id = ? AND status = ? AND cancel_requested = 0 AND attempt = ?
+                WHERE analysis_id = ? AND project_id = ? AND status IN (?, ?) AND cancel_requested = 0 AND attempt = ?
                 """,
                 (
                     MediaAnalysisStatus.CANCELLED.value, self._now_iso(), analysis_id, project_id,
-                    MediaAnalysisStatus.RUNNING.value, expected_attempt,
+                    MediaAnalysisStatus.RUNNING.value, MediaAnalysisStatus.QUEUED.value, expected_attempt,
                 ),
             )
             connection.commit()
@@ -1721,11 +1731,20 @@ class LocalProjectStore:
     def recover_orphaned_media_analysis_jobs(self, *, project_id: str) -> list[str]:
         connection = self._connection(project_id)
         try:
+            # Three attempts means the initial run plus the two permitted retries.
+            connection.execute(
+                """
+                UPDATE media_analysis_runs
+                SET status = ?, error_code = ?, error_message = ?, next_retry_at = NULL, updated_at = ?
+                WHERE project_id = ? AND status = ? AND cancel_requested = 0 AND attempt >= 3
+                """,
+                (MediaAnalysisStatus.FAILED.value, "RETRY_EXHAUSTED", "Recovered worker exceeded retry budget.", self._now_iso(), project_id, MediaAnalysisStatus.RUNNING.value),
+            )
             rows = connection.execute(
                 """
                 UPDATE media_analysis_runs
                 SET status = ?, progress_percent = 0, next_retry_at = NULL, updated_at = ?
-                WHERE project_id = ? AND status = ? AND cancel_requested = 0
+                WHERE project_id = ? AND status = ? AND cancel_requested = 0 AND attempt < 3
                 RETURNING analysis_id
                 """,
                 (MediaAnalysisStatus.QUEUED.value, self._now_iso(), project_id, MediaAnalysisStatus.RUNNING.value),
@@ -1734,6 +1753,77 @@ class LocalProjectStore:
         finally:
             connection.close()
         return [str(row["analysis_id"]) for row in rows]
+
+    def record_media_analysis_cache(self, *, project_id: str, asset_id: str, source_sha256: str, cache_key: str) -> None:
+        """Keep immutable cache provenance; a new source makes prior derived data stale."""
+        now = self._now_iso()
+        self._execute(project_id, """
+            UPDATE media_analysis_cache SET state = 'stale', tags_stale = 1, embedding_stale = 1,
+                preview_stale = 1, proposal_index_stale = 1, stale_at = ?
+            WHERE project_id = ? AND asset_id = ? AND source_sha256 <> ? AND state = 'active'
+        """, (now, project_id, asset_id, source_sha256))
+        self._execute(project_id, """
+            INSERT OR IGNORE INTO media_analysis_cache (
+                cache_id, project_id, asset_id, source_sha256, cache_key, state, created_at
+            ) VALUES (?, ?, ?, ?, ?, 'active', ?)
+        """, (f"media_cache_{uuid.uuid4().hex}", project_id, asset_id, source_sha256, cache_key, now))
+
+    def delete_asset(self, *, project_id: str, asset_id: str) -> None:
+        """Delete the local asset and its disposable derived cache, retaining analysis history."""
+        asset = self.get_asset(project_id=project_id, asset_id=asset_id)
+        self._execute(project_id, "DELETE FROM media_analysis_cache WHERE project_id = ? AND asset_id = ?", (project_id, asset_id))
+        self._execute(project_id, "DELETE FROM assets WHERE project_id = ? AND asset_id = ?", (project_id, asset_id))
+        path = self.resolve_storage_uri(project_id=project_id, storage_uri=str(asset["storage_uri"]))
+        if path.exists():
+            path.unlink()
+        derived_dir = self.project_root(project_id) / "analysis" / "media_cache" / asset_id
+        if derived_dir.exists():
+            shutil.rmtree(derived_dir)
+
+    def can_apply_media_analysis(self, *, project_id: str, analysis_id: str) -> bool:
+        """Durable safety gate used by proposal/apply callers before consuming analysis."""
+        analysis = self.get_media_analysis(project_id=project_id, analysis_id=analysis_id)
+        if analysis["status"] not in {MediaAnalysisStatus.SUCCEEDED.value, MediaAnalysisStatus.NEEDS_REVIEW.value} or bool(analysis["cancel_requested"]):
+            return False
+        try:
+            asset = self.get_asset(project_id=project_id, asset_id=str(analysis["asset_id"]))
+            source = self.resolve_storage_uri(project_id=project_id, storage_uri=str(asset["storage_uri"]))
+            if not source.exists():
+                self._mark_media_cache_stale(project_id=project_id, asset_id=str(analysis["asset_id"]), source_sha256=str(analysis["idempotency_key"]).split(":", 1)[0])
+                return False
+            current_sha = sha256_file(source)
+        except (KeyError, OSError):
+            return False
+        expected_sha = str(analysis["idempotency_key"]).split(":", 1)[0]
+        if current_sha != expected_sha:
+            self._mark_media_cache_stale(project_id=project_id, asset_id=str(analysis["asset_id"]), source_sha256=expected_sha)
+            return False
+        return True
+
+    def _mark_media_cache_stale(self, *, project_id: str, asset_id: str, source_sha256: str) -> None:
+        self._execute(project_id, """
+            UPDATE media_analysis_cache SET state = 'stale', tags_stale = 1, embedding_stale = 1,
+                preview_stale = 1, proposal_index_stale = 1, stale_at = ?
+            WHERE project_id = ? AND asset_id = ? AND source_sha256 = ? AND state = 'active'
+        """, (self._now_iso(), project_id, asset_id, source_sha256))
+
+    def list_media_analysis_cache(self, *, project_id: str, asset_id: str) -> list[dict[str, Any]]:
+        connection = self._connection(project_id)
+        try:
+            rows = connection.execute("SELECT * FROM media_analysis_cache WHERE project_id = ? AND asset_id = ? ORDER BY created_at ASC", (project_id, asset_id)).fetchall()
+        finally:
+            connection.close()
+        return [{**dict(row), **{key: bool(dict(row)[key]) for key in ("tags_stale", "embedding_stale", "preview_stale", "proposal_index_stale")}} for row in rows]
+
+    def prune_stale_media_analysis_cache(self, *, project_id: str, retention_days: int = 30) -> int:
+        cutoff = (datetime.fromisoformat(self._now_iso()) - timedelta(days=retention_days)).isoformat()
+        connection = self._connection(project_id)
+        try:
+            cursor = connection.execute("DELETE FROM media_analysis_cache WHERE project_id = ? AND state = 'stale' AND stale_at <= ?", (project_id, cutoff))
+            connection.commit()
+            return cursor.rowcount
+        finally:
+            connection.close()
 
     def _set_media_analysis_error(
         self, *, project_id: str, analysis_id: str, status: MediaAnalysisStatus, expected_attempt: int,
@@ -3077,7 +3167,7 @@ class LocalProjectStore:
         return int(row["count"]) if row is not None else 0
 
     def _now_iso(self) -> str:
-        return datetime.now(UTC).isoformat()
+        return self._clock().isoformat()
 
     def get_latest_subtitle_for_timeline(self, *, project_id: str, timeline_id: str) -> dict[str, Any] | None:
         row = self._fetchone(
