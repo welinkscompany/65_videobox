@@ -155,7 +155,7 @@
 - Modify: tests/test_gemini_runtime.py
 - Test: tests/test_local_media_ai_providers.py
 
-- [ ] **Step 1: 외부 host와 Gemini fallback을 재현하는 RED test 작성**
+- [x] **Step 1: 외부 host와 Gemini fallback을 재현하는 RED test 작성**
 
 ~~~python
 def test_local_runtime_rejects_non_lm_studio_loopback() -> None:
@@ -169,13 +169,13 @@ def test_local_failure_never_calls_external_provider(fake_local, forbidden_exter
     assert forbidden_external.calls == []
 ~~~
 
-- [ ] **Step 2: RED 확인**
+- [x] **Step 2: RED 확인**
 
 Run: .venv\Scripts\python.exe -m pytest -q tests/test_local_media_ai_providers.py tests/test_ai_provider_routing.py tests/test_gemini_runtime.py tests/test_test_app_factory.py
 
 Expected: 외부 URL이 허용되거나 local failure 뒤 Gemini가 호출되어 FAIL.
 
-- [ ] **Step 3: local-only runtime과 socket deny fixture 구현**
+- [x] **Step 3: local-only runtime과 socket deny fixture 구현**
 
 LocalOpenAICompatibleRuntimeConfig는 scheme=http, hostname=127.0.0.1, port=1234, path=/v1만 허용한다. local_only_runtime.py에 LocalOnlyStructuredRuntime을 만들고 create_app 기본 wiring은 GeminiRESTStructuredProvider를 생성하지 않고 이 runtime을 사용한다. local_first_runtime.py는 과거 저장 데이터와 직접 import 호환 테스트를 위해 유지하지만 create_app과 자동 pipeline에서 더 이상 wiring하지 않는다. 호환용 Gemini key CRUD endpoint도 즉시 삭제하지 않지만 Director와 기존 자동 pipeline에서 호출되지 않게 한다.
 
@@ -202,13 +202,13 @@ def deny_unexpected_network(monkeypatch, request):
     monkeypatch.setattr(socket.socket, "connect", guarded_socket_connect)
 ~~~
 
-- [ ] **Step 4: GREEN 확인**
+- [x] **Step 4: GREEN 확인**
 
 Run: .venv\Scripts\python.exe -m pytest -q tests/test_local_media_ai_providers.py tests/test_ai_provider_routing.py tests/test_gemini_runtime.py tests/test_test_app_factory.py
 
 Expected: PASS, external provider call count 0.
 
-- [ ] **Step 5: 커밋**
+- [x] **Step 5: 커밋**
 
 ~~~powershell
 git add packages/core-engine/src/videobox_core_engine/settings.py packages/core-engine/src/videobox_core_engine/local_only_runtime.py packages/core-engine/src/videobox_core_engine/local_first_runtime.py services/api/src/videobox_api/main.py services/api/src/videobox_api/orchestration.py tests/conftest.py tests/test_test_app_factory.py tests/test_ai_provider_routing.py tests/test_gemini_runtime.py tests/test_local_media_ai_providers.py

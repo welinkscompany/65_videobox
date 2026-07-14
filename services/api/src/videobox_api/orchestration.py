@@ -8,10 +8,15 @@ from urllib.request import urlopen
 
 from videobox_core_engine.gemini_runtime import GeminiStructuredRuntime
 from videobox_core_engine.local_first_runtime import LocalFirstStructuredRuntime
+from videobox_core_engine.local_only_runtime import (
+    LocalOnlyStructuredGenerationError,
+    LocalOnlyStructuredRuntime,
+)
 from videobox_core_engine.settings import LocalOpenAICompatibleRuntimeConfig
 from videobox_provider_interfaces.local_qwen import LocalQwenHTTPTransport, LocalQwenStructuredProvider
 from videobox_provider_interfaces.llm import (
     LLMProviderConfig,
+    LLMProviderError,
     LLMTaskType,
     StructuredLLMProvider,
     StructuredLLMResponse,
@@ -100,6 +105,48 @@ class LocalFirstRuntimeService:
         )
 
 
+@dataclass(slots=True)
+class LocalOnlyRuntimeService:
+    local_provider: StructuredLLMProvider
+    local_runtime_config: LocalOpenAICompatibleRuntimeConfig = field(
+        default_factory=LocalOpenAICompatibleRuntimeConfig
+    )
+
+    def generate_structured(
+        self,
+        *,
+        project_id: str,
+        task_type: LLMTaskType,
+        prompt: str,
+        response_schema: dict[str, Any],
+        now: datetime | None = None,
+    ) -> StructuredLLMResponse:
+        del now
+        try:
+            return LocalOnlyStructuredRuntime(
+                local_provider=self.local_provider,
+                local_runtime_config=self.local_runtime_config,
+            ).generate(
+                project_id=project_id,
+                task_type=task_type,
+                prompt=prompt,
+                response_schema=response_schema,
+            )
+        except LocalOnlyStructuredGenerationError as exc:
+            raise LocalOnlyRuntimeProviderError(
+                provider_name=exc.provider_name,
+                message=exc.message,
+                retryable=False,
+                error_code=exc.error_code,
+                provider_trace=exc.provider_trace,
+            ) from exc
+
+
+@dataclass(slots=True, frozen=True)
+class LocalOnlyRuntimeProviderError(LLMProviderError):
+    provider_trace: dict[str, Any] = field(default_factory=dict)
+
+
 def build_local_qwen_structured_provider(
     *,
     local_runtime_config: LocalOpenAICompatibleRuntimeConfig,
@@ -143,6 +190,22 @@ def build_local_first_runtime_service(
         gemini_config=gemini_config,
         local_runtime_config=local_runtime_config,
         cooldown_seconds=cooldown_seconds,
+    )
+
+
+def build_local_only_runtime_service(
+    *,
+    store: LocalProjectStore,
+    local_runtime_config: LocalOpenAICompatibleRuntimeConfig,
+    local_http_client: Callable[..., Any] = urlopen,
+) -> LocalOnlyRuntimeService:
+    del store
+    return LocalOnlyRuntimeService(
+        local_provider=build_local_qwen_structured_provider(
+            local_runtime_config=local_runtime_config,
+            local_http_client=local_http_client,
+        ),
+        local_runtime_config=local_runtime_config,
     )
 
 

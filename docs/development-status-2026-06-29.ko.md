@@ -13,8 +13,9 @@
 - 기준 HEAD: `8eddb7f`
 - 계획 범위: 3개 순차 slice, 18개 TDD Task
 - 설계/계획 진행률: 100%, 잔여 0%
-- production code 구현 진행률: 0%, 잔여 100%
-- 다음 작업: Slice 1 Task 1 local-only runtime 경계와 deterministic test guard
+- production code 구현 진행률: 1/18 Task (약 5.6%), 잔여 약 94.4%
+- 완료 작업: Slice 1 Task 1 local-only runtime 경계와 deterministic test guard
+- 다음 작업: Slice 1 Task 2 Vision, embedding, capability preflight provider
 - 계획 commit `3fda0ae`는 remote에 push됐다. 다음 세션 재개용 handoff는 `docs/handoffs/2026-07-14-local-media-director-plan-closeout.ko.md`다.
 
 확인된 구현 blocker는 text-only local provider, Gemini 자동 fallback, 외부 HTTP(S) runtime 허용, durable media-analysis 상태 부재, script-only session 부재, B/M/S mutation의 불완전한 undo, output SHA/revision 재검증 부재다. 계획은 이 순서대로 RED test를 먼저 만들고 provider → analysis → proposal → transaction → UI → output E2E를 연결한다.
@@ -22,6 +23,13 @@
 UI는 4,396줄 `App.tsx`의 전면 rewrite를 하지 않고 `apps/web/src/features/director`와 `apps/web/src/features/media`에 새 책임을 분리한다. 현재 5,709줄 `app.test.tsx`에는 refresh/apply/materialize failure/ambiguity/manual fallback 통합 시나리오만 추가하고 세부 interaction은 component test로 분리한다.
 
 이번 상태는 문서 계획 closeout이다. production source와 test는 변경하지 않았으므로 전체 backend/frontend suite를 다시 실행하지 않았다. 문서 diff, placeholder, path/type consistency와 `git diff --check`를 계획 완료 gate로 사용한다.
+
+### Slice 1 Task 1 closeout (2026-07-14)
+
+- `LocalOpenAICompatibleRuntimeConfig`는 정확히 `http://127.0.0.1:1234/v1`만 허용하며, create_app 자동 pipeline은 Gemini provider를 생성하거나 LocalFirst fallback을 실행하지 않는다.
+- LocalOnly runtime의 성공 trace는 `local_only`, local 실패 뒤 heuristic/rule/static fallback trace는 `local_provider_error`를 보존한다. API E2E는 Gemini fake provider 호출 수가 0임을 고정한다.
+- pytest autouse network guard는 `connect`, `connect_ex`, `create_connection`을 차단한다. `live_lmstudio` marker의 정확한 loopback endpoint와 TestClient 내부 socketpair의 일회성 포트만 허용한다.
+- TDD RED: 누락 runtime, 외부 endpoint/후행 slash 허용, Gemini fallback wiring, socket guard loopback 및 port-reuse/connect_ex 우회를 재현했다. GREEN: focused suite 40 passed, full `tests/test_api.py` exit 0, `git diff --check` 통과.
 
 ## 234. 2026-07-14 starter media pack release
 

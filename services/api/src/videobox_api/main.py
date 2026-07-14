@@ -5,7 +5,11 @@ from urllib.request import urlopen
 
 from fastapi import FastAPI
 
-from videobox_api.orchestration import ApiOrchestrator, build_local_first_runtime_service
+from videobox_api.orchestration import (
+    ApiOrchestrator,
+    LocalOnlyRuntimeService,
+    build_local_only_runtime_service,
+)
 from videobox_api.provider_factories import _build_pycapcut_exporter, _build_stt_provider, _build_tts_provider
 from videobox_api.response_normalizers import (
     _build_preflight_review_prediction,
@@ -37,8 +41,6 @@ from videobox_core_engine.settings import (
     TTSEngineConfig,
     WhisperSTTConfig,
 )
-from videobox_provider_interfaces.gemini import GeminiHTTPTransport, GeminiRESTStructuredProvider
-from videobox_provider_interfaces.llm import LLMProviderConfig
 from videobox_storage.local_project_store import LocalProjectStore
 from videobox_storage.media_library_store import MediaLibraryStore
 from videobox_storage.user_library_store import UserLibraryStore
@@ -66,6 +68,7 @@ def create_app(
     capcut_draft_export_config: CapCutDraftExportConfig | None = None,
     tts_engine_config: TTSEngineConfig | None = None,
     capcut_handoff_service=None,
+    local_only_runtime_service_factory=None,
     local_first_runtime_service_factory=None,
     stt_provider=None,
     tts_provider=None,
@@ -80,17 +83,24 @@ def create_app(
         store.projects_root.parent / "videobox-user-library"
     )
     resolved_local_runtime_config = local_runtime_config or LocalOpenAICompatibleRuntimeConfig()
-    runtime_service_factory = local_first_runtime_service_factory or (
-        lambda project_store: build_local_first_runtime_service(
+    if local_only_runtime_service_factory is not None:
+        runtime_service_factory = local_only_runtime_service_factory
+    elif local_first_runtime_service_factory is not None:
+        # Compatibility bridge for tests or persisted callers that still
+        # construct a LocalFirst service.  The automatic pipeline receives a
+        # local-only service and therefore cannot invoke its Gemini fallback.
+        def runtime_service_factory(project_store: LocalProjectStore) -> LocalOnlyRuntimeService:
+            legacy_service = local_first_runtime_service_factory(project_store)
+            return LocalOnlyRuntimeService(
+                local_provider=legacy_service.local_provider,
+                local_runtime_config=legacy_service.local_runtime_config,
+            )
+    else:
+        runtime_service_factory = lambda project_store: build_local_only_runtime_service(
             store=project_store,
-            gemini_provider=GeminiRESTStructuredProvider(
-                transport=GeminiHTTPTransport(http_client=urlopen)
-            ),
-            gemini_config=LLMProviderConfig(provider_name="gemini", enabled=True),
             local_runtime_config=resolved_local_runtime_config,
             local_http_client=urlopen,
         )
-    )
     runtime_service = runtime_service_factory(store)
     resolved_auto_cut_config = auto_cut_config or AutoCutConfig()
     resolved_whisper_stt_config = whisper_stt_config or WhisperSTTConfig()
@@ -118,8 +128,8 @@ def create_app(
     app.state.whisper_stt_config = resolved_whisper_stt_config
     app.state.capcut_draft_export_config = resolved_capcut_draft_export_config
     app.state.tts_engine_config = resolved_tts_engine_config
-    app.state.build_local_first_runtime_service = build_local_first_runtime_service
-    app.state.local_first_runtime_service_factory = runtime_service_factory
+    app.state.build_local_only_runtime_service = build_local_only_runtime_service
+    app.state.local_only_runtime_service_factory = runtime_service_factory
     app.state.local_http_client = urlopen
     app.state.stt_provider = pipeline.stt_provider
     app.state.tts_provider = pipeline.tts_provider

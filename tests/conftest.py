@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import sys
+import socket
+import inspect
 from pathlib import Path
 
 import pytest
@@ -34,7 +36,7 @@ class _DeterministicOfflineRuntime:
 
 
 @pytest.fixture(autouse=True)
-def _replace_live_llm_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
+def _replace_live_llm_runtime(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest) -> None:
     import videobox_api.main as api_main
 
     def build_deterministic_runtime(**_: object) -> _DeterministicOfflineRuntime:
@@ -43,5 +45,79 @@ def _replace_live_llm_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
     def forbidden_urlopen(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("Tests must not call a live LLM HTTP transport.")
 
-    monkeypatch.setattr(api_main, "build_local_first_runtime_service", build_deterministic_runtime)
+    original_connect = socket.socket.connect
+    original_connect_ex = socket.socket.connect_ex
+    original_bind = socket.socket.bind
+    original_create_connection = socket.create_connection
+    socketpair_listener_ports: set[int] = set()
+
+    def is_socketpair_plumbing() -> bool:
+        return any(
+            frame.function == "_fallback_socketpair" and frame.filename.endswith("socket.py")
+            for frame in inspect.stack()
+        )
+
+    def allow_live_lmstudio(address: object) -> bool:
+        return (
+            request.node.get_closest_marker("live_lmstudio") is not None
+            and isinstance(address, tuple)
+            and len(address) >= 2
+            and address[0] == "127.0.0.1"
+            and address[1] == 1234
+        )
+
+    def guarded_connect(sock: socket.socket, address: object) -> object:
+        if allow_live_lmstudio(address):
+            return original_connect(sock, address)
+        # asyncio on Windows implements socket.socketpair() with a private
+        # loopback listener.  Permit only the exact ephemeral port bound by
+        # that plumbing, never arbitrary loopback destinations.
+        if (
+            isinstance(address, tuple)
+            and len(address) == 2
+            and address[0] == "127.0.0.1"
+            and address[1] in socketpair_listener_ports
+            and is_socketpair_plumbing()
+        ):
+            socketpair_listener_ports.discard(address[1])
+            return original_connect(sock, address)
+        raise AssertionError("Tests must not open network connections.")
+
+    def guarded_connect_ex(sock: socket.socket, address: object) -> int:
+        if allow_live_lmstudio(address):
+            return original_connect_ex(sock, address)
+        if (
+            isinstance(address, tuple)
+            and len(address) == 2
+            and address[0] == "127.0.0.1"
+            and address[1] in socketpair_listener_ports
+            and is_socketpair_plumbing()
+        ):
+            socketpair_listener_ports.discard(address[1])
+            return original_connect_ex(sock, address)
+        raise AssertionError("Tests must not open network connections.")
+
+    def guarded_bind(sock: socket.socket, address: object) -> object:
+        result = original_bind(sock, address)
+        if (
+            is_socketpair_plumbing()
+            and isinstance(address, tuple)
+            and len(address) == 2
+            and address[0] == "127.0.0.1"
+        ):
+            bound_address = sock.getsockname()
+            if isinstance(bound_address, tuple) and isinstance(bound_address[1], int):
+                socketpair_listener_ports.add(bound_address[1])
+        return result
+
+    def guarded_create_connection(address: object, *args: object, **kwargs: object) -> socket.socket:
+        if allow_live_lmstudio(address):
+            return original_create_connection(address, *args, **kwargs)
+        raise AssertionError("Tests must not open network connections.")
+
+    monkeypatch.setattr(api_main, "build_local_only_runtime_service", build_deterministic_runtime)
     monkeypatch.setattr(api_main, "urlopen", forbidden_urlopen)
+    monkeypatch.setattr(socket.socket, "connect", guarded_connect)
+    monkeypatch.setattr(socket.socket, "connect_ex", guarded_connect_ex)
+    monkeypatch.setattr(socket.socket, "bind", guarded_bind)
+    monkeypatch.setattr(socket, "create_connection", guarded_create_connection)
