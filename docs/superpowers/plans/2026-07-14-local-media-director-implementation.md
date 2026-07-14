@@ -298,7 +298,7 @@ git commit -m "feat: add bounded lm studio media providers"
 - Modify: packages/storage-abstractions/src/videobox_storage/local_project_store.py
 - Test: tests/test_media_analysis_store.py
 
-- [ ] **Step 1: 상태 전이와 restart recovery RED test 작성**
+- [x] **Step 1: 상태 전이와 restart recovery RED test 작성**
 
 ~~~python
 def test_media_analysis_persists_retry_and_recovers_orphan(tmp_path) -> None:
@@ -316,25 +316,25 @@ def test_media_analysis_persists_retry_and_recovers_orphan(tmp_path) -> None:
     assert recovered[0]["attempt"] == 1
 ~~~
 
-- [ ] **Step 2: RED 확인**
+- [x] **Step 2: RED 확인**
 
 Run: .venv\Scripts\python.exe -m pytest -q tests/test_media_analysis_store.py
 
 Expected: table 또는 create_media_analysis 부재로 FAIL.
 
-- [ ] **Step 3: domain과 SQLite migration 구현**
+- [x] **Step 3: domain과 SQLite migration 구현**
 
 MediaAnalysisStatus는 queued, running, succeeded, needs_review, blocked, failed, cancelled를 가진다. media_analysis_runs는 analysis_id, asset_id, idempotency_key UNIQUE, cache_key, status, attempt, progress_percent, error_code, error_message, next_retry_at, cancel_requested, result_json, created_at, updated_at을 저장한다. media_scene_windows와 media_embeddings는 analysis_id/source_sha256/profile_hash를 연결한다.
 
 LocalProjectStore에 create_media_analysis, claim_media_analysis, complete_media_analysis, mark_media_analysis_blocked, fail_media_analysis, request_media_analysis_cancel, recover_orphaned_media_analysis_jobs를 추가한다. 완료·cancelled record에는 늦은 result를 덮어쓰지 않는다.
 
-- [ ] **Step 4: 중복·상태 전이·restart·migration GREEN**
+- [x] **Step 4: 중복·상태 전이·restart·migration GREEN**
 
 Run: .venv\Scripts\python.exe -m pytest -q tests/test_media_analysis_store.py
 
 Expected: PASS. 같은 idempotency key는 동일 analysis를 반환하며 duplicate row가 생기지 않음.
 
-- [ ] **Step 5: 커밋**
+- [x] **Step 5: 커밋**
 
 ~~~powershell
 git add packages/domain-models packages/storage-abstractions tests/test_media_analysis_store.py

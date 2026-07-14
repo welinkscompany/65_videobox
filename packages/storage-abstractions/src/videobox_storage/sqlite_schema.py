@@ -89,6 +89,46 @@ PROJECT_SCHEMA_STATEMENTS = (
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS media_analysis_runs (
+        analysis_id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        asset_id TEXT NOT NULL,
+        idempotency_key TEXT NOT NULL UNIQUE,
+        cache_key TEXT NOT NULL,
+        status TEXT NOT NULL,
+        attempt INTEGER NOT NULL DEFAULT 0,
+        progress_percent INTEGER NOT NULL DEFAULT 0,
+        error_code TEXT,
+        error_message TEXT,
+        next_retry_at TEXT,
+        cancel_requested INTEGER NOT NULL DEFAULT 0,
+        result_json TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS media_scene_windows (
+        scene_window_id TEXT PRIMARY KEY,
+        analysis_id TEXT NOT NULL,
+        source_sha256 TEXT NOT NULL,
+        profile_hash TEXT NOT NULL,
+        start_sec REAL NOT NULL,
+        end_sec REAL NOT NULL,
+        metadata_json TEXT NOT NULL DEFAULT '{}'
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS media_embeddings (
+        embedding_id TEXT PRIMARY KEY,
+        analysis_id TEXT NOT NULL,
+        source_sha256 TEXT NOT NULL,
+        profile_hash TEXT NOT NULL,
+        embedding_json TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS provider_trace_failed_runs (
         job_id TEXT PRIMARY KEY,
         project_id TEXT NOT NULL,

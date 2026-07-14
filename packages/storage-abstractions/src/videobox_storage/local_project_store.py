@@ -13,6 +13,7 @@ from typing import Any
 from videobox_domain_models.assets import AssetRecord, AssetType
 from videobox_domain_models.ai_providers import GeminiKeyStatus
 from videobox_domain_models.jobs import JobStatus, JobType
+from videobox_domain_models.media_analysis import MediaAnalysisStatus
 from videobox_domain_models.projects import ProjectRecord
 from videobox_domain_models.recommendations import RecommendationRecord, RecommendationType
 from videobox_domain_models.transcripts import TranscriptRecord
@@ -1571,6 +1572,214 @@ class LocalProjectStore:
             (json.dumps(metadata, ensure_ascii=True), export_id),
         )
         return self.get_capcut_draft_export(project_id=project_id, export_id=export_id)
+
+    def create_media_analysis(
+        self,
+        *,
+        project_id: str,
+        asset_id: str,
+        idempotency_key: str,
+        cache_key: str,
+    ) -> dict[str, Any]:
+        """Create a durable analysis run, or return the run already requested."""
+        existing = self._media_analysis_by_idempotency(project_id, idempotency_key)
+        if existing is not None:
+            return existing
+        now = self._now_iso()
+        analysis_id = f"media_analysis_{uuid.uuid4().hex[:12]}"
+        try:
+            self._execute(
+                project_id,
+                """
+                INSERT INTO media_analysis_runs (
+                    analysis_id, project_id, asset_id, idempotency_key, cache_key,
+                    status, attempt, progress_percent, error_code, error_message,
+                    next_retry_at, cancel_requested, result_json, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, 0, 0, NULL, NULL, NULL, 0, NULL, ?, ?)
+                """,
+                (
+                    analysis_id, project_id, asset_id, idempotency_key, cache_key,
+                    MediaAnalysisStatus.QUEUED.value, now, now,
+                ),
+            )
+        except sqlite3.IntegrityError:
+            existing = self._media_analysis_by_idempotency(project_id, idempotency_key)
+            if existing is None:
+                raise
+            return existing
+        return self.get_media_analysis(project_id=project_id, analysis_id=analysis_id)
+
+    def get_media_analysis(self, *, project_id: str, analysis_id: str) -> dict[str, Any]:
+        row = self._fetchone(
+            project_id,
+            "SELECT * FROM media_analysis_runs WHERE analysis_id = ? AND project_id = ?",
+            (analysis_id, project_id),
+        )
+        if row is None:
+            raise KeyError(f"Media analysis not found: {analysis_id}")
+        return self._media_analysis_payload(row)
+
+    def claim_media_analysis(self, *, project_id: str, analysis_id: str) -> dict[str, Any] | None:
+        """Atomically claim a queued or due-retry run; None means another worker won."""
+        now = self._now_iso()
+        connection = self._connection(project_id)
+        try:
+            cursor = connection.execute(
+                """
+                UPDATE media_analysis_runs
+                SET status = ?, attempt = attempt + 1, progress_percent = 0, next_retry_at = NULL, updated_at = ?
+                WHERE analysis_id = ? AND project_id = ? AND cancel_requested = 0
+                  AND (
+                    status = ?
+                    OR (status = ? AND next_retry_at IS NOT NULL AND next_retry_at <= ?)
+                  )
+                """,
+                (
+                    MediaAnalysisStatus.RUNNING.value, now, analysis_id, project_id,
+                    MediaAnalysisStatus.QUEUED.value, MediaAnalysisStatus.FAILED.value, now,
+                ),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+        if cursor.rowcount != 1:
+            return None
+        return self.get_media_analysis(project_id=project_id, analysis_id=analysis_id)
+
+    def complete_media_analysis(
+        self,
+        *,
+        project_id: str,
+        analysis_id: str,
+        expected_attempt: int,
+        result: dict[str, Any],
+        status: MediaAnalysisStatus = MediaAnalysisStatus.SUCCEEDED,
+    ) -> dict[str, Any] | None:
+        if status not in {MediaAnalysisStatus.SUCCEEDED, MediaAnalysisStatus.NEEDS_REVIEW}:
+            raise ValueError("Completed media analysis must be succeeded or needs_review.")
+        connection = self._connection(project_id)
+        try:
+            cursor = connection.execute(
+                """
+                UPDATE media_analysis_runs
+                SET status = ?, result_json = ?, progress_percent = 100, error_code = NULL,
+                    error_message = NULL, next_retry_at = NULL, updated_at = ?
+                WHERE analysis_id = ? AND project_id = ? AND status = ? AND cancel_requested = 0 AND attempt = ?
+                """,
+                (
+                    status.value, json.dumps(result, ensure_ascii=True), self._now_iso(), analysis_id, project_id,
+                    MediaAnalysisStatus.RUNNING.value, expected_attempt,
+                ),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+        if cursor.rowcount != 1:
+            return None
+        return self.get_media_analysis(project_id=project_id, analysis_id=analysis_id)
+
+    def mark_media_analysis_blocked(
+        self, *, project_id: str, analysis_id: str, expected_attempt: int, error_code: str, error_message: str
+    ) -> dict[str, Any] | None:
+        return self._set_media_analysis_error(
+            project_id=project_id, analysis_id=analysis_id, status=MediaAnalysisStatus.BLOCKED,
+            expected_attempt=expected_attempt, error_code=error_code, error_message=error_message, next_retry_at=None,
+        )
+
+    def fail_media_analysis(
+        self, *, project_id: str, analysis_id: str, expected_attempt: int, error_code: str, error_message: str,
+        next_retry_at: str | None = None,
+    ) -> dict[str, Any] | None:
+        return self._set_media_analysis_error(
+            project_id=project_id, analysis_id=analysis_id, status=MediaAnalysisStatus.FAILED,
+            expected_attempt=expected_attempt, error_code=error_code, error_message=error_message, next_retry_at=next_retry_at,
+        )
+
+    def request_media_analysis_cancel(
+        self, *, project_id: str, analysis_id: str, expected_attempt: int
+    ) -> dict[str, Any] | None:
+        connection = self._connection(project_id)
+        try:
+            cursor = connection.execute(
+                """
+                UPDATE media_analysis_runs
+                SET status = ?, cancel_requested = 1, next_retry_at = NULL, updated_at = ?
+                WHERE analysis_id = ? AND project_id = ? AND status = ? AND cancel_requested = 0 AND attempt = ?
+                """,
+                (
+                    MediaAnalysisStatus.CANCELLED.value, self._now_iso(), analysis_id, project_id,
+                    MediaAnalysisStatus.RUNNING.value, expected_attempt,
+                ),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+        if cursor.rowcount != 1:
+            return None
+        return self.get_media_analysis(project_id=project_id, analysis_id=analysis_id)
+
+    def recover_orphaned_media_analysis_jobs(self, *, project_id: str) -> list[str]:
+        connection = self._connection(project_id)
+        try:
+            rows = connection.execute(
+                """
+                UPDATE media_analysis_runs
+                SET status = ?, progress_percent = 0, next_retry_at = NULL, updated_at = ?
+                WHERE project_id = ? AND status = ? AND cancel_requested = 0
+                RETURNING analysis_id
+                """,
+                (MediaAnalysisStatus.QUEUED.value, self._now_iso(), project_id, MediaAnalysisStatus.RUNNING.value),
+            ).fetchall()
+            connection.commit()
+        finally:
+            connection.close()
+        return [str(row["analysis_id"]) for row in rows]
+
+    def _set_media_analysis_error(
+        self, *, project_id: str, analysis_id: str, status: MediaAnalysisStatus, expected_attempt: int,
+        error_code: str, error_message: str, next_retry_at: str | None,
+    ) -> dict[str, Any] | None:
+        connection = self._connection(project_id)
+        try:
+            cursor = connection.execute(
+                """
+                UPDATE media_analysis_runs
+                SET status = ?, error_code = ?, error_message = ?, next_retry_at = ?, updated_at = ?
+                WHERE analysis_id = ? AND project_id = ? AND status = ? AND cancel_requested = 0 AND attempt = ?
+                """,
+                (
+                    status.value, error_code, error_message, next_retry_at, self._now_iso(), analysis_id,
+                    project_id, MediaAnalysisStatus.RUNNING.value, expected_attempt,
+                ),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+        if cursor.rowcount != 1:
+            return None
+        return self.get_media_analysis(project_id=project_id, analysis_id=analysis_id)
+
+    @staticmethod
+    def _is_media_analysis_final(item: dict[str, Any]) -> bool:
+        return item["status"] in {
+            MediaAnalysisStatus.SUCCEEDED.value, MediaAnalysisStatus.NEEDS_REVIEW.value,
+            MediaAnalysisStatus.FAILED.value, MediaAnalysisStatus.CANCELLED.value,
+        }
+
+    def _media_analysis_by_idempotency(self, project_id: str, idempotency_key: str) -> dict[str, Any] | None:
+        row = self._fetchone(
+            project_id,
+            "SELECT * FROM media_analysis_runs WHERE project_id = ? AND idempotency_key = ?",
+            (project_id, idempotency_key),
+        )
+        return self._media_analysis_payload(row) if row is not None else None
+
+    @staticmethod
+    def _media_analysis_payload(row: sqlite3.Row) -> dict[str, Any]:
+        payload = dict(row)
+        payload["cancel_requested"] = bool(payload["cancel_requested"])
+        payload["result"] = json.loads(payload.pop("result_json")) if payload["result_json"] else None
+        return payload
 
     def create_job(
         self,

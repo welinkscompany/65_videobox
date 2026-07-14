@@ -5,6 +5,7 @@ from videobox_domain_models.ai_providers import (
 )
 from videobox_domain_models.assets import AssetRecord, AssetType
 from videobox_domain_models.jobs import JobRecord, JobStatus, JobType
+from videobox_domain_models.media_analysis import MediaAnalysisStatus
 from videobox_domain_models.projects import ProjectRecord, ProjectStatus
 from videobox_domain_models.recommendations import (
     RecommendationRecord,
@@ -22,6 +23,7 @@ __all__ = [
     "JobRecord",
     "JobStatus",
     "JobType",
+    "MediaAnalysisStatus",
     "ProjectRecord",
     "ProjectStatus",
     "RecommendationRecord",
