@@ -41,6 +41,13 @@ UI는 4,396줄 `App.tsx`의 전면 rewrite를 하지 않고 `apps/web/src/featur
 
 현재 다음 실행 단위는 Slice 1 Task 6 live LM Studio smoke와 release gate다. Task 1–5 remediation의 provider/profile 경계와 durable provenance를 실제 local smoke에서 다시 확인한다.
 
+### Slice 1 Task 6 live gate evidence — blocked (2026-07-15)
+
+- `tests/test_lm_studio_media_smoke.py`는 `VIDEOBOX_RUN_LM_STUDIO_MEDIA_SMOKE=1`이 없으면 명시적으로 skip하며 normal pytest socket guard를 해제하지 않는다. opt-in marker도 정확한 `127.0.0.1:1234`만 허용한다.
+- 실제 opt-in 실행은 `/v1/models`까지 도달했지만, 2026-07-15 응답의 `qwen/qwen3.6-35b-a3b`, `text-embedding-bge-m3`, `text-embedding-nomic-embed-text-v1.5`, `ltx-2.3`, `flux.1-dev` 항목에는 `loaded`와 `native_capabilities`가 없었다. 따라서 strict capability preflight가 `vision + structured_json` 모델을 선택하지 못해 `no loaded model advertises native vision + structured_json capability`로 skip됐다.
+- 이는 PASS가 아니며 Task 6 checkbox, 전체 진행률, Slice 1 release gate를 완료 처리하지 않는다. 모델명을 capability로 추정하거나 fake provider로 대체하지 않았다. vision/embedding 실행 및 그 provider trace/audit artifact는 생성되지 않았고, 실제 요청은 exact loopback `GET /v1/models` 하나뿐이어서 Gemini 또는 외부 HTTP(S) 호출은 0이다. 기본 Git-ignored `artifacts/lm-studio-media-smoke/live-media-success.json` success artifact도 blocked run에서는 만들지 않는다. `VIDEOBOX_LM_STUDIO_SMOKE_ARTIFACT_ROOT`를 지정하면 해당 custom root의 보존·Git 제외는 실행자 책임이다.
+- 재개 조건: LM Studio가 loaded 상태와 native `vision`, `structured_json`, `embedding` capability를 제공하도록 모델을 준비한 뒤 같은 opt-in smoke를 재실행해 Vision fixed JSON schema, finite embedding, durable local semantic self-match, `lm_studio` provider trace/audit evidence를 PASS로 기록한다. PASS 때만 artifact는 HEAD·test total/command·profile/variant·sample SHA·exact endpoint/call count·external/Gemini 0·trace·timestamp를 담는다.
+
 ### Slice 1 Task 1 closeout (2026-07-14)
 
 - `LocalOpenAICompatibleRuntimeConfig`는 정확히 `http://127.0.0.1:1234/v1`만 허용하며, create_app 자동 pipeline은 Gemini provider를 생성하거나 LocalFirst fallback을 실행하지 않는다.

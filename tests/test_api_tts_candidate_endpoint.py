@@ -6,7 +6,6 @@ import wave
 from fastapi.testclient import TestClient
 
 from videobox_api.main import create_app
-from videobox_core_engine.settings import TTSEngineConfig
 from videobox_provider_interfaces.tts import TTSRequest, TTSResult
 
 
@@ -28,7 +27,7 @@ def test_tts_candidate_endpoint_produces_a_real_synthesized_audio_asset_end_to_e
 
     app = create_app(
         projects_root=tmp_path,
-        tts_engine_config=TTSEngineConfig(enabled=True, engine="gtts", language="en"),
+        tts_provider=_DeterministicWaveTTSProvider(),
     )
     client = TestClient(app)
     project_id = client.post("/api/projects", json={"name": "TTS Candidate Draft"}).json()["project_id"]
@@ -62,7 +61,7 @@ def test_tts_candidates_accumulate_per_segment_for_ab_comparison(tmp_path: Path)
 
     app = create_app(
         projects_root=tmp_path,
-        tts_engine_config=TTSEngineConfig(enabled=True, engine="gtts", language="en"),
+        tts_provider=_DeterministicWaveTTSProvider(),
     )
     client = TestClient(app)
     project_id = client.post("/api/projects", json={"name": "TTS AB Draft"}).json()["project_id"]

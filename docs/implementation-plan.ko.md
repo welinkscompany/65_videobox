@@ -1069,3 +1069,9 @@ production-readiness blocker slice 1의 9개 Task는 구현·회귀·600초 smok
 
 - actual LM Studio media analysis는 strict loopback capability profile로만 opt-in 구성하며, default blocked state와 test-only fake DI seam을 분리한다. model-profile cache identity, durable scene/embedding provenance, active queue position, preview availability, batch partial-failure contract까지 RED-first로 보완했다.
 - Task 4의 analysis validity gate는 proposal/apply consumer가 생성되는 Slice 2 Task 8–11에서 연결한다. 이연을 가리기 위한 가짜 apply endpoint는 만들지 않는다.
+
+### Slice 1 Task 6 live gate current evidence — blocked (2026-07-15)
+
+- opt-in live smoke는 `@live_lmstudio`, `VIDEOBOX_RUN_LM_STUDIO_MEDIA_SMOKE=1`, exact `127.0.0.1:1234`를 모두 만족할 때만 socket guard를 통과한다. 일반 회귀는 이 연결을 열지 않는다.
+- 실제 `/v1/models`는 reachable했지만 loaded native `vision`·`structured_json` capability를 광고한 모델이 없어 smoke는 Vision 요청 전 명시적으로 skip됐다. 이는 release PASS가 아니며 Task 6 checkbox와 진행률은 그대로 둔다. 성공 artifact도 생성되지 않았다.
+- 재개 조건은 loaded native vision/structured JSON 및 embedding capability가 보일 때 같은 opt-in smoke를 재실행하는 것이다. 성공 시 기본 Git-ignored `artifacts/lm-studio-media-smoke/live-media-success.json`에 profile/variant, sample SHA, requested loopback endpoint와 call count, external/Gemini 0, provider trace를 기록한다. `VIDEOBOX_LM_STUDIO_SMOKE_ARTIFACT_ROOT`를 지정하는 경우 해당 경로의 보존·Git 제외 책임은 실행자에게 있다.

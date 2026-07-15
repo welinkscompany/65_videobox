@@ -3,7 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
@@ -53,6 +53,7 @@ class _NoRedirect(HTTPRedirectHandler):
 class LMStudioHTTPTransport:
     base_url: str = _LM_STUDIO_URL
     http_client: Callable[..., Any] | None = None
+    requested_endpoints: list[str] = field(default_factory=list, init=False)
 
     def _validate_endpoint(self) -> None:
         parsed = urlparse(self.base_url)
@@ -115,8 +116,10 @@ class LMStudioHTTPTransport:
 
     def request_json(self, path: str, payload: dict[str, Any] | None, *, timeout_seconds: int) -> dict[str, Any]:
         self._validate_endpoint()  # Revalidate immediately before every outbound operation.
+        endpoint = f"{self.base_url}{path}"
+        self.requested_endpoints.append(endpoint)
         request = Request(
-            f"{self.base_url}{path}",
+            endpoint,
             data=None if payload is None else json.dumps(payload).encode("utf-8"),
             headers={"Content-Type": "application/json"},
             method="GET" if payload is None else "POST",
@@ -205,4 +208,6 @@ class LMStudioEmbeddingProvider(EmbeddingProvider):
             vectors = tuple(tuple(float(value) for value in item["embedding"]) for item in data)
         except (KeyError, TypeError, ValueError) as exc:
             raise LMStudioProviderError("Embedding response is malformed.", "failed") from exc
+        if not all(vector and all(math.isfinite(value) for value in vector) for vector in vectors):
+            raise LMStudioProviderError("Embedding response must contain finite non-empty vectors.", "failed")
         return EmbeddingResponse(provider_name=self.provider_name, model_name=request.model_name, vectors=vectors)

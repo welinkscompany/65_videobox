@@ -113,6 +113,15 @@ def test_lm_studio_preflight_selects_loaded_native_capability_profile() -> None:
     assert len(client.requests) == 1
 
 
+def test_lm_studio_transport_records_only_exact_validated_requested_endpoints() -> None:
+    client = FakeLMStudioClient([_loaded_models(capabilities=["embedding"])])
+    transport = LMStudioHTTPTransport(http_client=client)
+
+    transport.preflight(model_name="local-media", capability="embedding")
+
+    assert transport.requested_endpoints == ["http://127.0.0.1:1234/v1/models"]
+
+
 def test_lm_studio_preflight_blocks_unloaded_or_missing_model() -> None:
     client = FakeLMStudioClient([{"data": [{"id": "local-media", "loaded": False, "native_capabilities": ["vision"]}]}])
 
@@ -120,6 +129,21 @@ def test_lm_studio_preflight_blocks_unloaded_or_missing_model() -> None:
         LMStudioHTTPTransport(http_client=client).preflight(model_name="local-media", capability="vision")
 
     assert captured.value.code == "blocked"
+
+
+@pytest.mark.parametrize("non_finite", [float("nan"), float("inf"), float("-inf")])
+def test_embedding_provider_rejects_non_finite_vectors(non_finite: float) -> None:
+    client = FakeLMStudioClient([
+        _loaded_models(capabilities=["embedding"]),
+        {"data": [{"embedding": [non_finite]}]},
+    ])
+
+    with pytest.raises(LMStudioProviderError, match="finite") as captured:
+        LMStudioEmbeddingProvider(transport=LMStudioHTTPTransport(http_client=client)).embed(
+            EmbeddingRequest(model_name="local-media", inputs=("local summary",))
+        )
+
+    assert captured.value.code == "failed"
 
 
 def test_vision_provider_limits_prepared_images_and_requires_fixed_schema() -> None:

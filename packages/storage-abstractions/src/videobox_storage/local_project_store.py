@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import math
 from copy import deepcopy
 import re
 import shutil
@@ -1668,6 +1669,60 @@ class LocalProjectStore:
         finally:
             connection.close()
         return [{**dict(row), "embedding": json.loads(str(row["embedding_json"]))} for row in rows]
+
+    def find_local_media_embedding_matches(
+        self,
+        *,
+        project_id: str,
+        query_embedding: list[float],
+        limit: int = 10,
+    ) -> list[dict[str, Any]]:
+        """Rank durable local media embeddings with deterministic cosine similarity."""
+        query = tuple(float(value) for value in query_embedding)
+        if not query or not all(math.isfinite(value) for value in query):
+            raise ValueError("query_embedding must contain finite values")
+        if limit < 1:
+            raise ValueError("limit must be at least 1")
+        query_norm = math.sqrt(sum(value * value for value in query))
+        if query_norm == 0:
+            raise ValueError("query_embedding must not be a zero vector")
+        connection = self._connection(project_id)
+        try:
+            rows = connection.execute(
+                """
+                SELECT embeddings.embedding_id, embeddings.analysis_id, runs.asset_id,
+                       embeddings.source_sha256, embeddings.profile_hash, embeddings.embedding_json
+                FROM media_embeddings AS embeddings
+                INNER JOIN media_analysis_runs AS runs ON runs.analysis_id = embeddings.analysis_id
+                WHERE runs.project_id = ?
+                ORDER BY embeddings.analysis_id ASC, embeddings.embedding_id ASC
+                """,
+                (project_id,),
+            ).fetchall()
+        finally:
+            connection.close()
+        matches: list[dict[str, Any]] = []
+        for row in rows:
+            try:
+                candidate = tuple(float(value) for value in json.loads(str(row["embedding_json"])))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                continue
+            if len(candidate) != len(query) or not candidate or not all(math.isfinite(value) for value in candidate):
+                continue
+            candidate_norm = math.sqrt(sum(value * value for value in candidate))
+            if candidate_norm == 0:
+                continue
+            score = sum(left * right for left, right in zip(query, candidate)) / (query_norm * candidate_norm)
+            matches.append(
+                {
+                    "analysis_id": str(row["analysis_id"]),
+                    "asset_id": str(row["asset_id"]),
+                    "source_sha256": str(row["source_sha256"]),
+                    "profile_hash": str(row["profile_hash"]),
+                    "score": score,
+                }
+            )
+        return sorted(matches, key=lambda item: (-float(item["score"]), str(item["analysis_id"])))[:limit]
 
     def list_media_analysis(self, *, project_id: str) -> list[dict[str, Any]]:
         connection = self._connection(project_id)

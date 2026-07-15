@@ -4490,7 +4490,7 @@ def test_broll_batch_import_registers_multiple_files_for_recommendation(
     }
 
 
-def test_broll_batch_import_expands_directory_and_fails_atomically_on_invalid_file(
+def test_broll_batch_import_expands_directory_and_preserves_valid_assets_on_invalid_file(
     tmp_path: Path,
 ) -> None:
     app = create_app(projects_root=tmp_path)
@@ -4530,9 +4530,16 @@ def test_broll_batch_import_expands_directory_and_fails_atomically_on_invalid_fi
         },
     )
 
-    assert invalid_response.status_code == 400
+    assert invalid_response.status_code == 201
+    assert len(invalid_response.json()["assets"]) == 1
+    assert invalid_response.json()["failures"] == [
+        {
+            "source_path": str((source_directory / "missing.mp4").resolve()),
+            "reason": "source file does not exist",
+        }
+    ]
     list_response = client.get(f"/api/projects/{project_id}/assets/broll-video")
-    assert len(list_response.json()["assets"]) == 2
+    assert len(list_response.json()["assets"]) == 3
 
 
 def _create_music_recommendation_project(

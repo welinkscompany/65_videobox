@@ -6,7 +6,7 @@
 
 ## 1. 결정과 목표
 
-VideoBox는 Gemini를 기본 또는 자동 fallback으로 사용하지 않는다. 로컬 LM Studio만 기본 AI 경로로 사용한다. 현재 개발 PC smoke에서는 `qwen/qwen3.6-35b-a3b`가 vision capability를, `text-embedding-bge-m3`가 embedding capability를 제공함을 확인했지만, 배포/실행 시에는 이 모델명을 가정하지 않는다. 시작 전 capability preflight가 모델 key/variant, `vision`, structured JSON, embedding 가용성, loaded state, 허용 context/profile을 확인해 현재 실행 profile을 고정한다.
+VideoBox는 Gemini를 기본 또는 자동 fallback으로 사용하지 않는다. 로컬 LM Studio만 기본 AI 경로로 사용한다. `qwen/qwen3.6-35b-a3b`와 `text-embedding-bge-m3`는 개발 중 관찰한 후보 모델명일 뿐, 현재 실행/배포 capability 또는 release 통과 근거가 아니다. 실제 strict live-gate 상태와 재개 조건은 `docs/development-status-2026-06-29.ko.md` §235를 따른다. 배포/실행 시에는 이 모델명을 가정하지 않으며, 시작 전 capability preflight가 모델 key/variant, `vision`, structured JSON, embedding 가용성, loaded state, 허용 context/profile을 확인해 현재 실행 profile을 고정한다.
 
 사용자는 검색어를 생각하지 않아도 된다. 대본을 붙여넣거나 파일로 입력하면 VideoBox가 구간별 의도·분위기·전환을 해석하고, 로컬 자산에서 B-roll, BGM, SFX 후보를 제안한다. 사용자는 미리보기와 근거를 확인한 뒤에만 후보를 편집 초안에 적용한다.
 

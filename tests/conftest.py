@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 import socket
 import inspect
+import os
 from pathlib import Path
 
 import pytest
@@ -23,6 +24,17 @@ for src_path in SRC_PATHS:
     sys.path.insert(0, str(src_path))
 
 from videobox_provider_interfaces.llm import LLMProviderError
+
+
+def _allow_live_lmstudio(request: pytest.FixtureRequest, address: object) -> bool:
+    return (
+        request.node.get_closest_marker("live_lmstudio") is not None
+        and os.environ.get("VIDEOBOX_RUN_LM_STUDIO_MEDIA_SMOKE") == "1"
+        and isinstance(address, tuple)
+        and len(address) >= 2
+        and address[0] == "127.0.0.1"
+        and address[1] == 1234
+    )
 
 
 class _DeterministicOfflineRuntime:
@@ -57,17 +69,8 @@ def _replace_live_llm_runtime(monkeypatch: pytest.MonkeyPatch, request: pytest.F
             for frame in inspect.stack()
         )
 
-    def allow_live_lmstudio(address: object) -> bool:
-        return (
-            request.node.get_closest_marker("live_lmstudio") is not None
-            and isinstance(address, tuple)
-            and len(address) >= 2
-            and address[0] == "127.0.0.1"
-            and address[1] == 1234
-        )
-
     def guarded_connect(sock: socket.socket, address: object) -> object:
-        if allow_live_lmstudio(address):
+        if _allow_live_lmstudio(request, address):
             return original_connect(sock, address)
         # asyncio on Windows implements socket.socketpair() with a private
         # loopback listener.  Permit only the exact ephemeral port bound by
@@ -84,7 +87,7 @@ def _replace_live_llm_runtime(monkeypatch: pytest.MonkeyPatch, request: pytest.F
         raise AssertionError("Tests must not open network connections.")
 
     def guarded_connect_ex(sock: socket.socket, address: object) -> int:
-        if allow_live_lmstudio(address):
+        if _allow_live_lmstudio(request, address):
             return original_connect_ex(sock, address)
         if (
             isinstance(address, tuple)
@@ -111,7 +114,7 @@ def _replace_live_llm_runtime(monkeypatch: pytest.MonkeyPatch, request: pytest.F
         return result
 
     def guarded_create_connection(address: object, *args: object, **kwargs: object) -> socket.socket:
-        if allow_live_lmstudio(address):
+        if _allow_live_lmstudio(request, address):
             return original_create_connection(address, *args, **kwargs)
         raise AssertionError("Tests must not open network connections.")
 

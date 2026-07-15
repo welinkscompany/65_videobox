@@ -31,6 +31,47 @@ def test_media_analysis_persists_retry_and_recovers_orphan(tmp_path: Path) -> No
     assert store.get_media_analysis(project_id=project_id, analysis_id=job["analysis_id"])["status"] == MediaAnalysisStatus.QUEUED.value
 
 
+def test_local_semantic_lookup_ranks_persisted_embeddings_after_store_restart(tmp_path: Path) -> None:
+    store, project_id = _store(tmp_path)
+    near = store.create_media_analysis(
+        project_id=project_id,
+        asset_id="asset_near",
+        idempotency_key="sha:near",
+        cache_key="cache-near",
+    )
+    far = store.create_media_analysis(
+        project_id=project_id,
+        asset_id="asset_far",
+        idempotency_key="sha:far",
+        cache_key="cache-far",
+    )
+    store.record_media_embedding(
+        project_id=project_id,
+        analysis_id=near["analysis_id"],
+        source_sha256="sha-near",
+        profile_hash="cache-near",
+        embedding=[1.0, 0.0],
+    )
+    store.record_media_embedding(
+        project_id=project_id,
+        analysis_id=far["analysis_id"],
+        source_sha256="sha-far",
+        profile_hash="cache-far",
+        embedding=[0.0, 1.0],
+    )
+
+    restarted = LocalProjectStore(tmp_path)
+    matches = restarted.find_local_media_embedding_matches(
+        project_id=project_id,
+        query_embedding=[0.9, 0.1],
+        limit=2,
+    )
+
+    assert [item["analysis_id"] for item in matches] == [near["analysis_id"], far["analysis_id"]]
+    assert matches[0]["asset_id"] == "asset_near"
+    assert matches[0]["score"] > matches[1]["score"]
+
+
 def test_media_analysis_recovery_returns_only_runs_it_requeued(tmp_path: Path) -> None:
     store, project_id = _store(tmp_path)
     queued = store.create_media_analysis(

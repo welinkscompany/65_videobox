@@ -80,7 +80,7 @@ def build_assets_router(orchestrator: ApiOrchestrator, store: LocalProjectStore)
             storage_uri=asset.storage_uri,
         )
 
-    @router.get("/api/projects/{project_id}/assets/broll-video")
+    @router.get("/api/projects/{project_id}/assets/broll-video", response_model_exclude_none=True)
     def list_broll_assets(project_id: str) -> AssetListResponse:
         try:
             assets = orchestrator.list_broll_assets(project_id=project_id)
