@@ -40,14 +40,15 @@
 
 ### 1.1 2026-07-15 중간점검 보완 규정
 
-Task 1–8의 현재 HEAD를 승인 설계, SQLite durable state, API 조립 경로, output 경로까지 역추적했다. 아래는 완료 checkbox를 되돌리는 사유가 아니라, 다음 미완료 Task가 반드시 닫아야 하는 **binding remediation**이다.
+Task 1–9의 현재 HEAD를 승인 설계, SQLite durable state, API 조립 경로, output 경로까지 역추적했다. 아래는 완료 checkbox를 되돌리는 사유가 아니라, 다음 미완료 Task가 반드시 닫아야 하는 **binding remediation**이다.
 
 - user-owned B-roll의 `rights=unknown`은 local draft/export 후보가 될 수 있고 output warning provenance를 남긴다. invalid 또는 unverified Starter Pack만 eligibility에서 차단한다. 따라서 Task 9는 Task 8의 임시 `license == "valid"` eligibility를 `verified` / `unknown_user_owned` / `blocked` 정책으로 교체한다.
 - Director proposal은 router가 store를 직접 조립하지 않는다. Task 9의 전용 service가 script segment, durable analysis `can_apply`, source SHA/availability, indexed BGM/SFX, project preferences를 하나의 읽기 snapshot으로 묶어 ranking한다.
-- stale은 client가 보낸 revision을 신뢰하지 않는다. 서버는 proposal, current editing-session, asset-index, analysis/source 상태를 재조회해 ready/status, expiry, source session, base session revision, asset-index revision을 판정하고 stable `409 stale_proposal` reason을 반환한다.
+- stale은 client가 보낸 revision을 신뢰하지 않는다. 서버는 proposal, current editing-session, asset-index, analysis/source 상태를 재조회해 ready/status, expiry, source session, base session revision, asset-index revision을 판정하고 stable `409 stale_proposal` reason을 반환한다. B-roll은 non-empty succeeded analysis와 current source SHA를, BGM/SFX는 indexed canonical metadata와 current source SHA를 각각 검증하며, BGM/SFX에 visual analysis를 요구하지 않는다.
 - analysis cache는 content/profile artifact와 project asset run/link를 구분한다. 같은 SHA의 서로 다른 asset이 한 asset ID/run을 공유하지 않으며, cancel/late-result는 scene/embedding/result와 terminal state를 한 transaction으로 확정한다. semantic/ranking query는 succeeded + active/current source SHA만 읽고, ranking-visible analysis state/tag/embedding/review 변화는 asset-index revision을 atomically 증가시킨다.
 - asset ingest는 basename 충돌로 기존 bytes를 overwrite하지 않는다. asset-id/UUID 또는 content-addressed destination을 atomic staging copy로 등록하고, DB failure 또는 copy failure에는 staged file을 정리한다.
 - immutable proposal snapshot JSON은 ready/stale/expired lifecycle 전이로 rewrite하지 않는다. lifecycle status/reason/changed-at은 separate state/event record로 분리해 audit/replay에서 original candidate snapshot을 검증할 수 있게 한다.
+- candidate의 `media_revision`은 nullable passthrough가 아니다. asset register의 immutable `created_at`을 canonical registration revision으로 snapshot에 기록하고, proposal/preflight/materialize가 현재 asset record와 비교한다. source bytes 변경은 `expected_content_sha256`, metadata eligibility 변경은 asset-index revision으로 별도 검증한다.
 - editing-session SQLite row를 durable SSOT로 정하고 sidecar JSON은 regenerable projection으로 취급한다. Task 11 apply/undo/redo와 output freshness invalidation은 동일 SQLite transaction에서 확정하며 sidecar write 실패 뒤 startup reconciliation을 검증한다.
 - OpenCut/full NLE 및 Voice Capture & Narration은 이 remediation의 범위에 넣지 않는다. 이들은 §235의 별도 후속 판단을 유지한다.
 
@@ -94,7 +95,7 @@ Task 1–8의 현재 HEAD를 승인 설계, SQLite durable state, API 조립 경
 - Create: packages/core-engine/src/videobox_core_engine/director_proposals.py
 - Create: packages/core-engine/src/videobox_core_engine/editing_transactions.py
 - Create: packages/core-engine/src/videobox_core_engine/project_asset_materializer.py
-- Create: services/api/src/videobox_api/routers/director.py
+- Modify: services/api/src/videobox_api/routers/director_proposals.py
 - Create: tests/test_script_draft_session.py
 - Create: tests/test_media_director_ranking.py
 - Create: tests/test_media_director_proposals.py
@@ -141,7 +142,7 @@ Task 1–8의 현재 HEAD를 승인 설계, SQLite durable state, API 조립 경
 - Modify: apps/web/src/styles.css
 - Modify: apps/web/src/api.test.ts
 - Modify: apps/web/src/app.test.tsx
-- Modify: services/api/src/videobox_api/routers/director.py
+- Modify: services/api/src/videobox_api/routers/director_proposals.py
 - Modify: services/api/src/videobox_api/models.py
 - Modify: packages/storage-abstractions/src/videobox_storage/sqlite_schema.py
 - Modify: packages/storage-abstractions/src/videobox_storage/local_project_store.py
@@ -774,13 +775,18 @@ git commit -m "feat: expose immutable director proposals"
 **Files:**
 
 - Create: packages/core-engine/src/videobox_core_engine/project_asset_materializer.py
-- Modify: services/api/src/videobox_api/routers/director.py
+- Modify: packages/core-engine/src/videobox_core_engine/director_proposal_service.py
+- Modify: packages/domain-models/src/videobox_domain_models/director_proposals.py
+- Modify: packages/storage-abstractions/src/videobox_storage/local_project_store.py
+- Modify: services/api/src/videobox_api/routers/director_proposals.py
 - Modify: services/api/src/videobox_api/routers/media_library.py
 - Modify: packages/storage-abstractions/src/videobox_storage/media_library_store.py
 - Test: tests/test_media_director_apply.py
+- Modify: tests/test_media_director_proposals.py
+- Modify: tests/test_api_media_director.py
 - Modify: tests/test_api_media_library.py
 
-- [ ] **Step 1: exact preview와 materialize failure RED test 작성**
+- [ ] **Step 1: proposal integrity, exact preview, materialize failure RED test 작성**
 
 ~~~python
 def test_preview_returns_the_proposed_scene_controls(client) -> None:
@@ -794,32 +800,55 @@ def test_bundle_preflight_fails_before_session_mutation_when_asset_missing(servi
     with pytest.raises(AssetMaterializationError):
         service.materialize_candidates(PROJECT_ID, [MISSING_CANDIDATE])
     assert service.get_editing_session(PROJECT_ID, SESSION_ID) == before
+
+def test_indexed_bgm_and_sfx_preflight_without_visual_analysis(client) -> None:
+    proposal = create_indexed_bgm_and_sfx_only_proposal(client)
+    assert client.post(f"{proposal_url(proposal)}/preflight").status_code == 200
+
+def test_broll_empty_analysis_result_is_blocked_and_candidate_has_registration_revision(service) -> None:
+    complete_broll_analysis(service, result={})
+    with pytest.raises(DirectorProposalBlockedError):
+        service.create(project_id=PROJECT_ID, session_id=SESSION_ID)
+    proposal = create_valid_broll_proposal(service)
+    assert proposal.candidates[0].media_revision == registered_asset_created_at(proposal.candidates[0].asset_id)
+
+def test_proposal_lifecycle_state_and_event_rollback_together_when_event_insert_fails(store, monkeypatch) -> None:
+    monkeypatch.setattr(store, "_insert_director_proposal_lifecycle_event", raise_sqlite_error)
+    with pytest.raises(sqlite3.Error):
+        store.save_director_proposal(PROJECT_ID, ready_proposal())
+    assert store.get_director_proposal_lifecycle(PROJECT_ID, ready_proposal().proposal_id) == []
 ~~~
 
 - [ ] **Step 2: RED 확인**
 
-Run: .venv\Scripts\python.exe -m pytest -q tests/test_media_director_apply.py tests/test_api_media_library.py
+Run: .venv\Scripts\python.exe -m pytest -q tests/test_media_director_proposals.py tests/test_api_media_director.py tests/test_media_director_apply.py tests/test_api_media_library.py
 
-Expected: preview endpoint/materializer 부재로 FAIL.
+Expected: BGM/SFX가 `analysis_unavailable`로 stale, empty B-roll result가 candidate가 됨, lifecycle event failure가 proposal row를 남김, candidate `media_revision`이 `None`, preview endpoint/materializer 부재로 FAIL.
 
-- [ ] **Step 3: materialize service 추출**
+- [ ] **Step 3: Task 9 proposal integrity remediation 구현**
+
+`DirectorProposalService.stale_reasons`를 media-type별 verifier로 분리한다. B-roll은 current source SHA, non-empty succeeded result, `can_apply_media_analysis`를 요구하고 BGM/SFX는 source existence/SHA와 `canonical_metadata_indexed` 및 media-specific canonical fields만 요구한다. 양쪽은 current asset `created_at`이 proposal candidate의 non-null `media_revision`과 같은지도 확인한다. API `expires_at`은 timezone-aware ISO-8601만 받아 malformed input을 `422`로 거절한다.
+
+`read_director_proposal_snapshot`은 asset `created_at`을 rankable candidate의 canonical registration revision으로 넘기고, candidate schema는 eligible director candidate에 revision이 없는 상태를 허용하지 않는다. proposal create/expiry lifecycle status와 event는 하나의 SQLite transaction으로 commit하며 event insert failure 주입 시 proposal row도 rollback한다.
+
+- [ ] **Step 4: materialize service 추출**
 
 기존 router의 snapshot_verified_asset, license snapshot, project register, recent usage 로직을 ProjectAssetMaterializer로 옮긴다. 모든 candidate source를 먼저 hash 검증하고 project staging에 복사한 뒤 등록한다. 실패하면 editing session은 건드리지 않는다. 이미 같은 library asset SHA가 materialize된 경우 기존 project asset을 재사용한다.
 
-copy 전 source SHA, copy 후 source SHA, staged-copy SHA가 proposal의 expected SHA와 모두 같은지 확인한다. per-SHA lock으로 concurrent duplicate materialize를 idempotent하게 만들고, 어느 단계든 실패하면 staged file과 registration을 모두 정리해 orphan을 남기지 않는다. preflight와 materialize는 analysis/source availability와 media revision을 다시 검증한다.
+copy 전 source SHA, copy 후 source SHA, staged-copy SHA가 proposal의 expected SHA와 모두 같은지 확인한다. per-SHA lock으로 concurrent duplicate materialize를 idempotent하게 만들고, 어느 단계든 실패하면 staged file과 registration을 모두 정리해 orphan을 남기지 않는다. preflight와 materialize는 media-type별 analysis/canonical-metadata eligibility, source availability, current asset registration revision을 다시 검증한다. source SHA를 snapshot 이후와 staging copy 이후에 다시 비교해 source mutation race를 `stale_asset`으로 실패시키고 session/asset registration/orphan을 남기지 않는다.
 
-- [ ] **Step 4: preview endpoint 구현과 GREEN**
+- [ ] **Step 5: preview endpoint 구현과 GREEN**
 
 GET .../candidates/{candidate_id}/preview는 verified source snapshot 또는 project-local asset을 스트리밍하고 exact in/out/controls를 header와 proposal payload에 유지한다. audio는 서버에서 autoplay 상태를 만들지 않는다.
 
-Run: .venv\Scripts\python.exe -m pytest -q tests/test_media_director_apply.py tests/test_api_media_library.py
+Run: .venv\Scripts\python.exe -m pytest -q tests/test_media_director_proposals.py tests/test_api_media_director.py tests/test_media_director_apply.py tests/test_api_media_library.py
 
 Expected: PASS.
 
-- [ ] **Step 5: 커밋**
+- [ ] **Step 6: 커밋**
 
 ~~~powershell
-git add packages/core-engine/src/videobox_core_engine/project_asset_materializer.py packages/storage-abstractions/src/videobox_storage/media_library_store.py services/api/src/videobox_api/routers/director.py services/api/src/videobox_api/routers/media_library.py tests/test_media_director_apply.py tests/test_api_media_library.py
+git add packages/core-engine/src/videobox_core_engine/project_asset_materializer.py packages/core-engine/src/videobox_core_engine/director_proposal_service.py packages/domain-models/src/videobox_domain_models/director_proposals.py packages/storage-abstractions/src/videobox_storage/local_project_store.py packages/storage-abstractions/src/videobox_storage/media_library_store.py services/api/src/videobox_api/routers/director_proposals.py services/api/src/videobox_api/routers/media_library.py tests/test_media_director_proposals.py tests/test_api_media_director.py tests/test_media_director_apply.py tests/test_api_media_library.py
 git commit -m "feat: materialize and preview director candidates"
 ~~~
 
@@ -832,7 +861,7 @@ git commit -m "feat: materialize and preview director candidates"
 - Modify: packages/core-engine/src/videobox_core_engine/editing_session_and_regeneration.py
 - Modify: packages/storage-abstractions/src/videobox_storage/sqlite_schema.py
 - Modify: packages/storage-abstractions/src/videobox_storage/local_project_store.py
-- Modify: services/api/src/videobox_api/routers/director.py
+- Modify: services/api/src/videobox_api/routers/director_proposals.py
 - Modify: services/api/src/videobox_api/models.py
 - Test: tests/test_media_director_apply.py
 - Modify: tests/test_editing_session.py
@@ -889,7 +918,7 @@ git commit -m "feat: apply director proposals as atomic edits"
 
 - Modify: packages/core-engine/src/videobox_core_engine/ffmpeg_final_renderer.py
 - Modify: packages/capcut-export/src/videobox_capcut_export/pycapcut_adapter.py
-- Modify: services/api/src/videobox_api/routers/director.py
+- Modify: services/api/src/videobox_api/routers/director_proposals.py
 - Modify: tests/test_ffmpeg_final_renderer.py
 - Modify: tests/test_pycapcut_adapter.py
 - Modify: tests/test_real_starter_media_pack_e2e.py
@@ -937,7 +966,7 @@ Expected: 전부 PASS. 또한 non-live deterministic integration에서 real defa
 실제 test totals, real pack result, source mutation rejection과 commit HEAD를 기록한다.
 
 ~~~powershell
-git add packages/core-engine packages/capcut-export services/api/src/videobox_api/routers/director.py tests docs/implementation-plan.ko.md docs/development-status-2026-06-29.ko.md
+git add packages/core-engine packages/capcut-export services/api/src/videobox_api/routers/director_proposals.py tests docs/implementation-plan.ko.md docs/development-status-2026-06-29.ko.md
 git commit -m "test: verify script-first proposal slice"
 git push
 ~~~
@@ -954,7 +983,7 @@ git push
 - Create: packages/core-engine/src/videobox_core_engine/director_commands.py
 - Modify: packages/storage-abstractions/src/videobox_storage/sqlite_schema.py
 - Modify: packages/storage-abstractions/src/videobox_storage/local_project_store.py
-- Modify: services/api/src/videobox_api/routers/director.py
+- Modify: services/api/src/videobox_api/routers/director_proposals.py
 - Modify: services/api/src/videobox_api/models.py
 - Test: tests/test_director_conversation.py
 - Test: tests/test_director_commands.py

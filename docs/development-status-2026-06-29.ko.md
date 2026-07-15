@@ -71,9 +71,9 @@ UI는 4,396줄 `App.tsx`의 전면 rewrite를 하지 않고 `apps/web/src/featur
 
 ### Local Media Director 중간점검 보완 (2026-07-15)
 
-- HEAD `8b023f5`와 origin은 일치한다. 새 full backend regression은 `932 passed, 2 skipped`, frontend regression은 `107 passed`이며, 독립 계획/코드품질/source→runtime 감사로 Task 1–8 구현 범위와 누적 8/18(44.4%)이 일치함을 확인했다.
-- 다음 작업 Task 9는 단순 router/DTO가 아니다. proposal composition service가 durable analysis gate·source/index snapshot·preferences를 조립하고, server가 stale reason을 직접 판정하며, unknown user-owned B-roll warning provenance와 local-only failure(no Gemini)까지 RED-first로 닫는다. 동일-SHA asset 간 analysis ownership, cancel 뒤 derived data, analysis state의 index revision, basename overwrite도 먼저 교정한다.
-- 후속 Task 10–13에는 SHA copy/staging cleanup, SQLite/sidecar recovery 및 durable output freshness, preview/renderer/CapCut shared verifier, idempotent conversation message API를 보충했다. OpenCut과 Voice Capture & Narration은 현재 18 Task 외부의 보류 범위를 유지한다.
+- historical note: 이 중간점검 최초 시점의 HEAD는 `8b023f5`, 누적은 Task 1–8/18(44.4%)이었다. 이후 Task 9 code closeout `37252c2`가 완료됐으며, 현재 authoritative 상태는 이 섹션 상단의 9/18(50.0%), 다음 Task 10이다.
+- 2026-07-15 후속 독립 감사에서 Task 9 preflight의 media-type policy mismatch를 확인했다. BGM/SFX proposal은 indexed canonical metadata만으로 생성되지만 preflight가 B-roll analysis까지 요구해 stale 처리된다. empty B-roll analysis result, nullable candidate `media_revision`, lifecycle status/event 분리 commit도 확인됐다. Task 10은 materializer 전에 이 항목을 RED-first remediation으로 처리한다.
+- Task 10은 B-roll=non-empty succeeded analysis+SHA, BGM/SFX=indexed canonical metadata+SHA의 verifier를 분리하고 asset registration `created_at`을 candidate `media_revision`으로 고정한다. 그 뒤 SHA copy/staging cleanup·per-SHA lock·source-mutation race·candidate preview를 수행한다. OpenCut과 Voice Capture & Narration은 현재 18 Task 외부의 보류 범위를 유지한다.
 
 ### Slice 1 Task 1 closeout (2026-07-14)
 
