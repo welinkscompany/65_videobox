@@ -31,12 +31,15 @@ class DirectorCandidate:
     expected_content_sha256: str | None
     media_revision: str | None
     canonical_metadata: Mapping[str, object]
+    license_policy: str = "verified"
+    warning_provenance: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "reason_chips", tuple(self.reason_chips))
         object.__setattr__(self, "scores", _frozen_mapping(self.scores))
         object.__setattr__(self, "controls", _frozen_mapping(self.controls))
         object.__setattr__(self, "canonical_metadata", _frozen_mapping(self.canonical_metadata))
+        object.__setattr__(self, "warning_provenance", tuple(self.warning_provenance))
 
 
 @dataclass(frozen=True)

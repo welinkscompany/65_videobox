@@ -3,6 +3,19 @@ from __future__ import annotations
 from videobox_core_engine.media_ranking import rank_candidates
 
 
+def test_user_owned_unknown_rights_broll_is_eligible_with_warning_provenance() -> None:
+    ranked = rank_candidates(
+        {"text": "여행"},
+        [{"asset_id": "mine", "media_type": "broll", "tags": ["여행"], "source_kind": "user_owned", "license": "unknown", "availability": "available", "review_status": "approved"}],
+    )
+    assert [candidate.asset_id for candidate in ranked] == ["mine"]
+    assert ranked[0].canonical_metadata["copyright_warning"] == "rights_unknown_user_owned"
+
+
+def test_unknown_starter_asset_remains_ineligible() -> None:
+    assert not rank_candidates({"text": "여행"}, [{"asset_id": "starter", "media_type": "broll", "tags": ["여행"], "source_kind": "starter_pack", "license": "unknown", "availability": "available", "review_status": "approved"}])
+
+
 SEGMENT = {"segment_id": "script:s:001", "text": "차분한 여행 장면", "duration_sec": 5}
 
 

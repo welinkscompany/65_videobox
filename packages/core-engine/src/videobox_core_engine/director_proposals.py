@@ -38,7 +38,8 @@ def proposal_to_payload(proposal: DirectorProposal) -> dict[str, object]:
             "reason_chips": list(c.reason_chips), "scores": _json_value(c.scores), "availability": c.availability,
             "review_status": c.review_status, "preview_uri": c.preview_uri, "controls": _json_value(c.controls),
             "expected_content_sha256": c.expected_content_sha256, "media_revision": c.media_revision,
-            "canonical_metadata": _json_value(c.canonical_metadata)} for c in proposal.candidates],
+            "canonical_metadata": _json_value(c.canonical_metadata), "license_policy": c.license_policy,
+            "warning_provenance": list(c.warning_provenance)} for c in proposal.candidates],
     }
 
 def proposal_from_payload(payload: dict[str, object]) -> DirectorProposal:

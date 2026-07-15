@@ -2,6 +2,21 @@ import { describe, expect, it, vi } from "vitest";
 import { ApiConflictError, api } from "./api";
 
 describe("caption style API conflicts", () => {
+  it("uses the exact immutable Director proposal routes and request bodies", async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify({ proposal_id: "proposal_1" }), { status: 201 })));
+    vi.stubGlobal("fetch", fetchMock);
+    await api.createDirectorProposal("project_001", { session_id: "session_001" });
+    await api.getDirectorProposal("project_001", "proposal_1");
+    await api.preflightDirectorProposal("project_001", "proposal_1");
+    await api.refreshDirectorProposal("project_001", "proposal_1");
+    await api.updateDirectorPreferences("project_001", { pin_asset: ["asset_1"] });
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/projects/project_001/director/proposals", expect.objectContaining({ method: "POST", body: JSON.stringify({ session_id: "session_001" }) }));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/projects/project_001/director/proposals/proposal_1", undefined);
+    expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/projects/project_001/director/proposals/proposal_1/preflight", expect.objectContaining({ method: "POST" }));
+    expect(fetchMock).toHaveBeenNthCalledWith(4, "/api/projects/project_001/director/proposals/proposal_1/refresh", expect.objectContaining({ method: "POST" }));
+    expect(fetchMock).toHaveBeenNthCalledWith(5, "/api/projects/project_001/director/preferences", expect.objectContaining({ method: "PUT", body: JSON.stringify({ pin_asset: ["asset_1"] }) }));
+    vi.unstubAllGlobals();
+  });
   it("preserves batch analysis jobs and per-file failures", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
       assets: [{ asset_id: "asset_1" }], analysis_jobs: [{ analysis_id: "analysis_1" }], failures: [{ source_path: "bad.mp4", reason: "missing" }],

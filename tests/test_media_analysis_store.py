@@ -3,8 +3,10 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
 from pathlib import Path
+from hashlib import sha256
 
 from videobox_domain_models.media_analysis import MediaAnalysisStatus
+from videobox_domain_models.assets import AssetType
 from videobox_storage.local_project_store import LocalProjectStore
 
 
@@ -33,18 +35,16 @@ def test_media_analysis_persists_retry_and_recovers_orphan(tmp_path: Path) -> No
 
 def test_local_semantic_lookup_ranks_persisted_embeddings_after_store_restart(tmp_path: Path) -> None:
     store, project_id = _store(tmp_path)
-    near = store.create_media_analysis(
-        project_id=project_id,
-        asset_id="asset_near",
-        idempotency_key="sha:near",
-        cache_key="cache-near",
-    )
-    far = store.create_media_analysis(
-        project_id=project_id,
-        asset_id="asset_far",
-        idempotency_key="sha:far",
-        cache_key="cache-far",
-    )
+    near_path, far_path = tmp_path / "near.mp4", tmp_path / "far.mp4"
+    near_path.write_bytes(b"near")
+    far_path.write_bytes(b"far")
+    near_asset = store.register_asset(project_id=project_id, asset_type=AssetType.BROLL_VIDEO, source_path=near_path)
+    far_asset = store.register_asset(project_id=project_id, asset_type=AssetType.BROLL_VIDEO, source_path=far_path)
+    near = store.create_media_analysis(project_id=project_id, asset_id=near_asset.asset_id, idempotency_key=f"{sha256(near_path.read_bytes()).hexdigest()}:near", cache_key="cache-near")
+    far = store.create_media_analysis(project_id=project_id, asset_id=far_asset.asset_id, idempotency_key=f"{sha256(far_path.read_bytes()).hexdigest()}:far", cache_key="cache-far")
+    near_claim = store.claim_media_analysis(project_id=project_id, analysis_id=near["analysis_id"])
+    far_claim = store.claim_media_analysis(project_id=project_id, analysis_id=far["analysis_id"])
+    assert near_claim and far_claim
     store.record_media_embedding(
         project_id=project_id,
         analysis_id=near["analysis_id"],
@@ -59,6 +59,8 @@ def test_local_semantic_lookup_ranks_persisted_embeddings_after_store_restart(tm
         profile_hash="cache-far",
         embedding=[0.0, 1.0],
     )
+    assert store.complete_media_analysis(project_id=project_id, analysis_id=near["analysis_id"], expected_attempt=near_claim["attempt"], result={})
+    assert store.complete_media_analysis(project_id=project_id, analysis_id=far["analysis_id"], expected_attempt=far_claim["attempt"], result={})
 
     restarted = LocalProjectStore(tmp_path)
     matches = restarted.find_local_media_embedding_matches(
@@ -68,7 +70,7 @@ def test_local_semantic_lookup_ranks_persisted_embeddings_after_store_restart(tm
     )
 
     assert [item["analysis_id"] for item in matches] == [near["analysis_id"], far["analysis_id"]]
-    assert matches[0]["asset_id"] == "asset_near"
+    assert matches[0]["asset_id"] == near_asset.asset_id
     assert matches[0]["score"] > matches[1]["score"]
 
 
@@ -276,6 +278,71 @@ def test_media_analysis_ignores_late_completion_after_cancellation(tmp_path: Pat
     assert late is None
 
 
+def test_cancelled_analysis_rejects_late_derived_records_and_semantic_query(tmp_path: Path) -> None:
+    """Cancellation is terminal: a late worker cannot repopulate searchable data."""
+    store, project_id = _store(tmp_path)
+    job = store.create_media_analysis(project_id=project_id, asset_id="asset_001", idempotency_key="sha:profile", cache_key="cache-v1")
+    claim = store.claim_media_analysis(project_id=project_id, analysis_id=job["analysis_id"])
+    assert claim is not None
+    assert store.request_media_analysis_cancel(project_id=project_id, analysis_id=job["analysis_id"], expected_attempt=claim["attempt"])
+
+    store.record_media_scene_windows(project_id=project_id, analysis_id=job["analysis_id"], source_sha256="sha", profile_hash="cache-v1", windows=[{"start_sec": 0, "end_sec": 1}])
+    store.record_media_embedding(project_id=project_id, analysis_id=job["analysis_id"], source_sha256="sha", profile_hash="cache-v1", embedding=[1.0, 0.0])
+
+    assert store.list_media_scene_windows(project_id=project_id, analysis_id=job["analysis_id"]) == []
+    assert store.list_media_embeddings(project_id=project_id, analysis_id=job["analysis_id"]) == []
+    assert store.find_local_media_embedding_matches(project_id=project_id, query_embedding=[1.0, 0.0]) == []
+
+
+def test_analysis_state_transitions_bump_asset_index_revision(tmp_path: Path) -> None:
+    """Every ranking-visible analysis lifecycle transition invalidates proposals."""
+    store, project_id = _store(tmp_path)
+    job = store.create_media_analysis(project_id=project_id, asset_id="asset_001", idempotency_key="sha:profile", cache_key="cache-v1")
+    initial = store.get_asset_index_revision(project_id)
+    claim = store.claim_media_analysis(project_id=project_id, analysis_id=job["analysis_id"])
+    assert claim is not None
+    assert store.complete_media_analysis(project_id=project_id, analysis_id=job["analysis_id"], expected_attempt=claim["attempt"], result={})
+    assert store.get_asset_index_revision(project_id) > initial
+
+
+def test_every_ranking_visible_analysis_transition_is_revisioned_and_rejected_late_write_is_not(tmp_path: Path) -> None:
+    """Proposal freshness advances for every visible lifecycle transition, atomically."""
+    store, project_id = _store(tmp_path)
+    source = tmp_path / "indexed.mp4"
+    source.write_bytes(b"indexed")
+    asset = store.register_asset(project_id=project_id, asset_type=AssetType.BROLL_VIDEO, source_path=source)
+    digest = sha256(source.read_bytes()).hexdigest()
+
+    def claimed(label: str) -> tuple[dict, dict]:
+        job = store.create_media_analysis(project_id=project_id, asset_id=asset.asset_id, idempotency_key=f"{digest}:{label}", cache_key=label)
+        claim = store.claim_media_analysis(project_id=project_id, analysis_id=job["analysis_id"])
+        assert claim is not None
+        return job, claim
+
+    revision = store.get_asset_index_revision(project_id)
+    needs_review, claim = claimed("review")
+    assert store.complete_media_analysis(project_id=project_id, analysis_id=needs_review["analysis_id"], expected_attempt=claim["attempt"], status=MediaAnalysisStatus.NEEDS_REVIEW, result={"tags": {"layers": {"subjects": []}}})
+    assert store.get_asset_index_revision(project_id) > revision
+    revision = store.get_asset_index_revision(project_id)
+    assert store.review_media_analysis(project_id=project_id, analysis_id=needs_review["analysis_id"], tags={"subjects": ["office"]})
+    assert store.get_asset_index_revision(project_id) > revision
+
+    for label, transition in (("failed", "failed"), ("blocked", "blocked"), ("cancelled", "cancelled")):
+        job, claim = claimed(label)
+        revision = store.get_asset_index_revision(project_id)
+        if transition == "failed":
+            changed = store.fail_media_analysis(project_id=project_id, analysis_id=job["analysis_id"], expected_attempt=claim["attempt"], error_code="FAIL", error_message="failed")
+        elif transition == "blocked":
+            changed = store.mark_media_analysis_blocked(project_id=project_id, analysis_id=job["analysis_id"], expected_attempt=claim["attempt"], error_code="BLOCKED", error_message="blocked")
+        else:
+            changed = store.request_media_analysis_cancel(project_id=project_id, analysis_id=job["analysis_id"], expected_attempt=claim["attempt"])
+        assert changed is not None
+        assert store.get_asset_index_revision(project_id) > revision
+        revision = store.get_asset_index_revision(project_id)
+        assert store.complete_media_analysis(project_id=project_id, analysis_id=job["analysis_id"], expected_attempt=claim["attempt"], result={}) is None
+        assert store.get_asset_index_revision(project_id) == revision
+
+
 def test_media_analysis_cancellation_keeps_late_error_from_overwriting_terminal_state(tmp_path: Path) -> None:
     store, project_id = _store(tmp_path)
     job = store.create_media_analysis(
@@ -364,3 +431,23 @@ def test_media_analysis_transitions_to_blocked_and_retriable_failure(tmp_path: P
     assert blocked["status"] == MediaAnalysisStatus.BLOCKED.value
     assert failed["status"] == MediaAnalysisStatus.FAILED.value
     assert failed["next_retry_at"] == "2026-07-14T00:00:05+00:00"
+
+
+def test_analysis_idempotency_is_scoped_to_asset_ownership(tmp_path: Path) -> None:
+    store, project_id = _store(tmp_path)
+    first = store.create_media_analysis(project_id=project_id, asset_id="asset-a", idempotency_key="same-sha", cache_key="cache")
+    second = store.create_media_analysis(project_id=project_id, asset_id="asset-b", idempotency_key="same-sha", cache_key="cache")
+    assert first["analysis_id"] != second["analysis_id"]
+    assert second["asset_id"] == "asset-b"
+
+
+def test_cancel_removes_query_visible_derived_analysis_records(tmp_path: Path) -> None:
+    store, project_id = _store(tmp_path)
+    job = store.create_media_analysis(project_id=project_id, asset_id="asset", idempotency_key="owned", cache_key="cache")
+    claim = store.claim_media_analysis(project_id=project_id, analysis_id=job["analysis_id"])
+    assert claim is not None
+    store.record_media_scene_windows(project_id=project_id, analysis_id=job["analysis_id"], source_sha256="sha", profile_hash="profile", windows=[{"start_sec": 0, "end_sec": 1}])
+    store.record_media_embedding(project_id=project_id, analysis_id=job["analysis_id"], source_sha256="sha", profile_hash="profile", embedding=[1.0, 0.0])
+    assert store.request_media_analysis_cancel(project_id=project_id, analysis_id=job["analysis_id"], expected_attempt=claim["attempt"])
+    assert store.list_media_scene_windows(project_id=project_id, analysis_id=job["analysis_id"]) == []
+    assert store.list_media_embeddings(project_id=project_id, analysis_id=job["analysis_id"]) == []

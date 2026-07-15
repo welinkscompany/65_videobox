@@ -279,6 +279,8 @@ class LocalProjectStore:
         destination_dir = self.project_root(project_id) / self._asset_directory(asset_type)
         destination_dir.mkdir(parents=True, exist_ok=True)
         destination_path = destination_dir / resolved_source.name
+        if destination_path.exists():
+            destination_path = destination_dir / f"{uuid.uuid4().hex}-{resolved_source.name}"
         shutil.copy2(resolved_source, destination_path)
         storage_uri = self._path_to_uri(project_id, destination_path)
         asset = AssetRecord.create(
@@ -854,6 +856,7 @@ class LocalProjectStore:
             INSERT INTO director_proposals (proposal_id, project_id, status, source_session_id, source_script_segment_ids_json, proposal_json, created_at, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, (proposal.proposal_id, project_id, proposal.status, proposal.source_session_id, json.dumps(list(proposal.source_script_segment_ids)), canonical_payload, now, now))
+            self._execute(project_id, "INSERT INTO director_proposal_lifecycle_events (proposal_id, status, reason, changed_at) VALUES (?, ?, ?, ?)", (proposal.proposal_id, proposal.status, "created", now))
         except sqlite3.IntegrityError:
             existing = self._fetchone(project_id, "SELECT proposal_json FROM director_proposals WHERE proposal_id = ?", (proposal.proposal_id,))
             if existing is not None:
@@ -868,17 +871,25 @@ class LocalProjectStore:
         if row is None:
             raise KeyError(f"Director proposal not found: {proposal_id}")
         proposal = proposal_from_payload(json.loads(str(row["proposal_json"])))
+        current_status = str(row["status"])
         instant = now or self._clock()
-        if proposal.status == "ready" and proposal.expires_at and datetime.fromisoformat(proposal.expires_at).astimezone(UTC) <= instant.astimezone(UTC):
-            payload = proposal_to_payload(proposal)
-            payload["status"] = "expired"
-            self._execute(project_id, "UPDATE director_proposals SET status = ?, proposal_json = ?, updated_at = ? WHERE proposal_id = ?", ("expired", json.dumps(payload, ensure_ascii=True), self._now_iso(), proposal_id))
-            proposal = proposal_from_payload(payload)
+        if current_status == "ready" and proposal.expires_at and datetime.fromisoformat(proposal.expires_at).astimezone(UTC) <= instant.astimezone(UTC):
+            changed_at = self._now_iso()
+            self._execute(project_id, "UPDATE director_proposals SET status = ?, updated_at = ? WHERE proposal_id = ?", ("expired", changed_at, proposal_id))
+            self._execute(project_id, "INSERT INTO director_proposal_lifecycle_events (proposal_id, status, reason, changed_at) VALUES (?, ?, ?, ?)", (proposal_id, "expired", "expiry", changed_at))
+            current_status = "expired"
+        if proposal.status != current_status:
+            from dataclasses import replace
+            proposal = replace(proposal, status=current_status)
         return proposal
 
     def list_director_proposals(self, project_id: str) -> list[DirectorProposal]:
         rows = self._fetchall(project_id, "SELECT proposal_id FROM director_proposals ORDER BY created_at, proposal_id", ())
         return [self.get_director_proposal(project_id, str(row["proposal_id"])) for row in rows]
+
+    def get_director_proposal_lifecycle(self, project_id: str, proposal_id: str) -> list[dict[str, Any]]:
+        rows = self._fetchall(project_id, "SELECT status, reason, changed_at FROM director_proposal_lifecycle_events WHERE proposal_id = ? ORDER BY event_id", (proposal_id,))
+        return [dict(row) for row in rows]
 
     def save_director_preferences(self, project_id: str, preferences: dict[str, Any]) -> dict[str, list[str]]:
         allowed = ("pin_asset", "exclude_asset", "exclude_creator", "exclude_tag")
@@ -893,6 +904,47 @@ class LocalProjectStore:
     def get_asset_index_revision(self, project_id: str) -> int:
         row = self._fetchone(project_id, "SELECT revision FROM director_asset_index_revisions WHERE project_id = ?", (project_id,))
         return int(row["revision"]) if row else 0
+
+    def read_director_proposal_snapshot(self, *, project_id: str, session_id: str) -> dict[str, Any]:
+        """Return every proposal input from one SQLite read snapshot.
+
+        Proposal composition must never pair candidates from one library state
+        with a revision from another state.
+        """
+        connection = self._connection(project_id)
+        try:
+            connection.execute("BEGIN")
+            session_row = connection.execute(
+                "SELECT session_json, summary_json, session_revision, created_at, updated_at FROM editing_sessions WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+            if session_row is None:
+                raise KeyError(f"Editing session not found: {session_id}")
+            session = json.loads(str(session_row["session_json"] or "{}"))
+            session["summary"] = json.loads(str(session_row["summary_json"] or "{}"))
+            session["session_revision"] = int(session_row["session_revision"])
+            session["created_at"], session["updated_at"] = session_row["created_at"], session_row["updated_at"]
+            asset_rows = connection.execute("SELECT asset_id, project_id, asset_type, storage_uri, source_kind, mime_type, duration_sec, metadata_json, created_at FROM assets ORDER BY created_at ASC").fetchall()
+            analysis_rows = connection.execute("SELECT * FROM media_analysis_runs WHERE project_id = ? ORDER BY created_at ASC, analysis_id ASC", (project_id,)).fetchall()
+            preference_row = connection.execute("SELECT preferences_json FROM director_preferences WHERE project_id = ?", (project_id,)).fetchone()
+            revision_row = connection.execute("SELECT revision FROM director_asset_index_revisions WHERE project_id = ?", (project_id,)).fetchone()
+            hook = getattr(self, "_director_proposal_snapshot_hook", None)
+            if hook is not None:
+                hook()
+            connection.commit()
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+        finally:
+            connection.close()
+        assets = [{**dict(row), "metadata": json.loads(str(row["metadata_json"] or "{}"))} for row in asset_rows]
+        analyses = [self._media_analysis_payload(row) for row in analysis_rows]
+        return {
+            "session": session, "assets": assets, "analyses": analyses,
+            "preferences": json.loads(str(preference_row["preferences_json"])) if preference_row else {"pin_asset": [], "exclude_asset": [], "exclude_creator": [], "exclude_tag": []},
+            "asset_index_revision": int(revision_row["revision"]) if revision_row else 0,
+        }
 
     def next_director_proposal_revision(self, project_id: str) -> int:
         """Allocate a durable, project-scoped monotonic proposal revision."""
@@ -969,8 +1021,9 @@ class LocalProjectStore:
             payload = json.loads(str(row["proposal_json"]))
             if not wanted.intersection(payload.get("source_script_segment_ids", [])):
                 continue
-            payload["status"] = "stale"
-            connection.execute("UPDATE director_proposals SET status = 'stale', proposal_json = ?, updated_at = ? WHERE proposal_id = ?", (json.dumps(payload, ensure_ascii=True), self._now_iso(), row["proposal_id"]))
+            changed_at = self._now_iso()
+            connection.execute("UPDATE director_proposals SET status = 'stale', updated_at = ? WHERE proposal_id = ?", (changed_at, row["proposal_id"]))
+            connection.execute("INSERT INTO director_proposal_lifecycle_events (proposal_id, status, reason, changed_at) VALUES (?, ?, ?, ?)", (row["proposal_id"], "stale", "script_alignment", changed_at))
             changed += 1
         return changed
 
@@ -1731,7 +1784,8 @@ class LocalProjectStore:
         cache_key: str,
     ) -> dict[str, Any]:
         """Create a durable analysis run, or return the run already requested."""
-        existing = self._media_analysis_by_idempotency(project_id, idempotency_key)
+        owned_key = f"{asset_id}::{idempotency_key}"
+        existing = self._media_analysis_by_idempotency(project_id, asset_id, owned_key)
         if existing is not None:
             return existing
         now = self._now_iso()
@@ -1747,12 +1801,12 @@ class LocalProjectStore:
                 ) VALUES (?, ?, ?, ?, ?, ?, 0, 0, NULL, NULL, NULL, 0, NULL, ?, ?)
                 """,
                 (
-                    analysis_id, project_id, asset_id, idempotency_key, cache_key,
+                    analysis_id, project_id, asset_id, owned_key, cache_key,
                     MediaAnalysisStatus.QUEUED.value, now, now,
                 ),
             )
         except sqlite3.IntegrityError:
-            existing = self._media_analysis_by_idempotency(project_id, idempotency_key)
+            existing = self._media_analysis_by_idempotency(project_id, asset_id, owned_key)
             if existing is None:
                 raise
             return existing
@@ -1786,6 +1840,11 @@ class LocalProjectStore:
         return json.loads(str(row["profile_json"]))
 
     def record_media_scene_windows(self, *, project_id: str, analysis_id: str, source_sha256: str, profile_hash: str, windows: list[dict[str, Any]]) -> None:
+        # Workers can return after a user has cancelled.  Derived records must
+        # never resurrect a terminally cancelled run.
+        current = self.get_media_analysis(project_id=project_id, analysis_id=analysis_id)
+        if current["status"] != MediaAnalysisStatus.RUNNING.value or bool(current["cancel_requested"]):
+            return
         for window in windows:
             self._execute(project_id, "INSERT OR REPLACE INTO media_scene_windows (scene_window_id, analysis_id, source_sha256, profile_hash, start_sec, end_sec, metadata_json) VALUES (?, ?, ?, ?, ?, ?, ?)", (f"{analysis_id}:{window['start_sec']}:{window['end_sec']}", analysis_id, source_sha256, profile_hash, float(window["start_sec"]), float(window["end_sec"]), json.dumps(window.get("metadata") or {}, ensure_ascii=True)))
 
@@ -1798,6 +1857,9 @@ class LocalProjectStore:
         return [{**dict(row), "metadata": json.loads(str(row["metadata_json"]))} for row in rows]
 
     def record_media_embedding(self, *, project_id: str, analysis_id: str, source_sha256: str, profile_hash: str, embedding: list[float]) -> None:
+        current = self.get_media_analysis(project_id=project_id, analysis_id=analysis_id)
+        if current["status"] != MediaAnalysisStatus.RUNNING.value or bool(current["cancel_requested"]):
+            return
         self._execute(project_id, "INSERT OR REPLACE INTO media_embeddings (embedding_id, analysis_id, source_sha256, profile_hash, embedding_json, created_at) VALUES (?, ?, ?, ?, ?, ?)", (f"{analysis_id}:0", analysis_id, source_sha256, profile_hash, json.dumps(embedding), self._now_iso()))
 
     def list_media_embeddings(self, *, project_id: str, analysis_id: str) -> list[dict[str, Any]]:
@@ -1832,10 +1894,10 @@ class LocalProjectStore:
                        embeddings.source_sha256, embeddings.profile_hash, embeddings.embedding_json
                 FROM media_embeddings AS embeddings
                 INNER JOIN media_analysis_runs AS runs ON runs.analysis_id = embeddings.analysis_id
-                WHERE runs.project_id = ?
+                WHERE runs.project_id = ? AND runs.status = ? AND runs.cancel_requested = 0
                 ORDER BY embeddings.analysis_id ASC, embeddings.embedding_id ASC
                 """,
-                (project_id,),
+                (project_id, MediaAnalysisStatus.SUCCEEDED.value),
             ).fetchall()
         finally:
             connection.close()
@@ -1933,6 +1995,9 @@ class LocalProjectStore:
                     MediaAnalysisStatus.QUEUED.value, MediaAnalysisStatus.FAILED.value, now,
                 ),
             )
+            if cursor.rowcount == 1:
+                connection.execute("DELETE FROM media_scene_windows WHERE analysis_id = ?", (analysis_id,))
+                connection.execute("DELETE FROM media_embeddings WHERE analysis_id = ?", (analysis_id,))
             connection.commit()
         finally:
             connection.close()
@@ -1965,6 +2030,8 @@ class LocalProjectStore:
                     MediaAnalysisStatus.RUNNING.value, expected_attempt,
                 ),
             )
+            if cursor.rowcount == 1:
+                self._increment_asset_index_revision_with_connection(connection, project_id)
             connection.commit()
         finally:
             connection.close()
@@ -2005,6 +2072,10 @@ class LocalProjectStore:
                     MediaAnalysisStatus.RUNNING.value, MediaAnalysisStatus.QUEUED.value, expected_attempt,
                 ),
             )
+            if cursor.rowcount == 1:
+                connection.execute("DELETE FROM media_scene_windows WHERE analysis_id = ?", (analysis_id,))
+                connection.execute("DELETE FROM media_embeddings WHERE analysis_id = ?", (analysis_id,))
+                self._increment_asset_index_revision_with_connection(connection, project_id)
             connection.commit()
         finally:
             connection.close()
@@ -2080,18 +2151,18 @@ class LocalProjectStore:
     def can_apply_media_analysis(self, *, project_id: str, analysis_id: str) -> bool:
         """Durable safety gate used by proposal/apply callers before consuming analysis."""
         analysis = self.get_media_analysis(project_id=project_id, analysis_id=analysis_id)
-        if analysis["status"] not in {MediaAnalysisStatus.SUCCEEDED.value, MediaAnalysisStatus.NEEDS_REVIEW.value} or bool(analysis["cancel_requested"]):
+        if analysis["status"] != MediaAnalysisStatus.SUCCEEDED.value or bool(analysis["cancel_requested"]):
             return False
         try:
             asset = self.get_asset(project_id=project_id, asset_id=str(analysis["asset_id"]))
             source = self.resolve_storage_uri(project_id=project_id, storage_uri=str(asset["storage_uri"]))
             if not source.exists():
-                self._mark_media_cache_stale(project_id=project_id, asset_id=str(analysis["asset_id"]), source_sha256=str(analysis["idempotency_key"]).split(":", 1)[0])
+                self._mark_media_cache_stale(project_id=project_id, asset_id=str(analysis["asset_id"]), source_sha256=str(analysis["idempotency_key"]).split("::", 1)[-1].split(":", 1)[0])
                 return False
             current_sha = sha256_file(source)
         except (KeyError, OSError):
             return False
-        expected_sha = str(analysis["idempotency_key"]).split(":", 1)[0]
+        expected_sha = str(analysis["idempotency_key"]).split("::", 1)[-1].split(":", 1)[0]
         if current_sha != expected_sha:
             self._mark_media_cache_stale(project_id=project_id, asset_id=str(analysis["asset_id"]), source_sha256=expected_sha)
             return False
@@ -2139,6 +2210,10 @@ class LocalProjectStore:
                     project_id, MediaAnalysisStatus.RUNNING.value, expected_attempt,
                 ),
             )
+            if cursor.rowcount == 1:
+                connection.execute("DELETE FROM media_scene_windows WHERE analysis_id = ?", (analysis_id,))
+                connection.execute("DELETE FROM media_embeddings WHERE analysis_id = ?", (analysis_id,))
+                self._increment_asset_index_revision_with_connection(connection, project_id)
             connection.commit()
         finally:
             connection.close()
@@ -2153,11 +2228,11 @@ class LocalProjectStore:
             MediaAnalysisStatus.FAILED.value, MediaAnalysisStatus.CANCELLED.value,
         }
 
-    def _media_analysis_by_idempotency(self, project_id: str, idempotency_key: str) -> dict[str, Any] | None:
+    def _media_analysis_by_idempotency(self, project_id: str, asset_id: str, idempotency_key: str) -> dict[str, Any] | None:
         row = self._fetchone(
             project_id,
-            "SELECT * FROM media_analysis_runs WHERE project_id = ? AND idempotency_key = ?",
-            (project_id, idempotency_key),
+            "SELECT * FROM media_analysis_runs WHERE project_id = ? AND asset_id = ? AND idempotency_key = ?",
+            (project_id, asset_id, idempotency_key),
         )
         return self.get_media_analysis(project_id=project_id, analysis_id=str(row["analysis_id"])) if row is not None else None
 
@@ -3359,7 +3434,14 @@ class LocalProjectStore:
         # background job threads (see run_*_job in local_pipeline.py) write
         # to the same per-project database concurrently with polling reads.
         connection.execute("PRAGMA busy_timeout=5000")
-        connection.execute("PRAGMA journal_mode=WAL")
+        # The database is initialized in WAL mode.  Concurrently asking SQLite
+        # to change journal mode can itself take an exclusive lock; a racing
+        # connection may safely continue with the already-established mode.
+        try:
+            connection.execute("PRAGMA journal_mode=WAL")
+        except sqlite3.OperationalError as exc:
+            if "locked" not in str(exc).lower():
+                raise
         for statement in PROJECT_SCHEMA_STATEMENTS:
             connection.execute(statement)
         self._ensure_recommendation_decision_state_column(connection)

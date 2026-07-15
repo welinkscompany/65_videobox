@@ -53,6 +53,11 @@ export type MediaAnalysis = {
   created_at: string;
 };
 
+export type DirectorProposalCreateRequest = { session_id: string; expires_at?: string };
+export type DirectorPreferences = { pin_asset?: string[]; exclude_asset?: string[]; exclude_creator?: string[]; exclude_tag?: string[] };
+export type DirectorProposal = { proposal_id: string; revision_code: string; status: string; diff: Record<string, unknown>; candidates: Record<string, unknown>[] };
+export type DirectorProposalPreflight = { proposal_id?: string; status?: string; code?: "stale_proposal"; stale_reasons?: string[]; action?: "refresh"; diff?: Record<string, unknown> };
+
 export type TimelineClip = {
   clip_id: string;
   segment_id: string;
@@ -565,6 +570,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  createDirectorProposal: (projectId: string, payload: DirectorProposalCreateRequest) =>
+    request<DirectorProposal>(`/api/projects/${projectId}/director/proposals`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+  getDirectorProposal: (projectId: string, proposalId: string) =>
+    request<DirectorProposal>(`/api/projects/${projectId}/director/proposals/${proposalId}`),
+  preflightDirectorProposal: (projectId: string, proposalId: string) =>
+    request<DirectorProposalPreflight>(`/api/projects/${projectId}/director/proposals/${proposalId}/preflight`, { method: "POST" }),
+  refreshDirectorProposal: (projectId: string, proposalId: string) =>
+    request<DirectorProposal>(`/api/projects/${projectId}/director/proposals/${proposalId}/refresh`, { method: "POST" }),
+  getDirectorPreferences: (projectId: string) => request<DirectorPreferences>(`/api/projects/${projectId}/director/preferences`),
+  updateDirectorPreferences: (projectId: string, payload: DirectorPreferences) =>
+    request<DirectorPreferences>(`/api/projects/${projectId}/director/preferences`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
   getMediaLibraryInstallState: () => request<MediaLibraryInstallState>("/api/media-library/install-state"),
   listMediaLibraryAssets: () => request<{ assets: MediaLibraryAsset[] }>("/api/media-library/assets"),
   listMediaLibraryFavorites: () => request<{ asset_ids: string[] }>("/api/media-library/favorites"),

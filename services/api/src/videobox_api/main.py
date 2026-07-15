@@ -9,6 +9,7 @@ from fastapi import FastAPI
 
 from videobox_api.orchestration import (
     ApiOrchestrator,
+    LocalFirstRuntimeService,
     LocalOnlyRuntimeService,
     build_local_only_runtime_service,
 )
@@ -21,6 +22,7 @@ from videobox_api.response_normalizers import (
 )
 from videobox_api.routers.assets import build_assets_router
 from videobox_api.routers.editing_session import build_editing_session_router
+from videobox_api.routers.director_proposals import build_director_proposals_router
 from videobox_api.routers.editor_library import build_editor_library_router
 from videobox_api.routers.gemini_keys import build_gemini_keys_router
 from videobox_api.routers.jobs import build_jobs_router
@@ -191,6 +193,8 @@ def create_app(
             local_http_client=urlopen,
         )
     runtime_service = runtime_service_factory(store)
+    if isinstance(runtime_service, LocalFirstRuntimeService) or hasattr(runtime_service, "gemini_provider"):
+        raise ValueError("local_only_runtime_service_factory must not return a fallback-capable runtime")
     resolved_auto_cut_config = auto_cut_config or AutoCutConfig()
     resolved_whisper_stt_config = whisper_stt_config or WhisperSTTConfig()
     resolved_capcut_draft_export_config = capcut_draft_export_config or CapCutDraftExportConfig()
@@ -282,6 +286,7 @@ def create_app(
     app.include_router(build_jobs_router(orchestrator))
     app.include_router(build_timeline_router(orchestrator))
     app.include_router(build_editing_session_router(orchestrator, store))
+    app.include_router(build_director_proposals_router(store))
     app.include_router(build_editor_library_router(user_library_store))
     app.include_router(build_media_library_router(store, resolved_media_library_store))
     app.include_router(build_review_router(orchestrator))

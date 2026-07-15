@@ -207,6 +207,12 @@ PROJECT_SCHEMA_STATEMENTS = (
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS director_proposal_lifecycle_events (
+        event_id INTEGER PRIMARY KEY AUTOINCREMENT, proposal_id TEXT NOT NULL,
+        status TEXT NOT NULL, reason TEXT, changed_at TEXT NOT NULL
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS review_approvals (
         timeline_id TEXT PRIMARY KEY,
         project_id TEXT NOT NULL,

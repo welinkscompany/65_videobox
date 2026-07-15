@@ -8,10 +8,12 @@ import pytest
 
 from videobox_core_engine.director_proposals import create_proposal, create_and_save_proposal
 from videobox_core_engine.media_ranking import rank_candidates
-from videobox_storage.local_project_store import LocalProjectStore
+from videobox_storage.local_project_store import LocalProjectStore, sha256_file
+from videobox_domain_models.media_analysis import MediaAnalysisStatus
 from videobox_core_engine.local_pipeline import LocalPipelineRunner
 from videobox_core_engine.script_draft_session import build_provisional_script_draft_session
 from videobox_domain_models.assets import AssetType
+from videobox_core_engine.director_proposal_service import DirectorProposalBlockedError, DirectorProposalService
 
 
 PROJECT_ID = "project"
@@ -227,6 +229,78 @@ def test_expiry_is_evaluated_without_sleep(tmp_path) -> None:
     proposal = create_proposal(base_session_revision=1, asset_index_revision=1, source_session_id="s", candidates=[candidate()], revision=1, expires_at="2020-01-01T00:00:00+00:00")
     store.save_director_proposal(project.project_id, proposal)
     assert store.get_director_proposal(project.project_id, proposal.proposal_id, now=datetime(2021, 1, 1, tzinfo=UTC)).status == "expired"
+
+
+def test_expiry_lifecycle_does_not_rewrite_immutable_snapshot_json(tmp_path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project("p")
+    proposal = create_proposal(base_session_revision=1, asset_index_revision=1, source_session_id="s", candidates=[candidate()], revision=1, expires_at="2020-01-01T00:00:00+00:00")
+    store.save_director_proposal(project.project_id, proposal)
+    before = store._fetchone(project.project_id, "SELECT proposal_json FROM director_proposals WHERE proposal_id = ?", (proposal.proposal_id,))["proposal_json"]
+    assert store.get_director_proposal(project.project_id, proposal.proposal_id, now=datetime(2021, 1, 1, tzinfo=UTC)).status == "expired"
+    after = store._fetchone(project.project_id, "SELECT proposal_json FROM director_proposals WHERE proposal_id = ?", (proposal.proposal_id,))["proposal_json"]
+    assert before == after
+
+
+def test_director_service_creates_from_session_without_mutating_it(tmp_path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project("p")
+    session = store.save_editing_session(project_id=project.project_id, timeline_id="t", session_payload={"segments": [{"segment_id": "seg-1", "source_script_segment_id": "script:1", "caption_text": "여행"}], "history": []})
+    source = tmp_path / "clip.mp4"
+    source.write_bytes(b"clip")
+    asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=source, metadata={"tags": ["여행"], "license": "valid", "review_status": "approved"})
+    digest = sha256_file(store.resolve_storage_uri(project_id=project.project_id, storage_uri=asset.storage_uri))
+    analysis = store.create_media_analysis(project_id=project.project_id, asset_id=asset.asset_id, idempotency_key=f"{digest}:local", cache_key="local")
+    claimed = store.claim_media_analysis(project_id=project.project_id, analysis_id=analysis["analysis_id"])
+    assert claimed
+    store.complete_media_analysis(project_id=project.project_id, analysis_id=analysis["analysis_id"], expected_attempt=claimed["attempt"], result={"summary": "ok"}, status=MediaAnalysisStatus.SUCCEEDED)
+    before = store.get_editing_session(project_id=project.project_id, session_id=session["session_id"])
+    proposal = DirectorProposalService(store).create(project_id=project.project_id, session_id=session["session_id"])
+    assert proposal.candidates[0].asset_id == asset.asset_id
+    assert store.get_editing_session(project_id=project.project_id, session_id=session["session_id"]) == before
+
+
+def test_director_snapshot_does_not_mix_candidates_with_a_racing_asset_index(tmp_path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project("p")
+    session = store.save_editing_session(project_id=project.project_id, timeline_id="t", session_payload={"segments": [{"segment_id": "seg", "caption_text": "travel"}], "history": []})
+    source = tmp_path / "music.mp3"
+    source.write_bytes(b"music")
+    music = store.register_asset(project_id=project.project_id, asset_type=AssetType.BGM, source_path=source, metadata={"license": "valid", "review_status": "approved", "tags": ["travel"], "canonical_metadata_indexed": True, "mood": "calm", "energy": "low", "genre": "ambient", "recommended_use": "background"})
+    before = store.get_asset_index_revision(project.project_id)
+    other = LocalProjectStore(tmp_path)
+    store._director_proposal_snapshot_hook = lambda: other.update_asset_metadata(project_id=project.project_id, asset_id=music.asset_id, metadata_patch={"tags": ["raced"]})
+    proposal = DirectorProposalService(store).create(project_id=project.project_id, session_id=session["session_id"])
+    del store._director_proposal_snapshot_hook
+    assert proposal.asset_index_revision == before
+    assert proposal.candidates[0].asset_id == music.asset_id
+    assert "asset_index_revision" in DirectorProposalService(store).stale_reasons(project_id=project.project_id, proposal=proposal)
+
+
+def test_director_blocks_broll_when_snapshot_analysis_sha_source_is_missing_or_changed(tmp_path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project("p")
+    session = store.save_editing_session(project_id=project.project_id, timeline_id="t", session_payload={"segments": [{"segment_id": "seg", "caption_text": "office"}], "history": []})
+    source = tmp_path / "broll.mp4"; source.write_bytes(b"original")
+    asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=source, metadata={"license": "valid", "review_status": "approved"})
+    digest = sha256_file(store.resolve_storage_uri(project_id=project.project_id, storage_uri=asset.storage_uri))
+    run = store.create_media_analysis(project_id=project.project_id, asset_id=asset.asset_id, idempotency_key=f"{digest}:local", cache_key="local")
+    claim = store.claim_media_analysis(project_id=project.project_id, analysis_id=run["analysis_id"]); assert claim
+    assert store.complete_media_analysis(project_id=project.project_id, analysis_id=run["analysis_id"], expected_attempt=claim["attempt"], result={})
+    store.resolve_storage_uri(project_id=project.project_id, storage_uri=asset.storage_uri).write_bytes(b"changed")
+    with pytest.raises(DirectorProposalBlockedError) as blocked:
+        DirectorProposalService(store).create(project_id=project.project_id, session_id=session["session_id"])
+    assert blocked.value.lifecycle["recovery_action"] == "analyse_or_retry_assets"
+
+
+def test_director_blocks_unindexed_or_incomplete_bgm_sfx_metadata(tmp_path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project("p")
+    session = store.save_editing_session(project_id=project.project_id, timeline_id="t", session_payload={"segments": [{"segment_id": "seg", "caption_text": "music"}], "history": []})
+    source = tmp_path / "music.mp3"; source.write_bytes(b"music")
+    store.register_asset(project_id=project.project_id, asset_type=AssetType.BGM, source_path=source, metadata={"license": "valid", "review_status": "approved"})
+    with pytest.raises(DirectorProposalBlockedError):
+        DirectorProposalService(store).create(project_id=project.project_id, session_id=session["session_id"])
 
 
 def test_successful_alignment_selectively_stales_ready_proposals_after_restart(tmp_path) -> None:

@@ -25,7 +25,10 @@ def rank_candidates(segment: dict[str, Any], assets: list[dict[str, Any]], prefe
     for asset in assets:
         asset_id = str(asset.get("asset_id") or "")
         tags = _words(" ".join(map(str, asset.get("tags") or [])))
-        eligible = asset_id and str(asset.get("availability", "available")) == "available" and str(asset.get("license", "valid")) == "valid" and str(asset.get("review_status", "approved")) == "approved"
+        license_value = str(asset.get("license", "valid"))
+        license_policy = str(asset.get("license_policy") or "")
+        user_owned_unknown = license_policy == "unknown_user_owned" or (license_value == "unknown" and str(asset.get("source_kind", "")) == "user_owned")
+        eligible = asset_id and str(asset.get("availability", "available")) == "available" and (license_value == "valid" or user_owned_unknown) and str(asset.get("review_status", "approved")) == "approved"
         eligible = eligible and asset_id not in preferences.get("exclude_asset", []) and str(asset.get("creator") or "") not in preferences.get("exclude_creator", []) and not (tags & set(preferences.get("exclude_tag", [])))
         if not eligible:
             continue
@@ -44,7 +47,12 @@ def rank_candidates(segment: dict[str, Any], assets: list[dict[str, Any]], prefe
         letter = {"broll": "B", "bgm": "M", "sfx": "S"}.get(media_type, "B")
         metadata = _canonical_metadata(asset)
         metadata["semantic_provenance"] = semantic_provenance
-        candidate = DirectorCandidate(candidate_id=f"candidate:{asset_id}", visible_reference_code=f"P01-{letter}-00", media_type=media_type, asset_id=asset_id, library_asset_id=asset.get("library_asset_id"), reason_chips=tuple(sorted(target_words & tags)) or ("metadata",), scores=scores, availability=str(asset.get("availability", "available")), review_status=str(asset.get("review_status", "approved")), preview_uri=asset.get("preview_uri"), controls=dict(asset.get("controls") or {}), expected_content_sha256=asset.get("content_sha256"), media_revision=asset.get("media_revision"), canonical_metadata=metadata)
+        if user_owned_unknown:
+            metadata["copyright_warning"] = "rights_unknown_user_owned"
+        warning_provenance = tuple(asset.get("warning_provenance") or ())
+        if user_owned_unknown and "copyright_confirmation_required" not in warning_provenance:
+            warning_provenance = (*warning_provenance, "copyright_confirmation_required")
+        candidate = DirectorCandidate(candidate_id=f"candidate:{asset_id}", visible_reference_code=f"P01-{letter}-00", media_type=media_type, asset_id=asset_id, library_asset_id=asset.get("library_asset_id"), reason_chips=tuple(sorted(target_words & tags)) or ("metadata",), scores=scores, availability=str(asset.get("availability", "available")), review_status=str(asset.get("review_status", "approved")), preview_uri=asset.get("preview_uri"), controls=dict(asset.get("controls") or {}), expected_content_sha256=asset.get("content_sha256"), media_revision=asset.get("media_revision"), canonical_metadata=metadata, license_policy="unknown_user_owned" if user_owned_unknown else "verified", warning_provenance=warning_provenance)
         results.append((total, candidate))
     results.sort(key=lambda item: (-item[0], item[1].asset_id))
     numbered=[]
