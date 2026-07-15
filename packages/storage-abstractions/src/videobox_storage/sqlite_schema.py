@@ -213,6 +213,42 @@ PROJECT_SCHEMA_STATEMENTS = (
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS director_conversations (
+        conversation_id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS director_messages (
+        message_id TEXT PRIMARY KEY,
+        conversation_id TEXT NOT NULL,
+        project_id TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        role TEXT NOT NULL,
+        text TEXT NOT NULL,
+        proposal_id TEXT,
+        metadata_json TEXT NOT NULL DEFAULT '{}',
+        client_message_id TEXT,
+        created_at TEXT NOT NULL,
+        UNIQUE(conversation_id, client_message_id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS director_message_claims (
+        conversation_id TEXT NOT NULL,
+        client_message_id TEXT NOT NULL,
+        project_id TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        user_text TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        owner_token TEXT NOT NULL DEFAULT '', heartbeat_at TEXT NOT NULL DEFAULT '',
+        PRIMARY KEY (conversation_id, client_message_id)
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS review_approvals (
         timeline_id TEXT PRIMARY KEY,
         project_id TEXT NOT NULL,

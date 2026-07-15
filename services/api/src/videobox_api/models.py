@@ -20,6 +20,64 @@ class ProjectListResponse(BaseModel):
     projects: list[ProjectResponse]
 
 
+class DirectorConversationCreateRequest(BaseModel):
+    session_id: str = Field(min_length=1)
+
+
+class DirectorConversationResponse(BaseModel):
+    conversation_id: str
+    project_id: str
+    session_id: str
+
+
+class DirectorMessageSubmitRequest(BaseModel):
+    session_id: str = Field(min_length=1)
+    client_message_id: str = Field(min_length=1)
+    text: str = Field(min_length=1)
+
+
+class DirectorReferenceResponse(BaseModel):
+    reference_code: str
+    immutable_id: str | dict[str, str]
+    source: str
+
+
+class DirectorDisambiguationResponse(BaseModel):
+    status: str
+    options: list[DirectorReferenceResponse]
+
+
+class DirectorActionIntentResponse(BaseModel):
+    action: str
+    target: DirectorReferenceResponse
+    proposal_preflight: dict[str, str | int] | None = None
+
+
+class DirectorMessageResponse(BaseModel):
+    message_id: str
+    conversation_id: str
+    project_id: str
+    session_id: str
+    role: str
+    text: str
+    proposal_id: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    client_message_id: str | None = None
+    created_at: str
+
+
+class DirectorMessageListResponse(BaseModel):
+    messages: list[DirectorMessageResponse]
+
+
+class DirectorMessageExchangeResponse(BaseModel):
+    user_message: DirectorMessageResponse
+    assistant_message: DirectorMessageResponse
+    disambiguation: DirectorDisambiguationResponse | None = None
+    reference: DirectorReferenceResponse | None = None
+    action_intent: DirectorActionIntentResponse | None = None
+
+
 class AssetRegistrationRequest(BaseModel):
     source_path: str = Field(min_length=1)
 

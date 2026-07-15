@@ -987,7 +987,7 @@ git push
 - Test: tests/test_director_conversation.py
 - Test: tests/test_director_commands.py
 
-- [ ] **Step 1: persistence와 ambiguous reference RED test 작성**
+- [x] **Step 1: persistence와 ambiguous reference RED test 작성**
 
 ~~~python
 def test_message_persists_without_editing_mutation(service) -> None:
@@ -1002,25 +1002,27 @@ def test_ambiguous_three_returns_disambiguation() -> None:
     assert {item.reference_code for item in result.options} == {"P12-B-03", "B-03"}
 ~~~
 
-- [ ] **Step 2: RED 확인**
+- [x] **Step 2: RED 확인**
 
 Run: .venv\Scripts\python.exe -m pytest -q tests/test_director_conversation.py tests/test_director_commands.py
 
 Expected: module/table 부재로 FAIL.
 
-- [ ] **Step 3: schema와 resolver 구현**
+- [x] **Step 3: schema와 resolver 구현**
 
-director_conversations와 director_messages는 project_id/session_id, role, text, proposal_id, created_at을 저장한다. unsent draft는 browser local state이고 server message가 아니다. Resolver는 explicit Pxx-B/M/S candidate, B/M/S timeline placement, currently open proposal 순으로 해석하고 둘 이상이면 disambiguation을 반환한다.
+director_conversations와 director_messages는 project_id/session_id, role, text, proposal_id, created_at을 저장한다. unsent draft는 browser local state이고 server message가 아니다. Resolver는 explicit Pxx-B/M/S candidate, B/M/S timeline placement, currently open proposal 순으로 해석하고 둘 이상이면 disambiguation을 반환한다. timeline target은 raw segment ID가 아니라 durable placement ID 또는 최소 `{segment_id, track_type}` typed identity를 반환해야 하며, 같은 segment의 B/M/S가 서로 다른 target임을 RED test로 고정한다.
 
-API는 `POST /director/conversations/{conversation_id}/messages`와 `GET /director/conversations/{conversation_id}/messages`를 제공한다. submit은 client message ID로 idempotent하며 user message → persisted assistant response → optional immutable proposal/disambiguation link를 한 DTO로 반환한다. assistant generation을 쓰는 경우 local-only runtime trace만 허용하고, local failure는 message-only blocked/error로 저장하며 editing session을 바꾸지 않는다.
+API는 `POST /director/conversations/{conversation_id}/messages`와 `GET /director/conversations/{conversation_id}/messages`를 제공한다. 존재하지 않거나 다른 session에 속한 conversation은 404이며 POST가 자동 생성하지 않는다. submit은 client message ID로 idempotent하며 user message → persisted assistant response → optional immutable proposal/disambiguation link를 한 DTO로 반환한다. 동일 client ID의 동시 요청은 owner token·heartbeat·finalize fence로 local generation을 정확히 한 번만 수행하고, stale owner는 exchange를 확정할 수 없다. in-flight duplicate의 202/poll 또는 retry-after 계약은 runtime timeout과 일치하도록 fake-clock test로 고정한다. assistant generation을 쓰는 경우 local-only runtime trace만 허용하고, local failure는 message-only blocked/error로 저장하며 editing session을 바꾸지 않는다.
 
-- [ ] **Step 4: refresh/restart GREEN**
+resolved command는 단순 acknowledgement가 아니라 action intent와 typed target을 포함한 immutable proposal/preflight DTO를 만든다. 이 과정은 editing session을 바꾸지 않으며, Task 15/18의 explicit apply만 기존 atomic transaction으로 정확히 한 revision/undo event를 만든다는 E2E를 둔다.
+
+- [x] **Step 4: refresh/restart GREEN**
 
 Run: .venv\Scripts\python.exe -m pytest -q tests/test_director_conversation.py tests/test_director_commands.py tests/test_api_media_director.py
 
 Expected: PASS, restart 뒤 message order와 proposal link 유지.
 
-- [ ] **Step 5: 커밋**
+- [x] **Step 5: 커밋**
 
 ~~~powershell
 git add packages/domain-models/src/videobox_domain_models/director_conversation.py packages/core-engine/src/videobox_core_engine/director_commands.py packages/storage-abstractions services/api/src/videobox_api tests/test_director_conversation.py tests/test_director_commands.py
@@ -1064,7 +1066,7 @@ Expected: component import failure.
 
 - [ ] **Step 3: exact DTO와 pure components 구현**
 
-DirectorProposal, DirectorCandidate, DirectorProposalDiff, DirectorApplyScope, DirectorMessage, ApplyDirectorProposalResponse와 artifact freshness DTO(`source_session_revision`, `is_current`, `invalidated_at`, `invalidated_reason`)를 api.ts에 정의한다. UI-only state union은 directorTypes.ts에 둔다. EditingSessionHistoryEntry에는 action_id, label, created_at, reversible, blocked_reason를 추가한다. freshness가 false인 preview/SRT/final/CapCut은 revision·reason을 표시한 history로만 보이고 current-output action/성공 상태에서는 제외하는 pure selector/component test를 추가한다.
+DirectorProposal, DirectorCandidate, DirectorProposalDiff, DirectorApplyScope, DirectorConversation, DirectorMessage, DirectorMessageExchange, ApplyDirectorProposalResponse와 artifact freshness DTO(`source_session_revision`, `is_current`, `invalidated_at`, `invalidated_reason`)를 api.ts에 정의한다. conversation create/list/send API는 재시도에도 같은 client message ID를 재사용하고, 이미 확정된 exchange를 다시 렌더하는 unit test를 둔다. UI-only state union은 directorTypes.ts에 둔다. EditingSessionHistoryEntry에는 action_id, label, created_at, reversible, blocked_reason를 추가한다. freshness가 false인 preview/SRT/final/CapCut은 revision·reason을 표시한 history로만 보이고 current-output action/성공 상태에서는 제외하는 pure selector/component test를 추가한다.
 
 useEditingShortcuts는 Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z, Ctrl/Cmd+Y를 지원하고 input, textarea, contenteditable, isComposing을 무시한다.
 

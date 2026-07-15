@@ -1056,6 +1056,186 @@ class LocalProjectStore:
         file_path.write_text(json.dumps(updated, indent=2, ensure_ascii=True), encoding="utf-8")
         return updated
 
+    def create_director_conversation(self, *, project_id: str, session_id: str, conversation_id: str) -> dict[str, Any]:
+        self.get_editing_session(project_id=project_id, session_id=session_id)
+        now = self._now_iso()
+        connection = self._connection(project_id)
+        try:
+            connection.execute(
+                "INSERT INTO director_conversations (conversation_id, project_id, session_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+                (conversation_id, project_id, session_id, now, now),
+            )
+            connection.commit()
+        except sqlite3.IntegrityError:
+            connection.rollback()
+            row = connection.execute("SELECT project_id, session_id FROM director_conversations WHERE conversation_id = ?", (conversation_id,)).fetchone()
+            if row is None or str(row["project_id"]) != project_id or str(row["session_id"]) != session_id:
+                raise ValueError("conversation_id_conflict") from None
+        finally:
+            connection.close()
+        return {"conversation_id": conversation_id, "project_id": project_id, "session_id": session_id}
+
+    def get_director_conversation(self, *, project_id: str, conversation_id: str) -> dict[str, Any]:
+        row = self._fetchone(
+            project_id,
+            "SELECT conversation_id, project_id, session_id FROM director_conversations WHERE conversation_id = ? AND project_id = ?",
+            (conversation_id, project_id),
+        )
+        if row is None:
+            raise KeyError("director_conversation_missing")
+        return dict(row)
+
+    def append_director_message(
+        self, *, project_id: str, session_id: str, conversation_id: str, role: str,
+        text: str, proposal_id: str | None = None, client_message_id: str | None = None,
+    ) -> dict[str, Any]:
+        if role not in {"user", "assistant"} or not text.strip():
+            raise ValueError("director message requires a supported role and text")
+        now = self._now_iso()
+        message_id = uuid.uuid4().hex
+        connection = self._connection(project_id)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            session = connection.execute("SELECT session_id FROM editing_sessions WHERE session_id = ? AND project_id = ?", (session_id, project_id)).fetchone()
+            if session is None:
+                raise KeyError("editing_session_missing")
+            conversation = connection.execute("SELECT project_id, session_id FROM director_conversations WHERE conversation_id = ?", (conversation_id,)).fetchone()
+            if conversation is None:
+                raise KeyError("director_conversation_missing")
+            if str(conversation["project_id"]) != project_id or str(conversation["session_id"]) != session_id:
+                raise ValueError("conversation_scope_mismatch")
+            connection.execute(
+                "INSERT INTO director_messages (message_id, conversation_id, project_id, session_id, role, text, proposal_id, metadata_json, client_message_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, '{}', ?, ?)",
+                (message_id, conversation_id, project_id, session_id, role, text, proposal_id, client_message_id, now),
+            )
+            connection.execute("UPDATE director_conversations SET updated_at = ? WHERE conversation_id = ?", (now, conversation_id))
+            connection.commit()
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+        finally:
+            connection.close()
+        return {"message_id": message_id, "conversation_id": conversation_id, "project_id": project_id, "session_id": session_id, "role": role, "text": text, "proposal_id": proposal_id, "client_message_id": client_message_id, "created_at": now}
+
+    def list_director_messages(self, *, project_id: str, conversation_id: str) -> list[dict[str, Any]]:
+        rows = self._fetchall(project_id, "SELECT message_id, conversation_id, project_id, session_id, role, text, proposal_id, metadata_json, client_message_id, created_at FROM director_messages WHERE conversation_id = ? AND project_id = ? ORDER BY created_at, rowid", (conversation_id, project_id))
+        return [self._director_message_payload(row) for row in rows]
+
+    def get_director_exchange_by_client_message_id(self, *, project_id: str, session_id: str, conversation_id: str, client_message_id: str, user_text: str) -> dict[str, Any] | None:
+        conversation = self._fetchone(project_id, "SELECT session_id FROM director_conversations WHERE conversation_id = ? AND project_id = ?", (conversation_id, project_id))
+        if conversation is None:
+            raise KeyError("director_conversation_missing")
+        if str(conversation["session_id"]) != session_id:
+            raise ValueError("conversation_scope_mismatch")
+        rows = self.list_director_messages(project_id=project_id, conversation_id=conversation_id)
+        for index, item in enumerate(rows):
+            if item.get("client_message_id") != client_message_id:
+                continue
+            if item.get("text") != user_text:
+                raise ValueError("client_message_id_reused_with_different_content")
+            if index + 1 >= len(rows) or rows[index + 1].get("role") != "assistant":
+                raise ValueError("incomplete persisted director exchange")
+            return {"user_message": item, "assistant_message": rows[index + 1]}
+        return None
+
+    def claim_director_message(self, *, project_id: str, session_id: str, conversation_id: str, client_message_id: str, user_text: str) -> str | None:
+        """Exactly one caller owns local generation for a client message ID."""
+        connection = self._connection(project_id)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            now, token = self._now_iso(), uuid.uuid4().hex
+            conversation = connection.execute("SELECT project_id, session_id FROM director_conversations WHERE conversation_id = ?", (conversation_id,)).fetchone()
+            if conversation is None:
+                raise KeyError("director_conversation_missing")
+            if str(conversation["project_id"]) != project_id or str(conversation["session_id"]) != session_id:
+                raise ValueError("conversation_scope_mismatch")
+            row = connection.execute("SELECT project_id, session_id, user_text, heartbeat_at FROM director_message_claims WHERE conversation_id = ? AND client_message_id = ?", (conversation_id, client_message_id)).fetchone()
+            if row is not None:
+                if str(row["project_id"]) != project_id or str(row["session_id"]) != session_id:
+                    raise ValueError("conversation_scope_mismatch")
+                if str(row["user_text"]) != user_text:
+                    raise ValueError("client_message_id_reused_with_different_content")
+                claimed_at = datetime.fromisoformat(str(row["heartbeat_at"]))
+                # Local runtime generation has a bounded 30s request timeout;
+                # keep the lease materially above it so a live slow request is
+                # never reclaimed merely for crossing that timeout boundary.
+                if claimed_at.astimezone(UTC) <= self._clock().astimezone(UTC) - timedelta(seconds=300):
+                    connection.execute(
+                        "UPDATE director_message_claims SET owner_token = ?, heartbeat_at = ? WHERE conversation_id = ? AND client_message_id = ?",
+                        (token, now, conversation_id, client_message_id),
+                    )
+                    connection.commit()
+                    return token
+                connection.commit()
+                return False
+            connection.execute("INSERT INTO director_message_claims (conversation_id, client_message_id, project_id, session_id, user_text, created_at, owner_token, heartbeat_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (conversation_id, client_message_id, project_id, session_id, user_text, now, token, now))
+            connection.commit()
+            return token
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def heartbeat_director_message_claim(self, *, project_id: str, conversation_id: str, client_message_id: str, owner_token: str) -> bool:
+        connection = self._connection(project_id)
+        try:
+            cursor = connection.execute("UPDATE director_message_claims SET heartbeat_at = ? WHERE conversation_id = ? AND client_message_id = ? AND owner_token = ?", (self._now_iso(), conversation_id, client_message_id, owner_token))
+            connection.commit()
+            return cursor.rowcount == 1
+        finally:
+            connection.close()
+
+    def append_director_exchange(
+        self, *, project_id: str, session_id: str, conversation_id: str, client_message_id: str,
+        user_text: str, assistant_text: str, proposal_id: str | None = None, assistant_metadata: dict[str, Any] | None = None, owner_token: str | None = None,
+    ) -> dict[str, Any]:
+        """Persist the request and response atomically; retry returns the original DTO."""
+        now = self._now_iso()
+        connection = self._connection(project_id)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            session = connection.execute("SELECT session_id FROM editing_sessions WHERE session_id = ? AND project_id = ?", (session_id, project_id)).fetchone()
+            if session is None:
+                raise KeyError("editing_session_missing")
+            if owner_token is not None:
+                claim = connection.execute("SELECT owner_token FROM director_message_claims WHERE conversation_id = ? AND client_message_id = ?", (conversation_id, client_message_id)).fetchone()
+                if claim is None or str(claim["owner_token"]) != owner_token:
+                    raise ValueError("director_message_claim_lost")
+            conversation = connection.execute("SELECT project_id, session_id FROM director_conversations WHERE conversation_id = ?", (conversation_id,)).fetchone()
+            if conversation is None:
+                raise KeyError("director_conversation_missing")
+            if str(conversation["project_id"]) != project_id or str(conversation["session_id"]) != session_id:
+                raise ValueError("conversation_scope_mismatch")
+            existing = connection.execute("SELECT message_id FROM director_messages WHERE conversation_id = ? AND client_message_id = ?", (conversation_id, client_message_id)).fetchone()
+            if existing is not None:
+                rows = connection.execute("SELECT message_id, conversation_id, project_id, session_id, role, text, proposal_id, metadata_json, client_message_id, created_at FROM director_messages WHERE conversation_id = ? ORDER BY created_at, rowid", (conversation_id,)).fetchall()
+                user_index = next(index for index, row in enumerate(rows) if str(row["message_id"]) == str(existing["message_id"]))
+                if str(rows[user_index]["text"]) != user_text:
+                    raise ValueError("client_message_id_reused_with_different_content")
+                if user_index + 1 >= len(rows) or str(rows[user_index + 1]["role"]) != "assistant":
+                    raise ValueError("incomplete persisted director exchange")
+                connection.commit()
+                return {"user_message": self._director_message_payload(rows[user_index]), "assistant_message": self._director_message_payload(rows[user_index + 1])}
+            user_id, assistant_id = uuid.uuid4().hex, uuid.uuid4().hex
+            connection.execute("INSERT INTO director_messages (message_id, conversation_id, project_id, session_id, role, text, proposal_id, metadata_json, client_message_id, created_at) VALUES (?, ?, ?, ?, 'user', ?, NULL, '{}', ?, ?)", (user_id, conversation_id, project_id, session_id, user_text, client_message_id, now))
+            connection.execute("INSERT INTO director_messages (message_id, conversation_id, project_id, session_id, role, text, proposal_id, metadata_json, client_message_id, created_at) VALUES (?, ?, ?, ?, 'assistant', ?, ?, ?, NULL, ?)", (assistant_id, conversation_id, project_id, session_id, assistant_text, proposal_id, json.dumps(assistant_metadata or {}, ensure_ascii=True, sort_keys=True), now))
+            connection.commit()
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+        finally:
+            connection.close()
+        return {"user_message": {"message_id": user_id, "conversation_id": conversation_id, "project_id": project_id, "session_id": session_id, "role": "user", "text": user_text, "proposal_id": None, "metadata": {}, "client_message_id": client_message_id, "created_at": now}, "assistant_message": {"message_id": assistant_id, "conversation_id": conversation_id, "project_id": project_id, "session_id": session_id, "role": "assistant", "text": assistant_text, "proposal_id": proposal_id, "metadata": assistant_metadata or {}, "client_message_id": None, "created_at": now}}
+
+    def _director_message_payload(self, row: sqlite3.Row) -> dict[str, Any]:
+        payload = dict(row)
+        payload["metadata"] = self._json_object(str(payload.pop("metadata_json", "{}")))
+        return payload
+
     def save_director_proposal(self, project_id: str, proposal: DirectorProposal) -> DirectorProposal:
         payload = proposal_to_payload(proposal)
         canonical_payload = json.dumps(payload, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
@@ -3699,10 +3879,24 @@ class LocalProjectStore:
         self._ensure_editing_session_json_column(connection)
         self._ensure_tts_candidate_acceptance_columns(connection)
         self._ensure_artifact_freshness_columns(connection)
+        self._ensure_director_message_metadata_column(connection)
+        self._ensure_director_claim_columns(connection)
         self._ensure_artifact_freshness_triggers(connection)
         connection.commit()
         connection.row_factory = sqlite3.Row
         return connection
+
+    def _ensure_director_message_metadata_column(self, connection: sqlite3.Connection) -> None:
+        columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(director_messages)").fetchall()}
+        if "metadata_json" not in columns:
+            connection.execute("ALTER TABLE director_messages ADD COLUMN metadata_json TEXT NOT NULL DEFAULT '{}'")
+
+    def _ensure_director_claim_columns(self, connection: sqlite3.Connection) -> None:
+        columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(director_message_claims)").fetchall()}
+        if "owner_token" not in columns:
+            connection.execute("ALTER TABLE director_message_claims ADD COLUMN owner_token TEXT NOT NULL DEFAULT ''")
+        if "heartbeat_at" not in columns:
+            connection.execute("ALTER TABLE director_message_claims ADD COLUMN heartbeat_at TEXT NOT NULL DEFAULT ''")
 
     def _ensure_recommendation_decision_state_column(self, connection: sqlite3.Connection) -> None:
         existing_columns = {

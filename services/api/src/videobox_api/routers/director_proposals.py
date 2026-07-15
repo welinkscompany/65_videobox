@@ -1,8 +1,9 @@
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import FileResponse, JSONResponse
 from starlette.background import BackgroundTask
 import os
 import json
+from threading import Event, Thread
 from pydantic import BaseModel, Field, field_validator
 from datetime import datetime
 
@@ -12,6 +13,13 @@ from videobox_core_engine.project_asset_materializer import ProjectAssetMaterial
 from videobox_storage.local_project_store import LocalProjectStore
 from videobox_storage.local_project_store import EditingSessionRevisionConflict, sha256_file
 from videobox_core_engine.editing_transactions import apply_user_transaction
+from videobox_core_engine.director_commands import director_timeline_references, resolve_director_command
+from videobox_provider_interfaces.llm import LLMTaskType
+from videobox_core_engine.provider_trace import build_provider_trace
+from videobox_api.models import (
+    DirectorConversationCreateRequest, DirectorConversationResponse,
+    DirectorMessageExchangeResponse, DirectorMessageListResponse, DirectorMessageSubmitRequest,
+)
 
 
 class ProposalCreateRequest(BaseModel):
@@ -50,6 +58,135 @@ def build_director_proposals_router(store: LocalProjectStore) -> APIRouter:
 
     def payload(project_id, proposal):
         return proposal_to_payload(proposal) | {"status": proposal.status, "lifecycle": store.get_director_proposal_lifecycle(project_id, proposal.proposal_id)}
+
+    @router.post("/api/projects/{project_id}/director/conversations", status_code=status.HTTP_201_CREATED, response_model=DirectorConversationResponse)
+    def create_conversation(project_id: str, body: DirectorConversationCreateRequest) -> dict:
+        try:
+            conversation_id = __import__("uuid").uuid4().hex
+            return store.create_director_conversation(project_id=project_id, session_id=body.session_id, conversation_id=conversation_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="editing_session_missing") from exc
+
+    @router.get("/api/projects/{project_id}/director/conversations/{conversation_id}/messages", response_model=DirectorMessageListResponse)
+    def list_conversation_messages(project_id: str, conversation_id: str, session_id: str) -> dict:
+        try:
+            conversation = store.get_director_conversation(project_id=project_id, conversation_id=conversation_id)
+            if str(conversation["session_id"]) != session_id:
+                raise KeyError("director_conversation_missing")
+            return {"messages": store.list_director_messages(project_id=project_id, conversation_id=conversation_id)}
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="director_conversation_missing") from exc
+
+    @router.post(
+        "/api/projects/{project_id}/director/conversations/{conversation_id}/messages",
+        response_model=DirectorMessageExchangeResponse,
+        responses={202: {"description": "A duplicate client message is still generating locally; retry after the Retry-After header."}},
+    )
+    def submit_conversation_message(project_id: str, conversation_id: str, body: DirectorMessageSubmitRequest, request: Request) -> dict:
+        try:
+            store.get_editing_session(project_id=project_id, session_id=body.session_id)
+            conversation = store.get_director_conversation(project_id=project_id, conversation_id=conversation_id)
+            if str(conversation["session_id"]) != body.session_id:
+                raise KeyError("director_conversation_missing")
+            existing = store.get_director_exchange_by_client_message_id(
+                project_id=project_id, conversation_id=conversation_id,
+                session_id=body.session_id,
+                client_message_id=body.client_message_id, user_text=body.text,
+            )
+            if existing is not None:
+                return existing | dict(existing["assistant_message"].get("metadata") or {})
+            owner_token = store.claim_director_message(
+                project_id=project_id, session_id=body.session_id, conversation_id=conversation_id,
+                client_message_id=body.client_message_id, user_text=body.text,
+            )
+            if not owner_token:
+                # Generation may use the full 30-second local-runtime request
+                # budget.  A duplicate is therefore immediately retryable,
+                # rather than waiting a shorter, contradictory server timeout.
+                return JSONResponse(
+                    status_code=status.HTTP_202_ACCEPTED,
+                    content={"status": "director_message_in_progress", "retry_after_seconds": 1},
+                    headers={"Retry-After": "1"},
+                )
+            session = store.get_editing_session(project_id=project_id, session_id=body.session_id)
+            proposals = [proposal for proposal in store.list_director_proposals(project_id) if proposal.source_session_id == body.session_id and proposal.status == "ready"]
+            open_proposal = proposal_to_payload(proposals[-1]) if proposals else None
+            resolution = resolve_director_command(body.text, open_proposal=open_proposal, timeline=director_timeline_references(session))
+            resolution_metadata: dict[str, object] = {}
+            proposal_id: str | None = open_proposal["proposal_id"] if open_proposal else None
+            if resolution.status == "needs_disambiguation":
+                resolution_metadata["disambiguation"] = {
+                    "status": "needs_disambiguation",
+                    "options": [{"reference_code": option.reference_code, "immutable_id": option.immutable_id, "source": option.source} for option in resolution.options],
+                }
+                assistant_text = "어느 참조인지 선택해주세요."
+            elif resolution.status == "resolved" and resolution.reference is not None:
+                resolution_metadata["reference"] = {"reference_code": resolution.reference.reference_code, "immutable_id": resolution.reference.immutable_id, "source": resolution.reference.source}
+                assert resolution.action_intent is not None
+                resolution_metadata["action_intent"] = {
+                    "action": resolution.action_intent.action,
+                    "target": {
+                        "reference_code": resolution.action_intent.target.reference_code,
+                        "immutable_id": resolution.action_intent.target.immutable_id,
+                        "source": resolution.action_intent.target.source,
+                    },
+                    "proposal_preflight": resolution.action_intent.proposal_preflight,
+                }
+                assistant_text = "참조를 확인했습니다."
+            else:
+                assistant_text = ""
+            # Generate before opening the persistence writer transaction.  No
+            # fallback graph is present: only the app-injected local runtime is used.
+            if not assistant_text:
+                runtime = request.app.state.local_only_runtime_service_factory(store)
+                stop_heartbeat = Event()
+                def heartbeat() -> None:
+                    while not stop_heartbeat.wait(1.0):
+                        store.heartbeat_director_message_claim(project_id=project_id, conversation_id=conversation_id, client_message_id=body.client_message_id, owner_token=owner_token)
+                heartbeat_thread = Thread(target=heartbeat, daemon=True)
+                heartbeat_thread.start()
+                try:
+                    if hasattr(runtime, "generate_structured"):
+                        generated = runtime.generate_structured(prompt=body.text)
+                        assistant_text = str(getattr(generated, "text", generated))
+                    elif hasattr(runtime, "generate"):
+                        generated = runtime.generate(
+                            project_id=project_id, task_type=LLMTaskType.OPERATOR_COPY, prompt=body.text,
+                            response_schema={"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]},
+                        )
+                        data = getattr(generated, "output_data", {})
+                        assistant_text = str(data.get("text", "local director response")) if isinstance(data, dict) else "local director response"
+                        trace = getattr(generated, "metadata", {}).get("provider_trace")
+                        if isinstance(trace, dict):
+                            resolution_metadata["provider_trace"] = trace
+                    else:
+                        raise RuntimeError("injected runtime does not support local structured generation")
+                except Exception as exc:
+                    assistant_text = f"local_only_blocked: {exc}"
+                    trace = getattr(exc, "provider_trace", None)
+                    safe_trace = trace if isinstance(trace, dict) and trace.get("routing_mode") == "local_only" else build_provider_trace(
+                        final_provider=str(getattr(exc, "provider_name", "local_only_runtime")),
+                        fallback_reasons=["local_provider_error"], routing_mode="local_only",
+                    )
+                    resolution_metadata.update({
+                        "status": "blocked",
+                        "error_code": str(getattr(exc, "error_code", "local_runtime_error")),
+                        "provider_trace": safe_trace,
+                    })
+                finally:
+                    stop_heartbeat.set()
+                    heartbeat_thread.join(timeout=1.5)
+            exchange = store.append_director_exchange(
+                project_id=project_id, session_id=body.session_id, conversation_id=conversation_id,
+                client_message_id=body.client_message_id, user_text=body.text, assistant_text=assistant_text,
+                proposal_id=proposal_id, assistant_metadata=resolution_metadata, owner_token=owner_token,
+            )
+            return exchange | resolution_metadata
+        except KeyError as exc:
+            detail = str(exc).strip("'")
+            raise HTTPException(status_code=404, detail=detail) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @router.post("/api/projects/{project_id}/director/proposals", status_code=status.HTTP_201_CREATED)
     def create(project_id: str, body: ProposalCreateRequest) -> dict:

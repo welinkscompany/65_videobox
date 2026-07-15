@@ -1060,8 +1060,8 @@ production-readiness blocker slice 1의 9개 Task는 구현·회귀·600초 smok
   1. Local media intelligence foundation: LM Studio local-only provider, durable B-roll analysis, 자동 태깅/검수
   2. Script-first proposal engine: narration 없는 provisional script session, B/M/S ranking, preview/materialize, atomic apply
   3. Director workspace: 우측 대화 패널, 수동 편집, B/M/S reference, persistent conversation, 10-step undo/redo, responsive UI
-- 구현 시작 전 기준 HEAD는 `8eddb7f`다. Slice 1 Task 1–6과 그 release-blocking remediation 및 Slice 2 Task 7–12는 완료됐으며, 전체 계획 기준 12/18 Task(66.7%) 완료·33.3% 잔여다.
-- 다음 실행 단위는 Slice 3 Task 13 `persistent conversation과 reference command resolver`다.
+- 구현 시작 전 기준 HEAD는 `8eddb7f`다. Slice 1 Task 1–6과 그 release-blocking remediation, Slice 2 Task 7–12, Slice 3 Task 13은 완료됐으며, 전체 계획 기준 13/18 Task(72.2%) 완료·27.8% 잔여다.
+- 다음 실행 단위는 Slice 3 Task 14 `frontend API DTO와 pure reference/history/shortcut units`다.
 - 기존 `LocalFirstStructuredRuntime`의 Gemini 자동 fallback, 외부 HTTP(S) runtime 허용, text-only Qwen adapter는 승인 설계와 충돌하므로 Slice 1에서 RED test부터 교체한다.
 - Codex Sol/Terra/Luna 모델 선택은 개발 에이전트 실행 자원이며 VideoBox 제품 runtime 계약에는 포함하지 않는다.
 
@@ -1115,6 +1115,14 @@ production-readiness blocker slice 1의 9개 Task는 구현·회귀·600초 smok
 - stale old timeline, source mutation, stale review/subtitle, partial regeneration CAS/publish/cleanup failure는 output 전에 차단·보상한다. 실패 publish는 original session revision으로 정확히 복구하고 candidate timeline/review/run을 격리·정리한다. trigger migration도 SQLite 단일 writer transaction으로 직렬화했다.
 - real Starter Pack gate는 opt-in(`VIDEOBOX_RUN_REAL_STARTER_PACK_E2E=1`) 상태로 실제 re-materialize→reapply→partial regeneration→reapprove→subtitle regeneration recovery와 external/Gemini call 0을 검증한다. 이 worktree에는 pack이 없어 기본 run은 skip됐다.
 - 검증: Task12 focused 147 passed/1 skipped, full backend 978 passed/2 skipped, frontend 108 passed/build success. 다음은 Task 13 persistent conversation과 reference command resolver다.
+
+### Slice 3 Task 13 closeout 및 중간점검 (2026-07-15)
+
+- conversation/message는 SQLite durable truth로 저장하며, message submit은 editing session을 수정하지 않는다. 동일 client message ID는 다른 내용이면 409, 같은 내용이면 이미 확정된 user/assistant exchange를 반환한다.
+- local assistant 생성의 동시 재시도는 owner-token claim, heartbeat, finalize fence로 한 번만 실행한다. crash 뒤 stale claim은 회수할 수 있지만 이전 owner는 결과를 확정할 수 없다. local runtime 실패는 `blocked` metadata와 local-only provider trace를 남기고 editing session을 그대로 보존한다.
+- resolver는 open proposal 후보와 실제 persisted timeline의 B/M/S override placement를 immutable ID로 구분한다. 숫자만 있는 참조가 둘 이상이면 선택 card용 disambiguation을 반환한다.
+- RED는 conversation/resolver 모듈·table 부재와 이후 review P1(typed placement collision, action intent/preflight 부재, history session-scope 우회)을 재현했고 GREEN으로 닫았다. focused `26 passed`, final backend full `996 passed, 2 skipped`, frontend `108 passed`/build success, `git diff --check`를 통과했다. fake Gemini/external provider counter는 0으로 고정했다. 기존 backend multipart warning 및 frontend ErrorBoundary/`act(...)` stderr는 비차단 기존 경고다.
+- 중간점검 보완: timeline target은 typed `{segment_id, track_type}`이며, resolved command는 immutable proposal 또는 `{session_id, session_revision}` preflight binding을 가진 action intent를 반환·저장한다. command는 session을 변경하지 않고 Task 15/18의 explicit apply만 atomic mutation/undo를 만든다. unknown/mismatched conversation은 404, in-flight duplicate는 `202 + Retry-After` 계약으로 고정했다. Task 14는 이 intent/conversation DTO의 표시·재시도 client test를, Task 18은 retention/index release audit 및 bootstrap Gemini와 Director 성공 trace의 local-only route-surface 검증을 맡는다. OpenCut/full NLE 및 Voice Capture & Narration은 이 18 Task에 섞지 않고 후속 판단 gate를 유지한다.
 
 - historical note: 이 중간점검의 최초 시점은 HEAD `8b023f5`, Task 1–8/18(44.4%)이었다. 이후 Task 9와 Task 10이 완료됐으므로 현재 truth는 이 섹션 상단의 10/18(55.6%), 다음 Task 11이다.
 - 2026-07-15 후속 독립 감사는 Task 9 preflight가 BGM/SFX에 B-roll analysis를 잘못 요구하고, empty B-roll analysis result와 nullable candidate `media_revision`을 허용하며, proposal lifecycle state/event가 원자적이지 않음을 확인했다. Task 10은 materializer 전에 이 세 계약을 RED-first로 고친다. B-roll은 non-empty succeeded analysis+SHA, BGM/SFX는 indexed canonical metadata+SHA로 재검증하고, `media_revision`은 asset registration `created_at`으로 고정한다.

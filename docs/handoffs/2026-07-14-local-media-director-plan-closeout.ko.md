@@ -1,5 +1,7 @@
 # Local Media Director 계획 closeout handoff (2026-07-14)
 
+> Historical baseline only. Task 1–13은 이후 구현·검증됐으며, 현재 상태와 다음 작업은 `docs/development-status-2026-06-29.ko.md` §235 및 `docs/implementation-plan.ko.md` §22를 우선한다. 아래의 “시작 전/Task 1” 문구를 현재 재개 지시로 사용하지 않는다.
+
 ## 현재 위치
 
 - 저장소: D:\AI_Workspace_louis_office_50\10_workspace\65_videobox
