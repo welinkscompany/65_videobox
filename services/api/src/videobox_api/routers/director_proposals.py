@@ -10,6 +10,8 @@ from videobox_core_engine.director_proposal_service import DirectorProposalBlock
 from videobox_core_engine.director_proposals import proposal_to_payload
 from videobox_core_engine.project_asset_materializer import ProjectAssetMaterializer
 from videobox_storage.local_project_store import LocalProjectStore
+from videobox_storage.local_project_store import EditingSessionRevisionConflict, sha256_file
+from videobox_core_engine.editing_transactions import apply_user_transaction
 
 
 class ProposalCreateRequest(BaseModel):
@@ -34,6 +36,11 @@ class PreferencesRequest(BaseModel):
     exclude_asset: list[str] = []
     exclude_creator: list[str] = []
     exclude_tag: list[str] = []
+
+
+class ProposalApplyRequest(BaseModel):
+    candidate_ids: list[str] = Field(min_length=1)
+    expected_revision: int = Field(ge=1)
 
 
 def build_director_proposals_router(store: LocalProjectStore) -> APIRouter:
@@ -94,7 +101,8 @@ def build_director_proposals_router(store: LocalProjectStore) -> APIRouter:
     def materialize_candidate(project_id: str, proposal_id: str, candidate_id: str) -> dict:
         try:
             candidate = candidate_for(project_id, proposal_id, candidate_id)
-            return materializer.materialize(project_id=project_id, candidate=candidate)
+            proposal = service.get(project_id=project_id, proposal_id=proposal_id)
+            return materializer.materialize(project_id=project_id, candidate=candidate, expected_asset_index_revision=proposal.asset_index_revision)
         except (KeyError, ValueError):
             raise HTTPException(status_code=422, detail="candidate_unavailable") from None
 
@@ -104,6 +112,54 @@ def build_director_proposals_router(store: LocalProjectStore) -> APIRouter:
             return payload(project_id, service.refresh(project_id=project_id, proposal_id=proposal_id))
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @router.post("/api/projects/{project_id}/director/proposals/{proposal_id}/apply")
+    def apply(project_id: str, proposal_id: str, body: ProposalApplyRequest) -> dict:
+        try:
+            proposal = service.get(project_id=project_id, proposal_id=proposal_id)
+            if proposal.base_session_revision != body.expected_revision:
+                raise HTTPException(status_code=409, detail="proposal_revision_mismatch")
+            candidates = {item.candidate_id: item for item in proposal.candidates}
+            selected = [candidates[item] for item in body.candidate_ids]
+            materialized: dict[str, dict] = {}
+            for candidate in selected:
+                found = next((asset for asset in store.list_assets(project_id=project_id)
+                    if dict(asset.get("metadata") or {}).get("director_proposal_candidate_id") == candidate.candidate_id), None)
+                if found is None:
+                    raise ValueError("candidate_not_materialized")
+                metadata = dict(found.get("metadata") or {})
+                if metadata.get("director_materialized_asset_index_revision") != store.get_asset_index_revision(project_id):
+                    raise HTTPException(status_code=409, detail="asset_index_revision_mismatch")
+                path = store.resolve_storage_uri(project_id=project_id, storage_uri=str(found["storage_uri"]))
+                if not path.is_file() or sha256_file(path) != candidate.expected_content_sha256:
+                    raise ValueError("materialized_sha_mismatch")
+                materialized[candidate.candidate_id] = found
+            session = store.get_editing_session(project_id=project_id, session_id=proposal.source_session_id)
+            if int(session.get("session_revision") or 1) != body.expected_revision:
+                raise HTTPException(status_code=409, detail="session_revision_mismatch")
+            def mutate(draft: dict) -> None:
+                by_id = {str(segment.get("segment_id")): segment for segment in draft.get("segments", []) if isinstance(segment, dict)}
+                for candidate in selected:
+                    target = next((item.get("target_segment_id") for item in proposal.diff.get("placements", {}).get("add", []) if item.get("candidate_id") == candidate.candidate_id), None)
+                    segment = by_id.get(str(target))
+                    if segment is None:
+                        raise ValueError("target_segment_missing")
+                    key = {"broll": "broll_override", "bgm": "music_override", "sfx": "sfx_override"}[candidate.media_type]
+                    asset = materialized[candidate.candidate_id]
+                    segment[key] = {"asset_id": asset["asset_id"], "asset_uri": asset["storage_uri"], "media_controls": dict(candidate.controls), "expected_content_sha256": candidate.expected_content_sha256}
+            updated = apply_user_transaction(session=session, label="디렉터 제안 적용", affected_segment_ids=list(proposal.target_segment_ids), mutate=mutate)
+            expectations = [
+                (str(materialized[item.candidate_id]["asset_id"]), item.expected_content_sha256,
+                 int(dict(materialized[item.candidate_id].get("metadata") or {})["director_materialized_asset_index_revision"]))
+                for item in selected
+            ]
+            return store.apply_director_proposal_transaction(project_id=project_id, session_id=proposal.source_session_id, proposal_id=proposal_id, session_payload=updated, expected_revision=body.expected_revision, proposal_base_revision=proposal.base_session_revision, materialized_expectations=expectations)
+        except HTTPException:
+            raise
+        except (KeyError, ValueError):
+            raise HTTPException(status_code=422, detail="candidate_unavailable") from None
+        except EditingSessionRevisionConflict:
+            raise HTTPException(status_code=409, detail="session_revision_mismatch") from None
 
     @router.get("/api/projects/{project_id}/director/preferences")
     def get_preferences(project_id: str) -> dict:

@@ -866,7 +866,7 @@ git commit -m "feat: materialize and preview director candidates"
 - Modify: tests/test_editing_session.py
 - Modify: tests/test_editor_timeline_mutations.py
 
-- [ ] **Step 1: bundle apply와 10-step RED test 작성**
+- [x] **Step 1: bundle apply와 10-step RED test 작성**
 
 ~~~python
 def test_bundle_apply_is_one_revision_and_one_undo_action(service) -> None:
@@ -884,27 +884,27 @@ def test_only_ten_user_actions_are_restorable(session) -> None:
     assert len(session["history"]) == 11
 ~~~
 
-- [ ] **Step 2: RED 확인**
+- [x] **Step 2: RED 확인**
 
 Run: .venv\Scripts\python.exe -m pytest -q tests/test_media_director_apply.py tests/test_editing_session.py tests/test_editor_timeline_mutations.py
 
 Expected: B/M/S bundle이 undo snapshot에 없거나 100개 stack 때문에 FAIL.
 
-- [ ] **Step 3: transaction model 구현**
+- [x] **Step 3: transaction model 구현**
 
 apply_user_transaction은 모든 mutation을 deepcopy session에 먼저 적용하고 validation이 모두 통과한 경우에만 before/after snapshot 한 건을 기록한다. action entry는 action_id, label, created_at, reversible, blocked_reason, affected_segment_ids를 가진다. 사용자 undo stack은 10개, audit history는 100개다.
 
-proposal apply endpoint는 expected_revision, proposal base revision, asset index revision, materialized SHA를 검증하고 LocalProjectStore CAS 한 번으로 저장한다. apply CAS, proposal consumption/status, stale checks, artifact invalidation은 하나의 SQLite transaction이다. SQLite `editing_sessions.session_json`를 authoritative truth로 삼고 sidecar JSON은 commit 뒤 regenerate 가능한 projection으로 둔다. sidecar replace 실패를 주입해도 restart reconciliation 뒤 모든 reader가 SQLite truth를 보며, DB/CAS 실패에는 staged materialized asset도 정리되는 test를 추가한다.
+proposal apply endpoint는 expected_revision, proposal base revision, asset index revision, materialized SHA를 **동일 SQLite CAS transaction 안에서** 재검증하고 LocalProjectStore CAS 한 번으로 저장한다. apply CAS, proposal consumption/status, stale checks, artifact invalidation은 하나의 SQLite transaction이다. SQLite `editing_sessions.session_json`를 authoritative truth로 삼고 sidecar JSON은 commit 뒤 regenerate 가능한 projection으로 둔다. sidecar replace 실패를 주입해도 restart reconciliation 뒤 모든 reader가 SQLite truth를 본다. apply가 소유한 임시 stage만 DB/CAS 실패에 보상 정리하며, apply 전에 독립적으로 등록되어 재사용 가능한 materialized project asset은 보존한다. 미참조 materialized asset의 정리는 이 Task에 섞지 않고 후속 TTL/reference GC 설계·재시작 안전성 test로 다룬다. DB/CAS failure, asset-index revision race, apply 직전 materialized SHA mismatch 각각에서 session/proposal 불변과 asset ownership을 검증한다.
 
-- [ ] **Step 4: freshness invalidation과 GREEN**
+- [x] **Step 4: freshness invalidation과 GREEN**
 
-apply/undo/redo 뒤 affected timeline review approval, subtitle, preview, final render, CapCut draft의 current freshness를 false로 바꾼다. 각 artifact에는 `source_session_revision`, `is_current`, `invalidated_at`, `invalidated_reason`를 durable migration으로 저장하고 restart/API/UI에서도 이전 artifact는 남지만 current가 아님을 보장한다. 기존 manual B-roll/BGM/SFX/caption/overlay mutation도 동일 named 10-step transaction adapter를 사용하며 audit history는 100개를 유지한다.
+apply/undo/redo 뒤 affected timeline review approval, subtitle, preview, final render, CapCut draft의 current freshness를 false로 바꾼다. 각 artifact에는 `source_session_revision`, `is_current`, `invalidated_at`, `invalidated_reason`를 durable migration으로 저장하고, legacy SQLite migration과 새 artifact의 정확한 session-revision stamp를 test로 고정한다. job-backed API read도 저장된 옛 result JSON을 그대로 반환하지 않고 canonical artifact reader의 freshness를 반영한다. restart/API/UI에서도 이전 artifact는 남지만 current가 아님을 보장하고, current selector는 stale artifact를 제외한다. 기존 manual B-roll/BGM/SFX/caption/overlay mutation도 동일 named 10-step transaction adapter를 사용하며 audit history는 100개를 유지한다.
 
 Run: .venv\Scripts\python.exe -m pytest -q tests/test_media_director_apply.py tests/test_editing_session.py tests/test_editor_timeline_mutations.py
 
 Expected: PASS.
 
-- [ ] **Step 5: 커밋**
+- [x] **Step 5: 커밋**
 
 ~~~powershell
 git add packages/core-engine/src/videobox_core_engine/editing_transactions.py packages/core-engine/src/videobox_core_engine/editing_session.py packages/core-engine/src/videobox_core_engine/editing_session_and_regeneration.py packages/storage-abstractions/src/videobox_storage/sqlite_schema.py packages/storage-abstractions/src/videobox_storage/local_project_store.py services/api/src/videobox_api tests/test_media_director_apply.py tests/test_editing_session.py tests/test_editor_timeline_mutations.py
@@ -1064,7 +1064,7 @@ Expected: component import failure.
 
 - [ ] **Step 3: exact DTO와 pure components 구현**
 
-DirectorProposal, DirectorCandidate, DirectorProposalDiff, DirectorApplyScope, DirectorMessage, ApplyDirectorProposalResponse를 api.ts에 정의한다. UI-only state union은 directorTypes.ts에 둔다. EditingSessionHistoryEntry에는 action_id, label, created_at, reversible, blocked_reason를 추가한다.
+DirectorProposal, DirectorCandidate, DirectorProposalDiff, DirectorApplyScope, DirectorMessage, ApplyDirectorProposalResponse와 artifact freshness DTO(`source_session_revision`, `is_current`, `invalidated_at`, `invalidated_reason`)를 api.ts에 정의한다. UI-only state union은 directorTypes.ts에 둔다. EditingSessionHistoryEntry에는 action_id, label, created_at, reversible, blocked_reason를 추가한다. freshness가 false인 preview/SRT/final/CapCut은 revision·reason을 표시한 history로만 보이고 current-output action/성공 상태에서는 제외하는 pure selector/component test를 추가한다.
 
 useEditingShortcuts는 Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z, Ctrl/Cmd+Y를 지원하고 input, textarea, contenteditable, isComposing을 무시한다.
 

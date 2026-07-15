@@ -2,12 +2,16 @@ from __future__ import annotations
 
 from copy import deepcopy
 from typing import Any
+from datetime import UTC, datetime
+import uuid
 
 from videobox_domain_models.caption_style import CaptionStyle
 from videobox_core_engine.media_controls import normalize_media_controls
+from videobox_core_engine.editing_transactions import apply_user_transaction
 
 MIN_SEGMENT_DURATION_SEC = 0.2
-MAX_TIMELINE_UNDO_EVENTS = 100
+MAX_TIMELINE_UNDO_EVENTS = 10
+MAX_TIMELINE_AUDIT_EVENTS = 100
 FIXED_TIMELINE_TRACK_ROLES = ("narration", "broll", "bgm", "sfx", "overlay")
 
 ALLOWED_PARTIAL_REGEN_FIELDS = {
@@ -107,18 +111,22 @@ def _event_snapshot(session: dict[str, Any]) -> dict[str, Any]:
 
 
 def _record_undoable_mutation(*, before: dict[str, Any], updated: dict[str, Any], mutation_type: str, segment_id: str) -> dict[str, Any]:
-    event = {
-        "mutation_type": mutation_type,
-        "segment_id": segment_id,
-        "inverse_payload": _event_snapshot(before),
-        "forward_payload": _event_snapshot(updated),
-    }
-    updated.setdefault("history", []).append(deepcopy(event))
-    undo_stack = list(deepcopy(before.get("undo_stack", [])))
-    undo_stack.append(event)
-    updated["undo_stack"] = undo_stack[-MAX_TIMELINE_UNDO_EVENTS:]
-    updated["redo_stack"] = []
-    return updated
+    def mutate(draft: dict[str, Any]) -> None:
+        for key, value in updated.items():
+            if key not in {"history", "undo_stack", "redo_stack", "output_freshness"}:
+                draft[key] = deepcopy(value)
+    return apply_user_transaction(
+        session=before, label=mutation_type, affected_segment_ids=[segment_id] if segment_id else [],
+        mutate=mutate, mutation_type=mutation_type,
+    )
+
+
+def _apply_manual_mutation(*, before: dict[str, Any], updated: dict[str, Any], mutation_type: str, segment_id: str, extra: dict[str, Any] | None = None) -> dict[str, Any]:
+    result = _record_undoable_mutation(before=before, updated=updated, mutation_type=mutation_type, segment_id=segment_id)
+    if extra:
+        result["history"][-1].update(extra)
+        result["undo_stack"][-1].update(extra)
+    return result
 
 
 def _lineage_for_split(segment: dict[str, Any], *, parent_segment_id: str) -> dict[str, Any]:
@@ -236,7 +244,12 @@ def undo(*, session: dict[str, Any]) -> dict[str, Any]:
     updated["segments"] = deepcopy(event["inverse_payload"]["segments"])
     updated["undo_stack"] = undo_stack
     updated["redo_stack"] = list(deepcopy(session.get("redo_stack", []))) + [event]
-    updated.setdefault("history", []).append({"mutation_type": "undo", "segment_id": str(event.get("segment_id") or "")})
+    history = list(deepcopy(session.get("history", [])))
+    history.append({"mutation_type": "undo", "segment_id": str(event.get("segment_id") or "")})
+    updated["history"] = history[-MAX_TIMELINE_AUDIT_EVENTS:]
+    now = datetime.now(UTC).isoformat()
+    revision = int(session.get("session_revision") or 1) + 1
+    updated["output_freshness"] = {kind: {"source_session_revision": revision, "is_current": False, "invalidated_at": now, "invalidated_reason": "undo"} for kind in ("review", "subtitle", "preview", "final", "capcut")}
     return updated
 
 
@@ -249,7 +262,12 @@ def redo(*, session: dict[str, Any]) -> dict[str, Any]:
     updated["segments"] = deepcopy(event["forward_payload"]["segments"])
     updated["redo_stack"] = redo_stack
     updated["undo_stack"] = (list(deepcopy(session.get("undo_stack", []))) + [event])[-MAX_TIMELINE_UNDO_EVENTS:]
-    updated.setdefault("history", []).append({"mutation_type": "redo", "segment_id": str(event.get("segment_id") or "")})
+    history = list(deepcopy(session.get("history", [])))
+    history.append({"mutation_type": "redo", "segment_id": str(event.get("segment_id") or "")})
+    updated["history"] = history[-MAX_TIMELINE_AUDIT_EVENTS:]
+    now = datetime.now(UTC).isoformat()
+    revision = int(session.get("session_revision") or 1) + 1
+    updated["output_freshness"] = {kind: {"source_session_revision": revision, "is_current": False, "invalidated_at": now, "invalidated_reason": "redo"} for kind in ("review", "subtitle", "preview", "final", "capcut")}
     return updated
 
 
@@ -332,9 +350,7 @@ def update_caption_style(*, session: dict[str, Any], style: dict[str, Any], scop
     for segment in updated.get("segments", []):
         if isinstance(segment, dict) and str(segment.get("segment_id")) in target_ids:
             segment["caption_style"] = dict(resolved_style)
-    updated.setdefault("history", []).append({"mutation_type": "caption_style_update", "segment_id": ",".join(target_ids)})
-    updated["session_revision"] = int(updated.get("session_revision") or 1) + 1
-    return updated
+    return _apply_manual_mutation(before=session, updated=updated, mutation_type="caption_style_update", segment_id=",".join(target_ids))
 
 
 def update_segment_caption(
@@ -349,14 +365,7 @@ def update_segment_caption(
         if str(segment.get("segment_id")) != segment_id:
             continue
         segment["caption_text"] = normalized_caption
-        updated.setdefault("history", []).append(
-            {
-                "mutation_type": "caption_update",
-                "segment_id": segment_id,
-                "caption_text": normalized_caption,
-            }
-        )
-        return updated
+        return _apply_manual_mutation(before=session, updated=updated, mutation_type="caption_update", segment_id=segment_id, extra={"caption_text": normalized_caption})
     raise KeyError(f"Segment not found in editing session: {segment_id}")
 
 
@@ -372,14 +381,7 @@ def update_segment_cut_action(
         if str(segment.get("segment_id")) != segment_id:
             continue
         segment["cut_action"] = normalized_cut_action
-        updated.setdefault("history", []).append(
-            {
-                "mutation_type": "cut_action_update",
-                "segment_id": segment_id,
-                "cut_action": normalized_cut_action,
-            }
-        )
-        return updated
+        return _apply_manual_mutation(before=session, updated=updated, mutation_type="cut_action_update", segment_id=segment_id, extra={"cut_action": normalized_cut_action})
     raise KeyError(f"Segment not found in editing session: {segment_id}")
 
 
@@ -398,14 +400,7 @@ def update_segment_broll_override(
         segment["broll_override"] = {"asset_id": normalized_asset_id}
         if media_controls is not None:
             segment["broll_override"]["media_controls"] = normalize_media_controls(media_controls, media_kind="broll", duration_sec=float(segment.get("end_sec", 0.0)) - float(segment.get("start_sec", 0.0)))
-        updated.setdefault("history", []).append(
-            {
-                "mutation_type": "broll_override_update",
-                "segment_id": segment_id,
-                "asset_id": normalized_asset_id,
-            }
-        )
-        return updated
+        return _apply_manual_mutation(before=session, updated=updated, mutation_type="broll_override_update", segment_id=segment_id, extra={"asset_id": normalized_asset_id})
     raise KeyError(f"Segment not found in editing session: {segment_id}")
 
 
@@ -419,13 +414,7 @@ def clear_segment_broll_override(
         if str(segment.get("segment_id")) != segment_id:
             continue
         segment["broll_override"] = None
-        updated.setdefault("history", []).append(
-            {
-                "mutation_type": "broll_override_clear",
-                "segment_id": segment_id,
-            }
-        )
-        return updated
+        return _apply_manual_mutation(before=session, updated=updated, mutation_type="broll_override_clear", segment_id=segment_id)
     raise KeyError(f"Segment not found in editing session: {segment_id}")
 
 
@@ -439,8 +428,7 @@ def update_segment_sfx_override(*, session: dict[str, Any], segment_id: str, ass
             segment["sfx_override"]["asset_uri"] = asset_uri
         if media_controls is not None:
             segment["sfx_override"]["media_controls"] = normalize_media_controls(media_controls, media_kind="audio", duration_sec=float(segment.get("end_sec", 0.0)) - float(segment.get("start_sec", 0.0)))
-        updated.setdefault("history", []).append({"mutation_type": "sfx_override_update", "segment_id": segment_id, "asset_id": asset_id.strip()})
-        return updated
+        return _apply_manual_mutation(before=session, updated=updated, mutation_type="sfx_override_update", segment_id=segment_id, extra={"asset_id": asset_id.strip()})
     raise KeyError(f"Segment not found in editing session: {segment_id}")
 
 
@@ -450,8 +438,7 @@ def clear_segment_sfx_override(*, session: dict[str, Any], segment_id: str) -> d
         if str(segment.get("segment_id")) != segment_id:
             continue
         segment["sfx_override"] = None
-        updated.setdefault("history", []).append({"mutation_type": "sfx_override_clear", "segment_id": segment_id})
-        return updated
+        return _apply_manual_mutation(before=session, updated=updated, mutation_type="sfx_override_clear", segment_id=segment_id)
     raise KeyError(f"Segment not found in editing session: {segment_id}")
 
 
@@ -475,6 +462,7 @@ def update_segment_visual_overlay(
         mutation_type="visual_overlay_update",
     )
     updated["history"][-1]["asset_id"] = normalized_asset_id
+    updated["undo_stack"][-1]["asset_id"] = normalized_asset_id
     return updated
 
 
@@ -488,13 +476,7 @@ def clear_segment_visual_overlays(
         if str(segment.get("segment_id")) != segment_id:
             continue
         segment["visual_overlays"] = []
-        updated.setdefault("history", []).append(
-            {
-                "mutation_type": "visual_overlay_clear",
-                "segment_id": segment_id,
-            }
-        )
-        return updated
+        return _apply_manual_mutation(before=session, updated=updated, mutation_type="visual_overlay_clear", segment_id=segment_id)
     raise KeyError(f"Segment not found in editing session: {segment_id}")
 
 
@@ -619,14 +601,7 @@ def update_segment_music_override(
             segment["music_override"]["asset_uri"] = asset_uri
         if media_controls is not None:
             segment["music_override"]["media_controls"] = normalize_media_controls(media_controls, media_kind="audio", duration_sec=float(segment.get("end_sec", 0.0)) - float(segment.get("start_sec", 0.0)))
-        updated.setdefault("history", []).append(
-            {
-                "mutation_type": "music_override_update",
-                "segment_id": segment_id,
-                "asset_id": normalized_asset_id,
-            }
-        )
-        return updated
+        return _apply_manual_mutation(before=session, updated=updated, mutation_type="music_override_update", segment_id=segment_id, extra={"asset_id": normalized_asset_id})
     raise KeyError(f"Segment not found in editing session: {segment_id}")
 
 
@@ -640,13 +615,7 @@ def clear_segment_music_override(
         if str(segment.get("segment_id")) != segment_id:
             continue
         segment["music_override"] = None
-        updated.setdefault("history", []).append(
-            {
-                "mutation_type": "music_override_clear",
-                "segment_id": segment_id,
-            }
-        )
-        return updated
+        return _apply_manual_mutation(before=session, updated=updated, mutation_type="music_override_clear", segment_id=segment_id)
     raise KeyError(f"Segment not found in editing session: {segment_id}")
 
 
@@ -772,14 +741,7 @@ def _upsert_segment_overlay(
         ]
         overlays.append(overlay_payload)
         segment["visual_overlays"] = overlays
-        updated.setdefault("history", []).append(
-            {
-                "mutation_type": mutation_type,
-                "segment_id": segment_id,
-                "overlay_type": overlay_type,
-            }
-        )
-        return updated
+        return _apply_manual_mutation(before=session, updated=updated, mutation_type=mutation_type, segment_id=segment_id, extra={"overlay_type": overlay_type})
     raise KeyError(f"Segment not found in editing session: {segment_id}")
 
 
@@ -799,12 +761,5 @@ def _remove_segment_overlay(
             for overlay in segment.get("visual_overlays", [])
             if not (isinstance(overlay, dict) and str(overlay.get("overlay_type") or "") == overlay_type)
         ]
-        updated.setdefault("history", []).append(
-            {
-                "mutation_type": mutation_type,
-                "segment_id": segment_id,
-                "overlay_type": overlay_type,
-            }
-        )
-        return updated
+        return _apply_manual_mutation(before=session, updated=updated, mutation_type=mutation_type, segment_id=segment_id, extra={"overlay_type": overlay_type})
     raise KeyError(f"Segment not found in editing session: {segment_id}")

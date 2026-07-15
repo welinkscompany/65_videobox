@@ -218,7 +218,9 @@ PROJECT_SCHEMA_STATEMENTS = (
         project_id TEXT NOT NULL,
         status TEXT NOT NULL,
         approved_at TEXT,
-        updated_at TEXT NOT NULL
+        updated_at TEXT NOT NULL,
+        source_session_revision INTEGER, is_current INTEGER NOT NULL DEFAULT 1,
+        invalidated_at TEXT, invalidated_reason TEXT
     )
     """,
     """
@@ -229,7 +231,9 @@ PROJECT_SCHEMA_STATEMENTS = (
         file_uri TEXT NOT NULL,
         status TEXT NOT NULL,
         summary_json TEXT,
-        created_at TEXT NOT NULL
+        created_at TEXT NOT NULL,
+        source_session_revision INTEGER, is_current INTEGER NOT NULL DEFAULT 1,
+        invalidated_at TEXT, invalidated_reason TEXT
     )
     """,
     """
@@ -241,7 +245,9 @@ PROJECT_SCHEMA_STATEMENTS = (
         file_uri TEXT NOT NULL,
         status TEXT NOT NULL,
         summary_json TEXT,
-        created_at TEXT NOT NULL
+        created_at TEXT NOT NULL,
+        source_session_revision INTEGER, is_current INTEGER NOT NULL DEFAULT 1,
+        invalidated_at TEXT, invalidated_reason TEXT
     )
     """,
     """
@@ -253,7 +259,9 @@ PROJECT_SCHEMA_STATEMENTS = (
         file_uri TEXT NOT NULL,
         status TEXT NOT NULL,
         metadata_json TEXT,
-        created_at TEXT NOT NULL
+        created_at TEXT NOT NULL,
+        source_session_revision INTEGER, is_current INTEGER NOT NULL DEFAULT 1,
+        invalidated_at TEXT, invalidated_reason TEXT
     )
     """,
     """
@@ -281,7 +289,9 @@ PROJECT_SCHEMA_STATEMENTS = (
         target_duration_sec REAL,
         actual_duration_sec REAL,
         failure_code TEXT,
-        created_at TEXT NOT NULL
+        created_at TEXT NOT NULL,
+        source_session_revision INTEGER, is_current INTEGER NOT NULL DEFAULT 1,
+        invalidated_at TEXT, invalidated_reason TEXT
     )
     """,
     """

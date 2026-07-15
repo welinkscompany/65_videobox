@@ -228,7 +228,7 @@ class _PipelinePrivateHelpersMixin:
             project_id=str(timeline["project_id"]),
             timeline_id=str(timeline["timeline_id"]),
         )
-        if review_state["status"] != "approved":
+        if review_state["status"] != "approved" or not bool(review_state.get("is_current", True)):
             raise ValueError("Timeline requires explicit approval before preview, subtitle, or export.")
 
     def _ensure_timeline_has_no_blockers(self, timeline: dict[str, Any]) -> None:

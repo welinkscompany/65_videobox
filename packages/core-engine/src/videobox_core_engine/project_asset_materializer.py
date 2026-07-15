@@ -34,11 +34,13 @@ class ProjectAssetMaterializer:
         self._validate_eligibility(project_id=project_id, asset=asset, candidate=candidate)
         return asset, source
 
-    def materialize(self, *, project_id: str, candidate: object) -> dict[str, Any]:
+    def materialize(self, *, project_id: str, candidate: object, expected_asset_index_revision: int | None = None) -> dict[str, Any]:
         digest = str(candidate.expected_content_sha256 or "")
         if not digest:
             raise ValueError("candidate_sha_missing")
         with self._lock_for(digest):
+            if expected_asset_index_revision is not None and self.store.get_asset_index_revision(project_id) != expected_asset_index_revision:  # type: ignore[attr-defined]
+                raise ValueError("candidate_asset_index_revision_changed")
             asset, source = self.validate_candidate(project_id=project_id, candidate=candidate)
             for existing in self.store.list_assets(project_id=project_id):  # type: ignore[attr-defined]
                 metadata = dict(existing.get("metadata") or {})
@@ -66,7 +68,8 @@ class ProjectAssetMaterializer:
                     source_kind="director_materialized", mime_type=None,
                     metadata={"director_materialized_sha256": digest, "director_proposal_candidate_id": candidate.candidate_id,
                               "source_asset_id": candidate.asset_id, "license_policy": candidate.license_policy,
-                              "warning_provenance": list(candidate.warning_provenance)},
+                              "warning_provenance": list(candidate.warning_provenance),
+                              "director_materialized_asset_index_revision": (expected_asset_index_revision + 1) if expected_asset_index_revision is not None else None},
                 )
                 result = self.store.get_asset(project_id=project_id, asset_id=registered.asset_id)  # type: ignore[attr-defined]
                 project_path = self.store.resolve_storage_uri(project_id=project_id, storage_uri=str(result["storage_uri"]))  # type: ignore[attr-defined]

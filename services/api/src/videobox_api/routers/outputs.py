@@ -53,6 +53,7 @@ def build_outputs_router(orchestrator: ApiOrchestrator) -> APIRouter:
     def get_subtitle_result(project_id: str, job_id: str) -> SubtitleJobResponse:
         try:
             result = orchestrator.get_subtitle_result(project_id=project_id, job_id=job_id)
+            result["subtitle"] = orchestrator.pipeline.store.get_subtitle_run(project_id=project_id, subtitle_id=result["subtitle"]["subtitle_id"])
         except Exception as exc:
             raise _http_error(exc) from exc
         return SubtitleJobResponse(
@@ -76,6 +77,7 @@ def build_outputs_router(orchestrator: ApiOrchestrator) -> APIRouter:
     def get_preview_result(project_id: str, job_id: str) -> PreviewJobResponse:
         try:
             result = orchestrator.get_preview_result(project_id=project_id, job_id=job_id)
+            result["preview"] = orchestrator.pipeline.store.get_preview_run(project_id=project_id, preview_id=result["preview"]["preview_id"])
         except Exception as exc:
             raise _http_error(exc) from exc
         return PreviewJobResponse(
@@ -99,6 +101,7 @@ def build_outputs_router(orchestrator: ApiOrchestrator) -> APIRouter:
     def get_export_result(project_id: str, job_id: str) -> ExportJobResponse:
         try:
             result = orchestrator.get_capcut_export_result(project_id=project_id, job_id=job_id)
+            result["export"] = orchestrator.pipeline.store.get_export_run(project_id=project_id, export_id=result["export"]["export_id"])
         except Exception as exc:
             raise _http_error(exc) from exc
         return ExportJobResponse(
@@ -131,6 +134,8 @@ def build_outputs_router(orchestrator: ApiOrchestrator) -> APIRouter:
     def get_final_render_result(project_id: str, job_id: str) -> FinalRenderJobResponse:
         try:
             result = orchestrator.get_final_render_result(project_id=project_id, job_id=job_id)
+            if result.get("render"):
+                result["render"] = orchestrator.pipeline.store.get_final_render_export(project_id=project_id, export_id=result["render"]["export_id"])
         except Exception as exc:
             raise _http_error(exc) from exc
         return FinalRenderJobResponse(
@@ -163,6 +168,8 @@ def build_outputs_router(orchestrator: ApiOrchestrator) -> APIRouter:
     def get_capcut_draft_export_result(project_id: str, job_id: str) -> CapCutDraftExportJobResponse:
         try:
             result = orchestrator.get_capcut_draft_export_result(project_id=project_id, job_id=job_id)
+            if result.get("export"):
+                result["export"] = orchestrator.pipeline.store.get_capcut_draft_export(project_id=project_id, export_id=result["export"]["export_id"])
         except Exception as exc:
             raise _http_error(exc) from exc
         return CapCutDraftExportJobResponse(

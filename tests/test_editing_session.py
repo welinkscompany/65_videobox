@@ -11,6 +11,172 @@ from videobox_domain_models.assets import AssetType
 from videobox_storage.local_project_store import LocalProjectStore
 
 
+def test_named_user_transactions_keep_ten_undo_entries_and_one_hundred_audit_entries() -> None:
+    """Task 11 RED: a user action is a named atomic snapshot, not 100 undo slots."""
+    from videobox_core_engine.editing_transactions import apply_user_transaction
+    from videobox_core_engine.editing_session import build_editing_session
+
+    session = build_editing_session(
+        project_id="project", timeline={"timeline_id": "timeline"},
+        segments=[{"segment_id": "segment", "text": "before", "start_sec": 0, "end_sec": 1}],
+    )
+    for index in range(101):
+        session = apply_user_transaction(
+            session=session,
+            label=f"작업 {index}",
+            affected_segment_ids=["segment"],
+            mutate=lambda draft, index=index: draft["segments"][0].__setitem__("caption_text", str(index)),
+        )
+    assert len(session["undo_stack"]) == 10
+    assert len(session["history"]) == 100
+    assert session["undo_stack"][-1]["label"] == "작업 100"
+
+
+def test_sqlite_session_truth_recovers_after_sidecar_replace_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Task 11 RED: a post-commit sidecar failure must recover from SQLite on next read."""
+    store = LocalProjectStore(tmp_path / "projects")
+    project = store.bootstrap_project("sidecar")
+    saved = store.save_editing_session(project_id=project.project_id, timeline_id="timeline", session_payload={
+        "segments": [{"segment_id": "seg", "caption_text": "before"}], "history": [],
+    })
+    original_replace = Path.replace
+    failed = {"value": False}
+    def fail_sidecar(path: Path, target: Path):
+        if not failed["value"] and "editing_session" in path.name and path.suffix == ".tmp":
+            failed["value"] = True
+            raise OSError("injected sidecar replace failure")
+        return original_replace(path, target)
+    monkeypatch.setattr(Path, "replace", fail_sidecar)
+    with pytest.raises(OSError, match="sidecar"):
+        store.update_editing_session(project_id=project.project_id, session_id=saved["session_id"], expected_revision=1, session_payload={
+            **saved, "segments": [{"segment_id": "seg", "caption_text": "after"}],
+        })
+    monkeypatch.undo()
+    assert store.get_editing_session(project_id=project.project_id, session_id=saved["session_id"])["segments"][0]["caption_text"] == "after"
+
+
+def test_stale_review_blocks_output_until_reapproval_restores_current_freshness(tmp_path: Path) -> None:
+    """A stale approval cannot authorize output; a fresh approval can."""
+    from videobox_core_engine.local_pipeline import LocalPipelineRunner
+    from videobox_domain_models.jobs import JobStatus, JobType
+
+    store = LocalProjectStore(tmp_path / "projects")
+    project = store.bootstrap_project("Stale review output")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="preview",
+        timeline_payload={
+            "tracks": [],
+            "caption_segments": [
+                {"segment_id": "seg_001", "text": "Current voice", "start_sec": 0.0, "end_sec": 1.0}
+            ],
+            "review_flags": [],
+            "pending_recommendations": [],
+        },
+    )
+    timeline_job = store.create_job(
+        project_id=project.project_id,
+        job_type=JobType.TIMELINE_BUILD,
+        status=JobStatus.SUCCEEDED,
+    )
+    store.update_job(
+        project_id=project.project_id,
+        job_id=timeline_job["job_id"],
+        status=JobStatus.SUCCEEDED,
+        output_ref=timeline["timeline_id"],
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={"segments": [{"segment_id": "seg_001", "caption_text": "Before"}], "history": []},
+    )
+    store.save_review_state(project_id=project.project_id, timeline_id=timeline["timeline_id"], status="approved")
+    store.update_editing_session(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+        expected_revision=session["session_revision"],
+        session_payload={**session, "segments": [{"segment_id": "seg_001", "caption_text": "After"}]},
+    )
+    runner = LocalPipelineRunner(store)
+
+    assert store.get_review_state(project_id=project.project_id, timeline_id=timeline["timeline_id"])["is_current"] is False
+    with pytest.raises(ValueError, match="explicit approval"):
+        runner.start_subtitle_render(project_id=project.project_id, timeline_job_id=timeline_job["job_id"])
+
+    approved = runner.approve_timeline_review(project_id=project.project_id, timeline_job_id=timeline_job["job_id"])
+    assert approved["status"] == "approved"
+    assert approved["is_current"] is True
+    assert runner.start_subtitle_render(project_id=project.project_id, timeline_job_id=timeline_job["job_id"])["status"] == "succeeded"
+
+    reopened = runner.reopen_timeline_review(project_id=project.project_id, timeline_job_id=timeline_job["job_id"])
+    assert reopened["status"] == "draft"
+    assert reopened["is_current"] is True
+
+
+def test_stale_subtitle_is_not_selected_until_a_fresh_render_replaces_it(tmp_path: Path) -> None:
+    """Selectors must not silently return stale subtitles after an edit."""
+    store = LocalProjectStore(tmp_path / "projects")
+    project = store.bootstrap_project("Subtitle freshness")
+    timeline = store.save_timeline_run(project_id=project.project_id, output_mode="preview", timeline_payload={"tracks": []})
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={"segments": [{"segment_id": "seg", "caption_text": "Before"}], "history": []},
+    )
+    stale = store.save_subtitle_run(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        subtitle_payload={"entries": [{"index": 1, "start_sec": 0, "end_sec": 1, "text": "Before"}]},
+    )
+
+    store.update_editing_session(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+        expected_revision=session["session_revision"],
+        session_payload={**session, "segments": [{"segment_id": "seg", "caption_text": "After"}]},
+    )
+
+    assert store.get_subtitle_run(project_id=project.project_id, subtitle_id=stale["subtitle_id"])["is_current"] is False
+    assert store.get_latest_subtitle_for_timeline(project_id=project.project_id, timeline_id=timeline["timeline_id"]) is None
+    fresh = store.save_subtitle_run(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        subtitle_payload={"entries": [{"index": 1, "start_sec": 0, "end_sec": 1, "text": "After"}]},
+    )
+    assert store.get_latest_subtitle_for_timeline(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+    )["subtitle_id"] == fresh["subtitle_id"]
+
+
+def test_legacy_preview_render_table_gains_every_freshness_column_on_open(tmp_path: Path) -> None:
+    """Opening a real pre-Task-11 preview table upgrades it without data loss assumptions."""
+    store = LocalProjectStore(tmp_path / "projects")
+    project = store.bootstrap_project("Legacy preview migration")
+    database_path = store.database_path(project.project_id)
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute("DROP TABLE preview_renders")
+        connection.execute(
+            """
+            CREATE TABLE preview_renders (
+                preview_id TEXT PRIMARY KEY, project_id TEXT NOT NULL, timeline_id TEXT NOT NULL,
+                file_uri TEXT NOT NULL, status TEXT NOT NULL, summary_json TEXT, created_at TEXT NOT NULL
+            )
+            """
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    migrated = store._connection(project.project_id)
+    try:
+        columns = {str(row[1]) for row in migrated.execute("PRAGMA table_info(preview_renders)").fetchall()}
+    finally:
+        migrated.close()
+    assert {"source_session_revision", "is_current", "invalidated_at", "invalidated_reason"} <= columns
+
+
 def test_build_editing_session_from_review_timeline_creates_editable_segment_state() -> None:
     from videobox_core_engine.editing_session import build_editing_session
 

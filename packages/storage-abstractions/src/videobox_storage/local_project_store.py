@@ -678,6 +678,53 @@ class LocalProjectStore:
             expected_revision=expected_revision,
         )
 
+    def apply_director_proposal_transaction(
+        self, *, project_id: str, session_id: str, proposal_id: str,
+        session_payload: dict[str, Any], expected_revision: int,
+        proposal_base_revision: int, materialized_expectations: list[tuple[str, str, int]],
+    ) -> dict[str, Any]:
+        """Commit the session CAS and proposal consumption in the same SQLite transaction."""
+        existing = self.get_editing_session(project_id=project_id, session_id=session_id)
+        payload = deepcopy(session_payload)
+        if int(payload.get("session_revision") or 0) <= int(existing.get("session_revision") or 1):
+            payload["session_revision"] = int(existing.get("session_revision") or 1) + 1
+
+        def consume(connection: sqlite3.Connection) -> None:
+            proposal_row = connection.execute("SELECT proposal_json, status FROM director_proposals WHERE proposal_id = ?", (proposal_id,)).fetchone()
+            if proposal_row is None or str(proposal_row["status"]) != "ready":
+                raise EditingSessionRevisionConflict("Director proposal is no longer ready.")
+            if int(json.loads(str(proposal_row["proposal_json"])).get("base_session_revision") or 0) != proposal_base_revision:
+                raise EditingSessionRevisionConflict("Director proposal base revision changed.")
+            revision_row = connection.execute("SELECT revision FROM director_asset_index_revisions WHERE project_id = ?", (project_id,)).fetchone()
+            current_index_revision = int(revision_row["revision"]) if revision_row is not None else 0
+            for asset_id, expected_sha256, expected_index_revision in materialized_expectations:
+                row = connection.execute("SELECT storage_uri, metadata_json FROM assets WHERE project_id = ? AND asset_id = ?", (project_id, asset_id)).fetchone()
+                if row is None or current_index_revision != expected_index_revision:
+                    raise EditingSessionRevisionConflict("Materialized asset index changed during proposal apply.")
+                metadata = json.loads(str(row["metadata_json"] or "{}"))
+                if int(metadata.get("director_materialized_asset_index_revision") or -1) != expected_index_revision:
+                    raise EditingSessionRevisionConflict("Materialized asset revision changed during proposal apply.")
+                path = self.resolve_storage_uri(project_id=project_id, storage_uri=str(row["storage_uri"]))
+                if not path.is_file() or sha256_file(path) != expected_sha256:
+                    raise EditingSessionRevisionConflict("Materialized bytes changed during proposal apply.")
+            now = self._now_iso()
+            changed = connection.execute(
+                "UPDATE director_proposals SET status = ?, updated_at = ? WHERE proposal_id = ? AND status = 'ready'",
+                ("applied", now, proposal_id),
+            )
+            if changed.rowcount != 1:
+                raise EditingSessionRevisionConflict("Director proposal is no longer ready.")
+            connection.execute(
+                "INSERT INTO director_proposal_lifecycle_events (proposal_id, status, reason, changed_at) VALUES (?, ?, ?, ?)",
+                (proposal_id, "applied", "session_apply", now),
+            )
+
+        return self._write_editing_session(
+            project_id=project_id, timeline_id=str(existing["timeline_id"]), session_id=session_id,
+            session_payload=payload, is_new=False, created_at=str(existing["created_at"]),
+            expected_revision=expected_revision, transaction_hook=consume,
+        )
+
     def save_review_state(
         self,
         *,
@@ -702,7 +749,11 @@ class LocalProjectStore:
             ON CONFLICT(timeline_id) DO UPDATE SET
                 status = excluded.status,
                 approved_at = excluded.approved_at,
-                updated_at = excluded.updated_at
+                updated_at = excluded.updated_at,
+                source_session_revision = (SELECT session_revision FROM editing_sessions WHERE project_id = excluded.project_id AND timeline_id = excluded.timeline_id ORDER BY updated_at DESC LIMIT 1),
+                is_current = 1,
+                invalidated_at = NULL,
+                invalidated_reason = NULL
             """,
             (timeline_id, project_id, status, approved_at, updated_at),
         )
@@ -832,6 +883,7 @@ class LocalProjectStore:
             project_id=project_id,
             partial_regeneration_id=partial_regeneration_id,
         )
+
         updated = {
             **existing,
             **deepcopy(payload),
@@ -1367,7 +1419,7 @@ class LocalProjectStore:
         row = self._fetchone(
             project_id,
             """
-            SELECT timeline_id, project_id, status, approved_at, updated_at
+            SELECT timeline_id, project_id, status, approved_at, updated_at, source_session_revision, is_current, invalidated_at, invalidated_reason
             FROM review_approvals
             WHERE timeline_id = ?
             """,
@@ -1377,6 +1429,7 @@ class LocalProjectStore:
             raise KeyError(f"Review state not found: {timeline_id}")
         payload = dict(row)
         payload["status"] = str(payload.get("status") or "").strip().lower()
+        payload["is_current"] = bool(payload.get("is_current"))
         return payload
 
     def save_subtitle_run(
@@ -1440,7 +1493,7 @@ class LocalProjectStore:
                 payload["created_at"],
             ),
         )
-        return {"subtitle_id": subtitle_id, "file_uri": file_uri, "subtitle": payload}
+        return {"subtitle_id": subtitle_id, "file_uri": file_uri, "subtitle": self.get_subtitle_run(project_id=project_id, subtitle_id=subtitle_id)}
 
     def save_preview_run(
         self,
@@ -1510,7 +1563,7 @@ class LocalProjectStore:
             preview_path.unlink(missing_ok=True)
             player_path.unlink(missing_ok=True)
             raise
-        return {"preview_id": preview_id, "file_uri": file_uri, "preview": payload}
+        return {"preview_id": preview_id, "file_uri": file_uri, "preview": self.get_preview_run(project_id=project_id, preview_id=preview_id)}
 
     def _next_export_sequence(self, project_id: str) -> int:
         # All export types (capcut / final_render / capcut_draft_export) share one
@@ -1682,7 +1735,7 @@ class LocalProjectStore:
         row = self._fetchone(
             project_id,
             """
-            SELECT export_id, project_id, timeline_id, export_type, file_uri, status, created_at
+            SELECT export_id, project_id, timeline_id, export_type, file_uri, status, created_at, source_session_revision, is_current, invalidated_at, invalidated_reason
             FROM exports
             WHERE export_id = ?
             """,
@@ -1700,6 +1753,10 @@ class LocalProjectStore:
             "file_uri": row["file_uri"],
             "status": row["status"],
             "created_at": row["created_at"],
+            "source_session_revision": row["source_session_revision"],
+            "is_current": bool(row["is_current"]),
+            "invalidated_at": row["invalidated_at"],
+            "invalidated_reason": row["invalidated_reason"],
         }
 
     def save_capcut_draft_export(
@@ -1754,7 +1811,7 @@ class LocalProjectStore:
         row = self._fetchone(
             project_id,
             """
-            SELECT export_id, project_id, timeline_id, export_type, file_uri, status, metadata_json, created_at
+            SELECT export_id, project_id, timeline_id, export_type, file_uri, status, metadata_json, created_at, source_session_revision, is_current, invalidated_at, invalidated_reason
             FROM exports
             WHERE export_id = ?
             """,
@@ -1775,6 +1832,10 @@ class LocalProjectStore:
             "notes": list(metadata.get("notes") or []),
             "handoff": metadata.get("handoff"),
             "created_at": row["created_at"],
+            "source_session_revision": row["source_session_revision"],
+            "is_current": bool(row["is_current"]),
+            "invalidated_at": row["invalidated_at"],
+            "invalidated_reason": row["invalidated_reason"],
         }
 
     def update_capcut_draft_handoff(
@@ -2710,7 +2771,7 @@ class LocalProjectStore:
         row = self._fetchone(
             project_id,
             """
-            SELECT preview_id, project_id, timeline_id, file_uri, status, summary_json, created_at
+            SELECT preview_id, project_id, timeline_id, file_uri, status, summary_json, created_at, source_session_revision, is_current, invalidated_at, invalidated_reason
             FROM preview_renders
             WHERE preview_id = ?
             """,
@@ -2725,13 +2786,17 @@ class LocalProjectStore:
         payload["provider_trace"] = payload.get("provider_trace") or build_provider_trace(final_provider="static_fallback")
         payload["summary"] = json.loads(row["summary_json"] or "{}")
         payload["created_at"] = row["created_at"]
+        payload["source_session_revision"] = row["source_session_revision"]
+        payload["is_current"] = bool(row["is_current"])
+        payload["invalidated_at"] = row["invalidated_at"]
+        payload["invalidated_reason"] = row["invalidated_reason"]
         return payload
 
     def get_subtitle_run(self, *, project_id: str, subtitle_id: str) -> dict[str, Any]:
         row = self._fetchone(
             project_id,
             """
-            SELECT subtitle_id, project_id, timeline_id, format, file_uri, status, summary_json, created_at
+            SELECT subtitle_id, project_id, timeline_id, format, file_uri, status, summary_json, created_at, source_session_revision, is_current, invalidated_at, invalidated_reason
             FROM subtitle_renders
             WHERE subtitle_id = ?
             """,
@@ -2743,13 +2808,14 @@ class LocalProjectStore:
         summary = json.loads(payload.pop("summary_json") or "{}")
         payload["notes"] = summary.get("notes") or ["Subtitle file generated from approved review timeline."]
         payload["summary"] = summary
+        payload["is_current"] = bool(payload.get("is_current"))
         return payload
 
     def get_export_run(self, *, project_id: str, export_id: str) -> dict[str, Any]:
         row = self._fetchone(
             project_id,
             """
-            SELECT export_id, project_id, timeline_id, export_type, file_uri, status, metadata_json, created_at
+            SELECT export_id, project_id, timeline_id, export_type, file_uri, status, metadata_json, created_at, source_session_revision, is_current, invalidated_at, invalidated_reason
             FROM exports
             WHERE export_id = ?
             """,
@@ -2764,6 +2830,11 @@ class LocalProjectStore:
         payload["provider_trace"] = payload.get("provider_trace") or build_provider_trace(final_provider="static_fallback")
         payload["metadata"] = json.loads(row["metadata_json"] or "{}")
         payload["created_at"] = row["created_at"]
+        payload["source_session_revision"] = row["source_session_revision"]
+        payload["is_current"] = bool(row["is_current"])
+        payload["invalidated_at"] = row["invalidated_at"]
+        payload["invalidated_reason"] = row["invalidated_reason"]
+        payload["is_current"] = bool(payload["is_current"])
         return payload
 
     def get_editing_session(self, *, project_id: str, session_id: str) -> dict[str, Any]:
@@ -3470,6 +3541,8 @@ class LocalProjectStore:
         self._ensure_editing_session_revision_column(connection)
         self._ensure_editing_session_json_column(connection)
         self._ensure_tts_candidate_acceptance_columns(connection)
+        self._ensure_artifact_freshness_columns(connection)
+        self._ensure_artifact_freshness_triggers(connection)
         connection.commit()
         connection.row_factory = sqlite3.Row
         return connection
@@ -3500,6 +3573,26 @@ class LocalProjectStore:
         }
         if "session_revision" not in existing_columns:
             connection.execute("ALTER TABLE editing_sessions ADD COLUMN session_revision INTEGER NOT NULL DEFAULT 1")
+
+    def _ensure_artifact_freshness_columns(self, connection: sqlite3.Connection) -> None:
+        for table in ("review_approvals", "preview_renders", "subtitle_renders", "exports"):
+            existing = {str(row[1]) for row in connection.execute(f"PRAGMA table_info({table})").fetchall()}
+            for column, declaration in (
+                ("source_session_revision", "INTEGER"),
+                ("is_current", "INTEGER NOT NULL DEFAULT 1"),
+                ("invalidated_at", "TEXT"),
+                ("invalidated_reason", "TEXT"),
+            ):
+                if column not in existing:
+                    connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
+
+    def _ensure_artifact_freshness_triggers(self, connection: sqlite3.Connection) -> None:
+        for table, identifier in (("review_approvals", "timeline_id"), ("preview_renders", "preview_id"), ("subtitle_renders", "subtitle_id"), ("exports", "export_id")):
+            trigger = f"set_{table}_session_freshness"
+            connection.execute(
+                f"CREATE TRIGGER IF NOT EXISTS {trigger} AFTER INSERT ON {table} BEGIN "
+                f"UPDATE {table} SET source_session_revision = COALESCE((SELECT session_revision FROM editing_sessions WHERE project_id = NEW.project_id AND timeline_id = NEW.timeline_id ORDER BY updated_at DESC LIMIT 1), 1), is_current = 1 WHERE {identifier} = NEW.{identifier}; END"
+            )
 
     def _ensure_editing_session_json_column(self, connection: sqlite3.Connection) -> None:
         existing_columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(editing_sessions)").fetchall()}
@@ -3579,7 +3672,7 @@ class LocalProjectStore:
             """
             SELECT subtitle_id
             FROM subtitle_renders
-            WHERE timeline_id = ?
+            WHERE timeline_id = ? AND COALESCE(is_current, 1) = 1
             ORDER BY created_at DESC
             LIMIT 1
             """,
@@ -3665,6 +3758,7 @@ class LocalProjectStore:
             "timing_source",
             "narration_alignment_required",
             "stale_proposal_source_script_segment_ids",
+            "output_freshness",
         ):
             if key in session_payload:
                 payload[key] = session_payload[key]
@@ -3733,6 +3827,10 @@ class LocalProjectStore:
                     raise EditingSessionRevisionConflict("Editing session revision is stale.")
                 if transaction_hook is not None:
                     transaction_hook(connection)
+                self._invalidate_output_freshness_with_connection(
+                    connection, project_id=project_id, timeline_id=timeline_id,
+                    source_session_revision=payload["session_revision"], reason="editing_session_mutation",
+                )
                 connection.commit()
                 temporary_path.write_text(serialized_payload, encoding="utf-8")
                 temporary_path.replace(session_path)
@@ -3745,6 +3843,18 @@ class LocalProjectStore:
             finally:
                 connection.close()
         return self.get_editing_session(project_id=project_id, session_id=session_id)
+
+    def _invalidate_output_freshness_with_connection(
+        self, connection: sqlite3.Connection, *, project_id: str, timeline_id: str,
+        source_session_revision: int, reason: str,
+    ) -> None:
+        now = self._now_iso()
+        for table in ("review_approvals", "subtitle_renders", "preview_renders", "exports"):
+            connection.execute(
+                f"UPDATE {table} SET is_current = 0, invalidated_at = ?, invalidated_reason = ? "
+                f"WHERE project_id = ? AND timeline_id = ? AND COALESCE(is_current, 1) = 1",
+                (now, reason, project_id, timeline_id),
+            )
 
     def _timeline_file_path(self, *, project_id: str, timeline_id: str) -> Path:
         row = self._fetchone(

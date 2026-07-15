@@ -12,6 +12,7 @@ from videobox_api.main import create_app
 import videobox_api.main as api_main
 from videobox_api.orchestration import LocalFirstRuntimeService
 from videobox_domain_models.assets import AssetType
+from videobox_domain_models.jobs import JobStatus, JobType
 
 
 def test_create_app_rejects_fallback_capable_runtime_from_local_only_factory(tmp_path: Path) -> None:
@@ -205,3 +206,166 @@ def test_indexed_bgm_preflight_needs_no_visual_analysis_and_bad_expiry_is_422(tm
     assert candidate["media_revision"]
     assert {item["media_type"] for item in proposal.json()["candidates"]} == {"bgm", "sfx"}
     assert client.post(f"/api/projects/{project_id}/director/proposals/{proposal.json()['proposal_id']}/preflight").status_code == 200
+
+
+def test_materialized_candidate_apply_is_one_named_atomic_session_action(tmp_path: Path) -> None:
+    """Task 11 RED: applying a proposal consumes materialized identity in one CAS edit."""
+    app = create_app(projects_root=tmp_path / "projects")
+    client = TestClient(app)
+    store = app.state.store
+    project_id = client.post("/api/projects", json={"name": "atomic director"}).json()["project_id"]
+    source = tmp_path / "bed.mp3"; source.write_bytes(b"bed")
+    store.register_asset(project_id=project_id, asset_type=AssetType.BGM, source_path=source, metadata={
+        "canonical_metadata_indexed": True, "mood": "calm", "energy": "low", "genre": "ambient",
+        "recommended_use": "bed", "license": "valid", "review_status": "approved",
+    })
+    timeline_id = store.save_timeline_run(project_id=project_id, output_mode="preview", timeline_payload={"tracks": []})["timeline_id"]
+    session = store.save_editing_session(project_id=project_id, timeline_id=timeline_id, session_payload={
+        "segments": [{"segment_id": "seg", "caption_text": "voice", "start_sec": 0, "end_sec": 2, "cut_action": "keep", "review_required": False}], "history": [],
+    })
+    proposal = client.post(f"/api/projects/{project_id}/director/proposals", json={"session_id": session["session_id"]}).json()
+    candidate = proposal["candidates"][0]
+    materialized = client.post(
+        f"/api/projects/{project_id}/director/proposals/{proposal['proposal_id']}/candidates/{candidate['candidate_id']}/materialize"
+    )
+    assert materialized.status_code == 201
+    store.save_review_state(project_id=project_id, timeline_id=timeline_id, status="approved")
+    subtitle = store.save_subtitle_run(project_id=project_id, timeline_id=timeline_id, subtitle_payload={"entries": []})
+    preview = store.save_preview_run(
+        project_id=project_id,
+        timeline_id=timeline_id,
+        preview_payload={"artifact_kind": "preview_manifest", "clips": [], "player_html": ""},
+    )
+    final_source = tmp_path / "final.mp4"; final_source.write_bytes(b"final")
+    final = store.save_final_render(project_id=project_id, timeline_id=timeline_id, source_output_path=final_source)
+    capcut = store.save_capcut_export(project_id=project_id, timeline_id=timeline_id, export_payload={"tracks": []})
+    capcut_draft_source = tmp_path / "capcut-draft-source"
+    capcut_draft_source.mkdir()
+    (capcut_draft_source / "draft_content.json").write_text("{}", encoding="utf-8")
+    capcut_draft = store.save_capcut_draft_export(
+        project_id=project_id,
+        timeline_id=timeline_id,
+        source_draft_path=capcut_draft_source,
+    )
+
+    # These are the same durable job/result contracts used by the output GET
+    # endpoints.  The output bodies are seeded deterministically here because
+    # the media-director regression is about freshness after an edit, rather
+    # than renderer/encoder correctness.
+    def completed_output_job(job_type: JobType, output_ref: str) -> str:
+        job = store.create_job(project_id=project_id, job_type=job_type, status=JobStatus.SUCCEEDED)
+        store.update_job(
+            project_id=project_id,
+            job_id=job["job_id"],
+            status=JobStatus.SUCCEEDED,
+            output_ref=output_ref,
+        )
+        return str(job["job_id"])
+
+    subtitle_job_id = completed_output_job(JobType.SUBTITLE_RENDER, subtitle["subtitle_id"])
+    preview_job_id = completed_output_job(JobType.PREVIEW_RENDER, preview["preview_id"])
+    capcut_job_id = completed_output_job(JobType.CAPCUT_EXPORT, capcut["export_id"])
+    final_job_id = completed_output_job(JobType.FINAL_RENDER, final["export_id"])
+    capcut_draft_job_id = completed_output_job(JobType.CAPCUT_DRAFT_EXPORT, capcut_draft["export_id"])
+    response = client.post(f"/api/projects/{project_id}/director/proposals/{proposal['proposal_id']}/apply", json={
+        "candidate_ids": [candidate["candidate_id"]], "expected_revision": session["session_revision"],
+    })
+    assert response.status_code == 200
+    applied = response.json()
+    assert applied["session_revision"] == session["session_revision"] + 1
+    assert applied["undo_count"] == 1
+    assert applied["history"][-1]["label"] == "디렉터 제안 적용"
+    assert applied["segments"][0]["music_override"]["asset_id"] == materialized.json()["asset_id"]
+    assert {key: value["is_current"] for key, value in applied["output_freshness"].items()} == {
+        "review": False, "subtitle": False, "preview": False, "final": False, "capcut": False,
+    }
+    assert store.get_review_state(project_id=project_id, timeline_id=timeline_id)["is_current"] is False
+    review_http = client.get(f"/api/projects/{project_id}/review-approvals/timelines/{timeline_id}")
+    assert review_http.status_code == 200
+    assert review_http.json()["is_current"] is False
+    assert review_http.json()["source_session_revision"] == session["session_revision"]
+    assert review_http.json()["invalidated_at"]
+    assert review_http.json()["invalidated_reason"]
+    assert store.get_subtitle_run(project_id=project_id, subtitle_id=subtitle["subtitle_id"])["is_current"] is False
+    assert store.get_preview_run(project_id=project_id, preview_id=preview["preview_id"])["is_current"] is False
+    assert store.get_final_render_export(project_id=project_id, export_id=final["export_id"])["is_current"] is False
+    assert store.get_export_run(project_id=project_id, export_id=capcut["export_id"])["is_current"] is False
+    assert store.get_capcut_draft_export(project_id=project_id, export_id=capcut_draft["export_id"])["is_current"] is False
+
+    # API readers must return the durable stale marker, not a cached/job-start
+    # snapshot, including the canonical review-approval reader.
+    output_reads = {
+        "subtitle": (f"/api/projects/{project_id}/subtitles/{subtitle_job_id}", "subtitle"),
+        "preview": (f"/api/projects/{project_id}/previews/{preview_job_id}", "preview"),
+        "capcut": (f"/api/projects/{project_id}/exports/{capcut_job_id}", "export"),
+        "final": (f"/api/projects/{project_id}/final-renders/{final_job_id}", "render"),
+        "capcut_draft": (f"/api/projects/{project_id}/capcut-draft-exports/{capcut_draft_job_id}", "export"),
+    }
+    for endpoint, artifact_key in output_reads.values():
+        body = client.get(endpoint).json()
+        assert body["status"] == "succeeded"
+        artifact = body[artifact_key]
+        assert artifact["source_session_revision"] == session["session_revision"]
+        assert artifact["is_current"] is False
+        assert artifact["invalidated_at"]
+        assert artifact["invalidated_reason"] == "editing_session_mutation"
+    undo = client.post(f"/api/projects/{project_id}/editing-sessions/{session['session_id']}/undo", json={"expected_revision": applied["session_revision"]})
+    assert undo.status_code == 200
+    redo = client.post(f"/api/projects/{project_id}/editing-sessions/{session['session_id']}/redo", json={"expected_revision": undo.json()["session_revision"]})
+    assert redo.status_code == 200
+    assert store.get_review_state(project_id=project_id, timeline_id=timeline_id)["is_current"] is False
+    assert store.get_subtitle_run(project_id=project_id, subtitle_id=subtitle["subtitle_id"])["is_current"] is False
+    assert store.get_preview_run(project_id=project_id, preview_id=preview["preview_id"])["is_current"] is False
+    assert store.get_final_render_export(project_id=project_id, export_id=final["export_id"])["is_current"] is False
+    assert store.get_export_run(project_id=project_id, export_id=capcut["export_id"])["is_current"] is False
+
+
+def test_failed_apply_preserves_independent_materialized_asset_and_rolls_back_session_and_proposal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Task 11 RED: Task 10 project-local assets are reusable, never apply-owned or orphaned."""
+    app = create_app(projects_root=tmp_path / "projects"); client = TestClient(app); store = app.state.store
+    project_id = client.post("/api/projects", json={"name": "apply rollback"}).json()["project_id"]
+    source = tmp_path / "bed.mp3"; source.write_bytes(b"bed")
+    store.register_asset(project_id=project_id, asset_type=AssetType.BGM, source_path=source, metadata={"canonical_metadata_indexed": True, "mood": "calm", "energy": "low", "genre": "ambient", "recommended_use": "bed", "license": "valid", "review_status": "approved"})
+    timeline_id = store.save_timeline_run(project_id=project_id, output_mode="preview", timeline_payload={"tracks": []})["timeline_id"]
+    session = store.save_editing_session(project_id=project_id, timeline_id=timeline_id, session_payload={"segments": [{"segment_id": "seg", "caption_text": "voice", "start_sec": 0, "end_sec": 2, "cut_action": "keep", "review_required": False}], "history": []})
+    proposal = client.post(f"/api/projects/{project_id}/director/proposals", json={"session_id": session["session_id"]}).json(); candidate = proposal["candidates"][0]
+    materialized = client.post(f"/api/projects/{project_id}/director/proposals/{proposal['proposal_id']}/candidates/{candidate['candidate_id']}/materialize").json()
+    before = deepcopy(store.get_editing_session(project_id=project_id, session_id=session["session_id"]))
+    asset_path = store.resolve_storage_uri(project_id=project_id, storage_uri=materialized["storage_uri"])
+    monkeypatch.setattr(store, "_invalidate_output_freshness_with_connection", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("injected transaction failure")))
+    with pytest.raises(RuntimeError, match="injected transaction failure"):
+        client.post(f"/api/projects/{project_id}/director/proposals/{proposal['proposal_id']}/apply", json={"candidate_ids": [candidate["candidate_id"]], "expected_revision": session["session_revision"]})
+    assert store.get_editing_session(project_id=project_id, session_id=session["session_id"]) == before
+    assert store.get_director_proposal(project_id, proposal["proposal_id"]).status == "ready"
+    assert asset_path.is_file() and sha256(asset_path.read_bytes()).hexdigest() == candidate["expected_content_sha256"]
+    # Mutate only after the router's preflight has read the project-local file.
+    # The store transaction must rehash and reject without consuming the proposal.
+    monkeypatch.undo()
+    original_apply = store.apply_director_proposal_transaction
+    original_bytes = asset_path.read_bytes()
+    def race_materialized_sha(**kwargs):
+        asset_path.write_bytes(b"post-preflight mutation")
+        return original_apply(**kwargs)
+    monkeypatch.setattr(store, "apply_director_proposal_transaction", race_materialized_sha)
+    sha_race = client.post(f"/api/projects/{project_id}/director/proposals/{proposal['proposal_id']}/apply", json={"candidate_ids": [candidate["candidate_id"]], "expected_revision": session["session_revision"]})
+    assert sha_race.status_code == 409
+    assert store.get_editing_session(project_id=project_id, session_id=session["session_id"]) == before
+    assert store.get_director_proposal(project_id, proposal["proposal_id"]).status == "ready"
+    assert asset_path.is_file() and asset_path.read_bytes() == b"post-preflight mutation"
+    assert not (store.project_root(project_id) / ".materializing").exists()
+    asset_path.write_bytes(original_bytes)
+    # Let route-level preflight pass, then mutate the durable asset-index just
+    # before the store opens BEGIN IMMEDIATE.  The in-transaction SQL check,
+    # not the earlier Python check, must reject this race.
+    monkeypatch.undo()
+    monkeypatch.undo()
+    original_apply = store.apply_director_proposal_transaction
+    def race_asset_index(**kwargs):
+        store.bump_asset_index_revision(project_id)
+        return original_apply(**kwargs)
+    monkeypatch.setattr(store, "apply_director_proposal_transaction", race_asset_index)
+    race = client.post(f"/api/projects/{project_id}/director/proposals/{proposal['proposal_id']}/apply", json={"candidate_ids": [candidate["candidate_id"]], "expected_revision": session["session_revision"]})
+    assert race.status_code == 409
+    assert store.get_editing_session(project_id=project_id, session_id=session["session_id"]) == before
+    assert store.get_director_proposal(project_id, proposal["proposal_id"]).status == "ready"
+    assert asset_path.is_file() and sha256(asset_path.read_bytes()).hexdigest() == candidate["expected_content_sha256"]

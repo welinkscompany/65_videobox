@@ -143,7 +143,7 @@ def test_undo_redo_keeps_last_100_edit_events_and_ignores_non_edit_operations() 
     session = record_non_undoable_operation(session=session, operation_type="render")
     session = record_non_undoable_operation(session=session, operation_type="import")
 
-    assert len(session["undo_stack"]) == 100
+    assert len(session["undo_stack"]) == 10
     assert session["history"][-2:][0]["mutation_type"] == "render"
     assert session["history"][-1]["mutation_type"] == "import"
 
@@ -152,7 +152,7 @@ def test_undo_redo_keeps_last_100_edit_events_and_ignores_non_edit_operations() 
 
     assert len(undone["redo_stack"]) == 1
     assert redone["segments"] == session["segments"]
-    assert len(redone["undo_stack"]) == 100
+    assert len(redone["undo_stack"]) == 10
 
 
 def test_fixed_track_read_model_and_selected_range_preview_include_only_selected_caption_style_and_overlay() -> None:
@@ -212,6 +212,37 @@ def test_timeline_mutation_api_is_revisioned_and_selected_preview_returns_only_f
     assert preview.status_code == 200, preview.text
     assert [track["role"] for track in preview.json()["timeline"]["tracks"]] == ["narration", "broll", "bgm", "sfx", "overlay"]
     assert preview.json()["captions"][0]["segment_id"] == "seg_001"
+
+
+def test_manual_caption_api_increments_revision_and_rejects_a_stale_expected_revision(tmp_path: Path) -> None:
+    """A manual API mutation must use the same durable CAS boundary as Task 11 apply."""
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Manual API CAS")
+    saved = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id="timeline_001",
+        session_payload=_session(),
+    )
+    client = TestClient(create_app(projects_root=tmp_path))
+    root = f"/api/projects/{project.project_id}/editing-sessions/{saved['session_id']}"
+
+    first = client.patch(
+        f"{root}/segments/seg_001/caption",
+        json={"caption_text": "Fresh manual caption", "expected_revision": saved["session_revision"]},
+    )
+
+    assert first.status_code == 200, first.text
+    assert first.json()["session_revision"] == saved["session_revision"] + 1
+    assert first.json()["segments"][0]["caption_text"] == "Fresh manual caption"
+    stale = client.patch(
+        f"{root}/segments/seg_001/caption",
+        json={"caption_text": "Lost stale caption", "expected_revision": saved["session_revision"]},
+    )
+    assert stale.status_code == 409
+    assert store.get_editing_session(
+        project_id=project.project_id,
+        session_id=saved["session_id"],
+    )["segments"][0]["caption_text"] == "Fresh manual caption"
 
 
 def test_structural_timeline_regeneration_is_an_explicit_supported_output_step() -> None:
