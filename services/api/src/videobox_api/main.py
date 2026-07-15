@@ -33,6 +33,9 @@ from videobox_api.routers.timeline import build_timeline_router
 from videobox_core_engine.auto_cut import AutoCutPlanner
 from videobox_core_engine.local_pipeline import LocalPipelineRunner
 from videobox_core_engine.media_analysis import MediaAnalysisService
+from videobox_core_engine.media_analysis import AnalysisProfile
+from videobox_core_engine.media_probe import FFmpegMediaProbe
+from videobox_provider_interfaces.lm_studio import LMStudioEmbeddingProvider, LMStudioHTTPTransport, LMStudioVisionProvider
 from videobox_core_engine.output_operator_copy import LocalFirstOutputOperatorCopyBuilder
 from videobox_core_engine.recommenders import LocalFirstKeywordBrollRecommender, LocalFirstMusicRecommender
 from videobox_core_engine.review_guidance import LocalFirstReviewGuidanceBuilder
@@ -162,6 +165,10 @@ def create_app(
     analysis_dispatcher=None,
     analysis_clock=None,
     media_analysis_poll_interval_seconds: float = 0.05,
+    media_analysis_profile: dict | None = None,
+    enable_local_media_analysis: bool = False,
+    media_analysis_http_client=None,
+    allow_test_media_analysis_providers: bool = False,
 ) -> FastAPI:
     app = FastAPI(title="VideoBox API", version="0.1.0", lifespan=_media_analysis_lifespan)
     store = LocalProjectStore(projects_root or DEFAULT_PROJECTS_ROOT, now=analysis_clock)
@@ -173,15 +180,10 @@ def create_app(
     if local_only_runtime_service_factory is not None:
         runtime_service_factory = local_only_runtime_service_factory
     elif local_first_runtime_service_factory is not None:
-        # Compatibility bridge for tests or persisted callers that still
-        # construct a LocalFirst service.  The automatic pipeline receives a
-        # local-only service and therefore cannot invoke its Gemini fallback.
-        def runtime_service_factory(project_store: LocalProjectStore) -> LocalOnlyRuntimeService:
-            legacy_service = local_first_runtime_service_factory(project_store)
-            return LocalOnlyRuntimeService(
-                local_provider=legacy_service.local_provider,
-                local_runtime_config=legacy_service.local_runtime_config,
-            )
+        # A LocalFirst instance carries a fallback-capable provider graph and
+        # cannot be safely reduced by duck typing. Callers must migrate to the
+        # explicitly named local_only factory (or deterministic test runtime).
+        raise ValueError("local_first_runtime_service_factory is no longer supported; use local_only_runtime_service_factory.")
     else:
         runtime_service_factory = lambda project_store: build_local_only_runtime_service(
             store=project_store,
@@ -213,11 +215,37 @@ def create_app(
     # Analysis is opt-in by dependency injection in normal API tests and runtime wiring.
     # Enqueue remains durable even where a local vision profile is unavailable.
     resolved_vision_provider = vision_provider
+    resolved_media_probe = media_probe
+    resolved_profile = media_analysis_profile
+    if not enable_local_media_analysis and not allow_test_media_analysis_providers:
+        if resolved_vision_provider is not None:
+            raise ValueError("Injected media analysis providers require allow_test_media_analysis_providers=True; production must use the explicit local LM Studio profile.")
+        if embedding_provider is not None:
+            raise ValueError("Injected media analysis providers require allow_test_media_analysis_providers=True; production must use the explicit local LM Studio profile.")
+    if enable_local_media_analysis:
+        # This explicit profile is the only production construction path.  The
+        # transport validates the exact loopback endpoint before each request,
+        # and we preflight loaded native capability before a worker is exposed.
+        transport = LMStudioHTTPTransport(http_client=media_analysis_http_client)
+        capability = transport.capability_profile()
+        if capability.vision_model_name is None:
+            raise ValueError("A loaded LM Studio vision + structured_json model is required.")
+        transport.preflight(model_name=capability.vision_model_name, capability="vision")
+        resolved_vision_provider = LMStudioVisionProvider(transport=transport)
+        if capability.embedding_model_name is not None:
+            transport.preflight(model_name=capability.embedding_model_name, capability="embedding")
+            embedding_provider = LMStudioEmbeddingProvider(transport=transport)
+        resolved_media_probe = resolved_media_probe or FFmpegMediaProbe()
+        resolved_profile = {
+            "vision_model_name": capability.vision_model_name,
+            "embedding_model_name": capability.embedding_model_name,
+        }
     if resolved_vision_provider is not None:
-        if media_probe is None:
+        if resolved_media_probe is None:
             raise ValueError("media_probe is required when vision_provider is injected.")
         analysis_service = MediaAnalysisService(
-            store=store, media_probe=media_probe, vision_provider=resolved_vision_provider, clock=analysis_clock,
+            store=store, media_probe=resolved_media_probe, vision_provider=resolved_vision_provider, embedding_provider=embedding_provider,
+            profile=AnalysisProfile(**(resolved_profile or {})), clock=analysis_clock,
         )
         orchestrator.media_analysis_service = analysis_service
         orchestrator.media_analysis_dispatcher = analysis_dispatcher or analysis_service.dispatch_once

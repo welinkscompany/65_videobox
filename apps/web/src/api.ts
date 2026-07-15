@@ -35,11 +35,18 @@ export type BrollBatchImportRequest = {
   recursive?: boolean;
 };
 
+export type BrollBatchImportResponse = {
+  assets: BrollAsset[];
+  analysis_jobs: MediaAnalysis[];
+  failures: { source_path: string; reason: string }[];
+};
+
 export type MediaAnalysis = {
   analysis_id: string;
   asset_id: string;
   status: string;
   progress_percent: number;
+  queue_position: number | null;
   error_code: string | null;
   error_message: string | null;
   result: Record<string, unknown> | null;
@@ -627,8 +634,8 @@ export const api = {
   importBrollBatch: async (
     projectId: string,
     payload: BrollBatchImportRequest,
-  ): Promise<BrollAsset[]> => {
-    const response = await request<{ assets: BrollAsset[] }>(
+  ): Promise<BrollBatchImportResponse> => {
+    return request<BrollBatchImportResponse>(
       `/api/projects/${projectId}/assets/broll-video/batch`,
       {
         method: "POST",
@@ -638,7 +645,6 @@ export const api = {
         body: JSON.stringify(payload),
       },
     );
-    return response.assets;
   },
   listJobs: async (projectId: string): Promise<JobRecord[]> => {
     const payload = await request<{ jobs: JobRecord[] }>(`/api/projects/${projectId}/jobs`);

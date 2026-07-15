@@ -139,6 +139,14 @@ PROJECT_SCHEMA_STATEMENTS = (
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS media_analysis_profiles (
+        analysis_id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        profile_json TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS provider_trace_failed_runs (
         job_id TEXT PRIMARY KEY,
         project_id TEXT NOT NULL,

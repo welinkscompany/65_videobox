@@ -1060,7 +1060,12 @@ production-readiness blocker slice 1의 9개 Task는 구현·회귀·600초 smok
   1. Local media intelligence foundation: LM Studio local-only provider, durable B-roll analysis, 자동 태깅/검수
   2. Script-first proposal engine: narration 없는 provisional script session, B/M/S ranking, preview/materialize, atomic apply
   3. Director workspace: 우측 대화 패널, 수동 편집, B/M/S reference, persistent conversation, 10-step undo/redo, responsive UI
-- 구현 시작 전 기준 HEAD는 `8eddb7f`다. 이 section은 계획 승인 상태이며 production code 구현 완료를 의미하지 않는다.
-- 다음 실행 단위는 Slice 1 Task 1 `local-only runtime 경계와 deterministic test guard`다.
+- 구현 시작 전 기준 HEAD는 `8eddb7f`다. Slice 1 Task 1–5와 그 release-blocking remediation은 완료됐으며, 전체 계획 기준 5/18 Task(약 27.8%) 완료·약 72.2% 잔여다.
+- 다음 실행 단위는 Slice 1 Task 6 `live LM Studio smoke와 release gate`다.
 - 기존 `LocalFirstStructuredRuntime`의 Gemini 자동 fallback, 외부 HTTP(S) runtime 허용, text-only Qwen adapter는 승인 설계와 충돌하므로 Slice 1에서 RED test부터 교체한다.
 - Codex Sol/Terra/Luna 모델 선택은 개발 에이전트 실행 자원이며 VideoBox 제품 runtime 계약에는 포함하지 않는다.
+
+### Slice 1 Task 1–5 remediation closeout (2026-07-15)
+
+- actual LM Studio media analysis는 strict loopback capability profile로만 opt-in 구성하며, default blocked state와 test-only fake DI seam을 분리한다. model-profile cache identity, durable scene/embedding provenance, active queue position, preview availability, batch partial-failure contract까지 RED-first로 보완했다.
+- Task 4의 analysis validity gate는 proposal/apply consumer가 생성되는 Slice 2 Task 8–11에서 연결한다. 이연을 가리기 위한 가짜 apply endpoint는 만들지 않는다.

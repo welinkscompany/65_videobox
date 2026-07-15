@@ -1627,7 +1627,47 @@ class LocalProjectStore:
         )
         if row is None:
             raise KeyError(f"Media analysis not found: {analysis_id}")
-        return self._media_analysis_payload(row)
+        payload = self._media_analysis_payload(row)
+        if payload["status"] in {MediaAnalysisStatus.QUEUED.value, MediaAnalysisStatus.RUNNING.value}:
+            active_ids = [item["analysis_id"] for item in self.list_media_analysis(project_id=project_id) if item["status"] in {MediaAnalysisStatus.QUEUED.value, MediaAnalysisStatus.RUNNING.value}]
+            # A concurrent worker can transition this run between the row and
+            # queue snapshots. Prefer an unavailable position over a 500.
+            payload["queue_position"] = active_ids.index(analysis_id) + 1 if analysis_id in active_ids else None
+        else:
+            payload["queue_position"] = None
+        return payload
+
+    def record_media_analysis_profile(self, *, project_id: str, analysis_id: str, profile: dict[str, Any]) -> None:
+        self._execute(project_id, "INSERT OR REPLACE INTO media_analysis_profiles (analysis_id, project_id, profile_json, created_at) VALUES (?, ?, ?, ?)", (analysis_id, project_id, json.dumps(profile, ensure_ascii=True, sort_keys=True), self._now_iso()))
+
+    def get_media_analysis_profile(self, *, project_id: str, analysis_id: str) -> dict[str, Any]:
+        row = self._fetchone(project_id, "SELECT profile_json FROM media_analysis_profiles WHERE project_id = ? AND analysis_id = ?", (project_id, analysis_id))
+        if row is None:
+            raise KeyError(f"Media analysis profile not found: {analysis_id}")
+        return json.loads(str(row["profile_json"]))
+
+    def record_media_scene_windows(self, *, project_id: str, analysis_id: str, source_sha256: str, profile_hash: str, windows: list[dict[str, Any]]) -> None:
+        for window in windows:
+            self._execute(project_id, "INSERT OR REPLACE INTO media_scene_windows (scene_window_id, analysis_id, source_sha256, profile_hash, start_sec, end_sec, metadata_json) VALUES (?, ?, ?, ?, ?, ?, ?)", (f"{analysis_id}:{window['start_sec']}:{window['end_sec']}", analysis_id, source_sha256, profile_hash, float(window["start_sec"]), float(window["end_sec"]), json.dumps(window.get("metadata") or {}, ensure_ascii=True)))
+
+    def list_media_scene_windows(self, *, project_id: str, analysis_id: str) -> list[dict[str, Any]]:
+        connection = self._connection(project_id)
+        try:
+            rows = connection.execute("SELECT * FROM media_scene_windows WHERE analysis_id = ? ORDER BY start_sec ASC", (analysis_id,)).fetchall()
+        finally:
+            connection.close()
+        return [{**dict(row), "metadata": json.loads(str(row["metadata_json"]))} for row in rows]
+
+    def record_media_embedding(self, *, project_id: str, analysis_id: str, source_sha256: str, profile_hash: str, embedding: list[float]) -> None:
+        self._execute(project_id, "INSERT OR REPLACE INTO media_embeddings (embedding_id, analysis_id, source_sha256, profile_hash, embedding_json, created_at) VALUES (?, ?, ?, ?, ?, ?)", (f"{analysis_id}:0", analysis_id, source_sha256, profile_hash, json.dumps(embedding), self._now_iso()))
+
+    def list_media_embeddings(self, *, project_id: str, analysis_id: str) -> list[dict[str, Any]]:
+        connection = self._connection(project_id)
+        try:
+            rows = connection.execute("SELECT * FROM media_embeddings WHERE analysis_id = ? ORDER BY embedding_id ASC", (analysis_id,)).fetchall()
+        finally:
+            connection.close()
+        return [{**dict(row), "embedding": json.loads(str(row["embedding_json"]))} for row in rows]
 
     def list_media_analysis(self, *, project_id: str) -> list[dict[str, Any]]:
         connection = self._connection(project_id)
@@ -1638,7 +1678,15 @@ class LocalProjectStore:
             ).fetchall()
         finally:
             connection.close()
-        return [self._media_analysis_payload(row) for row in rows]
+        items = [self._media_analysis_payload(row) for row in rows]
+        position = 0
+        for item in items:
+            if item["status"] in {MediaAnalysisStatus.QUEUED.value, MediaAnalysisStatus.RUNNING.value}:
+                position += 1
+                item["queue_position"] = position
+            else:
+                item["queue_position"] = None
+        return items
 
     def review_media_analysis(self, *, project_id: str, analysis_id: str, tags: dict[str, list[str]]) -> dict[str, Any]:
         current = self.get_media_analysis(project_id=project_id, analysis_id=analysis_id)
@@ -1905,7 +1953,7 @@ class LocalProjectStore:
             "SELECT * FROM media_analysis_runs WHERE project_id = ? AND idempotency_key = ?",
             (project_id, idempotency_key),
         )
-        return self._media_analysis_payload(row) if row is not None else None
+        return self.get_media_analysis(project_id=project_id, analysis_id=str(row["analysis_id"])) if row is not None else None
 
     @staticmethod
     def _media_analysis_payload(row: sqlite3.Row) -> dict[str, Any]:

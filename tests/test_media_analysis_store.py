@@ -205,6 +205,13 @@ def test_media_analysis_returns_existing_run_for_same_idempotency_key(tmp_path: 
     assert second == first
 
 
+def test_get_media_analysis_tolerates_queue_snapshot_race(tmp_path: Path, monkeypatch) -> None:
+    store, project_id = _store(tmp_path)
+    job = store.create_media_analysis(project_id=project_id, asset_id="asset_001", idempotency_key="race", cache_key="cache")
+    monkeypatch.setattr(store, "list_media_analysis", lambda *, project_id: [])
+    assert store.get_media_analysis(project_id=project_id, analysis_id=job["analysis_id"])["queue_position"] is None
+
+
 def test_media_analysis_ignores_late_completion_after_cancellation(tmp_path: Path) -> None:
     store, project_id = _store(tmp_path)
     job = store.create_media_analysis(

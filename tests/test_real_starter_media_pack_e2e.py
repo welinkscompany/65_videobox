@@ -150,7 +150,7 @@ def test_real_starter_media_pack_flows_to_final_mp4_and_real_capcut_draft(tmp_pa
     app = create_app(
         projects_root=projects_root,
         media_library_store=library,
-        local_first_runtime_service_factory=lambda _: _DeterministicOfflineRuntime(),
+        local_only_runtime_service_factory=lambda _: _DeterministicOfflineRuntime(),
         stt_provider=_DeterministicSTT(),
         final_renderer=renderer,
         pycapcut_exporter=PyCapCutRealExportAdapter(store=store, video_width=320, video_height=180, video_fps=12),

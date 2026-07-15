@@ -296,12 +296,14 @@ def test_cancel_during_actual_blocking_vision_discards_late_result(tmp_path: Pat
 def test_canonical_cache_sha_changes_for_each_contract_constituent(tmp_path: Path, monkeypatch) -> None:
     service, _, _, _ = _service(tmp_path, _Vision())
     base = service.cache_key(source_sha256="source", profile=AnalysisProfile())
-    assert base == hashlib.sha256(json.dumps({"source_sha256":"source","extractor_version":"v1","ffmpeg_version":"ffmpeg-test","model_key":"local-vision","model_variant":"default","quantization":"default","prompt_version":"v1","schema_version":"v1"}, separators=(",", ":"), ensure_ascii=True).encode()).hexdigest()
+    assert base == hashlib.sha256(json.dumps({"source_sha256":"source","extractor_version":"v1","ffmpeg_version":"ffmpeg-test","model_key":"local-vision","model_variant":"default","quantization":"default","vision_model_name":"local","embedding_model_name":None,"prompt_version":"v1","schema_version":"v1"}, separators=(",", ":"), ensure_ascii=True).encode()).hexdigest()
     assert base != service.cache_key(source_sha256="changed", profile=AnalysisProfile())
     assert base != MediaAnalysisService(store=service.store, media_probe=type("P", (), {"ffmpeg_version":"changed"})(), vision_provider=_Vision()).cache_key(source_sha256="source", profile=AnalysisProfile())
     assert base != service.cache_key(source_sha256="source", profile=AnalysisProfile(model_key="changed"))
     assert base != service.cache_key(source_sha256="source", profile=AnalysisProfile(variant="changed"))
     assert base != service.cache_key(source_sha256="source", profile=AnalysisProfile(quantization="changed"))
+    assert base != service.cache_key(source_sha256="source", profile=AnalysisProfile(vision_model_name="changed-model"))
+    assert base != service.cache_key(source_sha256="source", profile=AnalysisProfile(embedding_model_name="changed-embed"))
     assert base != MediaAnalysisService(store=service.store, media_probe=service.media_probe, vision_provider=_Vision(), extractor_version="changed").cache_key(source_sha256="source", profile=AnalysisProfile())
     import videobox_core_engine.media_analysis as media_analysis
     monkeypatch.setattr(media_analysis, "TAG_PROMPT_VERSION", "changed")

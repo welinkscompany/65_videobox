@@ -27,12 +27,19 @@ UI는 4,396줄 `App.tsx`의 전면 rewrite를 하지 않고 `apps/web/src/featur
 - Task 4의 `can_apply_media_analysis` gate는 durable store contract로 유지한다. 실제 Director proposal/apply consumer는 Slice 2 Task 8–11에서 처음 생기므로, 해당 consumer가 gate를 호출하는 검증도 그 범위에서 구현한다.
 - media-analysis poller의 기본 50ms interval은 현재 deterministic local test/worker 운용을 위한 값이다. Slice 1 release gate 전 운영 profile에 맞는 interval/backoff tuning을 별도 검토한다.
 
+### Slice 1 Task 1–5 release-blocking remediation (2026-07-15)
+
+- 명시적 `enable_local_media_analysis` profile만 실제 LM Studio Vision/embedding provider와 FFmpeg probe를 내부 구성한다. transport는 매 요청 exact `http://127.0.0.1:1234/v1`·no-redirect를 재검증하고 capability preflight 뒤에만 worker를 연다. 기본 app은 provider 부재를 `blocked`로 보이며, production DI로 임의 provider 또는 legacy LocalFirst factory를 주입할 수 없다.
+- analysis cache/idempotency에는 vision·embedding model identity를 포함한다. selected profile, scene window, embedding은 restart 뒤에도 저장되며, read-only provenance endpoint는 profile·scene timing·embedding dimension만 노출한다.
+- analysis API/UI는 active queued/running job의 실제 `queue_position`만 보이고, result 없는 preview는 409으로 명시한다. batch client는 assets·analysis_jobs·per-file failures를 보존한다. 분석 상태는 기존 manual editor/library를 disable하지 않는다.
+- RED→GREEN은 external LM Studio provider injection, legacy factory, model-profile cache collision, queue snapshot race, unavailable preview, restart provenance, batch contract를 포함한다. 독립 명세 재심사와 코드품질 재심사는 승인했다. focused backend 77 passed, frontend 5 passed, web build 및 `git diff --check`가 통과했다. Starlette `python_multipart` deprecation warning 1건은 기존 비차단 경고다.
+
 ### 후속 판단 보류: OpenCut 및 Voice Capture & Narration
 
 - OpenCut은 현재 Task 4 및 Local Media Director 18개 Task의 구현 범위에 넣지 않는다. full editor 도입이 아니라 UX 참고 후보로만 보존하며, editing-session/FFmpeg/CapCut 계약 안정 후 별도 재분석한다.
 - 사용자 음성 녹음·업로드→local STT 전사→자막/대본 정렬은 후속 Voice Capture & Narration slice 후보로 보존한다. voice cloning/TTS는 명시 동의·보관/삭제·approval 계약을 먼저 설계한 뒤 별도 판단한다.
 
-이번 상태는 문서 계획 closeout이다. production source와 test는 변경하지 않았으므로 전체 backend/frontend suite를 다시 실행하지 않았다. 문서 diff, placeholder, path/type consistency와 `git diff --check`를 계획 완료 gate로 사용한다.
+현재 다음 실행 단위는 Slice 1 Task 6 live LM Studio smoke와 release gate다. Task 1–5 remediation의 provider/profile 경계와 durable provenance를 실제 local smoke에서 다시 확인한다.
 
 ### Slice 1 Task 1 closeout (2026-07-14)
 
