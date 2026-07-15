@@ -62,6 +62,12 @@ UI는 4,396줄 `App.tsx`의 전면 rewrite를 하지 않고 `apps/web/src/featur
 - 검증: focused `79 passed`, final backend full `932 passed, 2 skipped`, frontend `107 passed`/build success, `git diff --check` 통과. 기존 backend multipart deprecation warning 1건과 frontend test stderr/`act(...)` warning은 이번 변경과 무관한 비차단 기존 경고다.
 - 코드 commit은 `6a5d3ec`이다.
 
+### Local Media Director 중간점검 보완 (2026-07-15)
+
+- HEAD `8b023f5`와 origin은 일치한다. 새 full backend regression은 `932 passed, 2 skipped`, frontend regression은 `107 passed`이며, 독립 계획/코드품질/source→runtime 감사로 Task 1–8 구현 범위와 누적 8/18(44.4%)이 일치함을 확인했다.
+- 다음 작업 Task 9는 단순 router/DTO가 아니다. proposal composition service가 durable analysis gate·source/index snapshot·preferences를 조립하고, server가 stale reason을 직접 판정하며, unknown user-owned B-roll warning provenance와 local-only failure(no Gemini)까지 RED-first로 닫는다. 동일-SHA asset 간 analysis ownership, cancel 뒤 derived data, analysis state의 index revision, basename overwrite도 먼저 교정한다.
+- 후속 Task 10–13에는 SHA copy/staging cleanup, SQLite/sidecar recovery 및 durable output freshness, preview/renderer/CapCut shared verifier, idempotent conversation message API를 보충했다. OpenCut과 Voice Capture & Narration은 현재 18 Task 외부의 보류 범위를 유지한다.
+
 ### Slice 1 Task 1 closeout (2026-07-14)
 
 - `LocalOpenAICompatibleRuntimeConfig`는 정확히 `http://127.0.0.1:1234/v1`만 허용하며, create_app 자동 pipeline은 Gemini provider를 생성하거나 LocalFirst fallback을 실행하지 않는다.

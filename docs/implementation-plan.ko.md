@@ -1086,3 +1086,10 @@ production-readiness blocker slice 1의 9개 Task는 구현·회귀·600초 smok
 
 - immutable proposal/ranking/persistence를 API/apply 없이 core/store에 한정했다. proposal revision과 asset-index revision은 concurrent-safe하며, music/BGM alias·media-scoped reference code·semantic/lexical fallback provenance를 고정했다.
 - narration alignment stale과 asset index mutation은 각각 session/proposal 및 asset/revision을 atomic SQLite transaction으로 처리한다. Task 9가 proposal API와 session/index/expiry preflight를 처음 연결한다. 코드 commit은 `6a5d3ec`이다.
+
+### Local Media Director 중간점검 보완 (2026-07-15)
+
+- 현재 HEAD `8b023f5`와 `origin/codex/production-readiness-blocker-slice-1`은 일치하며, Task 1–8 코드 범위와 공식 누적 8/18(44.4%) 표기도 일치한다. 새 backend full regression은 `932 passed, 2 skipped`, frontend regression은 `107 passed`였다.
+- 계획/코드품질/source→runtime 독립 감사는 Task 9–12의 결손을 확인했다. Task 9는 dedicated proposal composition service, server-side stale reason 판정, durable analysis `can_apply` 및 source/index 재검증, user-owned `rights=unknown` B-roll의 warning provenance, local-only DI/failure counter를 계약으로 고정한다. 해당 B-roll 정책은 현 Task 8의 `license == valid` 임시 eligibility를 교정하는 후속 remediation이다. 동일-SHA cross-asset analysis ownership, cancel 뒤 derived scene/embedding 잔존, ranking-visible analysis transition의 index revision 누락, basename overwrite도 proposal consumer 전 RED-first remediation으로 묶는다.
+- Task 10은 copy 전후 SHA·staged SHA, per-SHA idempotent lock, cleanup을, Task 11은 SQLite authoritative session/sidecar reconciliation·durable output freshness·manual mutation parity를, Task 12는 preview/FFmpeg/CapCut shared stale verifier를 명시했다. Task 13은 idempotent message API와 local-only assistant response contract를 추가했고, Task 18은 Gemini UI뿐 아니라 bootstrap Gemini request 0을 검증한다.
+- OpenCut/full NLE와 Voice Capture & Narration은 현재 18 Task 계획에 섞지 않고 별도 후속 판단으로 유지한다.

@@ -38,6 +38,19 @@
 - apps/web/src/App.tsx는 4,396줄이고 app.test.tsx는 5,709줄이다. 새 세부 동작을 두 파일에 계속 직접 추가하면 회귀 범위가 과도하게 커진다.
 - tests/conftest.py는 videobox_api.main.urlopen만 막는다. module-local urlopen이나 새 transport의 socket 연결까지 차단하지 않는다.
 
+### 1.1 2026-07-15 중간점검 보완 규정
+
+Task 1–8의 현재 HEAD를 승인 설계, SQLite durable state, API 조립 경로, output 경로까지 역추적했다. 아래는 완료 checkbox를 되돌리는 사유가 아니라, 다음 미완료 Task가 반드시 닫아야 하는 **binding remediation**이다.
+
+- user-owned B-roll의 `rights=unknown`은 local draft/export 후보가 될 수 있고 output warning provenance를 남긴다. invalid 또는 unverified Starter Pack만 eligibility에서 차단한다. 따라서 Task 9는 Task 8의 임시 `license == "valid"` eligibility를 `verified` / `unknown_user_owned` / `blocked` 정책으로 교체한다.
+- Director proposal은 router가 store를 직접 조립하지 않는다. Task 9의 전용 service가 script segment, durable analysis `can_apply`, source SHA/availability, indexed BGM/SFX, project preferences를 하나의 읽기 snapshot으로 묶어 ranking한다.
+- stale은 client가 보낸 revision을 신뢰하지 않는다. 서버는 proposal, current editing-session, asset-index, analysis/source 상태를 재조회해 ready/status, expiry, source session, base session revision, asset-index revision을 판정하고 stable `409 stale_proposal` reason을 반환한다.
+- analysis cache는 content/profile artifact와 project asset run/link를 구분한다. 같은 SHA의 서로 다른 asset이 한 asset ID/run을 공유하지 않으며, cancel/late-result는 scene/embedding/result와 terminal state를 한 transaction으로 확정한다. semantic/ranking query는 succeeded + active/current source SHA만 읽고, ranking-visible analysis state/tag/embedding/review 변화는 asset-index revision을 atomically 증가시킨다.
+- asset ingest는 basename 충돌로 기존 bytes를 overwrite하지 않는다. asset-id/UUID 또는 content-addressed destination을 atomic staging copy로 등록하고, DB failure 또는 copy failure에는 staged file을 정리한다.
+- immutable proposal snapshot JSON은 ready/stale/expired lifecycle 전이로 rewrite하지 않는다. lifecycle status/reason/changed-at은 separate state/event record로 분리해 audit/replay에서 original candidate snapshot을 검증할 수 있게 한다.
+- editing-session SQLite row를 durable SSOT로 정하고 sidecar JSON은 regenerable projection으로 취급한다. Task 11 apply/undo/redo와 output freshness invalidation은 동일 SQLite transaction에서 확정하며 sidecar write 실패 뒤 startup reconciliation을 검증한다.
+- OpenCut/full NLE 및 Voice Capture & Narration은 이 remediation의 범위에 넣지 않는다. 이들은 §235의 별도 후속 판단을 유지한다.
+
 ## 2. 파일 구조
 
 ### Slice 1 — Local media intelligence foundation
@@ -675,10 +688,12 @@ git commit -m "feat: persist ranked director proposals"
 **Files:**
 
 - Create: services/api/src/videobox_api/routers/director.py
+- Create: packages/core-engine/src/videobox_core_engine/director_proposal_service.py
 - Modify: services/api/src/videobox_api/models.py
 - Modify: services/api/src/videobox_api/main.py
 - Modify: apps/web/src/api.ts
 - Test: tests/test_api_media_director.py
+- Test: tests/test_media_director_proposals.py
 - Modify: apps/web/src/api.test.ts
 
 - [ ] **Step 1: API RED test 작성**
@@ -691,6 +706,20 @@ def test_proposal_does_not_mutate_session_until_apply(client) -> None:
     assert after == before
     assert proposal["status"] == "ready"
     assert proposal["candidates"][0]["visible_reference_code"].startswith("P")
+
+def test_unknown_user_owned_broll_is_proposed_with_output_warning(client) -> None:
+    proposal = client.post(PROPOSALS_URL, json={"session_id": SESSION_ID}).json()
+    candidate = next(item for item in proposal["candidates"] if item["asset_id"] == UNKNOWN_USER_BROLL)
+    assert candidate["license_policy"] == "unknown_user_owned"
+    assert "copyright_confirmation_required" in candidate["warning_provenance"]
+
+def test_preflight_reloads_server_revisions_and_rejects_asset_index_change(client) -> None:
+    proposal = client.post(PROPOSALS_URL, json={"session_id": SESSION_ID}).json()
+    mutate_asset_metadata_outside_client_payload()
+    response = client.post(f"{PROPOSALS_URL}/{proposal['proposal_id']}/preflight", json={"asset_index_revision": proposal["asset_index_revision"]})
+    assert response.status_code == 409
+    assert response.json()["code"] == "stale_proposal"
+    assert "asset_index_revision" in response.json()["stale_reasons"]
 ~~~
 
 - [ ] **Step 2: RED 확인**
@@ -710,7 +739,15 @@ GET  /api/projects/{project_id}/director/preferences
 PUT  /api/projects/{project_id}/director/preferences
 ~~~
 
-preflight response는 add/replace/remove placement, scene controls, gain/ducking, caption 영향과 선택 scope를 반환한다. source/index/session revision 또는 expiry가 달라지면 409 stale_proposal과 refresh action을 반환한다. B-03과 P12-B-03가 동시에 가능한 자연어는 자동 적용하지 않고 disambiguation candidates를 반환한다.
+`DirectorProposalService`는 router 대신 script target segment, durable `can_apply_media_analysis`, source SHA/availability, current asset index, library metadata, preferences를 같은 read snapshot에서 조합한다. `needs_review`, blocked/failed/cancelled analysis, result 없는 analysis, deleted/stale source는 auto-applicable candidate가 아니라 explicit blocked/recovery payload가 된다. BGM/SFX에는 indexed canonical metadata만 사용한다.
+
+서비스를 연결하기 전 RED 회귀로 (a) 같은 bytes·다른 asset ID가 independent analysis/run ownership을 유지하는지, (b) cancel/late-result가 scene/embedding search에 남지 않는지, (c) complete/review/fail/cancel 등 ranking-visible analysis transition이 asset-index revision을 바꾸는지, (d) 같은 basename ingest가 기존 source bytes를 overwrite하지 않는지를 고정한다. 이 remediation이 통과하기 전 proposal create/refresh는 analysis-derived candidate를 만들지 않는다.
+
+preflight response는 add/replace/remove placement, scene controls, gain/ducking, caption 영향과 선택 scope를 반환한다. server는 proposal/session/current asset-index/analysis source를 재조회하며, proposal status, expiry, source session, base session revision, asset index revision, analysis/source SHA를 순서대로 판정한다. 하나라도 다르면 client revision을 신뢰하지 않고 `409 stale_proposal` + stable `stale_reasons` + refresh action을 반환한다. create/GET/refresh는 immutable snapshot을 restart 뒤에도 보존하고 editing session을 byte-equivalent하게 유지한다. B-03과 P12-B-03가 동시에 가능한 자연어는 자동 적용하지 않고 disambiguation candidates를 반환한다.
+
+proposal lifecycle state/reason/changed-at은 immutable proposal JSON과 별도 durable record에 저장한다. expiry/alignment/index stale은 snapshot을 rewrite하지 않으며 GET은 original candidate snapshot과 current lifecycle state를 함께 반환한다.
+
+local-only DI는 routing mode가 `local_only`인 explicit test/runtime protocol만 받을 수 있다. Director proposal 실패는 `blocked` 또는 `error`로 끝나며 Gemini/외부 provider 호출은 0임을 fake provider counter로 고정한다.
 
 - [ ] **Step 4: API client와 contract GREEN**
 
@@ -723,7 +760,7 @@ Expected: PASS, create/refresh/preflight payload가 exact revision을 전달.
 - [ ] **Step 5: 커밋**
 
 ~~~powershell
-git add services/api/src/videobox_api/routers/director.py services/api/src/videobox_api/models.py services/api/src/videobox_api/main.py apps/web/src/api.ts apps/web/src/api.test.ts tests/test_api_media_director.py
+git add packages/core-engine/src/videobox_core_engine/director_proposal_service.py services/api/src/videobox_api/routers/director.py services/api/src/videobox_api/models.py services/api/src/videobox_api/main.py apps/web/src/api.ts apps/web/src/api.test.ts tests/test_api_media_director.py tests/test_media_director_proposals.py
 git commit -m "feat: expose immutable director proposals"
 ~~~
 
@@ -764,6 +801,8 @@ Expected: preview endpoint/materializer 부재로 FAIL.
 
 기존 router의 snapshot_verified_asset, license snapshot, project register, recent usage 로직을 ProjectAssetMaterializer로 옮긴다. 모든 candidate source를 먼저 hash 검증하고 project staging에 복사한 뒤 등록한다. 실패하면 editing session은 건드리지 않는다. 이미 같은 library asset SHA가 materialize된 경우 기존 project asset을 재사용한다.
 
+copy 전 source SHA, copy 후 source SHA, staged-copy SHA가 proposal의 expected SHA와 모두 같은지 확인한다. per-SHA lock으로 concurrent duplicate materialize를 idempotent하게 만들고, 어느 단계든 실패하면 staged file과 registration을 모두 정리해 orphan을 남기지 않는다. preflight와 materialize는 analysis/source availability와 media revision을 다시 검증한다.
+
 - [ ] **Step 4: preview endpoint 구현과 GREEN**
 
 GET .../candidates/{candidate_id}/preview는 verified source snapshot 또는 project-local asset을 스트리밍하고 exact in/out/controls를 header와 proposal payload에 유지한다. audio는 서버에서 autoplay 상태를 만들지 않는다.
@@ -786,6 +825,8 @@ git commit -m "feat: materialize and preview director candidates"
 - Create: packages/core-engine/src/videobox_core_engine/editing_transactions.py
 - Modify: packages/core-engine/src/videobox_core_engine/editing_session.py
 - Modify: packages/core-engine/src/videobox_core_engine/editing_session_and_regeneration.py
+- Modify: packages/storage-abstractions/src/videobox_storage/sqlite_schema.py
+- Modify: packages/storage-abstractions/src/videobox_storage/local_project_store.py
 - Modify: services/api/src/videobox_api/routers/director.py
 - Modify: services/api/src/videobox_api/models.py
 - Test: tests/test_media_director_apply.py
@@ -820,11 +861,11 @@ Expected: B/M/S bundle이 undo snapshot에 없거나 100개 stack 때문에 FAIL
 
 apply_user_transaction은 모든 mutation을 deepcopy session에 먼저 적용하고 validation이 모두 통과한 경우에만 before/after snapshot 한 건을 기록한다. action entry는 action_id, label, created_at, reversible, blocked_reason, affected_segment_ids를 가진다. 사용자 undo stack은 10개, audit history는 100개다.
 
-proposal apply endpoint는 expected_revision, proposal base revision, asset index revision, materialized SHA를 검증하고 LocalProjectStore CAS 한 번으로 저장한다. 일부 mutation이 실패하면 session JSON/revision/history가 byte-equivalent하게 유지된다.
+proposal apply endpoint는 expected_revision, proposal base revision, asset index revision, materialized SHA를 검증하고 LocalProjectStore CAS 한 번으로 저장한다. apply CAS, proposal consumption/status, stale checks, artifact invalidation은 하나의 SQLite transaction이다. SQLite `editing_sessions.session_json`를 authoritative truth로 삼고 sidecar JSON은 commit 뒤 regenerate 가능한 projection으로 둔다. sidecar replace 실패를 주입해도 restart reconciliation 뒤 모든 reader가 SQLite truth를 보며, DB/CAS 실패에는 staged materialized asset도 정리되는 test를 추가한다.
 
 - [ ] **Step 4: freshness invalidation과 GREEN**
 
-apply/undo/redo 뒤 affected timeline review approval, subtitle, preview, final render, CapCut draft의 current freshness를 false로 바꾼다. 과거 artifact row와 file은 삭제하지 않는다.
+apply/undo/redo 뒤 affected timeline review approval, subtitle, preview, final render, CapCut draft의 current freshness를 false로 바꾼다. 각 artifact에는 `source_session_revision`, `is_current`, `invalidated_at`, `invalidated_reason`를 durable migration으로 저장하고 restart/API/UI에서도 이전 artifact는 남지만 current가 아님을 보장한다. 기존 manual B-roll/BGM/SFX/caption/overlay mutation도 동일 named 10-step transaction adapter를 사용하며 audit history는 100개를 유지한다.
 
 Run: .venv\Scripts\python.exe -m pytest -q tests/test_media_director_apply.py tests/test_editing_session.py tests/test_editor_timeline_mutations.py
 
@@ -833,7 +874,7 @@ Expected: PASS.
 - [ ] **Step 5: 커밋**
 
 ~~~powershell
-git add packages/core-engine/src/videobox_core_engine/editing_transactions.py packages/core-engine/src/videobox_core_engine/editing_session.py packages/core-engine/src/videobox_core_engine/editing_session_and_regeneration.py services/api/src/videobox_api tests/test_media_director_apply.py tests/test_editing_session.py tests/test_editor_timeline_mutations.py
+git add packages/core-engine/src/videobox_core_engine/editing_transactions.py packages/core-engine/src/videobox_core_engine/editing_session.py packages/core-engine/src/videobox_core_engine/editing_session_and_regeneration.py packages/storage-abstractions/src/videobox_storage/sqlite_schema.py packages/storage-abstractions/src/videobox_storage/local_project_store.py services/api/src/videobox_api tests/test_media_director_apply.py tests/test_editing_session.py tests/test_editor_timeline_mutations.py
 git commit -m "feat: apply director proposals as atomic edits"
 ~~~
 
@@ -843,6 +884,7 @@ git commit -m "feat: apply director proposals as atomic edits"
 
 - Modify: packages/core-engine/src/videobox_core_engine/ffmpeg_final_renderer.py
 - Modify: packages/capcut-export/src/videobox_capcut_export/pycapcut_adapter.py
+- Modify: services/api/src/videobox_api/routers/director.py
 - Modify: tests/test_ffmpeg_final_renderer.py
 - Modify: tests/test_pycapcut_adapter.py
 - Modify: tests/test_real_starter_media_pack_e2e.py
@@ -869,7 +911,7 @@ Expected: mutation을 감지하지 못해 FAIL.
 
 - [ ] **Step 3: shared source verifier 구현**
 
-project-local path, expected content SHA-256, media revision을 output 시작 전에 검증한다. mismatch이면 조용한 대체·재trim을 하지 않고 stale asset error를 반환한다. preview, FFmpeg, PyCapCut은 proposal apply가 저장한 동일 scene in/out/crop/loop/trim controls를 소비한다.
+project-local path, expected content SHA-256, media revision을 output 시작 전에 검증한다. mismatch이면 조용한 대체·재trim을 하지 않고 stale asset error를 반환한다. preview, FFmpeg, PyCapCut은 proposal apply가 저장한 동일 scene in/out/crop/loop/trim controls를 소비하며, 같은 post-materialization mutation에 세 경로 모두 같은 stale-asset identity를 반환하는 contract test를 둔다.
 
 - [ ] **Step 4: focused/full/real pack gate**
 
@@ -883,14 +925,14 @@ npm --prefix apps/web test
 npm --prefix apps/web run build
 ~~~
 
-Expected: 전부 PASS.
+Expected: 전부 PASS. 또한 non-live deterministic integration에서 real default local transport construction이 malformed/non-loopback config를 connection 전에 거절함을 확인한다. actual connection은 opt-in live smoke만 허용하며 evidence의 `external_provider_calls=0`, `gemini_calls=0`을 release gate로 확인한다.
 
 - [ ] **Step 5: SSOT, commit, push**
 
 실제 test totals, real pack result, source mutation rejection과 commit HEAD를 기록한다.
 
 ~~~powershell
-git add packages/core-engine packages/capcut-export tests docs/implementation-plan.ko.md docs/development-status-2026-06-29.ko.md
+git add packages/core-engine packages/capcut-export services/api/src/videobox_api/routers/director.py tests docs/implementation-plan.ko.md docs/development-status-2026-06-29.ko.md
 git commit -m "test: verify script-first proposal slice"
 git push
 ~~~
@@ -936,6 +978,8 @@ Expected: module/table 부재로 FAIL.
 - [ ] **Step 3: schema와 resolver 구현**
 
 director_conversations와 director_messages는 project_id/session_id, role, text, proposal_id, created_at을 저장한다. unsent draft는 browser local state이고 server message가 아니다. Resolver는 explicit Pxx-B/M/S candidate, B/M/S timeline placement, currently open proposal 순으로 해석하고 둘 이상이면 disambiguation을 반환한다.
+
+API는 `POST /director/conversations/{conversation_id}/messages`와 `GET /director/conversations/{conversation_id}/messages`를 제공한다. submit은 client message ID로 idempotent하며 user message → persisted assistant response → optional immutable proposal/disambiguation link를 한 DTO로 반환한다. assistant generation을 쓰는 경우 local-only runtime trace만 허용하고, local failure는 message-only blocked/error로 저장하며 editing session을 바꾸지 않는다.
 
 - [ ] **Step 4: refresh/restart GREEN**
 
@@ -1179,14 +1223,16 @@ git commit -m "feat: make director workspace responsive"
 
 - [ ] **Step 1: App integration RED scenarios 추가**
 
-app.test.tsx에는 다음 다섯 통합 시나리오만 추가한다. 세부 component test를 이 파일에 중복하지 않는다.
+app.test.tsx에는 다음 여섯 통합 시나리오만 추가한다. 세부 component test를 이 파일에 중복하지 않는다.
 
 1. 새로고침 뒤 conversation, proposal, numbered references 복구
 2. proposal apply가 API mutation 한 번만 호출하고 output freshness를 stale 처리
 3. materialize 실패 시 editing session 불변
 4. “3번 영상 교체” ambiguity에서 disambiguation card 표시
 5. Director blocked/error 중에도 manual mode 동작
-6. 기본 Settings에 Gemini 자동 fallback/key setup이 노출되지 않고 LM Studio capability만 표시
+6. fake Gemini bootstrap/provider counter와 Gemini key request가 모두 0이고, 기본 Settings에 Gemini 자동 fallback/key setup이 노출되지 않으며 LM Studio capability만 표시
+
+Director router/service는 Gemini key service 또는 legacy LocalFirst factory를 import/use하지 않는 route-surface test를 추가한다. Gemini CRUD는 backward compatibility가 필요할 때만 isolated legacy router로 유지한다.
 
 - [ ] **Step 2: App 연결과 focused GREEN**
 
