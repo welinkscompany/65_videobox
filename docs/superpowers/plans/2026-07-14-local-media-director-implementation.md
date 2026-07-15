@@ -615,10 +615,12 @@ git commit -m "feat: create provisional sessions from scripts"
 - Create: packages/core-engine/src/videobox_core_engine/director_proposals.py
 - Modify: packages/storage-abstractions/src/videobox_storage/sqlite_schema.py
 - Modify: packages/storage-abstractions/src/videobox_storage/local_project_store.py
+- Modify: packages/core-engine/src/videobox_core_engine/local_pipeline.py
 - Test: tests/test_media_director_ranking.py
 - Test: tests/test_media_director_proposals.py
+- Test: tests/test_editing_session.py
 
-- [ ] **Step 1: ranking과 immutable proposal RED test 작성**
+- [x] **Step 1: ranking과 immutable proposal RED test 작성**
 
 ~~~python
 def test_equal_scores_use_stable_asset_id_tie_break() -> None:
@@ -641,13 +643,13 @@ def test_proposal_persists_revision_and_stable_reference_codes(store) -> None:
     assert loaded.base_session_revision == 4
 ~~~
 
-- [ ] **Step 2: RED 확인**
+- [x] **Step 2: RED 확인**
 
 Run: .venv\Scripts\python.exe -m pytest -q tests/test_media_director_ranking.py tests/test_media_director_proposals.py
 
 Expected: module/table 부재로 FAIL.
 
-- [ ] **Step 3: score와 proposal contract 구현**
+- [x] **Step 3: score와 proposal contract 구현**
 
 Score는 semantic similarity, structured tags, duration/aspect, explicit conditions, favorite/recent, repetition/diversity, availability/license eligibility의 named components를 저장한다. embedding unavailable이면 normalized Korean tag/synonym lexical score를 사용한다. favorite는 repetition penalty를 제거하지 않는다. BGM index는 mood, energy, genre, vocal_presence, recommended_use, duration, license를, SFX index는 action_event, intensity, mood, recommended_use, duration, license를 canonical metadata로 정규화한다.
 
@@ -655,13 +657,13 @@ director_preferences table은 project-scoped pin_asset, exclude_asset, exclude_c
 
 DirectorProposal은 proposal_id, revision_code, base_session_revision, asset_index_revision, status, target_segment_ids, candidates, diff, expires_at을 가진다. Candidate는 candidate_id, visible_reference_code, media_type, asset_id/library_asset_id, reason_chips, availability, review_status, preview_uri, controls, expected_content_sha256, media_revision을 가진다.
 
-- [ ] **Step 4: persistence, expiry, stale, fallback GREEN**
+- [x] **Step 4: persistence, expiry, stale, fallback GREEN**
 
 Run: .venv\Scripts\python.exe -m pytest -q tests/test_media_director_ranking.py tests/test_media_director_proposals.py
 
 Expected: PASS. 같은 input/profile은 deterministic candidate order와 code를 반환.
 
-- [ ] **Step 5: 커밋**
+- [x] **Step 5: 커밋**
 
 ~~~powershell
 git add packages/domain-models/src/videobox_domain_models/director_proposals.py packages/core-engine/src/videobox_core_engine/media_ranking.py packages/core-engine/src/videobox_core_engine/director_proposals.py packages/storage-abstractions tests/test_media_director_ranking.py tests/test_media_director_proposals.py

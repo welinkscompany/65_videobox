@@ -13,9 +13,9 @@
 - 기준 HEAD: `8eddb7f`
 - 계획 범위: 3개 순차 slice, 18개 TDD Task
 - 설계/계획 진행률: 100%, 잔여 0%
-- production code 구현 진행률: 7/18 Task (약 38.9%), 잔여 약 61.1%
-- 완료 작업: Slice 1 Task 1 local-only runtime 경계와 deterministic test guard, Task 2 Vision/embedding/capability preflight provider, Task 3 durable MEDIA_ANALYSIS schema와 state machine, Task 4 FFmpeg probe/cache/quality gate/deterministic dispatcher, Task 5 analysis API/batch ingest/검수 UI, Task 6 actual LM Studio live release gate, Slice 2 Task 7 narration 없는 script draft session
-- 다음 작업: Slice 2 Task 8 immutable proposal domain, persistence, ranking
+- production code 구현 진행률: 8/18 Task (약 44.4%), 잔여 약 55.6%
+- 완료 작업: Slice 1 Task 1 local-only runtime 경계와 deterministic test guard, Task 2 Vision/embedding/capability preflight provider, Task 3 durable MEDIA_ANALYSIS schema와 state machine, Task 4 FFmpeg probe/cache/quality gate/deterministic dispatcher, Task 5 analysis API/batch ingest/검수 UI, Task 6 actual LM Studio live release gate, Slice 2 Task 7 narration 없는 script draft session, Task 8 immutable proposal domain/persistence/ranking
+- 다음 작업: Slice 2 Task 9 proposal API, numbering, preflight diff, refresh
 - 계획 commit `3fda0ae`는 remote에 push됐다. 다음 세션 재개용 handoff는 `docs/handoffs/2026-07-14-local-media-director-plan-closeout.ko.md`다.
 
 확인된 구현 blocker는 text-only local provider, Gemini 자동 fallback, 외부 HTTP(S) runtime 허용, durable media-analysis 상태 부재, script-only session 부재, B/M/S mutation의 불완전한 undo, output SHA/revision 재검증 부재다. 계획은 이 순서대로 RED test를 먼저 만들고 provider → analysis → proposal → transaction → UI → output E2E를 연결한다.
@@ -53,6 +53,14 @@ UI는 4,396줄 `App.tsx`의 전면 rewrite를 하지 않고 `apps/web/src/featur
 - API E2E는 script-only 생성·restart reload·non-script/empty script 차단과 alignment의 빈 목록, overlap, non-positive bounds 422을 고정한다. legacy editing-session JSON에는 absent 새 nullable metadata를 다시 직렬화하지 않아 기존 계약도 보존한다.
 - TDD RED는 `videobox_core_engine.script_draft_session` 모듈 부재를 재현했다. 구현 계획의 `tests/test_api_media_director.py`는 실제 저장소에 없었으므로 API E2E를 새 `tests/test_script_draft_session.py`에 수용하도록 SSOT 파일 목록/명령을 바로잡았다.
 - 검증: focused `66 passed`, final backend full `905 passed, 2 skipped`, frontend `107 passed`와 build success, `git diff --check` 통과(기존 `python_multipart` deprecation warning 1건은 비차단). 코드 commit은 `ed092d0`이다.
+
+### Slice 2 Task 8 immutable proposal/ranking closeout (2026-07-15)
+
+- immutable DirectorProposal/Candidate snapshot, durable proposal/base session/asset-index/source identity, project preference, expiry와 monotonic `P01` revision을 저장한다. 동일 proposal ID의 changed snapshot overwrite와 concurrent allocator race는 거절/원자 증가로 차단한다.
+- ranking은 `music`→BGM alias, media-scoped B/M/S reference numbering, semantic score가 있으면 그 값을 사용하고 없으면 Korean lexical synonym fallback provenance를 남긴다. exclude/license/availability/review gate는 pin/favorite보다 먼저 적용된다.
+- Task 7 narration alignment는 editing-session CAS와 matching ready proposal stale을 같은 SQLite transaction에서 수행한다. 실제 asset register/metadata/delete와 asset-index revision도 단일 transaction이며 실패 rollback을 고정했다. 이 작업 중 발견한 partial-regeneration writer 회귀도 별도 RED regression으로 복구했다.
+- 검증: focused `79 passed`, final backend full `932 passed, 2 skipped`, frontend `107 passed`/build success, `git diff --check` 통과. 기존 backend multipart deprecation warning 1건과 frontend test stderr/`act(...)` warning은 이번 변경과 무관한 비차단 기존 경고다.
+- 코드 commit은 `6a5d3ec`이다.
 
 ### Slice 1 Task 1 closeout (2026-07-14)
 

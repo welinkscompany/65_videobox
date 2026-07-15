@@ -1060,8 +1060,8 @@ production-readiness blocker slice 1의 9개 Task는 구현·회귀·600초 smok
   1. Local media intelligence foundation: LM Studio local-only provider, durable B-roll analysis, 자동 태깅/검수
   2. Script-first proposal engine: narration 없는 provisional script session, B/M/S ranking, preview/materialize, atomic apply
   3. Director workspace: 우측 대화 패널, 수동 편집, B/M/S reference, persistent conversation, 10-step undo/redo, responsive UI
-- 구현 시작 전 기준 HEAD는 `8eddb7f`다. Slice 1 Task 1–6과 그 release-blocking remediation 및 Slice 2 Task 7은 완료됐으며, 전체 계획 기준 7/18 Task(약 38.9%) 완료·약 61.1% 잔여다.
-- 다음 실행 단위는 Slice 2 Task 8 `immutable proposal domain, persistence, ranking`이다.
+- 구현 시작 전 기준 HEAD는 `8eddb7f`다. Slice 1 Task 1–6과 그 release-blocking remediation 및 Slice 2 Task 7–8은 완료됐으며, 전체 계획 기준 8/18 Task(약 44.4%) 완료·약 55.6% 잔여다.
+- 다음 실행 단위는 Slice 2 Task 9 `proposal API, numbering, preflight diff, refresh`다.
 - 기존 `LocalFirstStructuredRuntime`의 Gemini 자동 fallback, 외부 HTTP(S) runtime 허용, text-only Qwen adapter는 승인 설계와 충돌하므로 Slice 1에서 RED test부터 교체한다.
 - Codex Sol/Terra/Luna 모델 선택은 개발 에이전트 실행 자원이며 VideoBox 제품 runtime 계약에는 포함하지 않는다.
 
@@ -1081,3 +1081,8 @@ production-readiness blocker slice 1의 9개 Task는 구현·회귀·600초 smok
 - script-only session은 deterministic segmentation, fixed Korean speech-rate와 최소 2초 provisional timing, durable `timing_source`/alignment-required/source identity를 제공한다. alignment API는 실제 bounds로 교체하고 source ID별 future proposal stale handoff를 보존하지만 Task 8의 proposal domain을 앞당기지 않는다.
 - 독립 spec/quality review는 P1/P2 없이 승인했고, reverse runtime review가 찾은 API-level invalid alignment coverage(P2)는 빈 목록·overlap·non-positive bounds 422 E2E로 보완했다. legacy JSON의 absent new fields는 직렬화하지 않는다.
 - `ed092d0`에서 focused `66 passed`, final backend full `905 passed, 2 skipped`, frontend `107 passed`/build success와 `git diff --check`를 확인했다. 기존 `python_multipart` deprecation warning 1건은 비차단이다.
+
+### Slice 2 Task 8 closeout (2026-07-15)
+
+- immutable proposal/ranking/persistence를 API/apply 없이 core/store에 한정했다. proposal revision과 asset-index revision은 concurrent-safe하며, music/BGM alias·media-scoped reference code·semantic/lexical fallback provenance를 고정했다.
+- narration alignment stale과 asset index mutation은 각각 session/proposal 및 asset/revision을 atomic SQLite transaction으로 처리한다. Task 9가 proposal API와 session/index/expiry preflight를 처음 연결한다. 코드 commit은 `6a5d3ec`이다.
