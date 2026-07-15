@@ -13,9 +13,9 @@
 - 기준 HEAD: `8eddb7f`
 - 계획 범위: 3개 순차 slice, 18개 TDD Task
 - 설계/계획 진행률: 100%, 잔여 0%
-- production code 구현 진행률: 9/18 Task (50.0%), 잔여 50.0%
-- 완료 작업: Slice 1 Task 1 local-only runtime 경계와 deterministic test guard, Task 2 Vision/embedding/capability preflight provider, Task 3 durable MEDIA_ANALYSIS schema와 state machine, Task 4 FFmpeg probe/cache/quality gate/deterministic dispatcher, Task 5 analysis API/batch ingest/검수 UI, Task 6 actual LM Studio live release gate, Slice 2 Task 7 narration 없는 script draft session, Task 8 immutable proposal domain/persistence/ranking, Task 9 proposal API/preflight/refresh
-- 다음 작업: Slice 2 Task 10 candidate preview와 project asset materializer
+- production code 구현 진행률: 10/18 Task (55.6%), 잔여 44.4%
+- 완료 작업: Slice 1 Task 1 local-only runtime 경계와 deterministic test guard, Task 2 Vision/embedding/capability preflight provider, Task 3 durable MEDIA_ANALYSIS schema와 state machine, Task 4 FFmpeg probe/cache/quality gate/deterministic dispatcher, Task 5 analysis API/batch ingest/검수 UI, Task 6 actual LM Studio live release gate, Slice 2 Task 7 narration 없는 script draft session, Task 8 immutable proposal domain/persistence/ranking, Task 9 proposal API/preflight/refresh, Task 10 candidate preview와 project asset materializer
+- 다음 작업: Slice 2 Task 11 atomic apply, named 10-step undo/redo, output freshness
 - 계획 commit `3fda0ae`는 remote에 push됐다. 다음 세션 재개용 handoff는 `docs/handoffs/2026-07-14-local-media-director-plan-closeout.ko.md`다.
 
 확인된 구현 blocker는 text-only local provider, Gemini 자동 fallback, 외부 HTTP(S) runtime 허용, durable media-analysis 상태 부재, script-only session 부재, B/M/S mutation의 불완전한 undo, output SHA/revision 재검증 부재다. 계획은 이 순서대로 RED test를 먼저 만들고 provider → analysis → proposal → transaction → UI → output E2E를 연결한다.
@@ -71,9 +71,15 @@ UI는 4,396줄 `App.tsx`의 전면 rewrite를 하지 않고 `apps/web/src/featur
 
 ### Local Media Director 중간점검 보완 (2026-07-15)
 
-- historical note: 이 중간점검 최초 시점의 HEAD는 `8b023f5`, 누적은 Task 1–8/18(44.4%)이었다. 이후 Task 9 code closeout `37252c2`가 완료됐으며, 현재 authoritative 상태는 이 섹션 상단의 9/18(50.0%), 다음 Task 10이다.
+- historical note: 이 중간점검 최초 시점의 HEAD는 `8b023f5`, 누적은 Task 1–8/18(44.4%)이었다. 이후 Task 9 code closeout `37252c2`와 Task 10 closeout이 완료됐으며, 현재 authoritative 상태는 이 섹션 상단의 10/18(55.6%), 다음 Task 11이다.
 - 2026-07-15 후속 독립 감사에서 Task 9 preflight의 media-type policy mismatch를 확인했다. BGM/SFX proposal은 indexed canonical metadata만으로 생성되지만 preflight가 B-roll analysis까지 요구해 stale 처리된다. empty B-roll analysis result, nullable candidate `media_revision`, lifecycle status/event 분리 commit도 확인됐다. Task 10은 materializer 전에 이 항목을 RED-first remediation으로 처리한다.
 - Task 10은 B-roll=non-empty succeeded analysis+SHA, BGM/SFX=indexed canonical metadata+SHA의 verifier를 분리하고 asset registration `created_at`을 candidate `media_revision`으로 고정한다. 그 뒤 SHA copy/staging cleanup·per-SHA lock·source-mutation race·candidate preview를 수행한다. OpenCut과 Voice Capture & Narration은 현재 18 Task 외부의 보류 범위를 유지한다.
+
+### Slice 2 Task 10 candidate preview/materializer closeout (2026-07-15)
+
+- preview는 immutable candidate controls와 exact in/out header를 유지한 verified temporary snapshot만 스트리밍하고, autoplay/session/timeline mutation을 만들지 않는다. snapshot과 source SHA가 다르면 응답하지 않고 cleanup한다.
+- materializer는 candidate source→`.materializing` stage→새 project-local asset의 SHA를 순서대로 재검증한다. B-roll은 non-empty applicable analysis, BGM/SFX는 indexed required canonical metadata, 모두 registration revision을 다시 확인한다. per-SHA lock·provenance-safe reuse·post-registration compensation은 concurrent duplicate, source mutation, unlink failure에도 orphan을 남기지 않는다.
+- 검증: RED 404 preview route 부재를 재현했다. focused backend `79 passed`, full backend `957 passed, 2 skipped`, frontend `108 passed`/build success, `git diff --check` 통과. 기존 backend multipart deprecation 1건과 frontend ErrorBoundary/`act(...)` stderr는 비차단 기존 경고다. 코드 commit은 `d1d3f98`이다.
 
 ### Slice 1 Task 1 closeout (2026-07-14)
 

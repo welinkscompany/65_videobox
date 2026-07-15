@@ -780,13 +780,12 @@ git commit -m "feat: expose immutable director proposals"
 - Modify: packages/storage-abstractions/src/videobox_storage/local_project_store.py
 - Modify: services/api/src/videobox_api/routers/director_proposals.py
 - Modify: services/api/src/videobox_api/routers/media_library.py
-- Modify: packages/storage-abstractions/src/videobox_storage/media_library_store.py
 - Test: tests/test_media_director_apply.py
 - Modify: tests/test_media_director_proposals.py
 - Modify: tests/test_api_media_director.py
 - Modify: tests/test_api_media_library.py
 
-- [ ] **Step 1: proposal integrity, exact preview, materialize failure RED test 작성**
+- [x] **Step 1: proposal integrity, exact preview, materialize failure RED test 작성**
 
 ~~~python
 def test_preview_returns_the_proposed_scene_controls(client) -> None:
@@ -819,25 +818,25 @@ def test_proposal_lifecycle_state_and_event_rollback_together_when_event_insert_
     assert store.get_director_proposal_lifecycle(PROJECT_ID, ready_proposal().proposal_id) == []
 ~~~
 
-- [ ] **Step 2: RED 확인**
+- [x] **Step 2: RED 확인**
 
 Run: .venv\Scripts\python.exe -m pytest -q tests/test_media_director_proposals.py tests/test_api_media_director.py tests/test_media_director_apply.py tests/test_api_media_library.py
 
 Expected: BGM/SFX가 `analysis_unavailable`로 stale, empty B-roll result가 candidate가 됨, lifecycle event failure가 proposal row를 남김, candidate `media_revision`이 `None`, preview endpoint/materializer 부재로 FAIL.
 
-- [ ] **Step 3: Task 9 proposal integrity remediation 구현**
+- [x] **Step 3: Task 9 proposal integrity remediation 구현**
 
 `DirectorProposalService.stale_reasons`를 media-type별 verifier로 분리한다. B-roll은 current source SHA, non-empty succeeded result, `can_apply_media_analysis`를 요구하고 BGM/SFX는 source existence/SHA와 `canonical_metadata_indexed` 및 media-specific canonical fields만 요구한다. 양쪽은 current asset `created_at`이 proposal candidate의 non-null `media_revision`과 같은지도 확인한다. API `expires_at`은 timezone-aware ISO-8601만 받아 malformed input을 `422`로 거절한다.
 
 `read_director_proposal_snapshot`은 asset `created_at`을 rankable candidate의 canonical registration revision으로 넘기고, candidate schema는 eligible director candidate에 revision이 없는 상태를 허용하지 않는다. proposal create/expiry lifecycle status와 event는 하나의 SQLite transaction으로 commit하며 event insert failure 주입 시 proposal row도 rollback한다.
 
-- [ ] **Step 4: materialize service 추출**
+- [x] **Step 4: materialize service 추출**
 
 기존 router의 snapshot_verified_asset, license snapshot, project register, recent usage 로직을 ProjectAssetMaterializer로 옮긴다. 모든 candidate source를 먼저 hash 검증하고 project staging에 복사한 뒤 등록한다. 실패하면 editing session은 건드리지 않는다. 이미 같은 library asset SHA가 materialize된 경우 기존 project asset을 재사용한다.
 
 copy 전 source SHA, copy 후 source SHA, staged-copy SHA가 proposal의 expected SHA와 모두 같은지 확인한다. per-SHA lock으로 concurrent duplicate materialize를 idempotent하게 만들고, 어느 단계든 실패하면 staged file과 registration을 모두 정리해 orphan을 남기지 않는다. preflight와 materialize는 media-type별 analysis/canonical-metadata eligibility, source availability, current asset registration revision을 다시 검증한다. source SHA를 snapshot 이후와 staging copy 이후에 다시 비교해 source mutation race를 `stale_asset`으로 실패시키고 session/asset registration/orphan을 남기지 않는다.
 
-- [ ] **Step 5: preview endpoint 구현과 GREEN**
+- [x] **Step 5: preview endpoint 구현과 GREEN**
 
 GET .../candidates/{candidate_id}/preview는 verified source snapshot 또는 project-local asset을 스트리밍하고 exact in/out/controls를 header와 proposal payload에 유지한다. audio는 서버에서 autoplay 상태를 만들지 않는다.
 
@@ -845,10 +844,10 @@ Run: .venv\Scripts\python.exe -m pytest -q tests/test_media_director_proposals.p
 
 Expected: PASS.
 
-- [ ] **Step 6: 커밋**
+- [x] **Step 6: 커밋**
 
 ~~~powershell
-git add packages/core-engine/src/videobox_core_engine/project_asset_materializer.py packages/core-engine/src/videobox_core_engine/director_proposal_service.py packages/domain-models/src/videobox_domain_models/director_proposals.py packages/storage-abstractions/src/videobox_storage/local_project_store.py packages/storage-abstractions/src/videobox_storage/media_library_store.py services/api/src/videobox_api/routers/director_proposals.py services/api/src/videobox_api/routers/media_library.py tests/test_media_director_proposals.py tests/test_api_media_director.py tests/test_media_director_apply.py tests/test_api_media_library.py
+git add packages/core-engine/src/videobox_core_engine/project_asset_materializer.py packages/core-engine/src/videobox_core_engine/director_proposal_service.py packages/core-engine/src/videobox_core_engine/media_ranking.py packages/domain-models/src/videobox_domain_models/director_proposals.py packages/storage-abstractions/src/videobox_storage/local_project_store.py services/api/src/videobox_api/routers/director_proposals.py services/api/src/videobox_api/routers/media_library.py tests/test_media_director_proposals.py tests/test_api_media_director.py tests/test_media_director_apply.py tests/test_api_media_library.py
 git commit -m "feat: materialize and preview director candidates"
 ~~~
 

@@ -1060,8 +1060,8 @@ production-readiness blocker slice 1의 9개 Task는 구현·회귀·600초 smok
   1. Local media intelligence foundation: LM Studio local-only provider, durable B-roll analysis, 자동 태깅/검수
   2. Script-first proposal engine: narration 없는 provisional script session, B/M/S ranking, preview/materialize, atomic apply
   3. Director workspace: 우측 대화 패널, 수동 편집, B/M/S reference, persistent conversation, 10-step undo/redo, responsive UI
-- 구현 시작 전 기준 HEAD는 `8eddb7f`다. Slice 1 Task 1–6과 그 release-blocking remediation 및 Slice 2 Task 7–9은 완료됐으며, 전체 계획 기준 9/18 Task(50.0%) 완료·50.0% 잔여다.
-- 다음 실행 단위는 Slice 2 Task 10 `candidate preview와 project asset materializer`다.
+- 구현 시작 전 기준 HEAD는 `8eddb7f`다. Slice 1 Task 1–6과 그 release-blocking remediation 및 Slice 2 Task 7–10은 완료됐으며, 전체 계획 기준 10/18 Task(55.6%) 완료·44.4% 잔여다.
+- 다음 실행 단위는 Slice 2 Task 11 `atomic apply, named 10-step undo/redo, output freshness`다.
 - 기존 `LocalFirstStructuredRuntime`의 Gemini 자동 fallback, 외부 HTTP(S) runtime 허용, text-only Qwen adapter는 승인 설계와 충돌하므로 Slice 1에서 RED test부터 교체한다.
 - Codex Sol/Terra/Luna 모델 선택은 개발 에이전트 실행 자원이며 VideoBox 제품 runtime 계약에는 포함하지 않는다.
 
@@ -1094,9 +1094,15 @@ production-readiness blocker slice 1의 9개 Task는 구현·회귀·600초 smok
 - remediation은 unknown user-owned warning provenance, SHA별 asset ownership, terminal analysis derived-data cleanup, ranking-visible index revision, basename collision, local-only DI fallback rejection을 RED-first로 고정했다. Director route는 provider 호출이 없어 fake Gemini/external HTTP counter 0을 증명한다.
 - 코드 commit은 `37252c2`이다.
 
+### Slice 2 Task 10 closeout (2026-07-15)
+
+- ProjectAssetMaterializer는 candidate source→controlled staging→project-local asset의 SHA를 각각 재검증하고, source mutation·post-registration mismatch·unlink failure에는 asset row/file/staging을 보상 정리한다. 동일 project/SHA는 source/right/warning provenance까지 같을 때만 재사용한다.
+- candidate preview는 immutable controls와 exact in/out header를 가진 verified temporary snapshot만 스트리밍하며 autoplay, editing-session, timeline mutation을 수행하지 않는다. B-roll은 non-empty applicable analysis, BGM/SFX는 indexed required canonical metadata를 recheck한다.
+- independent spec/quality review가 P0/P1/P2 없이 승인했다. focused backend `79 passed`, final backend full `957 passed, 2 skipped`, frontend `108 passed`/build success, `git diff --check`가 통과했다. 코드 commit은 `d1d3f98`이다.
+
 ### Local Media Director 중간점검 보완 (2026-07-15)
 
-- historical note: 이 중간점검의 최초 시점은 HEAD `8b023f5`, Task 1–8/18(44.4%)이었다. 이후 Task 9가 `37252c2`으로 완료됐으므로 현재 truth는 이 섹션 상단의 9/18(50.0%), 다음 Task 10이다.
+- historical note: 이 중간점검의 최초 시점은 HEAD `8b023f5`, Task 1–8/18(44.4%)이었다. 이후 Task 9와 Task 10이 완료됐으므로 현재 truth는 이 섹션 상단의 10/18(55.6%), 다음 Task 11이다.
 - 2026-07-15 후속 독립 감사는 Task 9 preflight가 BGM/SFX에 B-roll analysis를 잘못 요구하고, empty B-roll analysis result와 nullable candidate `media_revision`을 허용하며, proposal lifecycle state/event가 원자적이지 않음을 확인했다. Task 10은 materializer 전에 이 세 계약을 RED-first로 고친다. B-roll은 non-empty succeeded analysis+SHA, BGM/SFX는 indexed canonical metadata+SHA로 재검증하고, `media_revision`은 asset registration `created_at`으로 고정한다.
 - Task 10은 copy 전후 SHA·staged SHA, per-SHA idempotent lock, cleanup과 source-mutation race, candidate preview까지 닫는다. Task 11은 SQLite authoritative session/sidecar reconciliation·durable output freshness·manual mutation parity를, Task 12는 preview/FFmpeg/CapCut shared stale verifier를 명시했다. Task 13은 idempotent message API와 local-only assistant response contract를 추가했고, Task 18은 Gemini UI뿐 아니라 bootstrap Gemini request 0을 검증한다.
 - OpenCut/full NLE와 Voice Capture & Narration은 현재 18 Task 계획에 섞지 않고 별도 후속 판단으로 유지한다.
