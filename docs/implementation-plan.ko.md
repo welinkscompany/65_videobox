@@ -1060,8 +1060,8 @@ production-readiness blocker slice 1의 9개 Task는 구현·회귀·600초 smok
   1. Local media intelligence foundation: LM Studio local-only provider, durable B-roll analysis, 자동 태깅/검수
   2. Script-first proposal engine: narration 없는 provisional script session, B/M/S ranking, preview/materialize, atomic apply
   3. Director workspace: 우측 대화 패널, 수동 편집, B/M/S reference, persistent conversation, 10-step undo/redo, responsive UI
-- 구현 시작 전 기준 HEAD는 `8eddb7f`다. Slice 1 Task 1–6과 그 release-blocking remediation, Slice 2 Task 7–12, Slice 3 Task 13은 완료됐으며, 전체 계획 기준 13/18 Task(72.2%) 완료·27.8% 잔여다.
-- 다음 실행 단위는 Slice 3 Task 14 `frontend API DTO와 pure reference/history/shortcut units`다.
+- 구현 시작 전 기준 HEAD는 `8eddb7f`다. Slice 1 Task 1–6과 그 release-blocking remediation, Slice 2 Task 7–12, Slice 3 Task 13–14는 완료됐으며, 전체 계획 기준 14/18 Task(77.8%) 완료·22.2% 잔여다.
+- 다음 실행 단위는 Slice 3 Task 15 `Director panel, context bar, cards, preview, comparison tray`다.
 - 기존 `LocalFirstStructuredRuntime`의 Gemini 자동 fallback, 외부 HTTP(S) runtime 허용, text-only Qwen adapter는 승인 설계와 충돌하므로 Slice 1에서 RED test부터 교체한다.
 - Codex Sol/Terra/Luna 모델 선택은 개발 에이전트 실행 자원이며 VideoBox 제품 runtime 계약에는 포함하지 않는다.
 
@@ -1123,6 +1123,13 @@ production-readiness blocker slice 1의 9개 Task는 구현·회귀·600초 smok
 - resolver는 open proposal 후보와 실제 persisted timeline의 B/M/S override placement를 immutable ID로 구분한다. 숫자만 있는 참조가 둘 이상이면 선택 card용 disambiguation을 반환한다.
 - RED는 conversation/resolver 모듈·table 부재와 이후 review P1(typed placement collision, action intent/preflight 부재, history session-scope 우회)을 재현했고 GREEN으로 닫았다. focused `26 passed`, final backend full `996 passed, 2 skipped`, frontend `108 passed`/build success, `git diff --check`를 통과했다. fake Gemini/external provider counter는 0으로 고정했다. 기존 backend multipart warning 및 frontend ErrorBoundary/`act(...)` stderr는 비차단 기존 경고다.
 - 중간점검 보완: timeline target은 typed `{segment_id, track_type}`이며, resolved command는 immutable proposal 또는 `{session_id, session_revision}` preflight binding을 가진 action intent를 반환·저장한다. command는 session을 변경하지 않고 Task 15/18의 explicit apply만 atomic mutation/undo를 만든다. unknown/mismatched conversation은 404, in-flight duplicate는 `202 + Retry-After` 계약으로 고정했다. Task 14는 이 intent/conversation DTO의 표시·재시도 client test를, Task 18은 retention/index release audit 및 bootstrap Gemini와 Director 성공 trace의 local-only route-surface 검증을 맡는다. OpenCut/full NLE 및 Voice Capture & Narration은 이 18 Task에 섞지 않고 후속 판단 gate를 유지한다.
+
+### Slice 3 Task 14 closeout (2026-07-16)
+
+- frontend API는 Task 13 conversation create/list/send, typed reference/action-intent/preflight 및 faithful proposal/candidate DTO를 소비한다. `prepareDirectorMessage`는 immutable client message ID/body를 보존해 `202 + Retry-After` 뒤 retry가 이미 확정된 exchange를 받도록 한다.
+- pure Director units는 proposal/timeline Korean reference label, explicit stale artifact history(legacy absent `is_current`은 current), action metadata history, IME·editable target을 배제한 Ctrl/Cmd undo/redo를 제공한다. 대화 exchange와 action intent는 apply endpoint나 editing session mutation을 호출하지 않는다.
+- quality remediation: 지원하지 않는 proposal apply scope 전송을 제거하고, backend editing-session response가 action_id/label/created_at/reversible/blocked_reason을 보존하도록 contract test를 추가했다.
+- 검증: focused frontend `15 passed`, backend contract `9 passed`, full backend `997 passed, 2 skipped`, full frontend `118 passed`/build success, independent spec/quality/final review P1/P2 없음, `git diff --check` 통과. 기존 multipart warning 및 frontend ErrorBoundary/`act(...)` stderr는 비차단 기존 경고다.
 
 - historical note: 이 중간점검의 최초 시점은 HEAD `8b023f5`, Task 1–8/18(44.4%)이었다. 이후 Task 9와 Task 10이 완료됐으므로 현재 truth는 이 섹션 상단의 10/18(55.6%), 다음 Task 11이다.
 - 2026-07-15 후속 독립 감사는 Task 9 preflight가 BGM/SFX에 B-roll analysis를 잘못 요구하고, empty B-roll analysis result와 nullable candidate `media_revision`을 허용하며, proposal lifecycle state/event가 원자적이지 않음을 확인했다. Task 10은 materializer 전에 이 세 계약을 RED-first로 고친다. B-roll은 non-empty succeeded analysis+SHA, BGM/SFX는 indexed canonical metadata+SHA로 재검증하고, `media_revision`은 asset registration `created_at`으로 고정한다.

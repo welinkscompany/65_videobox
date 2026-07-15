@@ -80,6 +80,28 @@ def test_director_reports_recovery_lifecycle_when_analysis_is_not_applicable(tmp
     assert response.json()["lifecycle"]["recovery_action"] == "analyse_or_retry_assets"
 
 
+def test_editing_session_get_preserves_history_action_metadata(tmp_path: Path) -> None:
+    app = create_app(projects_root=tmp_path / "projects")
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "history metadata"}).json()["project_id"]
+    session = app.state.store.save_editing_session(
+        project_id=project_id,
+        timeline_id="timeline",
+        session_payload={"segments": [], "history": [{
+            "mutation_type": "caption_update", "segment_id": "seg-1", "action_id": "action-1",
+            "label": "자막 변경", "created_at": "2026-07-16T00:00:00Z", "reversible": True, "blocked_reason": None,
+        }]},
+    )
+    response = client.get(f"/api/projects/{project_id}/editing-sessions/{session['session_id']}")
+    assert response.status_code == 200
+    assert response.json()["history"] == [{
+        "mutation_type": "caption_update", "segment_id": "seg-1", "caption_text": None, "cut_action": None,
+        "asset_id": None, "overlay_type": None, "recommendation_id": None, "inverse_payload": None,
+        "forward_payload": None, "action_id": "action-1", "label": "자막 변경", "created_at": "2026-07-16T00:00:00Z",
+        "reversible": True, "blocked_reason": None,
+    }]
+
+
 def test_director_proposal_api_e2e_is_snapshot_only_and_returns_actionable_stale_preflight(tmp_path: Path) -> None:
     """Task 9 contract: proposal reads real local state but never edits the session."""
     app = create_app(projects_root=tmp_path / "projects")

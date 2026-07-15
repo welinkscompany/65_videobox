@@ -55,8 +55,50 @@ export type MediaAnalysis = {
 
 export type DirectorProposalCreateRequest = { session_id: string; expires_at?: string };
 export type DirectorPreferences = { pin_asset?: string[]; exclude_asset?: string[]; exclude_creator?: string[]; exclude_tag?: string[] };
-export type DirectorProposal = { proposal_id: string; revision_code: string; status: string; diff: Record<string, unknown>; candidates: Record<string, unknown>[] };
-export type DirectorProposalPreflight = { proposal_id?: string; status?: string; code?: "stale_proposal"; stale_reasons?: string[]; action?: "refresh"; diff?: Record<string, unknown> };
+export type DirectorReference = { reference_code: string; immutable_id: string | { segment_id: string; track_type: string }; source: string };
+export type DirectorCandidate = {
+  candidate_id: string;
+  visible_reference_code: string;
+  media_type: string;
+  asset_id: string;
+  library_asset_id: string | null;
+  reason_chips: string[];
+  scores: Record<string, number>;
+  availability: string;
+  review_status: string;
+  preview_uri: string | null;
+  controls: Record<string, unknown>;
+  expected_content_sha256: string | null;
+  media_revision: string;
+  canonical_metadata: Record<string, unknown>;
+  license_policy: string;
+  warning_provenance: string[];
+};
+export type DirectorProposalDiff = Record<string, unknown>;
+export type DirectorApplyScope = "all" | "broll_only" | "selected_references";
+export type DirectorProposal = {
+  proposal_id: string;
+  revision_code: string;
+  revision: number;
+  base_session_revision: number;
+  asset_index_revision: number;
+  source_session_id: string;
+  target_segment_ids: string[];
+  source_script_segment_ids: string[];
+  status: string;
+  diff: DirectorProposalDiff;
+  expires_at: string | null;
+  candidates: DirectorCandidate[];
+};
+export type DirectorProposalPreflight = { proposal_id?: string; status?: string; code?: "stale_proposal"; stale_reasons?: string[]; action?: "refresh"; diff?: DirectorProposalDiff };
+export type ApplyDirectorProposalResponse = EditingSession;
+export type DirectorConversation = { conversation_id: string; project_id: string; session_id: string };
+export type DirectorMessage = { message_id: string; conversation_id: string; project_id: string; session_id: string; role: "user" | "assistant" | string; text: string; proposal_id: string | null; metadata: Record<string, unknown>; client_message_id: string | null; created_at: string };
+export type DirectorActionIntent = { action: string; target: DirectorReference; proposal_preflight: Record<string, string | number> | null };
+export type DirectorMessageExchange = { user_message: DirectorMessage; assistant_message: DirectorMessage; disambiguation?: { status: string; options: DirectorReference[] } | null; reference?: DirectorReference | null; action_intent?: DirectorActionIntent | null };
+export type DirectorMessageSubmitRequest = { session_id: string; client_message_id: string; text: string };
+export type DirectorMessageSendResult = { kind: "exchange"; exchange: DirectorMessageExchange } | { kind: "in_progress"; retryAfterSeconds: number };
+export type ArtifactFreshness = { source_session_revision: number; is_current?: boolean; invalidated_at?: string | null; invalidated_reason?: string | null };
 
 export type TimelineClip = {
   clip_id: string;
@@ -169,6 +211,11 @@ export type CaptionStyleScopePreflight = {
 };
 
 export type EditingSessionHistoryEntry = {
+  action_id?: string;
+  label?: string;
+  created_at?: string;
+  reversible?: boolean;
+  blocked_reason?: string | null;
   mutation_type: string;
   segment_id: string;
   caption_text?: string | null;
@@ -569,7 +616,29 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
+async function sendDirectorMessageRequest(path: string, payload: DirectorMessageSubmitRequest): Promise<DirectorMessageSendResult> {
+  const response = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+  if (response.status === 202) {
+    const retryAfterSeconds = Number(response.headers.get("Retry-After") ?? "1");
+    return { kind: "in_progress", retryAfterSeconds: Number.isFinite(retryAfterSeconds) ? retryAfterSeconds : 1 };
+  }
+  if (!response.ok) throw new Error(`Request failed: ${path} (${response.status})`);
+  return { kind: "exchange", exchange: (await response.json()) as DirectorMessageExchange };
+}
+
 export const api = {
+  createDirectorConversation: (projectId: string, payload: { session_id: string }) =>
+    request<DirectorConversation>(`/api/projects/${projectId}/director/conversations`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+  listDirectorMessages: async (projectId: string, conversationId: string, sessionId: string): Promise<DirectorMessage[]> =>
+    (await request<{ messages: DirectorMessage[] }>(`/api/projects/${projectId}/director/conversations/${conversationId}/messages?session_id=${encodeURIComponent(sessionId)}`)).messages,
+  sendDirectorMessage: (projectId: string, conversationId: string, payload: DirectorMessageSubmitRequest) =>
+    sendDirectorMessageRequest(`/api/projects/${projectId}/director/conversations/${conversationId}/messages`, payload),
+  prepareDirectorMessage: (projectId: string, conversationId: string, payload: DirectorMessageSubmitRequest) => {
+    const submit = () => sendDirectorMessageRequest(`/api/projects/${projectId}/director/conversations/${conversationId}/messages`, payload);
+    return { clientMessageId: payload.client_message_id, send: submit, retry: submit };
+  },
+  applyDirectorProposal: (projectId: string, proposalId: string, payload: { candidate_ids: string[]; expected_revision: number }) =>
+    request<ApplyDirectorProposalResponse>(`/api/projects/${projectId}/director/proposals/${proposalId}/apply`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ candidate_ids: payload.candidate_ids, expected_revision: payload.expected_revision }) }),
   createDirectorProposal: (projectId: string, payload: DirectorProposalCreateRequest) =>
     request<DirectorProposal>(`/api/projects/${projectId}/director/proposals`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
   getDirectorProposal: (projectId: string, proposalId: string) =>

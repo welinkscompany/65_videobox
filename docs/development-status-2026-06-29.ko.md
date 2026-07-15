@@ -13,9 +13,9 @@
 - 기준 HEAD: `8eddb7f`
 - 계획 범위: 3개 순차 slice, 18개 TDD Task
 - 설계/계획 진행률: 100%, 잔여 0%
-- production code 구현 진행률: 13/18 Task (72.2%), 잔여 27.8%
-- 완료 작업: Slice 1 Task 1 local-only runtime 경계와 deterministic test guard, Task 2 Vision/embedding/capability preflight provider, Task 3 durable MEDIA_ANALYSIS schema와 state machine, Task 4 FFmpeg probe/cache/quality gate/deterministic dispatcher, Task 5 analysis API/batch ingest/검수 UI, Task 6 actual LM Studio live release gate, Slice 2 Task 7 narration 없는 script draft session, Task 8 immutable proposal domain/persistence/ranking, Task 9 proposal API/preflight/refresh, Task 10 candidate preview와 project asset materializer, Task 11 atomic apply/named undo-redo/output freshness, Task 12 output hash/revision revalidation과 Slice 2 gate, Slice 3 Task 13 persistent conversation/reference command resolver
-- 다음 작업: Slice 3 Task 14 frontend API DTO와 pure reference/history/shortcut units
+- production code 구현 진행률: 14/18 Task (77.8%), 잔여 22.2%
+- 완료 작업: Slice 1 Task 1 local-only runtime 경계와 deterministic test guard, Task 2 Vision/embedding/capability preflight provider, Task 3 durable MEDIA_ANALYSIS schema와 state machine, Task 4 FFmpeg probe/cache/quality gate/deterministic dispatcher, Task 5 analysis API/batch ingest/검수 UI, Task 6 actual LM Studio live release gate, Slice 2 Task 7 narration 없는 script draft session, Task 8 immutable proposal domain/persistence/ranking, Task 9 proposal API/preflight/refresh, Task 10 candidate preview와 project asset materializer, Task 11 atomic apply/named undo-redo/output freshness, Task 12 output hash/revision revalidation과 Slice 2 gate, Slice 3 Task 13 persistent conversation/reference command resolver, Task 14 frontend API DTO/pure reference-history-shortcut units
+- 다음 작업: Slice 3 Task 15 Director panel, context bar, cards, preview, comparison tray
 - 계획 commit `3fda0ae`는 remote에 push됐다. 다음 세션 재개용 handoff는 `docs/handoffs/2026-07-14-local-media-director-plan-closeout.ko.md`다.
 
 확인된 구현 blocker는 text-only local provider, Gemini 자동 fallback, 외부 HTTP(S) runtime 허용, durable media-analysis 상태 부재, script-only session 부재, B/M/S mutation의 불완전한 undo, output SHA/revision 재검증 부재다. 계획은 이 순서대로 RED test를 먼저 만들고 provider → analysis → proposal → transaction → UI → output E2E를 연결한다.
@@ -28,6 +28,13 @@ UI는 4,396줄 `App.tsx`의 전면 rewrite를 하지 않고 `apps/web/src/featur
 - assistant failure는 local-only trace를 가진 persisted `blocked` message이고 editing session은 변경하지 않는다. resolver는 open proposal과 실제 persisted B/M/S placement를 구분하고 ambiguity card 데이터를 반환한다. Gemini/external fake provider call은 0이다.
 - 검증: focused `26 passed`, full backend `996 passed, 2 skipped`, frontend `108 passed`와 build success, `git diff --check` 통과. backend multipart warning 1건과 frontend ErrorBoundary/`act(...)` stderr는 기존 비차단 경고다.
 - 계획 보완: independent review가 same-segment B/M/S resolver의 raw segment-ID collision, resolved command의 acknowledgement-only 흐름, optional history session scope를 P1으로 확인했고 모두 RED-first로 닫았다. typed placement identity와 action intent→immutable proposal/session preflight binding은 Task 13에 구현됐으며 Task 15/18은 explicit atomic apply E2E를 맡는다. `202 + Retry-After` duplicate 계약, conversation retention/index release audit, Director successful trace의 local-only route-surface 검증도 Task 14/18에 명시했다. full NLE/OpenCut과 Voice Capture & Narration은 현재 remediation 범위 밖의 별도 gate를 유지한다.
+
+### Slice 3 Task 14 frontend contracts closeout (2026-07-16)
+
+- Task 13 local-only conversation DTO와 API client를 연결했다. `202`는 exchange로 오인하지 않고 retry-after 상태로 반환하며 prepared submission이 동일 client message ID/body를 재사용한다.
+- proposal/timeline typed reference label, stale-history selector, history action metadata, IME-safe undo/redo hook은 모두 App integration 전의 pure unit으로 분리했다. exchange/action intent는 editing session을 변경하거나 apply를 호출하지 않는다.
+- independent review가 발견한 unsupported apply scope와 history metadata serialization gap은 RED-first로 닫았다. legacy artifact payload에서 `is_current` 누락은 current로 호환한다.
+- 검증: frontend focused `15 passed`, backend contract `9 passed`, full backend `997 passed, 2 skipped`, frontend full `118 passed`/build success, diff check 통과. 다음은 Task 15 workspace UI와 explicit apply action이다.
 
 ### Slice 1 Task 5 closeout deferment
 

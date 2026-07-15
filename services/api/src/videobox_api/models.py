@@ -554,6 +554,11 @@ class LibraryFavoriteRequest(BaseModel):
 class EditingSessionHistoryEntryResponse(BaseModel):
     mutation_type: str
     segment_id: str
+    action_id: str | None = None
+    label: str | None = None
+    created_at: str | None = None
+    reversible: bool | None = None
+    blocked_reason: str | None = None
     caption_text: str | None = None
     cut_action: str | None = None
     asset_id: str | None = None

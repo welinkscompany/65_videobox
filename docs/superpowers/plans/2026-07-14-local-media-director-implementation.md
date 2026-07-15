@@ -1043,7 +1043,7 @@ git commit -m "feat: persist director conversations and commands"
 - Create: apps/web/src/features/director/director-history-controls.test.tsx
 - Create: apps/web/src/features/director/editing-shortcuts.test.tsx
 
-- [ ] **Step 1: component RED test 작성**
+- [x] **Step 1: component RED test 작성**
 
 ~~~tsx
 it("proposal과 timeline reference를 구분한다", () => {
@@ -1058,19 +1058,19 @@ it("한글 입력 중 Ctrl+Z를 편집 undo로 가로채지 않는다", () => {
 });
 ~~~
 
-- [ ] **Step 2: RED 확인**
+- [x] **Step 2: RED 확인**
 
 Run: npm --prefix apps/web test -- src/features/director/media-reference-badge.test.tsx src/features/director/director-history-controls.test.tsx src/features/director/editing-shortcuts.test.tsx
 
 Expected: component import failure.
 
-- [ ] **Step 3: exact DTO와 pure components 구현**
+- [x] **Step 3: exact DTO와 pure components 구현**
 
-DirectorProposal, DirectorCandidate, DirectorProposalDiff, DirectorApplyScope, DirectorConversation, DirectorMessage, DirectorMessageExchange, ApplyDirectorProposalResponse와 artifact freshness DTO(`source_session_revision`, `is_current`, `invalidated_at`, `invalidated_reason`)를 api.ts에 정의한다. conversation create/list/send API는 재시도에도 같은 client message ID를 재사용하고, 이미 확정된 exchange를 다시 렌더하는 unit test를 둔다. UI-only state union은 directorTypes.ts에 둔다. EditingSessionHistoryEntry에는 action_id, label, created_at, reversible, blocked_reason를 추가한다. freshness가 false인 preview/SRT/final/CapCut은 revision·reason을 표시한 history로만 보이고 current-output action/성공 상태에서는 제외하는 pure selector/component test를 추가한다.
+DirectorProposal, DirectorCandidate, DirectorProposalDiff, DirectorApplyScope, DirectorConversation, DirectorMessage, DirectorMessageExchange, DirectorActionIntent, ApplyDirectorProposalResponse와 artifact freshness DTO(`source_session_revision`, `is_current`, `invalidated_at`, `invalidated_reason`)를 api.ts에 정의한다. conversation create/list/send API는 caller-supplied client message ID를 `202 + Retry-After` 뒤에도 재사용하고, 이미 확정된 exchange를 다시 렌더하는 unit test를 둔다. UI-only state union은 directorTypes.ts에 둔다. EditingSessionHistoryEntry에는 action_id, label, created_at, reversible, blocked_reason를 추가한다. freshness가 false인 preview/SRT/final/CapCut은 revision·reason을 표시한 history로만 보이고 current-output action/성공 상태에서는 제외하는 pure selector/component test를 추가한다. legacy payload에서 absent `is_current`은 current로 취급한다.
 
 useEditingShortcuts는 Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z, Ctrl/Cmd+Y를 지원하고 input, textarea, contenteditable, isComposing을 무시한다.
 
-- [ ] **Step 4: GREEN과 build**
+- [x] **Step 4: GREEN과 build**
 
 Run: npm --prefix apps/web test -- src/features/director src/api.test.ts
 
@@ -1078,7 +1078,7 @@ Run: npm --prefix apps/web run build
 
 Expected: PASS.
 
-- [ ] **Step 5: 커밋**
+- [x] **Step 5: 커밋**
 
 ~~~powershell
 git add apps/web/src/api.ts apps/web/src/api.test.ts apps/web/src/features/director
