@@ -563,11 +563,12 @@ git push
 - Create: tests/test_script_draft_session.py
 - Modify: services/api/src/videobox_api/models.py
 - Modify: services/api/src/videobox_api/routers/editing_session.py
-- Modify: services/api/src/videobox_api/main.py
-- Modify: packages/core-engine/src/videobox_core_engine/editing_session.py
-- Test: tests/test_api_media_director.py
+- Modify: services/api/src/videobox_api/orchestration.py
+- Modify: packages/core-engine/src/videobox_core_engine/local_pipeline.py
+- Modify: packages/storage-abstractions/src/videobox_storage/local_project_store.py
+- Test: tests/test_script_draft_session.py
 
-- [ ] **Step 1: script-only RED test 작성**
+- [x] **Step 1: script-only RED test 작성**
 
 ~~~python
 def test_script_only_project_creates_provisional_session(client, script_asset_id) -> None:
@@ -582,26 +583,26 @@ def test_script_only_project_creates_provisional_session(client, script_asset_id
     assert all(item["end_sec"] > item["start_sec"] for item in session["segments"])
 ~~~
 
-- [ ] **Step 2: RED 확인**
+- [x] **Step 2: RED 확인**
 
-Run: .venv\Scripts\python.exe -m pytest -q tests/test_script_draft_session.py tests/test_api_media_director.py
+Run: .venv\Scripts\python.exe -m pytest -q tests/test_script_draft_session.py
 
-Expected: endpoint와 timing_source 부재로 FAIL.
+Expected: `videobox_core_engine.script_draft_session` 부재로 FAIL. 원 계획의 `tests/test_api_media_director.py`는 저장소에 존재하지 않아 API E2E를 새 Task 7 테스트 파일에 함께 둔다.
 
-- [ ] **Step 3: deterministic provisional segmentation 구현**
+- [x] **Step 3: deterministic provisional segmentation 구현**
 
 빈 줄, 문장 종결부호, max character budget 순으로 구간을 나눈다. 시간은 Korean character count를 고정 speech-rate로 환산하고 최소 2초를 보장한다. session에 timing_source=provisional_script와 narration_alignment_required=true를 저장한다. 나레이션 ingest/alignment 성공 시 동일 source_script_segment_id를 사용해 실제 bounds로 교체하고 proposal을 stale 처리한다.
 
-- [ ] **Step 4: API 및 reload GREEN**
+- [x] **Step 4: API 및 reload GREEN**
 
-Run: .venv\Scripts\python.exe -m pytest -q tests/test_script_draft_session.py tests/test_api_media_director.py tests/test_editing_session.py
+Run: .venv\Scripts\python.exe -m pytest -q tests/test_script_draft_session.py tests/test_editing_session.py tests/test_transcript_alignment.py
 
 Expected: PASS, restart 뒤 provisional flag와 segment IDs 유지.
 
-- [ ] **Step 5: 커밋**
+- [x] **Step 5: 커밋**
 
 ~~~powershell
-git add packages/core-engine/src/videobox_core_engine/script_draft_session.py packages/core-engine/src/videobox_core_engine/editing_session.py services/api/src/videobox_api tests/test_script_draft_session.py tests/test_api_media_director.py
+git add packages/core-engine/src/videobox_core_engine/script_draft_session.py packages/core-engine/src/videobox_core_engine/local_pipeline.py packages/storage-abstractions/src/videobox_storage/local_project_store.py services/api/src/videobox_api tests/test_script_draft_session.py
 git commit -m "feat: create provisional sessions from scripts"
 ~~~
 

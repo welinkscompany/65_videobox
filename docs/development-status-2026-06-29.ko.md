@@ -13,9 +13,9 @@
 - 기준 HEAD: `8eddb7f`
 - 계획 범위: 3개 순차 slice, 18개 TDD Task
 - 설계/계획 진행률: 100%, 잔여 0%
-- production code 구현 진행률: 6/18 Task (약 33.3%), 잔여 약 66.7%
-- 완료 작업: Slice 1 Task 1 local-only runtime 경계와 deterministic test guard, Task 2 Vision/embedding/capability preflight provider, Task 3 durable MEDIA_ANALYSIS schema와 state machine, Task 4 FFmpeg probe/cache/quality gate/deterministic dispatcher, Task 5 analysis API/batch ingest/검수 UI, Task 6 actual LM Studio live release gate
-- 다음 작업: Slice 2 Task 7 narration 없는 script draft session
+- production code 구현 진행률: 7/18 Task (약 38.9%), 잔여 약 61.1%
+- 완료 작업: Slice 1 Task 1 local-only runtime 경계와 deterministic test guard, Task 2 Vision/embedding/capability preflight provider, Task 3 durable MEDIA_ANALYSIS schema와 state machine, Task 4 FFmpeg probe/cache/quality gate/deterministic dispatcher, Task 5 analysis API/batch ingest/검수 UI, Task 6 actual LM Studio live release gate, Slice 2 Task 7 narration 없는 script draft session
+- 다음 작업: Slice 2 Task 8 immutable proposal domain, persistence, ranking
 - 계획 commit `3fda0ae`는 remote에 push됐다. 다음 세션 재개용 handoff는 `docs/handoffs/2026-07-14-local-media-director-plan-closeout.ko.md`다.
 
 확인된 구현 blocker는 text-only local provider, Gemini 자동 fallback, 외부 HTTP(S) runtime 허용, durable media-analysis 상태 부재, script-only session 부재, B/M/S mutation의 불완전한 undo, output SHA/revision 재검증 부재다. 계획은 이 순서대로 RED test를 먼저 만들고 provider → analysis → proposal → transaction → UI → output E2E를 연결한다.
@@ -45,6 +45,14 @@ UI는 4,396줄 `App.tsx`의 전면 rewrite를 하지 않고 `apps/web/src/featur
 - native exact `GET /api/v1/models` inventory로 loaded Qwen Vision `qwen/qwen3.6-35b-a3b`와 BGE embedding `text-embedding-bge-m3`를 식별했다. structured JSON은 inventory metadata나 모델명으로 추정하지 않고, production fixed JSON Schema `POST /v1/chat/completions`의 성공 및 strict local parse로 증명했다. 이후 `POST /v1/embeddings`, finite vector, restart 뒤 durable semantic self-match까지 통과했다.
 - custom Git-excluded artifact `C:\\Users\\atgro\\AppData\\Local\\Temp\\videobox-task6-release-evidence-87be02e\\live-media-success.json`은 sample SHA `944be1ad020b89fcb8a4c40e3be5e06ae581e751577483e3edf3bd8a7f7f3883`, native discovery 5회와 OpenAI runtime 2회의 exact loopback 요청(총 7), unfallbacked `lm_studio` trace, external provider call 0, Gemini call 0을 기록한다.
 - native inventory가 malformed한 과거 호환 환경에만 former strict `loaded=true + native_capabilities` inventory를 fallback으로 허용한다. 일반 `/v1/models` ID나 model name만으로 capability를 만들지 않으며, generic ID-only inventory는 blocked다.
+
+### Slice 2 Task 7 script draft session closeout (2026-07-15)
+
+- script asset만으로 `POST /editing-sessions/from-script`가 provisional editing session을 만든다. 구간은 빈 줄 → 문장 종결부호(공백 없는 한국어 문장 포함) → character budget 순으로 deterministic하게 나뉘며, 공백 제외 Korean character count/초와 최소 2초로 provisional bounds를 만든다.
+- session은 `timing_source=provisional_script`, `narration_alignment_required=true`, 안정된 `source_script_segment_id`를 durable store에 저장한다. narration alignment는 실제 bounds와 source ID를 유지하고 CAS revision 충돌에는 최신 session을 포함한 409을 반환하며, 실제 timing provenance로 바뀐 모든 source ID를 future proposal invalidation 목록에 남긴다. Task 8 proposal aggregate/table은 아직 만들지 않았다.
+- API E2E는 script-only 생성·restart reload·non-script/empty script 차단과 alignment의 빈 목록, overlap, non-positive bounds 422을 고정한다. legacy editing-session JSON에는 absent 새 nullable metadata를 다시 직렬화하지 않아 기존 계약도 보존한다.
+- TDD RED는 `videobox_core_engine.script_draft_session` 모듈 부재를 재현했다. 구현 계획의 `tests/test_api_media_director.py`는 실제 저장소에 없었으므로 API E2E를 새 `tests/test_script_draft_session.py`에 수용하도록 SSOT 파일 목록/명령을 바로잡았다.
+- 검증: focused `66 passed`, final backend full `905 passed, 2 skipped`, frontend `107 passed`와 build success, `git diff --check` 통과(기존 `python_multipart` deprecation warning 1건은 비차단). 코드 commit은 `ed092d0`이다.
 
 ### Slice 1 Task 1 closeout (2026-07-14)
 

@@ -1060,8 +1060,8 @@ production-readiness blocker slice 1의 9개 Task는 구현·회귀·600초 smok
   1. Local media intelligence foundation: LM Studio local-only provider, durable B-roll analysis, 자동 태깅/검수
   2. Script-first proposal engine: narration 없는 provisional script session, B/M/S ranking, preview/materialize, atomic apply
   3. Director workspace: 우측 대화 패널, 수동 편집, B/M/S reference, persistent conversation, 10-step undo/redo, responsive UI
-- 구현 시작 전 기준 HEAD는 `8eddb7f`다. Slice 1 Task 1–6과 그 release-blocking remediation은 완료됐으며, 전체 계획 기준 6/18 Task(약 33.3%) 완료·약 66.7% 잔여다.
-- 다음 실행 단위는 Slice 2 Task 7 `narration 없는 script draft session`이다.
+- 구현 시작 전 기준 HEAD는 `8eddb7f`다. Slice 1 Task 1–6과 그 release-blocking remediation 및 Slice 2 Task 7은 완료됐으며, 전체 계획 기준 7/18 Task(약 38.9%) 완료·약 61.1% 잔여다.
+- 다음 실행 단위는 Slice 2 Task 8 `immutable proposal domain, persistence, ranking`이다.
 - 기존 `LocalFirstStructuredRuntime`의 Gemini 자동 fallback, 외부 HTTP(S) runtime 허용, text-only Qwen adapter는 승인 설계와 충돌하므로 Slice 1에서 RED test부터 교체한다.
 - Codex Sol/Terra/Luna 모델 선택은 개발 에이전트 실행 자원이며 VideoBox 제품 runtime 계약에는 포함하지 않는다.
 
@@ -1075,3 +1075,9 @@ production-readiness blocker slice 1의 9개 Task는 구현·회귀·600초 smok
 - `87be02e` HEAD의 opt-in smoke가 actual Qwen Vision fixed-schema response, BGE finite embedding, `lm_studio` provider trace(no fallback), restart durable semantic self-match를 통과했다. `@live_lmstudio`+`VIDEOBOX_RUN_LM_STUDIO_MEDIA_SMOKE=1`+exact `127.0.0.1:1234` 외의 일반 회귀는 socket을 열지 않는다.
 - native `/api/v1/models`의 loaded instance/vision metadata는 후보 discovery 전용이다. structured JSON은 actual `POST /v1/chat/completions` fixed-schema 성공/strict parse로만 증명했다. exact loopback 7회(native 5, OpenAI runtime 2), external/Gemini 0, profile/variant/sample SHA/trace는 custom Git-excluded success artifact에 저장했다.
 - malformed native inventory에 한해서만 이전 strict loaded+native-capabilities inventory를 fallback으로 읽는다. generic `/v1/models` ID나 model name inference는 계속 blocked다. Task 7부터는 이 frozen local-only boundary를 사용한다.
+
+### Slice 2 Task 7 closeout (2026-07-15)
+
+- script-only session은 deterministic segmentation, fixed Korean speech-rate와 최소 2초 provisional timing, durable `timing_source`/alignment-required/source identity를 제공한다. alignment API는 실제 bounds로 교체하고 source ID별 future proposal stale handoff를 보존하지만 Task 8의 proposal domain을 앞당기지 않는다.
+- 독립 spec/quality review는 P1/P2 없이 승인했고, reverse runtime review가 찾은 API-level invalid alignment coverage(P2)는 빈 목록·overlap·non-positive bounds 422 E2E로 보완했다. legacy JSON의 absent new fields는 직렬화하지 않는다.
+- `ed092d0`에서 focused `66 passed`, final backend full `905 passed, 2 skipped`, frontend `107 passed`/build success와 `git diff --check`를 확인했다. 기존 `python_multipart` deprecation warning 1건은 비차단이다.
