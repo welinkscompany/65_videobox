@@ -3401,6 +3401,14 @@ class LocalProjectStore:
             "created_at": created_value,
             "updated_at": updated_at,
         }
+        for key in (
+            "script_asset_id",
+            "timing_source",
+            "narration_alignment_required",
+            "stale_proposal_source_script_segment_ids",
+        ):
+            if key in session_payload:
+                payload[key] = session_payload[key]
         summary_json = json.dumps(
             {
                 "segment_count": len(payload["segments"]),

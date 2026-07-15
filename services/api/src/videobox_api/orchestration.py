@@ -527,6 +527,12 @@ class ApiOrchestrator:
     def create_editing_session(self, *, project_id: str, timeline_job_id: str) -> dict[str, Any]:
         return self.pipeline.create_editing_session(project_id=project_id, timeline_job_id=timeline_job_id)
 
+    def create_script_draft_editing_session(self, *, project_id: str, script_asset_id: str) -> dict[str, Any]:
+        return self.pipeline.create_script_draft_editing_session(project_id=project_id, script_asset_id=script_asset_id)
+
+    def apply_script_draft_narration_alignment(self, *, project_id: str, session_id: str, aligned_segments: list[dict[str, Any]], expected_revision: int) -> dict[str, Any]:
+        return self.pipeline.apply_script_draft_narration_alignment(project_id=project_id, session_id=session_id, aligned_segments=aligned_segments, expected_revision=expected_revision)
+
     def get_editing_session(self, *, project_id: str, session_id: str) -> dict[str, Any]:
         return self.pipeline.get_editing_session(project_id=project_id, session_id=session_id)
 

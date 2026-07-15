@@ -226,6 +226,21 @@ class CreateEditingSessionRequest(BaseModel):
     timeline_job_id: str = Field(min_length=1)
 
 
+class CreateScriptDraftEditingSessionRequest(BaseModel):
+    script_asset_id: str = Field(min_length=1)
+
+
+class NarrationAlignmentSegmentRequest(BaseModel):
+    source_script_segment_id: str = Field(min_length=1)
+    start_sec: float
+    end_sec: float
+
+
+class NarrationAlignmentRequest(BaseModel):
+    expected_revision: int = Field(ge=1)
+    aligned_segments: list[NarrationAlignmentSegmentRequest] = Field(min_length=1)
+
+
 class EditorPresetRequest(BaseModel):
     name: str = Field(min_length=1)
     style: dict[str, Any]
@@ -467,6 +482,7 @@ class EditingSessionSegmentResponse(BaseModel):
     sfx_override: dict[str, object] | None = None
     tts_replacement: dict[str, object] | None = None
     caption_style: dict[str, object] | None = None
+    source_script_segment_id: str | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class MaterializeLibraryAssetRequest(BaseModel):
@@ -501,6 +517,10 @@ class EditingSessionResponse(BaseModel):
     redo_count: int = 0
     created_at: str | None = None
     updated_at: str | None = None
+    script_asset_id: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    timing_source: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    narration_alignment_required: bool | None = Field(default=None, exclude_if=lambda value: value is None)
+    stale_proposal_source_script_segment_ids: list[str] | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class SegmentAnalysisRecord(BaseModel):

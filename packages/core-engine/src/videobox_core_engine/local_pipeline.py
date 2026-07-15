@@ -59,6 +59,10 @@ from videobox_core_engine.editing_session import (
     update_segment_table_overlay,
     update_segment_visual_overlay,
 )
+from videobox_core_engine.script_draft_session import (
+    apply_narration_alignment_to_script_draft,
+    build_provisional_script_draft_session,
+)
 from videobox_core_engine.output_operator_copy import (
     OutputOperatorCopyBuilder,
     StaticOutputOperatorCopyBuilder,
@@ -94,7 +98,7 @@ from videobox_core_engine._pipeline_shared_helpers import (
     _normalized_runtime_pending_recommendations,
     _runtime_pending_recommendation_identity_key,
 )
-from videobox_core_engine.editing_session_and_regeneration import EditingSessionRegenerationMixin
+from videobox_core_engine.editing_session_and_regeneration import EditingSessionConflict, EditingSessionRegenerationMixin
 from videobox_core_engine._pipeline_private_helpers import _PipelinePrivateHelpersMixin
 
 
@@ -1424,6 +1428,42 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
             job_id=job["job_id"],
             status=JobStatus.SUCCEEDED,
             output_ref=persisted["export_id"],
+        )
+
+    def create_script_draft_editing_session(self, *, project_id: str, script_asset_id: str) -> dict[str, Any]:
+        asset = self.store.get_asset(project_id=project_id, asset_id=script_asset_id)
+        if str(asset.get("asset_type")) != AssetType.SCRIPT_DOCUMENT.value:
+            raise ValueError("script_asset_id must reference a script_document asset.")
+        script_path = self.store.resolve_storage_uri(project_id=project_id, storage_uri=str(asset["storage_uri"]))
+        session_payload = build_provisional_script_draft_session(
+            project_id=project_id,
+            script_asset_id=script_asset_id,
+            script_text=script_path.read_text(encoding="utf-8"),
+        )
+        return self.store.save_editing_session(
+            project_id=project_id,
+            timeline_id=str(session_payload["timeline_id"]),
+            session_payload=session_payload,
+        )
+
+    def apply_script_draft_narration_alignment(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        aligned_segments: list[dict[str, Any]],
+        expected_revision: int,
+    ) -> dict[str, Any]:
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        if int(session.get("session_revision") or 1) != expected_revision:
+            raise EditingSessionConflict(session)
+        updated, _ = apply_narration_alignment_to_script_draft(session=session, aligned_segments=aligned_segments)
+        return self._save_editing_session_with_revision(
+            project_id=project_id,
+            session_id=session_id,
+            session=session,
+            updated_session=updated,
+            expected_revision=expected_revision,
         )
 
     def _editing_session_for_output_timeline(

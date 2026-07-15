@@ -9,11 +9,13 @@ from videobox_api.models import (
     CaptionOverrideRequest,
     CaptionStyleMutationRequest,
     CreateEditingSessionRequest,
+    CreateScriptDraftEditingSessionRequest,
     CutActionOverrideRequest,
     EditingSessionResponse,
     EditingSessionRevisionRequest,
     ExplanationCardRequest,
     ImageOverlayRequest,
+    NarrationAlignmentRequest,
     PartialRegenerationJobResponse,
     PartialRegenerationPreflightRequest,
     PartialRegenerationRequest,
@@ -56,6 +58,31 @@ def build_editing_session_router(orchestrator: ApiOrchestrator, store: LocalProj
                 project_id=project_id,
                 timeline_job_id=payload.timeline_job_id,
             )
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return EditingSessionResponse(**result)
+
+    @router.post("/api/projects/{project_id}/editing-sessions/from-script", status_code=status.HTTP_201_CREATED)
+    def create_script_draft_editing_session(project_id: str, payload: CreateScriptDraftEditingSessionRequest) -> EditingSessionResponse:
+        try:
+            result = orchestrator.create_script_draft_editing_session(project_id=project_id, script_asset_id=payload.script_asset_id)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return EditingSessionResponse(**result)
+
+    @router.post("/api/projects/{project_id}/editing-sessions/{session_id}/narration-alignment")
+    def apply_script_draft_narration_alignment(project_id: str, session_id: str, payload: NarrationAlignmentRequest) -> EditingSessionResponse:
+        try:
+            result = orchestrator.apply_script_draft_narration_alignment(
+                project_id=project_id,
+                session_id=session_id,
+                aligned_segments=[item.model_dump() for item in payload.aligned_segments],
+                expected_revision=payload.expected_revision,
+            )
+        except EditingSessionConflict as exc:
+            return _editing_session_conflict_response(exc)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
         except Exception as exc:
             raise _http_error(exc) from exc
         return EditingSessionResponse(**result)
