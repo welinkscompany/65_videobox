@@ -21,7 +21,7 @@ def test_live_media_smoke_success_evidence_is_durable_and_local_only(tmp_path) -
             },
             "sample_sha256": "a" * 64,
             "requested_endpoints": [
-                "http://127.0.0.1:1234/v1/models",
+                "http://127.0.0.1:1234/api/v1/models",
                 "http://127.0.0.1:1234/v1/chat/completions",
                 "http://127.0.0.1:1234/v1/embeddings",
             ],

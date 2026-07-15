@@ -7,6 +7,7 @@ from typing import Any
 
 
 _EXACT_LM_STUDIO_PREFIX = "http://127.0.0.1:1234/v1/"
+_EXACT_LM_STUDIO_NATIVE_MODELS_URL = "http://127.0.0.1:1234/api/v1/models"
 _REQUIRED_EVIDENCE_FIELDS = frozenset(
     {
         "git_head",
@@ -35,7 +36,11 @@ def write_live_media_smoke_evidence(*, artifact_root: Path, evidence: dict[str, 
     if (
         not isinstance(endpoints, list)
         or not endpoints
-        or not all(isinstance(endpoint, str) and endpoint.startswith(_EXACT_LM_STUDIO_PREFIX) for endpoint in endpoints)
+        or not all(
+            isinstance(endpoint, str)
+            and (endpoint == _EXACT_LM_STUDIO_NATIVE_MODELS_URL or endpoint.startswith(_EXACT_LM_STUDIO_PREFIX))
+            for endpoint in endpoints
+        )
         or evidence["loopback_request_count"] != len(endpoints)
     ):
         raise ValueError("live smoke evidence must contain only exact LM Studio loopback requests")

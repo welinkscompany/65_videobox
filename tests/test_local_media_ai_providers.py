@@ -70,7 +70,29 @@ class _FakeHTTPResponse:
 
 
 def _loaded_models(*, capabilities: list[str]) -> dict[str, object]:
-    return {"data": [{"id": "local-media", "loaded": True, "native_capabilities": capabilities}]}
+    model_type = "embedding" if "embedding" in capabilities and "vision" not in capabilities else "llm"
+    native_capabilities: dict[str, object] = {}
+    if "vision" in capabilities:
+        native_capabilities["vision"] = True
+    return {
+        "models": [{
+            "key": "local-media",
+            "type": model_type,
+            "loaded_instances": [{"id": "local-media"}],
+            "capabilities": native_capabilities,
+        }]
+    }
+
+
+def _native_loaded_models(*, model_type: str, capabilities: dict[str, object] | None = None) -> dict[str, object]:
+    model: dict[str, object] = {
+        "key": "local-media",
+        "type": model_type,
+        "loaded_instances": [{"id": "local-media"}],
+    }
+    if capabilities is not None:
+        model["capabilities"] = capabilities
+    return {"models": [model]}
 
 
 VISION_RESPONSE_SCHEMA = {
@@ -113,17 +135,86 @@ def test_lm_studio_preflight_selects_loaded_native_capability_profile() -> None:
     assert len(client.requests) == 1
 
 
+def test_capability_profile_selects_loaded_native_api_models_without_inferring_structured_json() -> None:
+    client = FakeLMStudioClient([
+        {
+            "models": [
+                {
+                    "key": "vision-runtime",
+                    "type": "llm",
+                    "loaded_instances": [{"id": "vision-runtime"}],
+                    "capabilities": {"vision": True},
+                },
+                {
+                    "key": "embedding-runtime",
+                    "type": "embedding",
+                    "loaded_instances": [{"id": "embedding-runtime"}],
+                },
+            ]
+        }
+    ])
+
+    profile = LMStudioHTTPTransport(http_client=client).capability_profile()
+
+    assert profile == LMStudioCapabilityProfile(
+        vision_model_name="vision-runtime",
+        text_model_name="vision-runtime",
+        embedding_model_name="embedding-runtime",
+        structured_json=False,
+    )
+    assert client.requests[0].full_url == "http://127.0.0.1:1234/api/v1/models"
+
+
+def test_capability_profile_uses_strict_legacy_inventory_only_after_native_inventory_is_malformed() -> None:
+    client = FakeLMStudioClient([
+        {"data": [{"id": "generic-v1-id"}]},
+        {"data": [
+            {"id": "vision-legacy", "loaded": True, "native_capabilities": ["vision", "structured_json"]},
+            {"id": "embedding-legacy", "loaded": True, "native_capabilities": ["embedding"]},
+        ]},
+    ])
+
+    profile = LMStudioHTTPTransport(http_client=client).capability_profile()
+
+    assert profile == LMStudioCapabilityProfile(
+        vision_model_name="vision-legacy",
+        text_model_name=None,
+        embedding_model_name="embedding-legacy",
+        structured_json=False,
+    )
+    assert [request.full_url for request in client.requests] == [
+        "http://127.0.0.1:1234/api/v1/models",
+        "http://127.0.0.1:1234/v1/models",
+    ]
+
+
+def test_capability_profile_rejects_generic_legacy_v1_ids_without_strict_loaded_capabilities() -> None:
+    client = FakeLMStudioClient([
+        {"data": [{"id": "generic-native-id"}]},
+        {"data": [{"id": "generic-v1-id"}]},
+    ])
+
+    with pytest.raises(LMStudioProviderError, match="no loaded native-capability") as captured:
+        LMStudioHTTPTransport(http_client=client).capability_profile()
+
+    assert captured.value.code == "blocked"
+    assert [request.full_url for request in client.requests] == [
+        "http://127.0.0.1:1234/api/v1/models",
+        "http://127.0.0.1:1234/v1/models",
+    ]
+
+
 def test_lm_studio_transport_records_only_exact_validated_requested_endpoints() -> None:
     client = FakeLMStudioClient([_loaded_models(capabilities=["embedding"])])
     transport = LMStudioHTTPTransport(http_client=client)
 
     transport.preflight(model_name="local-media", capability="embedding")
 
-    assert transport.requested_endpoints == ["http://127.0.0.1:1234/v1/models"]
+    assert transport.requested_endpoints == ["http://127.0.0.1:1234/api/v1/models"]
 
 
 def test_lm_studio_preflight_blocks_unloaded_or_missing_model() -> None:
-    client = FakeLMStudioClient([{"data": [{"id": "local-media", "loaded": False, "native_capabilities": ["vision"]}]}])
+    client = FakeLMStudioClient([{"models": [{"key": "local-media", "type": "llm", "loaded_instances": [], "capabilities": {"vision": True}}]}])
 
     with pytest.raises(LMStudioProviderError, match="unavailable") as captured:
         LMStudioHTTPTransport(http_client=client).preflight(model_name="local-media", capability="vision")
@@ -331,19 +422,19 @@ def test_vision_rejects_undecodable_image_bytes() -> None:
 
 
 def test_capability_profile_selects_only_loaded_native_models() -> None:
-    payload = {"data": [
-        {"id": "vision", "loaded": True, "native_capabilities": ["vision", "structured_json"]},
-        {"id": "text", "loaded": True, "native_capabilities": ["text", "structured_json"]},
-        {"id": "embed", "loaded": True, "native_capabilities": ["embedding"]},
-        {"id": "fake", "loaded": True, "capabilities": ["vision", "embedding", "text", "structured_json"]},
+    payload = {"models": [
+        {"key": "vision", "type": "llm", "loaded_instances": [{"id": "vision"}], "capabilities": {"vision": True}},
+        {"key": "text", "type": "llm", "loaded_instances": [{"id": "text"}], "capabilities": {"vision": False}},
+        {"key": "embed", "type": "embedding", "loaded_instances": [{"id": "embed"}]},
+        {"key": "unloaded", "type": "llm", "loaded_instances": [], "capabilities": {"vision": True}},
     ]}
     profile = LMStudioHTTPTransport(http_client=FakeLMStudioClient([payload])).capability_profile()
 
-    assert profile == LMStudioCapabilityProfile(vision_model_name="vision", text_model_name="text", embedding_model_name="embed", structured_json=True)
+    assert profile == LMStudioCapabilityProfile(vision_model_name="vision", text_model_name="vision", embedding_model_name="embed", structured_json=False)
 
 
 def test_native_capability_is_required_and_arbitrary_capabilities_are_ignored() -> None:
-    client = FakeLMStudioClient([{"data": [{"id": "local-media", "loaded": True, "capabilities": ["vision"]}]}])
+    client = FakeLMStudioClient([{"models": [{"key": "local-media", "type": "llm", "loaded_instances": [{"id": "local-media"}], "capabilities": {"vision": False}}]}])
     with pytest.raises(LMStudioProviderError) as captured:
         LMStudioHTTPTransport(http_client=client).preflight(model_name="local-media", capability="vision")
     assert captured.value.code == "blocked"

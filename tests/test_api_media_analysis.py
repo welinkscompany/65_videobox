@@ -70,10 +70,10 @@ class LocalProfileHTTPClient:
     def __init__(self) -> None: self.urls: list[str] = []
     def __call__(self, request, **_kwargs):
         self.urls.append(request.full_url)
-        if request.full_url.endswith("/models"):
-            return FakeHTTPResponse({"data": [
-                {"id": "vision-local", "loaded": True, "native_capabilities": ["vision", "structured_json"]},
-                {"id": "embed-local", "loaded": True, "native_capabilities": ["embedding"]},
+        if request.full_url.endswith("/api/v1/models"):
+            return FakeHTTPResponse({"models": [
+                {"key": "vision-local", "type": "llm", "loaded_instances": [{"id": "vision-local"}], "capabilities": {"vision": True}},
+                {"key": "embed-local", "type": "embedding", "loaded_instances": [{"id": "embed-local"}], "capabilities": {}},
             ]})
         if request.full_url.endswith("/chat/completions"):
             layers = {layer: [] for layer in FIXED_VISION_LAYERS}
@@ -286,7 +286,9 @@ def test_explicit_local_profile_preflights_exact_loopback_and_wires_real_provide
     job = app.state.media_analysis_service.enqueue_analysis(project_id=project_id, asset_id=asset["asset_id"])
     result = app.state.media_analysis_service.dispatch_once(project_id=project_id, analysis_id=job["analysis_id"])
     assert result["status"] == "succeeded", result["error_message"]
-    assert all(url.startswith("http://127.0.0.1:1234/v1/") for url in http_client.urls)
+    assert all(url.startswith("http://127.0.0.1:1234/") for url in http_client.urls)
+    assert any(url.endswith("/api/v1/models") for url in http_client.urls)
+    assert "http://127.0.0.1:1234/v1/models" not in http_client.urls
     assert any(url.endswith("/chat/completions") for url in http_client.urls)
 
 

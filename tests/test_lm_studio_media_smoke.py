@@ -25,6 +25,8 @@ from videobox_storage.local_project_store import LocalProjectStore
 
 _LIVE_SMOKE_ENV = "VIDEOBOX_RUN_LM_STUDIO_MEDIA_SMOKE"
 _LIVE_SMOKE_ENABLE_VALUE = "1"
+_NATIVE_MODELS_ENDPOINT = "http://127.0.0.1:1234/api/v1/models"
+_OPENAI_LOOPBACK_PREFIX = "http://127.0.0.1:1234/v1/"
 _LIVE_SMOKE_SKIP_REASON = (
     "LM Studio live media smoke is disabled; set "
     "VIDEOBOX_RUN_LM_STUDIO_MEDIA_SMOKE=1 to permit only 127.0.0.1:1234."
@@ -77,14 +79,13 @@ def test_lm_studio_local_media_runtime_smoke() -> None:
 
     if profile.vision_model_name is None:
         pytest.skip(
-            "LM Studio live media smoke blocked: no loaded model advertises native "
-            "vision + structured_json capability."
+            "LM Studio live media smoke blocked: no loaded native Vision model is available."
         )
 
     try:
         transport.preflight(model_name=profile.vision_model_name, capability="vision", timeout_seconds=15)
     except LMStudioProviderError as exc:
-        pytest.skip(f"LM Studio live media smoke blocked: {exc.code}: {exc}")
+        pytest.fail(f"LM Studio live media smoke Vision candidate failed preflight: {exc.code}: {exc}")
 
     source = _small_jpeg()
     vision_response = LMStudioVisionProvider(transport=transport).analyze_images(
@@ -121,7 +122,7 @@ def test_lm_studio_local_media_runtime_smoke() -> None:
     try:
         transport.preflight(model_name=profile.embedding_model_name, capability="embedding", timeout_seconds=15)
     except LMStudioProviderError as exc:
-        pytest.skip(f"LM Studio live media smoke blocked after vision: {exc.code}: {exc}")
+        pytest.fail(f"LM Studio live media smoke embedding candidate failed preflight: {exc.code}: {exc}")
     embedding_response = LMStudioEmbeddingProvider(transport=transport).embed(
         EmbeddingRequest(model_name=profile.embedding_model_name, inputs=(output["summary"],))
     )
@@ -162,7 +163,9 @@ def test_lm_studio_local_media_runtime_smoke() -> None:
     ]
 
     endpoints = transport.requested_endpoints
-    assert endpoints and all(endpoint.startswith("http://127.0.0.1:1234/v1/") for endpoint in endpoints)
+    assert endpoints and all(
+        endpoint == _NATIVE_MODELS_ENDPOINT or endpoint.startswith(_OPENAI_LOOPBACK_PREFIX) for endpoint in endpoints
+    )
     assert all("gemini" not in endpoint.lower() for endpoint in endpoints)
     evidence = {
         "git_head": _git_head(),
@@ -171,7 +174,7 @@ def test_lm_studio_local_media_runtime_smoke() -> None:
         "profile": {
             "vision_model_name": profile.vision_model_name,
             "embedding_model_name": profile.embedding_model_name,
-            "variant": "native_capability_preflight",
+            "variant": "native_api_v1_inventory_plus_live_fixed_schema_probe",
         },
         "sample_sha256": source_sha256,
         "requested_endpoints": endpoints,

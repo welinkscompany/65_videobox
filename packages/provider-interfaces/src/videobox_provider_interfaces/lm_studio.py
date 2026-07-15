@@ -14,6 +14,7 @@ from videobox_provider_interfaces.vision import FIXED_VISION_LAYERS, FIXED_VISIO
 
 
 _LM_STUDIO_URL = "http://127.0.0.1:1234/v1"
+_LM_STUDIO_NATIVE_MODELS_URL = "http://127.0.0.1:1234/api/v1/models"
 _MAX_IMAGES = 6
 _MAX_ENCODED_IMAGE_BYTES = int(1.5 * 1024 * 1024)
 _VISION_SCHEMA_KEYS = frozenset({"layers", "summary", "confidence", "review_reasons"})
@@ -68,55 +69,120 @@ class LMStudioHTTPTransport:
         ):
             raise LMStudioProviderError("LM Studio endpoint must be exact loopback http://127.0.0.1:1234/v1.", "blocked")
 
-    def capability_profile(self, *, timeout_seconds: int = 15) -> LMStudioCapabilityProfile:
+    def _native_models_endpoint(self) -> str:
+        self._validate_endpoint()
+        # The native model inventory carries loaded-instance and vision metadata
+        # that the OpenAI-compatible /v1/models response does not guarantee.
+        return _LM_STUDIO_NATIVE_MODELS_URL
+
+    def _native_loaded_models(self, *, timeout_seconds: int) -> list[tuple[str, str, dict[str, Any]]]:
+        payload = self.request_native_models(timeout_seconds=timeout_seconds)
+        models = payload.get("models")
+        if not isinstance(models, list):
+            raise LMStudioProviderError("LM Studio returned malformed native model state.", "failed")
+        loaded: list[tuple[str, str, dict[str, Any]]] = []
+        for model in models:
+            if not isinstance(model, dict) or not isinstance(model.get("type"), str):
+                continue
+            instances = model.get("loaded_instances")
+            if not isinstance(instances, list):
+                continue
+            capabilities = model.get("capabilities")
+            native_capabilities = capabilities if isinstance(capabilities, dict) else {}
+            for instance in instances:
+                if isinstance(instance, dict) and isinstance(instance.get("id"), str) and instance["id"]:
+                    loaded.append((instance["id"], model["type"].lower(), native_capabilities))
+        return loaded
+
+    def _strict_legacy_loaded_models(self, *, timeout_seconds: int) -> list[tuple[str, str, dict[str, Any]]]:
+        """Use only the former explicit capability contract when native inventory is malformed."""
         payload = self.request_json("/models", None, timeout_seconds=timeout_seconds)
         models = payload.get("data")
         if not isinstance(models, list):
-            raise LMStudioProviderError("LM Studio returned malformed model state.", "failed")
-        selected: dict[str, str | None] = {"vision": None, "text": None, "embedding": None}
-        structured_json = False
+            raise LMStudioProviderError("LM Studio returned malformed legacy model state.", "failed")
+        loaded: list[tuple[str, str, dict[str, Any]]] = []
         for model in models:
             if not isinstance(model, dict) or model.get("loaded") is not True or not isinstance(model.get("id"), str):
                 continue
-            # Do not infer execution privileges from server-controlled generic metadata.
-            native = model.get("native_capabilities")
-            if not isinstance(native, list):
+            capabilities = model.get("native_capabilities")
+            if not isinstance(capabilities, list):
                 continue
-            capabilities = {str(value).lower() for value in native}
-            if selected["vision"] is None and {"vision", "structured_json"} <= capabilities:
-                selected["vision"] = model["id"]
-            if selected["text"] is None and {"text", "structured_json"} <= capabilities:
-                selected["text"] = model["id"]
-            if selected["embedding"] is None and "embedding" in capabilities:
-                selected["embedding"] = model["id"]
-            if "structured_json" in capabilities:
-                structured_json = True
+            loaded.append((model["id"], "legacy", {str(capability).lower(): True for capability in capabilities}))
+        if not loaded:
+            raise LMStudioProviderError("LM Studio legacy inventory has no loaded native-capability models.", "blocked")
+        return loaded
+
+    def _loaded_models(self, *, timeout_seconds: int) -> list[tuple[str, str, dict[str, Any]]]:
+        try:
+            return self._native_loaded_models(timeout_seconds=timeout_seconds)
+        except LMStudioProviderError as exc:
+            if exc.code != "failed" or str(exc) != "LM Studio returned malformed native model state.":
+                raise
+            return self._strict_legacy_loaded_models(timeout_seconds=timeout_seconds)
+
+    def capability_profile(self, *, timeout_seconds: int = 15) -> LMStudioCapabilityProfile:
+        selected: dict[str, str | None] = {"vision": None, "text": None, "embedding": None}
+        loaded_models = self._loaded_models(timeout_seconds=timeout_seconds)
+        for model_id, model_type, capabilities in loaded_models:
+            if selected["vision"] is None and (
+                (model_type == "llm" and capabilities.get("vision") is True)
+                or (model_type == "legacy" and capabilities.get("vision") is True)
+            ):
+                selected["vision"] = model_id
+            if selected["text"] is None and (model_type == "llm" or (model_type == "legacy" and capabilities.get("text") is True)):
+                selected["text"] = model_id
+            if selected["embedding"] is None and (model_type == "embedding" or (model_type == "legacy" and capabilities.get("embedding") is True)):
+                selected["embedding"] = model_id
         return LMStudioCapabilityProfile(
             vision_model_name=selected["vision"],
             text_model_name=selected["text"],
             embedding_model_name=selected["embedding"],
-            structured_json=structured_json,
+            # Native inventory does not prove schema-mode support.  The opt-in
+            # live Vision probe validates the fixed JSON schema before evidence
+            # is emitted; never infer it from model names or a missing field.
+            structured_json=False,
         )
 
     def preflight(self, *, model_name: str, capability: str, timeout_seconds: int = 15) -> str:
-        payload = self.request_json("/models", None, timeout_seconds=timeout_seconds)
-        models = payload.get("data")
-        if not isinstance(models, list):
-            raise LMStudioProviderError("LM Studio returned malformed model state.", "failed")
-        model = next((item for item in models if isinstance(item, dict) and item.get("id") == model_name), None)
-        if model is None or model.get("loaded") is not True:
+        model = next((item for item in self._loaded_models(timeout_seconds=timeout_seconds) if item[0] == model_name), None)
+        if model is None:
             raise LMStudioProviderError("Requested local model is unavailable or unloaded.", "blocked")
-        native = model.get("native_capabilities")
-        if not isinstance(native, list):
-            raise LMStudioProviderError(f"Loaded model does not support {capability}.", "blocked")
-        capabilities = {str(value).lower() for value in native}
-        if capability not in capabilities or (capability == "vision" and "structured_json" not in capabilities):
+        _, model_type, native_capabilities = model
+        supported = (
+            (capability == "vision" and model_type == "llm" and native_capabilities.get("vision") is True)
+            or (capability == "embedding" and model_type == "embedding")
+            or (capability == "text" and model_type == "llm")
+            or (capability == "vision" and model_type == "legacy" and native_capabilities.get("vision") is True)
+            or (capability == "embedding" and model_type == "legacy" and native_capabilities.get("embedding") is True)
+            or (capability == "text" and model_type == "legacy" and native_capabilities.get("text") is True)
+        )
+        if not supported:
             raise LMStudioProviderError(f"Loaded model does not support {capability}.", "blocked")
         return capability
+
+    def request_native_models(self, *, timeout_seconds: int) -> dict[str, Any]:
+        return self._request_json_endpoint(self._native_models_endpoint(), None, timeout_seconds=timeout_seconds)
 
     def request_json(self, path: str, payload: dict[str, Any] | None, *, timeout_seconds: int) -> dict[str, Any]:
         self._validate_endpoint()  # Revalidate immediately before every outbound operation.
         endpoint = f"{self.base_url}{path}"
+        return self._request_json_endpoint(endpoint, payload, timeout_seconds=timeout_seconds)
+
+    def _request_json_endpoint(self, endpoint: str, payload: dict[str, Any] | None, *, timeout_seconds: int) -> dict[str, Any]:
+        parsed = urlparse(endpoint)
+        if (
+            parsed.scheme != "http"
+            or parsed.hostname != "127.0.0.1"
+            or parsed.port != 1234
+            or parsed.params
+            or parsed.query
+            or parsed.fragment
+            or (
+                parsed.path != "/api/v1/models"
+                and not (parsed.path.startswith("/v1/") and len(parsed.path) > len("/v1/"))
+            )
+        ):
+            raise LMStudioProviderError("LM Studio request must be exact loopback endpoint.", "blocked")
         self.requested_endpoints.append(endpoint)
         request = Request(
             endpoint,
