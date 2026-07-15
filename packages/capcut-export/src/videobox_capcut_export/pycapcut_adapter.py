@@ -18,6 +18,7 @@ from pycapcut.video_segment import VideoSegment
 
 from videobox_core_engine.canonical_track import canonical_track_type
 from videobox_core_engine.media_controls import normalize_media_controls
+from videobox_core_engine.output_source_verifier import OutputSourceStaleError, verify_output_sources
 from videobox_domain_models.caption_style import CaptionStyle
 from videobox_storage.timeline_clip_source_resolution import (
     TimelineClipSourceError,
@@ -83,6 +84,7 @@ class PyCapCutRealExportAdapter:
         subtitle_file_path: Path | None = None,
         editing_session: dict[str, Any] | None = None,
     ) -> CapCutDraftExportResult:
+        verify_output_sources(store=self.store, project_id=project_id, timeline=timeline)
         narration_clips, broll_clips, bgm_clips, sfx_clips = self._collect_clips(timeline)
         if not narration_clips:
             raise PyCapCutExportError("Timeline has no narration clips to export.")

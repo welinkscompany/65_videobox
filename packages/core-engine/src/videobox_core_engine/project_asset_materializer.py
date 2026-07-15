@@ -88,7 +88,10 @@ class ProjectAssetMaterializer:
 
     @staticmethod
     def _candidate_result(asset: dict[str, Any], candidate: object, digest: str) -> dict[str, Any]:
+        # Keep source provenance public, while output consumers use the local
+        # registration revision written into the applied editing session.
         return {**asset, "content_sha256": digest, "media_revision": candidate.media_revision,
+                "materialized_media_revision": str(asset.get("created_at") or ""),
                 "controls": dict(candidate.controls), "warning_provenance": list(candidate.warning_provenance)}
 
     def preview_snapshot(self, *, project_id: str, candidate: object) -> Path:

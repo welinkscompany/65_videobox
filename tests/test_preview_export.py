@@ -8,9 +8,83 @@ import pytest
 
 from videobox_capcut_export import CapCutExportAdapter
 from videobox_core_engine.local_pipeline import LocalPipelineRunner
+from videobox_core_engine.output_source_verifier import OutputSourceStaleError
+from videobox_core_engine.preview_renderer import PreviewRenderer
 from videobox_domain_models.jobs import JobStatus, JobType
 from videobox_domain_models.recommendations import RecommendationType
 from videobox_storage.local_project_store import LocalProjectStore
+
+
+def test_preview_requires_verifier_store_for_revision_only_immutable_source() -> None:
+    """Preview must not bypass the shared immutable-source contract on revision alone."""
+    with pytest.raises(OutputSourceStaleError, match="preview verifier store is required"):
+        PreviewRenderer().build_preview_payload(
+            project_id="project_001",
+            timeline={
+                "timeline_id": "timeline_001",
+                "tracks": [
+                    {
+                        "track_id": "broll",
+                        "track_type": "broll",
+                        "clips": [{"asset_id": "asset_001", "asset_uri": "local://projects/project_001/assets/asset_001", "media_revision": "2026-07-15T00:00:00+00:00"}],
+                    }
+                ],
+            },
+        )
+
+
+def test_old_timeline_cannot_publish_any_output_after_latest_editing_session_moves(
+    tmp_path: Path,
+) -> None:
+    """Reapproving old artifacts cannot revive a timeline superseded by regeneration."""
+    class RecordingFinalRenderer:
+        video_width = 1920
+        video_height = 1080
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def render_timeline_to_mp4(self, **_: object) -> None:
+            self.calls += 1
+
+    class RecordingCapCutExporter:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def export_timeline(self, **_: object) -> object:
+            self.calls += 1
+            raise AssertionError("lineage gate must run before CapCut export")
+
+    store = LocalProjectStore(tmp_path / "projects")
+    project = store.bootstrap_project("lineage gate")
+    timeline_payload = {"tracks": [], "review_flags": [], "pending_recommendations": [], "applied_recommendations": []}
+    old_timeline = store.save_timeline_run(project_id=project.project_id, output_mode="review", timeline_payload=timeline_payload)
+    active_timeline = store.save_timeline_run(project_id=project.project_id, output_mode="review", timeline_payload=timeline_payload)
+    old_job = store.create_job(project_id=project.project_id, job_type=JobType.TIMELINE_BUILD, status=JobStatus.SUCCEEDED)
+    store.update_job(project_id=project.project_id, job_id=old_job["job_id"], status=JobStatus.SUCCEEDED, output_ref=old_timeline["timeline_id"])
+    session = store.save_editing_session(project_id=project.project_id, timeline_id=old_timeline["timeline_id"], session_payload={"segments": [], "history": []})
+    store.update_editing_session(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+        timeline_id=active_timeline["timeline_id"],
+        session_payload={"segments": [], "history": []},
+        expected_revision=session["session_revision"],
+    )
+    # Simulate a mistaken reapproval and regenerated subtitle for the old job.
+    store.save_review_state(project_id=project.project_id, timeline_id=old_timeline["timeline_id"], status="approved")
+    store.save_subtitle_run(project_id=project.project_id, timeline_id=old_timeline["timeline_id"], subtitle_payload={"entries": []})
+    final = RecordingFinalRenderer()
+    capcut = RecordingCapCutExporter()
+    runner = LocalPipelineRunner(store, final_renderer=final, pycapcut_exporter=capcut)
+
+    with pytest.raises(Exception, match="stale_output_asset"):
+        runner.start_preview_render(project_id=project.project_id, timeline_job_id=old_job["job_id"])
+    with pytest.raises(RuntimeError, match="stale_output_asset"):
+        runner.start_final_render(project_id=project.project_id, timeline_job_id=old_job["job_id"])
+    with pytest.raises(RuntimeError, match="stale_output_asset"):
+        runner.start_capcut_draft_export(project_id=project.project_id, timeline_job_id=old_job["job_id"])
+    assert final.calls == 0
+    assert capcut.calls == 0
 
 
 def test_save_preview_run_persists_artifacts_and_index(tmp_path: Path) -> None:
@@ -1215,6 +1289,42 @@ def test_start_preview_render_marks_job_failed_when_renderer_errors(tmp_path: Pa
     assert preview_job["job_type"] == JobType.PREVIEW_RENDER.value
     assert preview_job["status"] == JobStatus.FAILED.value
     assert preview_job["error_message"] == "preview renderer exploded"
+
+
+def test_preview_entrypoint_rejects_mutated_and_stale_dependencies_then_recovers(tmp_path: Path) -> None:
+    """Task 12 E2E: preview uses the same fail-closed source/freshness gate."""
+    from hashlib import sha256
+    from videobox_domain_models.assets import AssetType
+    from videobox_core_engine.output_source_verifier import OutputSourceStaleError
+
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Preview stale output gate")
+    source = tmp_path / "broll.bin"
+    source.write_bytes(b"original preview bytes")
+    asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=source)
+    stored = store.resolve_storage_uri(project_id=project.project_id, storage_uri=asset.storage_uri)
+    expected_sha = sha256(stored.read_bytes()).hexdigest()
+    timeline = store.save_timeline_run(project_id=project.project_id, output_mode="review", timeline_payload={
+        "project_id": project.project_id, "tracks": [{"track_id": "broll", "track_type": "broll", "clips": [{"asset_id": asset.asset_id, "asset_uri": asset.storage_uri, "start_sec": 0, "end_sec": 1, "expected_content_sha256": expected_sha, "media_revision": store.get_asset(project_id=project.project_id, asset_id=asset.asset_id)["created_at"], "media_controls": {"trim_start_sec": 0.1, "loop": False, "fit": "crop"}}]}], "review_flags": [], "applied_recommendations": [], "pending_recommendations": []})
+    timeline_job = store.create_job(project_id=project.project_id, job_type=JobType.TIMELINE_BUILD, status=JobStatus.SUCCEEDED)
+    store.update_job(project_id=project.project_id, job_id=timeline_job["job_id"], status=JobStatus.SUCCEEDED, output_ref=timeline["timeline_id"])
+    store.save_review_state(project_id=project.project_id, timeline_id=timeline["timeline_id"], status="approved")
+    runner = LocalPipelineRunner(store)
+    stored.write_bytes(b"mutated")
+    with pytest.raises(OutputSourceStaleError, match="stale_output_asset"):
+        runner.start_preview_render(project_id=project.project_id, timeline_job_id=timeline_job["job_id"])
+    assert not list((store.project_root(project.project_id) / "previews").glob("*.json"))
+    stored.write_bytes(b"original preview bytes")
+    session = store.save_editing_session(project_id=project.project_id, timeline_id=timeline["timeline_id"], session_payload={"segments": [], "history": []})
+    store.save_subtitle_run(project_id=project.project_id, timeline_id=timeline["timeline_id"], subtitle_payload={"entries": []})
+    store.update_editing_session(project_id=project.project_id, session_id=session["session_id"], session_payload={"segments": [], "history": []}, expected_revision=session["session_revision"])
+    runner.approve_timeline_review(project_id=project.project_id, timeline_job_id=timeline_job["job_id"])
+    with pytest.raises(OutputSourceStaleError, match="stale_output_asset"):
+        runner.start_preview_render(project_id=project.project_id, timeline_job_id=timeline_job["job_id"])
+    runner.start_subtitle_render(project_id=project.project_id, timeline_job_id=timeline_job["job_id"])
+    result = runner.start_preview_render(project_id=project.project_id, timeline_job_id=timeline_job["job_id"])
+    assert result["status"] == JobStatus.SUCCEEDED.value
+    assert runner.get_preview_result(project_id=project.project_id, job_id=result["job_id"])["preview"]["is_current"] is True
 
 
 def test_start_preview_render_accepts_legacy_list_only_output_copy_builder(tmp_path: Path) -> None:

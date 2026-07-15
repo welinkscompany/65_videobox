@@ -598,6 +598,7 @@ class TimelinePayloadResponse(BaseModel):
     applied_recommendations: list[RecommendationItemResponse] = Field(default_factory=list)
     pending_recommendations: list[RecommendationItemResponse] = Field(default_factory=list)
     created_at: str | None = None
+    source_session_revision: int | None = None
 
 
 class TimelineJobResponse(StartJobResponse):

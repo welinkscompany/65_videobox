@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from videobox_core_engine.local_pipeline import LocalPipelineRunner
 from videobox_domain_models.jobs import JobStatus, JobType
 from videobox_storage.local_project_store import LocalProjectStore
@@ -139,6 +141,31 @@ def test_start_final_render_persists_export_and_updates_job(tmp_path: Path) -> N
     assert fetched["render"]["file_uri"].startswith(f"local://projects/{project.project_id}/exports/final_render/")
 
 
+def test_final_entrypoint_blocks_stale_review_and_subtitle_until_regenerated(tmp_path: Path) -> None:
+    """Task 12 E2E: stale durable dependencies stop before the renderer call."""
+    raw_audio = tmp_path / "narration.wav"
+    raw_audio.write_bytes(b"fake wav data")
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Final stale output gate")
+    fake_renderer = _FakeFinalRenderer()
+    runner = LocalPipelineRunner(store, final_renderer=fake_renderer)
+    narration = runner.register_narration_asset(project_id=project.project_id, source_path=raw_audio)
+    timeline_job = _build_approved_timeline_job(store, runner, project.project_id, narration)
+    session = store.save_editing_session(project_id=project.project_id, timeline_id=timeline_job["timeline_id"], session_payload={"segments": [], "history": []})
+    store.save_subtitle_run(project_id=project.project_id, timeline_id=timeline_job["timeline_id"], subtitle_payload={"entries": []})
+    store.update_editing_session(project_id=project.project_id, session_id=session["session_id"], session_payload={"segments": [], "history": []}, expected_revision=session["session_revision"])
+    # Reapproval clears the review gate; stale subtitle remains and must be
+    # rejected by the output freshness verifier itself.
+    runner.approve_timeline_review(project_id=project.project_id, timeline_job_id=timeline_job["job_id"])
+    with pytest.raises(RuntimeError, match="stale_output_asset"):
+        runner.start_final_render(project_id=project.project_id, timeline_job_id=timeline_job["job_id"])
+    assert fake_renderer.received_calls == []
+    runner.start_subtitle_render(project_id=project.project_id, timeline_job_id=timeline_job["job_id"])
+    recovered = runner.start_final_render(project_id=project.project_id, timeline_job_id=timeline_job["job_id"])
+    assert recovered["status"] == "succeeded"
+    assert len(fake_renderer.received_calls) == 1
+
+
 def test_start_final_render_passes_latest_subtitle_file_path_to_renderer(tmp_path: Path) -> None:
     raw_audio = tmp_path / "narration.wav"
     raw_audio.write_bytes(b"fake wav data")
@@ -184,6 +211,7 @@ def test_start_final_render_derives_ass_from_matching_editing_session(tmp_path: 
     narration_asset = runner.register_narration_asset(project_id=project.project_id, source_path=raw_audio)
     timeline_job = _build_approved_timeline_job(store, runner, project.project_id, narration_asset)
     store.save_editing_session(project_id=project.project_id, timeline_id=timeline_job["timeline_id"], session_payload={"project_id": project.project_id, "timeline_id": timeline_job["timeline_id"], "caption_style": {"text_color": "#FF0000FF"}, "segments": [{"segment_id": "seg_001", "caption_text": "Styled output", "start_sec": 0.0, "end_sec": 2.0}], "history": []})
+    runner.approve_timeline_review(project_id=project.project_id, timeline_job_id=timeline_job["job_id"])
 
     runner.start_final_render(project_id=project.project_id, timeline_job_id=timeline_job["job_id"])
 

@@ -583,6 +583,7 @@ class _PipelinePrivateHelpersMixin:
         project_id: str,
         session: dict[str, Any],
         request: dict[str, Any],
+        output_session_revision: int,
     ) -> dict[str, Any]:
         source_timeline = self.store.get_timeline_run(
             project_id=project_id,
@@ -807,6 +808,7 @@ class _PipelinePrivateHelpersMixin:
             project_id=project_id,
             output_mode=timeline.output_mode,
             timeline_payload=timeline_payload,
+            source_session_revision=output_session_revision,
         )
         return {
             "session_id": str(session["session_id"]),

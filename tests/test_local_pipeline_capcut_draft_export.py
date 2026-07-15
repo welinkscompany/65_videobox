@@ -125,6 +125,28 @@ def test_start_capcut_draft_export_persists_export_and_updates_job(tmp_path: Pat
     )
 
 
+def test_capcut_entrypoint_blocks_stale_review_and_subtitle_until_regenerated(tmp_path: Path) -> None:
+    """Task 12 E2E: stale dependency never reaches the CapCut adapter."""
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="CapCut stale output gate")
+    fake_exporter = _FakePyCapCutExporter()
+    runner = LocalPipelineRunner(store, pycapcut_exporter=fake_exporter)
+    timeline_job_id = _build_approved_timeline_job(store, runner, project.project_id)
+    timeline_id = runner.get_timeline_result(project_id=project.project_id, job_id=timeline_job_id)["timeline"]["timeline_id"]
+    session = store.save_editing_session(project_id=project.project_id, timeline_id=timeline_id, session_payload={"segments": [], "history": []})
+    assert store.get_timeline_run(project_id=project.project_id, timeline_id=timeline_id)["source_session_revision"] == session["session_revision"]
+    store.save_subtitle_run(project_id=project.project_id, timeline_id=timeline_id, subtitle_payload={"entries": []})
+    store.update_editing_session(project_id=project.project_id, session_id=session["session_id"], session_payload={"segments": [], "history": []}, expected_revision=session["session_revision"])
+    runner.approve_timeline_review(project_id=project.project_id, timeline_job_id=timeline_job_id)
+    with pytest.raises(RuntimeError, match="stale_output_asset"):
+        runner.start_capcut_draft_export(project_id=project.project_id, timeline_job_id=timeline_job_id)
+    assert fake_exporter.received_calls == []
+    runner.start_subtitle_render(project_id=project.project_id, timeline_job_id=timeline_job_id)
+    recovered = runner.start_capcut_draft_export(project_id=project.project_id, timeline_job_id=timeline_job_id)
+    assert recovered["status"] == "succeeded"
+    assert len(fake_exporter.received_calls) == 1
+
+
 def test_start_capcut_draft_export_raises_clear_error_when_not_configured(tmp_path: Path) -> None:
     store = LocalProjectStore(tmp_path)
     project = store.bootstrap_project(name="CapCut Draft Export Unconfigured Project")
@@ -144,6 +166,7 @@ def test_start_capcut_draft_export_passes_matching_editing_session_to_adapter(tm
     timeline_job_id = _build_approved_timeline_job(store, runner, project.project_id)
     timeline_id = runner.get_timeline_result(project_id=project.project_id, job_id=timeline_job_id)["timeline"]["timeline_id"]
     store.save_editing_session(project_id=project.project_id, timeline_id=timeline_id, session_payload={"project_id": project.project_id, "timeline_id": timeline_id, "caption_style": {"text_color": "#00FF00FF"}, "segments": [{"segment_id": "seg_001", "caption_text": "CapCut style", "start_sec": 0.0, "end_sec": 2.0}], "history": []})
+    runner.approve_timeline_review(project_id=project.project_id, timeline_job_id=timeline_job_id)
 
     runner.start_capcut_draft_export(project_id=project.project_id, timeline_job_id=timeline_job_id)
 

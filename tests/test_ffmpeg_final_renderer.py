@@ -14,8 +14,28 @@ from videobox_core_engine.ass_subtitles import render_editing_session_ass
 from videobox_domain_models.assets import AssetType
 from videobox_storage.local_project_store import LocalProjectStore
 from videobox_storage.timeline_clip_source_resolution import ResolvedClipSource
+from videobox_core_engine.output_source_verifier import OutputSourceStaleError
 
 FFMPEG_AVAILABLE = shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
+
+
+def test_final_renderer_rejects_post_materialization_content_mutation_before_ffmpeg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Task 12 RED: no renderer may silently consume a swapped local asset."""
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="stale final source")
+    source = tmp_path / "broll.mp4"
+    source.write_bytes(b"original")
+    asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=source)
+    stored = store.resolve_storage_uri(project_id=project.project_id, storage_uri=asset.storage_uri)
+    expected_sha = __import__("hashlib").sha256(stored.read_bytes()).hexdigest()
+    stored.write_bytes(b"mutated after materialization")
+    renderer = FfmpegFinalRenderer(store=store)
+    monkeypatch.setattr(FfmpegFinalRenderer, "_run", lambda _self, _command: pytest.fail("ffmpeg must not start"))
+    timeline = {"tracks": [{"track_type": "broll", "clips": [{"asset_uri": asset.storage_uri, "asset_id": asset.asset_id, "start_sec": 0, "end_sec": 1, "expected_content_sha256": expected_sha}]}]}
+    with pytest.raises(OutputSourceStaleError, match="stale_output_asset"):
+        renderer.render_timeline_to_mp4(project_id=project.project_id, timeline=timeline, output_path=tmp_path / "out.mp4")
 
 
 def test_broll_extract_maps_trim_crop_loop_and_pad_into_one_ffmpeg_command(

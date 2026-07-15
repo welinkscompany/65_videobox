@@ -924,7 +924,7 @@ git commit -m "feat: apply director proposals as atomic edits"
 - Modify: docs/implementation-plan.ko.md
 - Modify: docs/development-status-2026-06-29.ko.md
 
-- [ ] **Step 1: source mutation RED test 작성**
+- [x] **Step 1: source mutation RED test 작성**
 
 ~~~python
 def test_final_renderer_rejects_materialized_asset_when_content_sha256_changed(tmp_path) -> None:
@@ -936,17 +936,17 @@ def test_final_renderer_rejects_materialized_asset_when_content_sha256_changed(t
 
 같은 계약을 PyCapCut real adapter에 추가하고, 기존 crop/loop/pad/trim/audio controls test는 유지한다.
 
-- [ ] **Step 2: RED 확인**
+- [x] **Step 2: RED 확인**
 
 Run: .venv\Scripts\python.exe -m pytest -q tests/test_ffmpeg_final_renderer.py tests/test_pycapcut_adapter.py
 
 Expected: mutation을 감지하지 못해 FAIL.
 
-- [ ] **Step 3: shared source verifier 구현**
+- [x] **Step 3: shared source verifier 구현**
 
 project-local path, expected content SHA-256, media revision을 output 시작 전에 검증한다. mismatch이면 조용한 대체·재trim을 하지 않고 stale asset error를 반환한다. preview, FFmpeg, PyCapCut은 proposal apply가 저장한 동일 scene in/out/crop/loop/trim controls를 소비하며, 같은 post-materialization mutation에 세 경로 모두 같은 stale-asset identity를 반환하는 contract test를 둔다.
 
-- [ ] **Step 4: focused/full/real pack gate**
+- [x] **Step 4: focused/full/real pack gate**
 
 ~~~powershell
 .venv\Scripts\python.exe -m pytest -q tests/test_ffmpeg_final_renderer.py tests/test_pycapcut_adapter.py tests/test_media_director_apply.py tests/test_api_media_director.py
@@ -960,7 +960,7 @@ npm --prefix apps/web run build
 
 Expected: 전부 PASS. 또한 non-live deterministic integration에서 real default local transport construction이 malformed/non-loopback config를 connection 전에 거절함을 확인한다. actual connection은 opt-in live smoke만 허용하며 evidence의 `external_provider_calls=0`, `gemini_calls=0`을 release gate로 확인한다.
 
-- [ ] **Step 5: SSOT, commit, push**
+- [x] **Step 5: SSOT, commit, push**
 
 실제 test totals, real pack result, source mutation rejection과 commit HEAD를 기록한다.
 

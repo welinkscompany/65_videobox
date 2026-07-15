@@ -302,12 +302,17 @@ class EditingSessionRegenerationMixin:
             input_ref=session_id,
             status=JobStatus.RUNNING,
         )
+        published_timeline_id: str | None = None
+        refreshed_session: dict[str, Any] | None = None
+        partial_regeneration_id: str | None = None
         try:
             result = self._execute_partial_regeneration(
                 project_id=project_id,
                 session=session,
                 request=request,
+                output_session_revision=captured_revision + 1,
             )
+            published_timeline_id = str(result["timeline_id"])
             try:
                 refreshed_session = self.store.update_editing_session(
                     project_id=project_id,
@@ -315,8 +320,12 @@ class EditingSessionRegenerationMixin:
                     session_payload=session,
                     timeline_id=result["timeline_id"],
                     expected_revision=captured_revision,
+                    invalidate_output_freshness=False,
                 )
             except EditingSessionRevisionConflict:
+                discard = getattr(self.store, "discard_partial_regeneration_timeline", None)
+                if callable(discard):
+                    discard(project_id=project_id, timeline_id=str(result["timeline_id"]))
                 latest_session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
                 raise EditingSessionConflict(latest_session) from None
             persisted = self.store.save_partial_regeneration_run(
@@ -326,6 +335,7 @@ class EditingSessionRegenerationMixin:
                     "session_updated_at": refreshed_session["updated_at"],
                 },
             )
+            partial_regeneration_id = str(persisted["partial_regeneration_id"])
             self.store.update_job(
                 project_id=project_id,
                 job_id=job["job_id"],
@@ -333,11 +343,64 @@ class EditingSessionRegenerationMixin:
                 output_ref=persisted["partial_regeneration_id"],
             )
         except Exception as exc:
+            # If the session CAS succeeded but publication of its regeneration
+            # record/job failed, return the session to the prior durable
+            # timeline and remove the otherwise-unreachable candidate output.
+            cleanup_errors: list[str] = []
+            if refreshed_session is not None and published_timeline_id is not None:
+                try:
+                    restore = getattr(self.store, "restore_editing_session_after_failed_publication", None)
+                    if callable(restore):
+                        restore(
+                            project_id=project_id,
+                            session_id=session_id,
+                            session_payload=session,
+                            expected_revision=int(refreshed_session["session_revision"]),
+                        )
+                    else:
+                        self.store.update_editing_session(
+                            project_id=project_id,
+                            session_id=session_id,
+                            session_payload=session,
+                            timeline_id=str(session["timeline_id"]),
+                            expected_revision=int(refreshed_session["session_revision"]),
+                        )
+                    discard = getattr(self.store, "discard_partial_regeneration_timeline", None)
+                    if callable(discard):
+                        discard(project_id=project_id, timeline_id=published_timeline_id)
+                except EditingSessionRevisionConflict:
+                    # A later user edit won the CAS; never overwrite that
+                    # durable state while compensating this failed job.
+                    pass
+                except Exception as cleanup_exc:
+                    cleanup_errors.append(str(cleanup_exc))
+                    mark_cleanup_needed = getattr(self.store, "mark_partial_regeneration_cleanup_needed", None)
+                    if callable(mark_cleanup_needed):
+                        try:
+                            mark_cleanup_needed(
+                                project_id=project_id,
+                                timeline_id=published_timeline_id,
+                            )
+                        except Exception as marker_exc:
+                            cleanup_errors.append(str(marker_exc))
+            if partial_regeneration_id is not None:
+                discard_run = getattr(self.store, "discard_partial_regeneration_run", None)
+                if callable(discard_run):
+                    try:
+                        discard_run(
+                            project_id=project_id,
+                            partial_regeneration_id=partial_regeneration_id,
+                        )
+                    except Exception as cleanup_exc:
+                        cleanup_errors.append(str(cleanup_exc))
+            error_message = str(exc)
+            if cleanup_errors:
+                error_message = f"{error_message}; cleanup reconciliation pending: {'; '.join(cleanup_errors)}"
             self.store.update_job(
                 project_id=project_id,
                 job_id=job["job_id"],
                 status=JobStatus.FAILED,
-                error_message=str(exc),
+                error_message=error_message,
             )
             raise
         return {

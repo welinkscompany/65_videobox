@@ -36,6 +36,7 @@ from videobox_core_engine.auto_cut import AutoCutPlanner
 from videobox_core_engine.capcut_handoff import CapCutHandoffError, CapCutHandoffService
 from videobox_core_engine.ffmpeg_auto_cut_executor import FfmpegAutoCutExecutor
 from videobox_core_engine.ffmpeg_final_renderer import FfmpegFinalRenderer
+from videobox_core_engine.output_source_verifier import OutputSourceStaleError, verify_output_freshness
 from videobox_core_engine.ass_subtitles import render_editing_session_ass
 from videobox_core_engine.thumbnail_generator import ThumbnailGenerationError, generate_video_thumbnail
 from videobox_core_engine.tts_acceptance import assess_tts_audio
@@ -132,7 +133,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         self.review_guidance_builder = review_guidance_builder or HeuristicReviewGuidanceBuilder()
         self.output_operator_copy_builder = output_operator_copy_builder or StaticOutputOperatorCopyBuilder()
         self.timeline_builder = timeline_builder or TimelineBuilder()
-        self.preview_renderer = preview_renderer or PreviewRenderer()
+        self.preview_renderer = preview_renderer or PreviewRenderer(store=self.store)
         self.capcut_exporter = capcut_exporter or CapCutExportAdapter()
         self.auto_cut_planner = auto_cut_planner or AutoCutPlanner()
         self.auto_cut_executor = auto_cut_executor or FfmpegAutoCutExecutor(planner=self.auto_cut_planner)
@@ -1012,10 +1013,23 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
     def approve_timeline_review(self, *, project_id: str, timeline_job_id: str) -> dict[str, Any]:
         timeline = self.get_timeline_result(project_id=project_id, job_id=timeline_job_id)["timeline"]
         self._ensure_timeline_has_no_blockers(timeline)
+        session = self._editing_session_for_output_timeline(
+            project_id=project_id,
+            timeline=timeline,
+        )
+        source_session_revision = None
+        if session is not None:
+            source_session_revision = int(session["session_revision"])
+            self.store.bind_timeline_to_editing_session_revision(
+                project_id=project_id,
+                timeline_id=str(timeline["timeline_id"]),
+                session_revision=source_session_revision,
+            )
         return self.store.save_review_state(
             project_id=project_id,
             timeline_id=str(timeline["timeline_id"]),
             status="approved",
+            source_session_revision=source_session_revision,
         )
 
     def reopen_timeline_review(self, *, project_id: str, timeline_job_id: str) -> dict[str, Any]:
@@ -1094,10 +1108,8 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         try:
             timeline = self.get_timeline_result(project_id=project_id, job_id=timeline_job_id)["timeline"]
             self._ensure_timeline_ready_for_output(timeline)
-            preview_payload = self.preview_renderer.build_preview_payload(
-                project_id=project_id,
-                timeline=timeline,
-            )
+            self._ensure_output_dependencies_fresh(project_id=project_id, timeline=timeline)
+            preview_payload = self.preview_renderer.build_preview_payload(project_id=project_id, timeline=timeline)
         except Exception as exc:
             failed_job = self.store.update_job(
                 project_id=project_id,
@@ -1172,6 +1184,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         try:
             timeline = self.get_timeline_result(project_id=project_id, job_id=timeline_job_id)["timeline"]
             self._ensure_timeline_ready_for_output(timeline)
+            self._ensure_output_dependencies_fresh(project_id=project_id, timeline=timeline)
             latest_subtitle = self.store.get_latest_subtitle_for_timeline(
                 project_id=project_id,
                 timeline_id=str(timeline["timeline_id"]),
@@ -1279,6 +1292,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         try:
             timeline = self.get_timeline_result(project_id=project_id, job_id=timeline_job_id)["timeline"]
             self._ensure_timeline_ready_for_output(timeline)
+            self._ensure_output_dependencies_fresh(project_id=project_id, timeline=timeline)
             latest_subtitle = self.store.get_latest_subtitle_for_timeline(
                 project_id=project_id,
                 timeline_id=str(timeline["timeline_id"]),
@@ -1384,6 +1398,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         try:
             timeline = self.get_timeline_result(project_id=project_id, job_id=timeline_job_id)["timeline"]
             self._ensure_timeline_ready_for_output(timeline)
+            self._ensure_output_dependencies_fresh(project_id=project_id, timeline=timeline)
             latest_subtitle = self.store.get_latest_subtitle_for_timeline(
                 project_id=project_id,
                 timeline_id=str(timeline["timeline_id"]),
@@ -1479,6 +1494,31 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         if str(session.get("timeline_id") or "") != str(timeline.get("timeline_id") or ""):
             return None
         return session
+
+    def _ensure_output_dependencies_fresh(self, *, project_id: str, timeline: dict[str, Any]) -> None:
+        """A stale approval/subtitle must never authorize a new output artifact."""
+        timeline_id = str(timeline.get("timeline_id") or "")
+        if not timeline_id:
+            return
+        try:
+            active_session = self.store.get_latest_editing_session(project_id=project_id)
+        except KeyError:
+            active_session = None
+        if active_session is not None and str(active_session.get("timeline_id") or "") != timeline_id:
+            raise OutputSourceStaleError("timeline is not the active editing session output")
+        try:
+            review = self.store.get_review_state(project_id=project_id, timeline_id=timeline_id)
+        except KeyError:
+            review = None
+        subtitle = self.store.get_latest_subtitle_for_timeline(
+            project_id=project_id, timeline_id=timeline_id, include_stale=True
+        )
+        verify_output_freshness(
+            editing_session=active_session,
+            timeline=timeline,
+            subtitle=subtitle,
+            review=review,
+        )
 
     def get_capcut_draft_export_result(self, *, project_id: str, job_id: str) -> dict[str, Any]:
         job = self.store.get_job(project_id=project_id, job_id=job_id)

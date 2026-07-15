@@ -563,6 +563,7 @@ class LocalProjectStore:
         project_id: str,
         output_mode: str,
         timeline_payload: dict[str, Any],
+        source_session_revision: int | None = None,
     ) -> dict[str, Any]:
         sequence = self._next_sequence(
             self.project_root(project_id) / "timelines",
@@ -580,6 +581,8 @@ class LocalProjectStore:
             "created_at": self._now_iso(),
             **timeline_payload,
         }
+        if source_session_revision is not None:
+            payload["source_session_revision"] = int(source_session_revision)
         timeline_path.write_text(json.dumps(payload, indent=2, ensure_ascii=True), encoding="utf-8")
         summary_json = _timeline_summary_json(payload)
         self._execute(
@@ -629,6 +632,7 @@ class LocalProjectStore:
             project_id=project_id,
             timeline_id=timeline_id,
             status=initial_review_status,
+            source_session_revision=source_session_revision,
         )
         return {"timeline_id": timeline_id, "file_uri": file_uri, "timeline": payload}
 
@@ -644,13 +648,47 @@ class LocalProjectStore:
             "editing_session_*.json",
         )
         session_id = f"editing_session_{sequence:03d}"
-        return self._write_editing_session(
+        saved = self._write_editing_session(
             project_id=project_id,
             timeline_id=timeline_id,
             session_id=session_id,
             session_payload=session_payload,
             is_new=True,
         )
+        try:
+            self.bind_timeline_to_editing_session_revision(
+                project_id=project_id,
+                timeline_id=timeline_id,
+                session_revision=int(saved["session_revision"]),
+            )
+        except KeyError:
+            # A pre-timeline draft session cannot authorize any output until bound.
+            pass
+        return saved
+
+    def bind_timeline_to_editing_session_revision(
+        self,
+        *,
+        project_id: str,
+        timeline_id: str,
+        session_revision: int,
+    ) -> dict[str, Any]:
+        """Persist the editing-session revision consumed by a timeline and review."""
+        timeline = self.get_timeline_run(project_id=project_id, timeline_id=timeline_id)
+        timeline["source_session_revision"] = int(session_revision)
+        updated = self.update_timeline_run(
+            project_id=project_id,
+            timeline_id=timeline_id,
+            timeline_payload=timeline,
+        )
+        review = self.get_review_state(project_id=project_id, timeline_id=timeline_id)
+        self.save_review_state(
+            project_id=project_id,
+            timeline_id=timeline_id,
+            status=str(review["status"]),
+            source_session_revision=int(session_revision),
+        )
+        return updated
 
     def update_editing_session(
         self,
@@ -660,6 +698,7 @@ class LocalProjectStore:
         session_payload: dict[str, Any],
         timeline_id: str | None = None,
         expected_revision: int | None = None,
+        invalidate_output_freshness: bool = True,
     ) -> dict[str, Any]:
         existing = self.get_editing_session(project_id=project_id, session_id=session_id)
         current_revision = int(existing.get("session_revision") or 1)
@@ -676,6 +715,34 @@ class LocalProjectStore:
             is_new=False,
             created_at=created_at,
             expected_revision=expected_revision,
+            invalidate_output_freshness=invalidate_output_freshness,
+        )
+
+    def restore_editing_session_after_failed_publication(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        session_payload: dict[str, Any],
+        expected_revision: int,
+    ) -> dict[str, Any]:
+        """CAS-restore the exact pre-publication session without staling its outputs.
+
+        A partial regeneration briefly advances the session to bind its candidate
+        timeline.  If publishing the result/job fails, that candidate never became
+        observable, so the original revision and its artifacts remain authoritative.
+        """
+        existing = self.get_editing_session(project_id=project_id, session_id=session_id)
+        payload = deepcopy(session_payload)
+        return self._write_editing_session(
+            project_id=project_id,
+            timeline_id=str(payload["timeline_id"]),
+            session_id=session_id,
+            session_payload=payload,
+            is_new=False,
+            created_at=str(existing["created_at"]),
+            expected_revision=expected_revision,
+            invalidate_output_freshness=False,
         )
 
     def apply_director_proposal_transaction(
@@ -731,6 +798,7 @@ class LocalProjectStore:
         project_id: str,
         timeline_id: str,
         status: str,
+        source_session_revision: int | None = None,
     ) -> dict[str, Any]:
         if status not in {"draft", "blocked", "approved"}:
             raise ValueError(f"Unsupported review status: {status}")
@@ -744,18 +812,19 @@ class LocalProjectStore:
                 project_id,
                 status,
                 approved_at,
-                updated_at
-            ) VALUES (?, ?, ?, ?, ?)
+                updated_at,
+                source_session_revision
+            ) VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT(timeline_id) DO UPDATE SET
                 status = excluded.status,
                 approved_at = excluded.approved_at,
                 updated_at = excluded.updated_at,
-                source_session_revision = (SELECT session_revision FROM editing_sessions WHERE project_id = excluded.project_id AND timeline_id = excluded.timeline_id ORDER BY updated_at DESC LIMIT 1),
+                source_session_revision = COALESCE(excluded.source_session_revision, (SELECT session_revision FROM editing_sessions WHERE project_id = excluded.project_id AND timeline_id = excluded.timeline_id ORDER BY updated_at DESC LIMIT 1)),
                 is_current = 1,
                 invalidated_at = NULL,
                 invalidated_reason = NULL
             """,
-            (timeline_id, project_id, status, approved_at, updated_at),
+            (timeline_id, project_id, status, approved_at, updated_at, source_session_revision),
         )
         self.clear_operator_guidance(project_id=project_id, timeline_id=timeline_id)
         return self.get_review_state(project_id=project_id, timeline_id=timeline_id)
@@ -829,6 +898,79 @@ class LocalProjectStore:
         )
         return self.get_timeline_run(project_id=project_id, timeline_id=timeline_id)
 
+    def discard_partial_regeneration_timeline(
+        self,
+        *,
+        project_id: str,
+        timeline_id: str,
+    ) -> None:
+        """Remove a timeline published before its owning session CAS lost.
+
+        Partial regeneration constructs a new timeline before it can atomically
+        advance the editing session.  A losing CAS must therefore make that
+        timeline and its initial review ineligible before reporting conflict.
+        """
+        connection = self._connection(project_id)
+        timeline_path: Path | None = None
+        try:
+            row = connection.execute(
+                "SELECT file_uri FROM timelines WHERE project_id = ? AND timeline_id = ?",
+                (project_id, timeline_id),
+            ).fetchone()
+            if row is None:
+                return
+            timeline_path = self.resolve_storage_uri(project_id=project_id, storage_uri=str(row["file_uri"]))
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                "UPDATE review_approvals SET is_current = 0, invalidated_at = ?, invalidated_reason = ? WHERE project_id = ? AND timeline_id = ?",
+                (self._now_iso(), "partial_regeneration_cas_conflict", project_id, timeline_id),
+            )
+            connection.execute(
+                "DELETE FROM review_approvals WHERE project_id = ? AND timeline_id = ?",
+                (project_id, timeline_id),
+            )
+            connection.execute(
+                "DELETE FROM timelines WHERE project_id = ? AND timeline_id = ?",
+                (project_id, timeline_id),
+            )
+            connection.commit()
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+        finally:
+            connection.close()
+        if timeline_path is not None:
+            timeline_path.unlink(missing_ok=True)
+
+    def mark_partial_regeneration_cleanup_needed(
+        self,
+        *,
+        project_id: str,
+        timeline_id: str,
+    ) -> None:
+        """Make a failed-to-delete candidate ineligible while reconciliation retries."""
+        connection = self._connection(project_id)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                "UPDATE review_approvals SET is_current = 0, invalidated_at = ?, invalidated_reason = ? "
+                "WHERE project_id = ? AND timeline_id = ?",
+                (
+                    self._now_iso(),
+                    "partial_regeneration_cleanup_failed",
+                    project_id,
+                    timeline_id,
+                ),
+            )
+            connection.commit()
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+        finally:
+            connection.close()
+
     def save_partial_regeneration_run(
         self,
         *,
@@ -871,6 +1013,21 @@ class LocalProjectStore:
         if not file_path.exists():
             raise KeyError(f"Partial regeneration run not found: {partial_regeneration_id}")
         return json.loads(file_path.read_text(encoding="utf-8"))
+
+    def discard_partial_regeneration_run(
+        self,
+        *,
+        project_id: str,
+        partial_regeneration_id: str,
+    ) -> None:
+        """Remove a run that was written before its owning job was published."""
+        file_path = (
+            self.project_root(project_id)
+            / "analysis"
+            / "partial_regenerations"
+            / f"{partial_regeneration_id}.json"
+        )
+        file_path.unlink(missing_ok=True)
 
     def update_partial_regeneration_run(
         self,
@@ -3587,12 +3744,24 @@ class LocalProjectStore:
                     connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
 
     def _ensure_artifact_freshness_triggers(self, connection: sqlite3.Connection) -> None:
-        for table, identifier in (("review_approvals", "timeline_id"), ("preview_renders", "preview_id"), ("subtitle_renders", "subtitle_id"), ("exports", "export_id")):
-            trigger = f"set_{table}_session_freshness"
-            connection.execute(
-                f"CREATE TRIGGER IF NOT EXISTS {trigger} AFTER INSERT ON {table} BEGIN "
-                f"UPDATE {table} SET source_session_revision = COALESCE((SELECT session_revision FROM editing_sessions WHERE project_id = NEW.project_id AND timeline_id = NEW.timeline_id ORDER BY updated_at DESC LIMIT 1), 1), is_current = 1 WHERE {identifier} = NEW.{identifier}; END"
-            )
+        # This migration deliberately replaces an earlier trigger definition so
+        # that an explicit lineage revision is preserved.  _connection() is also
+        # used by background jobs, so the replacement must be one SQLite writer
+        # transaction; otherwise two connections can both observe a missing
+        # trigger between DROP and CREATE.
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            for table, identifier in (("review_approvals", "timeline_id"), ("preview_renders", "preview_id"), ("subtitle_renders", "subtitle_id"), ("exports", "export_id")):
+                trigger = f"set_{table}_session_freshness"
+                connection.execute(f"DROP TRIGGER IF EXISTS {trigger}")
+                connection.execute(
+                    f"CREATE TRIGGER {trigger} AFTER INSERT ON {table} BEGIN "
+                    f"UPDATE {table} SET source_session_revision = COALESCE(NEW.source_session_revision, (SELECT session_revision FROM editing_sessions WHERE project_id = NEW.project_id AND timeline_id = NEW.timeline_id ORDER BY updated_at DESC LIMIT 1), 1), is_current = 1 WHERE {identifier} = NEW.{identifier}; END"
+                )
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
 
     def _ensure_editing_session_json_column(self, connection: sqlite3.Connection) -> None:
         existing_columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(editing_sessions)").fetchall()}
@@ -3666,13 +3835,14 @@ class LocalProjectStore:
     def _now_iso(self) -> str:
         return self._clock().isoformat()
 
-    def get_latest_subtitle_for_timeline(self, *, project_id: str, timeline_id: str) -> dict[str, Any] | None:
+    def get_latest_subtitle_for_timeline(self, *, project_id: str, timeline_id: str, include_stale: bool = False) -> dict[str, Any] | None:
+        current_filter = "" if include_stale else " AND COALESCE(is_current, 1) = 1"
         row = self._fetchone(
             project_id,
             """
             SELECT subtitle_id
             FROM subtitle_renders
-            WHERE timeline_id = ? AND COALESCE(is_current, 1) = 1
+            WHERE timeline_id = ?""" + current_filter + """
             ORDER BY created_at DESC
             LIMIT 1
             """,
@@ -3735,6 +3905,7 @@ class LocalProjectStore:
         created_at: str | None = None,
         expected_revision: int | None = None,
         transaction_hook: Callable[[sqlite3.Connection], None] | None = None,
+        invalidate_output_freshness: bool = True,
     ) -> dict[str, Any]:
         session_path = self.project_root(project_id) / "editing_sessions" / f"{session_id}.json"
         file_uri = self._path_to_uri(project_id, session_path)
@@ -3809,10 +3980,11 @@ class LocalProjectStore:
                 cursor = connection.execute(
                     """
                     UPDATE editing_sessions
-                    SET summary_json = ?, session_revision = ?, session_json = ?, updated_at = ?
+                    SET timeline_id = ?, summary_json = ?, session_revision = ?, session_json = ?, updated_at = ?
                     WHERE session_id = ? AND (? IS NULL OR session_revision = ?)
                     """,
                     (
+                        timeline_id,
                         summary_json,
                         payload["session_revision"],
                         serialized_payload,
@@ -3827,10 +3999,11 @@ class LocalProjectStore:
                     raise EditingSessionRevisionConflict("Editing session revision is stale.")
                 if transaction_hook is not None:
                     transaction_hook(connection)
-                self._invalidate_output_freshness_with_connection(
-                    connection, project_id=project_id, timeline_id=timeline_id,
-                    source_session_revision=payload["session_revision"], reason="editing_session_mutation",
-                )
+                if invalidate_output_freshness:
+                    self._invalidate_output_freshness_with_connection(
+                        connection, project_id=project_id, timeline_id=timeline_id,
+                        source_session_revision=payload["session_revision"], reason="editing_session_mutation",
+                    )
                 connection.commit()
                 temporary_path.write_text(serialized_payload, encoding="utf-8")
                 temporary_path.replace(session_path)

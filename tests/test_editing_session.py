@@ -369,6 +369,160 @@ def test_partial_regeneration_conflict_returns_latest_manual_caption_and_style_w
     assert runner.store.persisted is None
 
 
+def test_partial_regeneration_cas_conflict_discards_pre_published_timeline_and_review(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A concurrent edit must not leave a current output from the losing regeneration."""
+    from videobox_core_engine.editing_session_and_regeneration import EditingSessionConflict, EditingSessionRegenerationMixin
+    from videobox_storage.local_project_store import EditingSessionRevisionConflict
+
+    store = LocalProjectStore(tmp_path / "projects")
+    project = store.bootstrap_project("partial CAS conflict")
+    source = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={"tracks": [], "review_flags": [], "pending_recommendations": [], "applied_recommendations": []},
+    )
+    saved = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=source["timeline_id"],
+        session_payload={"segments": [{"segment_id": "seg_001", "caption_text": "before"}], "history": []},
+    )
+
+    class Runner(EditingSessionRegenerationMixin):
+        orphan_timeline_id: str
+
+        def __init__(self) -> None:
+            self.store = store
+
+        def _execute_partial_regeneration(self, **_: object) -> dict[str, object]:
+            orphan = store.save_timeline_run(
+                project_id=project.project_id,
+                output_mode="review",
+                timeline_payload={"tracks": [], "review_flags": [], "pending_recommendations": [], "applied_recommendations": []},
+                source_session_revision=2,
+            )
+            self.orphan_timeline_id = orphan["timeline_id"]
+            return {"timeline_id": orphan["timeline_id"], "timeline": orphan["timeline"], "segment_ids": ["seg_001"], "fields": ["caption"], "downstream_steps": ["timeline_build"]}
+
+    runner = Runner()
+    original_update = store.update_editing_session
+
+    def concurrent_edit_then_conflict(**_: object) -> dict[str, object]:
+        original_update(
+            project_id=project.project_id,
+            session_id=saved["session_id"],
+            timeline_id=source["timeline_id"],
+            session_payload={"segments": [{"segment_id": "seg_001", "caption_text": "concurrent"}], "history": []},
+            expected_revision=saved["session_revision"],
+        )
+        raise EditingSessionRevisionConflict("stale")
+
+    monkeypatch.setattr(store, "update_editing_session", concurrent_edit_then_conflict)
+    with pytest.raises(EditingSessionConflict):
+        runner.start_editing_session_partial_regeneration(
+            project_id=project.project_id,
+            session_id=saved["session_id"],
+            segment_ids=["seg_001"],
+            fields=["caption"],
+            expected_revision=saved["session_revision"],
+        )
+
+    assert store.get_editing_session(project_id=project.project_id, session_id=saved["session_id"])["segments"][0]["caption_text"] == "concurrent"
+    with pytest.raises(KeyError):
+        store.get_timeline_run(project_id=project.project_id, timeline_id=runner.orphan_timeline_id)
+    with pytest.raises(KeyError):
+        store.get_review_state(project_id=project.project_id, timeline_id=runner.orphan_timeline_id)
+
+
+def test_partial_regeneration_success_publication_failure_compensates_session_timeline_and_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed success-job update must not publish any part of a regeneration."""
+    from videobox_core_engine.editing_session_and_regeneration import EditingSessionRegenerationMixin
+    from videobox_domain_models.jobs import JobStatus
+
+    store = LocalProjectStore(tmp_path / "projects")
+    project = store.bootstrap_project("partial publication failure")
+    source = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={"tracks": [], "review_flags": [], "pending_recommendations": [], "applied_recommendations": []},
+    )
+    saved = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=source["timeline_id"],
+        session_payload={"segments": [{"segment_id": "seg_001", "caption_text": "before"}], "history": []},
+    )
+
+    class Runner(EditingSessionRegenerationMixin):
+        candidate_timeline_id: str
+
+        def __init__(self) -> None:
+            self.store = store
+
+        def _execute_partial_regeneration(self, **_: object) -> dict[str, object]:
+            candidate = store.save_timeline_run(
+                project_id=project.project_id,
+                output_mode="review",
+                timeline_payload={"tracks": [], "review_flags": [], "pending_recommendations": [], "applied_recommendations": []},
+                source_session_revision=2,
+            )
+            self.candidate_timeline_id = candidate["timeline_id"]
+            store.save_review_state(project_id=project.project_id, timeline_id=self.candidate_timeline_id, status="approved")
+            return {"timeline_id": self.candidate_timeline_id, "timeline": candidate["timeline"], "segment_ids": ["seg_001"], "fields": ["caption"], "downstream_steps": ["timeline_build"]}
+
+    runner = Runner()
+    original_update_job = store.update_job
+    original_discard_timeline = store.discard_partial_regeneration_timeline
+
+    def fail_only_success_publication(**kwargs: object) -> dict[str, object]:
+        if kwargs["status"] is JobStatus.SUCCEEDED:
+            raise OSError("injected job success publication failure")
+        return original_update_job(**kwargs)  # type: ignore[arg-type]
+
+    def fail_candidate_cleanup(**_: object) -> None:
+        raise OSError("injected candidate cleanup failure")
+
+    monkeypatch.setattr(store, "update_job", fail_only_success_publication)
+    monkeypatch.setattr(store, "discard_partial_regeneration_timeline", fail_candidate_cleanup)
+    with pytest.raises(OSError, match="success publication"):
+        runner.start_editing_session_partial_regeneration(
+            project_id=project.project_id,
+            session_id=saved["session_id"],
+            segment_ids=["seg_001"],
+            fields=["caption"],
+            expected_revision=saved["session_revision"],
+        )
+
+    recovered = store.get_editing_session(project_id=project.project_id, session_id=saved["session_id"])
+    assert recovered["timeline_id"] == source["timeline_id"]
+    assert recovered["segments"] == saved["segments"]
+    assert recovered["session_revision"] == saved["session_revision"]
+    assert store.get_timeline_run(project_id=project.project_id, timeline_id=runner.candidate_timeline_id)["timeline_id"] == runner.candidate_timeline_id
+    reconciliation = store.get_review_state(project_id=project.project_id, timeline_id=runner.candidate_timeline_id)
+    assert reconciliation["is_current"] is False
+    assert reconciliation["invalidated_reason"] == "partial_regeneration_cleanup_failed"
+    assert not list((store.project_root(project.project_id) / "analysis" / "partial_regenerations").glob("*.json"))
+    job = store.list_jobs(project_id=project.project_id)[0]
+    assert job["status"] == JobStatus.FAILED.value
+    assert job["output_ref"] is None
+    assert "success publication failure" in str(job["error_message"])
+    assert "candidate cleanup failure" in str(job["error_message"])
+    monkeypatch.setattr(store, "update_job", original_update_job)
+    monkeypatch.setattr(store, "discard_partial_regeneration_timeline", original_discard_timeline)
+    retried = runner.start_editing_session_partial_regeneration(
+        project_id=project.project_id,
+        session_id=saved["session_id"],
+        segment_ids=["seg_001"],
+        fields=["caption"],
+        expected_revision=saved["session_revision"],
+    )
+    assert retried["status"] == JobStatus.SUCCEEDED.value
+
+
 def test_save_editing_session_recovers_when_table_is_missing_on_existing_project(tmp_path: Path) -> None:
     store = LocalProjectStore(tmp_path)
     project = store.bootstrap_project(name="Editing Session Migration Project")

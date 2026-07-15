@@ -5,11 +5,13 @@ import json
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from videobox_api.main import create_app
 from videobox_capcut_export.adapter import CapCutExportAdapter
 from videobox_core_engine.ffmpeg_final_renderer import FfmpegFinalRenderer
+from videobox_core_engine.output_source_verifier import OutputSourceStaleError, verify_output_freshness
 from videobox_core_engine.media_pack_service import MediaPackService, compute_pack_integrity
 from videobox_storage.local_project_store import LocalProjectStore
 from videobox_storage.media_library_store import MediaLibraryStore
@@ -396,6 +398,39 @@ def _create_timeline_session(client: TestClient, tmp_path: Path) -> tuple[str, s
         f"/api/projects/{project_id}/editing-sessions", json={"timeline_job_id": timeline_job_id},
     ).json()["session_id"]
     return project_id, session_id
+
+
+def test_partial_regeneration_stamps_output_provenance_with_final_session_revision_and_later_edit_is_stale(
+    tmp_path: Path,
+) -> None:
+    """Partial regeneration must not make its newly-created timeline stale at birth."""
+    client = TestClient(create_app(projects_root=tmp_path / "projects"))
+    project_id, session_id = _create_timeline_session(client, tmp_path)
+    before = client.get(f"/api/projects/{project_id}/editing-sessions/{session_id}").json()
+
+    partial = client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/partial-regeneration",
+        json={"segment_ids": ["seg_001"], "fields": ["caption"], "expected_revision": before["session_revision"]},
+    )
+    assert partial.status_code == 202, partial.text
+    partial_job_id = partial.json()["job_id"]
+    timeline = client.get(f"/api/projects/{project_id}/partial-regenerations/{partial_job_id}").json()["timeline"]
+    refreshed = client.get(f"/api/projects/{project_id}/editing-sessions/{session_id}").json()
+    assert timeline["source_session_revision"] == refreshed["session_revision"]
+
+    store = LocalProjectStore(tmp_path / "projects")
+    review = store.get_review_state(project_id=project_id, timeline_id=timeline["timeline_id"])
+    assert review["source_session_revision"] == refreshed["session_revision"]
+    assert review["is_current"] is True
+    verify_output_freshness(editing_session=refreshed, timeline=timeline, review=review)
+
+    changed = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/caption",
+        json={"caption_text": "A genuine later edit.", "expected_revision": refreshed["session_revision"]},
+    )
+    assert changed.status_code == 200, changed.text
+    with pytest.raises(OutputSourceStaleError, match="stale_output_asset: editing session revision changed"):
+        verify_output_freshness(editing_session=changed.json(), timeline=timeline, review=review)
 
 
 def test_only_materialized_matching_project_audio_assets_can_override_and_build_timeline(tmp_path: Path) -> None:

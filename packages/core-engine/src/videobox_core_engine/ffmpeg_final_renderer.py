@@ -10,6 +10,7 @@ from typing import Any
 
 from videobox_core_engine.canonical_track import canonical_track_type
 from videobox_core_engine.media_controls import normalize_media_controls
+from videobox_core_engine.output_source_verifier import OutputSourceStaleError, verify_output_sources
 from videobox_storage.local_project_store import LocalProjectStore
 from videobox_storage.timeline_clip_source_resolution import (
     ResolvedClipSource,
@@ -268,6 +269,7 @@ class FfmpegFinalRenderer:
         subtitle_ass_path: Path | None = None,
         on_progress: Callable[[int], None] | None = None,
     ) -> Path:
+        verify_output_sources(store=self.store, project_id=project_id, timeline=timeline)
         def report_progress(percent: int) -> None:
             if on_progress is not None:
                 on_progress(percent)

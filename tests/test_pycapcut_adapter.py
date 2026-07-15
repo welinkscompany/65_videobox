@@ -10,8 +10,24 @@ import pytest
 from videobox_capcut_export.pycapcut_adapter import PyCapCutExportError, PyCapCutRealExportAdapter
 from videobox_domain_models.assets import AssetType
 from videobox_storage.local_project_store import LocalProjectStore
+from videobox_core_engine.output_source_verifier import OutputSourceStaleError
 
 FFMPEG_AVAILABLE = shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
+
+
+def test_pycapcut_rejects_post_materialization_content_mutation_before_draft_creation(tmp_path: Path) -> None:
+    """Task 12 RED: CapCut uses the exact same stale-asset identity as final output."""
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="stale capcut source")
+    source = tmp_path / "narration.wav"
+    source.write_bytes(b"original")
+    asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.NARRATION_AUDIO, source_path=source)
+    stored = store.resolve_storage_uri(project_id=project.project_id, storage_uri=asset.storage_uri)
+    expected_sha = __import__("hashlib").sha256(stored.read_bytes()).hexdigest()
+    stored.write_bytes(b"mutated after materialization")
+    timeline = {"narration_source_uri": asset.storage_uri, "tracks": [{"track_type": "narration", "clips": [{"asset_uri": asset.storage_uri, "asset_id": asset.asset_id, "start_sec": 0, "end_sec": 1, "expected_content_sha256": expected_sha}]}]}
+    with pytest.raises(OutputSourceStaleError, match="stale_output_asset"):
+        PyCapCutRealExportAdapter(store=store).export_timeline(project_id=project.project_id, timeline=timeline, drafts_root=tmp_path / "drafts", draft_name="no-stale-draft")
 
 
 @pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg/ffprobe not installed on this machine")

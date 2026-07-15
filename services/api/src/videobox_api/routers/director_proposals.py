@@ -146,7 +146,7 @@ def build_director_proposals_router(store: LocalProjectStore) -> APIRouter:
                         raise ValueError("target_segment_missing")
                     key = {"broll": "broll_override", "bgm": "music_override", "sfx": "sfx_override"}[candidate.media_type]
                     asset = materialized[candidate.candidate_id]
-                    segment[key] = {"asset_id": asset["asset_id"], "asset_uri": asset["storage_uri"], "media_controls": dict(candidate.controls), "expected_content_sha256": candidate.expected_content_sha256}
+                    segment[key] = {"asset_id": asset["asset_id"], "asset_uri": asset["storage_uri"], "media_controls": dict(candidate.controls), "expected_content_sha256": candidate.expected_content_sha256, "media_revision": str(asset.get("created_at") or "")}
             updated = apply_user_transaction(session=session, label="디렉터 제안 적용", affected_segment_ids=list(proposal.target_segment_ids), mutate=mutate)
             expectations = [
                 (str(materialized[item.candidate_id]["asset_id"]), item.expected_content_sha256,
