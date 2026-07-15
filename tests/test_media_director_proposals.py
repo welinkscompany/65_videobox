@@ -287,10 +287,26 @@ def test_director_blocks_broll_when_snapshot_analysis_sha_source_is_missing_or_c
     run = store.create_media_analysis(project_id=project.project_id, asset_id=asset.asset_id, idempotency_key=f"{digest}:local", cache_key="local")
     claim = store.claim_media_analysis(project_id=project.project_id, analysis_id=run["analysis_id"]); assert claim
     assert store.complete_media_analysis(project_id=project.project_id, analysis_id=run["analysis_id"], expected_attempt=claim["attempt"], result={})
-    store.resolve_storage_uri(project_id=project.project_id, storage_uri=asset.storage_uri).write_bytes(b"changed")
     with pytest.raises(DirectorProposalBlockedError) as blocked:
         DirectorProposalService(store).create(project_id=project.project_id, session_id=session["session_id"])
     assert blocked.value.lifecycle["recovery_action"] == "analyse_or_retry_assets"
+    store.resolve_storage_uri(project_id=project.project_id, storage_uri=asset.storage_uri).write_bytes(b"changed")
+    with pytest.raises(DirectorProposalBlockedError):
+        DirectorProposalService(store).create(project_id=project.project_id, session_id=session["session_id"])
+
+
+def test_director_proposal_insert_and_created_lifecycle_event_roll_back_together(tmp_path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project("p")
+    proposal = create_proposal(base_session_revision=1, asset_index_revision=1, source_session_id="s", candidates=[candidate()], revision=1)
+    connection = store._connection(project.project_id)
+    try:
+        connection.execute("CREATE TRIGGER reject_director_lifecycle BEFORE INSERT ON director_proposal_lifecycle_events BEGIN SELECT RAISE(ABORT, 'event rejected'); END")
+    finally:
+        connection.close()
+    with pytest.raises(ValueError, match="immutable"):
+        store.save_director_proposal(project.project_id, proposal)
+    assert store._fetchone(project.project_id, "SELECT proposal_id FROM director_proposals WHERE proposal_id = ?", (proposal.proposal_id,)) is None
 
 
 def test_director_blocks_unindexed_or_incomplete_bgm_sfx_metadata(tmp_path) -> None:

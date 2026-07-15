@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -12,6 +13,8 @@ from videobox_core_engine.ffmpeg_final_renderer import FfmpegFinalRenderer
 from videobox_core_engine.media_pack_service import MediaPackService, compute_pack_integrity
 from videobox_storage.local_project_store import LocalProjectStore
 from videobox_storage.media_library_store import MediaLibraryStore
+from videobox_domain_models.assets import AssetType
+import videobox_core_engine.project_asset_materializer as materializer_module
 
 
 def _indexed_library(tmp_path: Path) -> MediaLibraryStore:
@@ -104,6 +107,9 @@ def test_materialize_verified_library_music_registers_a_project_local_bgm_with_l
     payload = response.json()
     assert payload["asset_type"] == "bgm"
     assert payload["storage_uri"].startswith(f"local://projects/{project_id}/assets/")
+    assert hashlib.sha256(
+        LocalProjectStore(tmp_path / "projects").resolve_storage_uri(project_id=project_id, storage_uri=payload["storage_uri"]).read_bytes()
+    ).hexdigest() == hashlib.sha256((tmp_path / "installed-pack" / "assets" / "music-001.mp3").read_bytes()).hexdigest()
     assert payload["metadata"] == {
         "source_library_asset_id": "pack:starter-001:music-001",
         "source_pack_id": "starter-001",
@@ -134,6 +140,43 @@ def test_materialize_missing_library_asset_returns_422_without_creating_project_
     assert response.status_code == 422
     assert response.json()["detail"] == "asset_missing"
     assert library.list_recent_usage() == []
+
+
+def test_library_materialize_does_not_reuse_same_sha_user_uploaded_audio(tmp_path: Path) -> None:
+    library = _indexed_library(tmp_path)
+    app = create_app(projects_root=tmp_path / "projects", media_library_store=library)
+    client = TestClient(app); project_id = client.post("/api/projects", json={"name": "provenance"}).json()["project_id"]
+    same_bytes = tmp_path / "user.mp3"; same_bytes.write_bytes(b"synthetic music")
+    user_asset = app.state.store.register_asset(project_id=project_id, asset_type=AssetType.BGM, source_path=same_bytes, source_kind="user_uploaded")
+    materialized = client.post("/api/media-library/assets/pack:starter-001:music-001/materialize", json={"project_id": project_id})
+    assert materialized.status_code == 201
+    assert materialized.json()["asset_id"] != user_asset.asset_id
+    assert materialized.json()["metadata"]["source_library_asset_id"] == "pack:starter-001:music-001"
+    assert materialized.json()["metadata"]["license_snapshot"]["official_url"] == "https://example.test/license"
+
+
+def test_library_materialize_same_sha_is_concurrent_idempotent_and_failure_cleans_registered_copy(tmp_path: Path, monkeypatch) -> None:
+    library = _indexed_library(tmp_path)
+    app = create_app(projects_root=tmp_path / "projects", media_library_store=library)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "same sha"}).json()["project_id"]
+    path = "/api/media-library/assets/pack:starter-001:music-001/materialize"
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        responses = list(pool.map(lambda _: TestClient(app).post(path, json={"project_id": project_id}), range(2)))
+    assert [response.status_code for response in responses] == [201, 201]
+    assert responses[0].json()["asset_id"] == responses[1].json()["asset_id"]
+    assert len(LocalProjectStore(tmp_path / "projects").list_assets(project_id=project_id)) == 1
+
+    project_store = app.state.store
+    original_sha = materializer_module.sha256_file
+    def mismatch_only_after_copy(path: Path) -> str:
+        if path.suffix == ".wav" and "projects" in str(path):
+            return "0" * 64
+        return original_sha(path)
+    monkeypatch.setattr(materializer_module, "sha256_file", mismatch_only_after_copy)
+    second = client.post("/api/media-library/assets/pack:starter-001:sfx-001/materialize", json={"project_id": project_id})
+    assert second.status_code == 422
+    assert len(project_store.list_assets(project_id=project_id)) == 1
 
 
 def test_media_library_list_and_favorite_api_expose_verified_assets_and_persist_global_favorites(tmp_path: Path) -> None:

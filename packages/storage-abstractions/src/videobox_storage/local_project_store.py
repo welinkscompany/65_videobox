@@ -851,19 +851,30 @@ class LocalProjectStore:
         payload = proposal_to_payload(proposal)
         canonical_payload = json.dumps(payload, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
         now = self._now_iso()
+        connection = self._connection(project_id)
         try:
-            self._execute(project_id, """
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute("""
             INSERT INTO director_proposals (proposal_id, project_id, status, source_session_id, source_script_segment_ids_json, proposal_json, created_at, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, (proposal.proposal_id, project_id, proposal.status, proposal.source_session_id, json.dumps(list(proposal.source_script_segment_ids)), canonical_payload, now, now))
-            self._execute(project_id, "INSERT INTO director_proposal_lifecycle_events (proposal_id, status, reason, changed_at) VALUES (?, ?, ?, ?)", (proposal.proposal_id, proposal.status, "created", now))
+            connection.execute("INSERT INTO director_proposal_lifecycle_events (proposal_id, status, reason, changed_at) VALUES (?, ?, ?, ?)", (proposal.proposal_id, proposal.status, "created", now))
+            connection.commit()
         except sqlite3.IntegrityError:
+            if connection.in_transaction:
+                connection.rollback()
             existing = self._fetchone(project_id, "SELECT proposal_json FROM director_proposals WHERE proposal_id = ?", (proposal.proposal_id,))
             if existing is not None:
                 stored = json.dumps(json.loads(str(existing["proposal_json"])), ensure_ascii=True, sort_keys=True, separators=(",", ":"))
                 if stored == canonical_payload:
                     return proposal
             raise ValueError(f"Director proposal is immutable and cannot be overwritten: {proposal.proposal_id}") from None
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+        finally:
+            connection.close()
         return proposal
 
     def get_director_proposal(self, project_id: str, proposal_id: str, now: datetime | None = None) -> DirectorProposal:
@@ -875,8 +886,18 @@ class LocalProjectStore:
         instant = now or self._clock()
         if current_status == "ready" and proposal.expires_at and datetime.fromisoformat(proposal.expires_at).astimezone(UTC) <= instant.astimezone(UTC):
             changed_at = self._now_iso()
-            self._execute(project_id, "UPDATE director_proposals SET status = ?, updated_at = ? WHERE proposal_id = ?", ("expired", changed_at, proposal_id))
-            self._execute(project_id, "INSERT INTO director_proposal_lifecycle_events (proposal_id, status, reason, changed_at) VALUES (?, ?, ?, ?)", (proposal_id, "expired", "expiry", changed_at))
+            connection = self._connection(project_id)
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                connection.execute("UPDATE director_proposals SET status = ?, updated_at = ? WHERE proposal_id = ?", ("expired", changed_at, proposal_id))
+                connection.execute("INSERT INTO director_proposal_lifecycle_events (proposal_id, status, reason, changed_at) VALUES (?, ?, ?, ?)", (proposal_id, "expired", "expiry", changed_at))
+                connection.commit()
+            except Exception:
+                if connection.in_transaction:
+                    connection.rollback()
+                raise
+            finally:
+                connection.close()
             current_status = "expired"
         if proposal.status != current_status:
             from dataclasses import replace

@@ -35,6 +35,8 @@ class DirectorCandidate:
     warning_provenance: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
+        if not isinstance(self.media_revision, str) or not self.media_revision.strip():
+            raise ValueError("DirectorCandidate.media_revision must be a non-empty immutable revision")
         object.__setattr__(self, "reason_chips", tuple(self.reason_chips))
         object.__setattr__(self, "scores", _frozen_mapping(self.scores))
         object.__setattr__(self, "controls", _frozen_mapping(self.controls))

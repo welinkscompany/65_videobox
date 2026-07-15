@@ -41,7 +41,7 @@ class DirectorProposalService:
             if not (analysis and analysis.get("status") == "succeeded" and not analysis.get("cancel_requested")):
                 return False
             expected_sha = str(analysis.get("idempotency_key") or "").split("::", 1)[-1].split(":", 1)[0]
-            return bool(expected_sha and sha256_file(source) == expected_sha)
+            return bool(expected_sha and sha256_file(source) == expected_sha and analysis.get("result"))
         assets = [self._rankable_asset(item) for item in snapshot["assets"] if eligible(item)]
         if not assets:
             states = sorted({str(item.get("status") or "unavailable") for item in snapshot["analyses"]})
@@ -109,9 +109,13 @@ class DirectorProposalService:
                 if candidate.expected_content_sha256 and sha256_file(source) != candidate.expected_content_sha256:
                     reasons.append("source_sha256")
                     break
-                analyses = [item for item in self.store.list_media_analysis(project_id=project_id) if str(item["asset_id"]) == candidate.asset_id]
-                if not analyses or not any(self.store.can_apply_media_analysis(project_id=project_id, analysis_id=str(item["analysis_id"])) for item in analyses):
-                    reasons.append("analysis_unavailable")
+                if candidate.media_type == "broll":
+                    analyses = [item for item in self.store.list_media_analysis(project_id=project_id) if str(item["asset_id"]) == candidate.asset_id]
+                    if not analyses or not any(self.store.can_apply_media_analysis(project_id=project_id, analysis_id=str(item["analysis_id"])) and bool(item.get("result")) for item in analyses):
+                        reasons.append("analysis_unavailable")
+                        break
+                if candidate.media_revision != str(asset.get("created_at") or ""):
+                    reasons.append("media_revision")
                     break
             except KeyError:
                 reasons.append("source_missing")
@@ -122,4 +126,4 @@ class DirectorProposalService:
         metadata = dict(asset.get("metadata") or {})
         asset_type = str(asset.get("asset_type") or "")
         media_type = {"broll_video": "broll", "music": "bgm", "bgm": "bgm", "sfx": "sfx"}.get(asset_type, metadata.get("media_type", "broll"))
-        return {**metadata, "asset_id": asset["asset_id"], "media_type": media_type, "source_kind": asset.get("source_kind", "local_file"), "availability": metadata.get("availability", "available"), "review_status": metadata.get("review_status", "approved"), "license": metadata.get("license", "valid"), "license_policy": metadata.get("license_policy"), "warning_provenance": metadata.get("warning_provenance", ()), "content_sha256": sha256_file(self.store.resolve_storage_uri(project_id=asset["project_id"], storage_uri=str(asset["storage_uri"]))), "preview_uri": metadata.get("preview_uri")}
+        return {**metadata, "asset_id": asset["asset_id"], "media_type": media_type, "source_kind": asset.get("source_kind", "local_file"), "availability": metadata.get("availability", "available"), "review_status": metadata.get("review_status", "approved"), "license": metadata.get("license", "valid"), "license_policy": metadata.get("license_policy"), "warning_provenance": metadata.get("warning_provenance", ()), "content_sha256": sha256_file(self.store.resolve_storage_uri(project_id=asset["project_id"], storage_uri=str(asset["storage_uri"]))), "media_revision": str(asset.get("created_at") or ""), "preview_uri": metadata.get("preview_uri")}

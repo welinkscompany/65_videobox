@@ -7,15 +7,16 @@ from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
 
 from videobox_api.models import LibraryFavoriteRequest, MaterializeLibraryAssetRequest
-from videobox_domain_models.assets import AssetType
 from videobox_storage.local_project_store import LocalProjectStore
 from videobox_storage.media_library_store import MediaLibraryStore
+from videobox_core_engine.project_asset_materializer import ProjectAssetMaterializer
 
 
 def build_media_library_router(
     project_store: LocalProjectStore, library_store: MediaLibraryStore,
 ) -> APIRouter:
     router = APIRouter()
+    materializer = ProjectAssetMaterializer(project_store)
 
     @router.get("/api/media-library/install-state")
     def get_media_library_install_state() -> dict[str, object]:
@@ -108,39 +109,9 @@ def build_media_library_router(
 
         asset, snapshot_path = snapshot
         try:
-            media_type = str(asset["media_type"])
-            if media_type == "music":
-                asset_type = AssetType.BGM
-            elif media_type == "sfx":
-                asset_type = AssetType.SFX
-            else:
-                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="unsupported_media_type")
-
-            source_pack_id = library_asset_id.split(":", 2)[1] if library_asset_id.startswith("pack:") else ""
-            metadata = {
-                "source_library_asset_id": library_asset_id,
-                "source_pack_id": source_pack_id,
-                "source_pack_version": str(asset["version"]),
-                "license_snapshot": {
-                    "official_url": str(asset["official_license_url"]),
-                    "evidence_timestamp": str(asset["evidence_timestamp"]),
-                    "evidence_sha256": str(asset["evidence_sha256"]),
-                    "source": str(asset["source"]),
-                    "creator": str(asset["creator"]),
-                    "attribution_required": bool(asset["attribution_required"]),
-                    "attribution_text": str(asset["attribution_text"]),
-                },
-            }
-            registered = project_store.register_asset(
-                project_id=payload.project_id,
-                asset_type=asset_type,
-                source_path=snapshot_path,
-                source_kind="media_library",
-                mime_type=_mime_type(snapshot_path),
-                metadata=metadata,
-            )
-            result = project_store.get_asset(
-                project_id=payload.project_id, asset_id=registered.asset_id,
+            result = materializer.materialize_verified_library_snapshot(
+                project_id=payload.project_id, library_asset_id=library_asset_id,
+                library_asset=asset, snapshot_path=snapshot_path, mime_type=_mime_type(snapshot_path),
             )
         except (FileNotFoundError, KeyError, ValueError) as exc:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="asset_missing") from exc
