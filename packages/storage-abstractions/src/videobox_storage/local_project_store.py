@@ -21,6 +21,8 @@ from videobox_domain_models.recommendations import RecommendationRecord, Recomme
 from videobox_domain_models.transcripts import TranscriptRecord
 from videobox_core_engine.provider_trace import build_provider_trace
 from videobox_storage.sqlite_schema import PROJECT_SCHEMA_STATEMENTS
+from videobox_domain_models.director_proposals import DirectorProposal
+from videobox_core_engine.director_proposals import proposal_from_payload, proposal_to_payload
 
 # Heavy exports (rendered mp4s, CapCut drafts) can be large; keep only the most
 # recent N per export_type per project so disk usage does not grow unbounded.
@@ -284,7 +286,7 @@ class LocalProjectStore:
             asset_type=asset_type,
             storage_uri=storage_uri,
         )
-        self._execute(
+        self._execute_asset_index_mutation(
             project_id,
             """
             INSERT INTO assets (
@@ -842,6 +844,142 @@ class LocalProjectStore:
         )
         file_path.write_text(json.dumps(updated, indent=2, ensure_ascii=True), encoding="utf-8")
         return updated
+
+    def save_director_proposal(self, project_id: str, proposal: DirectorProposal) -> DirectorProposal:
+        payload = proposal_to_payload(proposal)
+        canonical_payload = json.dumps(payload, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+        now = self._now_iso()
+        try:
+            self._execute(project_id, """
+            INSERT INTO director_proposals (proposal_id, project_id, status, source_session_id, source_script_segment_ids_json, proposal_json, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (proposal.proposal_id, project_id, proposal.status, proposal.source_session_id, json.dumps(list(proposal.source_script_segment_ids)), canonical_payload, now, now))
+        except sqlite3.IntegrityError:
+            existing = self._fetchone(project_id, "SELECT proposal_json FROM director_proposals WHERE proposal_id = ?", (proposal.proposal_id,))
+            if existing is not None:
+                stored = json.dumps(json.loads(str(existing["proposal_json"])), ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+                if stored == canonical_payload:
+                    return proposal
+            raise ValueError(f"Director proposal is immutable and cannot be overwritten: {proposal.proposal_id}") from None
+        return proposal
+
+    def get_director_proposal(self, project_id: str, proposal_id: str, now: datetime | None = None) -> DirectorProposal:
+        row = self._fetchone(project_id, "SELECT proposal_json, status FROM director_proposals WHERE proposal_id = ?", (proposal_id,))
+        if row is None:
+            raise KeyError(f"Director proposal not found: {proposal_id}")
+        proposal = proposal_from_payload(json.loads(str(row["proposal_json"])))
+        instant = now or self._clock()
+        if proposal.status == "ready" and proposal.expires_at and datetime.fromisoformat(proposal.expires_at).astimezone(UTC) <= instant.astimezone(UTC):
+            payload = proposal_to_payload(proposal)
+            payload["status"] = "expired"
+            self._execute(project_id, "UPDATE director_proposals SET status = ?, proposal_json = ?, updated_at = ? WHERE proposal_id = ?", ("expired", json.dumps(payload, ensure_ascii=True), self._now_iso(), proposal_id))
+            proposal = proposal_from_payload(payload)
+        return proposal
+
+    def list_director_proposals(self, project_id: str) -> list[DirectorProposal]:
+        rows = self._fetchall(project_id, "SELECT proposal_id FROM director_proposals ORDER BY created_at, proposal_id", ())
+        return [self.get_director_proposal(project_id, str(row["proposal_id"])) for row in rows]
+
+    def save_director_preferences(self, project_id: str, preferences: dict[str, Any]) -> dict[str, list[str]]:
+        allowed = ("pin_asset", "exclude_asset", "exclude_creator", "exclude_tag")
+        canonical = {key: sorted({str(value).strip() for value in preferences.get(key, []) if str(value).strip()}) for key in allowed}
+        self._execute(project_id, "INSERT INTO director_preferences (project_id, preferences_json, updated_at) VALUES (?, ?, ?) ON CONFLICT(project_id) DO UPDATE SET preferences_json=excluded.preferences_json, updated_at=excluded.updated_at", (project_id, json.dumps(canonical, ensure_ascii=True), self._now_iso()))
+        return canonical
+
+    def get_director_preferences(self, project_id: str) -> dict[str, list[str]]:
+        row = self._fetchone(project_id, "SELECT preferences_json FROM director_preferences WHERE project_id = ?", (project_id,))
+        return json.loads(str(row["preferences_json"])) if row else {"pin_asset": [], "exclude_asset": [], "exclude_creator": [], "exclude_tag": []}
+
+    def get_asset_index_revision(self, project_id: str) -> int:
+        row = self._fetchone(project_id, "SELECT revision FROM director_asset_index_revisions WHERE project_id = ?", (project_id,))
+        return int(row["revision"]) if row else 0
+
+    def next_director_proposal_revision(self, project_id: str) -> int:
+        """Allocate a durable, project-scoped monotonic proposal revision."""
+        connection = self._connection(project_id)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                "INSERT INTO director_proposal_revisions (project_id, revision) VALUES (?, 1) ON CONFLICT(project_id) DO UPDATE SET revision = revision + 1",
+                (project_id,),
+            )
+            row = connection.execute("SELECT revision FROM director_proposal_revisions WHERE project_id = ?", (project_id,)).fetchone()
+            connection.commit()
+            return int(row["revision"])
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def bump_asset_index_revision(self, project_id: str) -> int:
+        connection = self._connection(project_id)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            revision = self._increment_asset_index_revision_with_connection(connection, project_id)
+            connection.commit()
+            return revision
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def _increment_asset_index_revision_with_connection(self, connection: sqlite3.Connection, project_id: str) -> int:
+        connection.execute("INSERT INTO director_asset_index_revisions (project_id, revision) VALUES (?, 1) ON CONFLICT(project_id) DO UPDATE SET revision = revision + 1", (project_id,))
+        row = connection.execute("SELECT revision FROM director_asset_index_revisions WHERE project_id = ?", (project_id,)).fetchone()
+        return int(row["revision"])
+
+    def _execute_asset_index_mutation(self, project_id: str, statement: str, parameters: tuple[Any, ...]) -> None:
+        """Commit an eligible asset-index mutation and its revision as one unit."""
+        connection = self._connection(project_id)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute(statement, parameters)
+            self._increment_asset_index_revision_with_connection(connection, project_id)
+            connection.commit()
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def mark_director_proposals_stale_for_script_alignment(self, project_id: str, source_session_id: str, source_script_segment_ids: list[str]) -> int:
+        connection = self._connection(project_id)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            changed = self._mark_director_proposals_stale_with_connection(connection, project_id, source_session_id, source_script_segment_ids)
+            connection.commit()
+            return changed
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def _mark_director_proposals_stale_with_connection(self, connection: sqlite3.Connection, project_id: str, source_session_id: str, source_script_segment_ids: list[str]) -> int:
+        wanted = set(source_script_segment_ids)
+        rows = connection.execute("SELECT proposal_id, proposal_json FROM director_proposals WHERE source_session_id = ? AND status = 'ready'", (source_session_id,)).fetchall()
+        changed = 0
+        for row in rows:
+            payload = json.loads(str(row["proposal_json"]))
+            if not wanted.intersection(payload.get("source_script_segment_ids", [])):
+                continue
+            payload["status"] = "stale"
+            connection.execute("UPDATE director_proposals SET status = 'stale', proposal_json = ?, updated_at = ? WHERE proposal_id = ?", (json.dumps(payload, ensure_ascii=True), self._now_iso(), row["proposal_id"]))
+            changed += 1
+        return changed
+
+    def update_script_draft_alignment_and_stale_proposals(self, *, project_id: str, session_id: str, session_payload: dict[str, Any], expected_revision: int, source_script_segment_ids: list[str]) -> dict[str, Any]:
+        existing = self.get_editing_session(project_id=project_id, session_id=session_id)
+        payload = deepcopy(session_payload)
+        if int(payload.get("session_revision") or 0) <= int(existing.get("session_revision") or 1):
+            payload["session_revision"] = int(existing.get("session_revision") or 1) + 1
+        return self._write_editing_session(project_id=project_id, timeline_id=str(existing["timeline_id"]), session_id=session_id, session_payload=payload, is_new=False, created_at=str(existing["created_at"]), expected_revision=expected_revision, transaction_hook=lambda connection: self._mark_director_proposals_stale_with_connection(connection, project_id, session_id, source_script_segment_ids))
 
     def save_tts_candidate(
         self,
@@ -1917,8 +2055,21 @@ class LocalProjectStore:
     def delete_asset(self, *, project_id: str, asset_id: str) -> None:
         """Delete the local asset and its disposable derived cache, retaining analysis history."""
         asset = self.get_asset(project_id=project_id, asset_id=asset_id)
-        self._execute(project_id, "DELETE FROM media_analysis_cache WHERE project_id = ? AND asset_id = ?", (project_id, asset_id))
-        self._execute(project_id, "DELETE FROM assets WHERE project_id = ? AND asset_id = ?", (project_id, asset_id))
+        connection = self._connection(project_id)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute("DELETE FROM media_analysis_cache WHERE project_id = ? AND asset_id = ?", (project_id, asset_id))
+            cursor = connection.execute("DELETE FROM assets WHERE project_id = ? AND asset_id = ?", (project_id, asset_id))
+            if cursor.rowcount != 1:
+                raise KeyError(f"Asset not found: {asset_id}")
+            self._increment_asset_index_revision_with_connection(connection, project_id)
+            connection.commit()
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+        finally:
+            connection.close()
         path = self.resolve_storage_uri(project_id=project_id, storage_uri=str(asset["storage_uri"]))
         if path.exists():
             path.unlink()
@@ -2160,7 +2311,7 @@ class LocalProjectStore:
     def update_asset_metadata(self, *, project_id: str, asset_id: str, metadata_patch: dict[str, Any]) -> dict[str, Any]:
         asset = self.get_asset(project_id=project_id, asset_id=asset_id)
         merged_metadata = {**asset["metadata"], **metadata_patch}
-        self._execute(
+        self._execute_asset_index_mutation(
             project_id,
             "UPDATE assets SET metadata_json = ? WHERE asset_id = ?",
             (json.dumps(merged_metadata, ensure_ascii=True), asset_id),
@@ -3201,14 +3352,14 @@ class LocalProjectStore:
         return highest + 1
 
     def _connection(self, project_id: str) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.database_path(project_id))
+        connection = sqlite3.connect(self.database_path(project_id), timeout=5.0)
         # WAL lets readers proceed while a writer holds the lock, and
         # busy_timeout makes any remaining contention retry instead of
         # immediately raising "database is locked" — both matter once
         # background job threads (see run_*_job in local_pipeline.py) write
         # to the same per-project database concurrently with polling reads.
-        connection.execute("PRAGMA journal_mode=WAL")
         connection.execute("PRAGMA busy_timeout=5000")
+        connection.execute("PRAGMA journal_mode=WAL")
         for statement in PROJECT_SCHEMA_STATEMENTS:
             connection.execute(statement)
         self._ensure_recommendation_decision_state_column(connection)
@@ -3234,7 +3385,11 @@ class LocalProjectStore:
             for row in connection.execute("PRAGMA table_info(jobs)").fetchall()
         }
         if "progress_percent" not in existing_columns:
-            connection.execute("ALTER TABLE jobs ADD COLUMN progress_percent INTEGER")
+            try:
+                connection.execute("ALTER TABLE jobs ADD COLUMN progress_percent INTEGER")
+            except sqlite3.OperationalError as exc:
+                if "duplicate column name" not in str(exc).lower():
+                    raise
 
     def _ensure_editing_session_revision_column(self, connection: sqlite3.Connection) -> None:
         existing_columns = {
@@ -3383,6 +3538,7 @@ class LocalProjectStore:
         is_new: bool,
         created_at: str | None = None,
         expected_revision: int | None = None,
+        transaction_hook: Callable[[sqlite3.Connection], None] | None = None,
     ) -> dict[str, Any]:
         session_path = self.project_root(project_id) / "editing_sessions" / f"{session_id}.json"
         file_uri = self._path_to_uri(project_id, session_path)
@@ -3472,6 +3628,8 @@ class LocalProjectStore:
                 if cursor.rowcount != 1:
                     connection.rollback()
                     raise EditingSessionRevisionConflict("Editing session revision is stale.")
+                if transaction_hook is not None:
+                    transaction_hook(connection)
                 connection.commit()
                 temporary_path.write_text(serialized_payload, encoding="utf-8")
                 temporary_path.replace(session_path)

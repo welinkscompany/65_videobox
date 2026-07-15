@@ -2211,3 +2211,26 @@ def test_partial_regeneration_pipeline_applies_approved_tts_replacement_to_targe
         tts_asset.storage_uri,
         f"local://projects/{project.project_id}/segments/seg_002",
     ]
+
+def test_partial_regeneration_store_update_returns_and_persists_updated_payload(tmp_path: Path) -> None:
+    from videobox_storage.local_project_store import LocalProjectStore
+
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project("partial regeneration persistence")
+    saved = store.save_partial_regeneration_run(
+        project_id=project.project_id,
+        payload={"status": "running", "segment_ids": ["seg-1"]},
+    )
+
+    updated = store.update_partial_regeneration_run(
+        project_id=project.project_id,
+        partial_regeneration_id=saved["partial_regeneration_id"],
+        payload={"status": "succeeded", "result": {"timeline_id": "timeline-2"}},
+    )
+
+    assert updated["status"] == "succeeded"
+    assert updated["created_at"] == saved["created_at"]
+    assert store.get_partial_regeneration_run(
+        project_id=project.project_id,
+        partial_regeneration_id=saved["partial_regeneration_id"],
+    ) == updated

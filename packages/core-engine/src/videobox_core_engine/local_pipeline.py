@@ -86,7 +86,7 @@ from videobox_domain_models.recommendations import RecommendationType
 from videobox_provider_interfaces.recommenders import RecommendationProvider, RecommendationRequest
 from videobox_provider_interfaces.stt import MockSTTProvider, STTProvider, STTRequest
 from videobox_provider_interfaces.tts import TTSRequest
-from videobox_storage.local_project_store import LocalProjectStore
+from videobox_storage.local_project_store import EditingSessionRevisionConflict, LocalProjectStore
 from videobox_core_engine._pipeline_shared_helpers import (
     _build_review_guidance_reuse_key,
     _canonical_runtime_pending_recommendation_reason,
@@ -1458,13 +1458,16 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         if int(session.get("session_revision") or 1) != expected_revision:
             raise EditingSessionConflict(session)
         updated, _ = apply_narration_alignment_to_script_draft(session=session, aligned_segments=aligned_segments)
-        return self._save_editing_session_with_revision(
-            project_id=project_id,
-            session_id=session_id,
-            session=session,
-            updated_session=updated,
-            expected_revision=expected_revision,
-        )
+        try:
+            return self.store.update_script_draft_alignment_and_stale_proposals(
+                project_id=project_id, session_id=session_id, session_payload=updated,
+                expected_revision=expected_revision,
+                source_script_segment_ids=list(updated.get("stale_proposal_source_script_segment_ids") or []),
+            )
+        except EditingSessionRevisionConflict:
+            raise EditingSessionConflict(
+                self.store.get_editing_session(project_id=project_id, session_id=session_id)
+            ) from None
 
     def _editing_session_for_output_timeline(
         self, *, project_id: str, timeline: dict[str, Any]

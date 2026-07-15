@@ -185,6 +185,28 @@ PROJECT_SCHEMA_STATEMENTS = (
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS director_proposals (
+        proposal_id TEXT PRIMARY KEY, project_id TEXT NOT NULL, status TEXT NOT NULL,
+        source_session_id TEXT NOT NULL, source_script_segment_ids_json TEXT NOT NULL,
+        proposal_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS director_preferences (
+        project_id TEXT PRIMARY KEY, preferences_json TEXT NOT NULL, updated_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS director_asset_index_revisions (
+        project_id TEXT PRIMARY KEY, revision INTEGER NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS director_proposal_revisions (
+        project_id TEXT PRIMARY KEY, revision INTEGER NOT NULL
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS review_approvals (
         timeline_id TEXT PRIMARY KEY,
         project_id TEXT NOT NULL,
