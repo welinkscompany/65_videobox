@@ -13,9 +13,9 @@
 - 기준 HEAD: `8eddb7f`
 - 계획 범위: 3개 순차 slice, 18개 TDD Task
 - 설계/계획 진행률: 100%, 잔여 0%
-- production code 구현 진행률: 8/18 Task (약 44.4%), 잔여 약 55.6%
-- 완료 작업: Slice 1 Task 1 local-only runtime 경계와 deterministic test guard, Task 2 Vision/embedding/capability preflight provider, Task 3 durable MEDIA_ANALYSIS schema와 state machine, Task 4 FFmpeg probe/cache/quality gate/deterministic dispatcher, Task 5 analysis API/batch ingest/검수 UI, Task 6 actual LM Studio live release gate, Slice 2 Task 7 narration 없는 script draft session, Task 8 immutable proposal domain/persistence/ranking
-- 다음 작업: Slice 2 Task 9 proposal API, numbering, preflight diff, refresh
+- production code 구현 진행률: 9/18 Task (50.0%), 잔여 50.0%
+- 완료 작업: Slice 1 Task 1 local-only runtime 경계와 deterministic test guard, Task 2 Vision/embedding/capability preflight provider, Task 3 durable MEDIA_ANALYSIS schema와 state machine, Task 4 FFmpeg probe/cache/quality gate/deterministic dispatcher, Task 5 analysis API/batch ingest/검수 UI, Task 6 actual LM Studio live release gate, Slice 2 Task 7 narration 없는 script draft session, Task 8 immutable proposal domain/persistence/ranking, Task 9 proposal API/preflight/refresh
+- 다음 작업: Slice 2 Task 10 candidate preview와 project asset materializer
 - 계획 commit `3fda0ae`는 remote에 push됐다. 다음 세션 재개용 handoff는 `docs/handoffs/2026-07-14-local-media-director-plan-closeout.ko.md`다.
 
 확인된 구현 blocker는 text-only local provider, Gemini 자동 fallback, 외부 HTTP(S) runtime 허용, durable media-analysis 상태 부재, script-only session 부재, B/M/S mutation의 불완전한 undo, output SHA/revision 재검증 부재다. 계획은 이 순서대로 RED test를 먼저 만들고 provider → analysis → proposal → transaction → UI → output E2E를 연결한다.
@@ -61,6 +61,13 @@ UI는 4,396줄 `App.tsx`의 전면 rewrite를 하지 않고 `apps/web/src/featur
 - Task 7 narration alignment는 editing-session CAS와 matching ready proposal stale을 같은 SQLite transaction에서 수행한다. 실제 asset register/metadata/delete와 asset-index revision도 단일 transaction이며 실패 rollback을 고정했다. 이 작업 중 발견한 partial-regeneration writer 회귀도 별도 RED regression으로 복구했다.
 - 검증: focused `79 passed`, final backend full `932 passed, 2 skipped`, frontend `107 passed`/build success, `git diff --check` 통과. 기존 backend multipart deprecation warning 1건과 frontend test stderr/`act(...)` warning은 이번 변경과 무관한 비차단 기존 경고다.
 - 코드 commit은 `6a5d3ec`이다.
+
+### Slice 2 Task 9 proposal API/preflight/refresh closeout (2026-07-15)
+
+- immutable proposal은 one-read SQLite snapshot에서 생성되고 current B-roll SHA/succeeded analysis 또는 indexed BGM/SFX metadata를 확인한다. unknown user-owned B-roll은 warning provenance를 보존한다.
+- API E2E는 create/get/preflight/refresh/preferences, immutable session, stable stale 409, exact diff, lifecycle event, local-only DI와 Gemini/external call 0을 고정했다. terminal analysis late derived data·index transition·basename collision도 remediation test로 닫았다.
+- 검증: focused backend `90 passed`, backend full `948 passed, 2 skipped`, frontend `108 passed`/build success, `git diff --check` 통과. 기존 multipart deprecation 1건과 frontend stderr/`act(...)` warning은 비차단 기존 경고다.
+- 코드 commit은 `37252c2`이다.
 
 ### Local Media Director 중간점검 보완 (2026-07-15)
 

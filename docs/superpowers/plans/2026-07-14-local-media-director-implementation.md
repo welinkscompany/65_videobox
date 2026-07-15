@@ -687,16 +687,21 @@ git commit -m "feat: persist ranked director proposals"
 
 **Files:**
 
-- Create: services/api/src/videobox_api/routers/director.py
+- Create: services/api/src/videobox_api/routers/director_proposals.py
 - Create: packages/core-engine/src/videobox_core_engine/director_proposal_service.py
-- Modify: services/api/src/videobox_api/models.py
 - Modify: services/api/src/videobox_api/main.py
 - Modify: apps/web/src/api.ts
 - Test: tests/test_api_media_director.py
 - Test: tests/test_media_director_proposals.py
+- Modify: tests/test_media_analysis_store.py
+- Modify: packages/core-engine/src/videobox_core_engine/media_ranking.py
+- Modify: packages/core-engine/src/videobox_core_engine/director_proposals.py
+- Modify: packages/domain-models/src/videobox_domain_models/director_proposals.py
+- Modify: packages/storage-abstractions/src/videobox_storage/sqlite_schema.py
+- Modify: packages/storage-abstractions/src/videobox_storage/local_project_store.py
 - Modify: apps/web/src/api.test.ts
 
-- [ ] **Step 1: API RED test 작성**
+- [x] **Step 1: API RED test 작성**
 
 ~~~python
 def test_proposal_does_not_mutate_session_until_apply(client) -> None:
@@ -722,13 +727,13 @@ def test_preflight_reloads_server_revisions_and_rejects_asset_index_change(clien
     assert "asset_index_revision" in response.json()["stale_reasons"]
 ~~~
 
-- [ ] **Step 2: RED 확인**
+- [x] **Step 2: RED 확인**
 
 Run: .venv\Scripts\python.exe -m pytest -q tests/test_api_media_director.py
 
 Expected: 404.
 
-- [ ] **Step 3: API 구현**
+- [x] **Step 3: API 구현**
 
 ~~~text
 POST /api/projects/{project_id}/director/proposals
@@ -749,7 +754,7 @@ proposal lifecycle state/reason/changed-at은 immutable proposal JSON과 별도 
 
 local-only DI는 routing mode가 `local_only`인 explicit test/runtime protocol만 받을 수 있다. Director proposal 실패는 `blocked` 또는 `error`로 끝나며 Gemini/외부 provider 호출은 0임을 fake provider counter로 고정한다.
 
-- [ ] **Step 4: API client와 contract GREEN**
+- [x] **Step 4: API client와 contract GREEN**
 
 Run: .venv\Scripts\python.exe -m pytest -q tests/test_api_media_director.py
 
@@ -757,10 +762,10 @@ Run: npm --prefix apps/web test -- src/api.test.ts
 
 Expected: PASS, create/refresh/preflight payload가 exact revision을 전달.
 
-- [ ] **Step 5: 커밋**
+- [x] **Step 5: 커밋**
 
 ~~~powershell
-git add packages/core-engine/src/videobox_core_engine/director_proposal_service.py services/api/src/videobox_api/routers/director.py services/api/src/videobox_api/models.py services/api/src/videobox_api/main.py apps/web/src/api.ts apps/web/src/api.test.ts tests/test_api_media_director.py tests/test_media_director_proposals.py
+git add apps/web/src/api.ts apps/web/src/api.test.ts packages/core-engine/src/videobox_core_engine/director_proposals.py packages/core-engine/src/videobox_core_engine/director_proposal_service.py packages/core-engine/src/videobox_core_engine/media_ranking.py packages/domain-models/src/videobox_domain_models/director_proposals.py packages/storage-abstractions/src/videobox_storage services/api/src/videobox_api/main.py services/api/src/videobox_api/routers/director_proposals.py tests/test_api_media_director.py tests/test_media_analysis_store.py tests/test_media_director_proposals.py tests/test_media_director_ranking.py
 git commit -m "feat: expose immutable director proposals"
 ~~~
 
