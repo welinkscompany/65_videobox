@@ -1629,6 +1629,49 @@ class LocalProjectStore:
             raise KeyError(f"Media analysis not found: {analysis_id}")
         return self._media_analysis_payload(row)
 
+    def list_media_analysis(self, *, project_id: str) -> list[dict[str, Any]]:
+        connection = self._connection(project_id)
+        try:
+            rows = connection.execute(
+                "SELECT * FROM media_analysis_runs WHERE project_id = ? ORDER BY created_at ASC, analysis_id ASC",
+                (project_id,),
+            ).fetchall()
+        finally:
+            connection.close()
+        return [self._media_analysis_payload(row) for row in rows]
+
+    def review_media_analysis(self, *, project_id: str, analysis_id: str, tags: dict[str, list[str]]) -> dict[str, Any]:
+        current = self.get_media_analysis(project_id=project_id, analysis_id=analysis_id)
+        if current["status"] != MediaAnalysisStatus.NEEDS_REVIEW.value:
+            raise ValueError("Only needs_review media analysis can be manually reviewed.")
+        result = dict(current.get("result") or {})
+        existing_tags = dict(result.get("tags") or {})
+        existing_layers = dict(existing_tags.get("layers") or {})
+        merged_layers = {name: list(values) for name, values in existing_layers.items()}
+        for layer, values in tags.items():
+            if layer not in merged_layers:
+                raise ValueError(f"Unknown media tag layer: {layer}")
+            merged_layers[layer] = list(dict.fromkeys([*merged_layers[layer], *values]))
+        result["tags"] = {**existing_tags, "layers": merged_layers}
+        self._execute(
+            project_id,
+            "UPDATE media_analysis_runs SET status = ?, result_json = ?, progress_percent = 100, updated_at = ? WHERE analysis_id = ? AND project_id = ?",
+            (MediaAnalysisStatus.SUCCEEDED.value, json.dumps(result, ensure_ascii=True), self._now_iso(), analysis_id, project_id),
+        )
+        reviewed = self.get_media_analysis(project_id=project_id, analysis_id=analysis_id)
+        searchable_tags = [tag for values in merged_layers.values() for tag in values]
+        asset = self.get_asset(project_id=project_id, asset_id=str(current["asset_id"]))
+        existing_tags = asset["metadata"].get("tags") if isinstance(asset["metadata"].get("tags"), list) else []
+        self.update_asset_metadata(project_id=project_id, asset_id=str(current["asset_id"]), metadata_patch={"tags": list(dict.fromkeys([*existing_tags, *searchable_tags]))})
+        return reviewed
+
+    def retry_media_analysis(self, *, project_id: str, analysis_id: str) -> dict[str, Any]:
+        current = self.get_media_analysis(project_id=project_id, analysis_id=analysis_id)
+        if current["status"] not in {MediaAnalysisStatus.FAILED.value, MediaAnalysisStatus.BLOCKED.value}:
+            raise ValueError("Only failed or blocked media analysis can be retried.")
+        self._execute(project_id, "UPDATE media_analysis_runs SET status = ?, error_code = NULL, error_message = NULL, next_retry_at = NULL, cancel_requested = 0, updated_at = ? WHERE analysis_id = ? AND project_id = ?", (MediaAnalysisStatus.QUEUED.value, self._now_iso(), analysis_id, project_id))
+        return self.get_media_analysis(project_id=project_id, analysis_id=analysis_id)
+
     def claim_media_analysis(self, *, project_id: str, analysis_id: str) -> dict[str, Any] | None:
         """Atomically claim a queued or due-retry run; None means another worker won."""
         now = self._now_iso()

@@ -423,7 +423,7 @@ git commit -m "feat: analyze local media with recoverable jobs"
 - Modify: apps/web/src/App.tsx
 - Test: tests/test_api_media_analysis.py
 
-- [ ] **Step 1: fake provider API와 UI recovery RED test 작성**
+- [x] **Step 1: fake provider API와 UI recovery RED test 작성**
 
 ~~~python
 def test_broll_import_enqueues_fake_analysis_and_survives_reload(client, fake_vision) -> None:
@@ -449,7 +449,7 @@ def test_needs_review_manual_tags_become_searchable(client) -> None:
     assert response.json()["status"] == "succeeded"
 ~~~
 
-- [ ] **Step 2: RED 확인**
+- [x] **Step 2: RED 확인**
 
 Run: .venv\Scripts\python.exe -m pytest -q tests/test_api_media_analysis.py
 
@@ -457,7 +457,7 @@ Run: npm --prefix apps/web test -- src/features/media/media-analysis-panel.test.
 
 Expected: endpoint/component 부재로 FAIL.
 
-- [ ] **Step 3: API 구현**
+- [x] **Step 3: API 구현**
 
 다음 endpoint를 추가한다.
 
@@ -475,11 +475,11 @@ create_app은 vision_provider, embedding_provider, media_probe, analysis_dispatc
 
 batch directory import는 recursive=true일 때 지원 확장자를 하위 폴더까지 deterministic sort로 찾고 resolved path와 content SHA로 중복을 제거한다. recursive=false는 기존 한 단계 동작을 유지한다. response에는 등록 asset과 analysis job을 함께 반환하되 한 파일 실패가 이미 성공한 다른 등록을 롤백하지 않는다.
 
-- [ ] **Step 4: UI 구현**
+- [x] **Step 4: UI 구현**
 
 MediaAnalysisPanel은 파일별 progress, queue_position, queued/running/needs_review/blocked/error, cancel/retry, preview, manual tag form을 표시한다. 분석 실패 중에도 기존 편집기는 비활성화하지 않는다. App.tsx에는 panel mount와 selected project/asset callback만 추가한다.
 
-- [ ] **Step 5: focused GREEN과 커밋**
+- [x] **Step 5: focused GREEN과 커밋**
 
 Run: .venv\Scripts\python.exe -m pytest -q tests/test_api_media_analysis.py tests/test_media_analysis_jobs.py
 

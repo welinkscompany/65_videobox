@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import APIRouter, File, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, File, UploadFile, status
 from fastapi.responses import FileResponse
 
 from videobox_api.errors import _http_error
@@ -92,18 +92,34 @@ def build_assets_router(orchestrator: ApiOrchestrator, store: LocalProjectStore)
     def register_broll_assets_batch(
         project_id: str,
         payload: BrollBatchAssetRegistrationRequest,
-    ) -> AssetListResponse:
+        background_tasks: BackgroundTasks,
+    ) -> dict:
         try:
-            assets = orchestrator.register_broll_assets_batch(
+            batch = orchestrator.register_broll_assets_batch(
                 project_id=project_id,
                 source_paths=[Path(source_path) for source_path in payload.source_paths],
                 source_directory=Path(payload.source_directory) if payload.source_directory else None,
                 tags=payload.tags,
                 title_by_source_path=payload.title_by_source_path,
+                recursive=payload.recursive,
             )
         except Exception as exc:
             raise _http_error(exc) from exc
-        return AssetListResponse(assets=[AssetArchiveItemResponse(**asset) for asset in assets])
+        service = getattr(orchestrator, "media_analysis_service", None)
+        analyses = []
+        for asset in batch["assets"]:
+            if service is None:
+                continue
+            try:
+                analysis = service.enqueue_analysis(project_id=project_id, asset_id=asset["asset_id"])
+                dispatcher = getattr(orchestrator, "media_analysis_dispatcher", None)
+                if dispatcher is not None:
+                    background_tasks.add_task(dispatcher, project_id=project_id, analysis_id=analysis["analysis_id"])
+                analyses.append(service.get_analysis(project_id, analysis["analysis_id"]))
+            except Exception:
+                # Asset registration is durable even if analysis cannot start.
+                continue
+        return {"assets": [AssetArchiveItemResponse(**asset).model_dump() for asset in batch["assets"]], "analysis_jobs": analyses, "failures": batch["failures"]}
 
     @router.post("/api/projects/{project_id}/assets/raw-video", status_code=status.HTTP_201_CREATED)
     def register_raw_video(project_id: str, payload: AssetRegistrationRequest) -> AssetResponse:

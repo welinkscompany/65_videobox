@@ -13,14 +13,19 @@
 - 기준 HEAD: `8eddb7f`
 - 계획 범위: 3개 순차 slice, 18개 TDD Task
 - 설계/계획 진행률: 100%, 잔여 0%
-- production code 구현 진행률: 4/18 Task (약 22.2%), 잔여 약 77.8%
-- 완료 작업: Slice 1 Task 1 local-only runtime 경계와 deterministic test guard, Task 2 Vision/embedding/capability preflight provider, Task 3 durable MEDIA_ANALYSIS schema와 state machine, Task 4 FFmpeg probe/cache/quality gate/deterministic dispatcher
-- 다음 작업: Slice 1 Task 5 analysis API, batch ingest 연결, 검수 UI
+- production code 구현 진행률: 5/18 Task (약 27.8%), 잔여 약 72.2%
+- 완료 작업: Slice 1 Task 1 local-only runtime 경계와 deterministic test guard, Task 2 Vision/embedding/capability preflight provider, Task 3 durable MEDIA_ANALYSIS schema와 state machine, Task 4 FFmpeg probe/cache/quality gate/deterministic dispatcher, Task 5 analysis API/batch ingest/검수 UI
+- 다음 작업: Slice 1 Task 6 live LM Studio smoke와 release gate
 - 계획 commit `3fda0ae`는 remote에 push됐다. 다음 세션 재개용 handoff는 `docs/handoffs/2026-07-14-local-media-director-plan-closeout.ko.md`다.
 
 확인된 구현 blocker는 text-only local provider, Gemini 자동 fallback, 외부 HTTP(S) runtime 허용, durable media-analysis 상태 부재, script-only session 부재, B/M/S mutation의 불완전한 undo, output SHA/revision 재검증 부재다. 계획은 이 순서대로 RED test를 먼저 만들고 provider → analysis → proposal → transaction → UI → output E2E를 연결한다.
 
 UI는 4,396줄 `App.tsx`의 전면 rewrite를 하지 않고 `apps/web/src/features/director`와 `apps/web/src/features/media`에 새 책임을 분리한다. 현재 5,709줄 `app.test.tsx`에는 refresh/apply/materialize failure/ambiguity/manual fallback 통합 시나리오만 추가하고 세부 interaction은 component test로 분리한다.
+
+### Slice 1 Task 5 closeout deferment
+
+- Task 4의 `can_apply_media_analysis` gate는 durable store contract로 유지한다. 실제 Director proposal/apply consumer는 Slice 2 Task 8–11에서 처음 생기므로, 해당 consumer가 gate를 호출하는 검증도 그 범위에서 구현한다.
+- media-analysis poller의 기본 50ms interval은 현재 deterministic local test/worker 운용을 위한 값이다. Slice 1 release gate 전 운영 profile에 맞는 interval/backoff tuning을 별도 검토한다.
 
 ### 후속 판단 보류: OpenCut 및 Voice Capture & Narration
 

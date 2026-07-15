@@ -30,6 +30,7 @@ import {
   type MediaLibraryAsset,
   type MediaLibraryInstallState,
 } from "./api";
+import { MediaAnalysisPanel } from "./features/media/MediaAnalysisPanel";
 import {
   buildDefaultEditingSelection,
   buildDefaultRegenerationFields,
@@ -2146,6 +2147,8 @@ export function App() {
             </div>
           </details>
         </section>
+
+        {selectedProjectId ? <MediaAnalysisPanel projectId={selectedProjectId} onSelectAsset={(assetId) => { setBrollAssetFilter(assetId); setSelectedSection("editing"); }} /> : null}
 
         {selectedSection === "overview" ? (
           <section className="workspace-grid">

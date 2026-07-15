@@ -57,6 +57,7 @@ class TTSCandidateListResponse(BaseModel):
 class BrollBatchAssetRegistrationRequest(BaseModel):
     source_paths: list[str] = Field(default_factory=list)
     source_directory: str | None = None
+    recursive: bool = False
     tags: list[str] = Field(default_factory=list)
     title_by_source_path: dict[str, str] = Field(default_factory=dict)
 
@@ -96,6 +97,11 @@ class TTSCandidateResponse(AssetResponse):
 class AssetArchiveItemResponse(AssetResponse):
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: str
+    source_path: str | None = None
+
+
+class MediaAnalysisReviewRequest(BaseModel):
+    tags: dict[str, list[str]]
 
 
 class AssetListResponse(BaseModel):

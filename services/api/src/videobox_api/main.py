@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+import asyncio
 from pathlib import Path
 from urllib.request import urlopen
 
@@ -23,12 +25,14 @@ from videobox_api.routers.editor_library import build_editor_library_router
 from videobox_api.routers.gemini_keys import build_gemini_keys_router
 from videobox_api.routers.jobs import build_jobs_router
 from videobox_api.routers.media_library import build_media_library_router
+from videobox_api.routers.media_analysis import build_media_analysis_router
 from videobox_api.routers.outputs import build_outputs_router
 from videobox_api.routers.projects import build_projects_router
 from videobox_api.routers.review import build_review_router
 from videobox_api.routers.timeline import build_timeline_router
 from videobox_core_engine.auto_cut import AutoCutPlanner
 from videobox_core_engine.local_pipeline import LocalPipelineRunner
+from videobox_core_engine.media_analysis import MediaAnalysisService
 from videobox_core_engine.output_operator_copy import LocalFirstOutputOperatorCopyBuilder
 from videobox_core_engine.recommenders import LocalFirstKeywordBrollRecommender, LocalFirstMusicRecommender
 from videobox_core_engine.review_guidance import LocalFirstReviewGuidanceBuilder
@@ -41,7 +45,7 @@ from videobox_core_engine.settings import (
     TTSEngineConfig,
     WhisperSTTConfig,
 )
-from videobox_storage.local_project_store import LocalProjectStore
+from videobox_storage.local_project_store import LocalProjectStore, sha256_file
 from videobox_storage.media_library_store import MediaLibraryStore
 from videobox_storage.user_library_store import UserLibraryStore
 
@@ -57,6 +61,83 @@ __all__ = [
     "_build_targeted_segments",
     "_build_stt_provider",
 ]
+
+
+async def _poll_media_analysis(app: FastAPI, *, recover_running: bool) -> None:
+    store: LocalProjectStore = app.state.store
+    dispatcher = app.state.media_analysis_dispatcher
+    for project in store.list_projects():
+        project_id = str(project["project_id"])
+        recovered = store.recover_orphaned_media_analysis_jobs(project_id=project_id) if recover_running else []
+        if dispatcher is None:
+            continue
+        pending_ids = {
+            *recovered,
+            *(str(item["analysis_id"]) for item in store.list_media_analysis(project_id=project_id) if item["status"] in {"queued", "failed"}),
+        }
+        for analysis_id in sorted(pending_ids):
+            await asyncio.to_thread(dispatcher, project_id=project_id, analysis_id=analysis_id)
+
+
+@asynccontextmanager
+async def _media_analysis_lifespan(app: FastAPI):
+    """Run recovery and durable retry polling outside request/startup hot paths."""
+    stop_event = asyncio.Event()
+
+    async def worker() -> None:
+        first = True
+        while not stop_event.is_set():
+            await _poll_media_analysis(app, recover_running=first)
+            first = False
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=app.state.media_analysis_poll_interval_seconds)
+            except TimeoutError:
+                pass
+
+    task = asyncio.create_task(worker(), name="videobox-media-analysis-poller")
+    try:
+        yield
+    finally:
+        stop_event.set()
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+
+class _UnavailableMediaAnalysisService:
+    """Records a visible blocked capability state when no real local worker is configured."""
+    def __init__(self, store: LocalProjectStore) -> None:
+        self.store = store
+
+    def enqueue_analysis(self, *, project_id: str, asset_id: str) -> dict:
+        asset = self.store.get_asset(project_id=project_id, asset_id=asset_id)
+        source = self.store.resolve_storage_uri(project_id=project_id, storage_uri=asset["storage_uri"])
+        digest = sha256_file(source)
+        key = f"queued:{digest}"
+        self.store.record_media_analysis_cache(project_id=project_id, asset_id=asset_id, source_sha256=digest, cache_key=key)
+        analysis = self.store.create_media_analysis(project_id=project_id, asset_id=asset_id, idempotency_key=f"{digest}:{key}", cache_key=key)
+        if analysis["status"] == "queued":
+            claimed = self.store.claim_media_analysis(project_id=project_id, analysis_id=analysis["analysis_id"])
+            if claimed is not None:
+                self.store.mark_media_analysis_blocked(project_id=project_id, analysis_id=analysis["analysis_id"], expected_attempt=int(claimed["attempt"]), error_code="MEDIA_ANALYSIS_WORKER_UNAVAILABLE", error_message="Configure a local media analysis worker or inject a vision provider.")
+        return self.get_analysis(project_id, analysis["analysis_id"])
+
+    def get_analysis(self, project_id: str, analysis_id: str) -> dict:
+        return self.store.get_media_analysis(project_id=project_id, analysis_id=analysis_id)
+
+    def cancel_analysis(self, *, project_id: str, analysis_id: str) -> dict | None:
+        current = self.get_analysis(project_id, analysis_id)
+        return self.store.request_media_analysis_cancel(project_id=project_id, analysis_id=analysis_id, expected_attempt=int(current["attempt"]))
+
+    def retry_analysis(self, *, project_id: str, analysis_id: str) -> dict:
+        self.store.retry_media_analysis(project_id=project_id, analysis_id=analysis_id)
+        current = self.store.get_media_analysis(project_id=project_id, analysis_id=analysis_id)
+        claimed = self.store.claim_media_analysis(project_id=project_id, analysis_id=analysis_id)
+        if claimed is not None:
+            self.store.mark_media_analysis_blocked(project_id=project_id, analysis_id=analysis_id, expected_attempt=int(claimed["attempt"]), error_code="MEDIA_ANALYSIS_WORKER_UNAVAILABLE", error_message="Configure a local media analysis worker or inject a vision provider.")
+        return self.store.get_media_analysis(project_id=project_id, analysis_id=analysis_id)
 
 
 def create_app(
@@ -75,9 +156,15 @@ def create_app(
     final_renderer=None,
     pycapcut_exporter=None,
     media_library_store: MediaLibraryStore | None = None,
+    vision_provider=None,
+    embedding_provider=None,
+    media_probe=None,
+    analysis_dispatcher=None,
+    analysis_clock=None,
+    media_analysis_poll_interval_seconds: float = 0.05,
 ) -> FastAPI:
-    app = FastAPI(title="VideoBox API", version="0.1.0")
-    store = LocalProjectStore(projects_root or DEFAULT_PROJECTS_ROOT)
+    app = FastAPI(title="VideoBox API", version="0.1.0", lifespan=_media_analysis_lifespan)
+    store = LocalProjectStore(projects_root or DEFAULT_PROJECTS_ROOT, now=analysis_clock)
     user_library_store = UserLibraryStore(store.projects_root.parent / "videobox-user-library")
     resolved_media_library_store = media_library_store or MediaLibraryStore(
         store.projects_root.parent / "videobox-user-library"
@@ -123,7 +210,28 @@ def create_app(
         final_renderer=final_renderer,
     )
     orchestrator = ApiOrchestrator(store, pipeline=pipeline)
+    # Analysis is opt-in by dependency injection in normal API tests and runtime wiring.
+    # Enqueue remains durable even where a local vision profile is unavailable.
+    resolved_vision_provider = vision_provider
+    if resolved_vision_provider is not None:
+        if media_probe is None:
+            raise ValueError("media_probe is required when vision_provider is injected.")
+        analysis_service = MediaAnalysisService(
+            store=store, media_probe=media_probe, vision_provider=resolved_vision_provider, clock=analysis_clock,
+        )
+        orchestrator.media_analysis_service = analysis_service
+        orchestrator.media_analysis_dispatcher = analysis_dispatcher or analysis_service.dispatch_once
+    else:
+        analysis_service = _UnavailableMediaAnalysisService(store)
+        orchestrator.media_analysis_service = analysis_service
+        orchestrator.media_analysis_dispatcher = None
     app.state.local_runtime_config = resolved_local_runtime_config
+    app.state.store = store
+    app.state.media_analysis_vision_provider = resolved_vision_provider
+    app.state.media_analysis_embedding_provider = embedding_provider
+    app.state.media_analysis_service = orchestrator.media_analysis_service
+    app.state.media_analysis_dispatcher = orchestrator.media_analysis_dispatcher
+    app.state.media_analysis_poll_interval_seconds = media_analysis_poll_interval_seconds
     app.state.auto_cut_config = resolved_auto_cut_config
     app.state.whisper_stt_config = resolved_whisper_stt_config
     app.state.capcut_draft_export_config = resolved_capcut_draft_export_config
@@ -142,6 +250,7 @@ def create_app(
 
     app.include_router(build_projects_router(store))
     app.include_router(build_assets_router(orchestrator, store))
+    app.include_router(build_media_analysis_router(store, orchestrator.media_analysis_service, orchestrator.media_analysis_dispatcher))
     app.include_router(build_jobs_router(orchestrator))
     app.include_router(build_timeline_router(orchestrator))
     app.include_router(build_editing_session_router(orchestrator, store))

@@ -274,76 +274,76 @@ class ApiOrchestrator:
         source_directory: Path | None,
         tags: list[str],
         title_by_source_path: dict[str, str],
-    ) -> list[dict[str, Any]]:
-        paths = self._resolve_broll_batch_paths(
+        recursive: bool = False,
+    ) -> dict[str, list[dict[str, Any]]]:
+        paths, failures = self._resolve_broll_batch_paths(
             source_paths=source_paths,
-            source_directory=source_directory,
+            source_directory=source_directory, recursive=recursive,
         )
         registered_asset_ids: list[str] = []
+        source_by_asset_id: dict[str, str] = {}
         for source_path in paths:
-            asset = self.pipeline.register_broll_asset(
-                project_id=project_id,
-                source_path=source_path,
-                title=title_by_source_path.get(str(source_path)) or source_path.stem,
-                tags=tags,
-            )
+            try:
+                asset = self.pipeline.register_broll_asset(
+                    project_id=project_id,
+                    source_path=source_path,
+                    title=title_by_source_path.get(str(source_path)) or source_path.stem,
+                    tags=tags,
+                )
+            except Exception as exc:
+                # A bad file must not roll back assets already accepted in this batch.
+                failures.append({"source_path": str(source_path.resolve()), "reason": str(exc)})
+                continue
             registered_asset_ids.append(asset["asset_id"])
+            source_by_asset_id[asset["asset_id"]] = str(source_path.resolve())
         assets_by_id = {
             asset["asset_id"]: asset
             for asset in self.store.list_assets(project_id=project_id, asset_type=AssetType.BROLL_VIDEO)
         }
-        return [assets_by_id[asset_id] for asset_id in registered_asset_ids if asset_id in assets_by_id]
+        return {"assets": [{**assets_by_id[asset_id], "source_path": source_by_asset_id.get(asset_id)} for asset_id in registered_asset_ids if asset_id in assets_by_id], "failures": failures}
 
     def _resolve_broll_batch_paths(
         self,
         *,
         source_paths: list[Path],
-        source_directory: Path | None,
-    ) -> list[Path]:
+        source_directory: Path | None, recursive: bool = False,
+    ) -> tuple[list[Path], list[dict[str, str]]]:
         paths: list[Path] = []
         if source_directory is not None:
             if not source_directory.exists():
                 raise ValueError(f"B-roll source directory does not exist: {source_directory}")
             if not source_directory.is_dir():
                 raise ValueError(f"B-roll source directory is not a directory: {source_directory}")
-            paths.extend(
-                sorted(
-                    (
-                        candidate
-                        for candidate in source_directory.iterdir()
-                        if candidate.is_file()
-                        and candidate.suffix.lower() in BROLL_VIDEO_EXTENSIONS
-                    ),
-                    key=lambda path: path.name.lower(),
-                )
-            )
+            iterator = source_directory.rglob("*") if recursive else source_directory.iterdir()
+            paths.extend(sorted((candidate for candidate in iterator if candidate.is_file() and candidate.suffix.lower() in BROLL_VIDEO_EXTENSIONS), key=lambda path: str(path.resolve()).lower()))
         paths.extend(source_paths)
         if not paths:
             raise ValueError("No B-roll video files found for batch import.")
         unique_paths: list[Path] = []
+        failures: list[dict[str, str]] = []
         seen: set[Path] = set()
+        seen_content: set[str] = set()
         for path in paths:
-            if path in seen:
+            resolved = path.resolve()
+            if resolved in seen:
                 continue
-            seen.add(path)
-            unique_paths.append(path)
-        invalid_paths = [path for path in unique_paths if not path.exists() or not path.is_file()]
-        if invalid_paths:
-            raise ValueError(
-                "B-roll batch import requires existing files: "
-                + ", ".join(str(path) for path in invalid_paths)
-            )
-        invalid_extensions = [
-            path
-            for path in unique_paths
-            if path.suffix.lower() not in BROLL_VIDEO_EXTENSIONS
-        ]
-        if invalid_extensions:
-            raise ValueError(
-                "B-roll batch import only accepts video files: "
-                + ", ".join(str(path) for path in invalid_extensions)
-            )
-        return unique_paths
+            seen.add(resolved)
+            from videobox_storage.local_project_store import sha256_file
+            if not resolved.exists() or not resolved.is_file():
+                failures.append({"source_path": str(resolved), "reason": "source file does not exist"})
+                continue
+            if resolved.suffix.lower() not in BROLL_VIDEO_EXTENSIONS:
+                failures.append({"source_path": str(resolved), "reason": "unsupported video extension"})
+                continue
+            if resolved.exists() and resolved.is_file():
+                digest = sha256_file(resolved)
+                if digest in seen_content:
+                    continue
+                seen_content.add(digest)
+            unique_paths.append(resolved)
+        if not unique_paths and not failures:
+            raise ValueError("No B-roll video files found for batch import.")
+        return unique_paths, failures
 
     def register_raw_video_asset(self, *, project_id: str, source_path: Path) -> RegisteredAsset:
         asset = self.pipeline.register_raw_video_asset(

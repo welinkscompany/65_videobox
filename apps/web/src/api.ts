@@ -32,6 +32,18 @@ export type BrollBatchImportRequest = {
   source_paths: string[];
   source_directory?: string;
   tags: string[];
+  recursive?: boolean;
+};
+
+export type MediaAnalysis = {
+  analysis_id: string;
+  asset_id: string;
+  status: string;
+  progress_percent: number;
+  error_code: string | null;
+  error_message: string | null;
+  result: Record<string, unknown> | null;
+  created_at: string;
 };
 
 export type TimelineClip = {
@@ -713,6 +725,11 @@ export const api = {
     }
     return (await response.json()) as EditingSession;
   },
+  listMediaAnalysis: (projectId: string) => request<{ items: MediaAnalysis[] }>(`/api/projects/${projectId}/media-analysis`),
+  cancelMediaAnalysis: (projectId: string, analysisId: string) => request<MediaAnalysis>(`/api/projects/${projectId}/media-analysis/${analysisId}/cancel`, { method: "POST" }),
+  retryMediaAnalysis: (projectId: string, analysisId: string) => request<MediaAnalysis>(`/api/projects/${projectId}/media-analysis/${analysisId}/retry`, { method: "POST" }),
+  reviewMediaAnalysis: (projectId: string, analysisId: string, tags: Record<string, string[]>) => request<MediaAnalysis>(`/api/projects/${projectId}/media-analysis/${analysisId}/review`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tags }) }),
+  mediaAnalysisPreview: (projectId: string, assetId: string) => request<{ analysis_id: string; preview: unknown }>(`/api/projects/${projectId}/assets/${assetId}/analysis-preview`),
   getEditingSessionFixedTimeline: (projectId: string, sessionId: string) =>
     request<FixedTimeline>(`/api/projects/${projectId}/editing-sessions/${sessionId}/fixed-timeline`),
   previewEditingSessionSelectedRange: (projectId: string, sessionId: string, payload: { start_sec: number; end_sec: number }) =>
