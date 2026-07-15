@@ -501,7 +501,7 @@ git commit -m "feat: connect media analysis api and review ui"
 - Modify: docs/implementation-plan.ko.md
 - Modify: docs/development-status-2026-06-29.ko.md
 
-- [ ] **Step 1: opt-in live smoke 작성**
+- [x] **Step 1: opt-in live smoke 작성**
 
 ~~~python
 @pytest.mark.live_lmstudio
@@ -516,7 +516,7 @@ def test_live_vision_embedding_and_semantic_lookup(live_profile, sample_frame) -
 
 env VIDEOBOX_RUN_LM_STUDIO_MEDIA_SMOKE가 없으면 skip한다. Slice 1 release 실행에서는 env를 켜고 strict capability preflight를 통과한 실제 local profile의 PASS가 필요하다. 이 gate에서 SKIP은 성공으로 세지 않는다. 모델 이름이나 일반 `/v1/models` 항목만으로 capability를 추정하지 않는다.
 
-- [ ] **Step 2: focused와 live smoke 실행**
+- [x] **Step 2: focused와 live smoke 실행**
 
 ~~~powershell
 .venv\Scripts\python.exe -m pytest -q tests/test_local_media_ai_providers.py tests/test_media_analysis_store.py tests/test_media_analysis_jobs.py tests/test_api_media_analysis.py
@@ -527,7 +527,7 @@ Remove-Item Env:VIDEOBOX_RUN_LM_STUDIO_MEDIA_SMOKE
 
 Expected: focused PASS, live test 1 PASS, external provider call 0.
 
-- [ ] **Step 3: 전체 회귀 실행**
+- [x] **Step 3: 전체 회귀 실행**
 
 ~~~powershell
 .venv\Scripts\python.exe -m pytest -q
@@ -539,11 +539,11 @@ git status --short
 
 Expected: 전부 exit 0. intentional ErrorBoundary stderr는 기존 허용 범위를 넘지 않음.
 
-- [ ] **Step 4: SSOT에 실제 수치와 evidence 기록**
+- [x] **Step 4: SSOT에 실제 수치와 evidence 기록**
 
 구현 완료 HEAD, test totals, live profile key/variant, 분석 sample SHA, external call 0, artifact path를 기록한다. successful opt-in run은 Git-ignored `artifacts/lm-studio-media-smoke/live-media-success.json`(또는 `VIDEOBOX_LM_STUDIO_SMOKE_ARTIFACT_ROOT`)에 exact requested endpoint/call count, profile, trace를 durable evidence로 쓴다. blocked/skip run은 이 success artifact를 쓰지 않는다. 모델명은 현재 PC smoke evidence로만 기록하고 배포 default로 고정하지 않는다.
 
-- [ ] **Step 5: Slice 1 closeout commit/push**
+- [x] **Step 5: Slice 1 closeout commit/push**
 
 ~~~powershell
 git add pyproject.toml tests/test_lm_studio_media_smoke.py docs/implementation-plan.ko.md docs/development-status-2026-06-29.ko.md

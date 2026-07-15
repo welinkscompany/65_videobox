@@ -13,9 +13,9 @@
 - 기준 HEAD: `8eddb7f`
 - 계획 범위: 3개 순차 slice, 18개 TDD Task
 - 설계/계획 진행률: 100%, 잔여 0%
-- production code 구현 진행률: 5/18 Task (약 27.8%), 잔여 약 72.2%
-- 완료 작업: Slice 1 Task 1 local-only runtime 경계와 deterministic test guard, Task 2 Vision/embedding/capability preflight provider, Task 3 durable MEDIA_ANALYSIS schema와 state machine, Task 4 FFmpeg probe/cache/quality gate/deterministic dispatcher, Task 5 analysis API/batch ingest/검수 UI
-- 다음 작업: Slice 1 Task 6 live LM Studio smoke와 release gate
+- production code 구현 진행률: 6/18 Task (약 33.3%), 잔여 약 66.7%
+- 완료 작업: Slice 1 Task 1 local-only runtime 경계와 deterministic test guard, Task 2 Vision/embedding/capability preflight provider, Task 3 durable MEDIA_ANALYSIS schema와 state machine, Task 4 FFmpeg probe/cache/quality gate/deterministic dispatcher, Task 5 analysis API/batch ingest/검수 UI, Task 6 actual LM Studio live release gate
+- 다음 작업: Slice 2 Task 7 narration 없는 script draft session
 - 계획 commit `3fda0ae`는 remote에 push됐다. 다음 세션 재개용 handoff는 `docs/handoffs/2026-07-14-local-media-director-plan-closeout.ko.md`다.
 
 확인된 구현 blocker는 text-only local provider, Gemini 자동 fallback, 외부 HTTP(S) runtime 허용, durable media-analysis 상태 부재, script-only session 부재, B/M/S mutation의 불완전한 undo, output SHA/revision 재검증 부재다. 계획은 이 순서대로 RED test를 먼저 만들고 provider → analysis → proposal → transaction → UI → output E2E를 연결한다.
@@ -39,14 +39,12 @@ UI는 4,396줄 `App.tsx`의 전면 rewrite를 하지 않고 `apps/web/src/featur
 - OpenCut은 현재 Task 4 및 Local Media Director 18개 Task의 구현 범위에 넣지 않는다. full editor 도입이 아니라 UX 참고 후보로만 보존하며, editing-session/FFmpeg/CapCut 계약 안정 후 별도 재분석한다.
 - 사용자 음성 녹음·업로드→local STT 전사→자막/대본 정렬은 후속 Voice Capture & Narration slice 후보로 보존한다. voice cloning/TTS는 명시 동의·보관/삭제·approval 계약을 먼저 설계한 뒤 별도 판단한다.
 
-현재 다음 실행 단위는 Slice 1 Task 6 live LM Studio smoke와 release gate다. Task 1–5 remediation의 provider/profile 경계와 durable provenance를 실제 local smoke에서 다시 확인한다.
+### Slice 1 Task 6 live gate evidence — PASS (2026-07-15)
 
-### Slice 1 Task 6 live gate evidence — blocked (2026-07-15)
-
-- `tests/test_lm_studio_media_smoke.py`는 `VIDEOBOX_RUN_LM_STUDIO_MEDIA_SMOKE=1`이 없으면 명시적으로 skip하며 normal pytest socket guard를 해제하지 않는다. opt-in marker도 정확한 `127.0.0.1:1234`만 허용한다.
-- 실제 opt-in 실행은 `/v1/models`까지 도달했지만, 2026-07-15 응답의 `qwen/qwen3.6-35b-a3b`, `text-embedding-bge-m3`, `text-embedding-nomic-embed-text-v1.5`, `ltx-2.3`, `flux.1-dev` 항목에는 `loaded`와 `native_capabilities`가 없었다. 따라서 strict capability preflight가 `vision + structured_json` 모델을 선택하지 못해 `no loaded model advertises native vision + structured_json capability`로 skip됐다.
-- 이는 PASS가 아니며 Task 6 checkbox, 전체 진행률, Slice 1 release gate를 완료 처리하지 않는다. 모델명을 capability로 추정하거나 fake provider로 대체하지 않았다. vision/embedding 실행 및 그 provider trace/audit artifact는 생성되지 않았고, 실제 요청은 exact loopback `GET /v1/models` 하나뿐이어서 Gemini 또는 외부 HTTP(S) 호출은 0이다. 기본 Git-ignored `artifacts/lm-studio-media-smoke/live-media-success.json` success artifact도 blocked run에서는 만들지 않는다. `VIDEOBOX_LM_STUDIO_SMOKE_ARTIFACT_ROOT`를 지정하면 해당 custom root의 보존·Git 제외는 실행자 책임이다.
-- 재개 조건: LM Studio가 loaded 상태와 native `vision`, `structured_json`, `embedding` capability를 제공하도록 모델을 준비한 뒤 같은 opt-in smoke를 재실행해 Vision fixed JSON schema, finite embedding, durable local semantic self-match, `lm_studio` provider trace/audit evidence를 PASS로 기록한다. PASS 때만 artifact는 HEAD·test total/command·profile/variant·sample SHA·exact endpoint/call count·external/Gemini 0·trace·timestamp를 담는다.
+- `87be02e7eec1108bc2e758d595d926f558fcf6e4`에서 `VIDEOBOX_RUN_LM_STUDIO_MEDIA_SMOKE=1 pytest -q -rs tests/test_lm_studio_media_smoke.py -m live_lmstudio`가 `1 passed, 1 deselected`로 통과했다. normal pytest의 socket guard는 유지되고 marker+환경변수+exact `127.0.0.1:1234`일 때만 live 연결을 연다.
+- native exact `GET /api/v1/models` inventory로 loaded Qwen Vision `qwen/qwen3.6-35b-a3b`와 BGE embedding `text-embedding-bge-m3`를 식별했다. structured JSON은 inventory metadata나 모델명으로 추정하지 않고, production fixed JSON Schema `POST /v1/chat/completions`의 성공 및 strict local parse로 증명했다. 이후 `POST /v1/embeddings`, finite vector, restart 뒤 durable semantic self-match까지 통과했다.
+- custom Git-excluded artifact `C:\\Users\\atgro\\AppData\\Local\\Temp\\videobox-task6-release-evidence-87be02e\\live-media-success.json`은 sample SHA `944be1ad020b89fcb8a4c40e3be5e06ae581e751577483e3edf3bd8a7f7f3883`, native discovery 5회와 OpenAI runtime 2회의 exact loopback 요청(총 7), unfallbacked `lm_studio` trace, external provider call 0, Gemini call 0을 기록한다.
+- native inventory가 malformed한 과거 호환 환경에만 former strict `loaded=true + native_capabilities` inventory를 fallback으로 허용한다. 일반 `/v1/models` ID나 model name만으로 capability를 만들지 않으며, generic ID-only inventory는 blocked다.
 
 ### Slice 1 Task 1 closeout (2026-07-14)
 

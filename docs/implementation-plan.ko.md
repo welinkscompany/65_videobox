@@ -1060,8 +1060,8 @@ production-readiness blocker slice 1의 9개 Task는 구현·회귀·600초 smok
   1. Local media intelligence foundation: LM Studio local-only provider, durable B-roll analysis, 자동 태깅/검수
   2. Script-first proposal engine: narration 없는 provisional script session, B/M/S ranking, preview/materialize, atomic apply
   3. Director workspace: 우측 대화 패널, 수동 편집, B/M/S reference, persistent conversation, 10-step undo/redo, responsive UI
-- 구현 시작 전 기준 HEAD는 `8eddb7f`다. Slice 1 Task 1–5와 그 release-blocking remediation은 완료됐으며, 전체 계획 기준 5/18 Task(약 27.8%) 완료·약 72.2% 잔여다.
-- 다음 실행 단위는 Slice 1 Task 6 `live LM Studio smoke와 release gate`다.
+- 구현 시작 전 기준 HEAD는 `8eddb7f`다. Slice 1 Task 1–6과 그 release-blocking remediation은 완료됐으며, 전체 계획 기준 6/18 Task(약 33.3%) 완료·약 66.7% 잔여다.
+- 다음 실행 단위는 Slice 2 Task 7 `narration 없는 script draft session`이다.
 - 기존 `LocalFirstStructuredRuntime`의 Gemini 자동 fallback, 외부 HTTP(S) runtime 허용, text-only Qwen adapter는 승인 설계와 충돌하므로 Slice 1에서 RED test부터 교체한다.
 - Codex Sol/Terra/Luna 모델 선택은 개발 에이전트 실행 자원이며 VideoBox 제품 runtime 계약에는 포함하지 않는다.
 
@@ -1070,8 +1070,8 @@ production-readiness blocker slice 1의 9개 Task는 구현·회귀·600초 smok
 - actual LM Studio media analysis는 strict loopback capability profile로만 opt-in 구성하며, default blocked state와 test-only fake DI seam을 분리한다. model-profile cache identity, durable scene/embedding provenance, active queue position, preview availability, batch partial-failure contract까지 RED-first로 보완했다.
 - Task 4의 analysis validity gate는 proposal/apply consumer가 생성되는 Slice 2 Task 8–11에서 연결한다. 이연을 가리기 위한 가짜 apply endpoint는 만들지 않는다.
 
-### Slice 1 Task 6 live gate current evidence — blocked (2026-07-15)
+### Slice 1 Task 6 live gate current evidence — PASS (2026-07-15)
 
-- opt-in live smoke는 `@live_lmstudio`, `VIDEOBOX_RUN_LM_STUDIO_MEDIA_SMOKE=1`, exact `127.0.0.1:1234`를 모두 만족할 때만 socket guard를 통과한다. 일반 회귀는 이 연결을 열지 않는다.
-- 실제 `/v1/models`는 reachable했지만 loaded native `vision`·`structured_json` capability를 광고한 모델이 없어 smoke는 Vision 요청 전 명시적으로 skip됐다. 이는 release PASS가 아니며 Task 6 checkbox와 진행률은 그대로 둔다. 성공 artifact도 생성되지 않았다.
-- 재개 조건은 loaded native vision/structured JSON 및 embedding capability가 보일 때 같은 opt-in smoke를 재실행하는 것이다. 성공 시 기본 Git-ignored `artifacts/lm-studio-media-smoke/live-media-success.json`에 profile/variant, sample SHA, requested loopback endpoint와 call count, external/Gemini 0, provider trace를 기록한다. `VIDEOBOX_LM_STUDIO_SMOKE_ARTIFACT_ROOT`를 지정하는 경우 해당 경로의 보존·Git 제외 책임은 실행자에게 있다.
+- `87be02e` HEAD의 opt-in smoke가 actual Qwen Vision fixed-schema response, BGE finite embedding, `lm_studio` provider trace(no fallback), restart durable semantic self-match를 통과했다. `@live_lmstudio`+`VIDEOBOX_RUN_LM_STUDIO_MEDIA_SMOKE=1`+exact `127.0.0.1:1234` 외의 일반 회귀는 socket을 열지 않는다.
+- native `/api/v1/models`의 loaded instance/vision metadata는 후보 discovery 전용이다. structured JSON은 actual `POST /v1/chat/completions` fixed-schema 성공/strict parse로만 증명했다. exact loopback 7회(native 5, OpenAI runtime 2), external/Gemini 0, profile/variant/sample SHA/trace는 custom Git-excluded success artifact에 저장했다.
+- malformed native inventory에 한해서만 이전 strict loaded+native-capabilities inventory를 fallback으로 읽는다. generic `/v1/models` ID나 model name inference는 계속 blocked다. Task 7부터는 이 frozen local-only boundary를 사용한다.

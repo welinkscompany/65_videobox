@@ -4,10 +4,9 @@ import json
 import re
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 
-_EXACT_LM_STUDIO_PREFIX = "http://127.0.0.1:1234/v1/"
-_EXACT_LM_STUDIO_NATIVE_MODELS_URL = "http://127.0.0.1:1234/api/v1/models"
 _REQUIRED_EVIDENCE_FIELDS = frozenset(
     {
         "git_head",
@@ -25,6 +24,21 @@ _REQUIRED_EVIDENCE_FIELDS = frozenset(
 )
 
 
+def _is_exact_loopback_endpoint(endpoint: object) -> bool:
+    if not isinstance(endpoint, str):
+        return False
+    parsed = urlparse(endpoint)
+    return (
+        parsed.scheme == "http"
+        and parsed.hostname == "127.0.0.1"
+        and parsed.port == 1234
+        and not parsed.params
+        and not parsed.query
+        and not parsed.fragment
+        and (parsed.path == "/api/v1/models" or (parsed.path.startswith("/v1/") and len(parsed.path) > len("/v1/")))
+    )
+
+
 def write_live_media_smoke_evidence(*, artifact_root: Path, evidence: dict[str, Any]) -> Path:
     """Persist a successful live-only smoke audit outside version control."""
     missing = _REQUIRED_EVIDENCE_FIELDS - set(evidence)
@@ -36,11 +50,7 @@ def write_live_media_smoke_evidence(*, artifact_root: Path, evidence: dict[str, 
     if (
         not isinstance(endpoints, list)
         or not endpoints
-        or not all(
-            isinstance(endpoint, str)
-            and (endpoint == _EXACT_LM_STUDIO_NATIVE_MODELS_URL or endpoint.startswith(_EXACT_LM_STUDIO_PREFIX))
-            for endpoint in endpoints
-        )
+        or not all(_is_exact_loopback_endpoint(endpoint) for endpoint in endpoints)
         or evidence["loopback_request_count"] != len(endpoints)
     ):
         raise ValueError("live smoke evidence must contain only exact LM Studio loopback requests")
