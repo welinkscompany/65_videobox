@@ -1203,7 +1203,7 @@ git commit -m "refactor: extract manual media library"
 - Modify: apps/web/src/features/director/DirectorWorkspace.tsx
 - Modify: apps/web/src/styles.css
 
-- [ ] **Step 1: mobile interaction RED test 작성**
+- [x] **Step 1: mobile interaction RED test 작성**
 
 ~~~tsx
 it("모바일 sheet가 draft를 보존하고 닫은 뒤 focus를 복귀한다", async () => {
@@ -1216,17 +1216,17 @@ it("모바일 sheet가 draft를 보존하고 닫은 뒤 focus를 복귀한다", 
 });
 ~~~
 
-- [ ] **Step 2: RED 확인**
+- [x] **Step 2: RED 확인**
 
 Run: npm --prefix apps/web test -- src/features/director/responsive-director.test.tsx
 
 Expected: hook 또는 dialog behavior 부재로 FAIL.
 
-- [ ] **Step 3: desktop/mobile layout 구현**
+- [x] **Step 3: desktop/mobile layout 구현**
 
 Desktop은 360–420px aside와 접기 기능을 사용한다. narrow viewport는 aria-modal dialog bottom sheet, focus trap, Escape/back/close, focus return을 제공한다. 기존 1100px/640px breakpoint와 겹치지 않게 Director 전환 기준 하나를 styles.css에 정의한다. candidate tray는 full-width carousel로 바뀐다.
 
-- [ ] **Step 4: reduced motion와 keyboard GREEN**
+- [x] **Step 4: reduced motion와 keyboard GREEN**
 
 상태를 색상만으로 전달하지 않고 live region과 text를 사용한다. prefers-reduced-motion을 존중한다.
 
@@ -1236,7 +1236,7 @@ Run: npm --prefix apps/web run build
 
 Expected: PASS.
 
-- [ ] **Step 5: 커밋**
+- [x] **Step 5: 커밋**
 
 ~~~powershell
 git add apps/web/src/features/director apps/web/src/styles.css

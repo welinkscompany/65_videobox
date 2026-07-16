@@ -1,8 +1,15 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 248. 2026-07-16 Local Media Director Slice 3 Task 16 closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
-> 이 문서의 기존 날짜 기반 섹션은 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 248`을 기준으로 본다.
+> 현재 authoritative 상태/next slice 판단은 `## 249. 2026-07-16 Local Media Director Slice 3 Task 17 closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 이 문서의 기존 날짜 기반 섹션은 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 249`를 기준으로 본다.
 > 단, `2일 내 1차 데모 완성` 실행 레일은 `## 189`의 장기 우선순위를 그대로 넓게 집행하지 않고, `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`의 축소된 실행 계획을 우선 적용한다.
+
+## 249. 2026-07-16 Local Media Director Slice 3 Task 17 closeout
+
+- Director workspace는 desktop에서 360–420px aside와 접기 제어를 제공하고, 760px 이하에서는 portal 기반 `aria-modal` bottom sheet로 전환한다. sheet는 backdrop, background inert/aria-hidden, capture 차단으로 배경의 수동 BGM/B-roll mutation을 막는다.
+- narrow sheet는 초기 내부 focus, 양방향 Tab trap, Escape/back/close focus 복귀, IME composition Escape 예외, breakpoint exit 시 desktop collapse 제어로의 focus 복원을 제공하며 입력 draft를 보존한다. candidate tray는 narrow carousel이며 reduced-motion 선호를 state/CSS에 반영한다.
+- 검증: responsive RED(열기 제어 부재·IME Escape 닫힘·배경 B-roll mutation·breakpoint focus 유실)를 확인한 뒤 GREEN으로 닫았다. frontend 전체 `156 passed`, production build 성공, 관련 Director backend contract `16 passed`, `git diff --check` 통과. 독립 사양·품질 리뷰는 P0/P1 없이 승인됐다.
+- 전체 구현 계획 누적 진행률은 17/18 Task (94.4%), 잔여 5.6%다. 다음 실행 단위는 Slice 3 Task 18 App integration, refresh recovery, real output E2E, release closeout이다.
 
 ## 248. 2026-07-16 Local Media Director Slice 3 Task 16 closeout
 
