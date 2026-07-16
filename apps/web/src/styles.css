@@ -231,6 +231,15 @@ button {
   color: var(--danger);
 }
 
+button:focus-visible,
+textarea:focus-visible,
+input:focus-visible,
+audio:focus-visible,
+video:focus-visible {
+  outline: 3px solid #1f6feb;
+  outline-offset: 3px;
+}
+
 .warning-banner {
   background: #fff3cd;
   color: #765300;

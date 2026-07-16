@@ -33,6 +33,15 @@ class EditingSessionRevisionConflict(RuntimeError):
     """The persisted editing-session revision did not match the requested CAS revision."""
 
 
+class EditingSessionPostCommitFileWriteError(RuntimeError):
+    """SQLite committed an editing session, but its convenience JSON mirror did not.
+
+    The SQLite ``session_json`` column is authoritative and will recreate the
+    mirror on the next read.  Callers that own files registered in the same
+    transaction must therefore *not* compensate those files.
+    """
+
+
 def _normalize_boolish(value: object) -> bool:
     if isinstance(value, str):
         return value.strip().lower() not in {"", "0", "false", "no", "off"}
@@ -45,6 +54,14 @@ def sha256_file(path: Path) -> str:
         while chunk := handle.read(1024 * 1024):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _is_relative_to(path: Path, parent: Path) -> bool:
+    try:
+        path.relative_to(parent)
+        return True
+    except ValueError:
+        return False
 
 
 def _canonical_recommendation_type(value: object) -> str:
@@ -188,6 +205,7 @@ class LocalProjectStore:
     def __init__(self, projects_root: Path, now: Callable[[], datetime] | None = None) -> None:
         self.projects_root = Path(projects_root)
         self._clock = now or (lambda: datetime.now(UTC))
+        self._reconcile_batch_director_operations()
 
     def bootstrap_project(self, name: str) -> ProjectRecord:
         project = ProjectRecord.create(name=name)
@@ -238,6 +256,130 @@ class LocalProjectStore:
 
     def project_root(self, project_id: str) -> Path:
         return self.projects_root / "projects" / project_id
+
+    def _reconcile_batch_director_operations(self) -> None:
+        """Recover only disposable batch-apply files left around a process crash.
+
+        A manifest is deliberately filesystem-durable before bytes leave staging.
+        On restart, a destination is preserved only when SQLite owns the exact
+        URI and hash; every other staged/destination file is compensation work.
+        """
+        projects = self.projects_root / "projects"
+        if not projects.exists():
+            return
+        for project_root in projects.iterdir():
+            if not project_root.is_dir() or not (project_root / "db" / "project.sqlite").is_file():
+                continue
+            operations = project_root / ".batch-director-operations"
+            if not operations.exists():
+                continue
+            project_id = project_root.name
+            for manifest in operations.glob("*.json"):
+                try:
+                    payload = json.loads(manifest.read_text(encoding="utf-8"))
+                    if not self._batch_manifest_paths_are_safe(
+                        project_root=project_root,
+                        operations=operations,
+                        manifest=manifest,
+                        payload=payload,
+                    ):
+                        # A manifest can be hand-edited or partially corrupt.
+                        # Retain it for inspection rather than using its paths
+                        # as deletion authority.
+                        continue
+                    entries = list(payload.get("entries") or []) if isinstance(payload, dict) else []
+                    for entry in entries:
+                        if not isinstance(entry, dict):
+                            continue
+                        destination = Path(str(entry.get("destination_path") or ""))
+                        staged = Path(str(entry.get("staged_path") or ""))
+                        digest = str(entry.get("sha256") or "")
+                        if destination.exists() and not self._batch_destination_is_registered(project_id, destination, digest):
+                            destination.unlink()
+                        if staged.exists():
+                            staged.unlink()
+                        if staged.parent != operations and staged.parent.exists() and not any(staged.parent.iterdir()):
+                            staged.parent.rmdir()
+                except (OSError, ValueError, json.JSONDecodeError):
+                    # A corrupt manifest must not make startup unavailable;
+                    # it is retained for operator inspection rather than
+                    # guessing which files it owns.
+                    continue
+                manifest.unlink(missing_ok=True)
+            # ``.tmp`` is only the atomically-written manifest sidecar.  It is
+            # safe to remove from the operation root even when no final JSON
+            # was written; do not infer ownership from arbitrary nested files.
+            for temporary in operations.glob("*.tmp"):
+                if temporary.is_file():
+                    temporary.unlink(missing_ok=True)
+            for operation_dir in operations.iterdir():
+                if operation_dir.is_dir() and not any(operation_dir.iterdir()):
+                    operation_dir.rmdir()
+            if operations.exists() and not any(operations.iterdir()):
+                operations.rmdir()
+
+    @staticmethod
+    def _batch_manifest_paths_are_safe(*, project_root: Path, operations: Path, manifest: Path, payload: object) -> bool:
+        """Return true only when every cleanup path is one this batch owns."""
+        if not isinstance(payload, dict):
+            return False
+        operation_id = payload.get("operation_id")
+        if not isinstance(operation_id, str) or not operation_id or manifest.stem != operation_id:
+            return False
+        operation_root = (operations / operation_id).resolve()
+        # Current batch materialization uses assets/imported.  The media roots
+        # remain accepted solely for pre-existing project layouts that used the
+        # same crash-recovery manifest contract.
+        destination_roots = tuple(
+            (project_root / relative).resolve()
+            for relative in (Path("assets") / "imported", Path("media") / "broll", Path("media") / "bgm", Path("media") / "sfx")
+        )
+        try:
+            operation_root.relative_to(operations.resolve())
+            for destination_root in destination_roots:
+                destination_root.relative_to(project_root.resolve())
+        except ValueError:
+            return False
+        entries = payload.get("entries")
+        if not isinstance(entries, list):
+            return False
+        for entry in entries:
+            if not isinstance(entry, dict):
+                return False
+            staged_value = entry.get("staged_path")
+            destination_value = entry.get("destination_path")
+            digest = entry.get("sha256")
+            if not isinstance(staged_value, str) or not isinstance(destination_value, str) or not isinstance(digest, str) or not digest:
+                return False
+            try:
+                resolved_staged = Path(staged_value).resolve()
+                # Older manifests used a one-file stage directly under the
+                # operations root.  Keep recovery compatible, but never allow
+                # another operation directory to be claimed.
+                if not _is_relative_to(resolved_staged, operation_root) and resolved_staged.parent != operations.resolve():
+                    return False
+                resolved_destination = Path(destination_value).resolve()
+                if not any(_is_relative_to(resolved_destination, root) for root in destination_roots):
+                    return False
+            except ValueError:
+                return False
+        return True
+
+    def _batch_destination_is_registered(self, project_id: str, destination: Path, digest: str) -> bool:
+        try:
+            root = self.project_root(project_id).resolve()
+            resolved = destination.resolve()
+            if root not in resolved.parents or not digest or not resolved.is_file() or sha256_file(resolved) != digest:
+                return False
+            uri = self._path_to_uri(project_id, resolved)
+            connection = sqlite3.connect(self.database_path(project_id))
+            try:
+                row = connection.execute("SELECT asset_id FROM assets WHERE project_id = ? AND storage_uri = ?", (project_id, uri)).fetchone()
+                return row is not None
+            finally:
+                connection.close()
+        except (OSError, ValueError, sqlite3.Error):
+            return False
 
     def database_path(self, project_id: str) -> Path:
         return self.project_root(project_id) / "db" / "project.sqlite"
@@ -791,6 +933,97 @@ class LocalProjectStore:
             session_payload=payload, is_new=False, created_at=str(existing["created_at"]),
             expected_revision=expected_revision, transaction_hook=consume,
         )
+
+    def batch_apply_director_proposal_transaction(
+        self, *, project_id: str, session_id: str, proposal_id: str,
+        session_payload: dict[str, Any], expected_revision: int, proposal_base_revision: int,
+        expected_asset_index_revision: int, staged_assets: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Register already-verified staged bytes and consume a proposal in one CAS write.
+
+        Filesystem moves cannot participate in SQLite rollback, so every copied
+        destination is tracked and removed on any failed database/session write.
+        The caller owns removal of the disposable stage files in all cases.
+        """
+        existing = self.get_editing_session(project_id=project_id, session_id=session_id)
+        payload = deepcopy(session_payload)
+        if int(payload.get("session_revision") or 0) <= int(existing.get("session_revision") or 1):
+            payload["session_revision"] = int(existing.get("session_revision") or 1) + 1
+        copied_paths: list[Path] = []
+
+        def consume(connection: sqlite3.Connection) -> None:
+            proposal_row = connection.execute("SELECT proposal_json, status FROM director_proposals WHERE proposal_id = ?", (proposal_id,)).fetchone()
+            if proposal_row is None or str(proposal_row["status"]) != "ready":
+                raise EditingSessionRevisionConflict("Director proposal is no longer ready.")
+            if int(json.loads(str(proposal_row["proposal_json"])).get("base_session_revision") or 0) != proposal_base_revision:
+                raise EditingSessionRevisionConflict("Director proposal base revision changed.")
+            revision_row = connection.execute("SELECT revision FROM director_asset_index_revisions WHERE project_id = ?", (project_id,)).fetchone()
+            current_revision = int(revision_row["revision"]) if revision_row is not None else 0
+            if current_revision != expected_asset_index_revision:
+                raise EditingSessionRevisionConflict("Director asset index changed before batch apply.")
+            for item in staged_assets:
+                staged = Path(str(item["staged_path"]))
+                destination = Path(str(item["destination_path"]))
+                digest = str(item["sha256"])
+                if not staged.is_file() or sha256_file(staged) != digest:
+                    raise ValueError("candidate_staging_sha_mismatch")
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                if destination.exists():
+                    raise ValueError("batch_destination_exists")
+                shutil.copy2(staged, destination)
+                copied_paths.append(destination)
+                if sha256_file(destination) != digest:
+                    raise ValueError("candidate_project_sha_mismatch")
+            materialized_revision = current_revision + 1
+            for item in staged_assets:
+                record: AssetRecord = item["asset_record"]
+                metadata = dict(item["metadata"])
+                metadata["director_materialized_asset_index_revision"] = materialized_revision
+                connection.execute(
+                    """INSERT INTO assets (asset_id, project_id, asset_type, storage_uri, source_kind, mime_type, duration_sec, metadata_json, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (record.asset_id, record.project_id, record.asset_type.value, record.storage_uri,
+                     "director_materialized", None, None, json.dumps(metadata, ensure_ascii=True), record.created_at.isoformat()),
+                )
+            if staged_assets:
+                actual_revision = self._increment_asset_index_revision_with_connection(connection, project_id)
+                if actual_revision != materialized_revision:
+                    raise EditingSessionRevisionConflict("Director asset index changed during batch apply.")
+            now = self._now_iso()
+            changed = connection.execute("UPDATE director_proposals SET status = ?, updated_at = ? WHERE proposal_id = ? AND status = 'ready'", ("applied", now, proposal_id))
+            if changed.rowcount != 1:
+                raise EditingSessionRevisionConflict("Director proposal is no longer ready.")
+            connection.execute("INSERT INTO director_proposal_lifecycle_events (proposal_id, status, reason, changed_at) VALUES (?, ?, ?, ?)", (proposal_id, "applied", "batch_session_apply", now))
+
+        try:
+            result = self._write_editing_session(
+                project_id=project_id, timeline_id=str(existing["timeline_id"]), session_id=session_id,
+                session_payload=payload, is_new=False, created_at=str(existing["created_at"]),
+                expected_revision=expected_revision, transaction_hook=consume,
+            )
+            for manifest_path in {Path(str(item.get("manifest_path"))) for item in staged_assets if item.get("manifest_path")}:
+                try:
+                    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                    if isinstance(manifest, dict):
+                        manifest["status"] = "committed"
+                        temporary = manifest_path.with_suffix(".tmp")
+                        temporary.write_text(json.dumps(manifest, sort_keys=True), encoding="utf-8")
+                        temporary.replace(manifest_path)
+                except (OSError, ValueError, json.JSONDecodeError):
+                    # Database commit is authoritative; the next startup can
+                    # still prove and reconcile a stale manifest.
+                    pass
+            return result
+        except EditingSessionPostCommitFileWriteError:
+            # The DB transaction owns these assets now.  The read path repairs
+            # its JSON mirror from SQLite, so preserving the bytes is safer
+            # than trying to undo a committed transaction.
+            raise
+        except Exception:
+            for path in copied_paths:
+                if path.exists():
+                    path.unlink()
+            raise
 
     def save_review_state(
         self,
@@ -4199,8 +4432,13 @@ class LocalProjectStore:
                         source_session_revision=payload["session_revision"], reason="editing_session_mutation",
                     )
                 connection.commit()
-                temporary_path.write_text(serialized_payload, encoding="utf-8")
-                temporary_path.replace(session_path)
+                try:
+                    temporary_path.write_text(serialized_payload, encoding="utf-8")
+                    temporary_path.replace(session_path)
+                except Exception as exc:
+                    raise EditingSessionPostCommitFileWriteError(
+                        "Editing-session SQLite commit succeeded but JSON mirror write failed."
+                    ) from exc
             except Exception:
                 if connection.in_transaction:
                     connection.rollback()

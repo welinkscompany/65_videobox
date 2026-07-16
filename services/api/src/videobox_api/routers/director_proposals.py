@@ -51,6 +51,10 @@ class ProposalApplyRequest(BaseModel):
     expected_revision: int = Field(ge=1)
 
 
+class ProposalBatchApplyRequest(ProposalApplyRequest):
+    """A single explicit user action; materialization happens only inside this endpoint."""
+
+
 def build_director_proposals_router(store: LocalProjectStore) -> APIRouter:
     router = APIRouter()
     service = DirectorProposalService(store)
@@ -297,6 +301,49 @@ def build_director_proposals_router(store: LocalProjectStore) -> APIRouter:
             raise HTTPException(status_code=422, detail="candidate_unavailable") from None
         except EditingSessionRevisionConflict:
             raise HTTPException(status_code=409, detail="session_revision_mismatch") from None
+
+    @router.post("/api/projects/{project_id}/director/proposals/{proposal_id}/batch-apply")
+    def batch_apply(project_id: str, proposal_id: str, body: ProposalBatchApplyRequest) -> dict:
+        """Stage all requested bytes, then atomically register and apply them in one CAS write."""
+        staged: list[dict] = []
+        try:
+            proposal = service.get(project_id=project_id, proposal_id=proposal_id)
+            if proposal.base_session_revision != body.expected_revision:
+                raise HTTPException(status_code=409, detail="proposal_revision_mismatch")
+            if service.stale_reasons(project_id=project_id, proposal=proposal):
+                raise HTTPException(status_code=409, detail="stale_proposal")
+            candidates_by_id = {item.candidate_id: item for item in proposal.candidates}
+            if len(set(body.candidate_ids)) != len(body.candidate_ids):
+                raise ValueError("candidate_ids_duplicate")
+            selected = [candidates_by_id[item] for item in body.candidate_ids]
+            staged, materialized = materializer.stage_batch(project_id=project_id, candidates=selected)
+            session = store.get_editing_session(project_id=project_id, session_id=proposal.source_session_id)
+            if int(session.get("session_revision") or 1) != body.expected_revision:
+                raise HTTPException(status_code=409, detail="session_revision_mismatch")
+            placements = {str(item.get("candidate_id")): str(item.get("target_segment_id")) for item in proposal.diff.get("placements", {}).get("add", [])}
+            def mutate(draft: dict) -> None:
+                by_id = {str(segment.get("segment_id")): segment for segment in draft.get("segments", []) if isinstance(segment, dict)}
+                for candidate in selected:
+                    segment = by_id.get(placements.get(candidate.candidate_id, ""))
+                    if segment is None:
+                        raise ValueError("target_segment_missing")
+                    key = {"broll": "broll_override", "bgm": "music_override", "sfx": "sfx_override"}[candidate.media_type]
+                    asset = materialized[candidate.candidate_id]
+                    segment[key] = {"asset_id": asset["asset_id"], "asset_uri": asset["storage_uri"], "media_controls": dict(candidate.controls), "expected_content_sha256": candidate.expected_content_sha256, "media_revision": asset["created_at"]}
+            updated = apply_user_transaction(session=session, label="디렉터 제안 일괄 적용", affected_segment_ids=[placements[item.candidate_id] for item in selected], mutate=mutate)
+            return store.batch_apply_director_proposal_transaction(
+                project_id=project_id, session_id=proposal.source_session_id, proposal_id=proposal_id,
+                session_payload=updated, expected_revision=body.expected_revision, proposal_base_revision=proposal.base_session_revision,
+                expected_asset_index_revision=proposal.asset_index_revision, staged_assets=staged,
+            )
+        except HTTPException:
+            raise
+        except EditingSessionRevisionConflict:
+            raise HTTPException(status_code=409, detail="stale_proposal") from None
+        except (KeyError, ValueError):
+            raise HTTPException(status_code=422, detail="candidate_unavailable") from None
+        finally:
+            materializer.cleanup_staged(staged)
 
     @router.get("/api/projects/{project_id}/director/preferences")
     def get_preferences(project_id: str) -> dict:

@@ -109,3 +109,47 @@ def test_preview_snapshot_body_stays_at_candidate_sha_after_source_changes(tmp_p
     assert sha256(snapshot.read_bytes()).hexdigest() == candidate.expected_content_sha256
     _remove_preview_snapshot(snapshot)
     assert not snapshot.parent.exists()
+
+
+def test_store_startup_reconciles_uncommitted_batch_manifest_but_preserves_registered_bytes(tmp_path: Path) -> None:
+    root = tmp_path / "projects"
+    store = LocalProjectStore(root); project = store.bootstrap_project("reconcile")
+    operation_dir = store.project_root(project.project_id) / ".batch-director-operations"
+    stage = operation_dir / "op-stale" / "stage.mp4"; destination = store.project_root(project.project_id) / "assets" / "imported" / "orphan.mp4"
+    stage.parent.mkdir(parents=True); stage.write_bytes(b"staged"); destination.write_bytes(b"orphan")
+    manifest = operation_dir / "op-stale.json"
+    manifest.write_text(__import__("json").dumps({"operation_id": "op-stale", "status": "staging", "entries": [{"staged_path": str(stage), "destination_path": str(destination), "sha256": sha256(b"orphan").hexdigest()}]}), encoding="utf-8")
+
+    LocalProjectStore(root)
+
+    assert not stage.exists() and not destination.exists() and not manifest.exists()
+
+    source = tmp_path / "verified.mp4"; source.write_bytes(b"verified")
+    registered = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=source)
+    verified_destination = store.resolve_storage_uri(project_id=project.project_id, storage_uri=registered.storage_uri)
+    operation_dir.mkdir()
+    committed = operation_dir / "op-committed.json"
+    committed.write_text(__import__("json").dumps({"operation_id": "op-committed", "status": "committed", "entries": [{"staged_path": str(operation_dir / "gone.mp4"), "destination_path": str(verified_destination), "sha256": sha256(b"verified").hexdigest()}]}), encoding="utf-8")
+
+    LocalProjectStore(root)
+
+    assert verified_destination.exists() and verified_destination.read_bytes() == b"verified"
+    assert not committed.exists()
+
+
+def test_store_startup_retains_unsafe_batch_manifest_without_touching_its_paths(tmp_path: Path) -> None:
+    root = tmp_path / "projects"
+    store = LocalProjectStore(root); project = store.bootstrap_project("unsafe-reconcile")
+    operations = store.project_root(project.project_id) / ".batch-director-operations"
+    stage = operations / "op-unsafe" / "stage.mp4"; stage.parent.mkdir(parents=True); stage.write_bytes(b"stage")
+    outside = tmp_path / "must-not-delete.mp4"; outside.write_bytes(b"operator-file")
+    manifest = operations / "op-unsafe.json"
+    manifest.write_text(__import__("json").dumps({"operation_id": "op-unsafe", "status": "staging", "entries": [{"staged_path": str(stage), "destination_path": str(outside), "sha256": sha256(b"operator-file").hexdigest()}]}), encoding="utf-8")
+    stale_tmp = operations / "op-unsafe.tmp"; stale_tmp.write_text("partial", encoding="utf-8")
+
+    LocalProjectStore(root)
+
+    assert outside.read_bytes() == b"operator-file"
+    assert stage.exists()
+    assert manifest.exists()
+    assert not stale_tmp.exists()

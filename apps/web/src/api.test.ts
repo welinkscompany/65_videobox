@@ -56,6 +56,21 @@ describe("caption style API conflicts", () => {
     vi.unstubAllGlobals();
   });
 
+  it("normalizes the real preflight 409 stale payload instead of throwing a generic conflict", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ code: "stale_proposal", stale_reasons: ["session_revision_changed"], diff: { changed: ["seg-1"] } }), { status: 409 })));
+    await expect(api.preflightDirectorProposal("p", "proposal-1")).resolves.toMatchObject({ status: "stale", code: "stale_proposal", stale_reasons: ["session_revision_changed"] });
+    vi.unstubAllGlobals();
+  });
+
+  it("materializes the selected immutable candidate and constructs its preview route", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ asset_id: "asset-1" }), { status: 201 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await api.materializeDirectorCandidate("p", "proposal-1", "candidate/1");
+    expect(fetchMock).toHaveBeenCalledWith("/api/projects/p/director/proposals/proposal-1/candidates/candidate%2F1/materialize", expect.objectContaining({ method: "POST" }));
+    expect(api.directorCandidatePreviewUrl("p", "proposal-1", "candidate/1")).toBe("/api/projects/p/director/proposals/proposal-1/candidates/candidate%2F1/preview");
+    vi.unstubAllGlobals();
+  });
+
   it("types editing-session history metadata delivered by the API", () => {
     const session = {
       session_id: "s", project_id: "p", timeline_id: "t", session_revision: 3, segments: [], history: [{

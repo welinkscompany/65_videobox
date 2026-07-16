@@ -3,11 +3,14 @@ from __future__ import annotations
 import threading
 import shutil
 import os
+import json
+import uuid
 from pathlib import Path
 from typing import Any
 
 from videobox_storage.local_project_store import sha256_file
 from videobox_domain_models.assets import AssetType
+from videobox_domain_models.assets import AssetRecord
 
 
 class ProjectAssetMaterializer:
@@ -85,6 +88,91 @@ class ProjectAssetMaterializer:
                     os.remove(staged)
                 if stage_dir.exists() and not any(stage_dir.iterdir()):
                     os.rmdir(stage_dir)
+
+    def stage_batch(self, *, project_id: str, candidates: list[object]) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
+        """Copy and rehash every candidate before the store opens its one CAS transaction."""
+        operations_dir = self.store.project_root(project_id) / ".batch-director-operations"  # type: ignore[attr-defined]
+        # Keep disposable paths short: Windows' CopyFile2 still encounters
+        # MAX_PATH deployments even when the project root itself is nested.
+        operation_id = f"b-{uuid.uuid4().hex[:8]}"
+        stage_dir = operations_dir / operation_id
+        manifest_path = operations_dir / f"{operation_id}.json"
+        stage_dir.mkdir(parents=True, exist_ok=True)
+        self._write_batch_manifest(manifest_path, operation_id, "staging", [])
+        staged: list[dict[str, Any]] = []
+        by_identity: dict[tuple[str, str, str, tuple[str, ...]], dict[str, Any]] = {}
+        by_candidate: dict[str, dict[str, Any]] = {}
+        try:
+            for candidate in candidates:
+                digest = str(candidate.expected_content_sha256 or "")
+                if not digest:
+                    raise ValueError("candidate_sha_missing")
+                asset, source = self.validate_candidate(project_id=project_id, candidate=candidate)
+                identity = (str(candidate.asset_id), digest, str(candidate.license_policy), tuple(candidate.warning_provenance))
+                item = by_identity.get(identity)
+                if item is None:
+                    asset_type = {"broll": AssetType.BROLL_VIDEO, "bgm": AssetType.BGM, "sfx": AssetType.SFX}.get(candidate.media_type)
+                    if asset_type is None:
+                        raise ValueError("candidate_media_type_invalid")
+                    staged_path = stage_dir / f"s-{len(staged)}{source.suffix.lower()}"
+                    if sha256_file(source) != digest:
+                        raise ValueError("candidate_source_changed")
+                    shutil.copy2(source, staged_path)
+                    if sha256_file(source) != digest or sha256_file(staged_path) != digest:
+                        raise ValueError("candidate_staging_sha_mismatch")
+                    destination = self.store.project_root(project_id) / self.store._asset_directory(asset_type) / f"batch-{digest[:12]}-{len(staged)}-{source.name}"  # type: ignore[attr-defined]
+                    record = AssetRecord.create(project_id=project_id, asset_type=asset_type, storage_uri=self.store._path_to_uri(project_id, destination))  # type: ignore[attr-defined]
+                    item = {
+                        "staged_path": staged_path, "destination_path": destination, "sha256": digest, "asset_record": record,
+                        "manifest_path": manifest_path,
+                        "metadata": {"director_materialized_sha256": digest, "source_asset_id": candidate.asset_id,
+                                     "license_policy": candidate.license_policy, "warning_provenance": list(candidate.warning_provenance),
+                                     "director_proposal_candidate_ids": []},
+                    }
+                    by_identity[identity] = item
+                    staged.append(item)
+                    self._write_batch_manifest(manifest_path, operation_id, "staging", staged)
+                item["metadata"]["director_proposal_candidate_ids"].append(candidate.candidate_id)
+                by_candidate[candidate.candidate_id] = {"asset_id": item["asset_record"].asset_id, "storage_uri": item["asset_record"].storage_uri, "created_at": item["asset_record"].created_at.isoformat()}
+            return staged, by_candidate
+        except Exception:
+            self.cleanup_staged(staged)
+            if manifest_path.exists():
+                os.remove(manifest_path)
+            if stage_dir.exists() and not any(stage_dir.iterdir()):
+                os.rmdir(stage_dir)
+            if operations_dir.exists() and not any(operations_dir.iterdir()):
+                os.rmdir(operations_dir)
+            raise
+
+    @staticmethod
+    def cleanup_staged(staged: list[dict[str, Any]]) -> None:
+        parents: set[Path] = set()
+        manifests: set[Path] = set()
+        for item in staged:
+            path = Path(str(item["staged_path"]))
+            parents.add(path.parent)
+            if path.exists():
+                os.remove(path)
+            if item.get("manifest_path"):
+                manifests.add(Path(str(item["manifest_path"])))
+        for parent in parents:
+            if parent.exists() and not any(parent.iterdir()):
+                os.rmdir(parent)
+        for manifest in manifests:
+            if manifest.exists():
+                os.remove(manifest)
+            if manifest.parent.exists() and not any(manifest.parent.iterdir()):
+                os.rmdir(manifest.parent)
+
+    @staticmethod
+    def _write_batch_manifest(manifest: Path, operation_id: str, status: str, staged: list[dict[str, Any]]) -> None:
+        payload = {"operation_id": operation_id, "status": status, "entries": [{
+            "staged_path": str(item["staged_path"]), "destination_path": str(item["destination_path"]), "sha256": str(item["sha256"]),
+        } for item in staged]}
+        temporary = manifest.with_suffix(".tmp")
+        temporary.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+        temporary.replace(manifest)
 
     @staticmethod
     def _candidate_result(asset: dict[str, Any], candidate: object, digest: str) -> dict[str, Any]:

@@ -31,6 +31,7 @@ import {
   type MediaLibraryInstallState,
 } from "./api";
 import { MediaAnalysisPanel } from "./features/media/MediaAnalysisPanel";
+import { DirectorWorkspacePanel } from "./features/director/DirectorWorkspacePanel";
 import {
   buildDefaultEditingSelection,
   buildDefaultRegenerationFields,
@@ -2887,6 +2888,7 @@ export function App() {
                       <dd>{preservedEditingSegments.length}</dd>
                     </div>
                   </dl>
+                  {selectedProjectId ? <DirectorWorkspacePanel projectId={selectedProjectId} sessionId={editingSession.session_id} sessionRevision={editingSession.session_revision} selectedSegment={selectedEditingSegment ? { segmentId: selectedEditingSegment.segment_id, startSec: selectedEditingSegment.start_sec, endSec: selectedEditingSegment.end_sec, draftApplied: changedSegmentIds.has(selectedEditingSegment.segment_id) } : undefined} /> : null}
                   <section className="editor-library" aria-label="고정 트랙 타임라인">
                     <h3>고정 트랙 타임라인</h3>
                     <p className="meta-copy">나레이션·B롤·BGM·SFX·오버레이만 사용합니다. 임의 트랙은 추가할 수 없습니다.</p>
@@ -3239,7 +3241,7 @@ export function App() {
                   ) : null}
                 </>
               ) : (
-                <p className="empty-state">편집 세션 없음</p>
+                <>{selectedProjectId ? <DirectorWorkspacePanel projectId={selectedProjectId} sessionId={null} sessionRevision={0} /> : null}<p className="empty-state">편집 세션 없음</p></>
               )}
             </article>
 

@@ -626,6 +626,14 @@ async function sendDirectorMessageRequest(path: string, payload: DirectorMessage
   return { kind: "exchange", exchange: (await response.json()) as DirectorMessageExchange };
 }
 
+async function preflightDirectorProposalRequest(path: string): Promise<DirectorProposalPreflight> {
+  const response = await fetch(path, { method: "POST" });
+  const payload = (await response.json()) as DirectorProposalPreflight;
+  if (response.status === 409 && (payload.code === "stale_proposal" || payload.status === "stale")) return { ...payload, status: "stale", code: "stale_proposal" };
+  if (!response.ok) throw new Error(`Request failed: ${path} (${response.status})`);
+  return payload;
+}
+
 export const api = {
   createDirectorConversation: (projectId: string, payload: { session_id: string }) =>
     request<DirectorConversation>(`/api/projects/${projectId}/director/conversations`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
@@ -639,12 +647,18 @@ export const api = {
   },
   applyDirectorProposal: (projectId: string, proposalId: string, payload: { candidate_ids: string[]; expected_revision: number }) =>
     request<ApplyDirectorProposalResponse>(`/api/projects/${projectId}/director/proposals/${proposalId}/apply`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ candidate_ids: payload.candidate_ids, expected_revision: payload.expected_revision }) }),
+  batchApplyDirectorProposal: (projectId: string, proposalId: string, payload: { candidate_ids: string[]; expected_revision: number }) =>
+    request<ApplyDirectorProposalResponse>(`/api/projects/${projectId}/director/proposals/${proposalId}/batch-apply`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+  materializeDirectorCandidate: (projectId: string, proposalId: string, candidateId: string) =>
+    request<AssetResponse>(`/api/projects/${projectId}/director/proposals/${proposalId}/candidates/${encodeURIComponent(candidateId)}/materialize`, { method: "POST" }),
+  directorCandidatePreviewUrl: (projectId: string, proposalId: string, candidateId: string) =>
+    `/api/projects/${projectId}/director/proposals/${proposalId}/candidates/${encodeURIComponent(candidateId)}/preview`,
   createDirectorProposal: (projectId: string, payload: DirectorProposalCreateRequest) =>
     request<DirectorProposal>(`/api/projects/${projectId}/director/proposals`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
   getDirectorProposal: (projectId: string, proposalId: string) =>
     request<DirectorProposal>(`/api/projects/${projectId}/director/proposals/${proposalId}`),
   preflightDirectorProposal: (projectId: string, proposalId: string) =>
-    request<DirectorProposalPreflight>(`/api/projects/${projectId}/director/proposals/${proposalId}/preflight`, { method: "POST" }),
+    preflightDirectorProposalRequest(`/api/projects/${projectId}/director/proposals/${proposalId}/preflight`),
   refreshDirectorProposal: (projectId: string, proposalId: string) =>
     request<DirectorProposal>(`/api/projects/${projectId}/director/proposals/${proposalId}/refresh`, { method: "POST" }),
   getDirectorPreferences: (projectId: string) => request<DirectorPreferences>(`/api/projects/${projectId}/director/preferences`),

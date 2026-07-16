@@ -1097,7 +1097,7 @@ git commit -m "feat: add director frontend contracts"
 - Create: apps/web/src/features/director/director-workspace.test.tsx
 - Create: apps/web/src/features/director/asset-preview-player.test.tsx
 
-- [ ] **Step 1: state와 explicit apply RED test 작성**
+- [x] **Step 1: state와 explicit apply RED test 작성**
 
 ~~~tsx
 it("메시지 응답만으로 편집 상태를 변경하지 않는다", async () => {
@@ -1116,19 +1116,19 @@ it("새 오디오 preview가 이전 preview를 중지하며 autoplay하지 않�
 });
 ~~~
 
-- [ ] **Step 2: RED 확인**
+- [x] **Step 2: RED 확인**
 
 Run: npm --prefix apps/web test -- src/features/director/director-workspace.test.tsx src/features/director/asset-preview-player.test.tsx
 
 Expected: component import failure.
 
-- [ ] **Step 3: workspace state machine 구현**
+- [x] **Step 3: workspace state machine 구현**
 
 상태는 script_required, idle, analysis_running, proposal_ready, applying, blocked, error다. Context bar는 segment/timecode/placement/proposal revision/draft-applied를 표시한다. Card는 reason chips, availability/license/review status와 backend reference code를 표시한다.
 
 Comparison tray는 preflight diff를 먼저 보여주고 B-roll만, 선택 reference만, 전체 적용 scope를 제공한다. primary action은 변경 적용 하나만 둔다. 후보가 부족한 경우에만 왜 이 후보뿐인가 설명을 노출하고, pin/exclude asset/creator/tag action은 project preference API에 저장한다.
 
-- [ ] **Step 4: preview와 accessibility GREEN**
+- [x] **Step 4: preview와 accessibility GREEN**
 
 B-roll player는 proposal in/out에서 시작하고 out에서 pause/loop한다. audio는 자동 재생하지 않고 한 번에 하나만 재생하며 backend audition_gain_db를 적용한다. 현재 narration 문맥의 solo/mute를 제공하되 timeline gain 자체를 변경하지 않는다. 모든 control은 visible focus, keyboard label, live status를 가진다.
 
@@ -1136,7 +1136,7 @@ Run: npm --prefix apps/web test -- src/features/director
 
 Expected: PASS.
 
-- [ ] **Step 5: 커밋**
+- [x] **Step 5: 커밋**
 
 ~~~powershell
 git add apps/web/src/features/director

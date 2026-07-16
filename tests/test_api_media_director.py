@@ -342,6 +342,136 @@ def test_materialized_candidate_apply_is_one_named_atomic_session_action(tmp_pat
     assert store.get_export_run(project_id=project_id, export_id=capcut["export_id"])["is_current"] is False
 
 
+def test_batch_apply_materializes_two_candidates_and_consumes_one_proposal_in_one_session_revision(tmp_path: Path) -> None:
+    """Task 15 RED: multi-candidate Director apply is one backend transaction, never a client loop."""
+    app = create_app(projects_root=tmp_path / "projects")
+    client = TestClient(app)
+    store = app.state.store
+    project_id = client.post("/api/projects", json={"name": "batch director"}).json()["project_id"]
+    source = tmp_path / "batch.mp4"; source.write_bytes(b"batch-local-broll")
+    asset = store.register_asset(project_id=project_id, asset_type=AssetType.BROLL_VIDEO, source_path=source, metadata={"review_status": "approved"})
+    digest = sha256(source.read_bytes()).hexdigest()
+    analysis = store.create_media_analysis(project_id=project_id, asset_id=asset.asset_id, idempotency_key=f"{digest}:local", cache_key="batch")
+    claim = store.claim_media_analysis(project_id=project_id, analysis_id=analysis["analysis_id"]); assert claim
+    store.complete_media_analysis(project_id=project_id, analysis_id=analysis["analysis_id"], expected_attempt=claim["attempt"], result={"frames": [{"summary": "batch"}]})
+    session = store.save_editing_session(project_id=project_id, timeline_id="timeline", session_payload={"segments": [
+        {"segment_id": "seg-1", "caption_text": "first"}, {"segment_id": "seg-2", "caption_text": "second"},
+    ], "history": []})
+    proposal = client.post(f"/api/projects/{project_id}/director/proposals", json={"session_id": session["session_id"]}).json()
+    selected = [item["candidate_id"] for item in proposal["candidates"] if item["candidate_id"].split(":")[1] in {"seg-1", "seg-2"}]
+
+    response = client.post(f"/api/projects/{project_id}/director/proposals/{proposal['proposal_id']}/batch-apply", json={
+        "candidate_ids": selected, "expected_revision": session["session_revision"],
+    })
+
+    assert response.status_code == 200, response.text
+    applied = response.json()
+    assert applied["session_revision"] == session["session_revision"] + 1
+    assert {segment["segment_id"] for segment in applied["segments"] if segment.get("broll_override")} == {"seg-1", "seg-2"}
+    assert store.get_director_proposal(project_id, proposal["proposal_id"]).status == "applied"
+    assert len(store.list_assets(project_id=project_id)) == 2
+
+
+def test_batch_apply_source_failure_leaves_session_proposal_and_assets_clean(tmp_path: Path) -> None:
+    app = create_app(projects_root=tmp_path / "projects"); client = TestClient(app); store = app.state.store
+    project_id = client.post("/api/projects", json={"name": "batch rollback"}).json()["project_id"]
+    source = tmp_path / "rollback.mp4"; source.write_bytes(b"before")
+    asset = store.register_asset(project_id=project_id, asset_type=AssetType.BROLL_VIDEO, source_path=source, metadata={"review_status": "approved"})
+    digest = sha256(source.read_bytes()).hexdigest()
+    analysis = store.create_media_analysis(project_id=project_id, asset_id=asset.asset_id, idempotency_key=f"{digest}:local", cache_key="rollback")
+    claim = store.claim_media_analysis(project_id=project_id, analysis_id=analysis["analysis_id"]); assert claim
+    store.complete_media_analysis(project_id=project_id, analysis_id=analysis["analysis_id"], expected_attempt=claim["attempt"], result={"frames": [{"summary": "before"}]})
+    session = store.save_editing_session(project_id=project_id, timeline_id="timeline", session_payload={"segments": [{"segment_id": "seg", "caption_text": "before"}], "history": []})
+    proposal = client.post(f"/api/projects/{project_id}/director/proposals", json={"session_id": session["session_id"]}).json()
+    source_in_project = store.resolve_storage_uri(project_id=project_id, storage_uri=asset.storage_uri)
+    source_in_project.write_bytes(b"mutated-after-proposal")
+
+    response = client.post(f"/api/projects/{project_id}/director/proposals/{proposal['proposal_id']}/batch-apply", json={"candidate_ids": [proposal["candidates"][0]["candidate_id"]], "expected_revision": session["session_revision"]})
+
+    assert response.status_code == 409
+    assert store.get_editing_session(project_id=project_id, session_id=session["session_id"])["session_revision"] == session["session_revision"]
+    assert store.get_director_proposal(project_id, proposal["proposal_id"]).status == "ready"
+    assert [item["asset_id"] for item in store.list_assets(project_id=project_id)] == [asset.asset_id]
+    assert not (store.project_root(project_id) / ".materializing").exists()
+
+
+def test_batch_apply_transaction_failure_compensates_copied_assets(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    app = create_app(projects_root=tmp_path / "projects"); client = TestClient(app); store = app.state.store
+    project_id = client.post("/api/projects", json={"name": "batch transaction rollback"}).json()["project_id"]
+    source = tmp_path / "transaction.mp4"; source.write_bytes(b"transaction")
+    asset = store.register_asset(project_id=project_id, asset_type=AssetType.BROLL_VIDEO, source_path=source, metadata={"review_status": "approved"})
+    digest = sha256(source.read_bytes()).hexdigest(); analysis = store.create_media_analysis(project_id=project_id, asset_id=asset.asset_id, idempotency_key=f"{digest}:local", cache_key="transaction")
+    claim = store.claim_media_analysis(project_id=project_id, analysis_id=analysis["analysis_id"]); assert claim
+    store.complete_media_analysis(project_id=project_id, analysis_id=analysis["analysis_id"], expected_attempt=claim["attempt"], result={"frames": [{"summary": "transaction"}]})
+    session = store.save_editing_session(project_id=project_id, timeline_id="timeline", session_payload={"segments": [{"segment_id": "seg", "caption_text": "transaction"}], "history": []})
+    proposal = client.post(f"/api/projects/{project_id}/director/proposals", json={"session_id": session["session_id"]}).json()
+    monkeypatch.setattr(store, "_invalidate_output_freshness_with_connection", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("rollback")))
+
+    with pytest.raises(RuntimeError, match="rollback"):
+        client.post(f"/api/projects/{project_id}/director/proposals/{proposal['proposal_id']}/batch-apply", json={"candidate_ids": [proposal["candidates"][0]["candidate_id"]], "expected_revision": session["session_revision"]})
+
+    assert store.get_editing_session(project_id=project_id, session_id=session["session_id"])["session_revision"] == session["session_revision"]
+    assert store.get_director_proposal(project_id, proposal["proposal_id"]).status == "ready"
+    assert [item["asset_id"] for item in store.list_assets(project_id=project_id)] == [asset.asset_id]
+    assert not (store.project_root(project_id) / ".materializing").exists()
+
+
+def test_batch_apply_post_commit_session_mirror_failure_preserves_db_owned_asset_bytes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The JSON mirror is recoverable; a committed batch must not be compensated."""
+    app = create_app(projects_root=tmp_path / "projects"); client = TestClient(app); store = app.state.store
+    project_id = client.post("/api/projects", json={"name": "post commit mirror"}).json()["project_id"]
+    source = tmp_path / "post-commit.mp4"; source.write_bytes(b"post-commit")
+    asset = store.register_asset(project_id=project_id, asset_type=AssetType.BROLL_VIDEO, source_path=source, metadata={"review_status": "approved"})
+    digest = sha256(source.read_bytes()).hexdigest(); analysis = store.create_media_analysis(project_id=project_id, asset_id=asset.asset_id, idempotency_key=f"{digest}:local", cache_key="post-commit")
+    claim = store.claim_media_analysis(project_id=project_id, analysis_id=analysis["analysis_id"]); assert claim
+    store.complete_media_analysis(project_id=project_id, analysis_id=analysis["analysis_id"], expected_attempt=claim["attempt"], result={"frames": [{"summary": "post-commit"}]})
+    session = store.save_editing_session(project_id=project_id, timeline_id="timeline", session_payload={"segments": [{"segment_id": "seg", "caption_text": "post-commit"}], "history": []})
+    proposal = client.post(f"/api/projects/{project_id}/director/proposals", json={"session_id": session["session_id"]}).json()
+    original_replace = Path.replace
+    def fail_session_mirror(source_path: Path, target_path: Path) -> Path:
+        if target_path.parent.name == "editing_sessions":
+            raise OSError("injected mirror publish failure")
+        return original_replace(source_path, target_path)
+    monkeypatch.setattr(Path, "replace", fail_session_mirror)
+
+    with pytest.raises(RuntimeError, match="SQLite commit succeeded"):
+        client.post(f"/api/projects/{project_id}/director/proposals/{proposal['proposal_id']}/batch-apply", json={"candidate_ids": [proposal["candidates"][0]["candidate_id"]], "expected_revision": session["session_revision"]})
+
+    # Do not read the session while the injected mirror fault remains active:
+    # reads deliberately repair the mirror from the committed SQLite value.
+    materialized = [item for item in store.list_assets(project_id=project_id) if item["asset_id"] != asset.asset_id]
+    assert len(materialized) == 1
+    materialized_path = store.resolve_storage_uri(project_id=project_id, storage_uri=materialized[0]["storage_uri"])
+    assert materialized_path.is_file() and materialized_path.read_bytes() == b"post-commit"
+    monkeypatch.undo()
+    recovered = store.get_editing_session(project_id=project_id, session_id=session["session_id"])
+    assert recovered["session_revision"] == session["session_revision"] + 1
+
+
+def test_store_startup_reconciles_crashed_batch_manifest_without_deleting_registered_asset(tmp_path: Path) -> None:
+    """A restart compensates uncommitted batch bytes but keeps SQLite-owned bytes."""
+    app = create_app(projects_root=tmp_path / "projects"); client = TestClient(app); store = app.state.store
+    project_id = client.post("/api/projects", json={"name": "batch recovery"}).json()["project_id"]
+    source = tmp_path / "registered.mp4"; source.write_bytes(b"registered")
+    registered = store.register_asset(project_id=project_id, asset_type=AssetType.BROLL_VIDEO, source_path=source)
+    registered_path = store.resolve_storage_uri(project_id=project_id, storage_uri=registered.storage_uri)
+    operations = store.project_root(project_id) / ".batch-director-operations"; stage = operations / "batch-crashed"; stage.mkdir(parents=True)
+    staged_path = stage / "staged.mp4"; staged_path.write_bytes(b"staged")
+    orphan_path = store.project_root(project_id) / "media" / "broll" / "orphan.mp4"; orphan_path.parent.mkdir(parents=True); orphan_path.write_bytes(b"orphan")
+    manifest = operations / "batch-crashed.json"
+    manifest.write_text(json.dumps({"operation_id": "batch-crashed", "status": "staging", "entries": [
+        {"staged_path": str(staged_path), "destination_path": str(registered_path), "sha256": sha256(registered_path.read_bytes()).hexdigest()},
+        {"staged_path": str(staged_path), "destination_path": str(orphan_path), "sha256": sha256(orphan_path.read_bytes()).hexdigest()},
+    ]}), encoding="utf-8")
+
+    type(store)(store.projects_root)
+
+    assert registered_path.is_file()
+    assert not orphan_path.exists()
+    assert not staged_path.exists()
+    assert not manifest.exists()
+
+
 def test_failed_apply_preserves_independent_materialized_asset_and_rolls_back_session_and_proposal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Task 11 RED: Task 10 project-local assets are reusable, never apply-owned or orphaned."""
     app = create_app(projects_root=tmp_path / "projects"); client = TestClient(app); store = app.state.store

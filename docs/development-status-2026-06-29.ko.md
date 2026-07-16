@@ -8832,6 +8832,14 @@ focused 검증 메모:
 - dead helper, 임시 메모, 역할이 끝난 중복 파일 중 삭제보다 역할 명시가 맞는지 먼저 판단한다
 - 최종 closeout 직전 broad 재검증이 정말 필요한지 마지막으로 판단한다
 
+## 247. 2026-07-16 Local Media Director Slice 3 Task 15 closeout
+
+- Director workspace는 대화 응답만으로 편집 session을 변경하지 않으며, immutable preflight와 명시적 `변경 적용`만 batch atomic apply를 호출한다.
+- 비교 tray는 preflight diff와 selected-reference/B-roll/all scope를 표시한다. 후보 preview는 one-at-a-time, B-roll in/out, candidate audition gain, preview-only narration mute/solo를 제공하며 timeline gain을 바꾸지 않는다.
+- batch journal은 Windows 장경로를 피하고, post-commit mirror write failure에서 DB-owned bytes를 보존한다. restart reconciliation은 허용된 project stage/assets 경로만 정리하고 unsafe manifest를 보존한다.
+- 검증: focused frontend `36 passed`, focused backend `20 passed`, frontend full `137 passed`와 build, `git diff --check` 통과. backend full regression은 다음 Task 16의 첫 gate로 재실행한다.
+- 누적 진행률: 15/18 (83.3%), 잔여 16.7%. 다음 작업은 Task 16 manual media library 추출과 AI 실패 독립성이다.
+
 ## 221. 2026-07-12 개인 음성 TTS 청취 승인 게이트 closeout
 
 - `PATCH /api/projects/{project_id}/tts-candidates/{candidate_id}/listening-review`가 기술 검증 통과 후보의 `approved`/`rejected` 결정을 SQLite에 저장하고 후보 목록 재조회에 유지한다.
