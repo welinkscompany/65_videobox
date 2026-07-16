@@ -17,7 +17,10 @@ class TimelineClip:
     end_sec: float
     clip_type: str = "narration"
     recommendation_id: str | None = None
+    asset_id: str | None = None
     media_controls: dict[str, object] = field(default_factory=dict)
+    expected_content_sha256: str | None = None
+    media_revision: str | None = None
 
 
 @dataclass(slots=True, frozen=True)

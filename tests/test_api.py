@@ -4649,6 +4649,15 @@ def _create_timeline_review_project(
     return project_id, timeline_job_id
 
 
+def _get_timeline_review_broll_asset(client: TestClient, project_id: str) -> dict[str, object]:
+    response = client.get(f"/api/projects/{project_id}/assets/broll-video")
+
+    assert response.status_code == 200
+    assets = response.json()["assets"]
+    assert len(assets) == 1
+    return assets[0]
+
+
 def test_health_endpoint_reports_ok() -> None:
     client = TestClient(create_app())
 
@@ -15152,6 +15161,7 @@ def test_editing_session_api_can_fetch_cut_and_broll_updates(tmp_path: Path) -> 
     app = create_app(projects_root=tmp_path)
     client = TestClient(app)
     project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+    broll_asset = _get_timeline_review_broll_asset(client, project_id)
 
     create_response = client.post(
         f"/api/projects/{project_id}/editing-sessions",
@@ -15166,7 +15176,7 @@ def test_editing_session_api_can_fetch_cut_and_broll_updates(tmp_path: Path) -> 
     )
     broll_response = client.patch(
         f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/broll",
-        json={"asset_id": "asset_manual_001", "expected_revision": cut_response.json()["session_revision"]},
+        json={"asset_id": broll_asset["asset_id"], "expected_revision": cut_response.json()["session_revision"]},
     )
     get_response = client.get(
         f"/api/projects/{project_id}/editing-sessions/{session_id}",
@@ -15175,9 +15185,13 @@ def test_editing_session_api_can_fetch_cut_and_broll_updates(tmp_path: Path) -> 
     assert cut_response.status_code == 200
     assert broll_response.status_code == 200
     assert get_response.status_code == 200
+    broll_override = broll_response.json()["segments"][0]["broll_override"]
+    assert broll_override["asset_id"] == broll_asset["asset_id"]
+    assert broll_override["expected_content_sha256"]
+    assert broll_override["media_revision"]
     payload = get_response.json()
     assert payload["segments"][0]["cut_action"] == "remove"
-    assert payload["segments"][0]["broll_override"] == {"asset_id": "asset_manual_001"}
+    assert payload["segments"][0]["broll_override"] == broll_override
     assert payload["history"][-2]["mutation_type"] == "cut_action_update"
     assert payload["history"][-1]["mutation_type"] == "broll_override_update"
 
@@ -15186,6 +15200,7 @@ def test_editing_session_api_can_clear_broll_override(tmp_path: Path) -> None:
     app = create_app(projects_root=tmp_path)
     client = TestClient(app)
     project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+    broll_asset = _get_timeline_review_broll_asset(client, project_id)
 
     create_response = client.post(
         f"/api/projects/{project_id}/editing-sessions",
@@ -15194,15 +15209,16 @@ def test_editing_session_api_can_clear_broll_override(tmp_path: Path) -> None:
     session = create_response.json()
     session_id = session["session_id"]
 
-    client.patch(
+    broll_response = client.patch(
         f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/broll",
-        json={"asset_id": "asset_manual_001", "expected_revision": session["session_revision"]},
+        json={"asset_id": broll_asset["asset_id"], "expected_revision": session["session_revision"]},
     )
     clear_response = client.delete(
         f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/broll",
-        params={"expected_revision": session["session_revision"] + 1},
+        params={"expected_revision": broll_response.json()["session_revision"]},
     )
 
+    assert broll_response.status_code == 200
     assert clear_response.status_code == 200
     payload = clear_response.json()
     assert payload["segments"][0]["broll_override"] is None
@@ -15394,6 +15410,7 @@ def test_editing_session_api_surfaces_blocked_prediction_when_starting_partial_r
     app = create_app(projects_root=tmp_path)
     client = TestClient(app)
     project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+    broll_asset = _get_timeline_review_broll_asset(client, project_id)
 
     create_response = client.post(
         f"/api/projects/{project_id}/editing-sessions",
@@ -15411,7 +15428,7 @@ def test_editing_session_api_surfaces_blocked_prediction_when_starting_partial_r
     broll_response = client.patch(
         f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_002/broll",
         json={
-            "asset_id": "asset_manual_002",
+            "asset_id": broll_asset["asset_id"],
             "expected_revision": caption_response.json()["session_revision"],
         },
     )
@@ -15425,6 +15442,7 @@ def test_editing_session_api_surfaces_blocked_prediction_when_starting_partial_r
         },
     )
 
+    assert broll_response.status_code == 200
     assert response.status_code == 202
     payload = response.json()
     assert payload["predicted_review_status_after_rerun"] == "blocked"
@@ -15448,6 +15466,7 @@ def test_editing_session_api_can_preview_partial_regeneration_scope_without_crea
     app = create_app(projects_root=tmp_path)
     client = TestClient(app)
     project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+    broll_asset = _get_timeline_review_broll_asset(client, project_id)
 
     create_response = client.post(
         f"/api/projects/{project_id}/editing-sessions",
@@ -15460,9 +15479,9 @@ def test_editing_session_api_can_preview_partial_regeneration_scope_without_crea
         f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_002/caption",
         json={"caption_text": "Team meeting overview with corrected label", "expected_revision": session["session_revision"]},
     )
-    client.patch(
+    broll_response = client.patch(
         f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_002/broll",
-        json={"asset_id": "asset_manual_002", "expected_revision": session["session_revision"] + 1},
+        json={"asset_id": broll_asset["asset_id"], "expected_revision": session["session_revision"] + 1},
     )
 
     before_jobs = client.get(f"/api/projects/{project_id}/jobs").json()["jobs"]
@@ -15475,7 +15494,16 @@ def test_editing_session_api_can_preview_partial_regeneration_scope_without_crea
     )
     after_jobs = client.get(f"/api/projects/{project_id}/jobs").json()["jobs"]
 
+    assert broll_response.status_code == 200
     assert response.status_code == 200
+    broll_override = next(
+        segment["broll_override"]
+        for segment in broll_response.json()["segments"]
+        if segment["segment_id"] == "seg_002"
+    )
+    assert broll_override["asset_id"] == broll_asset["asset_id"]
+    assert broll_override["expected_content_sha256"]
+    assert broll_override["media_revision"]
     payload = response.json()
     assert "job_id" not in payload
     assert payload["session_id"] == session_id
@@ -15498,7 +15526,7 @@ def test_editing_session_api_can_preview_partial_regeneration_scope_without_crea
             "caption_text": "Team meeting overview with corrected label",
             "cut_action": "keep",
             "review_required": True,
-            "broll_override": {"asset_id": "asset_manual_002"},
+            "broll_override": broll_override,
             "visual_overlays": [],
             "music_override": None,
             "tts_replacement": None,
@@ -21843,6 +21871,7 @@ def test_editing_session_api_replaces_trimmed_stale_applied_broll_recommendation
     app = create_app(projects_root=tmp_path)
     client = TestClient(app)
     project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+    broll_asset = _get_timeline_review_broll_asset(client, project_id)
 
     timeline_result = client.get(f"/api/projects/{project_id}/timelines/{timeline_job_id}")
     timeline_payload = timeline_result.json()["timeline"]
@@ -21878,9 +21907,9 @@ def test_editing_session_api_replaces_trimmed_stale_applied_broll_recommendation
     )
     session_id = create_response.json()["session_id"]
 
-    client.patch(
+    broll_response = client.patch(
         f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/broll",
-        json={"asset_id": "asset_manual_001"},
+        json={"asset_id": broll_asset["asset_id"]},
     )
 
     response = client.post(
@@ -21891,6 +21920,7 @@ def test_editing_session_api_replaces_trimmed_stale_applied_broll_recommendation
         },
     )
 
+    assert broll_response.status_code == 200
     assert response.status_code == 202
     payload = response.json()
     result_response = client.get(
@@ -21900,9 +21930,7 @@ def test_editing_session_api_replaces_trimmed_stale_applied_broll_recommendation
     assert result_response.status_code == 200
     result_payload = result_response.json()
     broll_track = next(track for track in result_payload["timeline"]["tracks"] if track["track_type"] == "broll")
-    assert [clip["asset_uri"] for clip in broll_track["clips"]] == [
-        f"local://projects/{project_id}/assets/asset_manual_001"
-    ]
+    assert [clip["asset_uri"] for clip in broll_track["clips"]] == [broll_asset["storage_uri"]]
     assert [item["recommendation_id"] for item in result_payload["timeline"]["applied_recommendations"]] == [
         f"manual_broll_seg_001"
     ]
@@ -21914,6 +21942,7 @@ def test_editing_session_api_replaces_mixed_case_stale_applied_broll_recommendat
     app = create_app(projects_root=tmp_path)
     client = TestClient(app)
     project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+    broll_asset = _get_timeline_review_broll_asset(client, project_id)
 
     timeline_result = client.get(f"/api/projects/{project_id}/timelines/{timeline_job_id}")
     timeline_payload = timeline_result.json()["timeline"]
@@ -21949,9 +21978,9 @@ def test_editing_session_api_replaces_mixed_case_stale_applied_broll_recommendat
     )
     session_id = create_response.json()["session_id"]
 
-    client.patch(
+    broll_response = client.patch(
         f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/broll",
-        json={"asset_id": "asset_manual_001"},
+        json={"asset_id": broll_asset["asset_id"]},
     )
 
     response = client.post(
@@ -21962,6 +21991,7 @@ def test_editing_session_api_replaces_mixed_case_stale_applied_broll_recommendat
         },
     )
 
+    assert broll_response.status_code == 200
     assert response.status_code == 202
     payload = response.json()
     result_response = client.get(
@@ -21971,9 +22001,7 @@ def test_editing_session_api_replaces_mixed_case_stale_applied_broll_recommendat
     assert result_response.status_code == 200
     result_payload = result_response.json()
     broll_track = next(track for track in result_payload["timeline"]["tracks"] if track["track_type"] == "broll")
-    assert [clip["asset_uri"] for clip in broll_track["clips"]] == [
-        f"local://projects/{project_id}/assets/asset_manual_001"
-    ]
+    assert [clip["asset_uri"] for clip in broll_track["clips"]] == [broll_asset["storage_uri"]]
     assert [item["recommendation_id"] for item in result_payload["timeline"]["applied_recommendations"]] == [
         f"manual_broll_seg_001"
     ]
@@ -21985,6 +22013,7 @@ def test_editing_session_api_replaces_trimmed_target_segment_id_stale_applied_br
     app = create_app(projects_root=tmp_path)
     client = TestClient(app)
     project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+    broll_asset = _get_timeline_review_broll_asset(client, project_id)
 
     timeline_result = client.get(f"/api/projects/{project_id}/timelines/{timeline_job_id}")
     timeline_payload = timeline_result.json()["timeline"]
@@ -22020,9 +22049,9 @@ def test_editing_session_api_replaces_trimmed_target_segment_id_stale_applied_br
     )
     session_id = create_response.json()["session_id"]
 
-    client.patch(
+    broll_response = client.patch(
         f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/broll",
-        json={"asset_id": "asset_manual_001"},
+        json={"asset_id": broll_asset["asset_id"]},
     )
 
     response = client.post(
@@ -22033,6 +22062,7 @@ def test_editing_session_api_replaces_trimmed_target_segment_id_stale_applied_br
         },
     )
 
+    assert broll_response.status_code == 200
     assert response.status_code == 202
     payload = response.json()
     result_response = client.get(
@@ -22042,9 +22072,7 @@ def test_editing_session_api_replaces_trimmed_target_segment_id_stale_applied_br
     assert result_response.status_code == 200
     result_payload = result_response.json()
     broll_track = next(track for track in result_payload["timeline"]["tracks"] if track["track_type"] == "broll")
-    assert [clip["asset_uri"] for clip in broll_track["clips"]] == [
-        f"local://projects/{project_id}/assets/asset_manual_001"
-    ]
+    assert [clip["asset_uri"] for clip in broll_track["clips"]] == [broll_asset["storage_uri"]]
     assert [item["recommendation_id"] for item in result_payload["timeline"]["applied_recommendations"]] == [
         "manual_broll_seg_001"
     ]

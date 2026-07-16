@@ -190,4 +190,16 @@ describe("caption style API conflicts", () => {
     );
     vi.unstubAllGlobals();
   });
+
+  it("keeps Starter Pack favorite and recent calls project-scoped", async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify({ asset_ids: ["pack:music"] }), { status: 200 })));
+    vi.stubGlobal("fetch", fetchMock);
+    await api.listProjectMediaLibraryFavorites("project_a");
+    await api.listProjectRecentMediaLibraryAssetIds("project_a");
+    await api.setProjectMediaLibraryFavorite("project_a", "pack:music", true);
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/projects/project_a/media-library/favorites", undefined);
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/projects/project_a/media-library/recent", undefined);
+    expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/projects/project_a/media-library/assets/pack%3Amusic/favorite", expect.objectContaining({ method: "PUT", body: JSON.stringify({ enabled: true }) }));
+    vi.unstubAllGlobals();
+  });
 });

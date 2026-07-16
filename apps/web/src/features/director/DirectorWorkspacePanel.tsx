@@ -3,11 +3,12 @@ import { api, type DirectorMessageExchange, type DirectorProposal } from "../../
 import { DirectorWorkspace } from "./DirectorWorkspace";
 import type { DirectorWorkspaceState } from "./directorTypes";
 
-export function DirectorWorkspacePanel({ projectId, sessionId, sessionRevision, selectedSegment }: { projectId: string; sessionId: string | null; sessionRevision: number; selectedSegment?: { segmentId: string; startSec: number; endSec: number; draftApplied: boolean } }) {
+export function DirectorWorkspacePanel({ projectId, sessionId, sessionRevision, selectedSegment, onStateChange }: { projectId: string; sessionId: string | null; sessionRevision: number; selectedSegment?: { segmentId: string; startSec: number; endSec: number; draftApplied: boolean }; onStateChange?: (state: DirectorWorkspaceState) => void }) {
   const [state, setState] = useState<DirectorWorkspaceState>(sessionId ? "analysis_running" : "script_required");
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [proposal, setProposal] = useState<DirectorProposal | null>(null);
   const stableMessageId = useRef<string | null>(null);
+  useEffect(() => { onStateChange?.(state); }, [onStateChange, state]);
   useEffect(() => {
     let cancelled = false;
     if (!sessionId) { setState("script_required"); return () => { cancelled = true; }; }

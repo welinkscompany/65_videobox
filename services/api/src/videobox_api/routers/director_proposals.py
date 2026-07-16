@@ -351,7 +351,7 @@ def build_director_proposals_router(store: LocalProjectStore) -> APIRouter:
 
     @router.put("/api/projects/{project_id}/director/preferences")
     def put_preferences(project_id: str, body: PreferencesRequest) -> dict:
-        return store.save_director_preferences(project_id, body.model_dump())
+        return store.save_director_preferences(project_id, body.model_dump(exclude_unset=True))
 
     return router
 

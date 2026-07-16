@@ -62,6 +62,33 @@ def build_media_library_router(
         except Exception as exc:
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="library_unavailable") from exc
 
+    @router.get("/api/projects/{project_id}/media-library/favorites")
+    def list_project_library_favorites(project_id: str) -> dict[str, object]:
+        _require_project(project_store, project_id)
+        return {"asset_ids": project_store.get_project_media_library_preferences(project_id)["favorite_asset_ids"]}
+
+    @router.get("/api/projects/{project_id}/media-library/recent")
+    def list_project_recent_library_usage(project_id: str) -> dict[str, object]:
+        _require_project(project_store, project_id)
+        return {"asset_ids": project_store.get_project_media_library_preferences(project_id)["recent_asset_ids"]}
+
+    @router.put("/api/projects/{project_id}/media-library/assets/{library_asset_id:path}/favorite")
+    def set_project_library_favorite(
+        project_id: str, library_asset_id: str, payload: LibraryFavoriteRequest,
+    ) -> dict[str, object]:
+        _require_project(project_store, project_id)
+        try:
+            if payload.enabled and library_store.get_verified_asset(library_asset_id=library_asset_id) is None:
+                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="asset_missing")
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="library_unavailable") from exc
+        preferences = project_store.set_project_media_library_favorite(
+            project_id=project_id, library_asset_id=library_asset_id, enabled=payload.enabled,
+        )
+        return {"asset_ids": preferences["favorite_asset_ids"]}
+
     @router.put("/api/media-library/assets/{library_asset_id:path}/favorite")
     def set_library_favorite(library_asset_id: str, payload: LibraryFavoriteRequest) -> dict[str, object]:
         try:
@@ -121,6 +148,9 @@ def build_media_library_router(
         # Library usage is a postcondition: failed project registration must not
         # mutate the global library's recent/favorite state.
         library_store.mark_recent_usage(library_asset_id=library_asset_id)
+        project_store.mark_project_media_library_recent(
+            project_id=payload.project_id, library_asset_id=library_asset_id,
+        )
         return result
 
     return router
@@ -128,3 +158,10 @@ def build_media_library_router(
 
 def _mime_type(path: Path) -> str | None:
     return {".mp3": "audio/mpeg", ".wav": "audio/wav"}.get(path.suffix.lower())
+
+
+def _require_project(project_store: LocalProjectStore, project_id: str) -> None:
+    try:
+        project_store.get_project(project_id=project_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project_missing") from exc

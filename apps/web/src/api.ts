@@ -672,6 +672,14 @@ export const api = {
     request<{ asset_ids: string[] }>(`/api/media-library/assets/${encodeURIComponent(libraryAssetId)}/favorite`, {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled }),
     }),
+  listProjectMediaLibraryFavorites: (projectId: string) =>
+    request<{ asset_ids: string[] }>(`/api/projects/${projectId}/media-library/favorites`),
+  listProjectRecentMediaLibraryAssetIds: (projectId: string) =>
+    request<{ asset_ids: string[] }>(`/api/projects/${projectId}/media-library/recent`),
+  setProjectMediaLibraryFavorite: (projectId: string, libraryAssetId: string, enabled: boolean) =>
+    request<{ asset_ids: string[] }>(`/api/projects/${projectId}/media-library/assets/${encodeURIComponent(libraryAssetId)}/favorite`, {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled }),
+    }),
   materializeMediaLibraryAsset: (libraryAssetId: string, projectId: string) =>
     request<AssetResponse>(`/api/media-library/assets/${encodeURIComponent(libraryAssetId)}/materialize`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project_id: projectId }),

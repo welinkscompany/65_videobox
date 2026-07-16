@@ -892,10 +892,13 @@ class _PipelinePrivateHelpersMixin:
             state["recommendations"].append(
                 self._manual_recommendation_payload(
                     segment_id=segment_id,
-                recommendation_type=RecommendationType.BROLL,
-                asset_id=str(override["asset_id"]),
-                reason="Manual B-roll override from editing session.",
-                media_controls=override.get("media_controls"),
+                    recommendation_type=RecommendationType.BROLL,
+                    asset_id=str(override["asset_id"]),
+                    asset_uri=str(self.store.get_asset(project_id=project_id, asset_id=str(override["asset_id"]))["storage_uri"]),
+                    reason="Manual B-roll override from editing session.",
+                    media_controls=override.get("media_controls"),
+                    expected_content_sha256=override.get("expected_content_sha256"),
+                    media_revision=override.get("media_revision"),
                 )
             )
 
@@ -1155,6 +1158,8 @@ class _PipelinePrivateHelpersMixin:
         asset_uri: str = "",
         reason: str,
         media_controls: object = None,
+        expected_content_sha256: object = None,
+        media_revision: object = None,
     ) -> dict[str, Any]:
         provider_trace = build_provider_trace(final_provider="editing_session_manual")
         return {
@@ -1166,7 +1171,13 @@ class _PipelinePrivateHelpersMixin:
             "reason": reason,
             "auto_apply_allowed": True,
             "review_required": False,
-            "payload": {"provider_trace": provider_trace, "selected_asset_uri": asset_uri, "media_controls": deepcopy(media_controls) if isinstance(media_controls, dict) else {}},
+            "payload": {
+                "provider_trace": provider_trace,
+                "selected_asset_uri": asset_uri,
+                "media_controls": deepcopy(media_controls) if isinstance(media_controls, dict) else {},
+                "expected_content_sha256": str(expected_content_sha256 or "").strip(),
+                "media_revision": str(media_revision or "").strip(),
+            },
             "created_at": self.store._now_iso(),
             "provider_trace": provider_trace,
         }

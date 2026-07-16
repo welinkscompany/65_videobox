@@ -228,6 +228,58 @@ def test_media_library_list_and_favorite_api_expose_verified_assets_and_persist_
     assert client.get("/api/media-library/favorites").json() == {"asset_ids": ["pack:starter-001:music-001"]}
 
 
+def test_project_media_library_preferences_are_isolated_persistent_and_materialize_marks_recent(tmp_path: Path) -> None:
+    """Task 16 RED: starter-pack affinity belongs to a project, never the global pack."""
+    library = _indexed_library(tmp_path)
+    projects_root = tmp_path / "projects"
+    client = TestClient(create_app(projects_root=projects_root, media_library_store=library))
+    first = client.post("/api/projects", json={"name": "first"}).json()["project_id"]
+    second = client.post("/api/projects", json={"name": "second"}).json()["project_id"]
+    asset_id = "pack:starter-001:music-001"
+
+    favorite = client.put(
+        f"/api/projects/{first}/media-library/assets/{asset_id}/favorite", json={"enabled": True},
+    )
+
+    assert favorite.status_code == 200
+    assert favorite.json() == {"asset_ids": [asset_id]}
+    assert client.get(f"/api/projects/{second}/media-library/favorites").json() == {"asset_ids": []}
+    assert client.post(
+        f"/api/media-library/assets/{asset_id}/materialize", json={"project_id": first},
+    ).status_code == 201
+    assert client.get(f"/api/projects/{first}/media-library/recent").json() == {"asset_ids": [asset_id]}
+
+    restarted = TestClient(create_app(projects_root=projects_root, media_library_store=library))
+    assert restarted.get(f"/api/projects/{first}/media-library/favorites").json() == {"asset_ids": [asset_id]}
+    assert restarted.get(f"/api/projects/{first}/media-library/recent").json() == {"asset_ids": [asset_id]}
+
+
+def test_project_media_library_preference_mutations_do_not_lose_concurrent_updates(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Task 16 RED: project-local favorite/recent read-modify-write is atomic."""
+    store = LocalProjectStore(tmp_path / "projects")
+    project = store.bootstrap_project(name="atomic project media preferences")
+    original = store.get_project_media_library_preferences
+    barrier = __import__("threading").Barrier(2)
+
+    def synchronized_read(project_id: str) -> dict[str, list[str]]:
+        if __import__("threading").current_thread().name.startswith("ThreadPoolExecutor"):
+            snapshot = original(project_id)
+            barrier.wait(timeout=2)
+            return snapshot
+        return original(project_id)
+
+    monkeypatch.setattr(store, "get_project_media_library_preferences", synchronized_read)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        list(executor.map(
+            lambda asset_id: store.set_project_media_library_favorite(
+                project_id=project.project_id, library_asset_id=asset_id, enabled=True,
+            ),
+            ["local-broll-a", "local-broll-b"],
+        ))
+
+    assert store.get_project_media_library_preferences(project.project_id)["favorite_asset_ids"] == ["local-broll-a", "local-broll-b"]
+
+
 def test_verified_library_asset_preview_streams_without_creating_project_state(tmp_path: Path) -> None:
     library = _indexed_library(tmp_path)
     client = TestClient(create_app(projects_root=tmp_path / "projects", media_library_store=library))
@@ -431,6 +483,26 @@ def test_partial_regeneration_stamps_output_provenance_with_final_session_revisi
     assert changed.status_code == 200, changed.text
     with pytest.raises(OutputSourceStaleError, match="stale_output_asset: editing session revision changed"):
         verify_output_freshness(editing_session=changed.json(), timeline=timeline, review=review)
+
+
+def test_manual_broll_override_rejects_a_project_local_non_broll_asset(tmp_path: Path) -> None:
+    """Task 16 RED: a local URI/SHA is insufficient; manual B-roll must be BROLL_VIDEO."""
+    library = _indexed_library(tmp_path)
+    client = TestClient(create_app(projects_root=tmp_path / "projects", media_library_store=library))
+    project_id, session_id = _create_timeline_session(client, tmp_path)
+    before = client.get(f"/api/projects/{project_id}/editing-sessions/{session_id}").json()
+    bgm = client.post(
+        "/api/media-library/assets/pack:starter-001:music-001/materialize", json={"project_id": project_id},
+    ).json()
+
+    response = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/broll",
+        json={"asset_id": bgm["asset_id"], "expected_revision": before["session_revision"]},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "asset_missing"
+    assert client.get(f"/api/projects/{project_id}/editing-sessions/{session_id}").json() == before
 
 
 def test_only_materialized_matching_project_audio_assets_can_override_and_build_timeline(tmp_path: Path) -> None:

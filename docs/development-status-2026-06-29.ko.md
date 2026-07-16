@@ -1,8 +1,16 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 235. 2026-07-14 Local Media Director implementation planning`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
-> 이 문서의 기존 날짜 기반 섹션은 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 235`만 기준으로 본다.
+> 현재 authoritative 상태/next slice 판단은 `## 248. 2026-07-16 Local Media Director Slice 3 Task 16 closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 이 문서의 기존 날짜 기반 섹션은 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 248`을 기준으로 본다.
 > 단, `2일 내 1차 데모 완성` 실행 레일은 `## 189`의 장기 우선순위를 그대로 넓게 집행하지 않고, `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`의 축소된 실행 계획을 우선 적용한다.
+
+## 248. 2026-07-16 Local Media Director Slice 3 Task 16 closeout
+
+- Starter Pack BGM/SFX와 프로젝트 로컬 B-roll 수동 라이브러리를 `ManualMediaLibrary`로 추출했다. Director가 blocked/error여도 수동 미리보기·명시적 적용은 독립적으로 유지되며, 미리보기는 editing session을 변경하지 않는다.
+- 글로벌 pack asset은 materialize 후 적용하고, 로컬 B-roll은 서버가 실제 `BROLL_VIDEO` 자산을 재해시해 SHA/revision을 editing session → partial regeneration → timeline clip → output-source verifier까지 보존한다. 출처가 바뀌면 출력 검증이 거절되는 회귀 테스트를 추가했다.
+- 프로젝트 범위 favorite/recent, pin/exclude를 저장하고, SQLite `BEGIN IMMEDIATE`로 병렬 갱신의 read-modify-write 유실을 막았다. 로컬 B-roll 적용 직후 recent filter를 갱신하며, 키보드는 B-roll 카드 포커스 후 명시적 선택 구간 대상에서 Enter/Space로만 배치할 수 있다.
+- 검증: ManualMediaLibrary RED/Green과 strict B-roll provenance RED/Green을 확인했다. 최종 frontend 전체 `145 passed`, `npm --prefix apps/web run build` 성공, 관련 backend focused `89 passed`, 전체 backend `1011 passed, 2 skipped`를 확인했다. 독립 사양 리뷰와 최종 품질 리뷰는 P0/P1 없이 승인됐다.
+- 전체 구현 계획 누적 진행률은 16/18 Task (88.9%), 잔여 11.1%다. 다음 실행 단위는 Slice 3 Task 17 responsive bottom sheet와 focus/IME/a11y다.
 
 ## 235. 2026-07-14 Local Media Director implementation planning
 

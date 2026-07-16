@@ -275,6 +275,10 @@ def build_editing_session_router(orchestrator: ApiOrchestrator, store: LocalProj
             return _editing_session_conflict_response(exc)
         except Exception as exc:
             raise _http_error(exc) from exc
+        store.mark_project_media_library_recent(
+            project_id=project_id,
+            library_asset_id=payload.asset_id,
+        )
         return EditingSessionResponse(**result)
 
     @router.patch("/api/projects/{project_id}/editing-sessions/{session_id}/segments/{segment_id}/sfx")

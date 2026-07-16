@@ -33,7 +33,7 @@ class EditingSessionRevisionConflict(RuntimeError):
     """The persisted editing-session revision did not match the requested CAS revision."""
 
 
-class EditingSessionPostCommitFileWriteError(RuntimeError):
+class EditingSessionPostCommitFileWriteError(OSError):
     """SQLite committed an editing session, but its convenience JSON mirror did not.
 
     The SQLite ``session_json`` column is authoritative and will recreate the
@@ -1536,13 +1536,101 @@ class LocalProjectStore:
 
     def save_director_preferences(self, project_id: str, preferences: dict[str, Any]) -> dict[str, list[str]]:
         allowed = ("pin_asset", "exclude_asset", "exclude_creator", "exclude_tag")
-        canonical = {key: sorted({str(value).strip() for value in preferences.get(key, []) if str(value).strip()}) for key in allowed}
-        self._execute(project_id, "INSERT INTO director_preferences (project_id, preferences_json, updated_at) VALUES (?, ?, ?) ON CONFLICT(project_id) DO UPDATE SET preferences_json=excluded.preferences_json, updated_at=excluded.updated_at", (project_id, json.dumps(canonical, ensure_ascii=True), self._now_iso()))
-        return canonical
+        connection = self._connection(project_id)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute("SELECT preferences_json FROM director_preferences WHERE project_id = ?", (project_id,)).fetchone()
+            current = json.loads(str(row["preferences_json"])) if row else {key: [] for key in allowed}
+            canonical = {
+                key: sorted({str(value).strip() for value in preferences[key] if str(value).strip()})
+                if key in preferences else list(current.get(key, []))
+                for key in allowed
+            }
+            connection.execute("INSERT INTO director_preferences (project_id, preferences_json, updated_at) VALUES (?, ?, ?) ON CONFLICT(project_id) DO UPDATE SET preferences_json=excluded.preferences_json, updated_at=excluded.updated_at", (project_id, json.dumps(canonical, ensure_ascii=True), self._now_iso()))
+            connection.commit()
+            return canonical
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+        finally:
+            connection.close()
 
     def get_director_preferences(self, project_id: str) -> dict[str, list[str]]:
         row = self._fetchone(project_id, "SELECT preferences_json FROM director_preferences WHERE project_id = ?", (project_id,))
         return json.loads(str(row["preferences_json"])) if row else {"pin_asset": [], "exclude_asset": [], "exclude_creator": [], "exclude_tag": []}
+
+    def get_project_media_library_preferences(self, project_id: str) -> dict[str, list[str]]:
+        row = self._fetchone(
+            project_id,
+            "SELECT preferences_json FROM project_media_library_preferences WHERE project_id = ?",
+            (project_id,),
+        )
+        return json.loads(str(row["preferences_json"])) if row else {"favorite_asset_ids": [], "recent_asset_ids": []}
+
+    def set_project_media_library_favorite(
+        self, *, project_id: str, library_asset_id: str, enabled: bool,
+    ) -> dict[str, list[str]]:
+        return self._mutate_project_media_library_preferences(
+            project_id=project_id,
+            mutate=lambda preferences: {
+                **preferences,
+                "favorite_asset_ids": sorted(
+                    ([item for item in preferences["favorite_asset_ids"] if item != library_asset_id] + ([library_asset_id] if enabled else []))
+                ),
+            },
+        )
+
+    def mark_project_media_library_recent(
+        self, *, project_id: str, library_asset_id: str,
+    ) -> dict[str, list[str]]:
+        return self._mutate_project_media_library_preferences(
+            project_id=project_id,
+            mutate=lambda preferences: {
+                **preferences,
+                "recent_asset_ids": [library_asset_id, *[item for item in preferences["recent_asset_ids"] if item != library_asset_id]][:10],
+            },
+        )
+
+    def _mutate_project_media_library_preferences(self, *, project_id: str, mutate: Callable[[dict[str, list[str]]], dict[str, list[str]]]) -> dict[str, list[str]]:
+        connection = self._connection(project_id)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute("SELECT preferences_json FROM project_media_library_preferences WHERE project_id = ?", (project_id,)).fetchone()
+            current = json.loads(str(row["preferences_json"])) if row else {"favorite_asset_ids": [], "recent_asset_ids": []}
+            preferences = mutate({key: list(current.get(key, [])) for key in ("favorite_asset_ids", "recent_asset_ids")})
+            self._save_project_media_library_preferences_with_connection(connection, project_id, preferences)
+            connection.commit()
+            return preferences
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def _save_project_media_library_preferences(self, project_id: str, preferences: dict[str, list[str]]) -> None:
+        canonical = {
+            key: [str(value).strip() for value in preferences.get(key, []) if str(value).strip()]
+            for key in ("favorite_asset_ids", "recent_asset_ids")
+        }
+        self._execute(
+            project_id,
+            "INSERT INTO project_media_library_preferences (project_id, preferences_json, updated_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(project_id) DO UPDATE SET preferences_json=excluded.preferences_json, updated_at=excluded.updated_at",
+            (project_id, json.dumps(canonical, ensure_ascii=True), self._now_iso()),
+        )
+
+    def _save_project_media_library_preferences_with_connection(self, connection: sqlite3.Connection, project_id: str, preferences: dict[str, list[str]]) -> None:
+        canonical = {
+            key: [str(value).strip() for value in preferences.get(key, []) if str(value).strip()]
+            for key in ("favorite_asset_ids", "recent_asset_ids")
+        }
+        connection.execute(
+            "INSERT INTO project_media_library_preferences (project_id, preferences_json, updated_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(project_id) DO UPDATE SET preferences_json=excluded.preferences_json, updated_at=excluded.updated_at",
+            (project_id, json.dumps(canonical, ensure_ascii=True), self._now_iso()),
+        )
 
     def get_asset_index_revision(self, project_id: str) -> int:
         row = self._fetchone(project_id, "SELECT revision FROM director_asset_index_revisions WHERE project_id = ?", (project_id,))
@@ -4437,7 +4525,7 @@ class LocalProjectStore:
                     temporary_path.replace(session_path)
                 except Exception as exc:
                     raise EditingSessionPostCommitFileWriteError(
-                        "Editing-session SQLite commit succeeded but JSON mirror write failed."
+                        f"Editing-session SQLite commit succeeded but JSON mirror write failed: {exc}"
                     ) from exc
             except Exception:
                 if connection.in_transaction:

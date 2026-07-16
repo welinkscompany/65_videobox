@@ -1153,7 +1153,7 @@ git commit -m "feat: build director proposal workspace"
 - Modify: apps/web/src/api.ts
 - Modify: apps/web/src/styles.css
 
-- [ ] **Step 1: 동작 보존과 filter RED test 작성**
+- [x] **Step 1: 동작 보존과 filter RED test 작성**
 
 ~~~tsx
 it("Director가 blocked여도 수동 배치를 허용한다", async () => {
@@ -1169,17 +1169,17 @@ it("미리보기만으로 편집 session을 변경하지 않는다", async () =>
 });
 ~~~
 
-- [ ] **Step 2: RED 확인**
+- [x] **Step 2: RED 확인**
 
 Run: npm --prefix apps/web test -- src/features/media/manual-media-library.test.tsx
 
 Expected: component import failure.
 
-- [ ] **Step 3: 기존 media library 블록을 동작 보존 상태로 추출**
+- [x] **Step 3: 기존 media library 블록을 동작 보존 상태로 추출**
 
 App.tsx 약 2960행의 Starter Pack library UI를 ManualMediaLibrary로 이동한다. B-roll/BGM/SFX, type, aspect, duration, analyzed, review-needed, favorite, recent filter를 제공한다. drag/drop과 action button은 모두 selected segment/range를 명시한다.
 
-- [ ] **Step 4: materialize-before-apply와 favorite GREEN**
+- [x] **Step 4: materialize-before-apply와 favorite GREEN**
 
 Global pack asset은 backend proposal/manual materialize service를 통하고, project-local B-roll은 SHA/revision을 전달한다. favorite/pin/exclude는 project scope API에 저장한다.
 
@@ -1187,7 +1187,7 @@ Run: npm --prefix apps/web test -- src/features/media/manual-media-library.test.
 
 Expected: 기존 library 테스트와 신규 test 모두 PASS.
 
-- [ ] **Step 5: 커밋**
+- [x] **Step 5: 커밋**
 
 ~~~powershell
 git add apps/web/src/features/media apps/web/src/App.tsx apps/web/src/api.ts apps/web/src/styles.css

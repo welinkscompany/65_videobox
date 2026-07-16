@@ -702,6 +702,8 @@ function createFetchMock({
     mediaLibraryAssets: Array<Record<string, unknown>>;
     mediaLibraryFavorites: string[];
     mediaLibraryRecent: string[];
+    mediaLibraryFavoritesByProject: Record<string, string[]>;
+    mediaLibraryRecentByProject: Record<string, string[]>;
   } = {
     timeline: structuredClone(timeline.timeline),
     editingSession: structuredClone(editingSession) as EditingSession,
@@ -715,6 +717,8 @@ function createFetchMock({
     mediaLibraryAssets: structuredClone(mediaLibraryAssets),
     mediaLibraryFavorites: [],
     mediaLibraryRecent: [],
+    mediaLibraryFavoritesByProject: {},
+    mediaLibraryRecentByProject: {},
   };
 
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -731,6 +735,21 @@ function createFetchMock({
     if (url.endsWith("/api/media-library/install-state")) {
       return new Response(JSON.stringify({ status: state.mediaLibraryAssets.length ? "installed" : "not_installed", installed_asset_count: state.mediaLibraryAssets.length }));
     }
+    const projectLibraryMatch = url.match(/\/api\/projects\/([^/]+)\/media-library\/(favorites|recent)$/);
+    if (projectLibraryMatch) {
+      const [, projectId, kind] = projectLibraryMatch;
+      const values = kind === "favorites" ? state.mediaLibraryFavoritesByProject[projectId] ?? [] : state.mediaLibraryRecentByProject[projectId] ?? [];
+      return new Response(JSON.stringify({ asset_ids: values }));
+    }
+    const projectFavoriteMatch = url.match(/\/api\/projects\/([^/]+)\/media-library\/assets\/(.+)\/favorite$/);
+    if (projectFavoriteMatch && init?.method === "PUT") {
+      const [, projectId, encodedAssetId] = projectFavoriteMatch;
+      const assetId = decodeURIComponent(encodedAssetId);
+      const current = state.mediaLibraryFavoritesByProject[projectId] ?? [];
+      const enabled = Boolean(JSON.parse(String(init.body ?? "{}")).enabled);
+      state.mediaLibraryFavoritesByProject[projectId] = enabled ? [...new Set([...current, assetId])] : current.filter((item) => item !== assetId);
+      return new Response(JSON.stringify({ asset_ids: state.mediaLibraryFavoritesByProject[projectId] }));
+    }
     if (url.endsWith("/api/media-library/favorites")) {
       return new Response(JSON.stringify({ asset_ids: state.mediaLibraryFavorites }));
     }
@@ -745,7 +764,10 @@ function createFetchMock({
       return new Response(JSON.stringify({ asset_ids: state.mediaLibraryFavorites }));
     }
     if (/\/api\/media-library\/assets\/.+\/materialize$/.test(url) && init?.method === "POST") {
-      state.mediaLibraryRecent = [decodeURIComponent(url.split("/").slice(-2)[0] ?? "")];
+      const assetId = decodeURIComponent(url.split("/").slice(-2)[0] ?? "");
+      state.mediaLibraryRecent = [assetId];
+      const projectId = String(JSON.parse(String(init.body ?? "{}")).project_id ?? "");
+      if (projectId) state.mediaLibraryRecentByProject[projectId] = [assetId];
       return new Response(JSON.stringify({ asset_id: "asset_materialized_music_001", asset_type: "bgm", storage_uri: "local://projects/project_001/assets/imported/music-001.mp3" }), { status: 201 });
     }
     if (url.endsWith("/api/projects")) {
@@ -1224,6 +1246,7 @@ function createFetchMock({
             : segment,
         ),
       };
+      state.mediaLibraryRecentByProject.project_001 = [payload.asset_id];
       return new Response(JSON.stringify(state.editingSession));
     }
     if (
@@ -2815,7 +2838,7 @@ describe("App", () => {
 
     expect(await screen.findByText(/editing_session_001/i)).toBeInTheDocument();
     expect(await screen.findByRole("button", { name: /seg_002/i })).toBeInTheDocument();
-    expect(await screen.findByText(/asset_manual_002/i)).toBeInTheDocument();
+    expect(await screen.findByText(/asset_broll_archive_002/i)).toBeInTheDocument();
     expect(
       screen.getByText(/meeting context: summarize the active discussion\./i),
     ).toBeInTheDocument();
@@ -3151,32 +3174,39 @@ describe("App", () => {
     expect(screen.queryByText(/partial_regeneration_job_001/i)).not.toBeInTheDocument();
   }
 
-  it("shows archived B-roll assets in the editing session picker and saves the selected override", async () => {
+  it("places an archived B-roll card through the sole manual library path with SHA identity", async () => {
     const fetchMock = await renderStartedEditingSession();
 
-    expect((await screen.findAllByText(/사무실 로비 패닝/i)).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/asset_broll_archive_001/i).length).toBeGreaterThan(0);
-
-    fireEvent.change(screen.getByRole("combobox", { name: /B롤 선택/i }), {
-      target: { value: "asset_broll_archive_002" },
-    });
-    expect(screen.getByRole("heading", { name: /선택 B롤/i })).toBeInTheDocument();
-    expect(screen.getAllByText(/팀 화이트보드/i).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/asset_broll_archive_002/i).length).toBeGreaterThan(0);
-    fireEvent.click(screen.getByRole("button", { name: /B롤 저장/i }));
+    const card = (await screen.findByText("asset_broll_archive_002")).closest("article");
+    expect(card).not.toBeNull();
+    fireEvent.click(card!.querySelector("button:last-of-type")!);
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
         "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/broll",
         expect.objectContaining({
           method: "PATCH",
-          body: JSON.stringify({
-            expected_revision: 1,
-            asset_id: "asset_broll_archive_002",
-          }),
+          body: JSON.stringify({ expected_revision: 1, asset_id: "asset_broll_archive_002", media_controls: { expected_content_sha256: "", media_revision: "2026-07-06T00:00:01Z" } }),
         }),
       );
     });
+  });
+
+  it("refreshes project recent media state after applying a local B-roll", async () => {
+    const fetchMock = await renderStartedEditingSession();
+    const recentCallsBeforeApply = fetchMock.mock.calls.filter(([url, init]) =>
+      String(url).endsWith("/api/projects/project_001/media-library/recent") && !init,
+    ).length;
+    const card = (await screen.findByText("asset_broll_archive_002")).closest("article");
+    expect(card).not.toBeNull();
+
+    fireEvent.click(within(card!).getByRole("button", { name: /선택 구간에 B롤 적용/i }));
+
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([url, init]) =>
+      String(url).endsWith("/api/projects/project_001/media-library/recent") && !init,
+    )).toHaveLength(recentCallsBeforeApply + 1));
+    fireEvent.click(screen.getByRole("button", { name: "B롤 필터: 최근" }));
+    expect(screen.getByText("asset_broll_archive_002")).toBeInTheDocument();
   });
 
   it("shows a short success message after saving an editing change", async () => {
@@ -3242,18 +3272,15 @@ describe("App", () => {
     );
   });
 
-  it("marks a selected B-roll asset with a canonical media-pack favorite id", async () => {
+  it("marks a ManualMediaLibrary B-roll card with a project-scoped favorite id", async () => {
     const fetchMock = await renderStartedEditingSession();
-    fireEvent.click(screen.getByRole("button", { name: /seg_002/i }));
-    fireEvent.change(screen.getByRole("combobox", { name: /B롤 선택/i }), {
-      target: { value: "asset_manual_002" },
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: /B롤 즐겨찾기/i }));
+    const card = (await screen.findByText("asset_broll_archive_002")).closest("article");
+    expect(card).not.toBeNull();
+    fireEvent.click(within(card!).getByRole("button", { name: /B롤 즐겨찾기$/i }));
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/projects/project_001/editor-library/favorites/pack:local:asset_manual_002",
+        "/api/projects/project_001/editor-library/favorites/pack:local:asset_broll_archive_002",
         expect.objectContaining({
           method: "PUT",
           body: JSON.stringify({ favorite_type: "media", enabled: true }),
@@ -3262,30 +3289,26 @@ describe("App", () => {
     );
   });
 
-  it("filters archived B-roll assets by display name tags and asset id before saving", async () => {
+  it("filters ManualMediaLibrary B-roll cards by display name tags and asset id before explicit placement", async () => {
     const fetchMock = await renderStartedEditingSession();
-    const picker = await screen.findByRole("combobox", { name: /B롤 선택/i });
+    expect(await screen.findByText(/Office lobby pan/i)).toBeInTheDocument();
+    expect(screen.getByText(/Team whiteboard/i)).toBeInTheDocument();
 
-    expect(picker).toHaveTextContent(/사무실 로비 패닝/i);
-    expect(picker).toHaveTextContent(/팀 화이트보드/i);
-
-    fireEvent.change(screen.getByLabelText(/B롤 검색/i), {
-      target: { value: "기획" },
+    fireEvent.change(screen.getByRole("textbox", { name: /^검색$/i }), {
+      target: { value: "planning" },
     });
-    expect(picker).not.toHaveTextContent(/사무실 로비 패닝/i);
-    expect(picker).toHaveTextContent(/팀 화이트보드/i);
-    expect(screen.getByText(/보임 1\/2/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Office lobby pan/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/Team whiteboard/i)).toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText(/B롤 검색/i), {
+    fireEvent.change(screen.getByRole("textbox", { name: /^검색$/i }), {
       target: { value: "archive_001" },
     });
-    expect(picker).toHaveTextContent(/사무실 로비 패닝/i);
-    expect(picker).not.toHaveTextContent(/팀 화이트보드/i);
+    expect(screen.getByText(/Office lobby pan/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Team whiteboard/i)).not.toBeInTheDocument();
 
-    fireEvent.change(picker, {
-      target: { value: "asset_broll_archive_001" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: /B롤 저장/i }));
+    const card = screen.getByText(/Office lobby pan/i).closest("article");
+    expect(card).not.toBeNull();
+    fireEvent.click(within(card!).getByRole("button", { name: /선택 구간에 B롤 적용/i }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -3295,13 +3318,14 @@ describe("App", () => {
           body: JSON.stringify({
             expected_revision: 1,
             asset_id: "asset_broll_archive_001",
+            media_controls: { expected_content_sha256: "", media_revision: "2026-07-06T00:00:00Z" },
           }),
         }),
       );
     });
   });
 
-  it("imports a B-roll folder from the editing session and refreshes the asset picker", async () => {
+  it("imports a B-roll folder and refreshes the ManualMediaLibrary cards", async () => {
     const fetchMock = await renderStartedEditingSession();
     const folderPath =
       "D:\\AI_Workspace_louis_office_50\\20_project\\65_videobox-project\\비롤_라이브러리\\검수완료";
@@ -3328,12 +3352,10 @@ describe("App", () => {
       );
     });
     await waitFor(() => {
-      expect(screen.getByRole("combobox", { name: /B롤 선택/i })).toHaveTextContent(/공장 라인/i);
+      expect(screen.getByText(/factory-line/i)).toBeInTheDocument();
     });
     expect(await screen.findByText(/가져옴 1개/i)).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: /B롤 선택/i })).toHaveTextContent(
-      /asset_broll_archive_003/i,
-    );
+    expect(screen.getByText(/asset_broll_archive_003/i)).toBeInTheDocument();
   });
 
   it("shows a B-roll import error when folder import fails", async () => {
@@ -3838,13 +3860,13 @@ describe("App", () => {
     expect(screen.getByRole("checkbox", { name: /^음악$/i })).not.toBeChecked();
   });
 
-  it("clears the saved b-roll override and invalidates the active candidate", async () => {
+  it("clears the selected-range B-roll override from the ManualMediaLibrary and invalidates the active candidate", async () => {
     const fetchMock = await renderStartedEditingSession(
       createFetchMock({ candidateReviewSnapshot: candidateReviewSnapshotResponse }),
     );
 
     await runCandidateToApprovalReady();
-    fireEvent.click(screen.getByRole("button", { name: /B롤 해제/i }));
+    fireEvent.click(screen.getByRole("button", { name: /선택 구간 B롤 해제/i }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -3856,8 +3878,7 @@ describe("App", () => {
     });
     await expectCandidateInvalidated();
     expect(screen.getByText(/B롤 해제됨/i)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /B롤 해제/i })).not.toBeInTheDocument();
-    expect(screen.getByLabelText(/B롤 자산 ID/i)).toHaveValue("");
+    expect(screen.queryByRole("button", { name: /선택 구간 B롤 해제/i })).not.toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: /B롤/i })).not.toBeChecked();
   });
 
@@ -5622,7 +5643,7 @@ describe("App", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "BGM 즐겨찾기" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
-      "/api/media-library/assets/pack%3Astarter-001%3Amusic-001/favorite",
+      "/api/projects/project_001/media-library/assets/pack%3Astarter-001%3Amusic-001/favorite",
       expect.objectContaining({ method: "PUT" }),
     ));
     fireEvent.click(screen.getByRole("button", { name: "즐겨찾기" }));
@@ -5657,7 +5678,7 @@ describe("App", () => {
     expect(screen.getByRole("button", { name: "분할" })).toBeEnabled();
   });
 
-  it("restores media favorites and recent usage from the global library after an app reload", async () => {
+  it("restores media favorites and recent usage from the active project after an app reload", async () => {
     const fetchMock = createFetchMock({
       mediaLibraryAssets: [{
         library_asset_id: "pack:starter-001:music-001",
@@ -5681,7 +5702,7 @@ describe("App", () => {
     fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
     fireEvent.click(await screen.findByRole("button", { name: "BGM 즐겨찾기" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
-      "/api/media-library/assets/pack%3Astarter-001%3Amusic-001/favorite",
+      "/api/projects/project_001/media-library/assets/pack%3Astarter-001%3Amusic-001/favorite",
       expect.objectContaining({ method: "PUT" }),
     ));
     fireEvent.click(screen.getByRole("button", { name: "BGM 적용" }));
@@ -5696,10 +5717,10 @@ describe("App", () => {
     await screen.findByRole("button", { name: "즐겨찾기" });
 
     await waitFor(() => expect(fetchMock.mock.calls.filter(([url, init]) =>
-      String(url).endsWith("/api/media-library/favorites") && !init,
+      String(url).endsWith("/api/projects/project_001/media-library/favorites") && !init,
     )).toHaveLength(2));
     await waitFor(() => expect(fetchMock.mock.calls.filter(([url, init]) =>
-      String(url).endsWith("/api/media-library/recent") && !init,
+      String(url).endsWith("/api/projects/project_001/media-library/recent") && !init,
     )).toHaveLength(3));
     fireEvent.click(screen.getByRole("button", { name: "즐겨찾기" }));
     expect(screen.getByText("music-001")).toBeInTheDocument();

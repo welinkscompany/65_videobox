@@ -31,7 +31,9 @@ import {
   type MediaLibraryInstallState,
 } from "./api";
 import { MediaAnalysisPanel } from "./features/media/MediaAnalysisPanel";
+import { ManualMediaLibrary } from "./features/media/ManualMediaLibrary";
 import { DirectorWorkspacePanel } from "./features/director/DirectorWorkspacePanel";
+import type { DirectorWorkspaceState } from "./features/director/directorTypes";
 import {
   buildDefaultEditingSelection,
   buildDefaultRegenerationFields,
@@ -44,9 +46,6 @@ import {
   findLatestJob,
   findLatestTimelineJob,
   formatAffectedOutputArea,
-  formatBrollAssetLabel,
-  formatBrollAssetTags,
-  formatBrollAssetTitle,
   formatDisplayText,
   formatEditingMutationFeedbackLabel,
   formatFieldLabel,
@@ -129,7 +128,6 @@ export function App() {
   );
   const [brollSourcePaths, setBrollSourcePaths] = useState("");
   const [brollImportTags, setBrollImportTags] = useState("");
-  const [brollAssetFilter, setBrollAssetFilter] = useState("");
   const [brollImportError, setBrollImportError] = useState<string | null>(null);
   const [brollImportMessage, setBrollImportMessage] = useState<string | null>(null);
   const [isImportingBroll, setIsImportingBroll] = useState(false);
@@ -165,6 +163,7 @@ export function App() {
   const [mediaLibraryFavoriteIds, setMediaLibraryFavoriteIds] = useState<string[]>([]);
   const [recentMediaLibraryAssetIds, setRecentMediaLibraryAssetIds] = useState<string[]>([]);
   const [mediaLibraryError, setMediaLibraryError] = useState<string | null>(null);
+  const [directorWorkspaceState, setDirectorWorkspaceState] = useState<DirectorWorkspaceState>("idle");
   const [mediaLibraryInstallState, setMediaLibraryInstallState] = useState<MediaLibraryInstallState | null>(null);
   const [mediaLibraryFilter, setMediaLibraryFilter] = useState("");
   const [mediaLibraryView, setMediaLibraryView] = useState<"all" | "favorites" | "recent">("all");
@@ -248,7 +247,8 @@ export function App() {
 
   useEffect(() => {
     let cancelled = false;
-    void Promise.all([api.getMediaLibraryInstallState(), api.listMediaLibraryAssets(), api.listMediaLibraryFavorites(), api.listRecentMediaLibraryAssetIds()]).then(
+    if (!selectedProjectId) return () => { cancelled = true; };
+    void Promise.all([api.getMediaLibraryInstallState(), api.listMediaLibraryAssets(), api.listProjectMediaLibraryFavorites(selectedProjectId), api.listProjectRecentMediaLibraryAssetIds(selectedProjectId)]).then(
       ([installState, assets, favorites, recent]) => {
         if (cancelled) return;
         setMediaLibraryAssets(assets.assets);
@@ -262,7 +262,7 @@ export function App() {
       },
     );
     return () => { cancelled = true; };
-  }, []);
+  }, [selectedProjectId]);
 
   useEffect(() => {
     if (!selectedProjectId) {
@@ -348,7 +348,6 @@ export function App() {
       setExportJob(null);
       setBrollAssets([]);
       setBrollAssetLoadError(null);
-      setBrollAssetFilter("");
       setBrollImportError(null);
       setBrollImportMessage(null);
       setGeminiKeys([]);
@@ -366,7 +365,6 @@ export function App() {
       setLoadState("loading");
       setErrorMessage(null);
       setBrollAssetLoadError(null);
-      setBrollAssetFilter("");
       setBrollImportError(null);
       setBrollImportMessage(null);
       setGeminiLoadError(null);
@@ -878,6 +876,7 @@ export function App() {
       addRegenerationField?: string;
       feedbackAction?: "저장" | "해제" | "삭제";
       removeRegenerationField?: string;
+      onSuccess?: () => void;
     },
   ) {
     const feedbackLabel = formatEditingMutationFeedbackLabel(mutationKey);
@@ -889,6 +888,7 @@ export function App() {
       const session = await action();
       editingUserEditsRef.current = {};
       applyEditingSessionState(session);
+      options?.onSuccess?.();
       if (options?.addRegenerationField) {
         setSelectedRegenerationFields((current) =>
           current.includes(options.addRegenerationField!)
@@ -1574,25 +1574,6 @@ export function App() {
   const selectedEditingDraft = selectedEditingSegmentId
     ? editingDrafts[selectedEditingSegmentId]
     : undefined;
-  const selectedBrollAsset = selectedEditingDraft?.brollAssetId
-    ? brollAssets.find((asset) => asset.asset_id === selectedEditingDraft.brollAssetId)
-    : undefined;
-  const filteredBrollAssets = useMemo(() => {
-    const query = brollAssetFilter.trim().toLowerCase();
-    if (!query) {
-      return brollAssets;
-    }
-    return brollAssets.filter((asset) => formatBrollAssetLabel(asset).toLowerCase().includes(query));
-  }, [brollAssetFilter, brollAssets]);
-  const selectableBrollAssets = useMemo(() => {
-    if (
-      selectedBrollAsset &&
-      !filteredBrollAssets.some((asset) => asset.asset_id === selectedBrollAsset.asset_id)
-    ) {
-      return [selectedBrollAsset, ...filteredBrollAssets];
-    }
-    return filteredBrollAssets;
-  }, [filteredBrollAssets, selectedBrollAsset]);
   const activeEditingSessionId = editingSession?.session_id ?? null;
   const visibleMediaLibraryAssets = useMemo(() => {
     const search = mediaLibraryFilter.trim().toLowerCase();
@@ -1605,8 +1586,9 @@ export function App() {
   }, [mediaLibraryAssets, mediaLibraryFavoriteIds, mediaLibraryFilter, mediaLibraryView, recentMediaLibraryAssetIds]);
 
   async function toggleMediaLibraryFavorite(asset: MediaLibraryAsset) {
+    if (!selectedProjectId) return;
     try {
-      const result = await api.setMediaLibraryFavorite(asset.library_asset_id, !mediaLibraryFavoriteIds.includes(asset.library_asset_id));
+      const result = await api.setProjectMediaLibraryFavorite(selectedProjectId, asset.library_asset_id, !mediaLibraryFavoriteIds.includes(asset.library_asset_id));
       setMediaLibraryFavoriteIds(result.asset_ids);
     } catch {
       setMediaLibraryError("미디어 즐겨찾기를 저장할 수 없습니다. 프로젝트 편집은 계속할 수 있습니다.");
@@ -1620,7 +1602,7 @@ export function App() {
       `${selectedEditingSegment.segment_id}-${field}`,
       async () => {
         const materialized = await api.materializeMediaLibraryAsset(asset.library_asset_id, selectedProjectId);
-        const recent = await api.listRecentMediaLibraryAssetIds();
+        const recent = await api.listProjectRecentMediaLibraryAssetIds(selectedProjectId);
         setRecentMediaLibraryAssetIds(recent.asset_ids);
         return asset.media_type === "music"
           ? api.updateEditingSessionMusicOverride(selectedProjectId, activeEditingSessionId, selectedEditingSegment.segment_id, { expected_revision: editingSession.session_revision, asset_id: materialized.asset_id })
@@ -2149,7 +2131,7 @@ export function App() {
           </details>
         </section>
 
-        {selectedProjectId ? <MediaAnalysisPanel projectId={selectedProjectId} onSelectAsset={(assetId) => { setBrollAssetFilter(assetId); setSelectedSection("editing"); }} /> : null}
+        {selectedProjectId ? <MediaAnalysisPanel projectId={selectedProjectId} onSelectAsset={() => setSelectedSection("editing")} /> : null}
 
         {selectedSection === "overview" ? (
           <section className="workspace-grid">
@@ -2888,7 +2870,7 @@ export function App() {
                       <dd>{preservedEditingSegments.length}</dd>
                     </div>
                   </dl>
-                  {selectedProjectId ? <DirectorWorkspacePanel projectId={selectedProjectId} sessionId={editingSession.session_id} sessionRevision={editingSession.session_revision} selectedSegment={selectedEditingSegment ? { segmentId: selectedEditingSegment.segment_id, startSec: selectedEditingSegment.start_sec, endSec: selectedEditingSegment.end_sec, draftApplied: changedSegmentIds.has(selectedEditingSegment.segment_id) } : undefined} /> : null}
+                  {selectedProjectId ? <DirectorWorkspacePanel projectId={selectedProjectId} sessionId={editingSession.session_id} sessionRevision={editingSession.session_revision} selectedSegment={selectedEditingSegment ? { segmentId: selectedEditingSegment.segment_id, startSec: selectedEditingSegment.start_sec, endSec: selectedEditingSegment.end_sec, draftApplied: changedSegmentIds.has(selectedEditingSegment.segment_id) } : undefined} onStateChange={setDirectorWorkspaceState} /> : null}
                   <section className="editor-library" aria-label="고정 트랙 타임라인">
                     <h3>고정 트랙 타임라인</h3>
                     <p className="meta-copy">나레이션·B롤·BGM·SFX·오버레이만 사용합니다. 임의 트랙은 추가할 수 없습니다.</p>
@@ -2971,41 +2953,40 @@ export function App() {
                     </div>
                     {selectedRangePreview ? <div className="confirmation-card"><p>{`선택 ${formatSeconds(selectedRangePreview.start_sec, selectedRangePreview.end_sec)} · 자막 ${selectedRangePreview.captions.length}개 · 오버레이 ${selectedRangePreview.overlays.length}개`}</p><div aria-label="범위 미리보기" className="range-preview-stage">{selectedRangePreview.overlays.map((overlay, index) => <span className="range-preview-overlay" key={`${String(overlay.segment_id ?? "overlay")}-${index}`}>{String(overlay.text ?? overlay.title ?? overlay.overlay_type ?? "오버레이")}</span>)}{selectedRangePreview.captions.map((caption) => <p className="range-preview-caption" key={caption.segment_id} style={{ color: String(caption.caption_style.text_color ?? caption.caption_style.font_color ?? "#ffffff"), fontSize: Number(caption.caption_style.font_size_px ?? caption.caption_style.font_size ?? 32) }}>{caption.caption_text}</p>)}</div><p className="meta-copy">적용 자막 스타일과 관련 오버레이를 포함한 범위 미리보기입니다.</p></div> : null}
                   </section>
-                  <section className="media-library" aria-label="미디어 라이브러리">
-                    {mediaLibraryError ? <p className="warning-banner">{mediaLibraryError}</p> : null}
-                    <p className="meta-copy">{mediaLibraryInstallState?.status === "installed" ? "Starter pack 설치됨" : mediaLibraryInstallState?.status === "degraded" ? "Starter pack 복구 필요" : "Starter pack 미설치"}</p>
-                    <p className="meta-copy">{mediaLibraryAssets.length ? `설치된 검증 미디어 ${mediaLibraryAssets.length}개` : "설치된 검증 미디어가 없습니다."}</p>
-                    <div className="action-row" aria-label="미디어 라이브러리 필터">
-                      <label className="field"><span>검색</span><input onChange={(event) => setMediaLibraryFilter(event.target.value)} placeholder="BGM, SFX, 태그 또는 길이" value={mediaLibraryFilter} /></label>
-                      <button className="action-button subtle" onClick={() => setMediaLibraryView("all")} type="button">전체</button>
-                      <button className="action-button subtle" onClick={() => setMediaLibraryView("favorites")} type="button">즐겨찾기</button>
-                      <button className="action-button subtle" onClick={() => setMediaLibraryView("recent")} type="button">최근</button>
-                    </div>
-                    {(["music", "sfx"] as const).map((mediaType) => {
-                      const label = mediaType === "music" ? "BGM" : "SFX";
-                      const items = visibleMediaLibraryAssets.filter((asset) => asset.media_type === mediaType);
-                      return <section className="media-library-group" key={mediaType}>
-                        <h3>{label} 라이브러리</h3>
-                        {items.map((asset) => {
-                          const canApply = asset.available && asset.verified && Boolean(selectedEditingSegment) && !isSavingEditingMutation;
-                          const isFavorite = mediaLibraryFavoriteIds.includes(asset.library_asset_id);
-                          return <article className="media-library-card" key={asset.library_asset_id}>
-                            <strong>{asset.asset_id}</strong>
-                            <p className="meta-copy">{asset.creator} · {asset.version} · {asset.duration_seconds}초</p>
-                            <p className="meta-copy">출처: {asset.source} · 라이선스: <a href={asset.official_license_url} rel="noreferrer" target="_blank">확인</a></p>
-                            {asset.attribution_required ? <p className="meta-copy">표기 필요: {asset.attribution_text}</p> : null}
-                            <div className="action-row">
-                              <button className="action-button subtle" disabled={!asset.available || !asset.verified} onClick={() => setPreviewLibraryAssetId(asset.library_asset_id)} type="button">{label} 미리보기</button>
-                              <button className="action-button subtle" onClick={() => void toggleMediaLibraryFavorite(asset)} type="button">{label} 즐겨찾기{isFavorite ? " 해제" : ""}</button>
-                              <button className="action-button" disabled={!canApply} onClick={() => void applyMediaLibraryAsset(asset)} type="button">{label} 적용</button>
-                            </div>
-                            {!asset.available || !asset.verified ? <p className="meta-copy">파일 또는 검증 정보가 없어 미리보기·적용할 수 없습니다.</p> : null}
-                            {previewLibraryAssetId === asset.library_asset_id ? <><audio autoPlay controls data-testid="media-library-preview" src={api.mediaLibraryPreviewUrl(asset.library_asset_id)} /><p className="meta-copy">미리보기 선택됨 · 프로젝트에는 변경하지 않았습니다.</p></> : null}
-                          </article>;
-                        })}
-                      </section>;
-                    })}
-                  </section>
+                  {selectedProjectId ? <ManualMediaLibrary
+                    projectId={selectedProjectId}
+                    assets={mediaLibraryAssets}
+                    brollAssets={brollAssets}
+                    favoriteIds={mediaLibraryFavoriteIds}
+                    unavailableMessage={mediaLibraryError}
+                    directorState={directorWorkspaceState}
+                    localFavoriteIds={editorFavorites.filter((item) => item.favorite_type === "media" && item.favorite_id.startsWith("pack:local:")).map((item) => item.favorite_id.slice("pack:local:".length))}
+                    recentIds={recentMediaLibraryAssetIds}
+                    selectedSegment={selectedEditingSegment ? { segmentId: selectedEditingSegment.segment_id, startSec: selectedEditingSegment.start_sec, endSec: selectedEditingSegment.end_sec } : null}
+                    activeBrollAssetId={typeof selectedEditingSegment?.broll_override?.asset_id === "string" ? selectedEditingSegment.broll_override.asset_id : null}
+                    busy={Boolean(isSavingEditingMutation)}
+                    onToggleFavorite={(libraryAssetId) => { const asset = mediaLibraryAssets.find((item) => item.library_asset_id === libraryAssetId); if (asset) void toggleMediaLibraryFavorite(asset); }}
+                    onToggleLocalFavorite={(assetId) => {
+                      const favoriteId = `pack:local:${assetId}`;
+                      const enabled = !editorFavorites.some((item) => item.favorite_id === favoriteId);
+                      void api.toggleEditorFavorite(selectedProjectId, favoriteId, { favorite_type: "media", enabled }).then(() => setEditorFavorites((current) => enabled ? [...current.filter((item) => item.favorite_id !== favoriteId), { favorite_id: favoriteId, favorite_type: "media" }] : current.filter((item) => item.favorite_id !== favoriteId)));
+                    }}
+                    onApplyGlobal={(asset) => void applyMediaLibraryAsset(asset)}
+                    onApplyBroll={(asset) => {
+                      if (!activeEditingSessionId || !selectedEditingSegment || !editingSession) return;
+                      void applyEditingMutation(`${selectedEditingSegment.segment_id}-broll`, () => api.updateEditingSessionBroll(selectedProjectId, activeEditingSessionId, selectedEditingSegment.segment_id, {
+                        expected_revision: editingSession.session_revision,
+                        asset_id: asset.asset_id,
+                        media_controls: { expected_content_sha256: String(asset.metadata.content_sha256 ?? asset.metadata.sha256 ?? ""), media_revision: asset.created_at },
+                      }), {
+                        onSuccess: () => void api.listProjectRecentMediaLibraryAssetIds(selectedProjectId).then((recent) => setRecentMediaLibraryAssetIds(recent.asset_ids)).catch(() => undefined),
+                      });
+                    }}
+                    onClearBroll={() => {
+                      if (!activeEditingSessionId || !selectedEditingSegment || !editingSession) return;
+                      void applyEditingMutation(`${selectedEditingSegment.segment_id}-broll`, () => api.clearEditingSessionBrollOverride(selectedProjectId, activeEditingSessionId, selectedEditingSegment.segment_id, editingSession.session_revision), { feedbackAction: "해제", removeRegenerationField: "broll" });
+                    }}
+                  /> : null}
                   <div className="editor-library" aria-label="자막 스타일 라이브러리">
                     <h3>자막 스타일</h3>
                     <label className="field">
@@ -3241,7 +3222,7 @@ export function App() {
                   ) : null}
                 </>
               ) : (
-                <>{selectedProjectId ? <DirectorWorkspacePanel projectId={selectedProjectId} sessionId={null} sessionRevision={0} /> : null}<p className="empty-state">편집 세션 없음</p></>
+                <>{selectedProjectId ? <DirectorWorkspacePanel projectId={selectedProjectId} sessionId={null} sessionRevision={0} onStateChange={setDirectorWorkspaceState} /> : null}<p className="empty-state">편집 세션 없음</p></>
               )}
             </article>
 
@@ -3537,180 +3518,6 @@ export function App() {
                   </button>
                   {brollImportError ? <p className="error-copy">{brollImportError}</p> : null}
                   {brollImportMessage ? <p className="meta-copy">{brollImportMessage}</p> : null}
-                  <label className="field">
-                    <span>B롤 검색</span>
-                    <input
-                      onChange={(event) => setBrollAssetFilter(event.target.value)}
-                      value={brollAssetFilter}
-                    />
-                  </label>
-                  <p className="meta-copy">
-                    보임 {filteredBrollAssets.length}/{brollAssets.length}
-                  </p>
-                  <div className="broll-thumbnail-grid">
-                    {filteredBrollAssets.map((asset) => (
-                      <button
-                        className={`broll-thumbnail-card ${
-                          asset.asset_id === selectedEditingDraft.brollAssetId ? "is-selected" : ""
-                        }`}
-                        key={asset.asset_id}
-                        onClick={() =>
-                          updateEditingDraft(selectedEditingSegment.segment_id, {
-                            brollAssetId: asset.asset_id,
-                          })
-                        }
-                        title={formatBrollAssetLabel(asset)}
-                        type="button"
-                      >
-                        {asset.metadata?.thumbnail_uri ? (
-                          <img
-                            alt={formatBrollAssetTitle(asset)}
-                            src={api.assetThumbnailUrl(selectedProjectId!, asset.asset_id)}
-                          />
-                        ) : (
-                          <span className="broll-thumbnail-placeholder">썸네일 없음</span>
-                        )}
-                        <span className="broll-thumbnail-title">{formatBrollAssetTitle(asset)}</span>
-                      </button>
-                    ))}
-                  </div>
-                  <label className="field">
-                    <span>B롤 선택</span>
-                    <select
-                      onChange={(event) =>
-                        updateEditingDraft(selectedEditingSegment.segment_id, {
-                          brollAssetId: event.target.value,
-                        })
-                      }
-                      value={selectedEditingDraft.brollAssetId}
-                    >
-                      <option value="">B롤 미선택</option>
-                      {selectedEditingDraft.brollAssetId &&
-                      !brollAssets.some(
-                        (asset) => asset.asset_id === selectedEditingDraft.brollAssetId,
-                      ) ? (
-                        <option value={selectedEditingDraft.brollAssetId}>
-                          현재 수동 ID
-                        </option>
-                      ) : null}
-                      {selectableBrollAssets.map((asset) => {
-                        return (
-                          <option key={asset.asset_id} value={asset.asset_id}>
-                            {formatBrollAssetLabel(asset)}
-                          </option>
-                        );
-                      })}
-                    </select>
-                  </label>
-                  <button
-                    className="action-button subtle"
-                    disabled={!selectedProjectId || !selectedEditingDraft.brollAssetId}
-                    onClick={() => {
-                      if (!selectedProjectId || !selectedEditingDraft.brollAssetId) return;
-                      const favoriteId = `pack:local:${selectedEditingDraft.brollAssetId}`;
-                      const enabled = !editorFavorites.some((item) => item.favorite_id === favoriteId);
-                      void api.toggleEditorFavorite(selectedProjectId, favoriteId, {
-                        favorite_type: "media",
-                        enabled,
-                      }).then(() => setEditorFavorites((current) => enabled
-                        ? [...current.filter((item) => item.favorite_id !== favoriteId), { favorite_id: favoriteId, favorite_type: "media" }]
-                        : current.filter((item) => item.favorite_id !== favoriteId),
-                      )).catch((error) => setErrorMessage(error instanceof Error ? error.message : "B롤 즐겨찾기를 저장하지 못했습니다"));
-                    }}
-                    type="button"
-                  >
-                    {editorFavorites.some((item) => item.favorite_id === `pack:local:${selectedEditingDraft.brollAssetId}`)
-                      ? "B롤 즐겨찾기 해제"
-                      : "B롤 즐겨찾기"}
-                  </button>
-                  <div className="track-card">
-                    <h3>선택 B롤</h3>
-                    {selectedBrollAsset ? (
-                      <>
-                        <strong>{formatBrollAssetTitle(selectedBrollAsset)}</strong>
-                        <span>{selectedBrollAsset.asset_id}</span>
-                        {formatBrollAssetTags(selectedBrollAsset) ? (
-                          <span>{formatBrollAssetTags(selectedBrollAsset)}</span>
-                        ) : null}
-                      </>
-                    ) : selectedEditingDraft.brollAssetId ? (
-                      <>
-                        <strong>선택한 B롤 자산을 찾을 수 없습니다</strong>
-                        <span>{selectedEditingDraft.brollAssetId}</span>
-                      </>
-                    ) : (
-                      <p className="empty-state">선택 없음</p>
-                    )}
-                  </div>
-                  {brollAssetLoadError ? (
-                    <p className="error-copy">{brollAssetLoadError}</p>
-                  ) : null}
-                  {!brollAssetLoadError && brollAssets.length === 0 ? (
-                    <p className="empty-state">보관 B롤 없음</p>
-                  ) : null}
-                  <label className="field">
-                    <span>B롤 자산 ID</span>
-                    <input
-                      onChange={(event) =>
-                        updateEditingDraft(selectedEditingSegment.segment_id, {
-                          brollAssetId: event.target.value,
-                        })
-                      }
-                      value={selectedEditingDraft.brollAssetId}
-                    />
-                  </label>
-                  <button
-                    className="action-button"
-                    disabled={
-                      !selectedProjectId ||
-                      !activeEditingSessionId ||
-                      !selectedEditingDraft.brollAssetId ||
-                      isSavingEditingMutation === `${selectedEditingSegment.segment_id}-broll`
-                    }
-                    onClick={() =>
-                      void applyEditingMutation(`${selectedEditingSegment.segment_id}-broll`, () =>
-                        api.updateEditingSessionBroll(
-                          selectedProjectId!,
-                          activeEditingSessionId!,
-                          selectedEditingSegment.segment_id,
-                          {
-                            expected_revision: editingSession!.session_revision,
-                            asset_id: selectedEditingDraft.brollAssetId,
-                            ...(brollFit !== "fit" || !brollLoop || brollPad || brollTrimStartSec !== 0 ? { media_controls: { fit: brollFit, loop: brollLoop, pad: brollPad, trim_start_sec: brollTrimStartSec } } : {}),
-                          },
-                        ),
-                      )
-                    }
-                    type="button"
-                  >
-                    B롤 저장
-                  </button>
-                  {selectedEditingSegment.broll_override ? (
-                    <button
-                      className="action-button"
-                      disabled={
-                        !selectedProjectId ||
-                        !activeEditingSessionId ||
-                        isSavingEditingMutation === `${selectedEditingSegment.segment_id}-broll`
-                      }
-                      onClick={() =>
-                        void applyEditingMutation(
-                          `${selectedEditingSegment.segment_id}-broll`,
-                          () =>
-                            api.clearEditingSessionBrollOverride(
-                              selectedProjectId!,
-                              activeEditingSessionId!,
-                              selectedEditingSegment.segment_id,
-                              editingSession!.session_revision,
-                            ),
-                          { feedbackAction: "해제", removeRegenerationField: "broll" },
-                        )
-                      }
-                      type="button"
-                    >
-                      B롤 해제
-                    </button>
-                  ) : null}
                   <label className="field">
                     <span>음악 자산 ID</span>
                     <input

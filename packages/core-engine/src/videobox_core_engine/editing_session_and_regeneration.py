@@ -32,7 +32,7 @@ from videobox_core_engine.canonical_track import (
     VALID_CANONICAL_TRACK_TYPES as VALID_RUNTIME_TRACK_TYPES,
 )
 from videobox_capcut_export import CapCutExportAdapter
-from videobox_storage.local_project_store import EditingSessionRevisionConflict
+from videobox_storage.local_project_store import EditingSessionRevisionConflict, sha256_file
 from videobox_domain_models.assets import AssetType
 from videobox_core_engine.auto_cut import AutoCutPlanner
 from videobox_core_engine.ffmpeg_auto_cut_executor import FfmpegAutoCutExecutor
@@ -240,11 +240,26 @@ class EditingSessionRegenerationMixin:
         expected_revision: int,
     ) -> dict[str, Any]:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        # The browser must not be the source of truth for a local file digest.
+        # Resolve and hash the registered project asset at mutation time so a
+        # manual B-roll placement has the same immutable provenance as a
+        # Director materialized candidate.
+        asset = self.store.get_asset(project_id=project_id, asset_id=asset_id)
+        if asset.get("asset_type") != AssetType.BROLL_VIDEO.value:
+            raise ValueError("asset_missing")
+        source = self.store.resolve_storage_uri(project_id=project_id, storage_uri=str(asset["storage_uri"]))
+        if not source.is_file():
+            raise FileNotFoundError(f"Manual B-roll source is unavailable: {asset_id}")
+        identity_controls = {
+            **dict(media_controls or {}),
+            "expected_content_sha256": sha256_file(source),
+            "media_revision": str(asset.get("created_at") or ""),
+        }
         updated_session = update_segment_broll_override(
             session=session,
             segment_id=segment_id,
             asset_id=asset_id,
-            media_controls=media_controls,
+            media_controls=identity_controls,
         )
         return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=updated_session, expected_revision=expected_revision)
 

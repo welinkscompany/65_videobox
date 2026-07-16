@@ -399,6 +399,16 @@ def update_segment_broll_override(
             continue
         segment["broll_override"] = {"asset_id": normalized_asset_id}
         if media_controls is not None:
+            # Manual project-local placement carries the immutable identity used
+            # by output verification.  Keep it alongside (not inside) the
+            # normalized playback controls so downstream source verification can
+            # re-hash the exact asset selected by the operator.
+            expected_sha = str(media_controls.get("expected_content_sha256") or "").strip()
+            media_revision = str(media_controls.get("media_revision") or "").strip()
+            if expected_sha:
+                segment["broll_override"]["expected_content_sha256"] = expected_sha
+            if media_revision:
+                segment["broll_override"]["media_revision"] = media_revision
             segment["broll_override"]["media_controls"] = normalize_media_controls(media_controls, media_kind="broll", duration_sec=float(segment.get("end_sec", 0.0)) - float(segment.get("start_sec", 0.0)))
         return _apply_manual_mutation(before=session, updated=updated, mutation_type="broll_override_update", segment_id=segment_id, extra={"asset_id": normalized_asset_id})
     raise KeyError(f"Segment not found in editing session: {segment_id}")

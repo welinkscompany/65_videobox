@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from hashlib import sha256
 import json
@@ -9,6 +10,7 @@ from fastapi.testclient import TestClient
 import pytest
 
 from videobox_api.main import create_app
+from videobox_storage.local_project_store import LocalProjectStore
 import videobox_api.main as api_main
 from videobox_api.orchestration import LocalFirstRuntimeService
 from videobox_domain_models.assets import AssetType
@@ -208,6 +210,47 @@ def test_director_candidate_preview_and_materialize_preserve_identity_controls_a
     assert materialized.json()["warning_provenance"] == ["copyright_confirmation_required"]
     assert materialized.json()["asset_id"] != asset.asset_id
     assert store.get_editing_session(project_id=project_id, session_id=session["session_id"]) == before
+
+
+def test_director_preference_put_merges_partial_updates_without_dropping_existing_fields(tmp_path: Path) -> None:
+    """Task 16 RED: each project-scoped manual preference control is independently durable."""
+    client = TestClient(create_app(projects_root=tmp_path / "projects"))
+    project_id = client.post("/api/projects", json={"name": "preference merge"}).json()["project_id"]
+
+    first = client.put(f"/api/projects/{project_id}/director/preferences", json={"pin_asset": ["asset-a"]})
+    second = client.put(f"/api/projects/{project_id}/director/preferences", json={"exclude_asset": ["asset-b"]})
+
+    assert first.status_code == second.status_code == 200
+    assert second.json() == {
+        "pin_asset": ["asset-a"], "exclude_asset": ["asset-b"], "exclude_creator": [], "exclude_tag": [],
+    }
+    assert client.get(f"/api/projects/{project_id}/director/preferences").json() == second.json()
+
+
+def test_director_preference_partial_mutations_do_not_lose_concurrent_updates(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Task 16 RED: partial preference fields must merge inside one SQLite write transaction."""
+    store = LocalProjectStore(tmp_path / "projects")
+    project = store.bootstrap_project(name="atomic director preferences")
+    original = store.get_director_preferences
+    barrier = __import__("threading").Barrier(2)
+
+    def synchronized_read(project_id: str) -> dict[str, list[str]]:
+        if __import__("threading").current_thread().name.startswith("ThreadPoolExecutor"):
+            snapshot = original(project_id)
+            barrier.wait(timeout=2)
+            return snapshot
+        return original(project_id)
+
+    monkeypatch.setattr(store, "get_director_preferences", synchronized_read)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        list(executor.map(
+            lambda preference: store.save_director_preferences(project.project_id, preference),
+            [{"pin_asset": ["asset-a"]}, {"exclude_asset": ["asset-b"]}],
+        ))
+
+    assert store.get_director_preferences(project.project_id) == {
+        "pin_asset": ["asset-a"], "exclude_asset": ["asset-b"], "exclude_creator": [], "exclude_tag": [],
+    }
 
 
 def test_indexed_bgm_preflight_needs_no_visual_analysis_and_bad_expiry_is_422(tmp_path: Path) -> None:
@@ -434,7 +477,7 @@ def test_batch_apply_post_commit_session_mirror_failure_preserves_db_owned_asset
         return original_replace(source_path, target_path)
     monkeypatch.setattr(Path, "replace", fail_session_mirror)
 
-    with pytest.raises(RuntimeError, match="SQLite commit succeeded"):
+    with pytest.raises(OSError, match="SQLite commit succeeded"):
         client.post(f"/api/projects/{project_id}/director/proposals/{proposal['proposal_id']}/batch-apply", json={"candidate_ids": [proposal["candidates"][0]["candidate_id"]], "expected_revision": session["session_revision"]})
 
     # Do not read the session while the injected mirror fault remains active:

@@ -197,6 +197,11 @@ PROJECT_SCHEMA_STATEMENTS = (
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS project_media_library_preferences (
+        project_id TEXT PRIMARY KEY, preferences_json TEXT NOT NULL, updated_at TEXT NOT NULL
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS director_asset_index_revisions (
         project_id TEXT PRIMARY KEY, revision INTEGER NOT NULL
     )

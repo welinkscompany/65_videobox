@@ -1332,6 +1332,13 @@ def test_partial_regeneration_pipeline_keeps_scope_limited_to_selected_segments(
     store = LocalProjectStore(tmp_path)
     project = store.bootstrap_project(name="Partial Regeneration Scope Project")
     runner = _LocalPipelineRunner(store)
+    manual_broll_source = tmp_path / "manual-broll-002.mp4"
+    manual_broll_source.write_bytes(b"manual broll data")
+    manual_broll_asset = store.register_asset(
+        project_id=project.project_id,
+        asset_type=AssetType.BROLL_VIDEO,
+        source_path=manual_broll_source,
+    )
 
     store.save_timeline_run(
         project_id=project.project_id,
@@ -1426,7 +1433,7 @@ def test_partial_regeneration_pipeline_keeps_scope_limited_to_selected_segments(
                     "end_sec": 2.0,
                     "cut_action": "keep",
                     "review_required": False,
-                    "broll_override": {"asset_id": "asset_manual_002"},
+                    "broll_override": {"asset_id": manual_broll_asset.asset_id},
                     "visual_overlays": [],
                     "music_override": None,
                 },
@@ -1434,7 +1441,7 @@ def test_partial_regeneration_pipeline_keeps_scope_limited_to_selected_segments(
             "history": [
                 {"mutation_type": "caption_update", "segment_id": "seg_001", "caption_text": "Manual caption one"},
                 {"mutation_type": "caption_update", "segment_id": "seg_002", "caption_text": "Manual caption two"},
-                {"mutation_type": "broll_override_update", "segment_id": "seg_002", "asset_id": "asset_manual_002"},
+                {"mutation_type": "broll_override_update", "segment_id": "seg_002", "asset_id": manual_broll_asset.asset_id},
             ],
         },
     )
@@ -1468,7 +1475,7 @@ def test_partial_regeneration_pipeline_keeps_scope_limited_to_selected_segments(
     broll_track = next(track for track in result["timeline"]["tracks"] if track["track_type"] == "broll")
     assert [clip["segment_id"] for clip in broll_track["clips"]] == ["seg_001", "seg_002"]
     manual_clip = next(clip for clip in broll_track["clips"] if clip["segment_id"] == "seg_002")
-    assert manual_clip["asset_uri"].endswith("/assets/asset_manual_002")
+    assert manual_clip["asset_uri"] == manual_broll_asset.storage_uri
     runner.approve_timeline_review(project_id=project.project_id, timeline_job_id=started["job_id"])
     subtitle_job = runner.start_subtitle_render(
         project_id=project.project_id,

@@ -123,16 +123,25 @@ class TimelineBuilder:
                 if bool(recommendation.get("auto_apply_allowed")) and not bool(recommendation.get("review_required")):
                     applied_recommendations.append(recommendation)
                     if rec_type == "broll" and recommendation.get("selected_asset_id"):
+                        expected_content_sha256 = str(
+                            payload.get("expected_content_sha256") if isinstance(payload, dict) else ""
+                        ).strip() or None
+                        media_revision = str(
+                            payload.get("media_revision") if isinstance(payload, dict) else ""
+                        ).strip() or None
                         broll_clips.append(
                             TimelineClip(
                                 clip_id=f"clip_broll_{len(broll_clips) + 1:03d}",
                                 segment_id=segment_id,
-                                asset_uri=f"local://projects/{project_id}/assets/{recommendation['selected_asset_id']}",
+                                asset_uri=selected_asset_uri or f"local://projects/{project_id}/assets/{recommendation['selected_asset_id']}",
                                 start_sec=float(segment["start_sec"]),
                                 end_sec=float(segment["end_sec"]),
                                 clip_type="broll",
                                 recommendation_id=str(recommendation["recommendation_id"]),
+                                asset_id=selected_asset_id,
                                 media_controls=self._media_controls(recommendation, media_kind="broll", duration_sec=float(segment["end_sec"]) - float(segment["start_sec"])),
+                                expected_content_sha256=expected_content_sha256,
+                                media_revision=media_revision,
                             )
                         )
                     if rec_type == "bgm":
