@@ -636,6 +636,11 @@ class TimelineClipResponse(BaseModel):
     end_sec: float
     clip_type: str
     recommendation_id: str | None = None
+    asset_id: str | None = None
+    media_controls: dict[str, object] = Field(default_factory=dict)
+    expected_content_sha256: str | None = None
+    media_revision: str | None = None
+    warning_provenance: list[str] = Field(default_factory=list)
 
 
 class TimelineTrackResponse(BaseModel):

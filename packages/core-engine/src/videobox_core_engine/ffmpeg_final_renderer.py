@@ -11,6 +11,7 @@ from typing import Any
 from videobox_core_engine.canonical_track import canonical_track_type
 from videobox_core_engine.media_controls import normalize_media_controls
 from videobox_core_engine.output_source_verifier import OutputSourceStaleError, verify_output_sources
+from videobox_core_engine.output_warning_provenance import output_warning_notes
 from videobox_storage.local_project_store import LocalProjectStore
 from videobox_storage.timeline_clip_source_resolution import (
     ResolvedClipSource,
@@ -115,11 +116,14 @@ class FfmpegFinalRenderer:
             command += ["-t", str(output_duration_sec)]
         if video:
             controls = normalize_media_controls(media_controls, media_kind="broll", duration_sec=float(output_duration_sec or 0.001))
-            if controls["trim_start_sec"]:
-                command = [self.ffmpeg_binary, "-y", "-ss", str(float(source.trim_start_sec or 0.0) + controls["trim_start_sec"])] + command[2:]
+            source_start_sec = float(source.trim_start_sec or 0.0) + float(controls.get("in_sec", 0.0)) + controls["trim_start_sec"]
+            if source_start_sec:
+                command = [self.ffmpeg_binary, "-y", "-ss", str(source_start_sec)] + command[2:]
             if not controls["loop"]:
                 command = [item for index, item in enumerate(command) if not (item == "-stream_loop" or (index and command[index - 1] == "-stream_loop"))]
-            available_duration_sec = self._probe_media_duration(source.path) - float(source.trim_start_sec or 0.0) - controls["trim_start_sec"]
+            available_duration_sec = self._probe_media_duration(source.path) - source_start_sec
+            if "out_sec" in controls:
+                available_duration_sec = min(available_duration_sec, float(controls["out_sec"]) - source_start_sec)
             if available_duration_sec <= 0:
                 raise FinalRenderError(f"B-roll trim starts after the source ends: '{source.path}'. Reduce trim_start_sec.")
             needs_padding = bool(
@@ -418,6 +422,10 @@ class FfmpegFinalRenderer:
                 "libx264" if subtitle_ass_path is not None else "copy",
                 "-c:a",
                 "aac",
+            ]
+            for note in output_warning_notes(timeline):
+                command += ["-metadata", f"comment={note}"]
+            command += [
                 "-shortest",
                 str(output_path),
             ]

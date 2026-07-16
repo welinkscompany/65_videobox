@@ -33,6 +33,15 @@ def test_preview_requires_verifier_store_for_revision_only_immutable_source() ->
         )
 
 
+def test_preview_payload_exposes_unknown_rights_warning_from_output_source() -> None:
+    payload = PreviewRenderer().build_preview_payload(
+        project_id="project_001",
+        timeline={"timeline_id": "timeline_001", "tracks": [{"track_id": "broll", "track_type": "broll", "clips": [{"asset_id": "asset_001", "asset_uri": "local://projects/project_001/assets/asset_001", "warning_provenance": ["copyright_confirmation_required"]}]}]},
+    )
+
+    assert payload["source_controls"][0]["warning_provenance"] == ["copyright_confirmation_required"]
+
+
 def test_old_timeline_cannot_publish_any_output_after_latest_editing_session_moves(
     tmp_path: Path,
 ) -> None:

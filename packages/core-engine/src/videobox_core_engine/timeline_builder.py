@@ -28,6 +28,13 @@ def _normalize_boolish(value: object) -> bool:
     return bool(value)
 
 
+def _optional_text(value: object) -> str | None:
+    if value is None:
+        return None
+    normalized = str(value).strip()
+    return normalized or None
+
+
 class TimelineBuilder:
     def build(
         self,
@@ -117,18 +124,24 @@ class TimelineBuilder:
                 selected_asset_uri = _canonical_source_uri(
                     payload.get("selected_asset_uri") if isinstance(payload, dict) else None
                 )
+                expected_content_sha256 = _optional_text(
+                    payload.get("expected_content_sha256") if isinstance(payload, dict) else None
+                )
+                media_revision = _optional_text(
+                    payload.get("media_revision") if isinstance(payload, dict) else None
+                )
+                raw_warning_provenance = (
+                    payload.get("warning_provenance") if isinstance(payload, dict) else []
+                )
+                warning_provenance = list(raw_warning_provenance) if isinstance(
+                    raw_warning_provenance, (list, tuple)
+                ) else []
                 if rec_type in {"bgm", "sfx"} and (not selected_asset_id or not selected_asset_uri or asset_uri_validator is None or not asset_uri_validator(selected_asset_id, rec_type, selected_asset_uri)):
                     pending_recommendations.append(recommendation)
                     continue
                 if bool(recommendation.get("auto_apply_allowed")) and not bool(recommendation.get("review_required")):
                     applied_recommendations.append(recommendation)
                     if rec_type == "broll" and recommendation.get("selected_asset_id"):
-                        expected_content_sha256 = str(
-                            payload.get("expected_content_sha256") if isinstance(payload, dict) else ""
-                        ).strip() or None
-                        media_revision = str(
-                            payload.get("media_revision") if isinstance(payload, dict) else ""
-                        ).strip() or None
                         broll_clips.append(
                             TimelineClip(
                                 clip_id=f"clip_broll_{len(broll_clips) + 1:03d}",
@@ -142,6 +155,7 @@ class TimelineBuilder:
                                 media_controls=self._media_controls(recommendation, media_kind="broll", duration_sec=float(segment["end_sec"]) - float(segment["start_sec"])),
                                 expected_content_sha256=expected_content_sha256,
                                 media_revision=media_revision,
+                                warning_provenance=warning_provenance,
                             )
                         )
                     if rec_type == "bgm":
@@ -154,7 +168,11 @@ class TimelineBuilder:
                                 end_sec=float(segment["end_sec"]),
                                 clip_type="bgm",
                                 recommendation_id=str(recommendation["recommendation_id"]),
+                                asset_id=selected_asset_id,
                                 media_controls=self._media_controls(recommendation, media_kind="audio", duration_sec=float(segment["end_sec"]) - float(segment["start_sec"])),
+                                expected_content_sha256=expected_content_sha256,
+                                media_revision=media_revision,
+                                warning_provenance=warning_provenance,
                             )
                         )
                     if rec_type == "sfx":
@@ -167,7 +185,11 @@ class TimelineBuilder:
                                 end_sec=float(segment["end_sec"]),
                                 clip_type="sfx",
                                 recommendation_id=str(recommendation["recommendation_id"]),
+                                asset_id=selected_asset_id,
                                 media_controls=self._media_controls(recommendation, media_kind="audio", duration_sec=float(segment["end_sec"]) - float(segment["start_sec"])),
+                                expected_content_sha256=expected_content_sha256,
+                                media_revision=media_revision,
+                                warning_provenance=warning_provenance,
                             )
                         )
                 else:

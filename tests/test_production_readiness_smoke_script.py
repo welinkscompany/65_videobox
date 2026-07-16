@@ -94,6 +94,13 @@ def test_smoke_harness_observes_broll_loop_and_muxed_subtitle_instead_of_marking
     assert 'checks["revised_caption_in_final_mp4"]' in source
 
 
+def test_smoke_harness_uses_the_supported_local_only_runtime_factory() -> None:
+    source = SCRIPT_PATH.read_text(encoding="utf-8")
+
+    assert "local_only_runtime_service_factory=lambda _: DeterministicOfflineRuntime()" in source
+    assert "local_first_runtime_service_factory" not in source
+
+
 def test_smoke_harness_requires_listening_approved_personal_voice_tts_for_final_and_capcut_outputs() -> None:
     source = SCRIPT_PATH.read_text(encoding="utf-8")
 

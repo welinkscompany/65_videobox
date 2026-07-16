@@ -98,6 +98,7 @@ export type DirectorActionIntent = { action: string; target: DirectorReference; 
 export type DirectorMessageExchange = { user_message: DirectorMessage; assistant_message: DirectorMessage; disambiguation?: { status: string; options: DirectorReference[] } | null; reference?: DirectorReference | null; action_intent?: DirectorActionIntent | null };
 export type DirectorMessageSubmitRequest = { session_id: string; client_message_id: string; text: string };
 export type DirectorMessageSendResult = { kind: "exchange"; exchange: DirectorMessageExchange } | { kind: "in_progress"; retryAfterSeconds: number };
+export type DirectorReloadState = { conversation: DirectorConversation | null; messages: DirectorMessage[]; proposal: DirectorProposal | null; references: DirectorReference[] };
 export type ArtifactFreshness = { source_session_revision: number; is_current?: boolean; invalidated_at?: string | null; invalidated_reason?: string | null };
 
 export type TimelineClip = {
@@ -635,6 +636,8 @@ async function preflightDirectorProposalRequest(path: string): Promise<DirectorP
 }
 
 export const api = {
+  reloadDirectorSession: (projectId: string, sessionId: string) =>
+    request<DirectorReloadState>(`/api/projects/${projectId}/director/sessions/${sessionId}/reload`),
   createDirectorConversation: (projectId: string, payload: { session_id: string }) =>
     request<DirectorConversation>(`/api/projects/${projectId}/director/conversations`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
   listDirectorMessages: async (projectId: string, conversationId: string, sessionId: string): Promise<DirectorMessage[]> =>

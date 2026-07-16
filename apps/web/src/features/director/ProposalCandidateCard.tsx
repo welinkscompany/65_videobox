@@ -8,6 +8,7 @@ export function ProposalCandidateCard({ candidate, selected, onToggle, onPrefere
     <label><input aria-label={`${candidate.visible_reference_code} 선택`} type="checkbox" checked={selected} onChange={() => onToggle(candidate.candidate_id)} /><MediaReferenceBadge code={candidate.visible_reference_code} kind="proposal" /></label>
     <p>{candidate.reason_chips.map((chip) => <span key={chip}>{chip} </span>)}</p>
     <p>{candidate.availability} · {candidate.license_policy} · {candidate.review_status}</p>
+    {candidate.warning_provenance.includes("copyright_confirmation_required") ? <p role="alert">저작권 확인 필요: 사용자 소유 권리 상태를 확인하세요.</p> : null}
     {onPreference ? <p><button type="button" onClick={() => onPreference("pin_asset", candidate.asset_id)}>고정</button><button type="button" onClick={() => onPreference("exclude_asset", candidate.asset_id)}>에셋 제외</button>{creator ? <button type="button" onClick={() => onPreference("exclude_creator", creator)}>제작자 제외</button> : null}{tag ? <button type="button" onClick={() => onPreference("exclude_tag", tag)}>태그 제외</button> : null}</p> : null}
   </article>;
 }

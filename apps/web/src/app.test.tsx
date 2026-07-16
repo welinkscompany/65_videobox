@@ -1715,6 +1715,117 @@ it("recovers after a failed TTS listening approval save", async () => {
 });
 
 describe("App", () => {
+  it("Director integration: reload recovery stays read-only until the operator explicitly starts", async () => {
+    const baseFetch = createFetchMock();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (/\/director\/sessions\/editing_session_001\/reload$/.test(url)) return new Response(JSON.stringify({ conversation: null, proposal: null }));
+      if (url.endsWith("/director/conversations") && init?.method === "POST") return new Response(JSON.stringify({ conversation_id: "conversation_001" }), { status: 201 });
+      if (url.endsWith("/director/proposals") && init?.method === "POST") return new Response(JSON.stringify({ proposal_id: "proposal_001", candidates: [], target_segment_ids: ["seg_001"], base_session_revision: 1, revision_code: "P01" }), { status: 201 });
+      return baseFetch(input, init);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /편집 시작/i }));
+    expect(await screen.findByRole("button", { name: "디렉터 시작" })).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/director/conversations"))).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "디렉터 시작" }));
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([input]) => String(input).endsWith("/director/conversations")).length).toBe(1));
+  });
+
+  it("Director integration: reload restores an existing conversation and proposal without a second start", async () => {
+    const baseFetch = createFetchMock();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (/\/director\/sessions\/editing_session_001\/reload$/.test(String(input))) return new Response(JSON.stringify({ conversation: { conversation_id: "conversation_001" }, proposal: { proposal_id: "proposal_001", candidates: [], target_segment_ids: ["seg_001"], base_session_revision: 1, revision_code: "P01" } }));
+      if (/\/director\/proposals\/proposal_001\/preflight$/.test(String(input))) return new Response(JSON.stringify({ status: "ready" }));
+      return baseFetch(input, init);
+    });
+    vi.stubGlobal("fetch", fetchMock); render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i })); fireEvent.click(await screen.findByRole("button", { name: /편집 시작/i }));
+    expect((await screen.findAllByText(/revision 1/i)).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: "디렉터 시작" })).not.toBeInTheDocument();
+  });
+
+  it("Director integration: materialize failure leaves the editing session untouched and keeps manual editing available", async () => {
+    const baseFetch = createFetchMock();
+    const proposal = { proposal_id: "proposal_materialize_fail_001", revision_code: "P01", revision: 1, base_session_revision: 1, asset_index_revision: 1, source_session_id: "editing_session_001", source_script_segment_ids: [], target_segment_ids: ["seg_002"], status: "ready", diff: {}, expires_at: null, candidates: [{ candidate_id: "candidate_fail_001", visible_reference_code: "P01-B-01", media_type: "broll", asset_id: "asset_broll_archive_002", library_asset_id: null, reason_chips: [], scores: {}, availability: "available", review_status: "approved", preview_uri: null, controls: {}, expected_content_sha256: "sha", media_revision: "r1", canonical_metadata: {}, license_policy: "verified", warning_provenance: [] }] };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (/\/director\/sessions\/editing_session_001\/reload$/.test(url)) return new Response(JSON.stringify({ conversation: { conversation_id: "conversation_materialize_fail_001" }, proposal, messages: [], references: [] }));
+      if (url.endsWith(`/director/proposals/${proposal.proposal_id}`) && !init?.method) return new Response(JSON.stringify(proposal));
+      if (url.includes("/director/proposals/") && url.endsWith("/preflight")) return new Response(JSON.stringify({ status: "ready" }));
+      if (url.endsWith("/messages") && init?.method === "POST") return new Response(JSON.stringify({ user_message: {}, assistant_message: { text: "적용 준비" }, action_intent: { action: "apply", target: { source: "proposal", reference_code: "P01-B-01", immutable_id: "candidate_fail_001" }, proposal_preflight: { proposal_id: proposal.proposal_id } } }));
+      if (url.endsWith("/batch-apply") && init?.method === "POST") return new Response("materialize failed", { status: 500 });
+      return baseFetch(input, init);
+    });
+    vi.stubGlobal("fetch", fetchMock); render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i })); fireEvent.click(await screen.findByRole("button", { name: /편집 시작/i }));
+    fireEvent.change(await screen.findByLabelText("디렉터 메시지"), { target: { value: "P01-B-01 적용" } }); fireEvent.click(screen.getByRole("button", { name: "보내기" }));
+    const apply = await screen.findByRole("button", { name: "변경 적용" }); await waitFor(() => expect(apply).toBeEnabled()); fireEvent.click(apply);
+    expect(await screen.findByText("적용에 실패했습니다. 수동 편집은 계속할 수 있습니다.")).toBeInTheDocument();
+    expect(screen.getByLabelText("디렉터 컨텍스트")).toHaveTextContent("revision 1");
+    expect(screen.queryByText("초안 적용됨")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "수동 편집 계속" }));
+    fireEvent.change(screen.getByDisplayValue("Team meeting overview"), { target: { value: "materialize failure 뒤 수동 편집" } }); fireEvent.click(screen.getByRole("button", { name: /자막 저장/i }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/caption", expect.objectContaining({ method: "PATCH", body: JSON.stringify({ expected_revision: 1, caption_text: "materialize failure 뒤 수동 편집" }) })));
+  });
+
+  it("Director integration: ambiguous references remain a manual choice and do not mutate the active session", async () => {
+    const baseFetch = createFetchMock();
+    const proposal = { proposal_id: "proposal_ambiguity_001", revision_code: "P01", revision: 1, base_session_revision: 1, asset_index_revision: 1, source_session_id: "editing_session_001", source_script_segment_ids: [], target_segment_ids: ["seg_002"], status: "ready", diff: {}, expires_at: null, candidates: [] };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (/\/director\/sessions\/editing_session_001\/reload$/.test(url)) return new Response(JSON.stringify({ conversation: { conversation_id: "conversation_ambiguity_001" }, proposal, messages: [], references: [] }));
+      if (url.includes("/director/proposals/") && url.endsWith("/preflight")) return new Response(JSON.stringify({ status: "ready" }));
+      if (url.endsWith("/messages") && init?.method === "POST") return new Response(JSON.stringify({ user_message: {}, assistant_message: { text: "어느 참조인지 선택해주세요." }, disambiguation: { status: "needs_disambiguation", options: [{ source: "proposal", reference_code: "P01-B-03", immutable_id: "candidate_003" }, { source: "proposal", reference_code: "P01-B-04", immutable_id: "candidate_004" }] }, action_intent: null }));
+      return baseFetch(input, init);
+    });
+    vi.stubGlobal("fetch", fetchMock); render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i })); fireEvent.click(await screen.findByRole("button", { name: /편집 시작/i }));
+    fireEvent.change(await screen.findByLabelText("디렉터 메시지"), { target: { value: "3번 영상 교체" } }); fireEvent.click(screen.getByRole("button", { name: "보내기" }));
+    expect(await screen.findByRole("region", { name: "참조 선택 필요" })).toHaveTextContent("P01-B-03");
+    expect(screen.getByRole("region", { name: "참조 선택 필요" })).toHaveTextContent("P01-B-04");
+    expect(screen.getByRole("button", { name: "변경 적용" })).toBeDisabled();
+    expect(fetchMock.mock.calls.some(([input, request]) => String(input).endsWith("/batch-apply") && request?.method === "POST")).toBe(false);
+  });
+
+  it("Director integration: blocked local runtime exposes manual continuation rather than an automatic fallback", async () => {
+    const fetchMock = createFetchMock(); vi.stubGlobal("fetch", fetchMock); render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i })); fireEvent.click(await screen.findByRole("button", { name: /편집 시작/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /수동 편집 계속/i }));
+    expect(screen.getByRole("button", { name: /^편집$/i })).toBeInTheDocument();
+  });
+
+  it("Director integration: default bootstrap requests neither Gemini keys nor Gemini mutations", async () => {
+    const fetchMock = createFetchMock(); vi.stubGlobal("fetch", fetchMock); render(<App />);
+    expect(await screen.findByText(/작업자 검수 데모/i)).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/providers/gemini/keys"))).toBe(false);
+    expect(fetchMock.mock.calls.some(([input, init]) => String(input).includes("/providers/gemini") && init?.method !== "GET")).toBe(false);
+  });
+
+  it("Director integration: exactly-one apply invalidates output freshness", async () => {
+    const baseFetch = createFetchMock();
+    const proposal = { proposal_id: "proposal_apply_001", revision_code: "P01", revision: 1, base_session_revision: 1, asset_index_revision: 1, source_session_id: "editing_session_001", source_script_segment_ids: [], target_segment_ids: ["seg_001"], status: "ready", diff: {}, expires_at: null, candidates: [{ candidate_id: "candidate_001", visible_reference_code: "P01-B-01", media_type: "broll", asset_id: "asset_broll_archive_002", library_asset_id: null, reason_chips: [], scores: {}, availability: "available", review_status: "approved", preview_uri: null, controls: {}, expected_content_sha256: "sha", media_revision: "r1", canonical_metadata: {}, license_policy: "verified", warning_provenance: [] }] };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (/\/director\/sessions\/editing_session_001\/reload$/.test(url)) return new Response(JSON.stringify({ conversation: { conversation_id: "conversation_apply_001" }, proposal, messages: [], references: [] }));
+      if (url.endsWith("/director/proposals/proposal_apply_001") && !init?.method) return new Response(JSON.stringify(proposal));
+      if (url.includes("/director/proposals/") && url.endsWith("/preflight")) return new Response(JSON.stringify({ status: "ready" }));
+      if (url.endsWith("/messages") && init?.method === "POST") return new Response(JSON.stringify({ user_message: {}, assistant_message: { proposal_id: "proposal_apply_001", text: "apply" }, action_intent: { action: "apply", target: { source: "proposal", reference_code: "P01-B-01", immutable_id: "candidate_001" }, proposal_preflight: { proposal_id: "proposal_apply_001" } } }));
+      if (url.endsWith("/batch-apply") && init?.method === "POST") return new Response(JSON.stringify({ ...editingSessionResponse, session_revision: 2, caption_style_preflight: { affected_segment_ids: [] } }));
+      return baseFetch(input, init);
+    });
+    vi.stubGlobal("fetch", fetchMock); render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i })); fireEvent.click(await screen.findByRole("button", { name: /편집 시작/i }));
+    const input = await screen.findByLabelText("디렉터 메시지"); fireEvent.change(input, { target: { value: "P01-B-01 적용" } }); fireEvent.click(screen.getByRole("button", { name: "보내기" }));
+    const apply = await screen.findByRole("button", { name: "변경 적용" }); await waitFor(() => expect(apply).toBeEnabled()); fireEvent.click(apply);
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([url, init]) => String(url).endsWith("/batch-apply") && init?.method === "POST")).toHaveLength(1));
+    expect(await screen.findByText("변경을 적용했습니다.")).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText("preview_001")).not.toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "완성본 렌더" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "CapCut 초안(실제)" })).toBeDisabled();
+  });
   it("uploads a selected voice sample and makes its asset ID available to TTS generation", async () => {
     const fetchMock = createFetchMock();
     vi.stubGlobal("fetch", fetchMock);
@@ -2687,7 +2798,7 @@ describe("App", () => {
     expect(screen.getAllByText(/미시작/i).length).toBeGreaterThan(0);
   });
 
-  it("keeps the baseline dashboard usable when Gemini key loading fails", async () => {
+  it("does not request Gemini keys and shows only LM Studio capability in default settings", async () => {
     const fetchMock = vi.fn((input: RequestInfo | URL) => {
       const url = String(input);
       if (url.endsWith("/api/projects")) {
@@ -2727,89 +2838,35 @@ describe("App", () => {
     expect(await screen.findByText(/작업자 검수 데모/i)).toBeInTheDocument();
     expect(await screen.findByText(/timeline_001/i)).toBeInTheDocument();
     fireEvent.click(await screen.findByRole("button", { name: /^설정$/i }));
-    expect(await screen.findByText(/제미나이 라우팅 오류/i)).toBeInTheDocument();
-    expect(screen.queryByText(/request failed: \/api\/projects\/project_001\/providers\/gemini\/keys/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/제미나이 키 없음/i)).not.toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /LM Studio 기능/i })).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/providers/gemini/keys"))).toBe(false);
+    expect(screen.queryByText(/제미나이/i)).not.toBeInTheDocument();
   });
 
-  it("renders masked Gemini keys with routing state visibility and never leaks raw secrets", async () => {
+  it("keeps legacy Gemini CRUD isolated from the default local-only UI", async () => {
     const fetchMock = createFetchMock();
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: /^설정$/i }));
 
-    expect(await screen.findByRole("heading", { name: /^키$/i })).toBeInTheDocument();
-    expect(await screen.findByText(/기본 라우팅 키/i)).toBeInTheDocument();
-    expect(await screen.findByText("AIza...1234")).toBeInTheDocument();
-    expect(await screen.findByText(/대기 예비 키/i)).toBeInTheDocument();
-    expect(await screen.findByText(/429 할당량 초과/i)).toBeInTheDocument();
-    expect(await screen.findByText(/2026-06-28T00:05:00Z/i)).toBeInTheDocument();
-    expect(screen.getAllByText(/연속 실패/i).length).toBeGreaterThan(0);
+    expect(await screen.findByRole("heading", { name: /LM Studio 기능/i })).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/providers/gemini/keys"))).toBe(false);
     expect(screen.queryByText(/AIzaSyDANGER_SECRET/i)).not.toBeInTheDocument();
     expect(screen.queryByDisplayValue(/AIzaSyDANGER_SECRET/i)).not.toBeInTheDocument();
   });
 
-  it("creates, updates, disables, and re-enables Gemini keys while refreshing the dashboard state", async () => {
+  it("does not expose legacy Gemini mutations from the default settings", async () => {
     const fetchMock = createFetchMock();
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: /^설정$/i }));
 
-    expect(await screen.findByRole("heading", { name: /^키$/i })).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: /키 추가/i }));
-    fireEvent.change(screen.getByLabelText(/이름/i), {
-      target: { value: "Burst quota key" },
-    });
-    fireEvent.change(screen.getByLabelText(/API 키/i), {
-      target: { value: "AIzaSyDANGER_SECRET" },
-    });
-    fireEvent.change(screen.getByLabelText(/기본 모델/i), {
-      target: { value: "gemini-2.5-flash" },
-    });
-    fireEvent.change(screen.getByLabelText(/저가 모델/i), {
-      target: { value: "gemini-2.5-flash-lite" },
-    });
-    fireEvent.change(screen.getByLabelText(/고품질 모델/i), {
-      target: { value: "gemini-2.5-pro" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: /키 저장/i }));
-
-    expect(await screen.findByText(/긴급 할당 키/i)).toBeInTheDocument();
-    expect(screen.getByText("AIza...9999")).toBeInTheDocument();
-    expect(screen.queryByText(/AIzaSyDANGER_SECRET/i)).not.toBeInTheDocument();
-    expect(screen.queryByDisplayValue(/AIzaSyDANGER_SECRET/i)).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: /기본 라우팅 키 수정/i }));
-    fireEvent.change(screen.getByLabelText(/이름/i), {
-      target: { value: "Primary routing key v2" },
-    });
-    fireEvent.change(screen.getByLabelText(/저가 모델/i), {
-      target: { value: "gemini-2.5-flash" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: /변경 저장/i }));
-
-    expect(await screen.findByText(/기본 라우팅 키 v2/i)).toBeInTheDocument();
-    expect(screen.getAllByText(/gemini-2.5-flash/i).length).toBeGreaterThan(0);
-
-    fireEvent.click(screen.getByRole("button", { name: /기본 라우팅 키 v2 중지/i }));
-    await waitFor(() => {
-      expect(screen.getAllByText(/^중지$/i).length).toBeGreaterThan(0);
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: /기본 라우팅 키 v2 사용/i }));
-    await waitFor(() => {
-      expect(screen.getAllByText(/^사용$/i).length).toBeGreaterThan(1);
-    });
-
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/projects/project_001/providers/gemini/keys",
-        expect.anything(),
-      );
-    });
+    expect(await screen.findByRole("heading", { name: /LM Studio 기능/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /키 추가/i })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/API 키/i)).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([input, init]) => String(input).includes("/providers/gemini") && init?.method !== "GET")).toBe(false);
   });
 
   it("supports the thin editing flow with session load, regeneration preflight, and partial regeneration delta visibility", async () => {

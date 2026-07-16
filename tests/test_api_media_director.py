@@ -15,6 +15,68 @@ import videobox_api.main as api_main
 from videobox_api.orchestration import LocalFirstRuntimeService
 from videobox_domain_models.assets import AssetType
 from videobox_domain_models.jobs import JobStatus, JobType
+from videobox_core_engine.ffmpeg_final_renderer import FfmpegFinalRenderer
+from videobox_core_engine.output_source_verifier import OutputSourceStaleError, verify_output_sources
+from videobox_provider_interfaces.llm import StructuredLLMResponse
+
+
+def test_director_route_surface_has_no_gemini_or_legacy_localfirst_dependency() -> None:
+    router_path = Path(__file__).resolve().parents[1] / "services" / "api" / "src" / "videobox_api" / "routers" / "director_proposals.py"
+    source = router_path.read_text(encoding="utf-8")
+
+    assert "gemini_keys" not in source
+    assert "Gemini" not in source
+    assert "LocalFirst" not in source
+
+
+def test_director_reload_get_is_behavioral_read_only_and_never_calls_a_provider(tmp_path: Path) -> None:
+    class ForbiddenRuntime:
+        calls = 0
+        def generate_structured(self, **kwargs):
+            type(self).calls += 1
+            raise AssertionError("reload must not call a provider")
+    app = create_app(projects_root=tmp_path / "projects", local_only_runtime_service_factory=lambda _: ForbiddenRuntime())
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "reload"}).json()["project_id"]
+    session = app.state.store.save_editing_session(project_id=project_id, timeline_id="timeline", session_payload={"segments": [], "history": []})
+    before = deepcopy(app.state.store.get_editing_session(project_id=project_id, session_id=session["session_id"]))
+
+    response = client.get(f"/api/projects/{project_id}/director/sessions/{session['session_id']}/reload")
+
+    assert response.status_code == 200
+    assert response.json()["conversation"] is None and response.json()["proposal"] is None
+    assert app.state.store.get_editing_session(project_id=project_id, session_id=session["session_id"]) == before
+    assert ForbiddenRuntime.calls == 0
+
+
+def test_director_normal_message_uses_local_only_structured_runtime_contract(tmp_path: Path) -> None:
+    class StrictLocalRuntime:
+        external_calls = 0
+        calls: list[dict] = []
+
+        def generate_structured(self, *, project_id, task_type, prompt, response_schema, now=None):
+            assert project_id == self.project_id
+            assert task_type.value == "operator_copy"
+            assert prompt == "로컬 응답을 생성해줘"
+            assert response_schema == {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]}
+            assert now is None
+            type(self).calls.append({"project_id": project_id, "task_type": task_type, "prompt": prompt})
+            return StructuredLLMResponse(provider_name="strict-local", model_name="fixture", output_data={"text": "로컬 응답입니다."}, raw_text='{"text":"로컬 응답입니다."}', metadata={"provider_trace": {"routing_mode": "local_only"}})
+
+    runtime = StrictLocalRuntime()
+    app = create_app(projects_root=tmp_path / "projects", local_only_runtime_service_factory=lambda _: runtime)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "strict runtime"}).json()["project_id"]
+    runtime.project_id = project_id
+    session = app.state.store.save_editing_session(project_id=project_id, timeline_id="timeline", session_payload={"segments": [], "history": []})
+    conversation = client.post(f"/api/projects/{project_id}/director/conversations", json={"session_id": session["session_id"]}).json()
+
+    response = client.post(f"/api/projects/{project_id}/director/conversations/{conversation['conversation_id']}/messages", json={"session_id": session["session_id"], "client_message_id": "message-1", "text": "로컬 응답을 생성해줘"})
+
+    assert response.status_code == 200, response.text
+    assert response.json()["assistant_message"]["text"] == "로컬 응답입니다."
+    assert len(StrictLocalRuntime.calls) == 1
+    assert StrictLocalRuntime.external_calls == 0
 
 
 def test_create_app_rejects_fallback_capable_runtime_from_local_only_factory(tmp_path: Path) -> None:
@@ -210,6 +272,89 @@ def test_director_candidate_preview_and_materialize_preserve_identity_controls_a
     assert materialized.json()["warning_provenance"] == ["copyright_confirmation_required"]
     assert materialized.json()["asset_id"] != asset.asset_id
     assert store.get_editing_session(project_id=project_id, session_id=session["session_id"]) == before
+    applied = client.post(
+        f"/api/projects/{project_id}/director/proposals/{proposal['proposal_id']}/apply",
+        json={"candidate_ids": [candidate["candidate_id"]], "expected_revision": session["session_revision"]},
+    )
+    assert applied.status_code == 200, applied.text
+    # Local output remains allowed for user-owned unknown rights, but the
+    # output input must retain the operator-facing copyright warning.
+    assert applied.json()["segments"][0]["broll_override"]["warning_provenance"] == ["copyright_confirmation_required"]
+
+
+def test_partial_regenerated_director_broll_preserves_source_identity_and_blocks_stale_outputs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A Director B-roll override must remain fail-closed after partial regeneration."""
+    app = create_app(projects_root=tmp_path / "projects")
+    client = TestClient(app)
+    store = app.state.store
+    project_id = client.post("/api/projects", json={"name": "partial Director lineage"}).json()["project_id"]
+    source = tmp_path / "broll.mp4"
+    source.write_bytes(b"director broll bytes")
+    asset = store.register_asset(
+        project_id=project_id,
+        asset_type=AssetType.BROLL_VIDEO,
+        source_path=source,
+        metadata={
+            "semantic_score": .9,
+            "review_status": "approved",
+            "license_policy": "unknown_user_owned",
+            "warning_provenance": ["copyright_confirmation_required"],
+            "controls": {"in_sec": .1, "out_sec": 1.5, "fit": "crop"},
+        },
+    )
+    digest = sha256(source.read_bytes()).hexdigest()
+    analysis = store.create_media_analysis(project_id=project_id, asset_id=asset.asset_id, idempotency_key=f"{digest}:partial", cache_key="partial")
+    claim = store.claim_media_analysis(project_id=project_id, analysis_id=analysis["analysis_id"])
+    assert claim is not None
+    store.complete_media_analysis(project_id=project_id, analysis_id=analysis["analysis_id"], expected_attempt=claim["attempt"], result={"frames": [{"summary": "director broll"}]})
+    source_timeline = store.save_timeline_run(
+        project_id=project_id,
+        output_mode="review",
+        timeline_payload={
+            "tracks": [],
+            "caption_segments": [{"segment_id": "seg_001", "text": "Director B-roll", "start_sec": 0, "end_sec": 2, "confidence": 1}],
+            "applied_recommendations": [], "pending_recommendations": [], "review_flags": [],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project_id,
+        timeline_id=source_timeline["timeline_id"],
+        session_payload={"segments": [{"segment_id": "seg_001", "caption_text": "Director B-roll", "start_sec": 0, "end_sec": 2}], "history": []},
+    )
+    proposal = client.post(f"/api/projects/{project_id}/director/proposals", json={"session_id": session["session_id"]}).json()
+    candidate = next(item for item in proposal["candidates"] if item["media_type"] == "broll")
+    materialized = client.post(
+        f"/api/projects/{project_id}/director/proposals/{proposal['proposal_id']}/candidates/{candidate['candidate_id']}/materialize",
+    )
+    assert materialized.status_code == 201, materialized.text
+    applied = client.post(
+        f"/api/projects/{project_id}/director/proposals/{proposal['proposal_id']}/apply",
+        json={"candidate_ids": [candidate["candidate_id"]], "expected_revision": session["session_revision"]},
+    )
+    assert applied.status_code == 200, applied.text
+    partial = client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session['session_id']}/partial-regeneration",
+        json={"segment_ids": ["seg_001"], "fields": ["broll"], "expected_revision": applied.json()["session_revision"]},
+    )
+    assert partial.status_code == 202, partial.text
+    timeline = client.get(f"/api/projects/{project_id}/partial-regenerations/{partial.json()['job_id']}").json()["timeline"]
+    broll_clip = next(track for track in timeline["tracks"] if track["track_type"] == "broll")["clips"][0]
+    assert broll_clip["asset_uri"] == applied.json()["segments"][0]["broll_override"]["asset_uri"]
+    assert broll_clip["expected_content_sha256"] == candidate["expected_content_sha256"]
+    assert broll_clip["media_revision"]
+    assert broll_clip["warning_provenance"] == ["copyright_confirmation_required"]
+    stale_path = store.resolve_storage_uri(project_id=project_id, storage_uri=broll_clip["asset_uri"])
+    stale_path.write_bytes(stale_path.read_bytes() + b" mutated")
+    monkeypatch.setattr(FfmpegFinalRenderer, "_run", lambda _self, _command: pytest.fail("ffmpeg must not start"))
+    with pytest.raises(OutputSourceStaleError, match="stale_output_asset"):
+        FfmpegFinalRenderer(store=store).render_timeline_to_mp4(project_id=project_id, timeline=timeline, output_path=tmp_path / "out.mp4")
+    # The PyCapCut adapter calls this same shared guard before it creates a
+    # draft folder; assert that its input contract is blocked as well without
+    # making this API-lineage regression depend on the optional pycapcut wheel.
+    with pytest.raises(OutputSourceStaleError, match="stale_output_asset"):
+        verify_output_sources(store=store, project_id=project_id, timeline=timeline)
 
 
 def test_director_preference_put_merges_partial_updates_without_dropping_existing_fields(tmp_path: Path) -> None:
@@ -383,6 +528,41 @@ def test_materialized_candidate_apply_is_one_named_atomic_session_action(tmp_pat
     assert store.get_preview_run(project_id=project_id, preview_id=preview["preview_id"])["is_current"] is False
     assert store.get_final_render_export(project_id=project_id, export_id=final["export_id"])["is_current"] is False
     assert store.get_export_run(project_id=project_id, export_id=capcut["export_id"])["is_current"] is False
+
+
+def test_recovery_apply_selects_current_materialization_for_reused_candidate_id(tmp_path: Path) -> None:
+    app = create_app(projects_root=tmp_path / "projects")
+    client = TestClient(app)
+    store = app.state.store
+    project_id = client.post("/api/projects", json={"name": "recover candidate"}).json()["project_id"]
+    source = tmp_path / "bed.mp3"; source.write_bytes(b"bed")
+    store.register_asset(project_id=project_id, asset_type=AssetType.BGM, source_path=source, metadata={
+        "canonical_metadata_indexed": True, "mood": "calm", "energy": "low", "genre": "ambient",
+        "recommended_use": "bed", "license": "valid", "review_status": "approved",
+    })
+    timeline_id = store.save_timeline_run(project_id=project_id, output_mode="preview", timeline_payload={"tracks": []})["timeline_id"]
+    session = store.save_editing_session(project_id=project_id, timeline_id=timeline_id, session_payload={
+        "segments": [{"segment_id": "seg", "caption_text": "voice", "start_sec": 0, "end_sec": 2}], "history": [],
+    })
+    first_proposal = client.post(f"/api/projects/{project_id}/director/proposals", json={"session_id": session["session_id"]}).json()
+    first_candidate = first_proposal["candidates"][0]
+    first_materialized = client.post(
+        f"/api/projects/{project_id}/director/proposals/{first_proposal['proposal_id']}/candidates/{first_candidate['candidate_id']}/materialize"
+    ).json()
+    store.resolve_storage_uri(project_id=project_id, storage_uri=first_materialized["storage_uri"]).write_bytes(b"corrupted")
+
+    recovery_proposal = client.post(f"/api/projects/{project_id}/director/proposals", json={"session_id": session["session_id"]}).json()
+    recovery_candidate = recovery_proposal["candidates"][0]
+    recovery_materialized = client.post(
+        f"/api/projects/{project_id}/director/proposals/{recovery_proposal['proposal_id']}/candidates/{recovery_candidate['candidate_id']}/materialize"
+    ).json()
+    response = client.post(
+        f"/api/projects/{project_id}/director/proposals/{recovery_proposal['proposal_id']}/apply",
+        json={"candidate_ids": [recovery_candidate["candidate_id"]], "expected_revision": recovery_proposal["base_session_revision"]},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["segments"][0]["music_override"]["asset_id"] == recovery_materialized["asset_id"]
 
 
 def test_batch_apply_materializes_two_candidates_and_consumes_one_proposal_in_one_session_revision(tmp_path: Path) -> None:

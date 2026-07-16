@@ -21,6 +21,7 @@ class TimelineClip:
     media_controls: dict[str, object] = field(default_factory=dict)
     expected_content_sha256: str | None = None
     media_revision: str | None = None
+    warning_provenance: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True, frozen=True)

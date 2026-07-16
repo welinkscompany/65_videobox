@@ -745,7 +745,11 @@ class _PipelinePrivateHelpersMixin:
                             "end_sec": clip.end_sec,
                             "clip_type": clip.clip_type,
                             "recommendation_id": clip.recommendation_id,
+                            "asset_id": clip.asset_id,
                             "media_controls": clip.media_controls,
+                            "expected_content_sha256": clip.expected_content_sha256,
+                            "media_revision": clip.media_revision,
+                            "warning_provenance": clip.warning_provenance,
                         }
                         for clip in track.clips
                     ],
@@ -899,6 +903,7 @@ class _PipelinePrivateHelpersMixin:
                     media_controls=override.get("media_controls"),
                     expected_content_sha256=override.get("expected_content_sha256"),
                     media_revision=override.get("media_revision"),
+                    warning_provenance=override.get("warning_provenance"),
                 )
             )
 
@@ -961,6 +966,9 @@ class _PipelinePrivateHelpersMixin:
                 asset_uri=str(override.get("asset_uri") or ""),
                 reason="Manual music override from editing session.",
                 media_controls=override.get("media_controls"),
+                expected_content_sha256=override.get("expected_content_sha256"),
+                media_revision=override.get("media_revision"),
+                warning_provenance=override.get("warning_provenance"),
                 )
             )
 
@@ -1015,6 +1023,9 @@ class _PipelinePrivateHelpersMixin:
                 asset_uri=str(override.get("asset_uri") or ""),
                 reason="Manual SFX override from editing session requires operator review.",
                 media_controls=override.get("media_controls"),
+                expected_content_sha256=override.get("expected_content_sha256"),
+                media_revision=override.get("media_revision"),
+                warning_provenance=override.get("warning_provenance"),
             )
             recommendation["auto_apply_allowed"] = False
             recommendation["review_required"] = True
@@ -1160,6 +1171,7 @@ class _PipelinePrivateHelpersMixin:
         media_controls: object = None,
         expected_content_sha256: object = None,
         media_revision: object = None,
+        warning_provenance: object = None,
     ) -> dict[str, Any]:
         provider_trace = build_provider_trace(final_provider="editing_session_manual")
         return {
@@ -1177,6 +1189,7 @@ class _PipelinePrivateHelpersMixin:
                 "media_controls": deepcopy(media_controls) if isinstance(media_controls, dict) else {},
                 "expected_content_sha256": str(expected_content_sha256 or "").strip(),
                 "media_revision": str(media_revision or "").strip(),
+                "warning_provenance": list(warning_provenance) if isinstance(warning_provenance, (list, tuple)) else [],
             },
             "created_at": self.store._now_iso(),
             "provider_trace": provider_trace,

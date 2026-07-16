@@ -63,6 +63,28 @@ def build_director_proposals_router(store: LocalProjectStore) -> APIRouter:
     def payload(project_id, proposal):
         return proposal_to_payload(proposal) | {"status": proposal.status, "lifecycle": store.get_director_proposal_lifecycle(project_id, proposal.proposal_id)}
 
+    @router.get("/api/projects/{project_id}/director/sessions/{session_id}/reload")
+    def reload_session(project_id: str, session_id: str) -> dict:
+        """Read durable Director state only; a reload must never create or mutate it."""
+        try:
+            store.get_editing_session(project_id=project_id, session_id=session_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="editing_session_missing") from exc
+        conversation = store.latest_director_conversation(project_id=project_id, session_id=session_id)
+        proposal = next((item for item in reversed(store.list_director_proposals(project_id)) if item.source_session_id == session_id), None)
+        messages = store.list_director_messages(project_id=project_id, conversation_id=str(conversation["conversation_id"])) if conversation else []
+        return {
+            "conversation": conversation,
+            "messages": messages,
+            "proposal": payload(project_id, proposal) if proposal else None,
+            "references": [
+                {"reference_code": item.reference_code, "immutable_id": item.immutable_id, "source": item.source}
+                for item in director_timeline_references(
+                    store.get_editing_session(project_id=project_id, session_id=session_id)
+                ).get("segments", [])
+            ],
+        }
+
     @router.post("/api/projects/{project_id}/director/conversations", status_code=status.HTTP_201_CREATED, response_model=DirectorConversationResponse)
     def create_conversation(project_id: str, body: DirectorConversationCreateRequest) -> dict:
         try:
@@ -151,8 +173,19 @@ def build_director_proposals_router(store: LocalProjectStore) -> APIRouter:
                 heartbeat_thread.start()
                 try:
                     if hasattr(runtime, "generate_structured"):
-                        generated = runtime.generate_structured(prompt=body.text)
-                        assistant_text = str(getattr(generated, "text", generated))
+                        generated = runtime.generate_structured(
+                            project_id=project_id,
+                            task_type=LLMTaskType.OPERATOR_COPY,
+                            prompt=body.text,
+                            response_schema={"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]},
+                        )
+                        data = getattr(generated, "output_data", {})
+                        assistant_text = str(data.get("text", "")) if isinstance(data, dict) else ""
+                        if not assistant_text:
+                            assistant_text = str(getattr(generated, "raw_text", "local director response"))
+                        trace = getattr(generated, "metadata", {}).get("provider_trace")
+                        if isinstance(trace, dict):
+                            resolution_metadata["provider_trace"] = trace
                     elif hasattr(runtime, "generate"):
                         generated = runtime.generate(
                             project_id=project_id, task_type=LLMTaskType.OPERATOR_COPY, prompt=body.text,
@@ -263,13 +296,27 @@ def build_director_proposals_router(store: LocalProjectStore) -> APIRouter:
             candidates = {item.candidate_id: item for item in proposal.candidates}
             selected = [candidates[item] for item in body.candidate_ids]
             materialized: dict[str, dict] = {}
+            current_asset_index_revision = store.get_asset_index_revision(project_id)
             for candidate in selected:
-                found = next((asset for asset in store.list_assets(project_id=project_id)
-                    if dict(asset.get("metadata") or {}).get("director_proposal_candidate_id") == candidate.candidate_id), None)
+                candidates_for_id = [
+                    asset for asset in store.list_assets(project_id=project_id)
+                    if dict(asset.get("metadata") or {}).get("director_proposal_candidate_id") == candidate.candidate_id
+                ]
+                found = next(
+                    (
+                        asset for asset in reversed(candidates_for_id)
+                        if dict(asset.get("metadata") or {}).get("director_materialized_sha256") == candidate.expected_content_sha256
+                        and dict(asset.get("metadata") or {}).get("source_asset_id") == candidate.asset_id
+                        and dict(asset.get("metadata") or {}).get("director_materialized_asset_index_revision") == current_asset_index_revision
+                    ),
+                    None,
+                )
                 if found is None:
+                    if candidates_for_id:
+                        raise HTTPException(status_code=409, detail="asset_index_revision_mismatch")
                     raise ValueError("candidate_not_materialized")
                 metadata = dict(found.get("metadata") or {})
-                if metadata.get("director_materialized_asset_index_revision") != store.get_asset_index_revision(project_id):
+                if metadata.get("director_materialized_asset_index_revision") != current_asset_index_revision:
                     raise HTTPException(status_code=409, detail="asset_index_revision_mismatch")
                 path = store.resolve_storage_uri(project_id=project_id, storage_uri=str(found["storage_uri"]))
                 if not path.is_file() or sha256_file(path) != candidate.expected_content_sha256:
@@ -287,7 +334,7 @@ def build_director_proposals_router(store: LocalProjectStore) -> APIRouter:
                         raise ValueError("target_segment_missing")
                     key = {"broll": "broll_override", "bgm": "music_override", "sfx": "sfx_override"}[candidate.media_type]
                     asset = materialized[candidate.candidate_id]
-                    segment[key] = {"asset_id": asset["asset_id"], "asset_uri": asset["storage_uri"], "media_controls": dict(candidate.controls), "expected_content_sha256": candidate.expected_content_sha256, "media_revision": str(asset.get("created_at") or "")}
+                    segment[key] = {"asset_id": asset["asset_id"], "asset_uri": asset["storage_uri"], "media_controls": dict(candidate.controls), "expected_content_sha256": candidate.expected_content_sha256, "media_revision": str(asset.get("created_at") or ""), "warning_provenance": list(candidate.warning_provenance)}
             updated = apply_user_transaction(session=session, label="디렉터 제안 적용", affected_segment_ids=list(proposal.target_segment_ids), mutate=mutate)
             expectations = [
                 (str(materialized[item.candidate_id]["asset_id"]), item.expected_content_sha256,
@@ -329,7 +376,7 @@ def build_director_proposals_router(store: LocalProjectStore) -> APIRouter:
                         raise ValueError("target_segment_missing")
                     key = {"broll": "broll_override", "bgm": "music_override", "sfx": "sfx_override"}[candidate.media_type]
                     asset = materialized[candidate.candidate_id]
-                    segment[key] = {"asset_id": asset["asset_id"], "asset_uri": asset["storage_uri"], "media_controls": dict(candidate.controls), "expected_content_sha256": candidate.expected_content_sha256, "media_revision": asset["created_at"]}
+                    segment[key] = {"asset_id": asset["asset_id"], "asset_uri": asset["storage_uri"], "media_controls": dict(candidate.controls), "expected_content_sha256": candidate.expected_content_sha256, "media_revision": asset["created_at"], "warning_provenance": list(candidate.warning_provenance)}
             updated = apply_user_transaction(session=session, label="디렉터 제안 일괄 적용", affected_segment_ids=[placements[item.candidate_id] for item in selected], mutate=mutate)
             return store.batch_apply_director_proposal_transaction(
                 project_id=project_id, session_id=proposal.source_session_id, proposal_id=proposal_id,

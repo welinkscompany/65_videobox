@@ -320,6 +320,31 @@ def test_real_capcut_draft_materializes_sfx_audio_track(tmp_path: Path) -> None:
     assert any(Path(material["path"]) == stored_sfx_path for material in content["materials"]["audios"])
 
 
+def test_real_capcut_draft_keeps_unknown_user_owned_rights_warning_in_output_metadata(tmp_path: Path) -> None:
+    """Unknown rights permit a local draft, but the CapCut artifact must carry the copyright warning."""
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Unknown rights CapCut metadata")
+    narration_path = tmp_path / "narration.wav"
+    broll_path = tmp_path / "broll.mp4"
+    _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=1", str(narration_path)])
+    _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=black:s=320x240:r=15:d=1", str(broll_path)])
+    narration = store.register_asset(project_id=project.project_id, asset_type=AssetType.NARRATION_AUDIO, source_path=narration_path)
+    broll = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=broll_path)
+
+    result = PyCapCutRealExportAdapter(store=store, video_width=320, video_height=240, video_fps=15).export_timeline(
+        project_id=project.project_id,
+        drafts_root=tmp_path / "drafts",
+        draft_name="unknown-rights",
+        timeline={"narration_source_uri": narration.storage_uri, "tracks": [
+            {"track_type": "narration", "clips": [{"asset_uri": narration.storage_uri, "start_sec": 0.0, "end_sec": 1.0}]},
+            {"track_type": "broll", "clips": [{"asset_uri": broll.storage_uri, "start_sec": 0.0, "end_sec": 1.0, "warning_provenance": ["copyright_confirmation_required"]}]},
+        ]},
+    )
+
+    content = json.loads((result.draft_path / "draft_content.json").read_text(encoding="utf-8"))
+    assert content["videobox_output_metadata"]["warning_provenance"] == ["copyright_confirmation_required"]
+
+
 @pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg/ffprobe not installed on this machine")
 def test_real_capcut_draft_preserves_broll_trim_crop_loop_pad_and_audio_controls(tmp_path: Path) -> None:
     """The editable draft must carry the same controls as the final renderer."""

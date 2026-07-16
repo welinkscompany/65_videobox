@@ -140,6 +140,8 @@ def test_lm_studio_local_media_runtime_smoke() -> None:
         idempotency_key=f"{source_sha256}:{profile.embedding_model_name}",
         cache_key=f"live-smoke:{profile.embedding_model_name}",
     )
+    claim = store.claim_media_analysis(project_id=project.project_id, analysis_id=analysis["analysis_id"])
+    assert claim is not None
     store.record_media_embedding(
         project_id=project.project_id,
         analysis_id=analysis["analysis_id"],
@@ -147,6 +149,13 @@ def test_lm_studio_local_media_runtime_smoke() -> None:
         profile_hash=f"live-smoke:{profile.embedding_model_name}",
         embedding=list(embedding_response.vectors[0]),
     )
+    completed = store.complete_media_analysis(
+        project_id=project.project_id,
+        analysis_id=analysis["analysis_id"],
+        expected_attempt=claim["attempt"],
+        result={"summary": output["summary"]},
+    )
+    assert completed is not None
     matches = LocalProjectStore(root / "projects").find_local_media_embedding_matches(
         project_id=project.project_id,
         query_embedding=list(embedding_response.vectors[0]),

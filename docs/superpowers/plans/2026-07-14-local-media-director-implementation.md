@@ -1256,7 +1256,7 @@ git commit -m "feat: make director workspace responsive"
 - Modify: docs/implementation-plan.ko.md
 - Modify: docs/development-status-2026-06-29.ko.md
 
-- [ ] **Step 1: App integration RED scenarios 추가**
+- [x] **Step 1: App integration RED scenarios 추가**
 
 app.test.tsx에는 다음 여섯 통합 시나리오만 추가한다. 세부 component test를 이 파일에 중복하지 않는다.
 
@@ -1269,7 +1269,7 @@ app.test.tsx에는 다음 여섯 통합 시나리오만 추가한다. 세부 com
 
 Director router/service는 Gemini key service 또는 legacy LocalFirst factory를 import/use하지 않는 route-surface test를 추가한다. Gemini CRUD는 backward compatibility가 필요할 때만 isolated legacy router로 유지한다.
 
-- [ ] **Step 2: App 연결과 focused GREEN**
+- [x] **Step 2: App 연결과 focused GREEN**
 
 DirectorWorkspace props는 다음으로 고정한다.
 
@@ -1296,7 +1296,7 @@ Run: npm --prefix apps/web test -- src/app.test.tsx src/features/director src/fe
 
 Expected: PASS.
 
-- [ ] **Step 3: real media director E2E 작성**
+- [x] **Step 3: real media director E2E 작성**
 
 tests/test_real_local_media_director_e2e.py는 opt-in actual Starter Pack + real FFmpeg + PyCapCut을 사용하고 AI는 deterministic fake로 유지한다. 흐름은 script ingest → B-roll analysis → B/M/S proposal → preview → explicit apply/materialize → SRT → MP4 → real draft다.
 
@@ -1310,7 +1310,7 @@ Assertions:
 - assetless BGM/SFX candidate는 apply 불가
 - rights=unknown B-roll은 local output을 막지 않지만 MP4/CapCut output metadata와 UI에 저작권 확인 warning을 남김
 
-- [ ] **Step 4: 전체 release gate 실행**
+- [x] **Step 4: 전체 release gate 실행**
 
 scripts/dev-fast-path.ps1과 docs/development-fast-path.ko.md에 media-director-focused, media-director-live-smoke, media-director-release mode를 함께 추가한다. focused는 Director backend contract와 frontend feature tests, live-smoke는 127.0.0.1:1234 capability/vision/embedding, release는 full backend/frontend/build, real media director E2E, real Starter Pack, 600초 smoke, long-form CapCut QA를 순서대로 실행한다. tests/test_dev_fast_path.py는 세 mode와 실제 verifier/test 경로가 script에 존재함을 고정한다.
 
@@ -1333,11 +1333,11 @@ git rev-list --left-right --count '@{upstream}...HEAD'
 
 Expected: 모든 자동 gate PASS. CapCut Desktop을 자동으로 열지 않으며 human acceptance와 구분한다. artifacts와 local CapCut output은 evidence로 보존하고 stage하지 않는다.
 
-- [ ] **Step 5: release audit 6개 gate와 SSOT closeout**
+- [x] **Step 5: release audit 6개 gate와 SSOT closeout**
 
 docs/superpowers/plans/2026-07-13-release-audit-protocol.ko.md의 코드리뷰, 계획 gap, reverse trace, 실제 동작, 문서 지침, 찌꺼기 파일 gate를 적용한다. docs/implementation-plan.ko.md와 development status에는 실제 HEAD, test totals, live smoke/e2e artifact, 자동 검증 범위, 남은 human acceptance를 기록한다.
 
-- [ ] **Step 6: 최종 commit/push**
+- [x] **Step 6: 최종 commit/push**
 
 ~~~powershell
 git add apps/web packages services tests scripts/dev-fast-path.ps1 docs

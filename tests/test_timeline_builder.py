@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from dataclasses import asdict
+
 from videobox_core_engine.settings import DEFAULT_PROJECTS_ROOT
 from videobox_core_engine.timeline_builder import TimelineBuilder
+from videobox_core_engine.preview_renderer import PreviewRenderer
 from videobox_domain_models.recommendations import (
     RecommendationRecord,
     RecommendationType,
@@ -113,6 +116,24 @@ def test_timeline_builder_materializes_only_an_approved_sfx_asset() -> None:
 
     sfx_track = next(track for track in approved.tracks if track.track_type == "sfx")
     assert sfx_track.clips[0].asset_uri == "local://projects/proj_001/assets/imported/sfx.wav"
+
+
+def test_timeline_builder_keeps_absent_asset_identity_null_without_triggering_preview_verifier() -> None:
+    segment = SegmentRecord.create(project_id="proj_001", text="Narration", start_sec=0.0, end_sec=1.0)
+    timeline = TimelineBuilder().build(
+        project_id="proj_001", segments=[segment],
+        recommendations=[{
+            "recommendation_id": "rec_broll_legacy", "target_segment_id": segment.segment_id,
+            "recommendation_type": "broll", "selected_asset_id": "asset_broll_001",
+            "auto_apply_allowed": True, "review_required": False, "reason": "legacy local recommendation", "score": 1.0,
+            "payload": {"selected_asset_uri": "local://projects/proj_001/assets/asset_broll_001", "expected_content_sha256": None, "media_revision": None},
+        }],
+    )
+
+    clip = next(track for track in timeline.tracks if track.track_type == "broll").clips[0]
+    assert clip.expected_content_sha256 is None
+    assert clip.media_revision is None
+    assert PreviewRenderer().build_preview_payload(project_id="proj_001", timeline=asdict(timeline))["timeline_id"] == timeline.timeline_id
 
 
 def test_timeline_builder_keeps_external_audio_recommendations_pending_when_project_asset_validation_fails() -> None:

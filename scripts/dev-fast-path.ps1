@@ -8,6 +8,9 @@ param(
         "preflight-frontend",
         "current-focused",
         "current-focused-parallel",
+        "media-director-focused",
+        "media-director-live-smoke",
+        "media-director-release",
         "broader",
         "all",
         "smoke",
@@ -79,6 +82,9 @@ function Invoke-Step {
     Push-Location $WorkingDirectory
     try {
         Invoke-Expression $Command
+        if ($LASTEXITCODE -ne 0) {
+            throw "Step failed: $Label (exit code $LASTEXITCODE)"
+        }
     }
     finally {
         Pop-Location
@@ -235,6 +241,52 @@ switch ($Mode) {
             -Label "Full backend regression" `
             -Command "$pytestCommand -q" `
             -WorkingDirectory $repoRoot
+    }
+    "media-director-focused" {
+        Invoke-Step `
+            -Label "Media Director backend contracts" `
+            -Command "$pytestCommand tests/test_api_media_director.py tests/test_director_conversation.py tests/test_director_commands.py -q" `
+            -WorkingDirectory $repoRoot
+        Invoke-Step `
+            -Label "Media Director frontend features" `
+            -Command "npm test -- --run src/app.test.tsx src/features/director src/features/media" `
+            -WorkingDirectory $frontendRoot
+    }
+    "media-director-live-smoke" {
+        # This is deliberately opt-in.  pytest reports SKIPPED when no local
+        # LM Studio is available; the mode never treats that as live evidence.
+        Invoke-Step `
+            -Label "LM Studio media capability smoke (skips when unavailable)" `
+            -Command "try { `$env:VIDEOBOX_RUN_LM_STUDIO_MEDIA_SMOKE='1'; $pytestCommand tests/test_lm_studio_media_smoke.py tests/test_lm_studio_smoke_evidence.py -q } finally { Remove-Item Env:VIDEOBOX_RUN_LM_STUDIO_MEDIA_SMOKE -ErrorAction SilentlyContinue }" `
+            -WorkingDirectory $repoRoot
+    }
+    "media-director-release" {
+        Invoke-Step `
+            -Label "Media Director focused gate" `
+            -Command "& `"$PSCommandPath`" -Mode media-director-focused" `
+            -WorkingDirectory $repoRoot
+        Invoke-Step `
+            -Label "Full backend regression" `
+            -Command "$pytestCommand -q" `
+            -WorkingDirectory $repoRoot
+        Invoke-Step `
+            -Label "Full frontend regression" `
+            -Command "npm test -- --run" `
+            -WorkingDirectory $frontendRoot
+        Invoke-Step `
+            -Label "Frontend production build" `
+            -Command "npm run build" `
+            -WorkingDirectory $frontendRoot
+        Invoke-Step `
+            -Label "Deterministic local-runtime media E2E" `
+            -Command "try { `$env:VIDEOBOX_RUN_REAL_MEDIA_DIRECTOR_E2E='1'; $pytestCommand tests/test_real_local_media_director_e2e.py -q } finally { Remove-Item Env:VIDEOBOX_RUN_REAL_MEDIA_DIRECTOR_E2E -ErrorAction SilentlyContinue }" `
+            -WorkingDirectory $repoRoot
+        Invoke-Step `
+            -Label "Real Starter Media Pack E2E" `
+            -Command "try { `$env:VIDEOBOX_RUN_REAL_STARTER_PACK_E2E='1'; $pytestCommand tests/test_real_starter_media_pack_e2e.py -q } finally { Remove-Item Env:VIDEOBOX_RUN_REAL_STARTER_PACK_E2E -ErrorAction SilentlyContinue }" `
+            -WorkingDirectory $repoRoot
+        Invoke-Step -Label "600-second Korean production readiness smoke" -Command "& `"$backendPython`" scripts/verify-production-readiness-smoke.py --narration artifacts/task5-korean-600.wav --work-root artifacts/task5-smoke" -WorkingDirectory $repoRoot
+        Invoke-Step -Label "Three-fixture long-form CapCut draft QA" -Command "& `"$backendPython`" scripts/verify-long-form-capcut-draft-qa.py --narration artifacts/task5-korean-600.wav --work-root artifacts/long-form-capcut-qa" -WorkingDirectory $repoRoot
     }
     "smoke" {
         $artifactRoot = Join-Path $repoRoot "artifacts"

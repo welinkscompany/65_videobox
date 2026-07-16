@@ -19,6 +19,8 @@ from pycapcut.video_segment import VideoSegment
 from videobox_core_engine.canonical_track import canonical_track_type
 from videobox_core_engine.media_controls import normalize_media_controls
 from videobox_core_engine.output_source_verifier import OutputSourceStaleError, verify_output_sources
+from videobox_core_engine.output_warning_provenance import output_metadata, output_warning_notes
+import json
 from videobox_domain_models.caption_style import CaptionStyle
 from videobox_storage.timeline_clip_source_resolution import (
     TimelineClipSourceError,
@@ -151,6 +153,13 @@ class PyCapCutRealExportAdapter:
             script.import_srt(str(subtitle_file_path), "subtitle")
 
         script.save()
+        metadata = output_metadata(timeline)
+        if metadata["warning_provenance"]:
+            content_path = draft_path / "draft_content.json"
+            content = json.loads(content_path.read_text(encoding="utf-8"))
+            content["videobox_output_metadata"] = metadata
+            content_path.write_text(json.dumps(content, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+        warnings.extend(note for note in output_warning_notes(timeline) if note not in warnings)
         return CapCutDraftExportResult(draft_path=draft_path, capcut_compatibility_warnings=warnings)
 
     def _add_styled_captions(self, *, script: ScriptFile, editing_session: dict[str, Any]) -> list[str]:
@@ -336,7 +345,9 @@ class PyCapCutRealExportAdapter:
         if material.duration <= 0:
             raise PyCapCutExportError(f"B-roll source has no usable duration: {resolved.path}")
 
-        source_start_us = _seconds_to_us(resolved.trim_start_sec + controls["trim_start_sec"])
+        source_start_us = _seconds_to_us(
+            resolved.trim_start_sec + float(controls.get("in_sec", 0.0)) + controls["trim_start_sec"]
+        )
         # MediaInfo and CapCut's serialised duration can differ by up to two
         # final video frames after a non-zero trim. Preserve legacy untrimmed
         # loop duration exactly, but leave headroom for the trim boundary.
@@ -346,6 +357,11 @@ class PyCapCutRealExportAdapter:
             else 0
         )
         source_available_us = material.duration - source_start_us - trim_headroom_us
+        if "out_sec" in controls:
+            source_available_us = min(
+                source_available_us,
+                _seconds_to_us(float(controls["out_sec"])) - source_start_us,
+            )
         if source_available_us <= 0:
             raise PyCapCutExportError(
                 f"B-roll trim starts after the source ends: {resolved.path}. Reduce trim_start_sec."

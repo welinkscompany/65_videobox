@@ -31,10 +31,24 @@ def normalize_media_controls(
         trim_start_sec = float(payload.get("trim_start_sec", 0.0))
         if trim_start_sec < 0:
             raise ValueError("B-roll trim_start_sec must not be negative.")
-        return {
+        normalized = {
             "fit": fit,
             "loop": bool(payload.get("loop", True)),
             "pad": bool(payload.get("pad", False)),
             "trim_start_sec": trim_start_sec,
         }
+        # Source-window controls come from a selected local asset.  They are
+        # distinct from timeline trim and must survive Director apply so both
+        # FFmpeg and CapCut read the same original bytes.
+        if "in_sec" in payload:
+            in_sec = float(payload["in_sec"])
+            if in_sec < 0:
+                raise ValueError("B-roll in_sec must not be negative.")
+            normalized["in_sec"] = in_sec
+        if "out_sec" in payload:
+            out_sec = float(payload["out_sec"])
+            if out_sec <= float(normalized.get("in_sec", 0.0)):
+                raise ValueError("B-roll out_sec must be after in_sec.")
+            normalized["out_sec"] = out_sec
+        return normalized
     raise ValueError(f"Unsupported media control kind: {media_kind}")

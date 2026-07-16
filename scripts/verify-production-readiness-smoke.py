@@ -300,7 +300,7 @@ def run_smoke(
     )
     app = create_app(
         projects_root=projects_root,
-        local_first_runtime_service_factory=lambda _: DeterministicOfflineRuntime(),
+        local_only_runtime_service_factory=lambda _: DeterministicOfflineRuntime(),
         stt_provider=DeterministicKoreanSTTProvider(),
         tts_provider=DeterministicWaveTTSProvider(),
         final_renderer=renderer,

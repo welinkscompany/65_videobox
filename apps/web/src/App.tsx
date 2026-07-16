@@ -623,20 +623,9 @@ export function App() {
         );
         setBrollAssets(archivedBrollAssets);
         setLoadState("ready");
-        try {
-          const providerKeys = await api.listGeminiProviderKeys(projectId);
-          if (cancelled) {
-            return;
-          }
-          setGeminiKeys(providerKeys);
-          setGeminiLoadError(null);
-        } catch {
-          if (cancelled) {
-            return;
-          }
-          setGeminiKeys([]);
-          setGeminiLoadError("제미나이 라우팅 오류");
-        }
+        // Legacy Gemini CRUD remains available through its isolated API for
+        // existing stored data, but the default product bootstrap must not
+        // request it.  Local Media Director uses LM Studio only.
       } catch (error) {
         if (cancelled) {
           return;
@@ -912,6 +901,7 @@ export function App() {
         kind: "success",
         message: `${feedbackLabel} ${feedbackAction}됨`,
       });
+      return session;
     } catch (error) {
       if (error instanceof ApiConflictError) {
         setPendingEditingConflict({
@@ -930,6 +920,7 @@ export function App() {
           message: `${feedbackLabel} ${feedbackAction} 실패 · ${message}`,
         });
       }
+      return null;
     } finally {
       setIsSavingEditingMutation(null);
     }
@@ -2421,20 +2412,10 @@ export function App() {
               </p>
             </article>
 
-            <article className="panel">
-              <div className="panel-header">
-                <div>
-                  <p className="section-kicker">제미나이</p>
-                  <h2>키</h2>
-                </div>
-                <button
-                  className="action-button"
-                  onClick={openCreateGeminiForm}
-                  type="button"
-                >
-                  키 추가
-                </button>
-              </div>
+            <article className="panel" aria-label="로컬 AI 기능">
+              <div className="panel-header"><div><p className="section-kicker">로컬 AI</p><h2>LM Studio 기능</h2></div></div>
+              <p className="meta-copy">자동 런타임은 이 컴퓨터의 LM Studio loopback 기능만 사용합니다. 외부 자동 fallback과 API 키 설정은 기본 화면에 노출하지 않습니다.</p>
+              {false ? <>
               {isGeminiFormOpen ? (
                 <div className="provider-form">
                   <label className="field">
@@ -2590,6 +2571,7 @@ export function App() {
                   <p className="empty-state">제미나이 키 없음</p>
                 ) : null}
               </div>
+              </> : null}
             </article>
           </section>
         ) : null}
@@ -2870,7 +2852,7 @@ export function App() {
                       <dd>{preservedEditingSegments.length}</dd>
                     </div>
                   </dl>
-                  {selectedProjectId ? <DirectorWorkspacePanel projectId={selectedProjectId} sessionId={editingSession.session_id} sessionRevision={editingSession.session_revision} selectedSegment={selectedEditingSegment ? { segmentId: selectedEditingSegment.segment_id, startSec: selectedEditingSegment.start_sec, endSec: selectedEditingSegment.end_sec, draftApplied: changedSegmentIds.has(selectedEditingSegment.segment_id) } : undefined} onStateChange={setDirectorWorkspaceState} /> : null}
+                  {selectedProjectId ? <DirectorWorkspacePanel projectId={selectedProjectId} sessionId={editingSession.session_id} sessionRevision={editingSession.session_revision} selectedSegment={selectedEditingSegment ? { segmentId: selectedEditingSegment.segment_id, startSec: selectedEditingSegment.start_sec, endSec: selectedEditingSegment.end_sec, draftApplied: changedSegmentIds.has(selectedEditingSegment.segment_id) } : undefined} onStateChange={setDirectorWorkspaceState} applyEditingMutation={(action) => applyEditingMutation("director-proposal-apply", action as () => Promise<EditingSession>)} /> : null}
                   <section className="editor-library" aria-label="고정 트랙 타임라인">
                     <h3>고정 트랙 타임라인</h3>
                     <p className="meta-copy">나레이션·B롤·BGM·SFX·오버레이만 사용합니다. 임의 트랙은 추가할 수 없습니다.</p>

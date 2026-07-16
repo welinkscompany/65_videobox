@@ -90,6 +90,7 @@ class PreviewRenderer:
                     "media_controls": dict(clip.get("media_controls") or {}),
                     "expected_content_sha256": clip.get("expected_content_sha256"),
                     "media_revision": clip.get("media_revision"),
+                    "warning_provenance": list(clip.get("warning_provenance") or []),
                 }
                 for track in promptable_tracks
                 for clip in track["clips"]

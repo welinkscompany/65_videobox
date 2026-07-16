@@ -41,6 +41,34 @@ def test_candidate_materializer_stages_then_creates_one_reusable_project_asset(t
     assert restricted_result["warning_provenance"] == ["copyright_confirmation_required"]
 
 
+def test_candidate_materializer_uses_short_staging_filename_before_store_registration(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    store = LocalProjectStore(tmp_path / "projects")
+    project = store.bootstrap_project("p")
+    source = tmp_path / "clip.mp4"; source.write_bytes(b"clip")
+    asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=source, metadata={"review_status": "approved"})
+    digest = sha256(b"clip").hexdigest()
+    run = store.create_media_analysis(project_id=project.project_id, asset_id=asset.asset_id, idempotency_key=f"{digest}:local", cache_key="x")
+    claim = store.claim_media_analysis(project_id=project.project_id, analysis_id=run["analysis_id"]); assert claim
+    store.complete_media_analysis(project_id=project.project_id, analysis_id=run["analysis_id"], expected_attempt=claim["attempt"], result={"frame": "ok"})
+    session = store.save_editing_session(project_id=project.project_id, timeline_id="t", session_payload={"segments": [{"segment_id": "s", "caption_text": "clip"}], "history": []})
+    candidate = DirectorProposalService(store).create(project_id=project.project_id, session_id=session["session_id"]).candidates[0]
+    registered_source_names: list[str] = []
+    original_register = store.register_asset
+
+    def capture_register(**kwargs):
+        registered_source_names.append(kwargs["source_path"].name)
+        return original_register(**kwargs)
+
+    monkeypatch.setattr(store, "register_asset", capture_register)
+
+    ProjectAssetMaterializer(store).materialize(project_id=project.project_id, candidate=candidate)
+
+    assert len(registered_source_names) == 1
+    assert registered_source_names[0].startswith("stage-")
+    assert registered_source_names[0].endswith(".mp4")
+    assert len(registered_source_names[0]) <= 20
+
+
 def test_candidate_materializer_rejects_source_mutation_and_leaves_no_stage_or_asset(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     store = LocalProjectStore(tmp_path / "projects")
     project = store.bootstrap_project("p")

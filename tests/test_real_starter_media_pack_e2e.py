@@ -22,7 +22,7 @@ from videobox_capcut_export.pycapcut_adapter import PyCapCutRealExportAdapter
 from videobox_core_engine.ffmpeg_final_renderer import FfmpegFinalRenderer
 from videobox_core_engine.media_pack_release import ffprobe_media
 from videobox_core_engine.media_pack_service import MediaPackService
-from videobox_provider_interfaces.llm import LLMProviderError
+from videobox_provider_interfaces.llm import LLMTaskType, StructuredLLMResponse
 from videobox_provider_interfaces.stt import STTRequest, STTResult, STTSegment
 from videobox_storage.local_project_store import LocalProjectStore
 from videobox_storage.media_library_store import MediaLibraryStore
@@ -38,14 +38,57 @@ class _DeterministicOfflineRuntime:
     external_provider_calls = 0
     gemini_calls = 0
 
-    def generate_structured(self, **_: object) -> object:
-        type(self).external_provider_calls += 1
-        raise LLMProviderError(
-            provider_name="deterministic_real_pack_e2e",
-            message="Real pack release gate must not call localhost or external LLM providers.",
-            retryable=False,
-            error_code="DETERMINISTIC_REAL_PACK_E2E",
+    def generate_structured(
+        self,
+        *,
+        project_id: str,
+        task_type: LLMTaskType,
+        prompt: str,
+        response_schema: dict[str, object],
+        now: object | None = None,
+    ) -> StructuredLLMResponse:
+        del project_id, prompt, response_schema, now
+        output_data = {
+            LLMTaskType.SCENE_PLANNING: {"review_required": False, "cleanup_decision": "keep"},
+            LLMTaskType.KEYWORD_EXPANSION: {"keywords": ["starter", "pack"]},
+            LLMTaskType.MUSIC_RECOMMENDATION: {"music_mood": "calm local bed", "score": 0.75},
+            LLMTaskType.OPERATOR_COPY: {"summary": "Local starter-pack guidance.", "action_items": ["Continue local review."]},
+        }[task_type]
+        return StructuredLLMResponse(
+            provider_name="deterministic_local_fixture",
+            model_name="fixture",
+            output_data=output_data,
+            raw_text=json.dumps(output_data),
+            metadata={"provider_trace": {"routing_mode": "local_only", "final_provider": "deterministic_local_fixture", "fallback_reasons": []}},
         )
+
+
+def test_offline_runtime_returns_local_structured_responses_without_external_calls() -> None:
+    _DeterministicOfflineRuntime.external_provider_calls = 0
+    _DeterministicOfflineRuntime.gemini_calls = 0
+    runtime = _DeterministicOfflineRuntime()
+
+    outputs = {
+        task_type: runtime.generate_structured(
+            project_id="starter-pack-fixture",
+            task_type=task_type,
+            prompt="fixture",
+            response_schema={},
+        ).output_data
+        for task_type in (
+            LLMTaskType.SCENE_PLANNING,
+            LLMTaskType.KEYWORD_EXPANSION,
+            LLMTaskType.MUSIC_RECOMMENDATION,
+            LLMTaskType.OPERATOR_COPY,
+        )
+    }
+
+    assert outputs[LLMTaskType.SCENE_PLANNING]["review_required"] is False
+    assert outputs[LLMTaskType.KEYWORD_EXPANSION]["keywords"] == ["starter", "pack"]
+    assert outputs[LLMTaskType.MUSIC_RECOMMENDATION]["music_mood"] == "calm local bed"
+    assert outputs[LLMTaskType.OPERATOR_COPY]["summary"] == "Local starter-pack guidance."
+    assert _DeterministicOfflineRuntime.external_provider_calls == 0
+    assert _DeterministicOfflineRuntime.gemini_calls == 0
 
 
 class _DeterministicSTT:
@@ -359,9 +402,10 @@ def test_real_starter_media_pack_flows_to_final_mp4_and_real_capcut_draft(tmp_pa
         assert recovery_materialized_response.status_code == 201, recovery_materialized_response.text
         recovery_materialized = recovery_materialized_response.json()
         assert recovery_materialized["asset_id"] != applied_materialized.json()["asset_id"]
+        assert recovery_materialized["metadata"]["director_materialized_asset_index_revision"] == store.get_asset_index_revision(project_id)
         recovery_apply_response = client.post(
             f"/api/projects/{project_id}/director/proposals/{recovery_proposal['proposal_id']}/apply",
-            json={"candidate_ids": [recovery_candidate["candidate_id"]], "expected_revision": session["session_revision"]},
+            json={"candidate_ids": [recovery_candidate["candidate_id"]], "expected_revision": recovery_proposal["base_session_revision"]},
         )
         assert recovery_apply_response.status_code == 200, recovery_apply_response.text
         recovered_session = recovery_apply_response.json()

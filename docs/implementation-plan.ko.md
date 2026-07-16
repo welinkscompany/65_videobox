@@ -1060,8 +1060,8 @@ production-readiness blocker slice 1의 9개 Task는 구현·회귀·600초 smok
   1. Local media intelligence foundation: LM Studio local-only provider, durable B-roll analysis, 자동 태깅/검수
   2. Script-first proposal engine: narration 없는 provisional script session, B/M/S ranking, preview/materialize, atomic apply
   3. Director workspace: 우측 대화 패널, 수동 편집, B/M/S reference, persistent conversation, 10-step undo/redo, responsive UI
-- 구현 시작 전 기준 HEAD는 `8eddb7f`다. Slice 1 Task 1–6과 그 release-blocking remediation, Slice 2 Task 7–12, Slice 3 Task 13–17은 완료됐으며, 전체 계획 기준 17/18 Task(94.4%) 완료·5.6% 잔여다.
-- 다음 실행 단위는 Slice 3 Task 18 `App integration, refresh recovery, real output E2E, release closeout`이다.
+- 구현 시작 전 기준 HEAD는 `8eddb7f`다. Slice 1 Task 1–6과 그 release-blocking remediation, Slice 2 Task 7–12, Slice 3 Task 13–18은 완료됐으며, 전체 계획 기준 18/18 Task(100.0%) 완료·0% 잔여다.
+- 구현 계획의 개발 Task는 모두 닫혔다. 다음은 새 기능 Task가 아니라 CapCut Desktop 수동 재생·export 승인, 실제 음성 자연스러움, 배포 전 권리/라이선스 판단의 human acceptance release follow-up이다.
 - 기존 `LocalFirstStructuredRuntime`의 Gemini 자동 fallback, 외부 HTTP(S) runtime 허용, text-only Qwen adapter는 승인 설계와 충돌하므로 Slice 1에서 RED test부터 교체한다.
 - Codex Sol/Terra/Luna 모델 선택은 개발 에이전트 실행 자원이며 VideoBox 제품 runtime 계약에는 포함하지 않는다.
 

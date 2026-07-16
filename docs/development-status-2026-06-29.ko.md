@@ -1,8 +1,17 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 249. 2026-07-16 Local Media Director Slice 3 Task 17 closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
-> 이 문서의 기존 날짜 기반 섹션은 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 249`를 기준으로 본다.
+> 현재 authoritative 상태/next slice 판단은 `## 250. 2026-07-17 Local Media Director Slice 3 Task 18 release closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 이 문서의 기존 날짜 기반 섹션은 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 250`를 기준으로 본다.
 > 단, `2일 내 1차 데모 완성` 실행 레일은 `## 189`의 장기 우선순위를 그대로 넓게 집행하지 않고, `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`의 축소된 실행 계획을 우선 적용한다.
+
+## 250. 2026-07-17 Local Media Director Slice 3 Task 18 release closeout
+
+- App은 reload endpoint로 persisted conversation/proposal/reference를 read-only 복구하고, 실제 proposal 생성은 명시적 `디렉터 시작`에서만 수행한다. apply는 한 번의 batch mutation 뒤 timeline/review/subtitle/preview/final/CapCut freshness를 함께 무효화한다. Director route와 기본 Settings는 Gemini/legacy LocalFirst runtime을 사용하거나 노출하지 않는다.
+- RED→GREEN은 refresh recovery, ambiguity, materialize/batch 실패의 session 불변, blocked/error manual mode, Gemini bootstrap/key/provider request 0을 App contract로 고정했다. deterministic local structured runtime을 쓴 실제 B/M/S E2E는 source SHA·scene/audio controls가 timeline→FFmpeg→PyCapCut까지 보존됨, stale source가 final/draft를 모두 차단함, assetless BGM/SFX 거부, Korean SRT/MP4 audio/duration, unknown-rights warning metadata를 확인한다.
+- release gate: focused backend `39 passed`, focused frontend `151 passed`, full backend `1027 passed, 3 skipped, 1 warning`, full frontend `168 passed`, production build 성공, real Media Director E2E `2 passed`, real Starter Pack E2E `2 passed`다. `media-director-live-smoke`는 실제 127.0.0.1:1234 loopback capability/vision/embedding/reopen store query `7 passed`를 확인했고, release의 deterministic E2E는 external/Gemini provider call 0을 assertion으로 증명한다.
+- 실제 산출물 gate도 통과했다. `artifacts/task5-smoke`의 600초 Korean production-readiness smoke는 MP4/SRT/CapCut draft 및 control/hash 검사를, `artifacts/long-form-capcut-qa`의 three-fixture QA는 B-roll/audio controls와 CapCut ducking compatibility warning 보존을 검증했다. 자동 실행은 CapCut Desktop을 열거나 사람 판단을 대신하지 않는다.
+- release audit 6개 gate: 최신 독립 사양·품질 코드리뷰 P0/P1 없음, Task 18 계획 gap 없음, source→runtime reverse trace/E2E 통과, live loopback·real output 확인, fast-path/SSOT 지침 갱신, staged하지 않는 artifacts 및 diff/status 검사로 찌꺼기 여부를 점검했다.
+- 전체 구현 계획 누적 진행률은 18/18 Task (100.0%), 잔여 0%다. 남은 release follow-up은 human acceptance뿐이다: CapCut Desktop에서 draft 재생·export, 실제 음성 자연스러움 청취, 배포 전 자산 권리/라이선스 승인. 커밋/푸시 SHA는 이 closeout과 같은 Task 18 변경에 기록한다.
 
 ## 249. 2026-07-16 Local Media Director Slice 3 Task 17 closeout
 

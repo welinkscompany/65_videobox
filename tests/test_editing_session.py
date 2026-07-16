@@ -705,6 +705,11 @@ def test_approved_sfx_recommendation_materializes_target_timeline_track() -> Non
                 "end_sec": 3.0,
                 "clip_type": "sfx",
                 "recommendation_id": "manual_sfx_seg_001",
+                "asset_id": "asset_sfx_001",
+                "media_controls": {},
+                "expected_content_sha256": None,
+                "media_revision": None,
+                "warning_provenance": [],
             }
         ],
     }

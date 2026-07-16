@@ -55,7 +55,10 @@ class ProjectAssetMaterializer:
                     return self._candidate_result(existing, candidate, digest)
             stage_dir = self.store.project_root(project_id) / ".materializing"  # type: ignore[attr-defined]
             stage_dir.mkdir(parents=True, exist_ok=True)
-            staged = stage_dir / f"{digest}-{source.name}"
+            # Keep this disposable path short for Windows CopyFile2; the
+            # digest is verified before and after every copy, so it need not
+            # be embedded in the staging filename.
+            staged = stage_dir / f"stage-{uuid.uuid4().hex[:8]}{source.suffix.lower()}"
             registered = None
             try:
                 if sha256_file(source) != digest:

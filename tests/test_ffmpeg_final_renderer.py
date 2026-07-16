@@ -92,6 +92,33 @@ def test_final_renderer_explains_missing_broll_media_before_rendering(tmp_path: 
 
 
 @pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg/ffprobe not installed on this machine")
+def test_final_render_keeps_unknown_user_owned_rights_warning_in_mp4_metadata(tmp_path: Path) -> None:
+    """Unknown user-owned B-roll remains locally renderable, but never silently loses its rights warning."""
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Unknown rights final metadata")
+    narration_file = tmp_path / "narration.wav"
+    broll_file = tmp_path / "broll.mp4"
+    _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=1", str(narration_file)])
+    _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=black:s=320x240:r=15:d=1", str(broll_file)])
+    narration = store.register_asset(project_id=project.project_id, asset_type=AssetType.NARRATION_AUDIO, source_path=narration_file)
+    broll = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=broll_file)
+    output = tmp_path / "unknown-rights.mp4"
+
+    FfmpegFinalRenderer(store=store, video_width=320, video_height=240, video_fps=15).render_timeline_to_mp4(
+        project_id=project.project_id,
+        output_path=output,
+        timeline={"narration_source_uri": narration.storage_uri, "tracks": [
+            {"track_type": "narration", "clips": [{"asset_uri": narration.storage_uri, "start_sec": 0.0, "end_sec": 1.0}]},
+            {"track_type": "broll", "clips": [{"asset_uri": broll.storage_uri, "start_sec": 0.0, "end_sec": 1.0, "warning_provenance": ["copyright_confirmation_required"]}]},
+        ]},
+    )
+
+    probe = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format_tags=comment", "-of", "default=noprint_wrappers=1", str(output)], capture_output=True, text=True, timeout=30)
+    assert probe.returncode == 0, probe.stderr
+    assert "copyright_confirmation_required" in probe.stdout
+
+
+@pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg/ffprobe not installed on this machine")
 def test_render_timeline_burns_editing_session_ass_without_subtitle_stream(tmp_path: Path) -> None:
     store = LocalProjectStore(tmp_path)
     project = store.bootstrap_project(name="Styled Caption Render")

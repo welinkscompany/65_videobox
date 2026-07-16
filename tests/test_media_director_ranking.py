@@ -88,6 +88,21 @@ def test_music_alias_uses_bgm_metadata_and_per_media_reference_numbering() -> No
     assert set(music.canonical_metadata) >= {"mood", "energy", "genre", "vocal_presence", "recommended_use"}
 
 
+def test_audio_candidates_preserve_default_gain_control_for_output_lineage() -> None:
+    ranked = rank_candidates(
+        {"text": "여행", "duration_sec": 3},
+        [
+            asset("music", media_type="music", mood="calm", energy="low", genre="ambient", recommended_use="bed"),
+            asset("sfx", media_type="sfx", action_event="whoosh", intensity="low", recommended_use="accent"),
+        ],
+    )
+
+    assert {candidate.media_type: candidate.controls["gain_db"] for candidate in ranked} == {
+        "bgm": 0.0,
+        "sfx": 0.0,
+    }
+
+
 def test_explicit_semantic_score_is_used_and_lexical_fallback_has_provenance() -> None:
     semantic = rank_candidates({"text": "unrelated", "duration_sec": 1}, [asset("a", tags=[], semantic_score=0.8)])[0]
     lexical = rank_candidates({"text": "여행", "duration_sec": 1}, [asset("b", tags=["휴가"])])[0]

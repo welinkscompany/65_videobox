@@ -1318,6 +1318,14 @@ class LocalProjectStore:
             raise KeyError("director_conversation_missing")
         return dict(row)
 
+    def latest_director_conversation(self, *, project_id: str, session_id: str) -> dict[str, Any] | None:
+        row = self._fetchone(
+            project_id,
+            "SELECT conversation_id, project_id, session_id FROM director_conversations WHERE project_id = ? AND session_id = ? ORDER BY updated_at DESC, conversation_id DESC LIMIT 1",
+            (project_id, session_id),
+        )
+        return dict(row) if row is not None else None
+
     def append_director_message(
         self, *, project_id: str, session_id: str, conversation_id: str, role: str,
         text: str, proposal_id: str | None = None, client_message_id: str | None = None,

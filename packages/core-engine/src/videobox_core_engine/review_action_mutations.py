@@ -185,6 +185,19 @@ def _apply_approved_sfx_recommendation_to_timeline(
     selected_asset_uri = _canonical_source_uri(
         payload.get("selected_asset_uri") if isinstance(payload, dict) else None
     )
+    media_controls = deepcopy(payload.get("media_controls") or {}) if isinstance(payload, dict) else {}
+    expected_content_sha256 = (
+        str(payload.get("expected_content_sha256")).strip()
+        if isinstance(payload, dict) and payload.get("expected_content_sha256") is not None
+        else None
+    ) or None
+    media_revision = (
+        str(payload.get("media_revision")).strip()
+        if isinstance(payload, dict) and payload.get("media_revision") is not None
+        else None
+    ) or None
+    raw_warning_provenance = payload.get("warning_provenance") if isinstance(payload, dict) else []
+    warning_provenance = list(raw_warning_provenance) if isinstance(raw_warning_provenance, list) else []
     if not project_id:
         raise ValueError("Approved SFX recommendation requires timeline.project_id.")
     if not recommendation_id or not target_segment_id or not selected_asset_id:
@@ -237,5 +250,10 @@ def _apply_approved_sfx_recommendation_to_timeline(
             "end_sec": float(target_clip["end_sec"]),
             "clip_type": "sfx",
             "recommendation_id": recommendation_id,
+            "asset_id": selected_asset_id,
+            "media_controls": media_controls,
+            "expected_content_sha256": expected_content_sha256,
+            "media_revision": media_revision,
+            "warning_provenance": warning_provenance,
         }
     )
