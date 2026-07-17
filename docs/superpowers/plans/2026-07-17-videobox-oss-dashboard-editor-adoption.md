@@ -72,7 +72,7 @@ Prototype/문서 Task는 production TDD 예외지만 artifact verifier, 사용�
 
 | Task | exact focused command | required RED assertion |
 |---:|---|---|
-| 1 | `npm --prefix apps/web test -- src/user-copy-policy.test.ts src/features/director/DirectorContextBar.test.tsx src/features/director/director-history-controls.test.tsx` + `npm --prefix apps/web run build` | 현재 5개 TypeScript blocker 또는 legacy baseline 미보존 |
+| 1 | `npm --prefix apps/web test -- src/legacy-baseline.test.tsx src/user-copy-policy.test.ts src/features/director/DirectorContextBar.test.tsx src/features/director/director-history-controls.test.tsx` + `npm --prefix apps/web run build` | 현재 5개 TypeScript blocker 또는 legacy baseline 미보존 |
 | 2 | `.venv\Scripts\python.exe -m pytest -q tests/test_ui_prototype_artifacts.py` | viewport/artifact SHA/approval record 누락 |
 | 3 | `.venv\Scripts\python.exe -m pytest -q tests/test_editor_ui_source_provenance.py` + `./scripts/verify-editor-ui-source-provenance.ps1` | pin/path/hash/license/dependency lock 누락 |
 | 4 | `npm --prefix apps/web test -- src/ui-system.test.tsx src/external-runtime-assets.test.ts src/test/network-guard.test.ts` | primitive/alias/preflight/network boundary 누락 |
@@ -101,13 +101,13 @@ Prototype/문서 Task는 production TDD 예외지만 artifact verifier, 사용�
 
 ### Task 1: Close the current Lumi copy work and freeze the legacy baseline
 
-- [ ] **Task 1 완료**
+- [x] **Task 1 완료**
 
 **Files:** already-dirty Lumi copy files only; `apps/web/src/user-copy-policy.test.ts`; `apps/web/src/features/director/DirectorContextBar.test.tsx`; create `apps/web/src/legacy-baseline.test.tsx`.
 
-- [ ] **RED:** run the three current focused tests and `npm --prefix apps/web run build`; reproduce the planning-time five TypeScript failures without weakening assertions.
-- [ ] **GREEN:** fix nullable fixture/AST/path typing and lock project select, section select, Director manual fallback, preview/export, settings behavior.
-- [ ] **Verify:** `npm --prefix apps/web test`; `npm --prefix apps/web run build`; common closeout.
+- [x] **RED:** planning-time five TypeScript failures were already resolved in the merged upstream Lumi copy. A missing legacy selection-state contract was observed instead: the new project-selection assertion failed because `aria-pressed` was absent.
+- [x] **GREEN:** add selected-state semantics for project/section buttons and lock project select, section select, Director manual fallback, preview/export, and settings behavior without weakening the copy policy.
+- [x] **Verify:** focused Task 1 suite 21 passed, full frontend suite 200 passed, and production build passed; independent spec/quality reviews and source-to-runtime reverse checks found no open P0/P1.
 
 Commit: `feat: finish Lumi dashboard copy`
 

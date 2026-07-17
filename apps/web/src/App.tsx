@@ -1875,6 +1875,7 @@ export function App() {
                 className={`project-chip ${
                   project.project_id === selectedProjectId ? "is-selected" : ""
                 }`}
+                aria-pressed={project.project_id === selectedProjectId}
                 onClick={() => setSelectedProjectId(project.project_id)}
                 type="button"
               >
@@ -1938,6 +1939,7 @@ export function App() {
               <button
                 key={value}
                 className={selectedSection === value ? "tab-button is-active" : "tab-button"}
+                aria-pressed={selectedSection === value}
                 onClick={() =>
                   setSelectedSection(
                     value as "overview" | "timeline" | "review" | "editing" | "settings",

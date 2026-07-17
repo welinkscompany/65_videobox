@@ -353,7 +353,7 @@ Local Media Director 18개 Task와 editing-session revision, source provenance, 
 - 설계서: `docs/superpowers/specs/2026-07-17-videobox-oss-dashboard-editor-adoption-design.md`
 - 구현 계획서: `docs/superpowers/plans/2026-07-17-videobox-oss-dashboard-editor-adoption.md`
 - 구현 단위: 7개 slice, 22개 실행 Task
-- production 구현 진행률: 0/22 Task (0%), 잔여 100%
+- production 구현 진행률: 1/22 Task (4.5%), 잔여 95.5%
 
 도입 분류는 다음으로 고정한다.
 
@@ -366,7 +366,7 @@ Local Media Director 18개 Task와 editing-session revision, source provenance, 
 
 OpenCut EditorCore, IndexedDB/OPFS, browser renderer/export, WASM, browser STT와 Opencast Redux/MUI/full snapshot API/player fork/browser waveform decode는 반입하지 않는다. Supabase source도 직접 복사하지 않는다. editing-session, revision, FFmpeg, PyCapCut, output-source verifier는 계속 authoritative하다.
 
-새 shell은 local/cloud capability slot을 갖지만 실제 SaaS auth/team/billing과 Hermes agent/container는 이번 22개 Task에 넣지 않는다. 먼저 현재 미커밋 Lumi copy 작업을 검증·closeout하고, 세 화면/네 viewport 시각 승인을 받은 뒤 production UI로 진행한다. shell 직후에는 advanced timeline보다 `대본→루미 인터뷰→자산 점검→한 번 승인→atomic real draft→editor/output handoff` 수직 Slice를 먼저 검증한다. browser source audition은 실제 합성 preview가 아니며, current revision의 정확한 미리보기는 기존 FFmpeg composition path를 재사용한 freshness-bound proxy artifact로 고정한다. caption timing은 현 backend 권한에 맞춰 segment-linked로 제한한다.
+새 shell은 local/cloud capability slot을 갖지만 실제 SaaS auth/team/billing과 Hermes agent/container는 이번 22개 Task에 넣지 않는다. Slice 0 Task 1은 기존 Lumi copy를 closeout하고 project/section 선택, Director 수동 fallback, current/stale preview·output, settings의 legacy baseline을 고정했다. 다음은 production shell 코드가 아니라 Task 2의 세 화면/다섯 viewport(1920/1440/1280/768/390) 시각 prototype과 명시적 사용자 승인이다. shell 직후에는 advanced timeline보다 `대본→루미 인터뷰→자산 점검→한 번 승인→atomic real draft→editor/output handoff` 수직 Slice를 먼저 검증한다. browser source audition은 실제 합성 preview가 아니며, current revision의 정확한 미리보기는 기존 FFmpeg composition path를 재사용한 freshness-bound proxy artifact로 고정한다. caption timing은 현 backend 권한에 맞춰 segment-linked로 제한한다.
 
 ## 8.3 구현 완료 시 적용 여부 보고
 

@@ -1,8 +1,17 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 252. 2026-07-17 Hermes container design handoff`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 253. 2026-07-17 OSS Slice 0 Task 1 closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
 > 이 문서의 기존 날짜 기반 섹션은 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. Local Media Director release truth는 `## 250`, 현재 다음 frontend 계획은 `## 251`을 기준으로 본다.
 > 단, `2일 내 1차 데모 완성` 실행 레일은 `## 189`의 장기 우선순위를 그대로 넓게 집행하지 않고, `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`의 축소된 실행 계획을 우선 적용한다.
+
+## 253. 2026-07-17 OSS Slice 0 Task 1 closeout
+
+- 계획: `docs/superpowers/plans/2026-07-17-videobox-oss-dashboard-editor-adoption.md`; handoff: `docs/handoffs/2026-07-17-videobox-oss-dashboard-editor-adoption-slice-0-task-1-closeout.ko.md`.
+- current `main`과 `origin/main`은 작업 시작 시 같은 SHA `90a0f88`였고 clean이었다. historical Lumi UI dirty scope는 이미 upstream merge에 포함돼 있었으므로 reset/delete/separation 없이 그대로 보존했다.
+- planning-time TypeScript 오류 5개는 현 HEAD에서 이미 해소돼 있었다. 새 legacy baseline의 project selection `aria-pressed` 계약을 RED(기대 `true`, 실제 없음)로 관찰한 뒤, project/section 선택 상태를 접근성 semantics로 고정했다.
+- baseline은 project select, section select/settings, blocked Director의 직접 편집 fallback, current preview/final의 이용 가능 상태, stale artifact 재생성 안내를 보호한다. Lumi 문구 policy는 AST/금칙어 12 assertion을 유지한다. 독립 UI 검토는 일반 사용자 동사·즉시 다음 행동·구현 식별자 비노출의 세 기준으로 문구를 판단했으며, 이 정성 판단은 자동 assertion과 별개다.
+- fresh verification: Task 1 focused 21 passed, frontend full suite 200 passed, production build success, `git diff --check` success. independent spec/quality review와 source→runtime reverse check의 open P0/P1은 0이다. 이 Task의 diff는 provider 호출을 추가하지 않았고 normal local/test external/Gemini call은 0 계약을 변경하지 않았다.
+- OSS dashboard/editor 누적은 1/22 (4.5%), 잔여 95.5%다. 다음은 Task 2의 세 화면/다섯 viewport visual prototype 및 명시적 사용자 승인이고, Hermes/container 구현은 written-spec review와 별도 implementation plan 전까지 시작하지 않는다.
 
 ## 252. 2026-07-17 Hermes container design handoff
 
