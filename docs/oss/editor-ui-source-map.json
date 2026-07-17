@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "purpose": "Immutable OSS source pins are separate from future materialized and generated files.",
+  "source_pins": [
+    {
+      "name": "shadcn-admin",
+      "repository": "satnaing/shadcn-admin",
+      "commit": "e16c87f213a5ba5e45964e9b67c792105ec74d26",
+      "license": "MIT",
+      "license_url": "https://github.com/satnaing/shadcn-admin/blob/e16c87f213a5ba5e45964e9b67c792105ec74d26/LICENSE",
+      "notice_url": "https://github.com/satnaing/shadcn-admin/blob/e16c87f213a5ba5e45964e9b67c792105ec74d26/LICENSE",
+      "decision": "partial-port",
+      "upstream_paths": [],
+      "local_paths": []
+    },
+    {
+      "name": "shadcn-ui",
+      "repository": "shadcn-ui/ui",
+      "commit": "4396d5b2a5ee4e2ad5705e9b2522f92112f811a0",
+      "license": "MIT",
+      "license_url": "https://github.com/shadcn-ui/ui/blob/4396d5b2a5ee4e2ad5705e9b2522f92112f811a0/LICENSE.md",
+      "notice_url": "https://github.com/shadcn-ui/ui/blob/4396d5b2a5ee4e2ad5705e9b2522f92112f811a0/LICENSE.md",
+      "decision": "locked-source",
+      "upstream_paths": [],
+      "local_paths": []
+    },
+    {
+      "name": "opencut-current",
+      "repository": "OpenCut-app/OpenCut",
+      "commit": "bab8af831b354a0b5a98a4a6e818ab7d633b94df",
+      "license": "AGPL-3.0-or-later",
+      "license_url": "https://github.com/OpenCut-app/OpenCut/blob/bab8af831b354a0b5a98a4a6e818ab7d633b94df/LICENSE",
+      "notice_url": "https://github.com/OpenCut-app/OpenCut/blob/bab8af831b354a0b5a98a4a6e818ab7d633b94df/LICENSE",
+      "decision": "rejected-runtime",
+      "upstream_paths": [],
+      "local_paths": []
+    },
+    {
+      "name": "opencut-classic",
+      "repository": "OpenCut-app/opencut-classic",
+      "commit": "cf5e79e919144200294fb9fed22a222592a0aeea",
+      "license": "MIT",
+      "license_url": "https://github.com/OpenCut-app/opencut-classic/blob/cf5e79e919144200294fb9fed22a222592a0aeea/LICENSE",
+      "notice_url": "https://github.com/OpenCut-app/opencut-classic/blob/cf5e79e919144200294fb9fed22a222592a0aeea/LICENSE",
+      "decision": "partial-port",
+      "upstream_paths": [],
+      "local_paths": []
+    },
+    {
+      "name": "opencast-editor",
+      "repository": "opencast/editor",
+      "commit": "1208afb64d9de0ab50b321f84f9dd2695780db87",
+      "license": "Apache-2.0",
+      "license_url": "https://github.com/opencast/editor/blob/1208afb64d9de0ab50b321f84f9dd2695780db87/LICENSE",
+      "notice_url": "https://github.com/opencast/editor/blob/1208afb64d9de0ab50b321f84f9dd2695780db87/NOTICE",
+      "decision": "partial-port",
+      "upstream_paths": [],
+      "local_paths": []
+    },
+    {
+      "name": "supabase",
+      "repository": "supabase/supabase",
+      "commit": "1c827c5cbb29cacc6e9052adff2e1659e3cb05fb",
+      "license": "Apache-2.0",
+      "license_url": "https://github.com/supabase/supabase/blob/1c827c5cbb29cacc6e9052adff2e1659e3cb05fb/LICENSE",
+      "notice_url": "https://github.com/supabase/supabase/blob/1c827c5cbb29cacc6e9052adff2e1659e3cb05fb/LICENSE",
+      "decision": "reference-only",
+      "upstream_paths": [],
+      "local_paths": []
+    },
+    {
+      "name": "pretendard",
+      "repository": "orioncactus/pretendard",
+      "release": "v1.3.9",
+      "commit": "5c41199ea0024a9e0b2cb31735265056e5472d76",
+      "license": "SIL OFL-1.1",
+      "license_url": "https://github.com/orioncactus/pretendard/blob/5c41199ea0024a9e0b2cb31735265056e5472d76/LICENSE.txt",
+      "notice_url": "https://github.com/orioncactus/pretendard/blob/5c41199ea0024a9e0b2cb31735265056e5472d76/LICENSE.txt",
+      "decision": "locked-binary",
+      "materialized": false,
+      "upstream_paths": [
+        {
+          "path": "packages/pretendard/dist/web/variable/woff2/PretendardVariable.woff2",
+          "sha256": "9599f12fd42fc0bce1cd50b47a0c022e108d7aa64dd0d1bb0ed44f3282d900b4"
+        }
+      ],
+      "local_paths": []
+    }
+  ],
+  "materialized_files": [],
+  "generated_items": [],
+  "apache_adaptations": []
+}

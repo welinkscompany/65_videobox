@@ -99,6 +99,14 @@ VideoBox의 기본 반입 방식은 이 방식이다.
 
 상세 조사와 실행 순서는 각각 `docs/research/2026-07-17-videobox-oss-dashboard-editor-adoption.ko.md`, `docs/superpowers/plans/2026-07-17-videobox-oss-dashboard-editor-adoption.md`를 따른다. 실제 port 파일은 `THIRD_PARTY_NOTICES.md`와 `docs/oss/editor-ui-source-map.json`에 upstream commit/path/license/test를 기록한다.
 
+### 5.1.1 Task 3 provenance gate
+
+`docs/oss/editor-ui-source-map.json`은 일곱 immutable source pin과 실제 반입물(`materialized_files`/`generated_items`)을 분리한다. 현재 반입물은 비어 있으며, Pretendard도 OFL 검토 전에는 materialized 하지 않는다. `reference-only`와 `rejected-runtime` source pin은 local path를 가질 수 없다.
+
+향후 shadcn 반입은 `docs/oss/shadcn-registry-lock.json`에 pinned GitHub source path/raw SHA256, 생성 경로/normalized SHA256, test path, exact runtime dependency version/license/package-lock entry를 모두 기록해야 한다. live `npx shadcn add` 결과만으로는 반입할 수 없다. Apache-2.0 source를 실제로 수정·반입할 때에는 direct LICENSE/NOTICE URL, attribution, 정확한 change summary를 source map과 `THIRD_PARTY_NOTICES.md`에 먼저 남긴다.
+
+`scripts/verify-editor-ui-source-provenance.ps1`은 Python test를 호출하지 않고 source map/registry lock/notices, repository-relative path, hash drift, production source 및 `apps/web/package.json`·`package-lock.json`의 rejected runtime reference를 독립 검증한다. docs/tests와 untracked pnpm 파일은 scan 대상이 아니다.
+
 | source project/repo | source file/path | target VideoBox package/path | decision | reason | dependency / license notes | risk notes |
 |---|---|---|---|---|---|---|
 | `m-bain/whisperX` | repo 전체를 dependency로 사용 | `packages/provider-interfaces/src/videobox_provider_interfaces/stt.py` + runner wiring | `partial port` | STT와 forced alignment의 핵심 dependency다. 소스 복사보다 provider integration이 맞다 | GitHub 기준 BSD-2-Clause. 다만 alignment 모델/weights는 별도 확인 필요 | GPU/VRAM 요구량, alignment 모델별 라이선스 검토 필요 |
