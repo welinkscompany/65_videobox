@@ -1,0 +1,99 @@
+[
+  {
+    "claim_id": "clm_001",
+    "text": "The current OpenCut rewrite is not a usable editor integration target; the archived classic repository is the only current source-level editor reference and must be treated as selective source material, not an SDK.",
+    "risk": "normal",
+    "claim_type": "descriptive",
+    "source_ids": [
+      "src_001",
+      "src_002",
+      "src_003"
+    ],
+    "counter_search": "Checked current rewrite routes and roadmap for a complete editor implementation; none was present, while the official README directs users to classic.",
+    "counter_refuted": false,
+    "conflicting": false,
+    "primary_source": true,
+    "status": "verified",
+    "status_reason": "ok"
+  },
+  {
+    "claim_id": "clm_002",
+    "text": "shadcn/ui should be added as owned source code, and its canonical Sidebar supplies the responsive and accessible primitives needed for the VideoBox app shell.",
+    "risk": "normal",
+    "claim_type": "descriptive",
+    "source_ids": [
+      "src_006",
+      "src_007"
+    ],
+    "counter_search": "Checked whether shadcn/ui is intended as a conventional runtime component package; official material describes source distribution and CLI-generated owned code instead.",
+    "counter_refuted": false,
+    "conflicting": false,
+    "primary_source": true,
+    "status": "verified",
+    "status_reason": "ok"
+  },
+  {
+    "claim_id": "clm_003",
+    "text": "shadcn-admin is suitable as a selective shell source but not as a whole-project template or runtime dependency.",
+    "risk": "normal",
+    "claim_type": "descriptive",
+    "source_ids": [
+      "src_004",
+      "src_005"
+    ],
+    "counter_search": "Compared the deployed shell with repository guidance and dependency boundaries; the README explicitly says the project is not a starter template.",
+    "counter_refuted": false,
+    "conflicting": false,
+    "primary_source": true,
+    "status": "verified",
+    "status_reason": "ok"
+  },
+  {
+    "claim_id": "clm_004",
+    "text": "Supabase Studio is valuable for project and settings information architecture, but direct source porting would import a large product-specific dependency graph and should remain reference-only for this migration.",
+    "risk": "normal",
+    "claim_type": "descriptive",
+    "source_ids": [
+      "src_008",
+      "src_009"
+    ],
+    "counter_search": "Inspected whether the relevant layouts were standalone components; they rely on Studio workspace packages, routing, data hooks, feature gates, and telemetry.",
+    "counter_refuted": false,
+    "conflicting": false,
+    "primary_source": true,
+    "status": "verified",
+    "status_reason": "ok"
+  },
+  {
+    "claim_id": "clm_005",
+    "text": "Opencast Editor offers useful waveform, cut, subtitle cue, and keyboard interaction patterns, while its Redux, MUI, player, API client, and browser waveform pipeline should not be imported wholesale into VideoBox.",
+    "risk": "normal",
+    "claim_type": "descriptive",
+    "source_ids": [
+      "src_010",
+      "src_011"
+    ],
+    "counter_search": "Inspected whether transcript and timeline behaviors were isolated packages; the visible workflow exists, but implementation remains coupled to Opencast state and endpoints.",
+    "counter_refuted": false,
+    "conflicting": false,
+    "primary_source": true,
+    "status": "verified",
+    "status_reason": "ok"
+  },
+  {
+    "claim_id": "clm_006",
+    "text": "Pretendard can be self-hosted for consistent Korean typography, provided the SIL Open Font License notice is distributed and no runtime CDN is used.",
+    "risk": "normal",
+    "claim_type": "legal",
+    "source_ids": [
+      "src_012",
+      "src_013"
+    ],
+    "counter_search": "Checked the official license and package metadata for a conflicting proprietary or network-only distribution requirement; none was found.",
+    "counter_refuted": false,
+    "conflicting": false,
+    "primary_source": true,
+    "status": "verified",
+    "status_reason": "ok"
+  }
+]

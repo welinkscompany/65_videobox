@@ -1,8 +1,36 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 250. 2026-07-17 Local Media Director Slice 3 Task 18 release closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
-> 이 문서의 기존 날짜 기반 섹션은 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. 현재 truth, 현재 검증 수치, 현재 next slice는 `## 250`를 기준으로 본다.
+> 현재 authoritative 상태/next slice 판단은 `## 251. 2026-07-17 OSS dashboard/editor adoption planning`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 이 문서의 기존 날짜 기반 섹션은 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. Local Media Director release truth는 `## 250`, 현재 다음 frontend 계획은 `## 251`을 기준으로 본다.
 > 단, `2일 내 1차 데모 완성` 실행 레일은 `## 189`의 장기 우선순위를 그대로 넓게 집행하지 않고, `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`의 축소된 실행 계획을 우선 적용한다.
+
+## 251. 2026-07-17 OSS dashboard/editor adoption planning
+
+현재 dashboard가 실제 사용자의 제작 흐름과 편집 작업판을 충분히 드러내지 못한다는 판단에 따라 shadcn-admin, shadcn/ui, OpenCut current/classic, Opencast Editor, Supabase Studio의 공식 source를 commit 단위로 재조사했다.
+
+- 조사: `docs/research/2026-07-17-videobox-oss-dashboard-editor-adoption.ko.md`
+- 설계: `docs/superpowers/specs/2026-07-17-videobox-oss-dashboard-editor-adoption-design.md`
+- 실행 계획: `docs/superpowers/plans/2026-07-17-videobox-oss-dashboard-editor-adoption.md`
+- 조사 claim ledger: 공식 source 기반 핵심 주장 6건의 schema/disposition 검증 완료, unresolved/refuted 0건. 이것은 production 구현이나 법률 검토 완료를 뜻하지 않는다.
+
+확인된 핵심 사실:
+
+- current OpenCut rewrite에는 아직 실제 editor route/timeline/preview/asset/inspector가 없다. classic은 archived이므로 SDK가 아니라 선별 source로만 사용한다.
+- shadcn-admin은 responsive shell source가 유용하지만 upstream도 starter project가 아니라고 명시한다. layout composition만 port한다.
+- shadcn/ui는 source distribution이므로 VideoBox가 component code를 소유하는 방식이 맞다. live registry 결과가 아니라 pinned source path와 normalized file SHA를 lock해야 한다.
+- Opencast의 transcript/cue/waveform/cut UX는 유용하지만 Redux/MUI/player/browser decode는 VideoBox와 맞지 않는다. true clean-room이 아니라 Apache-2.0 attributed behavioral adaptation으로 기록한다.
+- Supabase Studio는 대형 product workspace에 결합돼 있어 project/settings/mobile IA만 참고한다.
+- VideoBox의 editing-session/revision/source provenance/FFmpeg/PyCapCut 계약은 외부 editor보다 강하므로 교체가 아니라 view/interaction adapter가 필요하다.
+
+독립 plan-gap, UX, source→runtime 리뷰는 계획 초안에 P0를 확인했다: 단일 source URL을 실제 합성 preview로 오인할 위험, caption-only timing을 저장할 backend 부재, proposal/빈 session을 실제 자동 편집 초안으로 오인할 위험, 핵심 사용자 검증이 Task 15까지 밀린 순서다. 실행 전에 모두 반영했다.
+
+실행은 7개 slice, 22개 Task로 재편했다. 순서는 current Lumi copy closeout → 세 화면/네 viewport 사용자 시각 승인 → deterministic source lock → shadcn foundation/shell → `대본→루미 인터뷰→자산 점검→한 번 승인→atomic real draft→editor/output handoff` 수직 Slice → authoritative adapter와 exact FFmpeg preview → timeline/waveform/linked caption → assets/Lumi → responsive/parity/release다. production 구현은 아직 시작하지 않았으므로 새 계획 누적은 0/22 Task(0%), 잔여 100%다. 기존 Local Media Director 18/18 완료는 취소되지 않는다.
+
+정확한 편집본 preview는 current revision과 source SHA를 기존 FFmpeg final composition path로 합성한 freshness-bound proxy artifact다. 선택 source audition과 구분한다. caption timing은 current segment metadata 권한에 맞춰 segment-linked로 제한하며 independent cue timing은 후속 범위다. local/test 외부/Gemini call 0은 유지하되 creation interview runtime은 future managed SaaS driver를 막지 않는 provider-neutral port를 사용한다.
+
+현재 immediate next action은 새 shell 구현이 아니라, 이미 worktree에 남아 있는 Lumi copy 변경의 focused test와 production build blocker를 먼저 닫아 baseline commit을 만드는 것이다. 그 뒤 Task 2의 production-code 이전 visual prototype 승인 gate로 진행한다. Hermes agent/container와 실제 SaaS auth/team/billing은 이번 22개 Task 밖이다.
+
+Planning-time verification은 Lumi 관련 focused 3파일 `17 passed`를 확인했다. 같은 상태에서 production build는 `director-history-controls.test.tsx` nullable fixture와 `user-copy-policy.test.ts`의 Node type/AST/`ImportMeta.dirname` TypeScript 오류 5건으로 실패했다. 이 실패는 새 OSS shell 구현 실패가 아니라 아직 commit되지 않은 Lumi copy Task 1의 명시적 RED baseline이다. 조사 ledger는 verified 6/unresolved 0/refuted 0, report evaluation은 citation 13/13·orphan 0·leak 0으로 PASS했다. 3개 독립 UX/plan/source→runtime 재리뷰의 최종 미폐쇄 P0/P1은 0건이다.
 
 ## 250. 2026-07-17 Local Media Director Slice 3 Task 18 release closeout
 

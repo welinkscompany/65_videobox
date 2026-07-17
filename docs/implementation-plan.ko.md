@@ -1,6 +1,6 @@
 # VideoBox 실행용 구현 계획서
 
-> 현재 worktree 기준 구현 상태와 next slice 판단은 `## 22. 2026-07-14 Local Media Director implementation plan`을 우선 적용한다. 그 외 상위 milestone/범위/순서 섹션은 제품·구현 계획의 기준을 설명하는 문서다.
+> 현재 worktree 기준 next implementation 판단은 `### 8.4.2 2026-07-17 OSS 앱 셸·편집기 재분석 결정`과 연결된 22-Task 실행 계획을 우선 적용한다. 완료된 Local Media Director 상태는 `## 22`가 authoritative closeout이다. 그 외 상위 milestone/범위/순서 섹션은 제품·구현 계획의 기준을 설명한다.
 > 개발 운영 상위 규칙은 저장소 루트 `AGENTS.md`와 `docs/development-fast-path.ko.md`의 `## 10. 고정 운영 규정`을 프로젝트 전역 기본값으로 적용한다. 즉, 이 계획서를 실행할 때의 작업 우선순위, 선택적 TDD/서브에이전트/리뷰 사용, 표준 검증 경로, hot path 구분, 커밋/푸시, 진행률 보고, turn closeout 형식은 해당 규정을 따른다.
 
 ## 1. 목적
@@ -344,6 +344,29 @@
 - 재분석 gate는 실제 Editor API/headless 상태, 라이선스·의존성 SBOM, 보안, canonical timeline round-trip, CapCut export 영향, GPU fallback을 포함한다.
 - Voice Capture & Narration은 별도 후속 slice다. 브라우저 녹음과 파일 업로드를 narration asset으로 정규화하고, local STT 전사·대본 정렬·자막 생성을 연결한다.
 - voice sample 기반 TTS/voice cloning은 전사와 분리한다. 명시적 opt-in, 원본·전사·샘플의 삭제/보관 정책, preview→apply→undo, review/approval gate를 별도 설계·검증하기 전에는 자동 사용하지 않는다.
+
+### 8.4.2 2026-07-17 OSS 앱 셸·편집기 재분석 결정
+
+Local Media Director 18개 Task와 editing-session revision, source provenance, FFmpeg/PyCapCut output gate가 완료됐으므로 §8.4.1의 OpenCut 재분석 gate를 열었다. 이번 결정은 OpenCut을 제품 dependency로 넣는 승인이 아니라, 검증 가능한 화면·상호작용만 VideoBox 경계 안으로 선별 이식하는 승인이다.
+
+- 조사 보고서: `docs/research/2026-07-17-videobox-oss-dashboard-editor-adoption.ko.md`
+- 설계서: `docs/superpowers/specs/2026-07-17-videobox-oss-dashboard-editor-adoption-design.md`
+- 구현 계획서: `docs/superpowers/plans/2026-07-17-videobox-oss-dashboard-editor-adoption.md`
+- 구현 단위: 7개 slice, 22개 실행 Task
+- production 구현 진행률: 0/22 Task (0%), 잔여 100%
+
+도입 분류는 다음으로 고정한다.
+
+1. `shadcn/ui`: pinned registry source path와 normalized file SHA를 lock한 source-owned component를 직접 사용한다. live registry 결과를 pinned source로 오인하지 않는다.
+2. `shadcn-admin`: sidebar/header/project switcher/settings shell composition만 `partial port`한다.
+3. `OpenCut current rewrite`: 실제 editor가 아직 없으므로 editor runtime 후보에서 제외한다.
+4. `OpenCut classic`: archived source에서 panel layout, asset tabs, inspector registry, pure timeline/preview geometry만 `partial port` 또는 adapter 방식으로 이식한다.
+5. `Opencast Editor`: transcript/subtitle/waveform/cut interaction을 Apache-2.0 attribution과 함께 source-derived behavioral adaptation한다.
+6. `Supabase Studio`: 프로젝트 계층, settings IA, mobile navigation을 `reference only`로 사용한다.
+
+OpenCut EditorCore, IndexedDB/OPFS, browser renderer/export, WASM, browser STT와 Opencast Redux/MUI/full snapshot API/player fork/browser waveform decode는 반입하지 않는다. Supabase source도 직접 복사하지 않는다. editing-session, revision, FFmpeg, PyCapCut, output-source verifier는 계속 authoritative하다.
+
+새 shell은 local/cloud capability slot을 갖지만 실제 SaaS auth/team/billing과 Hermes agent/container는 이번 22개 Task에 넣지 않는다. 먼저 현재 미커밋 Lumi copy 작업을 검증·closeout하고, 세 화면/네 viewport 시각 승인을 받은 뒤 production UI로 진행한다. shell 직후에는 advanced timeline보다 `대본→루미 인터뷰→자산 점검→한 번 승인→atomic real draft→editor/output handoff` 수직 Slice를 먼저 검증한다. browser source audition은 실제 합성 preview가 아니며, current revision의 정확한 미리보기는 기존 FFmpeg composition path를 재사용한 freshness-bound proxy artifact로 고정한다. caption timing은 현 backend 권한에 맞춰 segment-linked로 제한한다.
 
 ## 8.3 구현 완료 시 적용 여부 보고
 
