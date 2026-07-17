@@ -66,9 +66,11 @@ if (-not (Test-Path -LiteralPath $mapPath) -or -not (Test-Path -LiteralPath $loc
 $map = Get-Content -Raw -LiteralPath $mapPath | ConvertFrom-Json
 $lock = Get-Content -Raw -LiteralPath $lockPath | ConvertFrom-Json
 $notices = Get-Content -Raw -LiteralPath $noticesPath
+$packageManifestPath = Join-Path $root 'apps/web/package.json'
+$packageManifest = Get-Content -Raw -LiteralPath $packageManifestPath | ConvertFrom-Json
 $packageLockPath = Join-Path $root 'apps/web/package-lock.json'
 $packageLock = $null
-if (@($lock.generated_items).Count -gt 0 -and (Test-Path -LiteralPath $packageLockPath)) {
+if (Test-Path -LiteralPath $packageLockPath) {
   try {
     # npm lockfiles use an empty package-path key for the workspace root.
     # Windows PowerShell 5 cannot deserialize that key, so rename only the
@@ -77,7 +79,7 @@ if (@($lock.generated_items).Count -gt 0 -and (Test-Path -LiteralPath $packageLo
     $packageLock = $packageLockJson | ConvertFrom-Json
   }
   catch { Add-Error 'apps/web/package-lock.json is not valid JSON' }
-} elseif (@($lock.generated_items).Count -gt 0) { Add-Error 'apps/web/package-lock.json is absent' }
+} else { Add-Error 'apps/web/package-lock.json is absent' }
 
 if (@($map.source_pins).Count -ne 7) { Add-Error 'source_pins must contain exactly seven immutable pins' }
 $seen = @{}
@@ -164,7 +166,13 @@ foreach ($candidate in $productionRoots) {
 foreach ($file in $scanFiles) {
   $content = Get-Content -Raw -LiteralPath $file.FullName
   if ($content -match '(?i)OpenCut-app/OpenCut|@opencut|(?:from\s*|import\s*(?:[^;]*?\s+from\s*)?|require\(\s*)["'']opencut(?:/|["''])|https?://[^"'']*opencut') { Add-Error "rejected OpenCut runtime reference: $($file.FullName)" }
+  if ($content -match '(?i)@supabase/supabase-js|(?:from\s*|import\s*\(\s*|import\s*(?:[^;]*?\s+from\s*)?|require\(\s*)["'']supabase(?:/|["''])|https?://[^"'']*supabase') { Add-Error "reference-only Supabase runtime reference: $($file.FullName)" }
 }
+foreach ($dependencyField in @('dependencies', 'optionalDependencies', 'peerDependencies')) {
+  $declared = $packageManifest.PSObject.Properties[$dependencyField].Value
+  if ($null -ne $declared -and $null -ne $declared.PSObject.Properties['@supabase/supabase-js']) { Add-Error "reference-only Supabase declared dependency: $dependencyField" }
+}
+if ($null -ne $packageLock -and $null -ne $packageLock.PSObject.Properties['packages'] -and $null -ne $packageLock.packages.PSObject.Properties['node_modules/@supabase/supabase-js']) { Add-Error 'reference-only Supabase package-lock dependency' }
 
 if ($errors.Count -gt 0) { throw ("Editor UI provenance verification failed:`n - " + ($errors -join "`n - ")) }
 Write-Output 'Editor UI OSS provenance verification passed.'

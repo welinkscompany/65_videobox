@@ -9,6 +9,7 @@
 - 계획: `docs/superpowers/plans/2026-07-17-videobox-oss-dashboard-editor-adoption.md`; handoff: `docs/handoffs/2026-07-18-videobox-oss-dashboard-editor-adoption-slice-0-task-3-closeout.ko.md`; implementation commit: `a2a3cdc docs: govern editor OSS source adoption`.
 - 7개 source( shadcn-admin, shadcn/ui, OpenCut current/classic, Opencast, Supabase, Pretendard)를 exact commit/path/SHA/license/disposition으로 고정했다. OpenCut current와 Supabase는 reference-only이고, source map·registry/dependency lock·NOTICE·generated-file drift contract가 이를 검증한다.
 - RED는 누락 pin/path/hash/license/test, reference-only local copy, notice, runtime import, generated-file hash drift를 각각 실패시키는 assertion으로 관찰했다. GREEN: `.venv\\Scripts\\python.exe -m pytest -q tests/test_editor_ui_source_provenance.py` `12 passed`, PowerShell provenance verifier pass, production build pass, `git diff --check` pass.
+- source→runtime 역방향 검토가 Supabase reference-only runtime scan의 P1 gap을 확인했다. static/dynamic/require/URL/package manifest/package-lock 검사를 추가해 source-derived 또는 package 기반 Supabase runtime 유입을 막았고, 보완 뒤 focused provenance test는 `13 passed`, PowerShell verifier는 다시 pass했다.
 - 실제 OSS UI code, dependency, Pretendard font binary는 아직 도입하지 않았다. external/Gemini provider call 0과 Hermes/container 미구현 경계도 유지한다. untracked `apps/web/pnpm-lock.yaml`, `apps/web/pnpm-workspace.yaml`은 보존하고 이 Task에서 제외했다.
 - OSS dashboard/editor 누적은 3/22 (13.6%), 잔여 86.4%다. 다음 실행 단위는 Task 4 UI foundation이며, 그 Task의 executable TDD sub-plan과 독립 review가 먼저다.
 

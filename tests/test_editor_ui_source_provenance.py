@@ -403,6 +403,34 @@ def test_independent_verifier_rejects_apache_local_path_without_attribution() ->
         assert run_verifier(root).returncode != 0
     finally:
         temp.cleanup()
+
+
+def test_independent_verifier_rejects_supabase_runtime_and_declared_dependency_references() -> None:
+    for content in ('import "@supabase/supabase-js";\n', 'const x = require("@supabase/supabase-js");\n', 'const lazy = import("supabase");\n', 'const url = "https://cdn.example/supabase";\n'):
+        temp, root = verifier_fixture()
+        try:
+            runtime = root / "apps/web/src/runtime.ts"
+            runtime.parent.mkdir(parents=True, exist_ok=True)
+            runtime.write_text(content, encoding="utf-8")
+            assert run_verifier(root).returncode != 0
+        finally:
+            temp.cleanup()
+    temp, root = verifier_fixture()
+    try:
+        package = read_json(root / "apps/web/package.json")
+        package.setdefault("dependencies", {})["@supabase/supabase-js"] = "2.0.0"
+        write_json(root / "apps/web/package.json", package)
+        assert run_verifier(root).returncode != 0
+    finally:
+        temp.cleanup()
+    temp, root = verifier_fixture()
+    try:
+        package_lock = read_json(root / "apps/web/package-lock.json")
+        package_lock["packages"]["node_modules/@supabase/supabase-js"] = {"version": "2.0.0"}
+        write_json(root / "apps/web/package-lock.json", package_lock)
+        assert run_verifier(root).returncode != 0
+    finally:
+        temp.cleanup()
     temp, root = verifier_fixture()
     try:
         source_map = read_json(root / "docs/oss/editor-ui-source-map.json")
