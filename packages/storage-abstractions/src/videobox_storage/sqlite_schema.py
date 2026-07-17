@@ -89,6 +89,64 @@ PROJECT_SCHEMA_STATEMENTS = (
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS media_analysis_runs (
+        analysis_id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        asset_id TEXT NOT NULL,
+        idempotency_key TEXT NOT NULL UNIQUE,
+        cache_key TEXT NOT NULL,
+        status TEXT NOT NULL,
+        attempt INTEGER NOT NULL DEFAULT 0,
+        progress_percent INTEGER NOT NULL DEFAULT 0,
+        error_code TEXT,
+        error_message TEXT,
+        next_retry_at TEXT,
+        cancel_requested INTEGER NOT NULL DEFAULT 0,
+        result_json TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS media_analysis_cache (
+        cache_id TEXT PRIMARY KEY, project_id TEXT NOT NULL, asset_id TEXT NOT NULL,
+        source_sha256 TEXT NOT NULL, cache_key TEXT NOT NULL, state TEXT NOT NULL,
+        tags_stale INTEGER NOT NULL DEFAULT 0, embedding_stale INTEGER NOT NULL DEFAULT 0,
+        preview_stale INTEGER NOT NULL DEFAULT 0, proposal_index_stale INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL, stale_at TEXT,
+        UNIQUE(project_id, asset_id, source_sha256, cache_key)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS media_scene_windows (
+        scene_window_id TEXT PRIMARY KEY,
+        analysis_id TEXT NOT NULL,
+        source_sha256 TEXT NOT NULL,
+        profile_hash TEXT NOT NULL,
+        start_sec REAL NOT NULL,
+        end_sec REAL NOT NULL,
+        metadata_json TEXT NOT NULL DEFAULT '{}'
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS media_embeddings (
+        embedding_id TEXT PRIMARY KEY,
+        analysis_id TEXT NOT NULL,
+        source_sha256 TEXT NOT NULL,
+        profile_hash TEXT NOT NULL,
+        embedding_json TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS media_analysis_profiles (
+        analysis_id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        profile_json TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS provider_trace_failed_runs (
         job_id TEXT PRIMARY KEY,
         project_id TEXT NOT NULL,
@@ -120,8 +178,79 @@ PROJECT_SCHEMA_STATEMENTS = (
         timeline_id TEXT NOT NULL,
         file_uri TEXT NOT NULL,
         summary_json TEXT NOT NULL,
+        session_revision INTEGER NOT NULL DEFAULT 1,
+        session_json TEXT NOT NULL DEFAULT '{}',
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS director_proposals (
+        proposal_id TEXT PRIMARY KEY, project_id TEXT NOT NULL, status TEXT NOT NULL,
+        source_session_id TEXT NOT NULL, source_script_segment_ids_json TEXT NOT NULL,
+        proposal_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS director_preferences (
+        project_id TEXT PRIMARY KEY, preferences_json TEXT NOT NULL, updated_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS project_media_library_preferences (
+        project_id TEXT PRIMARY KEY, preferences_json TEXT NOT NULL, updated_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS director_asset_index_revisions (
+        project_id TEXT PRIMARY KEY, revision INTEGER NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS director_proposal_revisions (
+        project_id TEXT PRIMARY KEY, revision INTEGER NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS director_proposal_lifecycle_events (
+        event_id INTEGER PRIMARY KEY AUTOINCREMENT, proposal_id TEXT NOT NULL,
+        status TEXT NOT NULL, reason TEXT, changed_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS director_conversations (
+        conversation_id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS director_messages (
+        message_id TEXT PRIMARY KEY,
+        conversation_id TEXT NOT NULL,
+        project_id TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        role TEXT NOT NULL,
+        text TEXT NOT NULL,
+        proposal_id TEXT,
+        metadata_json TEXT NOT NULL DEFAULT '{}',
+        client_message_id TEXT,
+        created_at TEXT NOT NULL,
+        UNIQUE(conversation_id, client_message_id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS director_message_claims (
+        conversation_id TEXT NOT NULL,
+        client_message_id TEXT NOT NULL,
+        project_id TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        user_text TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        owner_token TEXT NOT NULL DEFAULT '', heartbeat_at TEXT NOT NULL DEFAULT '',
+        PRIMARY KEY (conversation_id, client_message_id)
     )
     """,
     """
@@ -130,7 +259,9 @@ PROJECT_SCHEMA_STATEMENTS = (
         project_id TEXT NOT NULL,
         status TEXT NOT NULL,
         approved_at TEXT,
-        updated_at TEXT NOT NULL
+        updated_at TEXT NOT NULL,
+        source_session_revision INTEGER, is_current INTEGER NOT NULL DEFAULT 1,
+        invalidated_at TEXT, invalidated_reason TEXT
     )
     """,
     """
@@ -141,7 +272,9 @@ PROJECT_SCHEMA_STATEMENTS = (
         file_uri TEXT NOT NULL,
         status TEXT NOT NULL,
         summary_json TEXT,
-        created_at TEXT NOT NULL
+        created_at TEXT NOT NULL,
+        source_session_revision INTEGER, is_current INTEGER NOT NULL DEFAULT 1,
+        invalidated_at TEXT, invalidated_reason TEXT
     )
     """,
     """
@@ -153,7 +286,9 @@ PROJECT_SCHEMA_STATEMENTS = (
         file_uri TEXT NOT NULL,
         status TEXT NOT NULL,
         summary_json TEXT,
-        created_at TEXT NOT NULL
+        created_at TEXT NOT NULL,
+        source_session_revision INTEGER, is_current INTEGER NOT NULL DEFAULT 1,
+        invalidated_at TEXT, invalidated_reason TEXT
     )
     """,
     """
@@ -165,7 +300,9 @@ PROJECT_SCHEMA_STATEMENTS = (
         file_uri TEXT NOT NULL,
         status TEXT NOT NULL,
         metadata_json TEXT,
-        created_at TEXT NOT NULL
+        created_at TEXT NOT NULL,
+        source_session_revision INTEGER, is_current INTEGER NOT NULL DEFAULT 1,
+        invalidated_at TEXT, invalidated_reason TEXT
     )
     """,
     """
@@ -188,7 +325,14 @@ PROJECT_SCHEMA_STATEMENTS = (
         segment_id TEXT NOT NULL,
         asset_id TEXT NOT NULL,
         source_text TEXT NOT NULL,
-        created_at TEXT NOT NULL
+        technical_status TEXT NOT NULL DEFAULT 'legacy_unverified',
+        operator_review_status TEXT NOT NULL DEFAULT 'pending',
+        target_duration_sec REAL,
+        actual_duration_sec REAL,
+        failure_code TEXT,
+        created_at TEXT NOT NULL,
+        source_session_revision INTEGER, is_current INTEGER NOT NULL DEFAULT 1,
+        invalidated_at TEXT, invalidated_reason TEXT
     )
     """,
     """

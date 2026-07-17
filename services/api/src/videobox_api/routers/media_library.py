@@ -1,0 +1,167 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from fastapi import APIRouter, HTTPException, status
+from fastapi.responses import FileResponse
+from starlette.background import BackgroundTask
+
+from videobox_api.models import LibraryFavoriteRequest, MaterializeLibraryAssetRequest
+from videobox_storage.local_project_store import LocalProjectStore
+from videobox_storage.media_library_store import MediaLibraryStore
+from videobox_core_engine.project_asset_materializer import ProjectAssetMaterializer
+
+
+def build_media_library_router(
+    project_store: LocalProjectStore, library_store: MediaLibraryStore,
+) -> APIRouter:
+    router = APIRouter()
+    materializer = ProjectAssetMaterializer(project_store)
+
+    @router.get("/api/media-library/install-state")
+    def get_media_library_install_state() -> dict[str, object]:
+        try:
+            return library_store.install_state()
+        except Exception as exc:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="library_unavailable") from exc
+
+    @router.get("/api/media-library/assets")
+    def list_library_assets() -> dict[str, object]:
+        try:
+            assets = library_store.inspect_active_assets()
+        except Exception as exc:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="library_unavailable") from exc
+        return {"assets": [{
+            "library_asset_id": item["library_asset_id"],
+            "asset_id": item["asset_id"],
+            "media_type": item["media_type"],
+            "duration_seconds": item["duration_seconds"],
+            "version": item["version"],
+            "verified": item["verified"],
+            "available": item["available"],
+            "source": item["source"],
+            "creator": item["creator"],
+            "official_license_url": item["official_license_url"],
+            "evidence_timestamp": item["evidence_timestamp"],
+            "tags": item["tags"],
+            "attribution_required": item["attribution_required"],
+            "attribution_text": item["attribution_text"],
+        } for item in assets]}
+
+    @router.get("/api/media-library/favorites")
+    def list_library_favorites() -> dict[str, object]:
+        try:
+            return {"asset_ids": library_store.list_favorites()}
+        except Exception as exc:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="library_unavailable") from exc
+
+    @router.get("/api/media-library/recent")
+    def list_recent_library_usage() -> dict[str, object]:
+        try:
+            return {"asset_ids": library_store.list_recent_usage()}
+        except Exception as exc:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="library_unavailable") from exc
+
+    @router.get("/api/projects/{project_id}/media-library/favorites")
+    def list_project_library_favorites(project_id: str) -> dict[str, object]:
+        _require_project(project_store, project_id)
+        return {"asset_ids": project_store.get_project_media_library_preferences(project_id)["favorite_asset_ids"]}
+
+    @router.get("/api/projects/{project_id}/media-library/recent")
+    def list_project_recent_library_usage(project_id: str) -> dict[str, object]:
+        _require_project(project_store, project_id)
+        return {"asset_ids": project_store.get_project_media_library_preferences(project_id)["recent_asset_ids"]}
+
+    @router.put("/api/projects/{project_id}/media-library/assets/{library_asset_id:path}/favorite")
+    def set_project_library_favorite(
+        project_id: str, library_asset_id: str, payload: LibraryFavoriteRequest,
+    ) -> dict[str, object]:
+        _require_project(project_store, project_id)
+        try:
+            if payload.enabled and library_store.get_verified_asset(library_asset_id=library_asset_id) is None:
+                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="asset_missing")
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="library_unavailable") from exc
+        preferences = project_store.set_project_media_library_favorite(
+            project_id=project_id, library_asset_id=library_asset_id, enabled=payload.enabled,
+        )
+        return {"asset_ids": preferences["favorite_asset_ids"]}
+
+    @router.put("/api/media-library/assets/{library_asset_id:path}/favorite")
+    def set_library_favorite(library_asset_id: str, payload: LibraryFavoriteRequest) -> dict[str, object]:
+        try:
+            if payload.enabled and library_store.get_verified_asset(library_asset_id=library_asset_id) is None:
+                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="asset_missing")
+            library_store.set_favorite(library_asset_id=library_asset_id, enabled=payload.enabled)
+            return {"asset_ids": library_store.list_favorites()}
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="library_unavailable") from exc
+
+    @router.get("/api/media-library/assets/{library_asset_id:path}/preview")
+    def preview_library_asset(library_asset_id: str):
+        try:
+            snapshot = library_store.snapshot_verified_asset(library_asset_id=library_asset_id)
+        except (FileNotFoundError, OSError, ValueError):
+            snapshot = None
+        except Exception as exc:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="library_unavailable") from exc
+        if snapshot is None:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="asset_missing")
+        _, snapshot_path = snapshot
+        return FileResponse(
+            snapshot_path,
+            media_type=_mime_type(snapshot_path),
+            background=BackgroundTask(library_store.remove_verified_snapshot, snapshot_path),
+        )
+
+    @router.post(
+        "/api/media-library/assets/{library_asset_id:path}/materialize",
+        status_code=status.HTTP_201_CREATED,
+    )
+    def materialize_library_asset(
+        library_asset_id: str, payload: MaterializeLibraryAssetRequest,
+    ) -> dict[str, object]:
+        try:
+            snapshot = library_store.snapshot_verified_asset(library_asset_id=library_asset_id)
+        except (FileNotFoundError, OSError, ValueError):
+            snapshot = None
+        except Exception as exc:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="library_unavailable") from exc
+        if snapshot is None:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="asset_missing")
+
+        asset, snapshot_path = snapshot
+        try:
+            result = materializer.materialize_verified_library_snapshot(
+                project_id=payload.project_id, library_asset_id=library_asset_id,
+                library_asset=asset, snapshot_path=snapshot_path, mime_type=_mime_type(snapshot_path),
+            )
+        except (FileNotFoundError, KeyError, ValueError) as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="asset_missing") from exc
+        finally:
+            library_store.remove_verified_snapshot(snapshot_path)
+
+        # Library usage is a postcondition: failed project registration must not
+        # mutate the global library's recent/favorite state.
+        library_store.mark_recent_usage(library_asset_id=library_asset_id)
+        project_store.mark_project_media_library_recent(
+            project_id=payload.project_id, library_asset_id=library_asset_id,
+        )
+        return result
+
+    return router
+
+
+def _mime_type(path: Path) -> str | None:
+    return {".mp3": "audio/mpeg", ".wav": "audio/wav"}.get(path.suffix.lower())
+
+
+def _require_project(project_store: LocalProjectStore, project_id: str) -> None:
+    try:
+        project_store.get_project(project_id=project_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project_missing") from exc

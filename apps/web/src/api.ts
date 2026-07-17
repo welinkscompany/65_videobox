@@ -32,7 +32,74 @@ export type BrollBatchImportRequest = {
   source_paths: string[];
   source_directory?: string;
   tags: string[];
+  recursive?: boolean;
 };
+
+export type BrollBatchImportResponse = {
+  assets: BrollAsset[];
+  analysis_jobs: MediaAnalysis[];
+  failures: { source_path: string; reason: string }[];
+};
+
+export type MediaAnalysis = {
+  analysis_id: string;
+  asset_id: string;
+  status: string;
+  progress_percent: number;
+  queue_position: number | null;
+  error_code: string | null;
+  error_message: string | null;
+  result: Record<string, unknown> | null;
+  created_at: string;
+};
+
+export type DirectorProposalCreateRequest = { session_id: string; expires_at?: string };
+export type DirectorPreferences = { pin_asset?: string[]; exclude_asset?: string[]; exclude_creator?: string[]; exclude_tag?: string[] };
+export type DirectorReference = { reference_code: string; immutable_id: string | { segment_id: string; track_type: string }; source: string };
+export type DirectorCandidate = {
+  candidate_id: string;
+  visible_reference_code: string;
+  media_type: string;
+  asset_id: string;
+  library_asset_id: string | null;
+  reason_chips: string[];
+  scores: Record<string, number>;
+  availability: string;
+  review_status: string;
+  preview_uri: string | null;
+  controls: Record<string, unknown>;
+  expected_content_sha256: string | null;
+  media_revision: string;
+  canonical_metadata: Record<string, unknown>;
+  license_policy: string;
+  warning_provenance: string[];
+};
+export type DirectorProposalDiff = Record<string, unknown>;
+export type DirectorApplyScope = "all" | "broll_only" | "selected_references";
+export type DirectorProposal = {
+  proposal_id: string;
+  revision_code: string;
+  revision: number;
+  base_session_revision: number;
+  asset_index_revision: number;
+  source_session_id: string;
+  target_segment_ids: string[];
+  source_script_segment_ids: string[];
+  status: string;
+  diff: DirectorProposalDiff;
+  expires_at: string | null;
+  candidates: DirectorCandidate[];
+};
+export type DirectorProposalPreflight = { proposal_id?: string; status?: string; code?: "stale_proposal"; stale_reasons?: string[]; action?: "refresh"; diff?: DirectorProposalDiff };
+export type ApplyDirectorProposalResponse = EditingSession;
+export type DirectorConversation = { conversation_id: string; project_id: string; session_id: string };
+export type DirectorMessage = { message_id: string; conversation_id: string; project_id: string; session_id: string; role: "user" | "assistant" | string; text: string; proposal_id: string | null; metadata: Record<string, unknown>; client_message_id: string | null; created_at: string };
+export type DirectorActionIntent = { action: string; target: DirectorReference; proposal_preflight: Record<string, string | number> | null };
+export type DirectorMessageExchange = { user_message: DirectorMessage; assistant_message: DirectorMessage; disambiguation?: { status: string; options: DirectorReference[] } | null; reference?: DirectorReference | null; action_intent?: DirectorActionIntent | null };
+export type DirectorMessageSubmitRequest = { session_id: string; client_message_id: string; text: string };
+export type DirectorMessageSendResult = { kind: "exchange"; exchange: DirectorMessageExchange } | { kind: "in_progress"; retryAfterSeconds: number };
+export type DirectorReloadState = { conversation: DirectorConversation | null; messages: DirectorMessage[]; proposal: DirectorProposal | null; references: DirectorReference[] };
+export type ArtifactFreshness = { source_session_revision: number; is_current?: boolean; invalidated_at?: string | null; invalidated_reason?: string | null };
 
 export type TimelineClip = {
   clip_id: string;
@@ -119,10 +186,37 @@ export type EditingSessionSegment = {
   broll_override: Record<string, unknown> | null;
   visual_overlays: Record<string, unknown>[];
   music_override: Record<string, unknown> | null;
+  sfx_override?: Record<string, unknown> | null;
   tts_replacement: Record<string, unknown> | null;
+  caption_style?: CaptionStyleSnapshot | null;
+};
+
+export type CaptionStyleSnapshot = Record<string, unknown>;
+
+export type CaptionStyleScope =
+  | 'current_caption'
+  | 'selected_captions'
+  | 'from_current'
+  | 'whole_project'
+  | 'project_default';
+
+export type CaptionStyleMutationRequest = {
+  expected_revision: number;
+  scope: CaptionStyleScope;
+  segment_ids: string[];
+  style: CaptionStyleSnapshot;
+};
+
+export type CaptionStyleScopePreflight = {
+  affected_segment_ids: string[];
 };
 
 export type EditingSessionHistoryEntry = {
+  action_id?: string;
+  label?: string;
+  created_at?: string;
+  reversible?: boolean;
+  blocked_reason?: string | null;
   mutation_type: string;
   segment_id: string;
   caption_text?: string | null;
@@ -130,14 +224,20 @@ export type EditingSessionHistoryEntry = {
   asset_id?: string | null;
   overlay_type?: string | null;
   recommendation_id?: string | null;
+  inverse_payload?: Record<string, unknown> | null;
+  forward_payload?: Record<string, unknown> | null;
 };
 
 export type EditingSession = {
   session_id: string;
   project_id: string;
   timeline_id: string;
+  session_revision: number;
+  caption_style?: CaptionStyleSnapshot | null;
   segments: EditingSessionSegment[];
   history: EditingSessionHistoryEntry[];
+  undo_count?: number;
+  redo_count?: number;
   created_at?: string | null;
   updated_at?: string | null;
 };
@@ -146,45 +246,80 @@ export type CreateEditingSessionRequest = {
   timeline_job_id: string;
 };
 
-export type CaptionOverrideRequest = {
+export type EditorPreset = {
+  preset_id: string;
+  name: string;
+  scope: "built_in" | "project" | "global";
+  style: CaptionStyleSnapshot;
+};
+
+export type EditorFavorite = {
+  favorite_id: string;
+  favorite_type: "media" | "preset";
+};
+
+type RevisionedEditingSessionMutation = {
+  expected_revision: number;
+};
+
+export type SegmentSplitRequest = RevisionedEditingSessionMutation & { split_sec: number };
+export type SegmentBoundsRequest = RevisionedEditingSessionMutation & { start_sec: number; end_sec: number };
+export type SegmentOrderRequest = RevisionedEditingSessionMutation & {
+  segment_ids: string[];
+  bounds_by_id?: Record<string, { start_sec: number; end_sec: number }>;
+};
+export type FixedTimeline = {
+  tracks: Array<{ role: "narration" | "broll" | "bgm" | "sfx" | "overlay"; clips: Record<string, unknown>[] }>;
+};
+export type SelectedRangePreview = {
+  start_sec: number;
+  end_sec: number;
+  captions: Array<{ segment_id: string; caption_text: string; caption_style: CaptionStyleSnapshot }>;
+  overlays: Array<Record<string, unknown>>;
+  timeline: FixedTimeline;
+};
+
+export type CaptionOverrideRequest = RevisionedEditingSessionMutation & {
   caption_text: string;
 };
 
-export type CutActionOverrideRequest = {
+export type CutActionOverrideRequest = RevisionedEditingSessionMutation & {
   cut_action: string;
 };
 
-export type BrollOverrideRequest = {
+export type BrollOverrideRequest = RevisionedEditingSessionMutation & {
   asset_id: string;
+  media_controls?: Record<string, unknown>;
 };
 
-export type MusicOverrideRequest = {
+export type MusicOverrideRequest = RevisionedEditingSessionMutation & {
   asset_id: string;
+  media_controls?: Record<string, unknown>;
 };
 
-export type ExplanationCardRequest = {
+export type ExplanationCardRequest = RevisionedEditingSessionMutation & {
   title: string;
   body: string;
   text: string;
 };
 
-export type ImageOverlayRequest = {
+export type ImageOverlayRequest = RevisionedEditingSessionMutation & {
   asset_id: string;
   text: string;
 };
 
-export type TableOverlayRequest = {
+export type TableOverlayRequest = RevisionedEditingSessionMutation & {
   columns: string[];
   rows: string[][];
   text: string;
 };
 
-export type TtsReplacementRequest = {
+export type TtsReplacementRequest = RevisionedEditingSessionMutation & {
   recommendation_id: string;
   asset_id: string;
 };
 
-export type PartialRegenerationRequest = {
+export type PartialRegenerationRequest = RevisionedEditingSessionMutation & {
   segment_ids: string[];
   fields: string[];
 };
@@ -350,6 +485,40 @@ export type TtsCandidateRequest = {
   segment_text: string;
   voice_sample_asset_id: string;
   segment_id?: string;
+  target_duration_sec?: number;
+};
+
+export type MediaLibraryAsset = {
+  library_asset_id: string;
+  asset_id: string;
+  media_type: "music" | "sfx";
+  duration_seconds: number;
+  version: string;
+  verified: boolean;
+  available: boolean;
+  tags: string[];
+  source: string;
+  creator: string;
+  official_license_url: string;
+  evidence_timestamp?: string;
+  attribution_required: boolean;
+  attribution_text: string;
+};
+
+export type MediaLibraryInstallState = {
+  status: "not_installed" | "installed" | "degraded";
+  installed_asset_count: number;
+};
+
+export type TtsCandidateResponse = AssetResponse & {
+  candidate_id?: string | null;
+  segment_id?: string | null;
+  source_text?: string | null;
+  technical_status: string;
+  operator_review_status: string;
+  target_duration_sec?: number | null;
+  actual_duration_sec?: number | null;
+  failure_code?: string | null;
 };
 
 export type TtsCandidateRecord = {
@@ -358,6 +527,11 @@ export type TtsCandidateRecord = {
   segment_id: string;
   asset_id: string;
   source_text: string;
+  technical_status: string;
+  operator_review_status: string;
+  target_duration_sec?: number | null;
+  actual_duration_sec?: number | null;
+  failure_code?: string | null;
   created_at: string;
 };
 
@@ -373,7 +547,14 @@ export type FinalRenderArtifact = {
 export type FinalRenderJob = {
   job_id: string;
   status: string;
-  render: FinalRenderArtifact;
+  render: FinalRenderArtifact | null;
+  error_message?: string | null;
+};
+
+export type RegisteredAsset = {
+  asset_id: string;
+  asset_type: string;
+  storage_uri: string;
 };
 
 export type CapCutDraftExportArtifact = {
@@ -383,28 +564,177 @@ export type CapCutDraftExportArtifact = {
   file_uri: string;
   status: string;
   created_at?: string | null;
+  notes: string[];
+  handoff?: CapCutDraftHandoff | null;
+};
+
+export type CapCutDraftHandoff = {
+  status: string;
+  source_file_uri: string;
+  registered_project_path?: string | null;
+  error_message?: string | null;
+  registered_at?: string | null;
+  reused: boolean;
+};
+
+export type CapCutHandoffDiagnostics = {
+  status: string;
+  installation_path?: string | null;
+  detected_version?: string | null;
+  is_supported: boolean;
+  project_root_path: string;
+  project_root_exists: boolean;
+  write_access: boolean;
+  recovery_message?: string | null;
+  checked_at: string;
 };
 
 export type CapCutDraftExportJob = {
   job_id: string;
   status: string;
-  export: CapCutDraftExportArtifact;
+  export: CapCutDraftExportArtifact | null;
+  error_message?: string | null;
 };
+
+export class ApiConflictError<T> extends Error {
+  constructor(public readonly latestSession: T, public readonly path: string) {
+    super(`Editing session conflict: ${path}`);
+    this.name = "ApiConflictError";
+  }
+}
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, init);
   if (!response.ok) {
+    if (response.status === 409) {
+      const payload = (await response.json()) as { latest_session?: T };
+      if (payload.latest_session !== undefined) {
+        throw new ApiConflictError(payload.latest_session, path);
+      }
+    }
     throw new Error(`Request failed: ${path} (${response.status})`);
   }
   return (await response.json()) as T;
 }
 
+async function sendDirectorMessageRequest(path: string, payload: DirectorMessageSubmitRequest): Promise<DirectorMessageSendResult> {
+  const response = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+  if (response.status === 202) {
+    const retryAfterSeconds = Number(response.headers.get("Retry-After") ?? "1");
+    return { kind: "in_progress", retryAfterSeconds: Number.isFinite(retryAfterSeconds) ? retryAfterSeconds : 1 };
+  }
+  if (!response.ok) throw new Error(`Request failed: ${path} (${response.status})`);
+  return { kind: "exchange", exchange: (await response.json()) as DirectorMessageExchange };
+}
+
+async function preflightDirectorProposalRequest(path: string): Promise<DirectorProposalPreflight> {
+  const response = await fetch(path, { method: "POST" });
+  const payload = (await response.json()) as DirectorProposalPreflight;
+  if (response.status === 409 && (payload.code === "stale_proposal" || payload.status === "stale")) return { ...payload, status: "stale", code: "stale_proposal" };
+  if (!response.ok) throw new Error(`Request failed: ${path} (${response.status})`);
+  return payload;
+}
+
 export const api = {
+  reloadDirectorSession: (projectId: string, sessionId: string) =>
+    request<DirectorReloadState>(`/api/projects/${projectId}/director/sessions/${sessionId}/reload`),
+  createDirectorConversation: (projectId: string, payload: { session_id: string }) =>
+    request<DirectorConversation>(`/api/projects/${projectId}/director/conversations`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+  listDirectorMessages: async (projectId: string, conversationId: string, sessionId: string): Promise<DirectorMessage[]> =>
+    (await request<{ messages: DirectorMessage[] }>(`/api/projects/${projectId}/director/conversations/${conversationId}/messages?session_id=${encodeURIComponent(sessionId)}`)).messages,
+  sendDirectorMessage: (projectId: string, conversationId: string, payload: DirectorMessageSubmitRequest) =>
+    sendDirectorMessageRequest(`/api/projects/${projectId}/director/conversations/${conversationId}/messages`, payload),
+  prepareDirectorMessage: (projectId: string, conversationId: string, payload: DirectorMessageSubmitRequest) => {
+    const submit = () => sendDirectorMessageRequest(`/api/projects/${projectId}/director/conversations/${conversationId}/messages`, payload);
+    return { clientMessageId: payload.client_message_id, send: submit, retry: submit };
+  },
+  applyDirectorProposal: (projectId: string, proposalId: string, payload: { candidate_ids: string[]; expected_revision: number }) =>
+    request<ApplyDirectorProposalResponse>(`/api/projects/${projectId}/director/proposals/${proposalId}/apply`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ candidate_ids: payload.candidate_ids, expected_revision: payload.expected_revision }) }),
+  batchApplyDirectorProposal: (projectId: string, proposalId: string, payload: { candidate_ids: string[]; expected_revision: number }) =>
+    request<ApplyDirectorProposalResponse>(`/api/projects/${projectId}/director/proposals/${proposalId}/batch-apply`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+  materializeDirectorCandidate: (projectId: string, proposalId: string, candidateId: string) =>
+    request<AssetResponse>(`/api/projects/${projectId}/director/proposals/${proposalId}/candidates/${encodeURIComponent(candidateId)}/materialize`, { method: "POST" }),
+  directorCandidatePreviewUrl: (projectId: string, proposalId: string, candidateId: string) =>
+    `/api/projects/${projectId}/director/proposals/${proposalId}/candidates/${encodeURIComponent(candidateId)}/preview`,
+  createDirectorProposal: (projectId: string, payload: DirectorProposalCreateRequest) =>
+    request<DirectorProposal>(`/api/projects/${projectId}/director/proposals`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+  getDirectorProposal: (projectId: string, proposalId: string) =>
+    request<DirectorProposal>(`/api/projects/${projectId}/director/proposals/${proposalId}`),
+  preflightDirectorProposal: (projectId: string, proposalId: string) =>
+    preflightDirectorProposalRequest(`/api/projects/${projectId}/director/proposals/${proposalId}/preflight`),
+  refreshDirectorProposal: (projectId: string, proposalId: string) =>
+    request<DirectorProposal>(`/api/projects/${projectId}/director/proposals/${proposalId}/refresh`, { method: "POST" }),
+  getDirectorPreferences: (projectId: string) => request<DirectorPreferences>(`/api/projects/${projectId}/director/preferences`),
+  updateDirectorPreferences: (projectId: string, payload: DirectorPreferences) =>
+    request<DirectorPreferences>(`/api/projects/${projectId}/director/preferences`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+  getMediaLibraryInstallState: () => request<MediaLibraryInstallState>("/api/media-library/install-state"),
+  listMediaLibraryAssets: () => request<{ assets: MediaLibraryAsset[] }>("/api/media-library/assets"),
+  listMediaLibraryFavorites: () => request<{ asset_ids: string[] }>("/api/media-library/favorites"),
+  listRecentMediaLibraryAssetIds: () => request<{ asset_ids: string[] }>("/api/media-library/recent"),
+  setMediaLibraryFavorite: (libraryAssetId: string, enabled: boolean) =>
+    request<{ asset_ids: string[] }>(`/api/media-library/assets/${encodeURIComponent(libraryAssetId)}/favorite`, {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled }),
+    }),
+  listProjectMediaLibraryFavorites: (projectId: string) =>
+    request<{ asset_ids: string[] }>(`/api/projects/${projectId}/media-library/favorites`),
+  listProjectRecentMediaLibraryAssetIds: (projectId: string) =>
+    request<{ asset_ids: string[] }>(`/api/projects/${projectId}/media-library/recent`),
+  setProjectMediaLibraryFavorite: (projectId: string, libraryAssetId: string, enabled: boolean) =>
+    request<{ asset_ids: string[] }>(`/api/projects/${projectId}/media-library/assets/${encodeURIComponent(libraryAssetId)}/favorite`, {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled }),
+    }),
+  materializeMediaLibraryAsset: (libraryAssetId: string, projectId: string) =>
+    request<AssetResponse>(`/api/media-library/assets/${encodeURIComponent(libraryAssetId)}/materialize`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project_id: projectId }),
+    }),
+  mediaLibraryPreviewUrl: (libraryAssetId: string) =>
+    `/api/media-library/assets/${encodeURIComponent(libraryAssetId)}/preview`,
+  listEditorPresets: (projectId: string) =>
+    request<EditorPreset[]>(`/api/projects/${projectId}/editor-library/presets`),
+  listEditorFavorites: (projectId: string) =>
+    request<EditorFavorite[]>(`/api/projects/${projectId}/editor-library/favorites`),
+  listRecentEditorPresetIds: (projectId: string) =>
+    request<string[]>(`/api/projects/${projectId}/editor-library/recent-presets`),
+  markRecentEditorPreset: (projectId: string, presetId: string) =>
+    request<string[]>(`/api/projects/${projectId}/editor-library/recent-presets/${presetId}`, {
+      method: "PUT",
+    }),
+  toggleEditorFavorite: (
+    projectId: string,
+    favoriteId: string,
+    payload: { favorite_type: EditorFavorite["favorite_type"]; enabled: boolean },
+  ) =>
+    request<EditorFavorite & { enabled: boolean }>(
+      `/api/projects/${projectId}/editor-library/favorites/${favoriteId}`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      },
+    ),
+  createProject: (payload: { name: string }) =>
+    request<Project>("/api/projects", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
   listProjects: async (): Promise<Project[]> => {
     const payload = await request<{ projects: Project[] }>("/api/projects");
     return payload.projects;
   },
   getProject: (projectId: string) => request<Project>(`/api/projects/${projectId}`),
+  registerNarrationAudio: (projectId: string, payload: { source_path: string }) =>
+    request<RegisteredAsset>(`/api/projects/${projectId}/assets/narration-audio`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+  registerScriptDocument: (projectId: string, payload: { source_path: string }) =>
+    request<RegisteredAsset>(`/api/projects/${projectId}/assets/script-document`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
   listBrollAssets: async (projectId: string): Promise<BrollAsset[]> => {
     const payload = await request<{ assets: BrollAsset[] }>(
       `/api/projects/${projectId}/assets/broll-video`,
@@ -414,8 +744,8 @@ export const api = {
   importBrollBatch: async (
     projectId: string,
     payload: BrollBatchImportRequest,
-  ): Promise<BrollAsset[]> => {
-    const response = await request<{ assets: BrollAsset[] }>(
+  ): Promise<BrollBatchImportResponse> => {
+    return request<BrollBatchImportResponse>(
       `/api/projects/${projectId}/assets/broll-video/batch`,
       {
         method: "POST",
@@ -425,7 +755,6 @@ export const api = {
         body: JSON.stringify(payload),
       },
     );
-    return response.assets;
   },
   listJobs: async (projectId: string): Promise<JobRecord[]> => {
     const payload = await request<{ jobs: JobRecord[] }>(`/api/projects/${projectId}/jobs`);
@@ -512,6 +841,59 @@ export const api = {
     }
     return (await response.json()) as EditingSession;
   },
+  listMediaAnalysis: (projectId: string) => request<{ items: MediaAnalysis[] }>(`/api/projects/${projectId}/media-analysis`),
+  cancelMediaAnalysis: (projectId: string, analysisId: string) => request<MediaAnalysis>(`/api/projects/${projectId}/media-analysis/${analysisId}/cancel`, { method: "POST" }),
+  retryMediaAnalysis: (projectId: string, analysisId: string) => request<MediaAnalysis>(`/api/projects/${projectId}/media-analysis/${analysisId}/retry`, { method: "POST" }),
+  reviewMediaAnalysis: (projectId: string, analysisId: string, tags: Record<string, string[]>) => request<MediaAnalysis>(`/api/projects/${projectId}/media-analysis/${analysisId}/review`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tags }) }),
+  mediaAnalysisPreview: (projectId: string, assetId: string) => request<{ analysis_id: string; preview: unknown }>(`/api/projects/${projectId}/assets/${assetId}/analysis-preview`),
+  getEditingSessionFixedTimeline: (projectId: string, sessionId: string) =>
+    request<FixedTimeline>(`/api/projects/${projectId}/editing-sessions/${sessionId}/fixed-timeline`),
+  previewEditingSessionSelectedRange: (projectId: string, sessionId: string, payload: { start_sec: number; end_sec: number }) =>
+    request<SelectedRangePreview>(`/api/projects/${projectId}/editing-sessions/${sessionId}/selected-range-preview`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+    }),
+  splitEditingSessionSegment: (projectId: string, sessionId: string, segmentId: string, payload: SegmentSplitRequest) =>
+    request<EditingSession>(`/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/split`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+    }),
+  mergeEditingSessionSegments: (projectId: string, sessionId: string, payload: RevisionedEditingSessionMutation & { left_segment_id: string; right_segment_id: string }) =>
+    request<EditingSession>(`/api/projects/${projectId}/editing-sessions/${sessionId}/segments/merge`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+    }),
+  updateEditingSessionSegmentBounds: (projectId: string, sessionId: string, segmentId: string, payload: SegmentBoundsRequest) =>
+    request<EditingSession>(`/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/bounds`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+    }),
+  reorderEditingSessionSegments: (projectId: string, sessionId: string, payload: SegmentOrderRequest) =>
+    request<EditingSession>(`/api/projects/${projectId}/editing-sessions/${sessionId}/segment-order`, {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+    }),
+  undoEditingSession: (projectId: string, sessionId: string, expectedRevision: number) =>
+    request<EditingSession>(`/api/projects/${projectId}/editing-sessions/${sessionId}/undo`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ expected_revision: expectedRevision }),
+    }),
+  redoEditingSession: (projectId: string, sessionId: string, expectedRevision: number) =>
+    request<EditingSession>(`/api/projects/${projectId}/editing-sessions/${sessionId}/redo`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ expected_revision: expectedRevision }),
+    }),
+  previewEditingSessionCaptionStyleScope: (
+    projectId: string,
+    sessionId: string,
+    payload: CaptionStyleMutationRequest,
+  ) =>
+    request<CaptionStyleScopePreflight>(
+      `/api/projects/${projectId}/editing-sessions/${sessionId}/caption-style/preflight`,
+      { method: 'POST', headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) },
+    ),
+  updateEditingSessionCaptionStyle: (
+    projectId: string,
+    sessionId: string,
+    payload: CaptionStyleMutationRequest,
+  ) =>
+    request<EditingSession>(
+      `/api/projects/${projectId}/editing-sessions/${sessionId}/caption-style`,
+      { method: 'PATCH', headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) },
+    ),
   updateEditingSessionCaption: (
     projectId: string,
     sessionId: string,
@@ -564,9 +946,10 @@ export const api = {
     projectId: string,
     sessionId: string,
     segmentId: string,
+    expectedRevision: number,
   ) =>
     request<EditingSession>(
-      `/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/broll`,
+      `/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/broll?expected_revision=${expectedRevision}`,
       {
         method: "DELETE",
       },
@@ -591,12 +974,37 @@ export const api = {
     projectId: string,
     sessionId: string,
     segmentId: string,
+    expectedRevision: number,
   ) =>
     request<EditingSession>(
-      `/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/music`,
+      `/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/music?expected_revision=${expectedRevision}`,
       {
         method: "DELETE",
       },
+    ),
+  updateEditingSessionSfxOverride: (
+    projectId: string,
+    sessionId: string,
+    segmentId: string,
+    payload: BrollOverrideRequest,
+  ) =>
+    request<EditingSession>(
+      `/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/sfx`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      },
+    ),
+  clearEditingSessionSfxOverride: (
+    projectId: string,
+    sessionId: string,
+    segmentId: string,
+    expectedRevision: number,
+  ) =>
+    request<EditingSession>(
+      `/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/sfx?expected_revision=${expectedRevision}`,
+      { method: "DELETE" },
     ),
   updateEditingSessionExplanationCard: (
     projectId: string,
@@ -618,9 +1026,10 @@ export const api = {
     projectId: string,
     sessionId: string,
     segmentId: string,
+    expectedRevision: number,
   ) =>
     request<EditingSession>(
-      `/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/explanation-card`,
+      `/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/explanation-card?expected_revision=${expectedRevision}`,
       {
         method: "DELETE",
       },
@@ -645,9 +1054,10 @@ export const api = {
     projectId: string,
     sessionId: string,
     segmentId: string,
+    expectedRevision: number,
   ) =>
     request<EditingSession>(
-      `/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/image-overlay`,
+      `/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/image-overlay?expected_revision=${expectedRevision}`,
       {
         method: "DELETE",
       },
@@ -672,9 +1082,10 @@ export const api = {
     projectId: string,
     sessionId: string,
     segmentId: string,
+    expectedRevision: number,
   ) =>
     request<EditingSession>(
-      `/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/table-overlay`,
+      `/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/table-overlay?expected_revision=${expectedRevision}`,
       {
         method: "DELETE",
       },
@@ -699,9 +1110,10 @@ export const api = {
     projectId: string,
     sessionId: string,
     segmentId: string,
+    expectedRevision: number,
   ) =>
     request<EditingSession>(
-      `/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/tts-replacement`,
+      `/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/tts-replacement?expected_revision=${expectedRevision}`,
       {
         method: "DELETE",
       },
@@ -709,7 +1121,7 @@ export const api = {
   previewPartialRegeneration: (
     projectId: string,
     sessionId: string,
-    payload: PartialRegenerationRequest,
+    payload: Omit<PartialRegenerationRequest, "expected_revision">,
   ) =>
     request<PartialRegenerationPreflight>(
       `/api/projects/${projectId}/editing-sessions/${sessionId}/partial-regeneration/preflight`,
@@ -795,8 +1207,22 @@ export const api = {
       },
       body: JSON.stringify(payload),
     }),
+  uploadVoiceSample: (projectId: string, file: File) => {
+    const payload = new FormData();
+    payload.append("file", file);
+    return request<AssetResponse>(`/api/projects/${projectId}/assets/voice-sample/upload`, {
+      method: "POST",
+      body: payload,
+    });
+  },
+  listVoiceSamples: async (projectId: string): Promise<AssetResponse[]> => {
+    const payload = await request<{ assets: AssetResponse[] }>(
+      `/api/projects/${projectId}/assets/voice-sample`,
+    );
+    return payload.assets;
+  },
   generateTtsCandidate: (projectId: string, payload: TtsCandidateRequest) =>
-    request<AssetResponse>(`/api/projects/${projectId}/tts-candidates`, {
+    request<TtsCandidateResponse>(`/api/projects/${projectId}/tts-candidates`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -806,6 +1232,17 @@ export const api = {
   listTtsCandidates: (projectId: string, segmentId: string) =>
     request<{ candidates: TtsCandidateRecord[] }>(
       `/api/projects/${projectId}/segments/${segmentId}/tts-candidates`,
+    ),
+  reviewTtsCandidate: (projectId: string, candidateId: string, decision: "approved" | "rejected") =>
+    request<TtsCandidateRecord>(
+      `/api/projects/${projectId}/tts-candidates/${candidateId}/listening-review`,
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ decision }),
+      },
     ),
   assetContentUrl: (projectId: string, assetId: string) =>
     `/api/projects/${projectId}/assets/${assetId}/content`,
@@ -834,6 +1271,12 @@ export const api = {
     ),
   getCapcutDraftExport: (projectId: string, jobId: string) =>
     request<CapCutDraftExportJob>(`/api/projects/${projectId}/capcut-draft-exports/${jobId}`),
+  registerCapcutDraftHandoff: (projectId: string, jobId: string) =>
+    request<{ handoff: CapCutDraftHandoff }>(
+      `/api/projects/${projectId}/capcut-draft-exports/${jobId}/handoff`,
+      { method: "POST" },
+    ),
+  getCapcutHandoffDiagnostics: () => request<CapCutHandoffDiagnostics>("/api/capcut/handoff-diagnostics"),
   retryJob: (projectId: string, jobId: string) =>
     request<{ job_id: string; status: string }>(`/api/projects/${projectId}/jobs/${jobId}/retry`, {
       method: "POST",

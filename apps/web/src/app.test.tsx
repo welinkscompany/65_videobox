@@ -4,12 +4,16 @@ import { App } from "./App";
 import type {
   BrollAsset,
   EditingSession,
+  JobRecord,
   PartialRegenerationPreflight,
   RecommendationItem,
   ReviewSnapshot,
   TimelineJob,
   TimelinePayload,
+  TtsCandidateRecord,
 } from "./api";
+
+type JobFixture = Omit<JobRecord, "project_id">;
 
 const projectsResponse = {
   projects: [
@@ -29,7 +33,19 @@ const projectResponse = {
   root_storage_uri: "local://projects/project_001",
 };
 
-const jobsResponse = {
+const capcutDiagnosticsReadyResponse = {
+  status: "ready",
+  installation_path: "C:/Users/operator/AppData/Local/CapCut/Apps/8.9.1.3802/CapCut.exe",
+  detected_version: "8.9.1.3802",
+  is_supported: true,
+  project_root_path: "C:/Users/operator/AppData/Local/CapCut/User Data/Projects/com.lveditor.draft",
+  project_root_exists: true,
+  write_access: true,
+  recovery_message: null,
+  checked_at: "2026-07-13T00:00:00Z",
+};
+
+const jobsResponse: { jobs: JobFixture[] } = {
   jobs: [
     {
       job_id: "transcription_job_001",
@@ -265,6 +281,7 @@ const editingSessionResponse = {
   project_id: "project_001",
   timeline_id: "timeline_001",
   session_id: "editing_session_001",
+  session_revision: 1,
   created_at: "2026-06-28T00:00:14Z",
   updated_at: "2026-06-28T00:00:17Z",
   segments: [
@@ -623,11 +640,24 @@ function createFetchMock({
   candidateReviewStatus,
   candidatePreflightStatus,
   editingMutationStatus,
+  editingMutationConflictSession,
   reviewSnapshot = reviewSnapshotResponse,
   candidateReviewSnapshot = candidateReviewSnapshotResponse,
   partialRegenerationResult = partialRegenerationResultResponse,
   partialRegenerationPreflight = partialRegenerationPreflightResponse,
   jobs = jobsResponse,
+  finalRenderResult,
+  capcutDraftResult,
+  capcutDraftResults,
+  capcutHandoffResult,
+  capcutDiagnostics = capcutDiagnosticsReadyResponse,
+  capcutDiagnosticsResponses,
+  ttsCandidates = [],
+  ttsListeningReviewStatuses,
+  voiceSampleUploadStatus,
+  voiceSamples = { assets: [] },
+  mediaLibraryAssets = [],
+  mediaLibraryUnavailable = false,
 }: {
   geminiKeys?: { keys: Array<Record<string, unknown>> };
   brollAssets?: { assets: BrollAsset[] };
@@ -640,32 +670,106 @@ function createFetchMock({
   candidateReviewStatus?: number;
   candidatePreflightStatus?: number;
   editingMutationStatus?: number;
+  editingMutationConflictSession?: EditingSession;
   reviewSnapshot?: ReviewSnapshot;
   candidateReviewSnapshot?: ReviewSnapshot;
   partialRegenerationResult?: typeof partialRegenerationResultResponse;
   partialRegenerationPreflight?: typeof partialRegenerationPreflightResponse;
   jobs?: typeof jobsResponse;
+  finalRenderResult?: Record<string, unknown>;
+  capcutDraftResult?: Record<string, unknown>;
+  capcutDraftResults?: Record<string, Record<string, unknown>>;
+  capcutHandoffResult?: Record<string, unknown>;
+  capcutDiagnostics?: Record<string, unknown>;
+  capcutDiagnosticsResponses?: Array<Record<string, unknown>>;
+  ttsCandidates?: TtsCandidateRecord[];
+  ttsListeningReviewStatuses?: number[];
+  voiceSampleUploadStatus?: number;
+  voiceSamples?: { assets: Array<Record<string, unknown>> };
+  mediaLibraryAssets?: Array<Record<string, unknown>>;
+  mediaLibraryUnavailable?: boolean;
 } = {}) {
   const state: {
     timeline: TimelinePayload;
     editingSession: EditingSession;
     geminiKeys: { keys: Array<Record<string, unknown>> };
     brollAssets: { assets: BrollAsset[] };
+    voiceSamples: { assets: Array<Record<string, unknown>> };
     reviewSnapshot: ReviewSnapshot;
     candidateReviewSnapshot: ReviewSnapshot;
     candidateTimelineReviewStatus: string;
+    ttsCandidates: TtsCandidateRecord[];
+    mediaLibraryAssets: Array<Record<string, unknown>>;
+    mediaLibraryFavorites: string[];
+    mediaLibraryRecent: string[];
+    mediaLibraryFavoritesByProject: Record<string, string[]>;
+    mediaLibraryRecentByProject: Record<string, string[]>;
   } = {
     timeline: structuredClone(timeline.timeline),
     editingSession: structuredClone(editingSession) as EditingSession,
     geminiKeys: structuredClone(geminiKeys),
     brollAssets: structuredClone(brollAssets),
+    voiceSamples: structuredClone(voiceSamples),
     reviewSnapshot: structuredClone(reviewSnapshot),
     candidateReviewSnapshot: structuredClone(candidateReviewSnapshot),
     candidateTimelineReviewStatus: partialRegenerationResult.timeline.review_status,
+    ttsCandidates: structuredClone(ttsCandidates),
+    mediaLibraryAssets: structuredClone(mediaLibraryAssets),
+    mediaLibraryFavorites: [],
+    mediaLibraryRecent: [],
+    mediaLibraryFavoritesByProject: {},
+    mediaLibraryRecentByProject: {},
   };
 
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
+    if (url.endsWith("/api/capcut/handoff-diagnostics")) {
+      return new Response(JSON.stringify(capcutDiagnosticsResponses?.shift() ?? capcutDiagnostics));
+    }
+    if (mediaLibraryUnavailable && url.startsWith("/api/media-library/")) {
+      return new Response("media library unavailable", { status: 503 });
+    }
+    if (url.endsWith("/api/media-library/assets")) {
+      return new Response(JSON.stringify({ assets: state.mediaLibraryAssets }));
+    }
+    if (url.endsWith("/api/media-library/install-state")) {
+      return new Response(JSON.stringify({ status: state.mediaLibraryAssets.length ? "installed" : "not_installed", installed_asset_count: state.mediaLibraryAssets.length }));
+    }
+    const projectLibraryMatch = url.match(/\/api\/projects\/([^/]+)\/media-library\/(favorites|recent)$/);
+    if (projectLibraryMatch) {
+      const [, projectId, kind] = projectLibraryMatch;
+      const values = kind === "favorites" ? state.mediaLibraryFavoritesByProject[projectId] ?? [] : state.mediaLibraryRecentByProject[projectId] ?? [];
+      return new Response(JSON.stringify({ asset_ids: values }));
+    }
+    const projectFavoriteMatch = url.match(/\/api\/projects\/([^/]+)\/media-library\/assets\/(.+)\/favorite$/);
+    if (projectFavoriteMatch && init?.method === "PUT") {
+      const [, projectId, encodedAssetId] = projectFavoriteMatch;
+      const assetId = decodeURIComponent(encodedAssetId);
+      const current = state.mediaLibraryFavoritesByProject[projectId] ?? [];
+      const enabled = Boolean(JSON.parse(String(init.body ?? "{}")).enabled);
+      state.mediaLibraryFavoritesByProject[projectId] = enabled ? [...new Set([...current, assetId])] : current.filter((item) => item !== assetId);
+      return new Response(JSON.stringify({ asset_ids: state.mediaLibraryFavoritesByProject[projectId] }));
+    }
+    if (url.endsWith("/api/media-library/favorites")) {
+      return new Response(JSON.stringify({ asset_ids: state.mediaLibraryFavorites }));
+    }
+    if (url.endsWith("/api/media-library/recent")) {
+      return new Response(JSON.stringify({ asset_ids: state.mediaLibraryRecent }));
+    }
+    if (/\/api\/media-library\/assets\/.+\/favorite$/.test(url) && init?.method === "PUT") {
+      const assetId = decodeURIComponent(url.split("/").slice(-2)[0] ?? "");
+      state.mediaLibraryFavorites = state.mediaLibraryFavorites.includes(assetId)
+        ? state.mediaLibraryFavorites.filter((item) => item !== assetId)
+        : [assetId, ...state.mediaLibraryFavorites];
+      return new Response(JSON.stringify({ asset_ids: state.mediaLibraryFavorites }));
+    }
+    if (/\/api\/media-library\/assets\/.+\/materialize$/.test(url) && init?.method === "POST") {
+      const assetId = decodeURIComponent(url.split("/").slice(-2)[0] ?? "");
+      state.mediaLibraryRecent = [assetId];
+      const projectId = String(JSON.parse(String(init.body ?? "{}")).project_id ?? "");
+      if (projectId) state.mediaLibraryRecentByProject[projectId] = [assetId];
+      return new Response(JSON.stringify({ asset_id: "asset_materialized_music_001", asset_type: "bgm", storage_uri: "local://projects/project_001/assets/imported/music-001.mp3" }), { status: 201 });
+    }
     if (url.endsWith("/api/projects")) {
       return new Response(JSON.stringify(projectsResponse));
     }
@@ -702,8 +806,44 @@ function createFetchMock({
     if (url.endsWith("/api/projects/project_001/assets/broll-video")) {
       return new Response(JSON.stringify(state.brollAssets));
     }
+    if (url.endsWith("/api/projects/project_001/assets/voice-sample") && !init?.method) {
+      return new Response(JSON.stringify(state.voiceSamples));
+    }
+    if (
+      url.endsWith("/api/projects/project_001/assets/voice-sample/upload") &&
+      init?.method === "POST"
+    ) {
+      if (voiceSampleUploadStatus != null && voiceSampleUploadStatus >= 400) {
+        return new Response("voice upload failed", { status: voiceSampleUploadStatus });
+      }
+      const uploadedAsset = {
+        asset_id: "asset_voice_uploaded_001",
+        asset_type: "voice_sample_audio",
+        storage_uri: "local://projects/project_001/assets/imported/my-voice.wav",
+      };
+      state.voiceSamples = { assets: [uploadedAsset, ...state.voiceSamples.assets] };
+      return new Response(JSON.stringify(uploadedAsset), { status: 201 });
+    }
+    const listeningReviewMatch = url.match(
+      /\/api\/projects\/project_001\/tts-candidates\/([^/]+)\/listening-review$/,
+    );
+    if (listeningReviewMatch && init?.method === "PATCH") {
+      const status = ttsListeningReviewStatuses?.shift() ?? 200;
+      if (status >= 400) {
+        return new Response("listening review failed", { status });
+      }
+      const decision = JSON.parse(String(init.body ?? "{}")) as { decision?: string };
+      const candidate = state.ttsCandidates.find(
+        (item) => item.candidate_id === listeningReviewMatch[1],
+      );
+      if (!candidate) {
+        return new Response("candidate not found", { status: 404 });
+      }
+      candidate.operator_review_status = decision.decision === "rejected" ? "rejected" : "approved";
+      return new Response(JSON.stringify(candidate));
+    }
     if (/\/api\/projects\/project_001\/segments\/[^/]+\/tts-candidates$/.test(url)) {
-      return new Response(JSON.stringify({ candidates: [] }));
+      return new Response(JSON.stringify({ candidates: state.ttsCandidates }));
     }
     if (
       url.endsWith("/api/projects/project_001/jobs/build-timeline") &&
@@ -747,6 +887,87 @@ function createFetchMock({
           job_id: "subtitle_render_job_008",
           status: "succeeded",
         }),
+      );
+    }
+    if (
+      url.endsWith("/api/projects/project_001/jobs/final-render") &&
+      init?.method === "POST"
+    ) {
+      return new Response(
+        JSON.stringify({
+          job_id: String(finalRenderResult?.job_id ?? "final_render_job_009"),
+          status: "running",
+        }),
+        { status: 202 },
+      );
+    }
+    if (url.endsWith("/api/projects/project_001/final-renders/final_render_job_009")) {
+      return new Response(
+        JSON.stringify(
+          finalRenderResult ?? {
+            job_id: "final_render_job_009",
+            status: "succeeded",
+            render: {
+              export_id: "final_render_001",
+              timeline_id: "timeline_001",
+              export_type: "final_render",
+              file_uri: "local://projects/project_001/exports/final/output.mp4",
+              status: "succeeded",
+            },
+            error_message: null,
+          },
+        ),
+      );
+    }
+    if (
+      url.endsWith("/api/projects/project_001/jobs/capcut-draft-export") &&
+      init?.method === "POST"
+    ) {
+      return new Response(
+        JSON.stringify({
+          job_id: String(capcutDraftResult?.job_id ?? "capcut_draft_job_009"),
+          status: "running",
+        }),
+        { status: 202 },
+      );
+    }
+    const capcutDraftMatch = url.match(/\/api\/projects\/project_001\/capcut-draft-exports\/(capcut_draft_job_\d+)$/);
+    if (capcutDraftMatch) {
+      return new Response(
+        JSON.stringify(
+          capcutDraftResults?.[capcutDraftMatch[1]] ?? capcutDraftResult ?? {
+            job_id: "capcut_draft_job_009",
+            status: "succeeded",
+            export: {
+              export_id: "capcut_draft_001",
+              timeline_id: "timeline_001",
+              export_type: "capcut_draft",
+              file_uri: "local://projects/project_001/exports/capcut-draft/draft",
+              status: "succeeded",
+              notes: ["ducking is not natively supported by CapCut draft export; apply it in CapCut after import"],
+            },
+            error_message: null,
+          },
+        ),
+      );
+    }
+    if (
+      url.endsWith("/api/projects/project_001/capcut-draft-exports/capcut_draft_job_009/handoff") &&
+      init?.method === "POST"
+    ) {
+      return new Response(
+        JSON.stringify(
+          capcutHandoffResult ?? {
+            handoff: {
+              status: "ready",
+              source_file_uri: "local://projects/project_001/exports/capcut-draft/draft",
+              registered_project_path: "C:/CapCut/User Data/Projects/com.lveditor.draft/videobox-export_001",
+              error_message: null,
+              registered_at: "2026-07-12T00:02:30Z",
+              reused: false,
+            },
+          },
+        ),
       );
     }
     if (url.endsWith("/api/projects/project_001/timelines/timeline_build_job_005")) {
@@ -911,12 +1132,38 @@ function createFetchMock({
       }
       return new Response(JSON.stringify(latestEditingSession));
     }
+    if (url.endsWith("/caption-style/preflight") && init?.method === "POST") {
+      return new Response(JSON.stringify({ affected_segment_ids: ["seg_002"] }));
+    }
+    if (url.endsWith("/caption-style") && init?.method === "PATCH") {
+      return new Response(JSON.stringify(state.editingSession));
+    }
+    if (url.endsWith("/api/projects/project_001/editor-library/presets")) {
+      return new Response(JSON.stringify([
+        { preset_id: "builtin:clean", name: "Clean", scope: "built_in", style: { font_size: 42 } },
+      ]));
+    }
+    if (url.endsWith("/api/projects/project_001/editor-library/favorites")) {
+      return new Response(JSON.stringify([]));
+    }
+    if (/\/api\/projects\/project_001\/editor-library\/favorites\//.test(url) && init?.method === "PUT") {
+      return new Response(JSON.stringify({ favorite_id: url.split("/").pop(), favorite_type: "preset", enabled: true }));
+    }
+    if (url.endsWith("/api/projects/project_001/editor-library/recent-presets")) {
+      return new Response(JSON.stringify([]));
+    }
     if (
       url.endsWith(
         "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/caption",
       ) &&
       init?.method === "PATCH"
     ) {
+      if (editingMutationConflictSession) {
+        return new Response(
+          JSON.stringify({ latest_session: editingMutationConflictSession }),
+          { status: 409 },
+        );
+      }
       if (editingMutationStatus != null && editingMutationStatus >= 400) {
         return new Response("caption save failed", { status: editingMutationStatus });
       }
@@ -959,7 +1206,7 @@ function createFetchMock({
       return new Response(JSON.stringify(state.editingSession));
     }
     if (
-      url.endsWith(
+      url.startsWith(
         "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/music",
       ) &&
       init?.method === "DELETE"
@@ -999,10 +1246,11 @@ function createFetchMock({
             : segment,
         ),
       };
+      state.mediaLibraryRecentByProject.project_001 = [payload.asset_id];
       return new Response(JSON.stringify(state.editingSession));
     }
     if (
-      url.endsWith(
+      url.startsWith(
         "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/broll",
       ) &&
       init?.method === "DELETE"
@@ -1055,7 +1303,7 @@ function createFetchMock({
       return new Response(JSON.stringify(state.editingSession));
     }
     if (
-      url.endsWith(
+      url.startsWith(
         "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/explanation-card",
       ) &&
       init?.method === "DELETE"
@@ -1108,7 +1356,7 @@ function createFetchMock({
       return new Response(JSON.stringify(state.editingSession));
     }
     if (
-      url.endsWith(
+      url.startsWith(
         "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/image-overlay",
       ) &&
       init?.method === "DELETE"
@@ -1163,7 +1411,7 @@ function createFetchMock({
       return new Response(JSON.stringify(state.editingSession));
     }
     if (
-      url.endsWith(
+      url.startsWith(
         "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/table-overlay",
       ) &&
       init?.method === "DELETE"
@@ -1210,7 +1458,7 @@ function createFetchMock({
       return new Response(JSON.stringify(state.editingSession));
     }
     if (
-      url.endsWith(
+      url.startsWith(
         "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/tts-replacement",
       ) &&
       init?.method === "DELETE"
@@ -1350,7 +1598,659 @@ function createFetchMock({
   });
 }
 
+it("does not copy a rejected TTS candidate into the editing draft", async () => {
+  const fetchMock = createFetchMock({
+    ttsCandidates: [
+      {
+        candidate_id: "tts_candidate_001",
+        project_id: "project_001",
+        segment_id: "seg_002",
+        asset_id: "asset_tts_rejected",
+        source_text: "거부된 개인 음성 후보",
+        technical_status: "rejected",
+        operator_review_status: "pending",
+        target_duration_sec: 3,
+        actual_duration_sec: 1,
+        failure_code: "duration_mismatch",
+        created_at: "2026-07-12T00:00:00Z",
+      },
+    ],
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  render(<App />);
+
+  fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
+  fireEvent.click(await screen.findByRole("button", { name: /편집 시작/i }));
+
+  expect(await screen.findByText(/선택 불가 · duration_mismatch/i)).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /이 후보 선택/i })).toBeDisabled();
+});
+
+it("requires listening approval before selecting a TTS candidate and restores the approval after reload", async () => {
+  const fetchMock = createFetchMock({
+    ttsCandidates: [
+      {
+        candidate_id: "tts_candidate_approved_001",
+        project_id: "project_001",
+        segment_id: "seg_002",
+        asset_id: "asset_tts_approved",
+        source_text: "청취 승인 전 개인 음성 후보",
+        technical_status: "accepted",
+        operator_review_status: "pending",
+        target_duration_sec: 3,
+        actual_duration_sec: 3,
+        failure_code: null,
+        created_at: "2026-07-12T00:00:00Z",
+      },
+    ],
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  const view = render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
+  fireEvent.click(await screen.findByRole("button", { name: /편집 시작/i }));
+
+  expect(await screen.findByText(/기술 검증 통과 · 청취 승인 대기/i)).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /이 후보 선택/i })).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: "청취 승인" }));
+
+  await waitFor(() =>
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/projects/project_001/tts-candidates/tts_candidate_approved_001/listening-review",
+      expect.objectContaining({ method: "PATCH" }),
+    ),
+  );
+  await waitFor(() =>
+    expect(screen.queryByRole("button", { name: "청취 승인" })).not.toBeInTheDocument(),
+  );
+  expect(screen.getByRole("button", { name: /이 후보 선택/i })).toBeEnabled();
+  fireEvent.click(screen.getByRole("button", { name: /이 후보 선택/i }));
+  expect(screen.getByLabelText("TTS 추천 ID")).toHaveValue(
+    "tts_candidate_approved_001",
+  );
+  expect(screen.getByLabelText("TTS 자산 ID")).toHaveValue("asset_tts_approved");
+
+  view.unmount();
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
+  fireEvent.click(await screen.findByRole("button", { name: /편집 시작/i }));
+  await waitFor(() =>
+    expect(screen.queryByRole("button", { name: "청취 승인" })).not.toBeInTheDocument(),
+  );
+  expect(screen.getByRole("button", { name: /이 후보 선택/i })).toBeEnabled();
+});
+
+it("recovers after a failed TTS listening approval save", async () => {
+  const fetchMock = createFetchMock({
+    ttsListeningReviewStatuses: [500, 200],
+    ttsCandidates: [
+      {
+        candidate_id: "tts_candidate_retry_001",
+        project_id: "project_001",
+        segment_id: "seg_002",
+        asset_id: "asset_tts_retry",
+        source_text: "재시도 청취 후보",
+        technical_status: "accepted",
+        operator_review_status: "pending",
+        target_duration_sec: 3,
+        actual_duration_sec: 3,
+        failure_code: null,
+        created_at: "2026-07-12T00:00:00Z",
+      },
+    ],
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
+  fireEvent.click(await screen.findByRole("button", { name: /편집 시작/i }));
+
+  fireEvent.click(await screen.findByRole("button", { name: "청취 승인" }));
+  expect(await screen.findByText(/TTS 청취 승인 실패/i)).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /이 후보 선택/i })).toBeDisabled();
+
+  fireEvent.click(screen.getByRole("button", { name: "청취 승인" }));
+  expect(await screen.findByText(/기술 검증 통과 · 청취 승인됨/i)).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /이 후보 선택/i })).toBeEnabled();
+});
+
 describe("App", () => {
+  it("Director integration: reload recovery stays read-only until the operator explicitly starts", async () => {
+    const baseFetch = createFetchMock();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (/\/director\/sessions\/editing_session_001\/reload$/.test(url)) return new Response(JSON.stringify({ conversation: null, proposal: null }));
+      if (url.endsWith("/director/conversations") && init?.method === "POST") return new Response(JSON.stringify({ conversation_id: "conversation_001" }), { status: 201 });
+      if (url.endsWith("/director/proposals") && init?.method === "POST") return new Response(JSON.stringify({ proposal_id: "proposal_001", candidates: [], target_segment_ids: ["seg_001"], base_session_revision: 1, revision_code: "P01" }), { status: 201 });
+      return baseFetch(input, init);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /편집 시작/i }));
+    expect(await screen.findByRole("button", { name: "루미에게 추천받기" })).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/director/conversations"))).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "루미에게 추천받기" }));
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([input]) => String(input).endsWith("/director/conversations")).length).toBe(1));
+  });
+
+  it("Director integration: reload restores an existing conversation and proposal without a second start", async () => {
+    const baseFetch = createFetchMock();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (/\/director\/sessions\/editing_session_001\/reload$/.test(String(input))) return new Response(JSON.stringify({ conversation: { conversation_id: "conversation_001" }, proposal: { proposal_id: "proposal_001", candidates: [], target_segment_ids: ["seg_001"], base_session_revision: 1, revision_code: "P01" } }));
+      if (/\/director\/proposals\/proposal_001\/preflight$/.test(String(input))) return new Response(JSON.stringify({ status: "ready" }));
+      return baseFetch(input, init);
+    });
+    vi.stubGlobal("fetch", fetchMock); render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i })); fireEvent.click(await screen.findByRole("button", { name: /편집 시작/i }));
+    expect(await screen.findByLabelText("현재 선택 위치")).toHaveTextContent("선택한 장면");
+    expect(screen.queryByRole("button", { name: "루미에게 추천받기" })).not.toBeInTheDocument();
+  });
+
+  it("Director integration: materialize failure leaves the editing session untouched and keeps manual editing available", async () => {
+    const baseFetch = createFetchMock();
+    const proposal = { proposal_id: "proposal_materialize_fail_001", revision_code: "P01", revision: 1, base_session_revision: 1, asset_index_revision: 1, source_session_id: "editing_session_001", source_script_segment_ids: [], target_segment_ids: ["seg_002"], status: "ready", diff: {}, expires_at: null, candidates: [{ candidate_id: "candidate_fail_001", visible_reference_code: "P01-B-01", media_type: "broll", asset_id: "asset_broll_archive_002", library_asset_id: null, reason_chips: [], scores: {}, availability: "available", review_status: "approved", preview_uri: null, controls: {}, expected_content_sha256: "sha", media_revision: "r1", canonical_metadata: {}, license_policy: "verified", warning_provenance: [] }] };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (/\/director\/sessions\/editing_session_001\/reload$/.test(url)) return new Response(JSON.stringify({ conversation: { conversation_id: "conversation_materialize_fail_001" }, proposal, messages: [], references: [] }));
+      if (url.endsWith(`/director/proposals/${proposal.proposal_id}`) && !init?.method) return new Response(JSON.stringify(proposal));
+      if (url.includes("/director/proposals/") && url.endsWith("/preflight")) return new Response(JSON.stringify({ status: "ready" }));
+      if (url.endsWith("/messages") && init?.method === "POST") return new Response(JSON.stringify({ user_message: {}, assistant_message: { text: "적용 준비" }, action_intent: { action: "apply", target: { source: "proposal", reference_code: "P01-B-01", immutable_id: "candidate_fail_001" }, proposal_preflight: { proposal_id: proposal.proposal_id } } }));
+      if (url.endsWith("/batch-apply") && init?.method === "POST") return new Response("materialize failed", { status: 500 });
+      return baseFetch(input, init);
+    });
+    vi.stubGlobal("fetch", fetchMock); render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i })); fireEvent.click(await screen.findByRole("button", { name: /편집 시작/i }));
+    fireEvent.change(await screen.findByLabelText("루미에게 요청하기"), { target: { value: "P01-B-01 적용" } }); fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
+    const apply = await screen.findByRole("button", { name: "이 추천 적용" }); await waitFor(() => expect(apply).toBeEnabled()); fireEvent.click(apply);
+    expect(await screen.findByText("추천을 적용하지 못했어요. 직접 골라 계속 편집할 수 있어요.")).toBeInTheDocument();
+    expect(screen.getByLabelText("현재 선택 위치")).toHaveTextContent("선택한 장면");
+    expect(screen.queryByText("편집본에 적용됨")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "직접 편집하기" }));
+    fireEvent.change(screen.getByDisplayValue("Team meeting overview"), { target: { value: "materialize failure 뒤 수동 편집" } }); fireEvent.click(screen.getByRole("button", { name: /자막 저장/i }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/caption", expect.objectContaining({ method: "PATCH", body: JSON.stringify({ expected_revision: 1, caption_text: "materialize failure 뒤 수동 편집" }) })));
+  });
+
+  it("Director integration: ambiguous references remain a manual choice and do not mutate the active session", async () => {
+    const baseFetch = createFetchMock();
+    const proposal = { proposal_id: "proposal_ambiguity_001", revision_code: "P01", revision: 1, base_session_revision: 1, asset_index_revision: 1, source_session_id: "editing_session_001", source_script_segment_ids: [], target_segment_ids: ["seg_002"], status: "ready", diff: {}, expires_at: null, candidates: [] };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (/\/director\/sessions\/editing_session_001\/reload$/.test(url)) return new Response(JSON.stringify({ conversation: { conversation_id: "conversation_ambiguity_001" }, proposal, messages: [], references: [] }));
+      if (url.includes("/director/proposals/") && url.endsWith("/preflight")) return new Response(JSON.stringify({ status: "ready" }));
+      if (url.endsWith("/messages") && init?.method === "POST") return new Response(JSON.stringify({ user_message: {}, assistant_message: { text: "어느 참조인지 선택해주세요." }, disambiguation: { status: "needs_disambiguation", options: [{ source: "proposal", reference_code: "P01-B-03", immutable_id: "candidate_003" }, { source: "proposal", reference_code: "P01-B-04", immutable_id: "candidate_004" }] }, action_intent: null }));
+      return baseFetch(input, init);
+    });
+    vi.stubGlobal("fetch", fetchMock); render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i })); fireEvent.click(await screen.findByRole("button", { name: /편집 시작/i }));
+    fireEvent.change(await screen.findByLabelText("루미에게 요청하기"), { target: { value: "3번 영상 교체" } }); fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
+    expect(await screen.findByRole("region", { name: "추천 항목 고르기" })).toHaveTextContent("루미 추천 1의 비롤 3번");
+    expect(screen.getByRole("region", { name: "추천 항목 고르기" })).toHaveTextContent("루미 추천 1의 비롤 4번");
+    expect(screen.getByRole("button", { name: "이 추천 적용" })).toBeDisabled();
+    expect(fetchMock.mock.calls.some(([input, request]) => String(input).endsWith("/batch-apply") && request?.method === "POST")).toBe(false);
+  });
+
+  it("Director integration: blocked local runtime exposes manual continuation rather than an automatic fallback", async () => {
+    const fetchMock = createFetchMock(); vi.stubGlobal("fetch", fetchMock); render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i })); fireEvent.click(await screen.findByRole("button", { name: /편집 시작/i }));
+    fireEvent.click(await screen.findByRole("button", { name: "직접 편집하기" }));
+    expect(screen.getByRole("button", { name: /^편집$/i })).toBeInTheDocument();
+  });
+
+  it("Director integration: default bootstrap requests neither Gemini keys nor Gemini mutations", async () => {
+    const fetchMock = createFetchMock(); vi.stubGlobal("fetch", fetchMock); render(<App />);
+    expect(await screen.findByText(/작업자 검수 데모/i)).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/providers/gemini/keys"))).toBe(false);
+    expect(fetchMock.mock.calls.some(([input, init]) => String(input).includes("/providers/gemini") && init?.method !== "GET")).toBe(false);
+  });
+
+  it("Director integration: exactly-one apply invalidates output freshness", async () => {
+    const baseFetch = createFetchMock();
+    const proposal = { proposal_id: "proposal_apply_001", revision_code: "P01", revision: 1, base_session_revision: 1, asset_index_revision: 1, source_session_id: "editing_session_001", source_script_segment_ids: [], target_segment_ids: ["seg_001"], status: "ready", diff: {}, expires_at: null, candidates: [{ candidate_id: "candidate_001", visible_reference_code: "P01-B-01", media_type: "broll", asset_id: "asset_broll_archive_002", library_asset_id: null, reason_chips: [], scores: {}, availability: "available", review_status: "approved", preview_uri: null, controls: {}, expected_content_sha256: "sha", media_revision: "r1", canonical_metadata: {}, license_policy: "verified", warning_provenance: [] }] };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (/\/director\/sessions\/editing_session_001\/reload$/.test(url)) return new Response(JSON.stringify({ conversation: { conversation_id: "conversation_apply_001" }, proposal, messages: [], references: [] }));
+      if (url.endsWith("/director/proposals/proposal_apply_001") && !init?.method) return new Response(JSON.stringify(proposal));
+      if (url.includes("/director/proposals/") && url.endsWith("/preflight")) return new Response(JSON.stringify({ status: "ready" }));
+      if (url.endsWith("/messages") && init?.method === "POST") return new Response(JSON.stringify({ user_message: {}, assistant_message: { proposal_id: "proposal_apply_001", text: "apply" }, action_intent: { action: "apply", target: { source: "proposal", reference_code: "P01-B-01", immutable_id: "candidate_001" }, proposal_preflight: { proposal_id: "proposal_apply_001" } } }));
+      if (url.endsWith("/batch-apply") && init?.method === "POST") return new Response(JSON.stringify({ ...editingSessionResponse, session_revision: 2, caption_style_preflight: { affected_segment_ids: [] } }));
+      return baseFetch(input, init);
+    });
+    vi.stubGlobal("fetch", fetchMock); render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i })); fireEvent.click(await screen.findByRole("button", { name: /편집 시작/i }));
+    const input = await screen.findByLabelText("루미에게 요청하기"); fireEvent.change(input, { target: { value: "P01-B-01 적용" } }); fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
+    const apply = await screen.findByRole("button", { name: "이 추천 적용" }); await waitFor(() => expect(apply).toBeEnabled()); fireEvent.click(apply);
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([url, init]) => String(url).endsWith("/batch-apply") && init?.method === "POST")).toHaveLength(1));
+    expect(await screen.findByText("추천을 편집본에 적용했어요.")).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText("preview_001")).not.toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "완성본 렌더" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "CapCut 초안(실제)" })).toBeDisabled();
+  });
+  it("uploads a selected voice sample and makes its asset ID available to TTS generation", async () => {
+    const fetchMock = createFetchMock();
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^설정$/i }));
+    const picker = screen.getByLabelText("음성 샘플 파일 선택");
+    fireEvent.change(picker, {
+      target: { files: [new File(["voice"], "my voice.wav", { type: "audio/wav" })] },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "선택한 파일 업로드" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/projects/project_001/assets/voice-sample/upload",
+        expect.objectContaining({ method: "POST", body: expect.any(FormData) }),
+      ),
+    );
+    expect(await screen.findByDisplayValue("asset_voice_uploaded_001")).toBeInTheDocument();
+  });
+
+  it("keeps the selected voice file recoverable after an upload failure", async () => {
+    const fetchMock = createFetchMock({ voiceSampleUploadStatus: 500 });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^설정$/i }));
+    const picker = screen.getByLabelText("음성 샘플 파일 선택");
+    fireEvent.change(picker, {
+      target: { files: [new File(["voice"], "retry.wav", { type: "audio/wav" })] },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "선택한 파일 업로드" }));
+
+    expect(await screen.findByText(/음성 샘플 업로드 실패/i)).toBeInTheDocument();
+    expect(screen.getByText("선택됨 · retry.wav")).toBeInTheDocument();
+  });
+
+  it("restores the latest registered voice sample ID after refresh", async () => {
+    const fetchMock = createFetchMock({
+      voiceSamples: {
+        assets: [
+          {
+            asset_id: "asset_voice_restored_001",
+            asset_type: "voice_sample_audio",
+            storage_uri: "local://projects/project_001/assets/imported/restored.wav",
+          },
+        ],
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^설정$/i }));
+    expect(await screen.findByDisplayValue("asset_voice_restored_001")).toBeInTheDocument();
+  });
+
+  it("restores the last successful final and CapCut artifacts after reload", async () => {
+    const restoredJobs = structuredClone(jobsResponse);
+    restoredJobs.jobs.push(
+      {
+        job_id: "final_render_job_009",
+        job_type: "final_render",
+        status: "succeeded",
+        input_ref: "timeline_build_job_005",
+        output_ref: "final_render_001",
+        error_message: null,
+        started_at: "2026-07-12T00:00:00Z",
+        finished_at: "2026-07-12T00:01:00Z",
+      },
+      {
+        job_id: "capcut_draft_job_009",
+        job_type: "capcut_draft_export",
+        status: "succeeded",
+        input_ref: "timeline_build_job_005",
+        output_ref: "capcut_draft_001",
+        error_message: null,
+        started_at: "2026-07-12T00:01:00Z",
+        finished_at: "2026-07-12T00:02:00Z",
+      },
+    );
+    const fetchMock = createFetchMock({ jobs: restoredJobs });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const firstRender = render(<App />);
+    expect(await screen.findByText(/exports\/final\/output.mp4/i)).toBeInTheDocument();
+    expect(screen.getByText(/exports\/capcut-draft\/draft/i)).toBeInTheDocument();
+    expect(screen.getByText(/CapCut에서 후처리 필요/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "CapCut 초안 다시 시도" })).not.toBeInTheDocument();
+    firstRender.unmount();
+
+    render(<App />);
+    expect(await screen.findByText(/exports\/final\/output.mp4/i)).toBeInTheDocument();
+    expect(screen.getByText(/exports\/capcut-draft\/draft/i)).toBeInTheDocument();
+    expect(screen.getByText(/CapCut에서 후처리 필요/i)).toBeInTheDocument();
+  });
+
+  it("does not render a CapCut after-processing warning when the persisted notes are empty", async () => {
+    const restoredJobs = structuredClone(jobsResponse);
+    restoredJobs.jobs.push({
+      job_id: "capcut_draft_job_009",
+      job_type: "capcut_draft_export",
+      status: "succeeded",
+      input_ref: "timeline_build_job_005",
+      output_ref: "capcut_draft_001",
+      error_message: null,
+      started_at: "2026-07-12T00:01:00Z",
+      finished_at: "2026-07-12T00:02:00Z",
+    });
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock({
+        jobs: restoredJobs,
+        capcutDraftResult: {
+          job_id: "capcut_draft_job_009",
+          status: "succeeded",
+          export: {
+            export_id: "capcut_draft_001",
+            timeline_id: "timeline_001",
+            export_type: "capcut_draft_export",
+            file_uri: "local://projects/project_001/exports/capcut-draft/draft",
+            status: "succeeded",
+            notes: [],
+          },
+          error_message: null,
+        },
+      }),
+    );
+
+    render(<App />);
+
+    expect(await screen.findByText(/exports\/capcut-draft\/draft/i)).toBeInTheDocument();
+    expect(screen.queryByText(/CapCut에서 후처리 필요/i)).not.toBeInTheDocument();
+  });
+
+  it("restores a registered CapCut project path after reload", async () => {
+    const restoredJobs = structuredClone(jobsResponse);
+    restoredJobs.jobs.push({
+      job_id: "capcut_draft_job_009",
+      job_type: "capcut_draft_export",
+      status: "succeeded",
+      input_ref: "timeline_build_job_005",
+      output_ref: "capcut_draft_001",
+      error_message: null,
+      started_at: "2026-07-12T00:01:00Z",
+      finished_at: "2026-07-12T00:02:00Z",
+    });
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock({
+        jobs: restoredJobs,
+        capcutDraftResult: {
+          job_id: "capcut_draft_job_009",
+          status: "succeeded",
+          export: {
+            export_id: "capcut_draft_001",
+            timeline_id: "timeline_001",
+            export_type: "capcut_draft_export",
+            file_uri: "local://projects/project_001/exports/capcut-draft/draft",
+            status: "succeeded",
+            notes: [],
+            handoff: {
+              status: "ready",
+              source_file_uri: "local://projects/project_001/exports/capcut-draft/draft",
+              registered_project_path: "C:/CapCut/User Data/Projects/com.lveditor.draft/videobox-export_001",
+              error_message: null,
+              registered_at: "2026-07-12T00:02:30Z",
+              reused: false,
+            },
+          },
+          error_message: null,
+        },
+      }),
+    );
+
+    render(<App />);
+
+    expect(await screen.findByText("CapCut에 열기 준비")).toBeInTheDocument();
+    expect(screen.getByText(/videobox export 001/i)).toBeInTheDocument();
+  });
+
+  it("shows and restores CapCut connection readiness details after reload", async () => {
+    const fetchMock = createFetchMock();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const firstRender = render(<App />);
+    expect(await screen.findByText("CapCut 연결 진단")).toBeInTheDocument();
+    expect(screen.getByText("연결 준비 완료")).toBeInTheDocument();
+    expect(screen.getByText("8.9.1.3802 · 지원됨")).toBeInTheDocument();
+    expect(screen.getByText(/CapCut\/Apps\/8.9.1.3802\/CapCut.exe/i)).toBeInTheDocument();
+    firstRender.unmount();
+
+    render(<App />);
+    expect(await screen.findByText("CapCut 연결 진단")).toBeInTheDocument();
+    expect(screen.getByText("연결 준비 완료")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith("/api/capcut/handoff-diagnostics", undefined);
+  });
+
+  it("shows Korean CapCut diagnostic recovery guidance and retries the machine check", async () => {
+    const failedDiagnostics = {
+      status: "failed",
+      installation_path: null,
+      detected_version: null,
+      is_supported: false,
+      project_root_path: "C:/Users/operator/AppData/Local/CapCut/User Data/Projects/com.lveditor.draft",
+      project_root_exists: false,
+      write_access: false,
+      recovery_message: "CapCut을 한 번 실행해 프로젝트 폴더를 만든 뒤 다시 진단하세요.",
+      checked_at: "2026-07-13T00:00:00Z",
+    };
+    const fetchMock = createFetchMock({
+      capcutDiagnosticsResponses: [failedDiagnostics, capcutDiagnosticsReadyResponse],
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+
+    expect(await screen.findByText("CapCut 연결 진단")).toBeInTheDocument();
+    expect(screen.getByText("연결 준비 필요")).toBeInTheDocument();
+    expect(screen.getByText(/CapCut을 한 번 실행해 프로젝트 폴더를 만든 뒤/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "다시 진단" }));
+
+    expect(await screen.findByText("연결 준비 완료")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith("/api/capcut/handoff-diagnostics", undefined),
+    );
+  });
+
+  it("shows a Korean CapCut registration failure and retries it without losing the draft", async () => {
+    const restoredJobs = structuredClone(jobsResponse);
+    restoredJobs.jobs.push({
+      job_id: "capcut_draft_job_009",
+      job_type: "capcut_draft_export",
+      status: "succeeded",
+      input_ref: "timeline_build_job_005",
+      output_ref: "capcut_draft_001",
+      error_message: null,
+      started_at: "2026-07-12T00:01:00Z",
+      finished_at: "2026-07-12T00:02:00Z",
+    });
+    const fetchMock = createFetchMock({
+      jobs: restoredJobs,
+      capcutDraftResult: {
+        job_id: "capcut_draft_job_009",
+        status: "succeeded",
+        export: {
+          export_id: "capcut_draft_001",
+          timeline_id: "timeline_001",
+          export_type: "capcut_draft_export",
+          file_uri: "local://projects/project_001/exports/capcut-draft/draft",
+          status: "succeeded",
+          notes: [],
+          handoff: {
+            status: "failed",
+            source_file_uri: "local://projects/project_001/exports/capcut-draft/draft",
+            registered_project_path: null,
+            error_message: "CapCut 설치를 확인한 뒤 다시 시도하세요.",
+            registered_at: null,
+            reused: false,
+          },
+        },
+        error_message: null,
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    expect(await screen.findByText(/CapCut 등록 실패: CapCut 설치를 확인/i)).toBeInTheDocument();
+    expect(screen.getByText(/exports\/capcut-draft\/draft/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "CapCut 등록 다시 시도" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/projects/project_001/capcut-draft-exports/capcut_draft_job_009/handoff",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    expect(await screen.findByText("CapCut에 열기 준비")).toBeInTheDocument();
+  });
+
+  it("restores the latest failed CapCut draft export while preserving the earlier successful artifact", async () => {
+    const restoredJobs: { jobs: JobFixture[] } = {
+      jobs: jobsResponse.jobs.filter((job) => job.job_type !== "capcut_draft_export"),
+    };
+    restoredJobs.jobs.push(
+      {
+        job_id: "capcut_draft_job_008",
+        job_type: "capcut_draft_export",
+        status: "succeeded",
+        input_ref: "timeline_build_job_005",
+        output_ref: "capcut_draft_001",
+        error_message: null,
+        started_at: "2026-07-13T00:01:00Z",
+        finished_at: "2026-07-13T00:02:00Z",
+      },
+      {
+        job_id: "capcut_draft_job_009",
+        job_type: "capcut_draft_export",
+        status: "failed",
+        input_ref: "timeline_build_job_005",
+        output_ref: null,
+        error_message: "CapCut draft package could not be written.",
+        started_at: "2026-07-13T00:03:00Z",
+        finished_at: "2026-07-13T00:04:00Z",
+      },
+    );
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock({
+        jobs: restoredJobs,
+        capcutDraftResults: {
+          capcut_draft_job_008: {
+            job_id: "capcut_draft_job_008",
+            status: "succeeded",
+            export: {
+              export_id: "capcut_draft_001",
+              timeline_id: "timeline_001",
+              export_type: "capcut_draft_export",
+              file_uri: "local://projects/project_001/exports/capcut-draft/draft",
+              status: "succeeded",
+              notes: [],
+            },
+            error_message: null,
+          },
+          capcut_draft_job_009: {
+            job_id: "capcut_draft_job_009",
+            status: "failed",
+            export: null,
+            error_message: "CapCut draft package could not be written.",
+          },
+        },
+      }),
+    );
+
+    render(<App />);
+
+    expect(await screen.findByText(/CapCut 초안 내보내기 실패/)).toBeInTheDocument();
+    expect(screen.getByText(/CapCut draft package could not be written/i)).toBeInTheDocument();
+    expect(screen.getByText(/마지막 성공 유지.*exports\/capcut-draft\/draft/i)).toBeInTheDocument();
+  });
+
+  it("renders a final-render failure with a null artifact without unmounting the dashboard", async () => {
+    const fetchMock = createFetchMock({
+      finalRenderResult: {
+        job_id: "final_render_job_009",
+        status: "failed",
+        render: null,
+        error_message: "FFmpeg could not resolve the requested B-roll source.",
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    await screen.findByText("timeline_001");
+    fireEvent.click(await screen.findByRole("button", { name: "완성본 렌더" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/projects/project_001/jobs/final-render",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+
+    expect(await screen.findByText("완성본 렌더 실패")).toBeInTheDocument();
+    expect(screen.getByText(/B-roll source/)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "VideoBox 작업판" })).toBeInTheDocument();
+  });
+
+  it("renders a CapCut draft failure with a null artifact without unmounting the dashboard", async () => {
+    const fetchMock = createFetchMock({
+      capcutDraftResult: {
+        job_id: "capcut_draft_job_009",
+        status: "failed",
+        export: null,
+        error_message: "CapCut draft package could not be written.",
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    await screen.findByText("timeline_001");
+
+    fireEvent.click(screen.getByRole("button", { name: "CapCut 초안(실제)" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/projects/project_001/jobs/capcut-draft-export",
+        expect.any(Object),
+      );
+    });
+
+    expect(await screen.findByText("CapCut 초안 내보내기 실패")).toBeInTheDocument();
+    expect(screen.getByText(/CapCut draft package/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "CapCut 초안 다시 시도" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "VideoBox 작업판" })).toBeInTheDocument();
+  });
+
+  it("offers a retry action after a failed final render", async () => {
+    const fetchMock = createFetchMock({
+      finalRenderResult: {
+        job_id: "final_render_job_009",
+        status: "failed",
+        render: null,
+        error_message: "FFmpeg failed.",
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+    await screen.findByText("timeline_001");
+
+    fireEvent.click(screen.getByRole("button", { name: "완성본 렌더" }));
+    await screen.findByText("완성본 렌더 실패");
+
+    fireEvent.click(screen.getByRole("button", { name: "완성본 렌더 다시 시도" }));
+
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.filter(
+          ([url, init]) =>
+            String(url).endsWith("/api/projects/project_001/jobs/final-render") && init?.method === "POST",
+        ),
+      ).toHaveLength(2);
+    });
+  });
+
   it("renders the dashboard with Korean short labels instead of explanatory English copy", async () => {
     vi.stubGlobal("fetch", createFetchMock());
 
@@ -1898,7 +2798,7 @@ describe("App", () => {
     expect(screen.getAllByText(/미시작/i).length).toBeGreaterThan(0);
   });
 
-  it("keeps the baseline dashboard usable when Gemini key loading fails", async () => {
+  it("does not request Gemini keys and shows only LM Studio capability in default settings", async () => {
     const fetchMock = vi.fn((input: RequestInfo | URL) => {
       const url = String(input);
       if (url.endsWith("/api/projects")) {
@@ -1938,89 +2838,35 @@ describe("App", () => {
     expect(await screen.findByText(/작업자 검수 데모/i)).toBeInTheDocument();
     expect(await screen.findByText(/timeline_001/i)).toBeInTheDocument();
     fireEvent.click(await screen.findByRole("button", { name: /^설정$/i }));
-    expect(await screen.findByText(/제미나이 라우팅 오류/i)).toBeInTheDocument();
-    expect(screen.queryByText(/request failed: \/api\/projects\/project_001\/providers\/gemini\/keys/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/제미나이 키 없음/i)).not.toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /LM Studio 기능/i })).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/providers/gemini/keys"))).toBe(false);
+    expect(screen.queryByText(/제미나이/i)).not.toBeInTheDocument();
   });
 
-  it("renders masked Gemini keys with routing state visibility and never leaks raw secrets", async () => {
+  it("keeps legacy Gemini CRUD isolated from the default local-only UI", async () => {
     const fetchMock = createFetchMock();
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: /^설정$/i }));
 
-    expect(await screen.findByRole("heading", { name: /^키$/i })).toBeInTheDocument();
-    expect(await screen.findByText(/기본 라우팅 키/i)).toBeInTheDocument();
-    expect(await screen.findByText("AIza...1234")).toBeInTheDocument();
-    expect(await screen.findByText(/대기 예비 키/i)).toBeInTheDocument();
-    expect(await screen.findByText(/429 할당량 초과/i)).toBeInTheDocument();
-    expect(await screen.findByText(/2026-06-28T00:05:00Z/i)).toBeInTheDocument();
-    expect(screen.getAllByText(/연속 실패/i).length).toBeGreaterThan(0);
+    expect(await screen.findByRole("heading", { name: /LM Studio 기능/i })).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/providers/gemini/keys"))).toBe(false);
     expect(screen.queryByText(/AIzaSyDANGER_SECRET/i)).not.toBeInTheDocument();
     expect(screen.queryByDisplayValue(/AIzaSyDANGER_SECRET/i)).not.toBeInTheDocument();
   });
 
-  it("creates, updates, disables, and re-enables Gemini keys while refreshing the dashboard state", async () => {
+  it("does not expose legacy Gemini mutations from the default settings", async () => {
     const fetchMock = createFetchMock();
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: /^설정$/i }));
 
-    expect(await screen.findByRole("heading", { name: /^키$/i })).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: /키 추가/i }));
-    fireEvent.change(screen.getByLabelText(/이름/i), {
-      target: { value: "Burst quota key" },
-    });
-    fireEvent.change(screen.getByLabelText(/API 키/i), {
-      target: { value: "AIzaSyDANGER_SECRET" },
-    });
-    fireEvent.change(screen.getByLabelText(/기본 모델/i), {
-      target: { value: "gemini-2.5-flash" },
-    });
-    fireEvent.change(screen.getByLabelText(/저가 모델/i), {
-      target: { value: "gemini-2.5-flash-lite" },
-    });
-    fireEvent.change(screen.getByLabelText(/고품질 모델/i), {
-      target: { value: "gemini-2.5-pro" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: /키 저장/i }));
-
-    expect(await screen.findByText(/긴급 할당 키/i)).toBeInTheDocument();
-    expect(screen.getByText("AIza...9999")).toBeInTheDocument();
-    expect(screen.queryByText(/AIzaSyDANGER_SECRET/i)).not.toBeInTheDocument();
-    expect(screen.queryByDisplayValue(/AIzaSyDANGER_SECRET/i)).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: /기본 라우팅 키 수정/i }));
-    fireEvent.change(screen.getByLabelText(/이름/i), {
-      target: { value: "Primary routing key v2" },
-    });
-    fireEvent.change(screen.getByLabelText(/저가 모델/i), {
-      target: { value: "gemini-2.5-flash" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: /변경 저장/i }));
-
-    expect(await screen.findByText(/기본 라우팅 키 v2/i)).toBeInTheDocument();
-    expect(screen.getAllByText(/gemini-2.5-flash/i).length).toBeGreaterThan(0);
-
-    fireEvent.click(screen.getByRole("button", { name: /기본 라우팅 키 v2 중지/i }));
-    await waitFor(() => {
-      expect(screen.getAllByText(/^중지$/i).length).toBeGreaterThan(0);
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: /기본 라우팅 키 v2 사용/i }));
-    await waitFor(() => {
-      expect(screen.getAllByText(/^사용$/i).length).toBeGreaterThan(1);
-    });
-
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/projects/project_001/providers/gemini/keys",
-        expect.anything(),
-      );
-    });
+    expect(await screen.findByRole("heading", { name: /LM Studio 기능/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /키 추가/i })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/API 키/i)).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([input, init]) => String(input).includes("/providers/gemini") && init?.method !== "GET")).toBe(false);
   });
 
   it("supports the thin editing flow with session load, regeneration preflight, and partial regeneration delta visibility", async () => {
@@ -2049,7 +2895,7 @@ describe("App", () => {
 
     expect(await screen.findByText(/editing_session_001/i)).toBeInTheDocument();
     expect(await screen.findByRole("button", { name: /seg_002/i })).toBeInTheDocument();
-    expect(await screen.findByText(/asset_manual_002/i)).toBeInTheDocument();
+    expect(await screen.findByText(/asset_broll_archive_002/i)).toBeInTheDocument();
     expect(
       screen.getByText(/meeting context: summarize the active discussion\./i),
     ).toBeInTheDocument();
@@ -2086,6 +2932,7 @@ describe("App", () => {
         expect.objectContaining({
           method: "POST",
           body: JSON.stringify({
+            expected_revision: 1,
             segment_ids: ["seg_002"],
             fields: ["broll", "explanation_card"],
           }),
@@ -2204,6 +3051,7 @@ describe("App", () => {
         expect.objectContaining({
           method: "PATCH",
           body: JSON.stringify({
+            expected_revision: 1,
             title: "Meeting context",
             body: "Summarize the active discussion.",
             text: "Meeting context: capture the approved discussion points.",
@@ -2216,6 +3064,7 @@ describe("App", () => {
       expect.objectContaining({
         method: "PATCH",
         body: JSON.stringify({
+          expected_revision: 1,
           asset_id: "asset_image_002",
           text: "Image overlay summary for the discussion.",
         }),
@@ -2226,6 +3075,7 @@ describe("App", () => {
       expect.objectContaining({
         method: "PATCH",
         body: JSON.stringify({
+          expected_revision: 1,
           columns: ["Topic", "Owner"],
           rows: [
             ["Launch plan", "Louis"],
@@ -2240,6 +3090,7 @@ describe("App", () => {
       expect.objectContaining({
         method: "PATCH",
         body: JSON.stringify({
+          expected_revision: 1,
           recommendation_id: "rec_tts_002",
           asset_id: "tts_asset_002",
         }),
@@ -2380,29 +3231,39 @@ describe("App", () => {
     expect(screen.queryByText(/partial_regeneration_job_001/i)).not.toBeInTheDocument();
   }
 
-  it("shows archived B-roll assets in the editing session picker and saves the selected override", async () => {
+  it("places an archived B-roll card through the sole manual library path with SHA identity", async () => {
     const fetchMock = await renderStartedEditingSession();
 
-    expect((await screen.findAllByText(/사무실 로비 패닝/i)).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/asset_broll_archive_001/i).length).toBeGreaterThan(0);
-
-    fireEvent.change(screen.getByRole("combobox", { name: /B롤 선택/i }), {
-      target: { value: "asset_broll_archive_002" },
-    });
-    expect(screen.getByRole("heading", { name: /선택 B롤/i })).toBeInTheDocument();
-    expect(screen.getAllByText(/팀 화이트보드/i).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/asset_broll_archive_002/i).length).toBeGreaterThan(0);
-    fireEvent.click(screen.getByRole("button", { name: /B롤 저장/i }));
+    const card = (await screen.findByText("asset_broll_archive_002")).closest("article");
+    expect(card).not.toBeNull();
+    fireEvent.click(card!.querySelector("button:last-of-type")!);
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
         "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/broll",
         expect.objectContaining({
           method: "PATCH",
-          body: JSON.stringify({ asset_id: "asset_broll_archive_002" }),
+          body: JSON.stringify({ expected_revision: 1, asset_id: "asset_broll_archive_002", media_controls: { expected_content_sha256: "", media_revision: "2026-07-06T00:00:01Z" } }),
         }),
       );
     });
+  });
+
+  it("refreshes project recent media state after applying a local B-roll", async () => {
+    const fetchMock = await renderStartedEditingSession();
+    const recentCallsBeforeApply = fetchMock.mock.calls.filter(([url, init]) =>
+      String(url).endsWith("/api/projects/project_001/media-library/recent") && !init,
+    ).length;
+    const card = (await screen.findByText("asset_broll_archive_002")).closest("article");
+    expect(card).not.toBeNull();
+
+    fireEvent.click(within(card!).getByRole("button", { name: /선택 구간에 B롤 적용/i }));
+
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([url, init]) =>
+      String(url).endsWith("/api/projects/project_001/media-library/recent") && !init,
+    )).toHaveLength(recentCallsBeforeApply + 1));
+    fireEvent.click(screen.getByRole("button", { name: "B롤 필터: 최근" }));
+    expect(screen.getByText("asset_broll_archive_002")).toBeInTheDocument();
   });
 
   it("shows a short success message after saving an editing change", async () => {
@@ -2427,43 +3288,101 @@ describe("App", () => {
     expect(await screen.findByText(/자막 저장 실패/i)).toBeInTheDocument();
   });
 
-  it("filters archived B-roll assets by display name tags and asset id before saving", async () => {
-    const fetchMock = await renderStartedEditingSession();
-    const picker = await screen.findByRole("combobox", { name: /B롤 선택/i });
+  it("reloads the latest session after a 409 without discarding the operator caption draft", async () => {
+    const latestSession = {
+      ...structuredClone(editingSessionResponse),
+      session_revision: 2,
+      segments: editingSessionResponse.segments.map((segment) =>
+        segment.segment_id === "seg_002"
+          ? { ...segment, caption_text: "Other operator update" }
+          : segment,
+      ),
+    };
+    await renderStartedEditingSession(createFetchMock({ editingMutationConflictSession: latestSession }));
 
-    expect(picker).toHaveTextContent(/사무실 로비 패닝/i);
-    expect(picker).toHaveTextContent(/팀 화이트보드/i);
-
-    fireEvent.change(screen.getByLabelText(/B롤 검색/i), {
-      target: { value: "기획" },
+    fireEvent.click(screen.getByRole("button", { name: /seg_002/i }));
+    const captionInput = screen.getByDisplayValue("Team meeting overview");
+    fireEvent.input(captionInput, {
+      target: { value: "Keep my unsaved caption" },
     });
-    expect(picker).not.toHaveTextContent(/사무실 로비 패닝/i);
-    expect(picker).toHaveTextContent(/팀 화이트보드/i);
-    expect(screen.getByText(/보임 1\/2/i)).toBeInTheDocument();
+    expect(await screen.findByText("Keep my unsaved caption")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /자막 저장/i }));
 
-    fireEvent.change(screen.getByLabelText(/B롤 검색/i), {
+    expect(await screen.findByText(/다른 편집 내용이 있습니다/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /최신 내용 적용/i }));
+    expect(await screen.findByDisplayValue("Keep my unsaved caption")).toBeInTheDocument();
+  });
+
+  it("marks the selected caption preset as a project-scoped favorite", async () => {
+    const fetchMock = await renderStartedEditingSession();
+
+    fireEvent.click(await screen.findByRole("button", { name: /프리셋 즐겨찾기/i }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/projects/project_001/editor-library/favorites/project:project_001:builtin:clean",
+        expect.objectContaining({
+          method: "PUT",
+          body: JSON.stringify({ favorite_type: "preset", enabled: true }),
+        }),
+      ),
+    );
+  });
+
+  it("marks a ManualMediaLibrary B-roll card with a project-scoped favorite id", async () => {
+    const fetchMock = await renderStartedEditingSession();
+    const card = (await screen.findByText("asset_broll_archive_002")).closest("article");
+    expect(card).not.toBeNull();
+    fireEvent.click(within(card!).getByRole("button", { name: /B롤 즐겨찾기$/i }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/projects/project_001/editor-library/favorites/pack:local:asset_broll_archive_002",
+        expect.objectContaining({
+          method: "PUT",
+          body: JSON.stringify({ favorite_type: "media", enabled: true }),
+        }),
+      ),
+    );
+  });
+
+  it("filters ManualMediaLibrary B-roll cards by display name tags and asset id before explicit placement", async () => {
+    const fetchMock = await renderStartedEditingSession();
+    expect(await screen.findByText(/Office lobby pan/i)).toBeInTheDocument();
+    expect(screen.getByText(/Team whiteboard/i)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("textbox", { name: /^검색$/i }), {
+      target: { value: "planning" },
+    });
+    expect(screen.queryByText(/Office lobby pan/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/Team whiteboard/i)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("textbox", { name: /^검색$/i }), {
       target: { value: "archive_001" },
     });
-    expect(picker).toHaveTextContent(/사무실 로비 패닝/i);
-    expect(picker).not.toHaveTextContent(/팀 화이트보드/i);
+    expect(screen.getByText(/Office lobby pan/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Team whiteboard/i)).not.toBeInTheDocument();
 
-    fireEvent.change(picker, {
-      target: { value: "asset_broll_archive_001" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: /B롤 저장/i }));
+    const card = screen.getByText(/Office lobby pan/i).closest("article");
+    expect(card).not.toBeNull();
+    fireEvent.click(within(card!).getByRole("button", { name: /선택 구간에 B롤 적용/i }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
         "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/broll",
         expect.objectContaining({
           method: "PATCH",
-          body: JSON.stringify({ asset_id: "asset_broll_archive_001" }),
+          body: JSON.stringify({
+            expected_revision: 1,
+            asset_id: "asset_broll_archive_001",
+            media_controls: { expected_content_sha256: "", media_revision: "2026-07-06T00:00:00Z" },
+          }),
         }),
       );
     });
   });
 
-  it("imports a B-roll folder from the editing session and refreshes the asset picker", async () => {
+  it("imports a B-roll folder and refreshes the ManualMediaLibrary cards", async () => {
     const fetchMock = await renderStartedEditingSession();
     const folderPath =
       "D:\\AI_Workspace_louis_office_50\\20_project\\65_videobox-project\\비롤_라이브러리\\검수완료";
@@ -2490,12 +3409,10 @@ describe("App", () => {
       );
     });
     await waitFor(() => {
-      expect(screen.getByRole("combobox", { name: /B롤 선택/i })).toHaveTextContent(/공장 라인/i);
+      expect(screen.getByText(/factory-line/i)).toBeInTheDocument();
     });
     expect(await screen.findByText(/가져옴 1개/i)).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: /B롤 선택/i })).toHaveTextContent(
-      /asset_broll_archive_003/i,
-    );
+    expect(screen.getByText(/asset_broll_archive_003/i)).toBeInTheDocument();
   });
 
   it("shows a B-roll import error when folder import fails", async () => {
@@ -2519,7 +3436,7 @@ describe("App", () => {
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/explanation-card",
+        "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/explanation-card?expected_revision=1",
         expect.objectContaining({
           method: "DELETE",
         }),
@@ -2546,7 +3463,7 @@ describe("App", () => {
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/image-overlay",
+        "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/image-overlay?expected_revision=1",
         expect.objectContaining({
           method: "DELETE",
         }),
@@ -2573,7 +3490,7 @@ describe("App", () => {
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/table-overlay",
+        "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/table-overlay?expected_revision=1",
         expect.objectContaining({
           method: "DELETE",
         }),
@@ -2603,7 +3520,7 @@ describe("App", () => {
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/tts-replacement",
+        "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/tts-replacement?expected_revision=1",
         expect.objectContaining({
           method: "DELETE",
         }),
@@ -2634,6 +3551,7 @@ describe("App", () => {
         expect.objectContaining({
           method: "PATCH",
           body: JSON.stringify({
+            expected_revision: 1,
             asset_id: "music_manual_002",
           }),
         }),
@@ -2987,7 +3905,7 @@ describe("App", () => {
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/music",
+        "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/music?expected_revision=1",
         expect.objectContaining({
           method: "DELETE",
         }),
@@ -2999,17 +3917,17 @@ describe("App", () => {
     expect(screen.getByRole("checkbox", { name: /^음악$/i })).not.toBeChecked();
   });
 
-  it("clears the saved b-roll override and invalidates the active candidate", async () => {
+  it("clears the selected-range B-roll override from the ManualMediaLibrary and invalidates the active candidate", async () => {
     const fetchMock = await renderStartedEditingSession(
       createFetchMock({ candidateReviewSnapshot: candidateReviewSnapshotResponse }),
     );
 
     await runCandidateToApprovalReady();
-    fireEvent.click(screen.getByRole("button", { name: /B롤 해제/i }));
+    fireEvent.click(screen.getByRole("button", { name: /선택 구간 B롤 해제/i }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/broll",
+        "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/broll?expected_revision=1",
         expect.objectContaining({
           method: "DELETE",
         }),
@@ -3017,8 +3935,7 @@ describe("App", () => {
     });
     await expectCandidateInvalidated();
     expect(screen.getByText(/B롤 해제됨/i)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /B롤 해제/i })).not.toBeInTheDocument();
-    expect(screen.getByLabelText(/B롤 자산 ID/i)).toHaveValue("");
+    expect(screen.queryByRole("button", { name: /선택 구간 B롤 해제/i })).not.toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: /B롤/i })).not.toBeChecked();
   });
 
@@ -3105,7 +4022,7 @@ describe("App", () => {
     const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (
-        url.endsWith(
+        url.startsWith(
           "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/tts-replacement",
         ) &&
         init?.method === "DELETE"
@@ -3445,6 +4362,7 @@ describe("App", () => {
         expect.objectContaining({
           method: "PATCH",
           body: JSON.stringify({
+            expected_revision: 1,
             caption_text: "Team meeting overview refreshed",
           }),
         }),
@@ -4684,5 +5602,186 @@ describe("App", () => {
     expect(screen.queryByText(/partial_regeneration_job_001/i)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /타임라인 승인/i })).toBeDisabled();
     expect(screen.getByRole("button", { name: /자막 생성/i })).toBeEnabled();
+  });
+
+  it("reopens narration and script ingest for the selected project after a refresh", async () => {
+    vi.stubGlobal("fetch", createFetchMock());
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "소스 등록" }));
+
+    expect(await screen.findByRole("heading", { name: "영상 만들기 시작" })).toBeInTheDocument();
+    expect(screen.getByLabelText("나레이션 로컬 경로")).toBeInTheDocument();
+    expect(screen.getByLabelText("스크립트 로컬 경로")).toBeInTheDocument();
+  });
+
+  it("shows the fixed five-track timeline controls after restoring an editing session", async () => {
+    vi.stubGlobal("fetch", createFetchMock());
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
+
+    expect(await screen.findByRole("heading", { name: "고정 트랙 타임라인" })).toBeInTheDocument();
+    expect(screen.getByText("나레이션")).toBeInTheDocument();
+    expect(screen.getAllByText("B롤").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("BGM").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("SFX").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("오버레이").length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "분할" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "실행 취소" })).toBeInTheDocument();
+  });
+
+  it("separates verified BGM and SFX library items, previews without mutation, persists favorites, and materializes before applying", async () => {
+    const fetchMock = createFetchMock({
+      mediaLibraryAssets: [
+        {
+          library_asset_id: "pack:starter-001:music-001",
+          asset_id: "music-001",
+          media_type: "music",
+          duration_seconds: 12.5,
+          version: "1.0.0",
+          verified: true,
+          available: true,
+          tags: ["calm", "office"],
+          source: "Synthetic source",
+          creator: "Synthetic creator",
+          official_license_url: "https://example.test/license",
+          attribution_required: true,
+          attribution_text: "Music by Synthetic creator",
+        },
+        {
+          library_asset_id: "pack:starter-001:sfx-missing",
+          asset_id: "sfx-missing",
+          media_type: "sfx",
+          duration_seconds: 1,
+          version: "1.0.0",
+          verified: false,
+          available: false,
+          tags: ["impact"],
+          source: "Synthetic source",
+          creator: "Synthetic creator",
+          official_license_url: "https://example.test/license",
+        },
+      ],
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
+    expect(await screen.findByRole("heading", { name: "BGM 라이브러리" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "SFX 라이브러리" })).toBeInTheDocument();
+    expect(screen.getByText("설치된 검증 미디어 2개")).toBeInTheDocument();
+    expect(screen.getByText("Starter pack 설치됨")).toBeInTheDocument();
+    expect(screen.getByText(/Synthetic creator · 1.0.0 · 12.5초/i)).toBeInTheDocument();
+    expect(screen.getByText(/표기 필요: Music by Synthetic creator/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "SFX 적용" })).toBeDisabled();
+
+    const search = screen.getByPlaceholderText("BGM, SFX, 태그 또는 길이");
+    fireEvent.change(search, { target: { value: "BGM" } });
+    expect(screen.getByText("music-001")).toBeInTheDocument();
+    expect(screen.queryByText("sfx-missing")).not.toBeInTheDocument();
+    fireEvent.change(search, { target: { value: "calm" } });
+    expect(screen.getByText("music-001")).toBeInTheDocument();
+    fireEvent.change(search, { target: { value: "12.5" } });
+    expect(screen.getByText("music-001")).toBeInTheDocument();
+    fireEvent.change(search, { target: { value: "" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "BGM 미리보기" }));
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      expect.stringMatching(/materialize|\/music$/),
+      expect.anything(),
+    );
+    expect(screen.getByText(/미리보기 선택됨/i)).toBeInTheDocument();
+    expect(screen.getByTestId("media-library-preview")).toHaveAttribute(
+      "src",
+      "/api/media-library/assets/pack%3Astarter-001%3Amusic-001/preview",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "BGM 즐겨찾기" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/projects/project_001/media-library/assets/pack%3Astarter-001%3Amusic-001/favorite",
+      expect.objectContaining({ method: "PUT" }),
+    ));
+    fireEvent.click(screen.getByRole("button", { name: "즐겨찾기" }));
+    expect(screen.getByText("music-001")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "BGM 적용" }));
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/media-library/assets/pack%3Astarter-001%3Amusic-001/materialize",
+        expect.objectContaining({ method: "POST", body: JSON.stringify({ project_id: "project_001" }) }),
+      );
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/music",
+        expect.objectContaining({
+          method: "PATCH",
+          body: JSON.stringify({ expected_revision: 1, asset_id: "asset_materialized_music_001" }),
+        }),
+      );
+    });
+    fireEvent.click(screen.getByRole("button", { name: "최근" }));
+    expect(screen.getByText("music-001")).toBeInTheDocument();
+  });
+
+  it("keeps the restored editor usable when the global media library is unavailable", async () => {
+    vi.stubGlobal("fetch", createFetchMock({ mediaLibraryUnavailable: true }));
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
+
+    expect(await screen.findByText(/미디어 라이브러리를 사용할 수 없습니다/i)).toBeInTheDocument();
+    expect(screen.getByText("editing_session_001")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "분할" })).toBeEnabled();
+  });
+
+  it("restores media favorites and recent usage from the active project after an app reload", async () => {
+    const fetchMock = createFetchMock({
+      mediaLibraryAssets: [{
+        library_asset_id: "pack:starter-001:music-001",
+        asset_id: "music-001",
+        media_type: "music",
+        duration_seconds: 12.5,
+        version: "1.0.0",
+        verified: true,
+        available: true,
+        tags: ["calm"],
+        source: "Synthetic source",
+        creator: "Synthetic creator",
+        official_license_url: "https://example.test/license",
+        attribution_required: false,
+        attribution_text: "",
+      }],
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const firstRender = render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
+    fireEvent.click(await screen.findByRole("button", { name: "BGM 즐겨찾기" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/projects/project_001/media-library/assets/pack%3Astarter-001%3Amusic-001/favorite",
+      expect.objectContaining({ method: "PUT" }),
+    ));
+    fireEvent.click(screen.getByRole("button", { name: "BGM 적용" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/media-library/assets/pack%3Astarter-001%3Amusic-001/materialize",
+      expect.objectContaining({ method: "POST" }),
+    ));
+
+    firstRender.unmount();
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
+    await screen.findByRole("button", { name: "즐겨찾기" });
+
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([url, init]) =>
+      String(url).endsWith("/api/projects/project_001/media-library/favorites") && !init,
+    )).toHaveLength(2));
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([url, init]) =>
+      String(url).endsWith("/api/projects/project_001/media-library/recent") && !init,
+    )).toHaveLength(3));
+    fireEvent.click(screen.getByRole("button", { name: "즐겨찾기" }));
+    expect(screen.getByText("music-001")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "최근" }));
+    expect(screen.getByText("music-001")).toBeInTheDocument();
   });
 });

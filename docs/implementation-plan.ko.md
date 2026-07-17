@@ -1,6 +1,6 @@
 # VideoBox 실행용 구현 계획서
 
-> 현재 worktree 기준 구현 상태와 next slice 판단은 `## 12. 2026-07-01 현재 구현 체크포인트`와 `## 13. 다음 실제 작업`을 우선 적용한다. 그 외 상위 milestone/범위/순서 섹션은 제품·구현 계획의 기준을 설명하는 문서다.
+> 현재 worktree 기준 next implementation 판단은 `### 8.4.2 2026-07-17 OSS 앱 셸·편집기 재분석 결정`과 연결된 22-Task 실행 계획을 우선 적용한다. 완료된 Local Media Director 상태는 `## 22`가 authoritative closeout이다. 그 외 상위 milestone/범위/순서 섹션은 제품·구현 계획의 기준을 설명한다.
 > 개발 운영 상위 규칙은 저장소 루트 `AGENTS.md`와 `docs/development-fast-path.ko.md`의 `## 10. 고정 운영 규정`을 프로젝트 전역 기본값으로 적용한다. 즉, 이 계획서를 실행할 때의 작업 우선순위, 선택적 TDD/서브에이전트/리뷰 사용, 표준 검증 경로, hot path 구분, 커밋/푸시, 진행률 보고, turn closeout 형식은 해당 규정을 따른다.
 
 ## 1. 목적
@@ -209,7 +209,7 @@
 - 언어: Python 우선
 - 영상 처리: FFmpeg
 - 전사: WhisperX 또는 대체 STT provider
-- LLM: 로컬 Qwen 우선 + Gemini multi-key fallback + 선택적 OpenAI provider
+- LLM: LM Studio loopback 기반 로컬 text/vision/embedding provider만 자동 runtime에 사용. Gemini/OpenAI 자동 fallback 금지
 - TTS: 사용자 본인 목소리 기반 TTS provider
 - 비전/자산 분석: OpenCV + 자산 메타데이터 인덱싱
 - 데이터 저장: 로컬 DB 우선
@@ -336,6 +336,37 @@
 3. 그 다음 오픈소스 편집기 셸을 `partial port` 또는 `reference` 방식으로 붙인다
 
 즉, 편집기 오픈소스는 `지금 바로 통째 반입`이 아니라 `편집 규칙이 고정된 직후`에 붙이는 것이 원칙이다.
+
+### 8.4.1 OpenCut 및 음성 제작 후속 판단 게이트
+
+- OpenCut은 현재 통째 도입·임베드·제품 의존성 후보가 아니다. 현행판은 재작성 중이고 classic은 archived 상태이므로, VideoBox의 FFmpeg preview·CapCut draft·editing-session SSOT를 대체하지 않는다.
+- 향후 timeline patch API와 FFmpeg preview 계약이 안정된 뒤에만 OpenCut을 다시 분석한다. 그때도 기본값은 코드 반입이 아니라 drag/trim, snapping, ripple, waveform, rational time 같은 UX interaction의 독립 재구현이다.
+- 재분석 gate는 실제 Editor API/headless 상태, 라이선스·의존성 SBOM, 보안, canonical timeline round-trip, CapCut export 영향, GPU fallback을 포함한다.
+- Voice Capture & Narration은 별도 후속 slice다. 브라우저 녹음과 파일 업로드를 narration asset으로 정규화하고, local STT 전사·대본 정렬·자막 생성을 연결한다.
+- voice sample 기반 TTS/voice cloning은 전사와 분리한다. 명시적 opt-in, 원본·전사·샘플의 삭제/보관 정책, preview→apply→undo, review/approval gate를 별도 설계·검증하기 전에는 자동 사용하지 않는다.
+
+### 8.4.2 2026-07-17 OSS 앱 셸·편집기 재분석 결정
+
+Local Media Director 18개 Task와 editing-session revision, source provenance, FFmpeg/PyCapCut output gate가 완료됐으므로 §8.4.1의 OpenCut 재분석 gate를 열었다. 이번 결정은 OpenCut을 제품 dependency로 넣는 승인이 아니라, 검증 가능한 화면·상호작용만 VideoBox 경계 안으로 선별 이식하는 승인이다.
+
+- 조사 보고서: `docs/research/2026-07-17-videobox-oss-dashboard-editor-adoption.ko.md`
+- 설계서: `docs/superpowers/specs/2026-07-17-videobox-oss-dashboard-editor-adoption-design.md`
+- 구현 계획서: `docs/superpowers/plans/2026-07-17-videobox-oss-dashboard-editor-adoption.md`
+- 구현 단위: 7개 slice, 22개 실행 Task
+- production 구현 진행률: 0/22 Task (0%), 잔여 100%
+
+도입 분류는 다음으로 고정한다.
+
+1. `shadcn/ui`: pinned registry source path와 normalized file SHA를 lock한 source-owned component를 직접 사용한다. live registry 결과를 pinned source로 오인하지 않는다.
+2. `shadcn-admin`: sidebar/header/project switcher/settings shell composition만 `partial port`한다.
+3. `OpenCut current rewrite`: 실제 editor가 아직 없으므로 editor runtime 후보에서 제외한다.
+4. `OpenCut classic`: archived source에서 panel layout, asset tabs, inspector registry, pure timeline/preview geometry만 `partial port` 또는 adapter 방식으로 이식한다.
+5. `Opencast Editor`: transcript/subtitle/waveform/cut interaction을 Apache-2.0 attribution과 함께 source-derived behavioral adaptation한다.
+6. `Supabase Studio`: 프로젝트 계층, settings IA, mobile navigation을 `reference only`로 사용한다.
+
+OpenCut EditorCore, IndexedDB/OPFS, browser renderer/export, WASM, browser STT와 Opencast Redux/MUI/full snapshot API/player fork/browser waveform decode는 반입하지 않는다. Supabase source도 직접 복사하지 않는다. editing-session, revision, FFmpeg, PyCapCut, output-source verifier는 계속 authoritative하다.
+
+새 shell은 local/cloud capability slot을 갖지만 실제 SaaS auth/team/billing과 Hermes agent/container는 이번 22개 Task에 넣지 않는다. 먼저 현재 미커밋 Lumi copy 작업을 검증·closeout하고, 세 화면/네 viewport 시각 승인을 받은 뒤 production UI로 진행한다. shell 직후에는 advanced timeline보다 `대본→루미 인터뷰→자산 점검→한 번 승인→atomic real draft→editor/output handoff` 수직 Slice를 먼저 검증한다. browser source audition은 실제 합성 preview가 아니며, current revision의 정확한 미리보기는 기존 FFmpeg composition path를 재사용한 freshness-bound proxy artifact로 고정한다. caption timing은 현 backend 권한에 맞춰 segment-linked로 제한한다.
 
 ## 8.3 구현 완료 시 적용 여부 보고
 
@@ -471,6 +502,29 @@
 - 본인 목소리 TTS 허용 범위 확정
 
 ## 12. 2026-07-01 현재 구현 체크포인트
+
+### 2026-07-11 production-readiness blocker slice 1 authoritative checkpoint
+
+이번 checkpoint는 `docs/superpowers/plans/2026-07-11-production-readiness-blocker-slice-1.md`의 9개 Task와 여섯 blocker 계약을 기준으로 한다. 2026-07-11 현재 HEAD `f02dde1` 이후 worktree 변경까지 포함한 검증 결과는 아래와 같다.
+
+| blocker | 현재 계약과 증거 |
+| --- | --- |
+| 빈 첫 화면 | 프로젝트 생성 뒤 narration/script ingest를 독립 실행한다. 하나가 실패해도 생성된 프로젝트와 다른 ingest 성공은 유지하고 실패한 항목만 다시 등록한다. `project-onboarding.test.tsx`가 create/ingest와 failure/retry를 검증한다. |
+| assetless BGM | 실물 `selected_asset_id` 없는 mood recommendation은 metadata로만 남고 BGM clip 또는 `music/suggested` URI를 만들지 않는다. |
+| nullable output | failed final render/real CapCut draft는 nullable artifact와 error message를 반환하며 UI는 error card, retry, ErrorBoundary로 복구한다. |
+| partial caption | partial regeneration candidate의 `caption_segments`가 승인 후 SRT에 쓰이고 final renderer에는 그 timeline의 최신 SRT가 전달된다. |
+| short source duration | FFmpeg는 short B-roll을 loop하고 audio를 `apad/trim`한다. real CapCut draft는 B-roll repetition과 project-local persistent WAV silence segment로 source를 늘리지 않고 target window를 채운다. |
+| export overlays | FFmpeg는 text 및 image overlay를 실제 frame에 materialize하고, real CapCut draft는 text track과 image video track/material을 가진다. |
+
+검증 증거:
+
+- frontend: `npm test -- --run` 82 passed, `npm run build` 성공. ErrorBoundary intentional throw와 기존 App test의 React `act(...)` warning은 stderr에 남지만 테스트 실패는 아니다.
+- backend: `.venv\\Scripts\\python.exe -m pytest -q -p no:cacheprovider`에서 Python 3.12.10, 621 passed.
+- actual Korean smoke: `production-readiness-korean-10m.wav` 600.000초, SHA-256 `a0c7f05a7052be735dce56df38a45ae167a9b24cad122a3c518ef9025701ee0f`; API ingest→edit→partial caption→SRT→FFmpeg MP4 9개 check true (MP4 internal subtitle 및 distinguishable short B-roll loop 포함); final MP4 600.000초, SHA-256 `45e430cae559e94b0b62eb2bf5f8178f74c0472a9fbadebb134ccb9bf9425c79`.
+
+진행률은 이 계획서의 39개 implementation milestone bullet을 재판정한 값이다. 36 완료, 3 부분, 0 미구현으로 판정한다. strict 완료율은 `36 / 39 = 92.3%`, 부분 항목을 0.5로 계산한 weighted 진행률은 `(36 + 3 × 0.5) / 39 = 96.2%`, weighted 잔여율은 `3.8%`다. 부분 3개는 개인 음성 clone 품질, 효과음 추천/선택, 긴 영상의 사람 검수 운영 품질이며 이번 blocker slice의 완료 조건은 아니다.
+
+이하 기존 2026-07-01 체크포인트는 historical reference다.
 
 현재 기준 아래 범위는 코드와 검증으로 실제 연결되어 있다.
 
@@ -749,6 +803,40 @@
 
 ## 13. 다음 실제 작업
 
+### 2026-07-11 기준
+
+production-readiness blocker slice 1의 9개 Task는 구현·회귀·600초 smoke·SSOT 갱신까지 완료했다. 다음 goal은 새 기능을 넓히기보다 아래 중 하나를 좁게 선택한다.
+
+1. 실제 사용자 음성 clone TTS 품질과 긴 영상 발화/무음 QA를 별도 provider acceptance 기준으로 고정한다.
+2. 효과음 추천·선택·output materialization을 BGM과 같은 real-asset only 계약으로 구현한다.
+3. 10분 이상 실제 프로젝트 3건의 수동 CapCut open/edit/export UX 검증을 수행하고 생성 source 경로, overlay layout, Korean typography를 점검한다.
+
+### 2026-07-12 SFX real-asset acceptance 완료
+
+효과음 slice는 실제 등록 asset이 없는 추천을 timeline에 넣지 않고, 편집 세션의 실제 SFX 선택만 partial regeneration에서 `sfx_review_required` 검수 대상으로 만든다. 개별 승인 뒤 candidate partial timeline과 원본 timeline 저장본을 함께 갱신하여 SFX track이 FFmpeg final MP4 및 real CapCut draft에 유지된다. 웹 편집 화면은 효과음 asset ID 저장·해제와 새로고침 복구를 지원한다.
+
+- 검증: frontend 83 passed/build success, backend Python 3.12 632 passed (API 388 + 기타 244 분할 실행), 600초 Korean smoke 12 checks true.
+- smoke final MP4 SHA-256: `036bc6ccfbcd5aba814e44aceb9b654f41ead6c9613d9ebfd4eb2dc8f672a93e`.
+- 전체 milestone: 39개 중 38 완료, 1 부분. strict 97.4%, partial=0.5 weighted 98.7%, weighted remaining 1.3%.
+- 남은 부분은 실제 사용자 녹음 human listening approval과 다중 실제 프로젝트 CapCut UX QA다.
+
+### 2026-07-12 개인 음성 파일 입력 readiness 완료
+
+웹 설정 화면에서 WAV/MP3/M4A/WebM/Ogg/FLAC 음성 파일을 선택해 multipart upload로 등록할 수 있다. 서버는 128 MiB 상한과 1 MiB chunk staging을 적용하고, 등록 뒤 임시 파일을 제거한다. 기존 직접 경로 등록은 호환 경로로 남기며, 최근 등록 voice sample asset은 새로고침 후 목록 API에서 복원되어 TTS candidate 생성에 다시 사용된다. microphone 자동 녹음은 범위 밖이다.
+
+- 검증: frontend 86 passed/build success, backend Python 3.12 633 passed (API 389 + 기타 244 분할 실행), 600초 Korean smoke 13 checks true.
+- 전체 milestone: 39개 중 38 완료, 1 부분. strict 97.4%, weighted 98.7%, weighted remaining 1.3%로 유지한다. 실제 사용자 녹음의 human listening approval과 다중 프로젝트 CapCut UX QA는 아직 사람이 수행해야 한다.
+
+### 2026-07-12 개인 음성 TTS 청취 승인 게이트 완료
+
+- 기술 검증을 통과한 `tts_candidate_*`는 SQLite의 `operator_review_status`가 `approved`일 때만 개인 음성 나레이션 대체에 사용할 수 있다. pending/rejected 후보는 기존 나레이션을 유지한다.
+- UI에서 재생 후 청취 승인/거부를 저장하며, 새로고침 뒤에도 후보 상태를 다시 읽고 복원한다. 승인 전 후보 선택은 비활성화된다.
+- legacy/imported 일반 TTS 교체는 개인 음성 후보가 아니므로 기존 편집 호환성을 유지한다.
+- 실제 600초 한국어 smoke에서 `tts_candidate_listening_approved`, SRT, FFmpeg MP4, real CapCut draft 반영을 확인했다.
+- 전체 milestone 진행률은 38/39 완료, 1 부분으로 유지한다: strict 97.4%, weighted 98.7%, remaining 1.3%. 남은 것은 실제 사용자가 자신의 음성을 듣고 품질을 판정하는 운영 QA와 다중 실제 프로젝트 CapCut UX QA다.
+
+이하 기존 next-task 목록은 historical reference다.
+
 현재 기준 다음 실제 작업은 아래 순서로 재고정한다.
 
 1. final closeout 본문과 final closeout commit 단위를 authoritative 상태로 유지한다
@@ -927,3 +1015,146 @@
 - 단, 최종 운영 마감 점검에서는 focused와 representative smoke가 green이어도 broader full backend regression이 red면 운영 완료로 닫지 않는다
 - 현재 최신 운영 점검 결과는 `full-suite only red 1개`가 남아 있으므로, 다음 실제 작업은 새 기능 추가가 아니라 그 경계 1개를 좁히는 안정화 복귀다
 - 그 blocker를 복구한 뒤 focused와 broader가 모두 다시 green으로 닫혔으므로, 현재 구현 계획 기준 required work는 운영 마감 단계까지 모두 완료된 상태로 본다
+
+## 14. 2026-07-12 personal voice TTS acceptance closeout
+
+- 개인 음성 TTS 후보는 무음, 손상, target duration 불일치를 기술적으로 거부하고 `pending operator review`를 별도 유지한다.
+- provider 실패는 generic TTS 자동 대체가 아니라 원본 narration 유지 오류로 처리한다.
+- BrollBox `execution/tts_engine.py`는 environment-global 및 gTTS fallback 결합 때문에 `rewrite`, Voicebox는 `reference only`로 확정한다.
+- deterministic Korean WAV provider와 실제 FFmpeg/real CapCut adapter를 이용한 600초 smoke가 TTS 후보, timeline approval, SRT, MP4, CapCut draft를 확인한다.
+
+## 15. 2026-07-12 detailed editor upgrade closeout
+
+- `docs/superpowers/plans/2026-07-12-detailed-editor-upgrade-implementation.md`의 Task 1–5를 완료했다. 상세 편집기 계획 진행률은 strict 100%, remaining 0%다.
+- Task 5는 BGM/SFX gain/fade/ducking, B-roll crop/fit/loop/pad/trim을 FFmpeg 및 real CapCut draft에 연결하고, missing font/media 차단과 preview/final/CapCut artifact recovery/reload를 추가했다.
+- 현재 HEAD 검증: backend Python 3.12 `674 passed`, frontend `96 passed`/build success, `dev-fast-path.ps1 -Mode smoke` 600초 Korean 15 checks true. smoke final MP4 SHA-256은 `448c74034c3981ff7aa5264d12655eba6096b1653261e93d1ffae41a26342f29`다.
+- 다음 권장 작업은 새 편집 기능 확대가 아니라 실제 CapCut desktop에서 10분 프로젝트 3건을 열고, B-roll pad와 ducking compatibility warning을 포함한 수동 open/edit/export UX QA를 기록하는 운영 검증이다.
+
+## 16. 2026-07-12 long-form CapCut draft QA closeout
+
+- `loop`, `crop_pad_overlay`, `audio_ducking` 3개 deterministic 600초 fixture가 ingest → editing session → partial regeneration → SRT → styled MP4 → real CapCut `draft_content.json`을 반복 실행한다.
+- auto QA는 B-roll loop/crop/pad/trim, image/text overlay, BGM/SFX gain/fade/ducking, 승인 개인 음성 TTS와 persisted ducking warning을 확인한다.
+- 실행 명령은 `./scripts/dev-fast-path.ps1 -Mode long-form-capcut-qa`다. 생성 artifact는 `artifacts/long-form-capcut-qa/`에만 두고 Git에는 넣지 않는다.
+- 이는 desktop CapCut 사용성 검증이 아니다. manifest의 `desktop_capcut_opened: false`와 같이 명시하며, 실제 CapCut 3건의 open/edit/export QA는 다음 사람 검증으로 남긴다.
+
+## 17. 2026-07-12 CapCut output observability and recovery UX closeout
+
+- real CapCut draft export의 persisted `notes` compatibility warning과 nullable artifact/error_message를 API → frontend type → output panel까지 같은 계약으로 연결했다.
+- UI는 artifact 경로와 마지막 성공 artifact를 유지하고, warning을 오류와 분리한 `CapCut에서 후처리 필요` 안내로 표시한다. retry는 failed 상태에서만 노출한다.
+- 새로고침 복구, 빈 warning, null artifact, failed API response는 frontend 및 backend contract test로 확인했다.
+- 현재 HEAD 검증: Python 3.12 backend `683 passed`, frontend `97 passed`, production build success. 실제 desktop CapCut open/edit/export는 여전히 사람 운영 QA 범위다.
+
+## 18. 2026-07-12 actual CapCut Desktop operating QA closeout
+
+- CapCut Desktop `8.7.0.3685`에서 `loop`, `crop_pad_overlay`, `audio_ducking` 3개 600초 real draft를 실제 open했다. asset track, 10분 timeline, 한국어 caption, overlay, B-roll control surface, BGM/SFX/TTS track이 모두 로드됐다.
+- `loop`은 CapCut UI에서 1080P/H.264/MP4/24fps로 실제 export 완료했고 `C:\\Users\\atgro\\AppData\\Local\\CapCut\\Videos\\videobox-qa-loop-20260712.mp4`의 FFprobe duration은 `600.026848` seconds다. 나머지 두 draft는 open/edit/export dialog까지만 확인했다.
+- 당시 handoff는 CapCut default project root에 draft folder를 수동 등록해야 했다. 이 제한은 아래 19번 slice에서 해소됐다.
+
+## 19. 2026-07-12 CapCut local-project handoff registration closeout
+
+- VideoBox는 원본 `draft_content.json` artifact를 수정하지 않고, Windows `%LOCALAPPDATA%\\CapCut\\User Data\\Projects\\com.lveditor.draft\\videobox-<export_id>`에 별도 registered copy를 만든다.
+- 지원 탐지는 `%LOCALAPPDATA%\\CapCut\\Apps` 아래의 `CapCut.exe`와 위 local project root가 모두 존재하고 쓰기 가능한 경우로 제한한다. 미설치, project root 미생성, 쓰기 권한 거부는 추측하지 않고 각각 한글 복구 안내를 반환한다.
+- 동일 export 재시도는 완전한 등록 copy를 재사용한다. 불완전한 충돌 copy는 새 임시 폴더 copy 후 교체하며, copy 실패 시 임시 폴더를 정리해 원본 artifact를 보존한다.
+- CapCut export API는 `handoff.status`, source artifact URI, registered project path, 오류 사유, 등록 시각, reused 여부를 영속화한다. 웹 출력 패널은 `CapCut에 열기 준비`, 등록 경로, 실패 사유, `CapCut 등록 다시 시도`를 새로고침 뒤에도 표시한다.
+- 실제 Windows CapCut Desktop에서 `videobox-handoff-loop-20260712`을 검색해 열었다. CapCut detail path는 `C:\\Users\\atgro\\AppData\\Local\\CapCut\\User Data\\Projects\\com.lveditor.draft\\videobox-handoff-loop-20260712`이고, 수동 폴더 복사 없이 10분 타임라인, 한국어 자막, 오디오 트랙이 열렸다. 같은 registration을 두 번 호출해 첫 호출 `reused=False`, 두 번째 호출 `reused=True`도 확인했다.
+- 최신 검증: Python 3.12 backend `693 passed`, frontend `99 passed`, production build 성공. artifacts는 Git에 포함하지 않는다.
+
+## 20. 2026-07-13 CapCut handoff diagnostics closeout
+
+- `GET /api/capcut/handoff-diagnostics`는 project/export/source draft를 변경하거나 CapCut을 실행하지 않고 현재 Windows handoff 준비 상태만 반환한다. 권한 검증은 즉시 삭제되는 temporary file probe로 실제 쓰기 가능 여부를 확인한다.
+- response는 선택된 최고 버전 `CapCut.exe` 설치 경로와 버전, 예상 local project root, root 존재, 쓰기 권한, `ready`/`failed`, 한글 복구 안내, 검사 시각을 포함한다.
+- 웹 출력 패널의 `CapCut 연결 진단` 카드는 설치·프로젝트 경로와 쓰기 상태를 보여주며, failure일 때 `다시 진단`으로 상태를 새로 읽는다. 카드 상태는 page reload 때도 API에서 다시 복구된다.
+- live Windows proof: CapCut `8.9.1.3802`, `C:\\Users\\atgro\\AppData\\Local\\CapCut\\Apps\\8.9.1.3802\\CapCut.exe`, `C:\\Users\\atgro\\AppData\\Local\\CapCut\\User Data\\Projects\\com.lveditor.draft`, write access `true`, status `ready`를 확인했다.
+- 최신 검증: Python 3.12 backend `698 passed`, frontend `101 passed`, production build 성공. `artifacts/`는 Git에 포함하지 않는다.
+
+## 21. 2026-07-13 long-form CapCut 3/3 final-render operating QA closeout
+
+- CapCut Desktop `8.9.1.3802`에서 `loop`, `crop_pad_overlay`, `audio_ducking` 3개 600초 real draft를 모두 1080P/H.264/MP4/24fps로 실제 local MP4 export 완료했다.
+- `loop`: `videobox-qa-loop-20260712.mp4`, `600.026848` seconds, `73,526,175` bytes, SHA-256 `3DF607575BE81F1FD0050F1635B831E1C71D7DB6C7DA45E933D7848C23DF53F8`.
+- `crop_pad_overlay`: `videobox-qa-crop-pad-overlay-20260712.mp4`, `600.026848` seconds, `25,452,146` bytes, SHA-256 `839F83D911384B1BE72B8D983DA7AC16E34221CCE505935A0E31F8394187043B`. CapCut timeline에서 Korean caption, image/text overlay, black-pad B-roll track을 확인했다.
+- `audio_ducking`: `videobox-qa-audio-ducking-20260712.mp4`, `600.026848` seconds, `73,882,181` bytes, SHA-256 `B23B2D7E7DDC01D3BDD0F49B11126EC80BA8CF90E3349F2DC29BC6AE72EAA11B`. CapCut timeline에서 narration/TTS와 `smoke-bgm.wav`/`smoke-impact.wav` audio track을 확인했다.
+- output은 모두 `C:\\Users\\atgro\\AppData\\Local\\CapCut\\Videos\\`에만 두며 VideoBox source artifact 및 Git `artifacts/`는 수정·추가하지 않는다.
+
+## 22. 2026-07-14 Local Media Director implementation plan
+
+- 승인 설계는 `docs/superpowers/specs/2026-07-14-local-media-director-design.md`다.
+- 실행 계획은 `docs/superpowers/plans/2026-07-14-local-media-director-implementation.md`다.
+- 계획은 18개 TDD Task를 세 순차 slice로 나눈다.
+  1. Local media intelligence foundation: LM Studio local-only provider, durable B-roll analysis, 자동 태깅/검수
+  2. Script-first proposal engine: narration 없는 provisional script session, B/M/S ranking, preview/materialize, atomic apply
+  3. Director workspace: 우측 대화 패널, 수동 편집, B/M/S reference, persistent conversation, 10-step undo/redo, responsive UI
+- 구현 시작 전 기준 HEAD는 `8eddb7f`다. Slice 1 Task 1–6과 그 release-blocking remediation, Slice 2 Task 7–12, Slice 3 Task 13–18은 완료됐으며, 전체 계획 기준 18/18 Task(100.0%) 완료·0% 잔여다.
+- 구현 계획의 개발 Task는 모두 닫혔다. 다음은 새 기능 Task가 아니라 CapCut Desktop 수동 재생·export 승인, 실제 음성 자연스러움, 배포 전 권리/라이선스 판단의 human acceptance release follow-up이다.
+- 기존 `LocalFirstStructuredRuntime`의 Gemini 자동 fallback, 외부 HTTP(S) runtime 허용, text-only Qwen adapter는 승인 설계와 충돌하므로 Slice 1에서 RED test부터 교체한다.
+- Codex Sol/Terra/Luna 모델 선택은 개발 에이전트 실행 자원이며 VideoBox 제품 runtime 계약에는 포함하지 않는다.
+
+### Slice 1 Task 1–5 remediation closeout (2026-07-15)
+
+- actual LM Studio media analysis는 strict loopback capability profile로만 opt-in 구성하며, default blocked state와 test-only fake DI seam을 분리한다. model-profile cache identity, durable scene/embedding provenance, active queue position, preview availability, batch partial-failure contract까지 RED-first로 보완했다.
+- Task 4의 analysis validity gate는 proposal/apply consumer가 생성되는 Slice 2 Task 8–11에서 연결한다. 이연을 가리기 위한 가짜 apply endpoint는 만들지 않는다.
+
+### Slice 1 Task 6 live gate current evidence — PASS (2026-07-15)
+
+- `87be02e` HEAD의 opt-in smoke가 actual Qwen Vision fixed-schema response, BGE finite embedding, `lm_studio` provider trace(no fallback), restart durable semantic self-match를 통과했다. `@live_lmstudio`+`VIDEOBOX_RUN_LM_STUDIO_MEDIA_SMOKE=1`+exact `127.0.0.1:1234` 외의 일반 회귀는 socket을 열지 않는다.
+- native `/api/v1/models`의 loaded instance/vision metadata는 후보 discovery 전용이다. structured JSON은 actual `POST /v1/chat/completions` fixed-schema 성공/strict parse로만 증명했다. exact loopback 7회(native 5, OpenAI runtime 2), external/Gemini 0, profile/variant/sample SHA/trace는 custom Git-excluded success artifact에 저장했다.
+- malformed native inventory에 한해서만 이전 strict loaded+native-capabilities inventory를 fallback으로 읽는다. generic `/v1/models` ID나 model name inference는 계속 blocked다. Task 7부터는 이 frozen local-only boundary를 사용한다.
+
+### Slice 2 Task 7 closeout (2026-07-15)
+
+- script-only session은 deterministic segmentation, fixed Korean speech-rate와 최소 2초 provisional timing, durable `timing_source`/alignment-required/source identity를 제공한다. alignment API는 실제 bounds로 교체하고 source ID별 future proposal stale handoff를 보존하지만 Task 8의 proposal domain을 앞당기지 않는다.
+- 독립 spec/quality review는 P1/P2 없이 승인했고, reverse runtime review가 찾은 API-level invalid alignment coverage(P2)는 빈 목록·overlap·non-positive bounds 422 E2E로 보완했다. legacy JSON의 absent new fields는 직렬화하지 않는다.
+- `ed092d0`에서 focused `66 passed`, final backend full `905 passed, 2 skipped`, frontend `107 passed`/build success와 `git diff --check`를 확인했다. 기존 `python_multipart` deprecation warning 1건은 비차단이다.
+
+### Slice 2 Task 8 closeout (2026-07-15)
+
+- immutable proposal/ranking/persistence를 API/apply 없이 core/store에 한정했다. proposal revision과 asset-index revision은 concurrent-safe하며, music/BGM alias·media-scoped reference code·semantic/lexical fallback provenance를 고정했다.
+- narration alignment stale과 asset index mutation은 각각 session/proposal 및 asset/revision을 atomic SQLite transaction으로 처리한다. Task 9가 proposal API와 session/index/expiry preflight를 처음 연결한다. 코드 commit은 `6a5d3ec`이다.
+
+### Slice 2 Task 9 closeout (2026-07-15)
+
+- DirectorProposalService는 SQLite read snapshot으로 script session, assets, analysis, preferences, asset-index revision을 함께 읽어 immutable proposal을 만든다. B-roll은 current source SHA와 succeeded analysis를, BGM/SFX는 source availability와 indexed canonical metadata를 요구한다.
+- proposal API는 create/get/preflight/refresh/preferences를 제공하며, preflight는 server-side revision/source/analysis/expiry를 재조회해 `409 stale_proposal`와 immutable diff를 반환한다. proposal lifecycle reason/event는 snapshot JSON과 분리된다. API client도 같은 request contract를 사용한다.
+- remediation은 unknown user-owned warning provenance, SHA별 asset ownership, terminal analysis derived-data cleanup, ranking-visible index revision, basename collision, local-only DI fallback rejection을 RED-first로 고정했다. Director route는 provider 호출이 없어 fake Gemini/external HTTP counter 0을 증명한다.
+- 코드 commit은 `37252c2`이다.
+
+### Slice 2 Task 10 closeout (2026-07-15)
+
+- ProjectAssetMaterializer는 candidate source→controlled staging→project-local asset의 SHA를 각각 재검증하고, source mutation·post-registration mismatch·unlink failure에는 asset row/file/staging을 보상 정리한다. 동일 project/SHA는 source/right/warning provenance까지 같을 때만 재사용한다.
+- candidate preview는 immutable controls와 exact in/out header를 가진 verified temporary snapshot만 스트리밍하며 autoplay, editing-session, timeline mutation을 수행하지 않는다. B-roll은 non-empty applicable analysis, BGM/SFX는 indexed required canonical metadata를 recheck한다.
+- independent spec/quality review가 P0/P1/P2 없이 승인했다. focused backend `79 passed`, final backend full `957 passed, 2 skipped`, frontend `108 passed`/build success, `git diff --check`가 통과했다. 코드 commit은 `d1d3f98`이다.
+
+### Local Media Director 중간점검 보완 (2026-07-15)
+
+### Slice 2 Task 11 closeout (2026-07-15)
+
+- proposal apply는 base/session/index/materialized SHA를 단일 SQLite CAS transaction에서 재검증하고 proposal consumption·session write·artifact invalidation을 함께 확정한다. SHA/index race와 DB failure는 session/proposal을 보존하며, apply 전에 등록된 materialized asset은 독립 재사용 자산으로 남긴다.
+- proposal과 manual B-roll/BGM/SFX/caption/overlay는 동일 named transaction adapter를 사용한다. undo stack은 10, audit history는 100으로 제한되며 manual mutation도 정확히 한 revision만 전진해 stale CAS를 거부한다.
+- review/subtitle/preview/final/CapCut은 durable freshness와 canonical API read를 가진다. stale review는 새 output을 막고 재승인 후에만 복구되며, stale subtitle은 current selector에서 배제된다.
+- 검증: focused backend 114 passed, full backend 965 passed/2 skipped, frontend 108 passed/build success. 다음은 Task 12 output hash/revision revalidation과 Slice 2 gate다.
+
+### Slice 2 Task 12 closeout (2026-07-15)
+
+- `OutputSourceStaleError(stale_output_asset)` shared gate는 project-local URI/asset identity, streaming SHA-256, materialized registration revision, current editing-session/timeline/review/subtitle revision을 preview·FFmpeg·PyCapCut에 동일하게 적용한다. direct preview도 SHA 또는 revision-bearing clip이면 verifier store 없이 fail-closed 된다.
+- stale old timeline, source mutation, stale review/subtitle, partial regeneration CAS/publish/cleanup failure는 output 전에 차단·보상한다. 실패 publish는 original session revision으로 정확히 복구하고 candidate timeline/review/run을 격리·정리한다. trigger migration도 SQLite 단일 writer transaction으로 직렬화했다.
+- real Starter Pack gate는 opt-in(`VIDEOBOX_RUN_REAL_STARTER_PACK_E2E=1`) 상태로 실제 re-materialize→reapply→partial regeneration→reapprove→subtitle regeneration recovery와 external/Gemini call 0을 검증한다. 이 worktree에는 pack이 없어 기본 run은 skip됐다.
+- 검증: Task12 focused 147 passed/1 skipped, full backend 978 passed/2 skipped, frontend 108 passed/build success. 다음은 Task 13 persistent conversation과 reference command resolver다.
+
+### Slice 3 Task 13 closeout 및 중간점검 (2026-07-15)
+
+- conversation/message는 SQLite durable truth로 저장하며, message submit은 editing session을 수정하지 않는다. 동일 client message ID는 다른 내용이면 409, 같은 내용이면 이미 확정된 user/assistant exchange를 반환한다.
+- local assistant 생성의 동시 재시도는 owner-token claim, heartbeat, finalize fence로 한 번만 실행한다. crash 뒤 stale claim은 회수할 수 있지만 이전 owner는 결과를 확정할 수 없다. local runtime 실패는 `blocked` metadata와 local-only provider trace를 남기고 editing session을 그대로 보존한다.
+- resolver는 open proposal 후보와 실제 persisted timeline의 B/M/S override placement를 immutable ID로 구분한다. 숫자만 있는 참조가 둘 이상이면 선택 card용 disambiguation을 반환한다.
+- RED는 conversation/resolver 모듈·table 부재와 이후 review P1(typed placement collision, action intent/preflight 부재, history session-scope 우회)을 재현했고 GREEN으로 닫았다. focused `26 passed`, final backend full `996 passed, 2 skipped`, frontend `108 passed`/build success, `git diff --check`를 통과했다. fake Gemini/external provider counter는 0으로 고정했다. 기존 backend multipart warning 및 frontend ErrorBoundary/`act(...)` stderr는 비차단 기존 경고다.
+- 중간점검 보완: timeline target은 typed `{segment_id, track_type}`이며, resolved command는 immutable proposal 또는 `{session_id, session_revision}` preflight binding을 가진 action intent를 반환·저장한다. command는 session을 변경하지 않고 Task 15/18의 explicit apply만 atomic mutation/undo를 만든다. unknown/mismatched conversation은 404, in-flight duplicate는 `202 + Retry-After` 계약으로 고정했다. Task 14는 이 intent/conversation DTO의 표시·재시도 client test를, Task 18은 retention/index release audit 및 bootstrap Gemini와 Director 성공 trace의 local-only route-surface 검증을 맡는다. OpenCut/full NLE 및 Voice Capture & Narration은 이 18 Task에 섞지 않고 후속 판단 gate를 유지한다.
+
+### Slice 3 Task 14 closeout (2026-07-16)
+
+- frontend API는 Task 13 conversation create/list/send, typed reference/action-intent/preflight 및 faithful proposal/candidate DTO를 소비한다. `prepareDirectorMessage`는 immutable client message ID/body를 보존해 `202 + Retry-After` 뒤 retry가 이미 확정된 exchange를 받도록 한다.
+- pure Director units는 proposal/timeline Korean reference label, explicit stale artifact history(legacy absent `is_current`은 current), action metadata history, IME·editable target을 배제한 Ctrl/Cmd undo/redo를 제공한다. 대화 exchange와 action intent는 apply endpoint나 editing session mutation을 호출하지 않는다.
+- quality remediation: 지원하지 않는 proposal apply scope 전송을 제거하고, backend editing-session response가 action_id/label/created_at/reversible/blocked_reason을 보존하도록 contract test를 추가했다.
+- 검증: focused frontend `15 passed`, backend contract `9 passed`, full backend `997 passed, 2 skipped`, full frontend `118 passed`/build success, independent spec/quality/final review P1/P2 없음, `git diff --check` 통과. 기존 multipart warning 및 frontend ErrorBoundary/`act(...)` stderr는 비차단 기존 경고다.
+
+- historical note: 이 중간점검의 최초 시점은 HEAD `8b023f5`, Task 1–8/18(44.4%)이었다. 이후 Task 9와 Task 10이 완료됐으므로 현재 truth는 이 섹션 상단의 10/18(55.6%), 다음 Task 11이다.
+- 2026-07-15 후속 독립 감사는 Task 9 preflight가 BGM/SFX에 B-roll analysis를 잘못 요구하고, empty B-roll analysis result와 nullable candidate `media_revision`을 허용하며, proposal lifecycle state/event가 원자적이지 않음을 확인했다. Task 10은 materializer 전에 이 세 계약을 RED-first로 고친다. B-roll은 non-empty succeeded analysis+SHA, BGM/SFX는 indexed canonical metadata+SHA로 재검증하고, `media_revision`은 asset registration `created_at`으로 고정한다.
+- Task 10은 copy 전후 SHA·staged SHA, per-SHA idempotent lock, cleanup과 source-mutation race, candidate preview까지 닫는다. Task 11은 SQLite authoritative session/sidecar reconciliation·durable output freshness·manual mutation parity를, Task 12는 preview/FFmpeg/CapCut shared stale verifier를 명시했다. Task 13은 idempotent message API와 local-only assistant response contract를 추가했고, Task 18은 Gemini UI뿐 아니라 bootstrap Gemini request 0을 검증한다.
+- OpenCut/full NLE와 Voice Capture & Narration은 현재 18 Task 계획에 섞지 않고 별도 후속 판단으로 유지한다.

@@ -1,32 +1,67 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import math
 from copy import deepcopy
 import re
 import shutil
 import sqlite3
-from datetime import UTC, datetime
+import uuid
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from videobox_domain_models.assets import AssetRecord, AssetType
 from videobox_domain_models.ai_providers import GeminiKeyStatus
 from videobox_domain_models.jobs import JobStatus, JobType
+from videobox_domain_models.media_analysis import MediaAnalysisStatus
 from videobox_domain_models.projects import ProjectRecord
 from videobox_domain_models.recommendations import RecommendationRecord, RecommendationType
 from videobox_domain_models.transcripts import TranscriptRecord
 from videobox_core_engine.provider_trace import build_provider_trace
 from videobox_storage.sqlite_schema import PROJECT_SCHEMA_STATEMENTS
+from videobox_domain_models.director_proposals import DirectorProposal
+from videobox_core_engine.director_proposals import proposal_from_payload, proposal_to_payload
 
 # Heavy exports (rendered mp4s, CapCut drafts) can be large; keep only the most
 # recent N per export_type per project so disk usage does not grow unbounded.
 DEFAULT_EXPORT_RETENTION_COUNT = 5
 
 
+class EditingSessionRevisionConflict(RuntimeError):
+    """The persisted editing-session revision did not match the requested CAS revision."""
+
+
+class EditingSessionPostCommitFileWriteError(OSError):
+    """SQLite committed an editing session, but its convenience JSON mirror did not.
+
+    The SQLite ``session_json`` column is authoritative and will recreate the
+    mirror on the next read.  Callers that own files registered in the same
+    transaction must therefore *not* compensate those files.
+    """
+
+
 def _normalize_boolish(value: object) -> bool:
     if isinstance(value, str):
         return value.strip().lower() not in {"", "0", "false", "no", "off"}
     return bool(value)
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while chunk := handle.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _is_relative_to(path: Path, parent: Path) -> bool:
+    try:
+        path.relative_to(parent)
+        return True
+    except ValueError:
+        return False
 
 
 def _canonical_recommendation_type(value: object) -> str:
@@ -44,13 +79,15 @@ def _canonical_track_type(value: object) -> str:
 VALID_STORE_BLOCKING_REVIEW_FLAG_CODES = {
     "segment_review_required",
     "broll_review_required",
+    "sfx_review_required",
     "tts_replacement_review_required",
 }
-VALID_STORE_TRACK_TYPES = {"narration", "broll", "bgm"}
+VALID_STORE_TRACK_TYPES = {"narration", "broll", "bgm", "sfx"}
 VALID_STORE_BLOCKING_RECOMMENDATION_TYPES = {
     RecommendationType.TTS_REPLACEMENT.value,
     RecommendationType.BROLL.value,
     RecommendationType.BGM.value,
+    RecommendationType.SFX.value,
     RecommendationType.OVERLAY.value,
 }
 
@@ -165,8 +202,10 @@ def _timeline_summary_json(payload: dict[str, Any]) -> str:
 
 
 class LocalProjectStore:
-    def __init__(self, projects_root: Path) -> None:
+    def __init__(self, projects_root: Path, now: Callable[[], datetime] | None = None) -> None:
         self.projects_root = Path(projects_root)
+        self._clock = now or (lambda: datetime.now(UTC))
+        self._reconcile_batch_director_operations()
 
     def bootstrap_project(self, name: str) -> ProjectRecord:
         project = ProjectRecord.create(name=name)
@@ -218,6 +257,130 @@ class LocalProjectStore:
     def project_root(self, project_id: str) -> Path:
         return self.projects_root / "projects" / project_id
 
+    def _reconcile_batch_director_operations(self) -> None:
+        """Recover only disposable batch-apply files left around a process crash.
+
+        A manifest is deliberately filesystem-durable before bytes leave staging.
+        On restart, a destination is preserved only when SQLite owns the exact
+        URI and hash; every other staged/destination file is compensation work.
+        """
+        projects = self.projects_root / "projects"
+        if not projects.exists():
+            return
+        for project_root in projects.iterdir():
+            if not project_root.is_dir() or not (project_root / "db" / "project.sqlite").is_file():
+                continue
+            operations = project_root / ".batch-director-operations"
+            if not operations.exists():
+                continue
+            project_id = project_root.name
+            for manifest in operations.glob("*.json"):
+                try:
+                    payload = json.loads(manifest.read_text(encoding="utf-8"))
+                    if not self._batch_manifest_paths_are_safe(
+                        project_root=project_root,
+                        operations=operations,
+                        manifest=manifest,
+                        payload=payload,
+                    ):
+                        # A manifest can be hand-edited or partially corrupt.
+                        # Retain it for inspection rather than using its paths
+                        # as deletion authority.
+                        continue
+                    entries = list(payload.get("entries") or []) if isinstance(payload, dict) else []
+                    for entry in entries:
+                        if not isinstance(entry, dict):
+                            continue
+                        destination = Path(str(entry.get("destination_path") or ""))
+                        staged = Path(str(entry.get("staged_path") or ""))
+                        digest = str(entry.get("sha256") or "")
+                        if destination.exists() and not self._batch_destination_is_registered(project_id, destination, digest):
+                            destination.unlink()
+                        if staged.exists():
+                            staged.unlink()
+                        if staged.parent != operations and staged.parent.exists() and not any(staged.parent.iterdir()):
+                            staged.parent.rmdir()
+                except (OSError, ValueError, json.JSONDecodeError):
+                    # A corrupt manifest must not make startup unavailable;
+                    # it is retained for operator inspection rather than
+                    # guessing which files it owns.
+                    continue
+                manifest.unlink(missing_ok=True)
+            # ``.tmp`` is only the atomically-written manifest sidecar.  It is
+            # safe to remove from the operation root even when no final JSON
+            # was written; do not infer ownership from arbitrary nested files.
+            for temporary in operations.glob("*.tmp"):
+                if temporary.is_file():
+                    temporary.unlink(missing_ok=True)
+            for operation_dir in operations.iterdir():
+                if operation_dir.is_dir() and not any(operation_dir.iterdir()):
+                    operation_dir.rmdir()
+            if operations.exists() and not any(operations.iterdir()):
+                operations.rmdir()
+
+    @staticmethod
+    def _batch_manifest_paths_are_safe(*, project_root: Path, operations: Path, manifest: Path, payload: object) -> bool:
+        """Return true only when every cleanup path is one this batch owns."""
+        if not isinstance(payload, dict):
+            return False
+        operation_id = payload.get("operation_id")
+        if not isinstance(operation_id, str) or not operation_id or manifest.stem != operation_id:
+            return False
+        operation_root = (operations / operation_id).resolve()
+        # Current batch materialization uses assets/imported.  The media roots
+        # remain accepted solely for pre-existing project layouts that used the
+        # same crash-recovery manifest contract.
+        destination_roots = tuple(
+            (project_root / relative).resolve()
+            for relative in (Path("assets") / "imported", Path("media") / "broll", Path("media") / "bgm", Path("media") / "sfx")
+        )
+        try:
+            operation_root.relative_to(operations.resolve())
+            for destination_root in destination_roots:
+                destination_root.relative_to(project_root.resolve())
+        except ValueError:
+            return False
+        entries = payload.get("entries")
+        if not isinstance(entries, list):
+            return False
+        for entry in entries:
+            if not isinstance(entry, dict):
+                return False
+            staged_value = entry.get("staged_path")
+            destination_value = entry.get("destination_path")
+            digest = entry.get("sha256")
+            if not isinstance(staged_value, str) or not isinstance(destination_value, str) or not isinstance(digest, str) or not digest:
+                return False
+            try:
+                resolved_staged = Path(staged_value).resolve()
+                # Older manifests used a one-file stage directly under the
+                # operations root.  Keep recovery compatible, but never allow
+                # another operation directory to be claimed.
+                if not _is_relative_to(resolved_staged, operation_root) and resolved_staged.parent != operations.resolve():
+                    return False
+                resolved_destination = Path(destination_value).resolve()
+                if not any(_is_relative_to(resolved_destination, root) for root in destination_roots):
+                    return False
+            except ValueError:
+                return False
+        return True
+
+    def _batch_destination_is_registered(self, project_id: str, destination: Path, digest: str) -> bool:
+        try:
+            root = self.project_root(project_id).resolve()
+            resolved = destination.resolve()
+            if root not in resolved.parents or not digest or not resolved.is_file() or sha256_file(resolved) != digest:
+                return False
+            uri = self._path_to_uri(project_id, resolved)
+            connection = sqlite3.connect(self.database_path(project_id))
+            try:
+                row = connection.execute("SELECT asset_id FROM assets WHERE project_id = ? AND storage_uri = ?", (project_id, uri)).fetchone()
+                return row is not None
+            finally:
+                connection.close()
+        except (OSError, ValueError, sqlite3.Error):
+            return False
+
     def database_path(self, project_id: str) -> Path:
         return self.project_root(project_id) / "db" / "project.sqlite"
 
@@ -258,6 +421,8 @@ class LocalProjectStore:
         destination_dir = self.project_root(project_id) / self._asset_directory(asset_type)
         destination_dir.mkdir(parents=True, exist_ok=True)
         destination_path = destination_dir / resolved_source.name
+        if destination_path.exists():
+            destination_path = destination_dir / f"{uuid.uuid4().hex}-{resolved_source.name}"
         shutil.copy2(resolved_source, destination_path)
         storage_uri = self._path_to_uri(project_id, destination_path)
         asset = AssetRecord.create(
@@ -265,7 +430,7 @@ class LocalProjectStore:
             asset_type=asset_type,
             storage_uri=storage_uri,
         )
-        self._execute(
+        self._execute_asset_index_mutation(
             project_id,
             """
             INSERT INTO assets (
@@ -540,6 +705,7 @@ class LocalProjectStore:
         project_id: str,
         output_mode: str,
         timeline_payload: dict[str, Any],
+        source_session_revision: int | None = None,
     ) -> dict[str, Any]:
         sequence = self._next_sequence(
             self.project_root(project_id) / "timelines",
@@ -557,6 +723,8 @@ class LocalProjectStore:
             "created_at": self._now_iso(),
             **timeline_payload,
         }
+        if source_session_revision is not None:
+            payload["source_session_revision"] = int(source_session_revision)
         timeline_path.write_text(json.dumps(payload, indent=2, ensure_ascii=True), encoding="utf-8")
         summary_json = _timeline_summary_json(payload)
         self._execute(
@@ -606,6 +774,7 @@ class LocalProjectStore:
             project_id=project_id,
             timeline_id=timeline_id,
             status=initial_review_status,
+            source_session_revision=source_session_revision,
         )
         return {"timeline_id": timeline_id, "file_uri": file_uri, "timeline": payload}
 
@@ -621,13 +790,47 @@ class LocalProjectStore:
             "editing_session_*.json",
         )
         session_id = f"editing_session_{sequence:03d}"
-        return self._write_editing_session(
+        saved = self._write_editing_session(
             project_id=project_id,
             timeline_id=timeline_id,
             session_id=session_id,
             session_payload=session_payload,
             is_new=True,
         )
+        try:
+            self.bind_timeline_to_editing_session_revision(
+                project_id=project_id,
+                timeline_id=timeline_id,
+                session_revision=int(saved["session_revision"]),
+            )
+        except KeyError:
+            # A pre-timeline draft session cannot authorize any output until bound.
+            pass
+        return saved
+
+    def bind_timeline_to_editing_session_revision(
+        self,
+        *,
+        project_id: str,
+        timeline_id: str,
+        session_revision: int,
+    ) -> dict[str, Any]:
+        """Persist the editing-session revision consumed by a timeline and review."""
+        timeline = self.get_timeline_run(project_id=project_id, timeline_id=timeline_id)
+        timeline["source_session_revision"] = int(session_revision)
+        updated = self.update_timeline_run(
+            project_id=project_id,
+            timeline_id=timeline_id,
+            timeline_payload=timeline,
+        )
+        review = self.get_review_state(project_id=project_id, timeline_id=timeline_id)
+        self.save_review_state(
+            project_id=project_id,
+            timeline_id=timeline_id,
+            status=str(review["status"]),
+            source_session_revision=int(session_revision),
+        )
+        return updated
 
     def update_editing_session(
         self,
@@ -636,8 +839,15 @@ class LocalProjectStore:
         session_id: str,
         session_payload: dict[str, Any],
         timeline_id: str | None = None,
+        expected_revision: int | None = None,
+        invalidate_output_freshness: bool = True,
     ) -> dict[str, Any]:
         existing = self.get_editing_session(project_id=project_id, session_id=session_id)
+        current_revision = int(existing.get("session_revision") or 1)
+        expected_revision = current_revision if expected_revision is None else expected_revision
+        session_payload = deepcopy(session_payload)
+        if int(session_payload.get("session_revision") or 0) <= current_revision:
+            session_payload["session_revision"] = current_revision + 1
         created_at = str(existing.get("created_at") or self._now_iso())
         return self._write_editing_session(
             project_id=project_id,
@@ -646,7 +856,174 @@ class LocalProjectStore:
             session_payload=session_payload,
             is_new=False,
             created_at=created_at,
+            expected_revision=expected_revision,
+            invalidate_output_freshness=invalidate_output_freshness,
         )
+
+    def restore_editing_session_after_failed_publication(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        session_payload: dict[str, Any],
+        expected_revision: int,
+    ) -> dict[str, Any]:
+        """CAS-restore the exact pre-publication session without staling its outputs.
+
+        A partial regeneration briefly advances the session to bind its candidate
+        timeline.  If publishing the result/job fails, that candidate never became
+        observable, so the original revision and its artifacts remain authoritative.
+        """
+        existing = self.get_editing_session(project_id=project_id, session_id=session_id)
+        payload = deepcopy(session_payload)
+        return self._write_editing_session(
+            project_id=project_id,
+            timeline_id=str(payload["timeline_id"]),
+            session_id=session_id,
+            session_payload=payload,
+            is_new=False,
+            created_at=str(existing["created_at"]),
+            expected_revision=expected_revision,
+            invalidate_output_freshness=False,
+        )
+
+    def apply_director_proposal_transaction(
+        self, *, project_id: str, session_id: str, proposal_id: str,
+        session_payload: dict[str, Any], expected_revision: int,
+        proposal_base_revision: int, materialized_expectations: list[tuple[str, str, int]],
+    ) -> dict[str, Any]:
+        """Commit the session CAS and proposal consumption in the same SQLite transaction."""
+        existing = self.get_editing_session(project_id=project_id, session_id=session_id)
+        payload = deepcopy(session_payload)
+        if int(payload.get("session_revision") or 0) <= int(existing.get("session_revision") or 1):
+            payload["session_revision"] = int(existing.get("session_revision") or 1) + 1
+
+        def consume(connection: sqlite3.Connection) -> None:
+            proposal_row = connection.execute("SELECT proposal_json, status FROM director_proposals WHERE proposal_id = ?", (proposal_id,)).fetchone()
+            if proposal_row is None or str(proposal_row["status"]) != "ready":
+                raise EditingSessionRevisionConflict("Director proposal is no longer ready.")
+            if int(json.loads(str(proposal_row["proposal_json"])).get("base_session_revision") or 0) != proposal_base_revision:
+                raise EditingSessionRevisionConflict("Director proposal base revision changed.")
+            revision_row = connection.execute("SELECT revision FROM director_asset_index_revisions WHERE project_id = ?", (project_id,)).fetchone()
+            current_index_revision = int(revision_row["revision"]) if revision_row is not None else 0
+            for asset_id, expected_sha256, expected_index_revision in materialized_expectations:
+                row = connection.execute("SELECT storage_uri, metadata_json FROM assets WHERE project_id = ? AND asset_id = ?", (project_id, asset_id)).fetchone()
+                if row is None or current_index_revision != expected_index_revision:
+                    raise EditingSessionRevisionConflict("Materialized asset index changed during proposal apply.")
+                metadata = json.loads(str(row["metadata_json"] or "{}"))
+                if int(metadata.get("director_materialized_asset_index_revision") or -1) != expected_index_revision:
+                    raise EditingSessionRevisionConflict("Materialized asset revision changed during proposal apply.")
+                path = self.resolve_storage_uri(project_id=project_id, storage_uri=str(row["storage_uri"]))
+                if not path.is_file() or sha256_file(path) != expected_sha256:
+                    raise EditingSessionRevisionConflict("Materialized bytes changed during proposal apply.")
+            now = self._now_iso()
+            changed = connection.execute(
+                "UPDATE director_proposals SET status = ?, updated_at = ? WHERE proposal_id = ? AND status = 'ready'",
+                ("applied", now, proposal_id),
+            )
+            if changed.rowcount != 1:
+                raise EditingSessionRevisionConflict("Director proposal is no longer ready.")
+            connection.execute(
+                "INSERT INTO director_proposal_lifecycle_events (proposal_id, status, reason, changed_at) VALUES (?, ?, ?, ?)",
+                (proposal_id, "applied", "session_apply", now),
+            )
+
+        return self._write_editing_session(
+            project_id=project_id, timeline_id=str(existing["timeline_id"]), session_id=session_id,
+            session_payload=payload, is_new=False, created_at=str(existing["created_at"]),
+            expected_revision=expected_revision, transaction_hook=consume,
+        )
+
+    def batch_apply_director_proposal_transaction(
+        self, *, project_id: str, session_id: str, proposal_id: str,
+        session_payload: dict[str, Any], expected_revision: int, proposal_base_revision: int,
+        expected_asset_index_revision: int, staged_assets: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Register already-verified staged bytes and consume a proposal in one CAS write.
+
+        Filesystem moves cannot participate in SQLite rollback, so every copied
+        destination is tracked and removed on any failed database/session write.
+        The caller owns removal of the disposable stage files in all cases.
+        """
+        existing = self.get_editing_session(project_id=project_id, session_id=session_id)
+        payload = deepcopy(session_payload)
+        if int(payload.get("session_revision") or 0) <= int(existing.get("session_revision") or 1):
+            payload["session_revision"] = int(existing.get("session_revision") or 1) + 1
+        copied_paths: list[Path] = []
+
+        def consume(connection: sqlite3.Connection) -> None:
+            proposal_row = connection.execute("SELECT proposal_json, status FROM director_proposals WHERE proposal_id = ?", (proposal_id,)).fetchone()
+            if proposal_row is None or str(proposal_row["status"]) != "ready":
+                raise EditingSessionRevisionConflict("Director proposal is no longer ready.")
+            if int(json.loads(str(proposal_row["proposal_json"])).get("base_session_revision") or 0) != proposal_base_revision:
+                raise EditingSessionRevisionConflict("Director proposal base revision changed.")
+            revision_row = connection.execute("SELECT revision FROM director_asset_index_revisions WHERE project_id = ?", (project_id,)).fetchone()
+            current_revision = int(revision_row["revision"]) if revision_row is not None else 0
+            if current_revision != expected_asset_index_revision:
+                raise EditingSessionRevisionConflict("Director asset index changed before batch apply.")
+            for item in staged_assets:
+                staged = Path(str(item["staged_path"]))
+                destination = Path(str(item["destination_path"]))
+                digest = str(item["sha256"])
+                if not staged.is_file() or sha256_file(staged) != digest:
+                    raise ValueError("candidate_staging_sha_mismatch")
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                if destination.exists():
+                    raise ValueError("batch_destination_exists")
+                shutil.copy2(staged, destination)
+                copied_paths.append(destination)
+                if sha256_file(destination) != digest:
+                    raise ValueError("candidate_project_sha_mismatch")
+            materialized_revision = current_revision + 1
+            for item in staged_assets:
+                record: AssetRecord = item["asset_record"]
+                metadata = dict(item["metadata"])
+                metadata["director_materialized_asset_index_revision"] = materialized_revision
+                connection.execute(
+                    """INSERT INTO assets (asset_id, project_id, asset_type, storage_uri, source_kind, mime_type, duration_sec, metadata_json, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (record.asset_id, record.project_id, record.asset_type.value, record.storage_uri,
+                     "director_materialized", None, None, json.dumps(metadata, ensure_ascii=True), record.created_at.isoformat()),
+                )
+            if staged_assets:
+                actual_revision = self._increment_asset_index_revision_with_connection(connection, project_id)
+                if actual_revision != materialized_revision:
+                    raise EditingSessionRevisionConflict("Director asset index changed during batch apply.")
+            now = self._now_iso()
+            changed = connection.execute("UPDATE director_proposals SET status = ?, updated_at = ? WHERE proposal_id = ? AND status = 'ready'", ("applied", now, proposal_id))
+            if changed.rowcount != 1:
+                raise EditingSessionRevisionConflict("Director proposal is no longer ready.")
+            connection.execute("INSERT INTO director_proposal_lifecycle_events (proposal_id, status, reason, changed_at) VALUES (?, ?, ?, ?)", (proposal_id, "applied", "batch_session_apply", now))
+
+        try:
+            result = self._write_editing_session(
+                project_id=project_id, timeline_id=str(existing["timeline_id"]), session_id=session_id,
+                session_payload=payload, is_new=False, created_at=str(existing["created_at"]),
+                expected_revision=expected_revision, transaction_hook=consume,
+            )
+            for manifest_path in {Path(str(item.get("manifest_path"))) for item in staged_assets if item.get("manifest_path")}:
+                try:
+                    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                    if isinstance(manifest, dict):
+                        manifest["status"] = "committed"
+                        temporary = manifest_path.with_suffix(".tmp")
+                        temporary.write_text(json.dumps(manifest, sort_keys=True), encoding="utf-8")
+                        temporary.replace(manifest_path)
+                except (OSError, ValueError, json.JSONDecodeError):
+                    # Database commit is authoritative; the next startup can
+                    # still prove and reconcile a stale manifest.
+                    pass
+            return result
+        except EditingSessionPostCommitFileWriteError:
+            # The DB transaction owns these assets now.  The read path repairs
+            # its JSON mirror from SQLite, so preserving the bytes is safer
+            # than trying to undo a committed transaction.
+            raise
+        except Exception:
+            for path in copied_paths:
+                if path.exists():
+                    path.unlink()
+            raise
 
     def save_review_state(
         self,
@@ -654,6 +1031,7 @@ class LocalProjectStore:
         project_id: str,
         timeline_id: str,
         status: str,
+        source_session_revision: int | None = None,
     ) -> dict[str, Any]:
         if status not in {"draft", "blocked", "approved"}:
             raise ValueError(f"Unsupported review status: {status}")
@@ -667,14 +1045,19 @@ class LocalProjectStore:
                 project_id,
                 status,
                 approved_at,
-                updated_at
-            ) VALUES (?, ?, ?, ?, ?)
+                updated_at,
+                source_session_revision
+            ) VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT(timeline_id) DO UPDATE SET
                 status = excluded.status,
                 approved_at = excluded.approved_at,
-                updated_at = excluded.updated_at
+                updated_at = excluded.updated_at,
+                source_session_revision = COALESCE(excluded.source_session_revision, (SELECT session_revision FROM editing_sessions WHERE project_id = excluded.project_id AND timeline_id = excluded.timeline_id ORDER BY updated_at DESC LIMIT 1)),
+                is_current = 1,
+                invalidated_at = NULL,
+                invalidated_reason = NULL
             """,
-            (timeline_id, project_id, status, approved_at, updated_at),
+            (timeline_id, project_id, status, approved_at, updated_at, source_session_revision),
         )
         self.clear_operator_guidance(project_id=project_id, timeline_id=timeline_id)
         return self.get_review_state(project_id=project_id, timeline_id=timeline_id)
@@ -748,6 +1131,79 @@ class LocalProjectStore:
         )
         return self.get_timeline_run(project_id=project_id, timeline_id=timeline_id)
 
+    def discard_partial_regeneration_timeline(
+        self,
+        *,
+        project_id: str,
+        timeline_id: str,
+    ) -> None:
+        """Remove a timeline published before its owning session CAS lost.
+
+        Partial regeneration constructs a new timeline before it can atomically
+        advance the editing session.  A losing CAS must therefore make that
+        timeline and its initial review ineligible before reporting conflict.
+        """
+        connection = self._connection(project_id)
+        timeline_path: Path | None = None
+        try:
+            row = connection.execute(
+                "SELECT file_uri FROM timelines WHERE project_id = ? AND timeline_id = ?",
+                (project_id, timeline_id),
+            ).fetchone()
+            if row is None:
+                return
+            timeline_path = self.resolve_storage_uri(project_id=project_id, storage_uri=str(row["file_uri"]))
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                "UPDATE review_approvals SET is_current = 0, invalidated_at = ?, invalidated_reason = ? WHERE project_id = ? AND timeline_id = ?",
+                (self._now_iso(), "partial_regeneration_cas_conflict", project_id, timeline_id),
+            )
+            connection.execute(
+                "DELETE FROM review_approvals WHERE project_id = ? AND timeline_id = ?",
+                (project_id, timeline_id),
+            )
+            connection.execute(
+                "DELETE FROM timelines WHERE project_id = ? AND timeline_id = ?",
+                (project_id, timeline_id),
+            )
+            connection.commit()
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+        finally:
+            connection.close()
+        if timeline_path is not None:
+            timeline_path.unlink(missing_ok=True)
+
+    def mark_partial_regeneration_cleanup_needed(
+        self,
+        *,
+        project_id: str,
+        timeline_id: str,
+    ) -> None:
+        """Make a failed-to-delete candidate ineligible while reconciliation retries."""
+        connection = self._connection(project_id)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                "UPDATE review_approvals SET is_current = 0, invalidated_at = ?, invalidated_reason = ? "
+                "WHERE project_id = ? AND timeline_id = ?",
+                (
+                    self._now_iso(),
+                    "partial_regeneration_cleanup_failed",
+                    project_id,
+                    timeline_id,
+                ),
+            )
+            connection.commit()
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+        finally:
+            connection.close()
+
     def save_partial_regeneration_run(
         self,
         *,
@@ -791,6 +1247,532 @@ class LocalProjectStore:
             raise KeyError(f"Partial regeneration run not found: {partial_regeneration_id}")
         return json.loads(file_path.read_text(encoding="utf-8"))
 
+    def discard_partial_regeneration_run(
+        self,
+        *,
+        project_id: str,
+        partial_regeneration_id: str,
+    ) -> None:
+        """Remove a run that was written before its owning job was published."""
+        file_path = (
+            self.project_root(project_id)
+            / "analysis"
+            / "partial_regenerations"
+            / f"{partial_regeneration_id}.json"
+        )
+        file_path.unlink(missing_ok=True)
+
+    def update_partial_regeneration_run(
+        self,
+        *,
+        project_id: str,
+        partial_regeneration_id: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        existing = self.get_partial_regeneration_run(
+            project_id=project_id,
+            partial_regeneration_id=partial_regeneration_id,
+        )
+
+        updated = {
+            **existing,
+            **deepcopy(payload),
+            "partial_regeneration_id": partial_regeneration_id,
+            "created_at": str(existing["created_at"]),
+        }
+        file_path = (
+            self.project_root(project_id)
+            / "analysis"
+            / "partial_regenerations"
+            / f"{partial_regeneration_id}.json"
+        )
+        file_path.write_text(json.dumps(updated, indent=2, ensure_ascii=True), encoding="utf-8")
+        return updated
+
+    def create_director_conversation(self, *, project_id: str, session_id: str, conversation_id: str) -> dict[str, Any]:
+        self.get_editing_session(project_id=project_id, session_id=session_id)
+        now = self._now_iso()
+        connection = self._connection(project_id)
+        try:
+            connection.execute(
+                "INSERT INTO director_conversations (conversation_id, project_id, session_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+                (conversation_id, project_id, session_id, now, now),
+            )
+            connection.commit()
+        except sqlite3.IntegrityError:
+            connection.rollback()
+            row = connection.execute("SELECT project_id, session_id FROM director_conversations WHERE conversation_id = ?", (conversation_id,)).fetchone()
+            if row is None or str(row["project_id"]) != project_id or str(row["session_id"]) != session_id:
+                raise ValueError("conversation_id_conflict") from None
+        finally:
+            connection.close()
+        return {"conversation_id": conversation_id, "project_id": project_id, "session_id": session_id}
+
+    def get_director_conversation(self, *, project_id: str, conversation_id: str) -> dict[str, Any]:
+        row = self._fetchone(
+            project_id,
+            "SELECT conversation_id, project_id, session_id FROM director_conversations WHERE conversation_id = ? AND project_id = ?",
+            (conversation_id, project_id),
+        )
+        if row is None:
+            raise KeyError("director_conversation_missing")
+        return dict(row)
+
+    def latest_director_conversation(self, *, project_id: str, session_id: str) -> dict[str, Any] | None:
+        row = self._fetchone(
+            project_id,
+            "SELECT conversation_id, project_id, session_id FROM director_conversations WHERE project_id = ? AND session_id = ? ORDER BY updated_at DESC, conversation_id DESC LIMIT 1",
+            (project_id, session_id),
+        )
+        return dict(row) if row is not None else None
+
+    def append_director_message(
+        self, *, project_id: str, session_id: str, conversation_id: str, role: str,
+        text: str, proposal_id: str | None = None, client_message_id: str | None = None,
+    ) -> dict[str, Any]:
+        if role not in {"user", "assistant"} or not text.strip():
+            raise ValueError("director message requires a supported role and text")
+        now = self._now_iso()
+        message_id = uuid.uuid4().hex
+        connection = self._connection(project_id)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            session = connection.execute("SELECT session_id FROM editing_sessions WHERE session_id = ? AND project_id = ?", (session_id, project_id)).fetchone()
+            if session is None:
+                raise KeyError("editing_session_missing")
+            conversation = connection.execute("SELECT project_id, session_id FROM director_conversations WHERE conversation_id = ?", (conversation_id,)).fetchone()
+            if conversation is None:
+                raise KeyError("director_conversation_missing")
+            if str(conversation["project_id"]) != project_id or str(conversation["session_id"]) != session_id:
+                raise ValueError("conversation_scope_mismatch")
+            connection.execute(
+                "INSERT INTO director_messages (message_id, conversation_id, project_id, session_id, role, text, proposal_id, metadata_json, client_message_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, '{}', ?, ?)",
+                (message_id, conversation_id, project_id, session_id, role, text, proposal_id, client_message_id, now),
+            )
+            connection.execute("UPDATE director_conversations SET updated_at = ? WHERE conversation_id = ?", (now, conversation_id))
+            connection.commit()
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+        finally:
+            connection.close()
+        return {"message_id": message_id, "conversation_id": conversation_id, "project_id": project_id, "session_id": session_id, "role": role, "text": text, "proposal_id": proposal_id, "client_message_id": client_message_id, "created_at": now}
+
+    def list_director_messages(self, *, project_id: str, conversation_id: str) -> list[dict[str, Any]]:
+        rows = self._fetchall(project_id, "SELECT message_id, conversation_id, project_id, session_id, role, text, proposal_id, metadata_json, client_message_id, created_at FROM director_messages WHERE conversation_id = ? AND project_id = ? ORDER BY created_at, rowid", (conversation_id, project_id))
+        return [self._director_message_payload(row) for row in rows]
+
+    def get_director_exchange_by_client_message_id(self, *, project_id: str, session_id: str, conversation_id: str, client_message_id: str, user_text: str) -> dict[str, Any] | None:
+        conversation = self._fetchone(project_id, "SELECT session_id FROM director_conversations WHERE conversation_id = ? AND project_id = ?", (conversation_id, project_id))
+        if conversation is None:
+            raise KeyError("director_conversation_missing")
+        if str(conversation["session_id"]) != session_id:
+            raise ValueError("conversation_scope_mismatch")
+        rows = self.list_director_messages(project_id=project_id, conversation_id=conversation_id)
+        for index, item in enumerate(rows):
+            if item.get("client_message_id") != client_message_id:
+                continue
+            if item.get("text") != user_text:
+                raise ValueError("client_message_id_reused_with_different_content")
+            if index + 1 >= len(rows) or rows[index + 1].get("role") != "assistant":
+                raise ValueError("incomplete persisted director exchange")
+            return {"user_message": item, "assistant_message": rows[index + 1]}
+        return None
+
+    def claim_director_message(self, *, project_id: str, session_id: str, conversation_id: str, client_message_id: str, user_text: str) -> str | None:
+        """Exactly one caller owns local generation for a client message ID."""
+        connection = self._connection(project_id)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            now, token = self._now_iso(), uuid.uuid4().hex
+            conversation = connection.execute("SELECT project_id, session_id FROM director_conversations WHERE conversation_id = ?", (conversation_id,)).fetchone()
+            if conversation is None:
+                raise KeyError("director_conversation_missing")
+            if str(conversation["project_id"]) != project_id or str(conversation["session_id"]) != session_id:
+                raise ValueError("conversation_scope_mismatch")
+            row = connection.execute("SELECT project_id, session_id, user_text, heartbeat_at FROM director_message_claims WHERE conversation_id = ? AND client_message_id = ?", (conversation_id, client_message_id)).fetchone()
+            if row is not None:
+                if str(row["project_id"]) != project_id or str(row["session_id"]) != session_id:
+                    raise ValueError("conversation_scope_mismatch")
+                if str(row["user_text"]) != user_text:
+                    raise ValueError("client_message_id_reused_with_different_content")
+                claimed_at = datetime.fromisoformat(str(row["heartbeat_at"]))
+                # Local runtime generation has a bounded 30s request timeout;
+                # keep the lease materially above it so a live slow request is
+                # never reclaimed merely for crossing that timeout boundary.
+                if claimed_at.astimezone(UTC) <= self._clock().astimezone(UTC) - timedelta(seconds=300):
+                    connection.execute(
+                        "UPDATE director_message_claims SET owner_token = ?, heartbeat_at = ? WHERE conversation_id = ? AND client_message_id = ?",
+                        (token, now, conversation_id, client_message_id),
+                    )
+                    connection.commit()
+                    return token
+                connection.commit()
+                return False
+            connection.execute("INSERT INTO director_message_claims (conversation_id, client_message_id, project_id, session_id, user_text, created_at, owner_token, heartbeat_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (conversation_id, client_message_id, project_id, session_id, user_text, now, token, now))
+            connection.commit()
+            return token
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def heartbeat_director_message_claim(self, *, project_id: str, conversation_id: str, client_message_id: str, owner_token: str) -> bool:
+        connection = self._connection(project_id)
+        try:
+            cursor = connection.execute("UPDATE director_message_claims SET heartbeat_at = ? WHERE conversation_id = ? AND client_message_id = ? AND owner_token = ?", (self._now_iso(), conversation_id, client_message_id, owner_token))
+            connection.commit()
+            return cursor.rowcount == 1
+        finally:
+            connection.close()
+
+    def append_director_exchange(
+        self, *, project_id: str, session_id: str, conversation_id: str, client_message_id: str,
+        user_text: str, assistant_text: str, proposal_id: str | None = None, assistant_metadata: dict[str, Any] | None = None, owner_token: str | None = None,
+    ) -> dict[str, Any]:
+        """Persist the request and response atomically; retry returns the original DTO."""
+        now = self._now_iso()
+        connection = self._connection(project_id)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            session = connection.execute("SELECT session_id FROM editing_sessions WHERE session_id = ? AND project_id = ?", (session_id, project_id)).fetchone()
+            if session is None:
+                raise KeyError("editing_session_missing")
+            if owner_token is not None:
+                claim = connection.execute("SELECT owner_token FROM director_message_claims WHERE conversation_id = ? AND client_message_id = ?", (conversation_id, client_message_id)).fetchone()
+                if claim is None or str(claim["owner_token"]) != owner_token:
+                    raise ValueError("director_message_claim_lost")
+            conversation = connection.execute("SELECT project_id, session_id FROM director_conversations WHERE conversation_id = ?", (conversation_id,)).fetchone()
+            if conversation is None:
+                raise KeyError("director_conversation_missing")
+            if str(conversation["project_id"]) != project_id or str(conversation["session_id"]) != session_id:
+                raise ValueError("conversation_scope_mismatch")
+            existing = connection.execute("SELECT message_id FROM director_messages WHERE conversation_id = ? AND client_message_id = ?", (conversation_id, client_message_id)).fetchone()
+            if existing is not None:
+                rows = connection.execute("SELECT message_id, conversation_id, project_id, session_id, role, text, proposal_id, metadata_json, client_message_id, created_at FROM director_messages WHERE conversation_id = ? ORDER BY created_at, rowid", (conversation_id,)).fetchall()
+                user_index = next(index for index, row in enumerate(rows) if str(row["message_id"]) == str(existing["message_id"]))
+                if str(rows[user_index]["text"]) != user_text:
+                    raise ValueError("client_message_id_reused_with_different_content")
+                if user_index + 1 >= len(rows) or str(rows[user_index + 1]["role"]) != "assistant":
+                    raise ValueError("incomplete persisted director exchange")
+                connection.commit()
+                return {"user_message": self._director_message_payload(rows[user_index]), "assistant_message": self._director_message_payload(rows[user_index + 1])}
+            user_id, assistant_id = uuid.uuid4().hex, uuid.uuid4().hex
+            connection.execute("INSERT INTO director_messages (message_id, conversation_id, project_id, session_id, role, text, proposal_id, metadata_json, client_message_id, created_at) VALUES (?, ?, ?, ?, 'user', ?, NULL, '{}', ?, ?)", (user_id, conversation_id, project_id, session_id, user_text, client_message_id, now))
+            connection.execute("INSERT INTO director_messages (message_id, conversation_id, project_id, session_id, role, text, proposal_id, metadata_json, client_message_id, created_at) VALUES (?, ?, ?, ?, 'assistant', ?, ?, ?, NULL, ?)", (assistant_id, conversation_id, project_id, session_id, assistant_text, proposal_id, json.dumps(assistant_metadata or {}, ensure_ascii=True, sort_keys=True), now))
+            connection.commit()
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+        finally:
+            connection.close()
+        return {"user_message": {"message_id": user_id, "conversation_id": conversation_id, "project_id": project_id, "session_id": session_id, "role": "user", "text": user_text, "proposal_id": None, "metadata": {}, "client_message_id": client_message_id, "created_at": now}, "assistant_message": {"message_id": assistant_id, "conversation_id": conversation_id, "project_id": project_id, "session_id": session_id, "role": "assistant", "text": assistant_text, "proposal_id": proposal_id, "metadata": assistant_metadata or {}, "client_message_id": None, "created_at": now}}
+
+    def _director_message_payload(self, row: sqlite3.Row) -> dict[str, Any]:
+        payload = dict(row)
+        payload["metadata"] = self._json_object(str(payload.pop("metadata_json", "{}")))
+        return payload
+
+    def save_director_proposal(self, project_id: str, proposal: DirectorProposal) -> DirectorProposal:
+        payload = proposal_to_payload(proposal)
+        canonical_payload = json.dumps(payload, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+        now = self._now_iso()
+        connection = self._connection(project_id)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute("""
+            INSERT INTO director_proposals (proposal_id, project_id, status, source_session_id, source_script_segment_ids_json, proposal_json, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (proposal.proposal_id, project_id, proposal.status, proposal.source_session_id, json.dumps(list(proposal.source_script_segment_ids)), canonical_payload, now, now))
+            connection.execute("INSERT INTO director_proposal_lifecycle_events (proposal_id, status, reason, changed_at) VALUES (?, ?, ?, ?)", (proposal.proposal_id, proposal.status, "created", now))
+            connection.commit()
+        except sqlite3.IntegrityError:
+            if connection.in_transaction:
+                connection.rollback()
+            existing = self._fetchone(project_id, "SELECT proposal_json FROM director_proposals WHERE proposal_id = ?", (proposal.proposal_id,))
+            if existing is not None:
+                stored = json.dumps(json.loads(str(existing["proposal_json"])), ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+                if stored == canonical_payload:
+                    return proposal
+            raise ValueError(f"Director proposal is immutable and cannot be overwritten: {proposal.proposal_id}") from None
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+        finally:
+            connection.close()
+        return proposal
+
+    def get_director_proposal(self, project_id: str, proposal_id: str, now: datetime | None = None) -> DirectorProposal:
+        row = self._fetchone(project_id, "SELECT proposal_json, status FROM director_proposals WHERE proposal_id = ?", (proposal_id,))
+        if row is None:
+            raise KeyError(f"Director proposal not found: {proposal_id}")
+        proposal = proposal_from_payload(json.loads(str(row["proposal_json"])))
+        current_status = str(row["status"])
+        instant = now or self._clock()
+        if current_status == "ready" and proposal.expires_at and datetime.fromisoformat(proposal.expires_at).astimezone(UTC) <= instant.astimezone(UTC):
+            changed_at = self._now_iso()
+            connection = self._connection(project_id)
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                connection.execute("UPDATE director_proposals SET status = ?, updated_at = ? WHERE proposal_id = ?", ("expired", changed_at, proposal_id))
+                connection.execute("INSERT INTO director_proposal_lifecycle_events (proposal_id, status, reason, changed_at) VALUES (?, ?, ?, ?)", (proposal_id, "expired", "expiry", changed_at))
+                connection.commit()
+            except Exception:
+                if connection.in_transaction:
+                    connection.rollback()
+                raise
+            finally:
+                connection.close()
+            current_status = "expired"
+        if proposal.status != current_status:
+            from dataclasses import replace
+            proposal = replace(proposal, status=current_status)
+        return proposal
+
+    def list_director_proposals(self, project_id: str) -> list[DirectorProposal]:
+        rows = self._fetchall(project_id, "SELECT proposal_id FROM director_proposals ORDER BY created_at, proposal_id", ())
+        return [self.get_director_proposal(project_id, str(row["proposal_id"])) for row in rows]
+
+    def get_director_proposal_lifecycle(self, project_id: str, proposal_id: str) -> list[dict[str, Any]]:
+        rows = self._fetchall(project_id, "SELECT status, reason, changed_at FROM director_proposal_lifecycle_events WHERE proposal_id = ? ORDER BY event_id", (proposal_id,))
+        return [dict(row) for row in rows]
+
+    def save_director_preferences(self, project_id: str, preferences: dict[str, Any]) -> dict[str, list[str]]:
+        allowed = ("pin_asset", "exclude_asset", "exclude_creator", "exclude_tag")
+        connection = self._connection(project_id)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute("SELECT preferences_json FROM director_preferences WHERE project_id = ?", (project_id,)).fetchone()
+            current = json.loads(str(row["preferences_json"])) if row else {key: [] for key in allowed}
+            canonical = {
+                key: sorted({str(value).strip() for value in preferences[key] if str(value).strip()})
+                if key in preferences else list(current.get(key, []))
+                for key in allowed
+            }
+            connection.execute("INSERT INTO director_preferences (project_id, preferences_json, updated_at) VALUES (?, ?, ?) ON CONFLICT(project_id) DO UPDATE SET preferences_json=excluded.preferences_json, updated_at=excluded.updated_at", (project_id, json.dumps(canonical, ensure_ascii=True), self._now_iso()))
+            connection.commit()
+            return canonical
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def get_director_preferences(self, project_id: str) -> dict[str, list[str]]:
+        row = self._fetchone(project_id, "SELECT preferences_json FROM director_preferences WHERE project_id = ?", (project_id,))
+        return json.loads(str(row["preferences_json"])) if row else {"pin_asset": [], "exclude_asset": [], "exclude_creator": [], "exclude_tag": []}
+
+    def get_project_media_library_preferences(self, project_id: str) -> dict[str, list[str]]:
+        row = self._fetchone(
+            project_id,
+            "SELECT preferences_json FROM project_media_library_preferences WHERE project_id = ?",
+            (project_id,),
+        )
+        return json.loads(str(row["preferences_json"])) if row else {"favorite_asset_ids": [], "recent_asset_ids": []}
+
+    def set_project_media_library_favorite(
+        self, *, project_id: str, library_asset_id: str, enabled: bool,
+    ) -> dict[str, list[str]]:
+        return self._mutate_project_media_library_preferences(
+            project_id=project_id,
+            mutate=lambda preferences: {
+                **preferences,
+                "favorite_asset_ids": sorted(
+                    ([item for item in preferences["favorite_asset_ids"] if item != library_asset_id] + ([library_asset_id] if enabled else []))
+                ),
+            },
+        )
+
+    def mark_project_media_library_recent(
+        self, *, project_id: str, library_asset_id: str,
+    ) -> dict[str, list[str]]:
+        return self._mutate_project_media_library_preferences(
+            project_id=project_id,
+            mutate=lambda preferences: {
+                **preferences,
+                "recent_asset_ids": [library_asset_id, *[item for item in preferences["recent_asset_ids"] if item != library_asset_id]][:10],
+            },
+        )
+
+    def _mutate_project_media_library_preferences(self, *, project_id: str, mutate: Callable[[dict[str, list[str]]], dict[str, list[str]]]) -> dict[str, list[str]]:
+        connection = self._connection(project_id)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute("SELECT preferences_json FROM project_media_library_preferences WHERE project_id = ?", (project_id,)).fetchone()
+            current = json.loads(str(row["preferences_json"])) if row else {"favorite_asset_ids": [], "recent_asset_ids": []}
+            preferences = mutate({key: list(current.get(key, [])) for key in ("favorite_asset_ids", "recent_asset_ids")})
+            self._save_project_media_library_preferences_with_connection(connection, project_id, preferences)
+            connection.commit()
+            return preferences
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def _save_project_media_library_preferences(self, project_id: str, preferences: dict[str, list[str]]) -> None:
+        canonical = {
+            key: [str(value).strip() for value in preferences.get(key, []) if str(value).strip()]
+            for key in ("favorite_asset_ids", "recent_asset_ids")
+        }
+        self._execute(
+            project_id,
+            "INSERT INTO project_media_library_preferences (project_id, preferences_json, updated_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(project_id) DO UPDATE SET preferences_json=excluded.preferences_json, updated_at=excluded.updated_at",
+            (project_id, json.dumps(canonical, ensure_ascii=True), self._now_iso()),
+        )
+
+    def _save_project_media_library_preferences_with_connection(self, connection: sqlite3.Connection, project_id: str, preferences: dict[str, list[str]]) -> None:
+        canonical = {
+            key: [str(value).strip() for value in preferences.get(key, []) if str(value).strip()]
+            for key in ("favorite_asset_ids", "recent_asset_ids")
+        }
+        connection.execute(
+            "INSERT INTO project_media_library_preferences (project_id, preferences_json, updated_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(project_id) DO UPDATE SET preferences_json=excluded.preferences_json, updated_at=excluded.updated_at",
+            (project_id, json.dumps(canonical, ensure_ascii=True), self._now_iso()),
+        )
+
+    def get_asset_index_revision(self, project_id: str) -> int:
+        row = self._fetchone(project_id, "SELECT revision FROM director_asset_index_revisions WHERE project_id = ?", (project_id,))
+        return int(row["revision"]) if row else 0
+
+    def read_director_proposal_snapshot(self, *, project_id: str, session_id: str) -> dict[str, Any]:
+        """Return every proposal input from one SQLite read snapshot.
+
+        Proposal composition must never pair candidates from one library state
+        with a revision from another state.
+        """
+        connection = self._connection(project_id)
+        try:
+            connection.execute("BEGIN")
+            session_row = connection.execute(
+                "SELECT session_json, summary_json, session_revision, created_at, updated_at FROM editing_sessions WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+            if session_row is None:
+                raise KeyError(f"Editing session not found: {session_id}")
+            session = json.loads(str(session_row["session_json"] or "{}"))
+            session["summary"] = json.loads(str(session_row["summary_json"] or "{}"))
+            session["session_revision"] = int(session_row["session_revision"])
+            session["created_at"], session["updated_at"] = session_row["created_at"], session_row["updated_at"]
+            asset_rows = connection.execute("SELECT asset_id, project_id, asset_type, storage_uri, source_kind, mime_type, duration_sec, metadata_json, created_at FROM assets ORDER BY created_at ASC").fetchall()
+            analysis_rows = connection.execute("SELECT * FROM media_analysis_runs WHERE project_id = ? ORDER BY created_at ASC, analysis_id ASC", (project_id,)).fetchall()
+            preference_row = connection.execute("SELECT preferences_json FROM director_preferences WHERE project_id = ?", (project_id,)).fetchone()
+            revision_row = connection.execute("SELECT revision FROM director_asset_index_revisions WHERE project_id = ?", (project_id,)).fetchone()
+            hook = getattr(self, "_director_proposal_snapshot_hook", None)
+            if hook is not None:
+                hook()
+            connection.commit()
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+        finally:
+            connection.close()
+        assets = [{**dict(row), "metadata": json.loads(str(row["metadata_json"] or "{}"))} for row in asset_rows]
+        analyses = [self._media_analysis_payload(row) for row in analysis_rows]
+        return {
+            "session": session, "assets": assets, "analyses": analyses,
+            "preferences": json.loads(str(preference_row["preferences_json"])) if preference_row else {"pin_asset": [], "exclude_asset": [], "exclude_creator": [], "exclude_tag": []},
+            "asset_index_revision": int(revision_row["revision"]) if revision_row else 0,
+        }
+
+    def next_director_proposal_revision(self, project_id: str) -> int:
+        """Allocate a durable, project-scoped monotonic proposal revision."""
+        connection = self._connection(project_id)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                "INSERT INTO director_proposal_revisions (project_id, revision) VALUES (?, 1) ON CONFLICT(project_id) DO UPDATE SET revision = revision + 1",
+                (project_id,),
+            )
+            row = connection.execute("SELECT revision FROM director_proposal_revisions WHERE project_id = ?", (project_id,)).fetchone()
+            connection.commit()
+            return int(row["revision"])
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def bump_asset_index_revision(self, project_id: str) -> int:
+        connection = self._connection(project_id)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            revision = self._increment_asset_index_revision_with_connection(connection, project_id)
+            connection.commit()
+            return revision
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def _increment_asset_index_revision_with_connection(self, connection: sqlite3.Connection, project_id: str) -> int:
+        connection.execute("INSERT INTO director_asset_index_revisions (project_id, revision) VALUES (?, 1) ON CONFLICT(project_id) DO UPDATE SET revision = revision + 1", (project_id,))
+        row = connection.execute("SELECT revision FROM director_asset_index_revisions WHERE project_id = ?", (project_id,)).fetchone()
+        return int(row["revision"])
+
+    def _execute_asset_index_mutation(self, project_id: str, statement: str, parameters: tuple[Any, ...]) -> None:
+        """Commit an eligible asset-index mutation and its revision as one unit."""
+        connection = self._connection(project_id)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute(statement, parameters)
+            self._increment_asset_index_revision_with_connection(connection, project_id)
+            connection.commit()
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def mark_director_proposals_stale_for_script_alignment(self, project_id: str, source_session_id: str, source_script_segment_ids: list[str]) -> int:
+        connection = self._connection(project_id)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            changed = self._mark_director_proposals_stale_with_connection(connection, project_id, source_session_id, source_script_segment_ids)
+            connection.commit()
+            return changed
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def _mark_director_proposals_stale_with_connection(self, connection: sqlite3.Connection, project_id: str, source_session_id: str, source_script_segment_ids: list[str]) -> int:
+        wanted = set(source_script_segment_ids)
+        rows = connection.execute("SELECT proposal_id, proposal_json FROM director_proposals WHERE source_session_id = ? AND status = 'ready'", (source_session_id,)).fetchall()
+        changed = 0
+        for row in rows:
+            payload = json.loads(str(row["proposal_json"]))
+            if not wanted.intersection(payload.get("source_script_segment_ids", [])):
+                continue
+            changed_at = self._now_iso()
+            connection.execute("UPDATE director_proposals SET status = 'stale', updated_at = ? WHERE proposal_id = ?", (changed_at, row["proposal_id"]))
+            connection.execute("INSERT INTO director_proposal_lifecycle_events (proposal_id, status, reason, changed_at) VALUES (?, ?, ?, ?)", (row["proposal_id"], "stale", "script_alignment", changed_at))
+            changed += 1
+        return changed
+
+    def update_script_draft_alignment_and_stale_proposals(self, *, project_id: str, session_id: str, session_payload: dict[str, Any], expected_revision: int, source_script_segment_ids: list[str]) -> dict[str, Any]:
+        existing = self.get_editing_session(project_id=project_id, session_id=session_id)
+        payload = deepcopy(session_payload)
+        if int(payload.get("session_revision") or 0) <= int(existing.get("session_revision") or 1):
+            payload["session_revision"] = int(existing.get("session_revision") or 1) + 1
+        return self._write_editing_session(project_id=project_id, timeline_id=str(existing["timeline_id"]), session_id=session_id, session_payload=payload, is_new=False, created_at=str(existing["created_at"]), expected_revision=expected_revision, transaction_hook=lambda connection: self._mark_director_proposals_stale_with_connection(connection, project_id, session_id, source_script_segment_ids))
+
     def save_tts_candidate(
         self,
         *,
@@ -798,6 +1780,7 @@ class LocalProjectStore:
         segment_id: str,
         asset_id: str,
         source_text: str,
+        acceptance: Any | None = None,
     ) -> dict[str, Any]:
         sequence = self._count_rows(project_id, "tts_candidates") + 1
         candidate_id = f"tts_candidate_{sequence:03d}"
@@ -806,10 +1789,24 @@ class LocalProjectStore:
             project_id,
             """
             INSERT INTO tts_candidates (
-                candidate_id, project_id, segment_id, asset_id, source_text, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?)
+                candidate_id, project_id, segment_id, asset_id, source_text,
+                technical_status, operator_review_status, target_duration_sec,
+                actual_duration_sec, failure_code, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (candidate_id, project_id, segment_id, asset_id, source_text, created_at),
+            (
+                candidate_id,
+                project_id,
+                segment_id,
+                asset_id,
+                source_text,
+                getattr(acceptance, "technical_status", "legacy_unverified"),
+                getattr(acceptance, "operator_review_status", "pending"),
+                getattr(acceptance, "target_duration_sec", None),
+                getattr(acceptance, "actual_duration_sec", None),
+                getattr(acceptance, "failure_code", None),
+                created_at,
+            ),
         )
         return {
             "candidate_id": candidate_id,
@@ -817,6 +1814,11 @@ class LocalProjectStore:
             "segment_id": segment_id,
             "asset_id": asset_id,
             "source_text": source_text,
+            "technical_status": getattr(acceptance, "technical_status", "legacy_unverified"),
+            "operator_review_status": getattr(acceptance, "operator_review_status", "pending"),
+            "target_duration_sec": getattr(acceptance, "target_duration_sec", None),
+            "actual_duration_sec": getattr(acceptance, "actual_duration_sec", None),
+            "failure_code": getattr(acceptance, "failure_code", None),
             "created_at": created_at,
         }
 
@@ -824,7 +1826,9 @@ class LocalProjectStore:
         rows = self._fetchall(
             project_id,
             """
-            SELECT candidate_id, project_id, segment_id, asset_id, source_text, created_at
+            SELECT candidate_id, project_id, segment_id, asset_id, source_text,
+                   technical_status, operator_review_status, target_duration_sec,
+                   actual_duration_sec, failure_code, created_at
             FROM tts_candidates
             WHERE segment_id = ?
             ORDER BY created_at ASC, candidate_id ASC
@@ -832,6 +1836,45 @@ class LocalProjectStore:
             (segment_id,),
         )
         return [dict(row) for row in rows]
+
+    def get_tts_candidate(self, *, project_id: str, candidate_id: str) -> dict[str, Any]:
+        row = self._fetchone(
+            project_id,
+            """
+            SELECT candidate_id, project_id, segment_id, asset_id, source_text,
+                   technical_status, operator_review_status, target_duration_sec,
+                   actual_duration_sec, failure_code, created_at
+            FROM tts_candidates
+            WHERE candidate_id = ?
+            """,
+            (candidate_id,),
+        )
+        if row is None:
+            raise KeyError(f"TTS candidate not found: {candidate_id}")
+        return dict(row)
+
+    def update_tts_candidate_listening_review(
+        self,
+        *,
+        project_id: str,
+        candidate_id: str,
+        decision: str,
+    ) -> dict[str, Any]:
+        normalized_decision = str(decision or "").strip().lower()
+        if normalized_decision not in {"approved", "rejected"}:
+            raise ValueError("Listening review decision must be approved or rejected.")
+        candidate = self.get_tts_candidate(project_id=project_id, candidate_id=candidate_id)
+        if candidate["technical_status"] != "accepted":
+            raise ValueError("Only technically accepted TTS candidates can receive a listening review.")
+        if candidate["operator_review_status"] != "pending":
+            raise ValueError("TTS candidate listening review has already been decided.")
+        self._execute(
+            project_id,
+            "UPDATE tts_candidates SET operator_review_status = ? WHERE candidate_id = ?",
+            (normalized_decision, candidate_id),
+        )
+        candidate["operator_review_status"] = normalized_decision
+        return candidate
 
     def save_gemini_provider_key(
         self,
@@ -1042,7 +2085,7 @@ class LocalProjectStore:
         row = self._fetchone(
             project_id,
             """
-            SELECT timeline_id, project_id, status, approved_at, updated_at
+            SELECT timeline_id, project_id, status, approved_at, updated_at, source_session_revision, is_current, invalidated_at, invalidated_reason
             FROM review_approvals
             WHERE timeline_id = ?
             """,
@@ -1052,6 +2095,7 @@ class LocalProjectStore:
             raise KeyError(f"Review state not found: {timeline_id}")
         payload = dict(row)
         payload["status"] = str(payload.get("status") or "").strip().lower()
+        payload["is_current"] = bool(payload.get("is_current"))
         return payload
 
     def save_subtitle_run(
@@ -1115,7 +2159,7 @@ class LocalProjectStore:
                 payload["created_at"],
             ),
         )
-        return {"subtitle_id": subtitle_id, "file_uri": file_uri, "subtitle": payload}
+        return {"subtitle_id": subtitle_id, "file_uri": file_uri, "subtitle": self.get_subtitle_run(project_id=project_id, subtitle_id=subtitle_id)}
 
     def save_preview_run(
         self,
@@ -1185,7 +2229,7 @@ class LocalProjectStore:
             preview_path.unlink(missing_ok=True)
             player_path.unlink(missing_ok=True)
             raise
-        return {"preview_id": preview_id, "file_uri": file_uri, "preview": payload}
+        return {"preview_id": preview_id, "file_uri": file_uri, "preview": self.get_preview_run(project_id=project_id, preview_id=preview_id)}
 
     def _next_export_sequence(self, project_id: str) -> int:
         # All export types (capcut / final_render / capcut_draft_export) share one
@@ -1357,7 +2401,7 @@ class LocalProjectStore:
         row = self._fetchone(
             project_id,
             """
-            SELECT export_id, project_id, timeline_id, export_type, file_uri, status, created_at
+            SELECT export_id, project_id, timeline_id, export_type, file_uri, status, created_at, source_session_revision, is_current, invalidated_at, invalidated_reason
             FROM exports
             WHERE export_id = ?
             """,
@@ -1375,6 +2419,10 @@ class LocalProjectStore:
             "file_uri": row["file_uri"],
             "status": row["status"],
             "created_at": row["created_at"],
+            "source_session_revision": row["source_session_revision"],
+            "is_current": bool(row["is_current"]),
+            "invalidated_at": row["invalidated_at"],
+            "invalidated_reason": row["invalidated_reason"],
         }
 
     def save_capcut_draft_export(
@@ -1383,6 +2431,7 @@ class LocalProjectStore:
         project_id: str,
         timeline_id: str,
         source_draft_path: Path,
+        notes: list[str] | None = None,
     ) -> dict[str, Any]:
         sequence = self._next_export_sequence(project_id)
         export_id = f"export_{sequence:03d}"
@@ -1414,7 +2463,7 @@ class LocalProjectStore:
                     "capcut_draft_export",
                     file_uri,
                     "succeeded",
-                    json.dumps({}, ensure_ascii=True),
+                    json.dumps({"notes": notes or []}, ensure_ascii=True),
                     created_at,
                 ),
             )
@@ -1428,7 +2477,7 @@ class LocalProjectStore:
         row = self._fetchone(
             project_id,
             """
-            SELECT export_id, project_id, timeline_id, export_type, file_uri, status, created_at
+            SELECT export_id, project_id, timeline_id, export_type, file_uri, status, metadata_json, created_at, source_session_revision, is_current, invalidated_at, invalidated_reason
             FROM exports
             WHERE export_id = ?
             """,
@@ -1439,14 +2488,508 @@ class LocalProjectStore:
         file_path = self.resolve_storage_uri(project_id=project_id, storage_uri=str(row["file_uri"]))
         if not file_path.exists():
             raise KeyError(f"Export artifact missing: {export_id}")
+        metadata = json.loads(str(row["metadata_json"] or "{}"))
         return {
             "export_id": row["export_id"],
             "timeline_id": row["timeline_id"],
             "export_type": row["export_type"],
             "file_uri": row["file_uri"],
             "status": row["status"],
+            "notes": list(metadata.get("notes") or []),
+            "handoff": metadata.get("handoff"),
             "created_at": row["created_at"],
+            "source_session_revision": row["source_session_revision"],
+            "is_current": bool(row["is_current"]),
+            "invalidated_at": row["invalidated_at"],
+            "invalidated_reason": row["invalidated_reason"],
         }
+
+    def update_capcut_draft_handoff(
+        self, *, project_id: str, export_id: str, handoff: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = self._fetchone(
+            project_id,
+            "SELECT metadata_json FROM exports WHERE export_id = ? AND export_type = ?",
+            (export_id, "capcut_draft_export"),
+        )
+        if row is None:
+            raise KeyError(f"CapCut draft export not found: {export_id}")
+        metadata = json.loads(str(row["metadata_json"] or "{}"))
+        metadata["handoff"] = handoff
+        self._execute(
+            project_id,
+            "UPDATE exports SET metadata_json = ? WHERE export_id = ?",
+            (json.dumps(metadata, ensure_ascii=True), export_id),
+        )
+        return self.get_capcut_draft_export(project_id=project_id, export_id=export_id)
+
+    def create_media_analysis(
+        self,
+        *,
+        project_id: str,
+        asset_id: str,
+        idempotency_key: str,
+        cache_key: str,
+    ) -> dict[str, Any]:
+        """Create a durable analysis run, or return the run already requested."""
+        owned_key = f"{asset_id}::{idempotency_key}"
+        existing = self._media_analysis_by_idempotency(project_id, asset_id, owned_key)
+        if existing is not None:
+            return existing
+        now = self._now_iso()
+        analysis_id = f"media_analysis_{uuid.uuid4().hex[:12]}"
+        try:
+            self._execute(
+                project_id,
+                """
+                INSERT INTO media_analysis_runs (
+                    analysis_id, project_id, asset_id, idempotency_key, cache_key,
+                    status, attempt, progress_percent, error_code, error_message,
+                    next_retry_at, cancel_requested, result_json, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, 0, 0, NULL, NULL, NULL, 0, NULL, ?, ?)
+                """,
+                (
+                    analysis_id, project_id, asset_id, owned_key, cache_key,
+                    MediaAnalysisStatus.QUEUED.value, now, now,
+                ),
+            )
+        except sqlite3.IntegrityError:
+            existing = self._media_analysis_by_idempotency(project_id, asset_id, owned_key)
+            if existing is None:
+                raise
+            return existing
+        return self.get_media_analysis(project_id=project_id, analysis_id=analysis_id)
+
+    def get_media_analysis(self, *, project_id: str, analysis_id: str) -> dict[str, Any]:
+        row = self._fetchone(
+            project_id,
+            "SELECT * FROM media_analysis_runs WHERE analysis_id = ? AND project_id = ?",
+            (analysis_id, project_id),
+        )
+        if row is None:
+            raise KeyError(f"Media analysis not found: {analysis_id}")
+        payload = self._media_analysis_payload(row)
+        if payload["status"] in {MediaAnalysisStatus.QUEUED.value, MediaAnalysisStatus.RUNNING.value}:
+            active_ids = [item["analysis_id"] for item in self.list_media_analysis(project_id=project_id) if item["status"] in {MediaAnalysisStatus.QUEUED.value, MediaAnalysisStatus.RUNNING.value}]
+            # A concurrent worker can transition this run between the row and
+            # queue snapshots. Prefer an unavailable position over a 500.
+            payload["queue_position"] = active_ids.index(analysis_id) + 1 if analysis_id in active_ids else None
+        else:
+            payload["queue_position"] = None
+        return payload
+
+    def record_media_analysis_profile(self, *, project_id: str, analysis_id: str, profile: dict[str, Any]) -> None:
+        self._execute(project_id, "INSERT OR REPLACE INTO media_analysis_profiles (analysis_id, project_id, profile_json, created_at) VALUES (?, ?, ?, ?)", (analysis_id, project_id, json.dumps(profile, ensure_ascii=True, sort_keys=True), self._now_iso()))
+
+    def get_media_analysis_profile(self, *, project_id: str, analysis_id: str) -> dict[str, Any]:
+        row = self._fetchone(project_id, "SELECT profile_json FROM media_analysis_profiles WHERE project_id = ? AND analysis_id = ?", (project_id, analysis_id))
+        if row is None:
+            raise KeyError(f"Media analysis profile not found: {analysis_id}")
+        return json.loads(str(row["profile_json"]))
+
+    def record_media_scene_windows(self, *, project_id: str, analysis_id: str, source_sha256: str, profile_hash: str, windows: list[dict[str, Any]]) -> None:
+        # Workers can return after a user has cancelled.  Derived records must
+        # never resurrect a terminally cancelled run.
+        current = self.get_media_analysis(project_id=project_id, analysis_id=analysis_id)
+        if current["status"] != MediaAnalysisStatus.RUNNING.value or bool(current["cancel_requested"]):
+            return
+        for window in windows:
+            self._execute(project_id, "INSERT OR REPLACE INTO media_scene_windows (scene_window_id, analysis_id, source_sha256, profile_hash, start_sec, end_sec, metadata_json) VALUES (?, ?, ?, ?, ?, ?, ?)", (f"{analysis_id}:{window['start_sec']}:{window['end_sec']}", analysis_id, source_sha256, profile_hash, float(window["start_sec"]), float(window["end_sec"]), json.dumps(window.get("metadata") or {}, ensure_ascii=True)))
+
+    def list_media_scene_windows(self, *, project_id: str, analysis_id: str) -> list[dict[str, Any]]:
+        connection = self._connection(project_id)
+        try:
+            rows = connection.execute("SELECT * FROM media_scene_windows WHERE analysis_id = ? ORDER BY start_sec ASC", (analysis_id,)).fetchall()
+        finally:
+            connection.close()
+        return [{**dict(row), "metadata": json.loads(str(row["metadata_json"]))} for row in rows]
+
+    def record_media_embedding(self, *, project_id: str, analysis_id: str, source_sha256: str, profile_hash: str, embedding: list[float]) -> None:
+        current = self.get_media_analysis(project_id=project_id, analysis_id=analysis_id)
+        if current["status"] != MediaAnalysisStatus.RUNNING.value or bool(current["cancel_requested"]):
+            return
+        self._execute(project_id, "INSERT OR REPLACE INTO media_embeddings (embedding_id, analysis_id, source_sha256, profile_hash, embedding_json, created_at) VALUES (?, ?, ?, ?, ?, ?)", (f"{analysis_id}:0", analysis_id, source_sha256, profile_hash, json.dumps(embedding), self._now_iso()))
+
+    def list_media_embeddings(self, *, project_id: str, analysis_id: str) -> list[dict[str, Any]]:
+        connection = self._connection(project_id)
+        try:
+            rows = connection.execute("SELECT * FROM media_embeddings WHERE analysis_id = ? ORDER BY embedding_id ASC", (analysis_id,)).fetchall()
+        finally:
+            connection.close()
+        return [{**dict(row), "embedding": json.loads(str(row["embedding_json"]))} for row in rows]
+
+    def find_local_media_embedding_matches(
+        self,
+        *,
+        project_id: str,
+        query_embedding: list[float],
+        limit: int = 10,
+    ) -> list[dict[str, Any]]:
+        """Rank durable local media embeddings with deterministic cosine similarity."""
+        query = tuple(float(value) for value in query_embedding)
+        if not query or not all(math.isfinite(value) for value in query):
+            raise ValueError("query_embedding must contain finite values")
+        if limit < 1:
+            raise ValueError("limit must be at least 1")
+        query_norm = math.sqrt(sum(value * value for value in query))
+        if query_norm == 0:
+            raise ValueError("query_embedding must not be a zero vector")
+        connection = self._connection(project_id)
+        try:
+            rows = connection.execute(
+                """
+                SELECT embeddings.embedding_id, embeddings.analysis_id, runs.asset_id,
+                       embeddings.source_sha256, embeddings.profile_hash, embeddings.embedding_json
+                FROM media_embeddings AS embeddings
+                INNER JOIN media_analysis_runs AS runs ON runs.analysis_id = embeddings.analysis_id
+                WHERE runs.project_id = ? AND runs.status = ? AND runs.cancel_requested = 0
+                ORDER BY embeddings.analysis_id ASC, embeddings.embedding_id ASC
+                """,
+                (project_id, MediaAnalysisStatus.SUCCEEDED.value),
+            ).fetchall()
+        finally:
+            connection.close()
+        matches: list[dict[str, Any]] = []
+        for row in rows:
+            try:
+                candidate = tuple(float(value) for value in json.loads(str(row["embedding_json"])))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                continue
+            if len(candidate) != len(query) or not candidate or not all(math.isfinite(value) for value in candidate):
+                continue
+            candidate_norm = math.sqrt(sum(value * value for value in candidate))
+            if candidate_norm == 0:
+                continue
+            score = sum(left * right for left, right in zip(query, candidate)) / (query_norm * candidate_norm)
+            matches.append(
+                {
+                    "analysis_id": str(row["analysis_id"]),
+                    "asset_id": str(row["asset_id"]),
+                    "source_sha256": str(row["source_sha256"]),
+                    "profile_hash": str(row["profile_hash"]),
+                    "score": score,
+                }
+            )
+        return sorted(matches, key=lambda item: (-float(item["score"]), str(item["analysis_id"])))[:limit]
+
+    def list_media_analysis(self, *, project_id: str) -> list[dict[str, Any]]:
+        connection = self._connection(project_id)
+        try:
+            rows = connection.execute(
+                "SELECT * FROM media_analysis_runs WHERE project_id = ? ORDER BY created_at ASC, analysis_id ASC",
+                (project_id,),
+            ).fetchall()
+        finally:
+            connection.close()
+        items = [self._media_analysis_payload(row) for row in rows]
+        position = 0
+        for item in items:
+            if item["status"] in {MediaAnalysisStatus.QUEUED.value, MediaAnalysisStatus.RUNNING.value}:
+                position += 1
+                item["queue_position"] = position
+            else:
+                item["queue_position"] = None
+        return items
+
+    def review_media_analysis(self, *, project_id: str, analysis_id: str, tags: dict[str, list[str]]) -> dict[str, Any]:
+        current = self.get_media_analysis(project_id=project_id, analysis_id=analysis_id)
+        if current["status"] != MediaAnalysisStatus.NEEDS_REVIEW.value:
+            raise ValueError("Only needs_review media analysis can be manually reviewed.")
+        result = dict(current.get("result") or {})
+        existing_tags = dict(result.get("tags") or {})
+        existing_layers = dict(existing_tags.get("layers") or {})
+        merged_layers = {name: list(values) for name, values in existing_layers.items()}
+        for layer, values in tags.items():
+            if layer not in merged_layers:
+                raise ValueError(f"Unknown media tag layer: {layer}")
+            merged_layers[layer] = list(dict.fromkeys([*merged_layers[layer], *values]))
+        result["tags"] = {**existing_tags, "layers": merged_layers}
+        self._execute(
+            project_id,
+            "UPDATE media_analysis_runs SET status = ?, result_json = ?, progress_percent = 100, updated_at = ? WHERE analysis_id = ? AND project_id = ?",
+            (MediaAnalysisStatus.SUCCEEDED.value, json.dumps(result, ensure_ascii=True), self._now_iso(), analysis_id, project_id),
+        )
+        reviewed = self.get_media_analysis(project_id=project_id, analysis_id=analysis_id)
+        searchable_tags = [tag for values in merged_layers.values() for tag in values]
+        asset = self.get_asset(project_id=project_id, asset_id=str(current["asset_id"]))
+        existing_tags = asset["metadata"].get("tags") if isinstance(asset["metadata"].get("tags"), list) else []
+        self.update_asset_metadata(project_id=project_id, asset_id=str(current["asset_id"]), metadata_patch={"tags": list(dict.fromkeys([*existing_tags, *searchable_tags]))})
+        return reviewed
+
+    def retry_media_analysis(self, *, project_id: str, analysis_id: str) -> dict[str, Any]:
+        current = self.get_media_analysis(project_id=project_id, analysis_id=analysis_id)
+        if current["status"] not in {MediaAnalysisStatus.FAILED.value, MediaAnalysisStatus.BLOCKED.value}:
+            raise ValueError("Only failed or blocked media analysis can be retried.")
+        self._execute(project_id, "UPDATE media_analysis_runs SET status = ?, error_code = NULL, error_message = NULL, next_retry_at = NULL, cancel_requested = 0, updated_at = ? WHERE analysis_id = ? AND project_id = ?", (MediaAnalysisStatus.QUEUED.value, self._now_iso(), analysis_id, project_id))
+        return self.get_media_analysis(project_id=project_id, analysis_id=analysis_id)
+
+    def claim_media_analysis(self, *, project_id: str, analysis_id: str) -> dict[str, Any] | None:
+        """Atomically claim a queued or due-retry run; None means another worker won."""
+        now = self._now_iso()
+        connection = self._connection(project_id)
+        try:
+            cursor = connection.execute(
+                """
+                UPDATE media_analysis_runs
+                SET status = ?, attempt = attempt + 1, progress_percent = 0, next_retry_at = NULL, updated_at = ?
+                WHERE analysis_id = ? AND project_id = ? AND cancel_requested = 0
+                  AND (
+                    status = ?
+                    OR (status = ? AND next_retry_at IS NOT NULL AND next_retry_at <= ?)
+                  )
+                """,
+                (
+                    MediaAnalysisStatus.RUNNING.value, now, analysis_id, project_id,
+                    MediaAnalysisStatus.QUEUED.value, MediaAnalysisStatus.FAILED.value, now,
+                ),
+            )
+            if cursor.rowcount == 1:
+                connection.execute("DELETE FROM media_scene_windows WHERE analysis_id = ?", (analysis_id,))
+                connection.execute("DELETE FROM media_embeddings WHERE analysis_id = ?", (analysis_id,))
+            connection.commit()
+        finally:
+            connection.close()
+        if cursor.rowcount != 1:
+            return None
+        return self.get_media_analysis(project_id=project_id, analysis_id=analysis_id)
+
+    def complete_media_analysis(
+        self,
+        *,
+        project_id: str,
+        analysis_id: str,
+        expected_attempt: int,
+        result: dict[str, Any],
+        status: MediaAnalysisStatus = MediaAnalysisStatus.SUCCEEDED,
+    ) -> dict[str, Any] | None:
+        if status not in {MediaAnalysisStatus.SUCCEEDED, MediaAnalysisStatus.NEEDS_REVIEW}:
+            raise ValueError("Completed media analysis must be succeeded or needs_review.")
+        connection = self._connection(project_id)
+        try:
+            cursor = connection.execute(
+                """
+                UPDATE media_analysis_runs
+                SET status = ?, result_json = ?, progress_percent = 100, error_code = NULL,
+                    error_message = NULL, next_retry_at = NULL, updated_at = ?
+                WHERE analysis_id = ? AND project_id = ? AND status = ? AND cancel_requested = 0 AND attempt = ?
+                """,
+                (
+                    status.value, json.dumps(result, ensure_ascii=True), self._now_iso(), analysis_id, project_id,
+                    MediaAnalysisStatus.RUNNING.value, expected_attempt,
+                ),
+            )
+            if cursor.rowcount == 1:
+                self._increment_asset_index_revision_with_connection(connection, project_id)
+            connection.commit()
+        finally:
+            connection.close()
+        if cursor.rowcount != 1:
+            return None
+        return self.get_media_analysis(project_id=project_id, analysis_id=analysis_id)
+
+    def mark_media_analysis_blocked(
+        self, *, project_id: str, analysis_id: str, expected_attempt: int, error_code: str, error_message: str
+    ) -> dict[str, Any] | None:
+        return self._set_media_analysis_error(
+            project_id=project_id, analysis_id=analysis_id, status=MediaAnalysisStatus.BLOCKED,
+            expected_attempt=expected_attempt, error_code=error_code, error_message=error_message, next_retry_at=None,
+        )
+
+    def fail_media_analysis(
+        self, *, project_id: str, analysis_id: str, expected_attempt: int, error_code: str, error_message: str,
+        next_retry_at: str | None = None,
+    ) -> dict[str, Any] | None:
+        return self._set_media_analysis_error(
+            project_id=project_id, analysis_id=analysis_id, status=MediaAnalysisStatus.FAILED,
+            expected_attempt=expected_attempt, error_code=error_code, error_message=error_message, next_retry_at=next_retry_at,
+        )
+
+    def request_media_analysis_cancel(
+        self, *, project_id: str, analysis_id: str, expected_attempt: int
+    ) -> dict[str, Any] | None:
+        connection = self._connection(project_id)
+        try:
+            cursor = connection.execute(
+                """
+                UPDATE media_analysis_runs
+                SET status = ?, cancel_requested = 1, next_retry_at = NULL, updated_at = ?
+                WHERE analysis_id = ? AND project_id = ? AND status IN (?, ?) AND cancel_requested = 0 AND attempt = ?
+                """,
+                (
+                    MediaAnalysisStatus.CANCELLED.value, self._now_iso(), analysis_id, project_id,
+                    MediaAnalysisStatus.RUNNING.value, MediaAnalysisStatus.QUEUED.value, expected_attempt,
+                ),
+            )
+            if cursor.rowcount == 1:
+                connection.execute("DELETE FROM media_scene_windows WHERE analysis_id = ?", (analysis_id,))
+                connection.execute("DELETE FROM media_embeddings WHERE analysis_id = ?", (analysis_id,))
+                self._increment_asset_index_revision_with_connection(connection, project_id)
+            connection.commit()
+        finally:
+            connection.close()
+        if cursor.rowcount != 1:
+            return None
+        return self.get_media_analysis(project_id=project_id, analysis_id=analysis_id)
+
+    def recover_orphaned_media_analysis_jobs(self, *, project_id: str) -> list[str]:
+        connection = self._connection(project_id)
+        try:
+            # Three attempts means the initial run plus the two permitted retries.
+            connection.execute(
+                """
+                UPDATE media_analysis_runs
+                SET status = ?, error_code = ?, error_message = ?, next_retry_at = NULL, updated_at = ?
+                WHERE project_id = ? AND status = ? AND cancel_requested = 0 AND attempt >= 3
+                """,
+                (MediaAnalysisStatus.FAILED.value, "RETRY_EXHAUSTED", "Recovered worker exceeded retry budget.", self._now_iso(), project_id, MediaAnalysisStatus.RUNNING.value),
+            )
+            rows = connection.execute(
+                """
+                UPDATE media_analysis_runs
+                SET status = ?, progress_percent = 0, next_retry_at = NULL, updated_at = ?
+                WHERE project_id = ? AND status = ? AND cancel_requested = 0 AND attempt < 3
+                RETURNING analysis_id
+                """,
+                (MediaAnalysisStatus.QUEUED.value, self._now_iso(), project_id, MediaAnalysisStatus.RUNNING.value),
+            ).fetchall()
+            connection.commit()
+        finally:
+            connection.close()
+        return [str(row["analysis_id"]) for row in rows]
+
+    def record_media_analysis_cache(self, *, project_id: str, asset_id: str, source_sha256: str, cache_key: str) -> None:
+        """Keep immutable cache provenance; a new source makes prior derived data stale."""
+        now = self._now_iso()
+        self._execute(project_id, """
+            UPDATE media_analysis_cache SET state = 'stale', tags_stale = 1, embedding_stale = 1,
+                preview_stale = 1, proposal_index_stale = 1, stale_at = ?
+            WHERE project_id = ? AND asset_id = ? AND source_sha256 <> ? AND state = 'active'
+        """, (now, project_id, asset_id, source_sha256))
+        self._execute(project_id, """
+            INSERT OR IGNORE INTO media_analysis_cache (
+                cache_id, project_id, asset_id, source_sha256, cache_key, state, created_at
+            ) VALUES (?, ?, ?, ?, ?, 'active', ?)
+        """, (f"media_cache_{uuid.uuid4().hex}", project_id, asset_id, source_sha256, cache_key, now))
+
+    def delete_asset(self, *, project_id: str, asset_id: str) -> None:
+        """Delete the local asset and its disposable derived cache, retaining analysis history."""
+        asset = self.get_asset(project_id=project_id, asset_id=asset_id)
+        connection = self._connection(project_id)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute("DELETE FROM media_analysis_cache WHERE project_id = ? AND asset_id = ?", (project_id, asset_id))
+            cursor = connection.execute("DELETE FROM assets WHERE project_id = ? AND asset_id = ?", (project_id, asset_id))
+            if cursor.rowcount != 1:
+                raise KeyError(f"Asset not found: {asset_id}")
+            self._increment_asset_index_revision_with_connection(connection, project_id)
+            connection.commit()
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+        finally:
+            connection.close()
+        path = self.resolve_storage_uri(project_id=project_id, storage_uri=str(asset["storage_uri"]))
+        if path.exists():
+            path.unlink()
+        derived_dir = self.project_root(project_id) / "analysis" / "media_cache" / asset_id
+        if derived_dir.exists():
+            shutil.rmtree(derived_dir)
+
+    def can_apply_media_analysis(self, *, project_id: str, analysis_id: str) -> bool:
+        """Durable safety gate used by proposal/apply callers before consuming analysis."""
+        analysis = self.get_media_analysis(project_id=project_id, analysis_id=analysis_id)
+        if analysis["status"] != MediaAnalysisStatus.SUCCEEDED.value or bool(analysis["cancel_requested"]):
+            return False
+        try:
+            asset = self.get_asset(project_id=project_id, asset_id=str(analysis["asset_id"]))
+            source = self.resolve_storage_uri(project_id=project_id, storage_uri=str(asset["storage_uri"]))
+            if not source.exists():
+                self._mark_media_cache_stale(project_id=project_id, asset_id=str(analysis["asset_id"]), source_sha256=str(analysis["idempotency_key"]).split("::", 1)[-1].split(":", 1)[0])
+                return False
+            current_sha = sha256_file(source)
+        except (KeyError, OSError):
+            return False
+        expected_sha = str(analysis["idempotency_key"]).split("::", 1)[-1].split(":", 1)[0]
+        if current_sha != expected_sha:
+            self._mark_media_cache_stale(project_id=project_id, asset_id=str(analysis["asset_id"]), source_sha256=expected_sha)
+            return False
+        return True
+
+    def _mark_media_cache_stale(self, *, project_id: str, asset_id: str, source_sha256: str) -> None:
+        self._execute(project_id, """
+            UPDATE media_analysis_cache SET state = 'stale', tags_stale = 1, embedding_stale = 1,
+                preview_stale = 1, proposal_index_stale = 1, stale_at = ?
+            WHERE project_id = ? AND asset_id = ? AND source_sha256 = ? AND state = 'active'
+        """, (self._now_iso(), project_id, asset_id, source_sha256))
+
+    def list_media_analysis_cache(self, *, project_id: str, asset_id: str) -> list[dict[str, Any]]:
+        connection = self._connection(project_id)
+        try:
+            rows = connection.execute("SELECT * FROM media_analysis_cache WHERE project_id = ? AND asset_id = ? ORDER BY created_at ASC", (project_id, asset_id)).fetchall()
+        finally:
+            connection.close()
+        return [{**dict(row), **{key: bool(dict(row)[key]) for key in ("tags_stale", "embedding_stale", "preview_stale", "proposal_index_stale")}} for row in rows]
+
+    def prune_stale_media_analysis_cache(self, *, project_id: str, retention_days: int = 30) -> int:
+        cutoff = (datetime.fromisoformat(self._now_iso()) - timedelta(days=retention_days)).isoformat()
+        connection = self._connection(project_id)
+        try:
+            cursor = connection.execute("DELETE FROM media_analysis_cache WHERE project_id = ? AND state = 'stale' AND stale_at <= ?", (project_id, cutoff))
+            connection.commit()
+            return cursor.rowcount
+        finally:
+            connection.close()
+
+    def _set_media_analysis_error(
+        self, *, project_id: str, analysis_id: str, status: MediaAnalysisStatus, expected_attempt: int,
+        error_code: str, error_message: str, next_retry_at: str | None,
+    ) -> dict[str, Any] | None:
+        connection = self._connection(project_id)
+        try:
+            cursor = connection.execute(
+                """
+                UPDATE media_analysis_runs
+                SET status = ?, error_code = ?, error_message = ?, next_retry_at = ?, updated_at = ?
+                WHERE analysis_id = ? AND project_id = ? AND status = ? AND cancel_requested = 0 AND attempt = ?
+                """,
+                (
+                    status.value, error_code, error_message, next_retry_at, self._now_iso(), analysis_id,
+                    project_id, MediaAnalysisStatus.RUNNING.value, expected_attempt,
+                ),
+            )
+            if cursor.rowcount == 1:
+                connection.execute("DELETE FROM media_scene_windows WHERE analysis_id = ?", (analysis_id,))
+                connection.execute("DELETE FROM media_embeddings WHERE analysis_id = ?", (analysis_id,))
+                self._increment_asset_index_revision_with_connection(connection, project_id)
+            connection.commit()
+        finally:
+            connection.close()
+        if cursor.rowcount != 1:
+            return None
+        return self.get_media_analysis(project_id=project_id, analysis_id=analysis_id)
+
+    @staticmethod
+    def _is_media_analysis_final(item: dict[str, Any]) -> bool:
+        return item["status"] in {
+            MediaAnalysisStatus.SUCCEEDED.value, MediaAnalysisStatus.NEEDS_REVIEW.value,
+            MediaAnalysisStatus.FAILED.value, MediaAnalysisStatus.CANCELLED.value,
+        }
+
+    def _media_analysis_by_idempotency(self, project_id: str, asset_id: str, idempotency_key: str) -> dict[str, Any] | None:
+        row = self._fetchone(
+            project_id,
+            "SELECT * FROM media_analysis_runs WHERE project_id = ? AND asset_id = ? AND idempotency_key = ?",
+            (project_id, asset_id, idempotency_key),
+        )
+        return self.get_media_analysis(project_id=project_id, analysis_id=str(row["analysis_id"])) if row is not None else None
+
+    @staticmethod
+    def _media_analysis_payload(row: sqlite3.Row) -> dict[str, Any]:
+        payload = dict(row)
+        payload["cancel_requested"] = bool(payload["cancel_requested"])
+        payload["result"] = json.loads(payload.pop("result_json")) if payload["result_json"] else None
+        return payload
 
     def create_job(
         self,
@@ -1591,7 +3134,7 @@ class LocalProjectStore:
     def update_asset_metadata(self, *, project_id: str, asset_id: str, metadata_patch: dict[str, Any]) -> dict[str, Any]:
         asset = self.get_asset(project_id=project_id, asset_id=asset_id)
         merged_metadata = {**asset["metadata"], **metadata_patch}
-        self._execute(
+        self._execute_asset_index_mutation(
             project_id,
             "UPDATE assets SET metadata_json = ? WHERE asset_id = ?",
             (json.dumps(merged_metadata, ensure_ascii=True), asset_id),
@@ -1894,7 +3437,7 @@ class LocalProjectStore:
         row = self._fetchone(
             project_id,
             """
-            SELECT preview_id, project_id, timeline_id, file_uri, status, summary_json, created_at
+            SELECT preview_id, project_id, timeline_id, file_uri, status, summary_json, created_at, source_session_revision, is_current, invalidated_at, invalidated_reason
             FROM preview_renders
             WHERE preview_id = ?
             """,
@@ -1909,13 +3452,17 @@ class LocalProjectStore:
         payload["provider_trace"] = payload.get("provider_trace") or build_provider_trace(final_provider="static_fallback")
         payload["summary"] = json.loads(row["summary_json"] or "{}")
         payload["created_at"] = row["created_at"]
+        payload["source_session_revision"] = row["source_session_revision"]
+        payload["is_current"] = bool(row["is_current"])
+        payload["invalidated_at"] = row["invalidated_at"]
+        payload["invalidated_reason"] = row["invalidated_reason"]
         return payload
 
     def get_subtitle_run(self, *, project_id: str, subtitle_id: str) -> dict[str, Any]:
         row = self._fetchone(
             project_id,
             """
-            SELECT subtitle_id, project_id, timeline_id, format, file_uri, status, summary_json, created_at
+            SELECT subtitle_id, project_id, timeline_id, format, file_uri, status, summary_json, created_at, source_session_revision, is_current, invalidated_at, invalidated_reason
             FROM subtitle_renders
             WHERE subtitle_id = ?
             """,
@@ -1927,13 +3474,14 @@ class LocalProjectStore:
         summary = json.loads(payload.pop("summary_json") or "{}")
         payload["notes"] = summary.get("notes") or ["Subtitle file generated from approved review timeline."]
         payload["summary"] = summary
+        payload["is_current"] = bool(payload.get("is_current"))
         return payload
 
     def get_export_run(self, *, project_id: str, export_id: str) -> dict[str, Any]:
         row = self._fetchone(
             project_id,
             """
-            SELECT export_id, project_id, timeline_id, export_type, file_uri, status, metadata_json, created_at
+            SELECT export_id, project_id, timeline_id, export_type, file_uri, status, metadata_json, created_at, source_session_revision, is_current, invalidated_at, invalidated_reason
             FROM exports
             WHERE export_id = ?
             """,
@@ -1948,13 +3496,18 @@ class LocalProjectStore:
         payload["provider_trace"] = payload.get("provider_trace") or build_provider_trace(final_provider="static_fallback")
         payload["metadata"] = json.loads(row["metadata_json"] or "{}")
         payload["created_at"] = row["created_at"]
+        payload["source_session_revision"] = row["source_session_revision"]
+        payload["is_current"] = bool(row["is_current"])
+        payload["invalidated_at"] = row["invalidated_at"]
+        payload["invalidated_reason"] = row["invalidated_reason"]
+        payload["is_current"] = bool(payload["is_current"])
         return payload
 
     def get_editing_session(self, *, project_id: str, session_id: str) -> dict[str, Any]:
         row = self._fetchone(
             project_id,
             """
-            SELECT session_id, project_id, timeline_id, file_uri, summary_json, created_at, updated_at
+            SELECT session_id, project_id, timeline_id, file_uri, summary_json, session_revision, session_json, created_at, updated_at
             FROM editing_sessions
             WHERE session_id = ?
             """,
@@ -1963,10 +3516,24 @@ class LocalProjectStore:
         if row is None:
             raise KeyError(f"Editing session not found: {session_id}")
         file_path = self.resolve_storage_uri(project_id=project_id, storage_uri=str(row["file_uri"]))
-        if not file_path.exists():
-            raise KeyError(f"Editing session JSON missing: {session_id}")
-        payload = json.loads(file_path.read_text(encoding="utf-8"))
+        canonical_json = str(row["session_json"] or "")
+        try:
+            payload = json.loads(canonical_json) if canonical_json and canonical_json != "{}" else {}
+        except json.JSONDecodeError:
+            payload = {}
+        if not payload:
+            if not file_path.exists():
+                raise KeyError(f"Editing session JSON missing: {session_id}")
+            payload = json.loads(file_path.read_text(encoding="utf-8"))
+        elif (not file_path.exists()) or file_path.read_text(encoding="utf-8") != canonical_json:
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            recovery_path = file_path.with_name(f".{file_path.name}.{uuid.uuid4().hex}.tmp")
+            recovery_path.write_text(canonical_json, encoding="utf-8")
+            recovery_path.replace(file_path)
         payload["summary"] = json.loads(row["summary_json"] or "{}")
+        payload["session_revision"] = int(row["session_revision"])
+        payload["undo_count"] = len(payload.get("undo_stack", []))
+        payload["redo_count"] = len(payload.get("redo_stack", []))
         payload["created_at"] = row["created_at"]
         payload["updated_at"] = row["updated_at"]
         return payload
@@ -2618,21 +4185,47 @@ class LocalProjectStore:
         return highest + 1
 
     def _connection(self, project_id: str) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.database_path(project_id))
+        connection = sqlite3.connect(self.database_path(project_id), timeout=5.0)
         # WAL lets readers proceed while a writer holds the lock, and
         # busy_timeout makes any remaining contention retry instead of
         # immediately raising "database is locked" — both matter once
         # background job threads (see run_*_job in local_pipeline.py) write
         # to the same per-project database concurrently with polling reads.
-        connection.execute("PRAGMA journal_mode=WAL")
         connection.execute("PRAGMA busy_timeout=5000")
+        # The database is initialized in WAL mode.  Concurrently asking SQLite
+        # to change journal mode can itself take an exclusive lock; a racing
+        # connection may safely continue with the already-established mode.
+        try:
+            connection.execute("PRAGMA journal_mode=WAL")
+        except sqlite3.OperationalError as exc:
+            if "locked" not in str(exc).lower():
+                raise
         for statement in PROJECT_SCHEMA_STATEMENTS:
             connection.execute(statement)
         self._ensure_recommendation_decision_state_column(connection)
         self._ensure_job_progress_percent_column(connection)
+        self._ensure_editing_session_revision_column(connection)
+        self._ensure_editing_session_json_column(connection)
+        self._ensure_tts_candidate_acceptance_columns(connection)
+        self._ensure_artifact_freshness_columns(connection)
+        self._ensure_director_message_metadata_column(connection)
+        self._ensure_director_claim_columns(connection)
+        self._ensure_artifact_freshness_triggers(connection)
         connection.commit()
         connection.row_factory = sqlite3.Row
         return connection
+
+    def _ensure_director_message_metadata_column(self, connection: sqlite3.Connection) -> None:
+        columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(director_messages)").fetchall()}
+        if "metadata_json" not in columns:
+            connection.execute("ALTER TABLE director_messages ADD COLUMN metadata_json TEXT NOT NULL DEFAULT '{}'")
+
+    def _ensure_director_claim_columns(self, connection: sqlite3.Connection) -> None:
+        columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(director_message_claims)").fetchall()}
+        if "owner_token" not in columns:
+            connection.execute("ALTER TABLE director_message_claims ADD COLUMN owner_token TEXT NOT NULL DEFAULT ''")
+        if "heartbeat_at" not in columns:
+            connection.execute("ALTER TABLE director_message_claims ADD COLUMN heartbeat_at TEXT NOT NULL DEFAULT ''")
 
     def _ensure_recommendation_decision_state_column(self, connection: sqlite3.Connection) -> None:
         existing_columns = {
@@ -2648,7 +4241,70 @@ class LocalProjectStore:
             for row in connection.execute("PRAGMA table_info(jobs)").fetchall()
         }
         if "progress_percent" not in existing_columns:
-            connection.execute("ALTER TABLE jobs ADD COLUMN progress_percent INTEGER")
+            try:
+                connection.execute("ALTER TABLE jobs ADD COLUMN progress_percent INTEGER")
+            except sqlite3.OperationalError as exc:
+                if "duplicate column name" not in str(exc).lower():
+                    raise
+
+    def _ensure_editing_session_revision_column(self, connection: sqlite3.Connection) -> None:
+        existing_columns = {
+            str(row[1]) for row in connection.execute("PRAGMA table_info(editing_sessions)").fetchall()
+        }
+        if "session_revision" not in existing_columns:
+            connection.execute("ALTER TABLE editing_sessions ADD COLUMN session_revision INTEGER NOT NULL DEFAULT 1")
+
+    def _ensure_artifact_freshness_columns(self, connection: sqlite3.Connection) -> None:
+        for table in ("review_approvals", "preview_renders", "subtitle_renders", "exports"):
+            existing = {str(row[1]) for row in connection.execute(f"PRAGMA table_info({table})").fetchall()}
+            for column, declaration in (
+                ("source_session_revision", "INTEGER"),
+                ("is_current", "INTEGER NOT NULL DEFAULT 1"),
+                ("invalidated_at", "TEXT"),
+                ("invalidated_reason", "TEXT"),
+            ):
+                if column not in existing:
+                    connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
+
+    def _ensure_artifact_freshness_triggers(self, connection: sqlite3.Connection) -> None:
+        # This migration deliberately replaces an earlier trigger definition so
+        # that an explicit lineage revision is preserved.  _connection() is also
+        # used by background jobs, so the replacement must be one SQLite writer
+        # transaction; otherwise two connections can both observe a missing
+        # trigger between DROP and CREATE.
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            for table, identifier in (("review_approvals", "timeline_id"), ("preview_renders", "preview_id"), ("subtitle_renders", "subtitle_id"), ("exports", "export_id")):
+                trigger = f"set_{table}_session_freshness"
+                connection.execute(f"DROP TRIGGER IF EXISTS {trigger}")
+                connection.execute(
+                    f"CREATE TRIGGER {trigger} AFTER INSERT ON {table} BEGIN "
+                    f"UPDATE {table} SET source_session_revision = COALESCE(NEW.source_session_revision, (SELECT session_revision FROM editing_sessions WHERE project_id = NEW.project_id AND timeline_id = NEW.timeline_id ORDER BY updated_at DESC LIMIT 1), 1), is_current = 1 WHERE {identifier} = NEW.{identifier}; END"
+                )
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+
+    def _ensure_editing_session_json_column(self, connection: sqlite3.Connection) -> None:
+        existing_columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(editing_sessions)").fetchall()}
+        if "session_json" not in existing_columns:
+            connection.execute("ALTER TABLE editing_sessions ADD COLUMN session_json TEXT NOT NULL DEFAULT '{}'")
+
+    def _ensure_tts_candidate_acceptance_columns(self, connection: sqlite3.Connection) -> None:
+        existing_columns = {
+            str(row[1]) for row in connection.execute("PRAGMA table_info(tts_candidates)").fetchall()
+        }
+        additions = (
+            ("technical_status", "TEXT NOT NULL DEFAULT 'legacy_unverified'"),
+            ("operator_review_status", "TEXT NOT NULL DEFAULT 'pending'"),
+            ("target_duration_sec", "REAL"),
+            ("actual_duration_sec", "REAL"),
+            ("failure_code", "TEXT"),
+        )
+        for column_name, column_definition in additions:
+            if column_name not in existing_columns:
+                connection.execute(f"ALTER TABLE tts_candidates ADD COLUMN {column_name} {column_definition}")
 
     def _derive_recommendation_decision_state(self, recommendation: dict[str, Any]) -> str:
         if _normalize_boolish(recommendation.get("auto_apply_allowed")) and not _normalize_boolish(
@@ -2700,15 +4356,16 @@ class LocalProjectStore:
         return int(row["count"]) if row is not None else 0
 
     def _now_iso(self) -> str:
-        return datetime.now(UTC).isoformat()
+        return self._clock().isoformat()
 
-    def get_latest_subtitle_for_timeline(self, *, project_id: str, timeline_id: str) -> dict[str, Any] | None:
+    def get_latest_subtitle_for_timeline(self, *, project_id: str, timeline_id: str, include_stale: bool = False) -> dict[str, Any] | None:
+        current_filter = "" if include_stale else " AND COALESCE(is_current, 1) = 1"
         row = self._fetchone(
             project_id,
             """
             SELECT subtitle_id
             FROM subtitle_renders
-            WHERE timeline_id = ?
+            WHERE timeline_id = ?""" + current_filter + """
             ORDER BY created_at DESC
             LIMIT 1
             """,
@@ -2769,6 +4426,9 @@ class LocalProjectStore:
         session_payload: dict[str, Any],
         is_new: bool,
         created_at: str | None = None,
+        expected_revision: int | None = None,
+        transaction_hook: Callable[[sqlite3.Connection], None] | None = None,
+        invalidate_output_freshness: bool = True,
     ) -> dict[str, Any]:
         session_path = self.project_root(project_id) / "editing_sessions" / f"{session_id}.json"
         file_uri = self._path_to_uri(project_id, session_path)
@@ -2778,20 +4438,36 @@ class LocalProjectStore:
             "session_id": session_id,
             "project_id": project_id,
             "timeline_id": timeline_id,
+            "session_revision": int(session_payload.get("session_revision") or 1),
+            "caption_style": session_payload.get("caption_style"),
             "segments": session_payload.get("segments", []),
             "history": session_payload.get("history", []),
+            "undo_stack": session_payload.get("undo_stack", []),
+            "redo_stack": session_payload.get("redo_stack", []),
             "created_at": created_value,
             "updated_at": updated_at,
         }
-        session_path.write_text(json.dumps(payload, indent=2, ensure_ascii=True), encoding="utf-8")
+        for key in (
+            "script_asset_id",
+            "timing_source",
+            "narration_alignment_required",
+            "stale_proposal_source_script_segment_ids",
+            "output_freshness",
+        ):
+            if key in session_payload:
+                payload[key] = session_payload[key]
         summary_json = json.dumps(
             {
                 "segment_count": len(payload["segments"]),
                 "history_count": len(payload["history"]),
+                "undo_count": len(payload["undo_stack"]),
+                "redo_count": len(payload["redo_stack"]),
             },
             ensure_ascii=True,
         )
+        serialized_payload = json.dumps(payload, indent=2, ensure_ascii=True)
         if is_new:
+            session_path.write_text(serialized_payload, encoding="utf-8")
             self._execute(
                 project_id,
                 """
@@ -2801,9 +4477,11 @@ class LocalProjectStore:
                     timeline_id,
                     file_uri,
                     summary_json,
+                    session_revision,
+                    session_json,
                     created_at,
                     updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     session_id,
@@ -2811,25 +4489,73 @@ class LocalProjectStore:
                     timeline_id,
                     file_uri,
                     summary_json,
+                    payload["session_revision"],
+                    serialized_payload,
                     created_value,
                     updated_at,
                 ),
             )
         else:
-            self._execute(
-                project_id,
-                """
-                UPDATE editing_sessions
-                SET summary_json = ?, updated_at = ?
-                WHERE session_id = ?
-                """,
-                (
-                    summary_json,
-                    updated_at,
-                    session_id,
-                ),
-            )
+            connection = self._connection(project_id)
+            temporary_path = session_path.with_name(f".{session_path.name}.{uuid.uuid4().hex}.tmp")
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                cursor = connection.execute(
+                    """
+                    UPDATE editing_sessions
+                    SET timeline_id = ?, summary_json = ?, session_revision = ?, session_json = ?, updated_at = ?
+                    WHERE session_id = ? AND (? IS NULL OR session_revision = ?)
+                    """,
+                    (
+                        timeline_id,
+                        summary_json,
+                        payload["session_revision"],
+                        serialized_payload,
+                        updated_at,
+                        session_id,
+                        expected_revision,
+                        expected_revision,
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    connection.rollback()
+                    raise EditingSessionRevisionConflict("Editing session revision is stale.")
+                if transaction_hook is not None:
+                    transaction_hook(connection)
+                if invalidate_output_freshness:
+                    self._invalidate_output_freshness_with_connection(
+                        connection, project_id=project_id, timeline_id=timeline_id,
+                        source_session_revision=payload["session_revision"], reason="editing_session_mutation",
+                    )
+                connection.commit()
+                try:
+                    temporary_path.write_text(serialized_payload, encoding="utf-8")
+                    temporary_path.replace(session_path)
+                except Exception as exc:
+                    raise EditingSessionPostCommitFileWriteError(
+                        f"Editing-session SQLite commit succeeded but JSON mirror write failed: {exc}"
+                    ) from exc
+            except Exception:
+                if connection.in_transaction:
+                    connection.rollback()
+                if temporary_path.exists():
+                    temporary_path.unlink()
+                raise
+            finally:
+                connection.close()
         return self.get_editing_session(project_id=project_id, session_id=session_id)
+
+    def _invalidate_output_freshness_with_connection(
+        self, connection: sqlite3.Connection, *, project_id: str, timeline_id: str,
+        source_session_revision: int, reason: str,
+    ) -> None:
+        now = self._now_iso()
+        for table in ("review_approvals", "subtitle_renders", "preview_renders", "exports"):
+            connection.execute(
+                f"UPDATE {table} SET is_current = 0, invalidated_at = ?, invalidated_reason = ? "
+                f"WHERE project_id = ? AND timeline_id = ? AND COALESCE(is_current, 1) = 1",
+                (now, reason, project_id, timeline_id),
+            )
 
     def _timeline_file_path(self, *, project_id: str, timeline_id: str) -> Path:
         row = self._fetchone(

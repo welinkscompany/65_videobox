@@ -93,6 +93,12 @@ from videobox_core_engine._pipeline_shared_helpers import (
 
 
 class _PipelinePrivateHelpersMixin:
+    def _is_valid_project_audio_recommendation_uri(self, asset_id: str, expected_type: str, uri: str, project_id: str) -> bool:
+        try:
+            asset = self.store.get_asset(project_id=project_id, asset_id=asset_id)
+            return asset.get("asset_type") == expected_type and asset.get("storage_uri") == uri and self.store.resolve_storage_uri(project_id=project_id, storage_uri=uri).is_file()
+        except (KeyError, ValueError):
+            return False
     def _asset_payload(self, asset: Any) -> dict[str, Any]:
         return {
             "asset_id": asset.asset_id,
@@ -222,7 +228,7 @@ class _PipelinePrivateHelpersMixin:
             project_id=str(timeline["project_id"]),
             timeline_id=str(timeline["timeline_id"]),
         )
-        if review_state["status"] != "approved":
+        if review_state["status"] != "approved" or not bool(review_state.get("is_current", True)):
             raise ValueError("Timeline requires explicit approval before preview, subtitle, or export.")
 
     def _ensure_timeline_has_no_blockers(self, timeline: dict[str, Any]) -> None:
@@ -346,6 +352,18 @@ class _PipelinePrivateHelpersMixin:
         )
         timeline["pending_recommendations"] = remaining_pending
         if decision == "approved":
+            if _canonical_runtime_recommendation_type(decided_recommendation.get("recommendation_type")) == RecommendationType.SFX.value:
+                payload = decided_recommendation.get("payload")
+                selected_asset_uri = str(payload.get("selected_asset_uri") or "").strip() if isinstance(payload, dict) else ""
+                selected_asset_id = str(decided_recommendation.get("selected_asset_id") or "").strip()
+                try:
+                    asset = self.store.get_asset(project_id=project_id, asset_id=selected_asset_id)
+                    if asset.get("asset_type") != "sfx" or asset.get("storage_uri") != selected_asset_uri:
+                        raise ValueError("asset_missing")
+                    if not self.store.resolve_storage_uri(project_id=project_id, storage_uri=selected_asset_uri).is_file():
+                        raise ValueError("asset_missing")
+                except (KeyError, ValueError):
+                    raise ValueError("asset_missing") from None
             timeline["applied_recommendations"] = [
                 *deepcopy(timeline.get("applied_recommendations", [])),
                 decided_recommendation,
@@ -376,6 +394,7 @@ class _PipelinePrivateHelpersMixin:
         self,
         *,
         project_id: str,
+        timeline_job_id: str,
         timeline: dict[str, Any],
         recommendation_id: str,
         auto_apply_allowed: bool,
@@ -394,13 +413,33 @@ class _PipelinePrivateHelpersMixin:
                 timeline_id=str(timeline["timeline_id"]),
                 timeline_payload=timeline,
             )
-            self.store.update_recommendation_review(
-                project_id=project_id,
-                recommendation_id=recommendation_id,
-                auto_apply_allowed=auto_apply_allowed,
-                review_required=review_required,
-                decision_state=decision_state,
+            job = self.store.get_job(project_id=project_id, job_id=timeline_job_id)
+            if str(job.get("job_type") or "") == JobType.PARTIAL_REGENERATION.value:
+                partial_regeneration_id = str(job.get("output_ref") or "").strip()
+                if not partial_regeneration_id:
+                    raise ValueError("Partial regeneration review decision requires an output reference.")
+                self.store.update_partial_regeneration_run(
+                    project_id=project_id,
+                    partial_regeneration_id=partial_regeneration_id,
+                    payload={"timeline": timeline},
+                )
+            provider_trace = rollback_recommendation.get("provider_trace")
+            if not isinstance(provider_trace, dict):
+                payload = rollback_recommendation.get("payload")
+                provider_trace = payload.get("provider_trace") if isinstance(payload, dict) else {}
+            is_editing_session_manual_recommendation = (
+                isinstance(provider_trace, dict)
+                and str(provider_trace.get("final_provider") or "").strip()
+                == "editing_session_manual"
             )
+            if not is_editing_session_manual_recommendation:
+                self.store.update_recommendation_review(
+                    project_id=project_id,
+                    recommendation_id=recommendation_id,
+                    auto_apply_allowed=auto_apply_allowed,
+                    review_required=review_required,
+                    decision_state=decision_state,
+                )
             status = "blocked" if review_flags or pending_recommendations else "draft"
             self.store.save_review_state(
                 project_id=project_id,
@@ -489,6 +528,30 @@ class _PipelinePrivateHelpersMixin:
         project_id: str,
         timeline: dict[str, Any],
     ) -> list[dict[str, Any]]:
+        persisted_segments = timeline.get("caption_segments")
+        if isinstance(persisted_segments, list):
+            normalized_segments = []
+            for segment in persisted_segments:
+                if not isinstance(segment, dict):
+                    continue
+                normalized = deepcopy(segment)
+                if not str(normalized.get("segment_id") or "").strip():
+                    continue
+                normalized["segment_id"] = str(normalized["segment_id"]).strip()
+                normalized["text"] = str(
+                    normalized.get("text")
+                    or normalized.get("narration_text")
+                    or normalized.get("transcript_text")
+                    or normalized.get("script_text")
+                    or normalized.get("summary")
+                    or ""
+                )
+                normalized["review_required"] = _normalize_runtime_boolish(
+                    normalized.get("review_required", False)
+                )
+                normalized_segments.append(normalized)
+            if normalized_segments:
+                return normalized_segments
         all_segments = self.store.list_segments(project_id=project_id)
         segment_lookup = {
             str(segment.get("segment_id") or "").strip(): segment
@@ -520,6 +583,7 @@ class _PipelinePrivateHelpersMixin:
         project_id: str,
         session: dict[str, Any],
         request: dict[str, Any],
+        output_session_revision: int,
     ) -> dict[str, Any]:
         source_timeline = self.store.get_timeline_run(
             project_id=project_id,
@@ -551,6 +615,39 @@ class _PipelinePrivateHelpersMixin:
                 if isinstance(segment, dict)
                 if str(segment.get("segment_id") or "").strip()
             ]
+
+        if "timeline_structure" in target_fields:
+            source_by_id = {
+                str(segment.get("segment_id") or "").strip(): segment
+                for segment in source_segments
+                if str(segment.get("segment_id") or "").strip()
+            }
+            structured_segments: list[dict[str, Any]] = []
+            for session_segment in session.get("segments", []):
+                if not isinstance(session_segment, dict):
+                    continue
+                segment_id = str(session_segment.get("segment_id") or "").strip()
+                if not segment_id:
+                    continue
+                lineage = session_segment.get("lineage")
+                root_segment_id = (
+                    str(lineage.get("root_segment_id") or "").strip()
+                    if isinstance(lineage, dict)
+                    else ""
+                ) or segment_id
+                source_segment = source_by_id.get(root_segment_id, {})
+                structured_segments.append(
+                    {
+                        **deepcopy(source_segment),
+                        "segment_id": segment_id,
+                        "text": str(session_segment.get("caption_text") or source_segment.get("text") or ""),
+                        "start_sec": float(session_segment.get("start_sec") or 0.0),
+                        "end_sec": float(session_segment.get("end_sec") or 0.0),
+                        "cleanup_decision": _normalize_runtime_cut_action(session_segment.get("cut_action") or source_segment.get("cleanup_decision")),
+                        "editing_session_lineage": deepcopy(lineage) if isinstance(lineage, dict) else {"root_segment_id": root_segment_id},
+                    }
+                )
+            source_segments = structured_segments
 
         source_pending_recommendations = _normalized_runtime_pending_recommendations(
             source_timeline.get("pending_recommendations", [])
@@ -601,6 +698,13 @@ class _PipelinePrivateHelpersMixin:
                     target_segment_ids=target_segment_ids,
                 )
                 continue
+            if step == "sfx_refresh":
+                self._execute_partial_regeneration_sfx_refresh_step(
+                    state=state,
+                    session_segments=session_segments,
+                    target_segment_ids=target_segment_ids,
+                )
+                continue
             if step == "overlay_refresh":
                 self._execute_partial_regeneration_overlay_refresh_step(
                     state=state,
@@ -623,6 +727,7 @@ class _PipelinePrivateHelpersMixin:
             recommendations=state["recommendations"],
             narration_source_uri=source_timeline.get("narration_source_uri"),
             export_overlays=state["export_overlays"],
+            asset_uri_validator=lambda asset_id, expected_type, uri: self._is_valid_project_audio_recommendation_uri(asset_id, expected_type, uri, project_id),
         )
         timeline_payload = {
             "project_id": timeline.project_id,
@@ -640,6 +745,11 @@ class _PipelinePrivateHelpersMixin:
                             "end_sec": clip.end_sec,
                             "clip_type": clip.clip_type,
                             "recommendation_id": clip.recommendation_id,
+                            "asset_id": clip.asset_id,
+                            "media_controls": clip.media_controls,
+                            "expected_content_sha256": clip.expected_content_sha256,
+                            "media_revision": clip.media_revision,
+                            "warning_provenance": clip.warning_provenance,
                         }
                         for clip in track.clips
                     ],
@@ -654,6 +764,7 @@ class _PipelinePrivateHelpersMixin:
                 }
                 for flag in timeline.review_flags
             ],
+            "caption_segments": timeline.caption_segments,
             "applied_recommendations": timeline.applied_recommendations,
             "pending_recommendations": timeline.pending_recommendations,
             "recommendation_decisions": timeline.recommendation_decisions,
@@ -701,6 +812,7 @@ class _PipelinePrivateHelpersMixin:
             project_id=project_id,
             output_mode=timeline.output_mode,
             timeline_payload=timeline_payload,
+            source_session_revision=output_session_revision,
         )
         return {
             "session_id": str(session["session_id"]),
@@ -786,7 +898,12 @@ class _PipelinePrivateHelpersMixin:
                     segment_id=segment_id,
                     recommendation_type=RecommendationType.BROLL,
                     asset_id=str(override["asset_id"]),
+                    asset_uri=str(self.store.get_asset(project_id=project_id, asset_id=str(override["asset_id"]))["storage_uri"]),
                     reason="Manual B-roll override from editing session.",
+                    media_controls=override.get("media_controls"),
+                    expected_content_sha256=override.get("expected_content_sha256"),
+                    media_revision=override.get("media_revision"),
+                    warning_provenance=override.get("warning_provenance"),
                 )
             )
 
@@ -844,9 +961,14 @@ class _PipelinePrivateHelpersMixin:
             state["recommendations"].append(
                 self._manual_recommendation_payload(
                     segment_id=segment_id,
-                    recommendation_type=RecommendationType.BGM,
-                    asset_id=str(override["asset_id"]),
-                    reason="Manual music override from editing session.",
+                recommendation_type=RecommendationType.BGM,
+                asset_id=str(override["asset_id"]),
+                asset_uri=str(override.get("asset_uri") or ""),
+                reason="Manual music override from editing session.",
+                media_controls=override.get("media_controls"),
+                expected_content_sha256=override.get("expected_content_sha256"),
+                media_revision=override.get("media_revision"),
+                warning_provenance=override.get("warning_provenance"),
                 )
             )
 
@@ -874,6 +996,40 @@ class _PipelinePrivateHelpersMixin:
                     fallback_provider="rule_based_fallback",
                 )
             )
+
+    def _execute_partial_regeneration_sfx_refresh_step(
+        self,
+        *,
+        state: dict[str, Any],
+        session_segments: dict[str, dict[str, Any]],
+        target_segment_ids: set[str],
+    ) -> None:
+        state["recommendations"] = [
+            item for item in state["recommendations"]
+            if not (
+                _canonical_runtime_recommendation_type(item.get("recommendation_type")) == RecommendationType.SFX.value
+                and str(item.get("target_segment_id") or "").strip() in target_segment_ids
+            )
+        ]
+        for segment_id in sorted(target_segment_ids):
+            session_segment = session_segments.get(segment_id)
+            override = session_segment.get("sfx_override") if session_segment else None
+            if not isinstance(override, dict) or not str(override.get("asset_id") or "").strip():
+                continue
+            recommendation = self._manual_recommendation_payload(
+                segment_id=segment_id,
+                recommendation_type=RecommendationType.SFX,
+                asset_id=str(override["asset_id"]),
+                asset_uri=str(override.get("asset_uri") or ""),
+                reason="Manual SFX override from editing session requires operator review.",
+                media_controls=override.get("media_controls"),
+                expected_content_sha256=override.get("expected_content_sha256"),
+                media_revision=override.get("media_revision"),
+                warning_provenance=override.get("warning_provenance"),
+            )
+            recommendation["auto_apply_allowed"] = False
+            recommendation["review_required"] = True
+            state["recommendations"].append(recommendation)
 
     def _execute_partial_regeneration_overlay_refresh_step(
         self,
@@ -1010,7 +1166,12 @@ class _PipelinePrivateHelpersMixin:
         segment_id: str,
         recommendation_type: RecommendationType,
         asset_id: str,
+        asset_uri: str = "",
         reason: str,
+        media_controls: object = None,
+        expected_content_sha256: object = None,
+        media_revision: object = None,
+        warning_provenance: object = None,
     ) -> dict[str, Any]:
         provider_trace = build_provider_trace(final_provider="editing_session_manual")
         return {
@@ -1022,7 +1183,14 @@ class _PipelinePrivateHelpersMixin:
             "reason": reason,
             "auto_apply_allowed": True,
             "review_required": False,
-            "payload": {"provider_trace": provider_trace},
+            "payload": {
+                "provider_trace": provider_trace,
+                "selected_asset_uri": asset_uri,
+                "media_controls": deepcopy(media_controls) if isinstance(media_controls, dict) else {},
+                "expected_content_sha256": str(expected_content_sha256 or "").strip(),
+                "media_revision": str(media_revision or "").strip(),
+                "warning_provenance": list(warning_provenance) if isinstance(warning_provenance, (list, tuple)) else [],
+            },
             "created_at": self.store._now_iso(),
             "provider_trace": provider_trace,
         }

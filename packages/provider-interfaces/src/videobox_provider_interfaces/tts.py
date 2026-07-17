@@ -10,6 +10,7 @@ class TTSRequest:
     text: str
     voice_sample_uri: str
     output_path: Path
+    target_duration_sec: float | None = None
 
 
 @dataclass(slots=True, frozen=True)

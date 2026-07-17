@@ -6,7 +6,9 @@ from fastapi import APIRouter, status
 
 from videobox_api.errors import _http_error
 from videobox_api.models import (
+    CapCutHandoffDiagnosticsResponse,
     CapCutDraftExportArtifactResponse,
+    CapCutDraftHandoffResponse,
     CapCutDraftExportJobResponse,
     ExportArtifactResponse,
     ExportJobResponse,
@@ -28,6 +30,14 @@ from videobox_api.orchestration import ApiOrchestrator
 def build_outputs_router(orchestrator: ApiOrchestrator) -> APIRouter:
     router = APIRouter()
 
+    @router.get("/api/capcut/handoff-diagnostics")
+    def get_capcut_handoff_diagnostics() -> CapCutHandoffDiagnosticsResponse:
+        try:
+            diagnostics = orchestrator.get_capcut_handoff_diagnostics()
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return CapCutHandoffDiagnosticsResponse(**diagnostics)
+
     @router.post("/api/projects/{project_id}/jobs/subtitle-render", status_code=status.HTTP_202_ACCEPTED)
     def start_subtitle_render(project_id: str, payload: OutputJobRequest) -> StartJobResponse:
         try:
@@ -43,6 +53,7 @@ def build_outputs_router(orchestrator: ApiOrchestrator) -> APIRouter:
     def get_subtitle_result(project_id: str, job_id: str) -> SubtitleJobResponse:
         try:
             result = orchestrator.get_subtitle_result(project_id=project_id, job_id=job_id)
+            result["subtitle"] = orchestrator.pipeline.store.get_subtitle_run(project_id=project_id, subtitle_id=result["subtitle"]["subtitle_id"])
         except Exception as exc:
             raise _http_error(exc) from exc
         return SubtitleJobResponse(
@@ -66,6 +77,7 @@ def build_outputs_router(orchestrator: ApiOrchestrator) -> APIRouter:
     def get_preview_result(project_id: str, job_id: str) -> PreviewJobResponse:
         try:
             result = orchestrator.get_preview_result(project_id=project_id, job_id=job_id)
+            result["preview"] = orchestrator.pipeline.store.get_preview_run(project_id=project_id, preview_id=result["preview"]["preview_id"])
         except Exception as exc:
             raise _http_error(exc) from exc
         return PreviewJobResponse(
@@ -89,6 +101,7 @@ def build_outputs_router(orchestrator: ApiOrchestrator) -> APIRouter:
     def get_export_result(project_id: str, job_id: str) -> ExportJobResponse:
         try:
             result = orchestrator.get_capcut_export_result(project_id=project_id, job_id=job_id)
+            result["export"] = orchestrator.pipeline.store.get_export_run(project_id=project_id, export_id=result["export"]["export_id"])
         except Exception as exc:
             raise _http_error(exc) from exc
         return ExportJobResponse(
@@ -121,6 +134,8 @@ def build_outputs_router(orchestrator: ApiOrchestrator) -> APIRouter:
     def get_final_render_result(project_id: str, job_id: str) -> FinalRenderJobResponse:
         try:
             result = orchestrator.get_final_render_result(project_id=project_id, job_id=job_id)
+            if result.get("render"):
+                result["render"] = orchestrator.pipeline.store.get_final_render_export(project_id=project_id, export_id=result["render"]["export_id"])
         except Exception as exc:
             raise _http_error(exc) from exc
         return FinalRenderJobResponse(
@@ -153,13 +168,24 @@ def build_outputs_router(orchestrator: ApiOrchestrator) -> APIRouter:
     def get_capcut_draft_export_result(project_id: str, job_id: str) -> CapCutDraftExportJobResponse:
         try:
             result = orchestrator.get_capcut_draft_export_result(project_id=project_id, job_id=job_id)
+            if result.get("export"):
+                result["export"] = orchestrator.pipeline.store.get_capcut_draft_export(project_id=project_id, export_id=result["export"]["export_id"])
         except Exception as exc:
             raise _http_error(exc) from exc
         return CapCutDraftExportJobResponse(
             job_id=result["job_id"],
             status=result["status"],
             export=CapCutDraftExportArtifactResponse(**result["export"]) if result["export"] else None,
+            error_message=result.get("error_message"),
         )
+
+    @router.post("/api/projects/{project_id}/capcut-draft-exports/{job_id}/handoff")
+    def register_capcut_draft_handoff(project_id: str, job_id: str) -> dict[str, CapCutDraftHandoffResponse]:
+        try:
+            handoff = orchestrator.register_capcut_draft_handoff(project_id=project_id, job_id=job_id)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return {"handoff": CapCutDraftHandoffResponse(**handoff)}
 
     @router.get("/api/projects/{project_id}/provider-traces")
     def get_provider_trace_audit(

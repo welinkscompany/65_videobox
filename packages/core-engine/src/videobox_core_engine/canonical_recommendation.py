@@ -7,6 +7,7 @@ VALID_CANONICAL_RECOMMENDATION_TYPES = {
     RecommendationType.TTS_REPLACEMENT.value,
     RecommendationType.BROLL.value,
     RecommendationType.BGM.value,
+    RecommendationType.SFX.value,
     RecommendationType.OVERLAY.value,
 }
 

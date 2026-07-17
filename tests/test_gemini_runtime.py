@@ -714,7 +714,7 @@ def test_local_first_runtime_uses_configured_local_model_name(tmp_path: Path) ->
         local_config=LLMProviderConfig(provider_name="local_qwen", enabled=True),
         gemini_config=LLMProviderConfig(provider_name="gemini", enabled=True),
         local_runtime_config=_local_runtime_config(
-            base_url="http://127.0.0.1:11434/v1",
+            base_url="http://127.0.0.1:1234/v1",
             model_name="Qwen3-32B-GGUF",
             timeout_seconds=45,
         ),
@@ -973,7 +973,7 @@ def test_build_local_first_runtime_service_wires_configured_local_endpoint() -> 
         gemini_provider=FakeStructuredProvider(),
         gemini_config=LLMProviderConfig(provider_name="gemini", enabled=True),
         local_runtime_config=_local_runtime_config(
-            base_url="http://127.0.0.1:11434/v1",
+            base_url="http://127.0.0.1:1234/v1",
             model_name="Qwen3-32B",
             timeout_seconds=42,
         ),
@@ -986,7 +986,7 @@ def test_build_local_first_runtime_service_wires_configured_local_endpoint() -> 
     )
 
     assert isinstance(service.local_provider, LocalQwenStructuredProvider)
-    assert service.local_runtime_config.base_url == "http://127.0.0.1:11434/v1"
+    assert service.local_runtime_config.base_url == "http://127.0.0.1:1234/v1"
     assert service.local_runtime_config.model_name == "Qwen3-32B"
     assert service.local_runtime_config.timeout_seconds == 42
     assert service.local_config.enabled is True
@@ -1038,7 +1038,7 @@ def test_build_local_first_runtime_service_rejects_conflicting_local_config() ->
             gemini_config=LLMProviderConfig(provider_name="gemini", enabled=True),
             local_runtime_config=_local_runtime_config(
                 enabled=True,
-                base_url="http://127.0.0.1:11434/v1",
+                base_url="http://127.0.0.1:1234/v1",
                 model_name="Qwen3-32B",
                 timeout_seconds=42,
             ),

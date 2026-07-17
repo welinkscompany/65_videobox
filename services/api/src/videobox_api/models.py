@@ -20,6 +20,64 @@ class ProjectListResponse(BaseModel):
     projects: list[ProjectResponse]
 
 
+class DirectorConversationCreateRequest(BaseModel):
+    session_id: str = Field(min_length=1)
+
+
+class DirectorConversationResponse(BaseModel):
+    conversation_id: str
+    project_id: str
+    session_id: str
+
+
+class DirectorMessageSubmitRequest(BaseModel):
+    session_id: str = Field(min_length=1)
+    client_message_id: str = Field(min_length=1)
+    text: str = Field(min_length=1)
+
+
+class DirectorReferenceResponse(BaseModel):
+    reference_code: str
+    immutable_id: str | dict[str, str]
+    source: str
+
+
+class DirectorDisambiguationResponse(BaseModel):
+    status: str
+    options: list[DirectorReferenceResponse]
+
+
+class DirectorActionIntentResponse(BaseModel):
+    action: str
+    target: DirectorReferenceResponse
+    proposal_preflight: dict[str, str | int] | None = None
+
+
+class DirectorMessageResponse(BaseModel):
+    message_id: str
+    conversation_id: str
+    project_id: str
+    session_id: str
+    role: str
+    text: str
+    proposal_id: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    client_message_id: str | None = None
+    created_at: str
+
+
+class DirectorMessageListResponse(BaseModel):
+    messages: list[DirectorMessageResponse]
+
+
+class DirectorMessageExchangeResponse(BaseModel):
+    user_message: DirectorMessageResponse
+    assistant_message: DirectorMessageResponse
+    disambiguation: DirectorDisambiguationResponse | None = None
+    reference: DirectorReferenceResponse | None = None
+    action_intent: DirectorActionIntentResponse | None = None
+
+
 class AssetRegistrationRequest(BaseModel):
     source_path: str = Field(min_length=1)
 
@@ -33,6 +91,7 @@ class TTSCandidateRequest(BaseModel):
     segment_text: str = Field(min_length=1)
     voice_sample_asset_id: str = Field(min_length=1)
     segment_id: str | None = None
+    target_duration_sec: float | None = Field(default=None, gt=0)
 
 
 class TTSCandidateRecordResponse(BaseModel):
@@ -41,6 +100,11 @@ class TTSCandidateRecordResponse(BaseModel):
     segment_id: str
     asset_id: str
     source_text: str
+    technical_status: str = "legacy_unverified"
+    operator_review_status: str = "pending"
+    target_duration_sec: float | None = None
+    actual_duration_sec: float | None = None
+    failure_code: str | None = None
     created_at: str
 
 
@@ -51,6 +115,7 @@ class TTSCandidateListResponse(BaseModel):
 class BrollBatchAssetRegistrationRequest(BaseModel):
     source_paths: list[str] = Field(default_factory=list)
     source_directory: str | None = None
+    recursive: bool = False
     tags: list[str] = Field(default_factory=list)
     title_by_source_path: dict[str, str] = Field(default_factory=dict)
 
@@ -76,9 +141,25 @@ class AssetResponse(BaseModel):
     storage_uri: str
 
 
+class TTSCandidateResponse(AssetResponse):
+    candidate_id: str | None = None
+    segment_id: str | None = None
+    source_text: str | None = None
+    technical_status: str = "legacy_unverified"
+    operator_review_status: str = "pending"
+    target_duration_sec: float | None = None
+    actual_duration_sec: float | None = None
+    failure_code: str | None = None
+
+
 class AssetArchiveItemResponse(AssetResponse):
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: str
+    source_path: str | None = None
+
+
+class MediaAnalysisReviewRequest(BaseModel):
+    tags: dict[str, list[str]]
 
 
 class AssetListResponse(BaseModel):
@@ -203,7 +284,34 @@ class CreateEditingSessionRequest(BaseModel):
     timeline_job_id: str = Field(min_length=1)
 
 
+class CreateScriptDraftEditingSessionRequest(BaseModel):
+    script_asset_id: str = Field(min_length=1)
+
+
+class NarrationAlignmentSegmentRequest(BaseModel):
+    source_script_segment_id: str = Field(min_length=1)
+    start_sec: float
+    end_sec: float
+
+
+class NarrationAlignmentRequest(BaseModel):
+    expected_revision: int = Field(ge=1)
+    aligned_segments: list[NarrationAlignmentSegmentRequest] = Field(min_length=1)
+
+
+class EditorPresetRequest(BaseModel):
+    name: str = Field(min_length=1)
+    style: dict[str, Any]
+    global_scope: bool = False
+
+
+class EditorFavoriteRequest(BaseModel):
+    favorite_type: str = Field(pattern="^(media|preset)$")
+    enabled: bool
+
+
 class CaptionOverrideRequest(BaseModel):
+    expected_revision: int = Field(ge=1)
     caption_text: str = Field(min_length=1)
 
     @model_validator(mode="after")
@@ -215,7 +323,15 @@ class CaptionOverrideRequest(BaseModel):
         return self
 
 
+class CaptionStyleMutationRequest(BaseModel):
+    expected_revision: int = Field(ge=1)
+    scope: str = Field(pattern="^(current_caption|selected_captions|from_current|whole_project|project_default)$")
+    segment_ids: list[str] = Field(default_factory=list)
+    style: dict[str, Any]
+
+
 class CutActionOverrideRequest(BaseModel):
+    expected_revision: int = Field(ge=1)
     cut_action: str = Field(min_length=1)
 
     @model_validator(mode="after")
@@ -228,7 +344,9 @@ class CutActionOverrideRequest(BaseModel):
 
 
 class BrollOverrideRequest(BaseModel):
+    expected_revision: int = Field(ge=1)
     asset_id: str = Field(min_length=1)
+    media_controls: dict[str, object] | None = None
 
     @model_validator(mode="after")
     def validate_asset_id(self) -> "BrollOverrideRequest":
@@ -239,7 +357,40 @@ class BrollOverrideRequest(BaseModel):
         return self
 
 
+class SegmentSplitRequest(BaseModel):
+    expected_revision: int = Field(ge=1)
+    split_sec: float = Field(ge=0)
+
+
+class SegmentMergeRequest(BaseModel):
+    expected_revision: int = Field(ge=1)
+    left_segment_id: str = Field(min_length=1)
+    right_segment_id: str = Field(min_length=1)
+
+
+class SegmentBoundsRequest(BaseModel):
+    expected_revision: int = Field(ge=1)
+    start_sec: float = Field(ge=0)
+    end_sec: float = Field(gt=0)
+
+
+class SegmentOrderRequest(BaseModel):
+    expected_revision: int = Field(ge=1)
+    segment_ids: list[str] = Field(min_length=1)
+    bounds_by_id: dict[str, dict[str, float]] | None = None
+
+
+class EditingSessionRevisionRequest(BaseModel):
+    expected_revision: int = Field(ge=1)
+
+
+class SelectedRangePreviewRequest(BaseModel):
+    start_sec: float = Field(ge=0)
+    end_sec: float = Field(gt=0)
+
+
 class VisualOverlayRequest(BaseModel):
+    expected_revision: int = Field(ge=1)
     overlay_type: str = Field(min_length=1)
     asset_id: str = Field(min_length=1)
 
@@ -257,6 +408,7 @@ class VisualOverlayRequest(BaseModel):
 
 
 class ExplanationCardRequest(BaseModel):
+    expected_revision: int = Field(ge=1)
     title: str = ""
     body: str = ""
     text: str = Field(min_length=1)
@@ -275,6 +427,7 @@ class ExplanationCardRequest(BaseModel):
 
 
 class ImageOverlayRequest(BaseModel):
+    expected_revision: int = Field(ge=1)
     asset_id: str = Field(min_length=1)
     text: str = ""
 
@@ -289,6 +442,7 @@ class ImageOverlayRequest(BaseModel):
 
 
 class TableOverlayRequest(BaseModel):
+    expected_revision: int = Field(ge=1)
     columns: list[str] = Field(default_factory=list)
     rows: list[list[str]] = Field(default_factory=list)
     text: str = Field(min_length=1)
@@ -305,6 +459,7 @@ class TableOverlayRequest(BaseModel):
 
 
 class TTSReplacementRequest(BaseModel):
+    expected_revision: int = Field(ge=1)
     recommendation_id: str = Field(min_length=1)
     asset_id: str = Field(min_length=1)
 
@@ -321,7 +476,25 @@ class TTSReplacementRequest(BaseModel):
         return self
 
 
+class TTSListeningReviewRequest(BaseModel):
+    decision: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_decision(self) -> "TTSListeningReviewRequest":
+        decision = self.decision.strip().lower()
+        if decision not in {"approved", "rejected"}:
+            raise ValueError("decision must be approved or rejected.")
+        self.decision = decision
+        return self
+
+
 class PartialRegenerationRequest(BaseModel):
+    expected_revision: int = Field(ge=1)
+    segment_ids: list[str] = Field(min_length=1)
+    fields: list[str] = Field(min_length=1)
+
+
+class PartialRegenerationPreflightRequest(BaseModel):
     segment_ids: list[str] = Field(min_length=1)
     fields: list[str] = Field(min_length=1)
 
@@ -364,27 +537,53 @@ class EditingSessionSegmentResponse(BaseModel):
     broll_override: dict[str, object] | None = None
     visual_overlays: list[dict[str, object]] = Field(default_factory=list)
     music_override: dict[str, object] | None = None
+    sfx_override: dict[str, object] | None = None
     tts_replacement: dict[str, object] | None = None
+    caption_style: dict[str, object] | None = None
+    source_script_segment_id: str | None = Field(default=None, exclude_if=lambda value: value is None)
+
+
+class MaterializeLibraryAssetRequest(BaseModel):
+    project_id: str
+
+
+class LibraryFavoriteRequest(BaseModel):
+    enabled: bool
 
 
 class EditingSessionHistoryEntryResponse(BaseModel):
     mutation_type: str
     segment_id: str
+    action_id: str | None = None
+    label: str | None = None
+    created_at: str | None = None
+    reversible: bool | None = None
+    blocked_reason: str | None = None
     caption_text: str | None = None
     cut_action: str | None = None
     asset_id: str | None = None
     overlay_type: str | None = None
     recommendation_id: str | None = None
+    inverse_payload: dict[str, object] | None = None
+    forward_payload: dict[str, object] | None = None
 
 
 class EditingSessionResponse(BaseModel):
     session_id: str
     project_id: str
     timeline_id: str
+    session_revision: int
+    caption_style: dict[str, object] | None = None
     segments: list[EditingSessionSegmentResponse]
     history: list[EditingSessionHistoryEntryResponse] = Field(default_factory=list)
+    undo_count: int = 0
+    redo_count: int = 0
     created_at: str | None = None
     updated_at: str | None = None
+    script_asset_id: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    timing_source: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    narration_alignment_required: bool | None = Field(default=None, exclude_if=lambda value: value is None)
+    stale_proposal_source_script_segment_ids: list[str] | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class SegmentAnalysisRecord(BaseModel):
@@ -437,6 +636,11 @@ class TimelineClipResponse(BaseModel):
     end_sec: float
     clip_type: str
     recommendation_id: str | None = None
+    asset_id: str | None = None
+    media_controls: dict[str, object] = Field(default_factory=dict)
+    expected_content_sha256: str | None = None
+    media_revision: str | None = None
+    warning_provenance: list[str] = Field(default_factory=list)
 
 
 class TimelineTrackResponse(BaseModel):
@@ -462,6 +666,7 @@ class TimelinePayloadResponse(BaseModel):
     applied_recommendations: list[RecommendationItemResponse] = Field(default_factory=list)
     pending_recommendations: list[RecommendationItemResponse] = Field(default_factory=list)
     created_at: str | None = None
+    source_session_revision: int | None = None
 
 
 class TimelineJobResponse(StartJobResponse):
@@ -491,6 +696,10 @@ class ReviewApprovalResponse(BaseModel):
     review_status: str
     approved_at: str | None = None
     updated_at: str
+    source_session_revision: int | None = None
+    is_current: bool = True
+    invalidated_at: str | None = None
+    invalidated_reason: str | None = None
 
 
 class PreviewArtifactResponse(BaseModel):
@@ -504,6 +713,10 @@ class PreviewArtifactResponse(BaseModel):
     notes: list[str] = Field(default_factory=list)
     provider_trace: ProviderTraceResponse
     created_at: str | None = None
+    source_session_revision: int | None = None
+    is_current: bool = True
+    invalidated_at: str | None = None
+    invalidated_reason: str | None = None
 
 
 class PreviewJobResponse(StartJobResponse):
@@ -523,6 +736,10 @@ class ExportArtifactResponse(BaseModel):
     notes: list[str] = Field(default_factory=list)
     provider_trace: ProviderTraceResponse
     created_at: str | None = None
+    source_session_revision: int | None = None
+    is_current: bool = True
+    invalidated_at: str | None = None
+    invalidated_reason: str | None = None
 
 
 class ExportJobResponse(StartJobResponse):
@@ -536,6 +753,10 @@ class FinalRenderArtifactResponse(BaseModel):
     file_uri: str
     status: str
     created_at: str | None = None
+    source_session_revision: int | None = None
+    is_current: bool = True
+    invalidated_at: str | None = None
+    invalidated_reason: str | None = None
 
 
 class FinalRenderJobResponse(StartJobResponse):
@@ -549,10 +770,38 @@ class CapCutDraftExportArtifactResponse(BaseModel):
     file_uri: str
     status: str
     created_at: str | None = None
+    notes: list[str] = Field(default_factory=list)
+    handoff: "CapCutDraftHandoffResponse | None" = None
+    source_session_revision: int | None = None
+    is_current: bool = True
+    invalidated_at: str | None = None
+    invalidated_reason: str | None = None
+
+
+class CapCutDraftHandoffResponse(BaseModel):
+    status: str
+    source_file_uri: str
+    registered_project_path: str | None = None
+    error_message: str | None = None
+    registered_at: str | None = None
+    reused: bool = False
+
+
+class CapCutHandoffDiagnosticsResponse(BaseModel):
+    status: str
+    installation_path: str | None = None
+    detected_version: str | None = None
+    is_supported: bool
+    project_root_path: str
+    project_root_exists: bool
+    write_access: bool
+    recovery_message: str | None = None
+    checked_at: str
 
 
 class CapCutDraftExportJobResponse(StartJobResponse):
     export: CapCutDraftExportArtifactResponse | None = None
+    error_message: str | None = None
 
 
 class ProviderTraceAuditSummaryResponse(BaseModel):
@@ -593,6 +842,10 @@ class SubtitleArtifactResponse(BaseModel):
     status: str
     notes: list[str] = Field(default_factory=list)
     created_at: str | None = None
+    source_session_revision: int | None = None
+    is_current: bool = True
+    invalidated_at: str | None = None
+    invalidated_reason: str | None = None
 
 
 class SubtitleJobResponse(StartJobResponse):

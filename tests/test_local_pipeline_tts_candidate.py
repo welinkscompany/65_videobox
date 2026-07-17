@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+import wave
 
 import pytest
 
@@ -20,6 +21,26 @@ class _FakeTTSProvider:
         self.received_requests.append(request)
         request.output_path.parent.mkdir(parents=True, exist_ok=True)
         request.output_path.write_bytes(b"fake synthesized audio")
+        return TTSResult(output_uri=str(request.output_path), provider_name=self.provider_name)
+
+
+class _FailingTTSProvider:
+    provider_name = "failing_tts"
+
+    def synthesize(self, request: TTSRequest) -> TTSResult:
+        raise RuntimeError("provider unavailable")
+
+
+class _ShortWaveTTSProvider:
+    provider_name = "short_wave_tts"
+
+    def synthesize(self, request: TTSRequest) -> TTSResult:
+        request.output_path.parent.mkdir(parents=True, exist_ok=True)
+        with wave.open(str(request.output_path), "wb") as wav_file:
+            wav_file.setnchannels(1)
+            wav_file.setsampwidth(2)
+            wav_file.setframerate(1000)
+            wav_file.writeframes(b"\x01\x00" * 1000)
         return TTSResult(output_uri=str(request.output_path), provider_name=self.provider_name)
 
 
@@ -88,3 +109,44 @@ def test_generate_tts_replacement_candidate_rejects_non_voice_sample_asset(tmp_p
             segment_text="Hello there.",
             voice_sample_asset_id=script_asset["asset_id"],
         )
+
+
+def test_provider_failure_preserves_original_narration_and_creates_no_candidate(tmp_path: Path) -> None:
+    voice_sample_path = tmp_path / "voice_sample.wav"
+    voice_sample_path.write_bytes(b"fake voice sample bytes")
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="TTS Failure")
+    runner = LocalPipelineRunner(store, tts_provider=_FailingTTSProvider())
+    voice_sample = runner.register_voice_sample_asset(project_id=project.project_id, source_path=voice_sample_path)
+
+    with pytest.raises(RuntimeError, match="original narration remains selected"):
+        runner.generate_tts_replacement_candidate(
+            project_id=project.project_id,
+            segment_text="안녕하세요.",
+            voice_sample_asset_id=voice_sample["asset_id"],
+            segment_id="seg_001",
+            target_duration_sec=3.0,
+        )
+
+    assert store.list_tts_candidates(project_id=project.project_id, segment_id="seg_001") == []
+
+
+def test_duration_mismatch_is_persisted_as_unselectable_candidate(tmp_path: Path) -> None:
+    voice_sample_path = tmp_path / "voice_sample.wav"
+    voice_sample_path.write_bytes(b"fake voice sample bytes")
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="TTS Duration")
+    runner = LocalPipelineRunner(store, tts_provider=_ShortWaveTTSProvider())
+    voice_sample = runner.register_voice_sample_asset(project_id=project.project_id, source_path=voice_sample_path)
+
+    result = runner.generate_tts_replacement_candidate(
+        project_id=project.project_id,
+        segment_text="안녕하세요.",
+        voice_sample_asset_id=voice_sample["asset_id"],
+        segment_id="seg_001",
+        target_duration_sec=3.0,
+    )
+
+    assert result["technical_status"] == "rejected"
+    assert result["failure_code"] == "duration_mismatch"
+    assert store.list_tts_candidates(project_id=project.project_id, segment_id="seg_001")[0]["technical_status"] == "rejected"

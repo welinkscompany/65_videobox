@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import base64
 from pathlib import Path
+import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -10,7 +13,39 @@ from videobox_provider_interfaces.local_xtts_provider import LocalXTTSProvider
 from videobox_provider_interfaces.tts import TTSRequest
 
 
-def test_gtts_provider_synthesizes_a_real_playable_mp3(tmp_path: Path) -> None:
+_PLAYABLE_MP3_FIXTURE = base64.b64decode(
+    "/+NIxAAodGaQXjPGaQLUkmAAJp7Z5MmnvYwgQQzsTAYDJ7FWNDy4KhJiTgO4C2BD"
+    "EzR7er54CsVkTLpQ4G8RKiFXfRD0TcW8AxZoiVxZV3gQQlRK7voWiJu+jvxOu5O5"
+    "oEEFUKhxZxCiIVd4gt4ibu9d9ETdCd30TREKucRziFXc656IW6bueiaIm78R+IVd"
+    "93OInXLdzgRKEAEodzRHiITh3gcWcRN3Su+gAlCIjYHQBATOn6v8mnaa05UZvfKX"
+    "BYaxF+b3IkuZIZMZp1e8vIGDNUTtc7TNQWaBUBnQaUFmVc0kujq5VSrpH1lbAIQJ"
+    "A2Ptd05EkST3F3nJKJy7a80ZGTuW9k5MXYqwCAhRqtCgIkmbCgQo1UmAhRMxqAiS"
+    "/+NIxHEw8/58rMMGyWCrAICOqtAQFYzUKBNVXDATRmNQFdlJgzaqVVSZmqsaqsZj"
+    "Zm1UoykzNVUlUtmOq2qls2zHqvGXZuquqlAzGqtVEkzNWFHFNCiQUlBYIoKOBWwV"
+    "n+AAHJ0cpkNInWKz4xOkqEnSJykViqPRBE4hlQnlAKQSAqDwWg4C4SCOPiUiKnDp"
+    "QucIiERDIeGyAjJAxI04so8ws0404so8gmtGiyiyiyjjTiyizLjKlnYsos0UJFAY"
+    "gWQJrmnZ2djjTiyizD4zXZ2dnk40osQLIE08p2dno404SBFmHkI3//1JE404so8w"
+    "+4//+USNONKLMPMi///sycacWUeYe7Ozs+bRpxpRZh5jOzlFmWoiSNFAYEeYeWUW"
+)
+
+
+class _DeterministicGTTS:
+    received_calls: list[dict[str, str]] = []
+
+    def __init__(self, *, text: str, lang: str) -> None:
+        self.text = text
+        self.lang = lang
+
+    def save(self, output_path: str) -> None:
+        type(self).received_calls.append({"text": self.text, "lang": self.lang, "output_path": output_path})
+        Path(output_path).write_bytes(_PLAYABLE_MP3_FIXTURE)
+
+
+def test_gtts_provider_writes_deterministic_playable_mp3_without_network(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _DeterministicGTTS.received_calls.clear()
+    monkeypatch.setitem(sys.modules, "gtts", SimpleNamespace(gTTS=_DeterministicGTTS))
     provider = GTTSProvider(language="en")
     output_path = tmp_path / "narration.mp3"
 
@@ -20,7 +55,11 @@ def test_gtts_provider_synthesizes_a_real_playable_mp3(tmp_path: Path) -> None:
 
     assert result.provider_name == "gtts"
     assert output_path.exists()
-    assert output_path.stat().st_size > 0
+    assert output_path.read_bytes() == _PLAYABLE_MP3_FIXTURE
+    assert output_path.read_bytes().startswith(b"\xff\xe3")
+    assert _DeterministicGTTS.received_calls == [
+        {"text": "Hello from VideoBox.", "lang": "en", "output_path": str(output_path)}
+    ]
 
 
 def test_gtts_provider_rejects_empty_text(tmp_path: Path) -> None:

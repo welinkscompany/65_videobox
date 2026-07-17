@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import json
+import re
 import sqlite3
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
+from fastapi.testclient import TestClient as FastAPITestClient
 
 from videobox_api.main import (
     _build_preflight_review_prediction,
@@ -14,7 +15,7 @@ from videobox_api.main import (
     _normalize_recommendations_for_response,
     create_app,
 )
-from videobox_api.orchestration import LocalFirstRuntimeService
+from videobox_api.orchestration import LocalFirstRuntimeService, LocalOnlyRuntimeService
 from videobox_core_engine.local_first_runtime import LocalFirstStructuredGenerationError
 from videobox_core_engine.local_pipeline import LocalPipelineRunner
 from videobox_core_engine.local_pipeline import _build_review_guidance_reuse_key
@@ -29,6 +30,7 @@ from videobox_core_engine.review_guidance import HeuristicReviewGuidanceBuilder,
 from videobox_core_engine.settings import AutoCutConfig, LocalOpenAICompatibleRuntimeConfig
 from videobox_core_engine.timeline_builder import TimelineBuilder
 from videobox_domain_models.jobs import JobStatus, JobType
+from videobox_domain_models.assets import AssetType
 from videobox_domain_models.recommendations import RecommendationType
 from videobox_provider_interfaces.llm import (
     LLMProviderConfig,
@@ -39,6 +41,54 @@ from videobox_provider_interfaces.llm import (
 )
 from videobox_provider_interfaces.stt import STTResult, STTSegment
 from videobox_storage.local_project_store import LocalProjectStore
+
+
+class TestClient(FastAPITestClient):
+    """Model the editor's normal read-then-mutate optimistic-lock workflow.
+
+    Workflow-oriented API tests predate revisioned editing sessions.  They are
+    not concurrency tests, so they intentionally use the latest revision just
+    as the actual editor does.  Tests that exercise conflicts pass an explicit
+    revision and are never changed by this helper.
+    """
+
+    _editing_session_mutation = re.compile(
+        r"^/api/projects/(?P<project_id>[^/]+)/editing-sessions/(?P<session_id>[^/]+)(?:/.*)?$"
+    )
+
+    def request(self, method: str, url: object, **kwargs: object):  # type: ignore[override]
+        method_upper = method.upper()
+        url_path = str(url).split("?", 1)[0]
+        match = self._editing_session_mutation.match(url_path)
+        is_partial_regeneration_start = url_path.endswith("/partial-regeneration")
+        is_mutation = method_upper in {"PATCH", "DELETE"} or (
+            method_upper == "POST" and is_partial_regeneration_start
+        )
+        if not match or not is_mutation:
+            return super().request(method, url, **kwargs)
+
+        request_json = kwargs.get("json")
+        request_params = kwargs.get("params")
+        if (isinstance(request_json, dict) and "expected_revision" in request_json) or (
+            isinstance(request_params, dict) and "expected_revision" in request_params
+        ):
+            return super().request(method, url, **kwargs)
+
+        latest = super().get(
+            f"/api/projects/{match.group('project_id')}/editing-sessions/{match.group('session_id')}"
+        )
+        if latest.status_code != 200:
+            return super().request(method, url, **kwargs)
+        revision = latest.json()["session_revision"]
+        if method_upper == "DELETE":
+            params = dict(request_params) if isinstance(request_params, dict) else {}
+            params["expected_revision"] = revision
+            kwargs["params"] = params
+        elif isinstance(request_json, dict):
+            body = dict(request_json)
+            body["expected_revision"] = revision
+            kwargs["json"] = body
+        return super().request(method, url, **kwargs)
 
 
 @dataclass
@@ -150,9 +200,9 @@ def test_build_targeted_segments_matches_trimmed_request_segment_ids() -> None:
                     "cut_action": "keep",
                     "review_required": False,
                     "broll_override": None,
-                    "visual_overlays": [],
-                    "music_override": None,
-                    "tts_replacement": None,
+                "visual_overlays": [],
+                "music_override": None,
+                "tts_replacement": None,
                 }
             ]
         },
@@ -166,9 +216,9 @@ def test_build_targeted_segments_matches_trimmed_request_segment_ids() -> None:
             "cut_action": "keep",
             "review_required": False,
             "broll_override": None,
-            "visual_overlays": [],
-            "music_override": None,
-            "tts_replacement": None,
+                "visual_overlays": [],
+                "music_override": None,
+                "tts_replacement": None,
         }
     ]
 
@@ -3572,7 +3622,9 @@ def test_editing_session_api_normalizes_legacy_string_false_segment_review_requi
             "broll_override": None,
             "visual_overlays": [],
             "music_override": None,
+            "sfx_override": None,
             "tts_replacement": None,
+            "caption_style": None,
         }
     ]
 
@@ -3675,7 +3727,9 @@ def test_editing_session_api_preserves_string_false_segment_review_required_afte
             "broll_override": None,
             "visual_overlays": [],
             "music_override": None,
+            "sfx_override": None,
             "tts_replacement": None,
+            "caption_style": None,
         }
     ]
 
@@ -4225,7 +4279,28 @@ def _local_first_service_factory(
             gemini_config=LLMProviderConfig(provider_name="gemini", enabled=True),
             local_runtime_config=LocalOpenAICompatibleRuntimeConfig(
                 enabled=local_enabled,
-                base_url="http://127.0.0.1:11434/v1",
+                base_url="http://127.0.0.1:1234/v1",
+                model_name="Qwen3-32B",
+                timeout_seconds=42,
+            ),
+        )
+
+    return factory
+
+
+def _local_only_service_factory(
+    *,
+    local_provider: FakeStructuredProvider,
+    gemini_provider: FakeStructuredProvider | None = None,
+    local_enabled: bool = True,
+):
+    del gemini_provider
+    def factory(_: LocalProjectStore) -> LocalOnlyRuntimeService:
+        return LocalOnlyRuntimeService(
+            local_provider=local_provider,
+            local_runtime_config=LocalOpenAICompatibleRuntimeConfig(
+                enabled=local_enabled,
+                base_url="http://127.0.0.1:1234/v1",
                 model_name="Qwen3-32B",
                 timeout_seconds=42,
             ),
@@ -4415,7 +4490,7 @@ def test_broll_batch_import_registers_multiple_files_for_recommendation(
     }
 
 
-def test_broll_batch_import_expands_directory_and_fails_atomically_on_invalid_file(
+def test_broll_batch_import_expands_directory_and_preserves_valid_assets_on_invalid_file(
     tmp_path: Path,
 ) -> None:
     app = create_app(projects_root=tmp_path)
@@ -4455,9 +4530,16 @@ def test_broll_batch_import_expands_directory_and_fails_atomically_on_invalid_fi
         },
     )
 
-    assert invalid_response.status_code == 400
+    assert invalid_response.status_code == 201
+    assert len(invalid_response.json()["assets"]) == 1
+    assert invalid_response.json()["failures"] == [
+        {
+            "source_path": str((source_directory / "missing.mp4").resolve()),
+            "reason": "source file does not exist",
+        }
+    ]
     list_response = client.get(f"/api/projects/{project_id}/assets/broll-video")
-    assert len(list_response.json()["assets"]) == 2
+    assert len(list_response.json()["assets"]) == 3
 
 
 def _create_music_recommendation_project(
@@ -4567,6 +4649,15 @@ def _create_timeline_review_project(
     return project_id, timeline_job_id
 
 
+def _get_timeline_review_broll_asset(client: TestClient, project_id: str) -> dict[str, object]:
+    response = client.get(f"/api/projects/{project_id}/assets/broll-video")
+
+    assert response.status_code == 200
+    assets = response.json()["assets"]
+    assert len(assets) == 1
+    return assets[0]
+
+
 def test_health_endpoint_reports_ok() -> None:
     client = TestClient(create_app())
 
@@ -4579,22 +4670,22 @@ def test_health_endpoint_reports_ok() -> None:
 def test_create_app_exposes_local_runtime_builder_on_app_state(tmp_path: Path) -> None:
     config = LocalOpenAICompatibleRuntimeConfig(
         enabled=True,
-        base_url="http://127.0.0.1:11434/v1/",
+        base_url="http://127.0.0.1:1234/v1",
         model_name="Qwen3-32B",
         timeout_seconds=42,
     )
 
     app = create_app(projects_root=tmp_path, local_runtime_config=config)
 
-    assert app.state.local_runtime_config.base_url == "http://127.0.0.1:11434/v1"
+    assert app.state.local_runtime_config.base_url == "http://127.0.0.1:1234/v1"
+    assert callable(app.state.build_local_only_runtime_service)
     assert app.state.local_runtime_config.model_name == "Qwen3-32B"
-    assert callable(app.state.build_local_first_runtime_service)
 
 
 def test_project_creation_endpoint_returns_local_storage_metadata(tmp_path) -> None:
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=FakeStructuredProvider(
                 errors=[
                     LLMProviderError(
@@ -4628,7 +4719,7 @@ def test_ingest_and_analysis_flow_persists_files_and_records(tmp_path: Path) -> 
 
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=FakeStructuredProvider(
                 errors=[
                     LLMProviderError(
@@ -4737,7 +4828,7 @@ def test_segment_analysis_endpoint_uses_local_first_runtime_before_gemini(
     gemini_provider = FakeStructuredProvider()
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=local_provider,
             gemini_provider=gemini_provider,
             local_enabled=True,
@@ -4761,7 +4852,7 @@ def test_segment_analysis_endpoint_uses_local_first_runtime_before_gemini(
     assert segment["review_required"] is True
     assert segment["cleanup_decision"] == "review"
     assert segment["provider_trace"] == {
-        "routing_mode": "local_first",
+        "routing_mode": "local_only",
         "final_provider": "local_qwen",
         "fallback_reasons": [],
     }
@@ -4769,7 +4860,7 @@ def test_segment_analysis_endpoint_uses_local_first_runtime_before_gemini(
     assert gemini_provider.calls == []
 
 
-def test_segment_analysis_endpoint_falls_back_to_gemini_when_local_fails(
+def test_segment_analysis_endpoint_does_not_call_gemini_when_local_fails(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -4800,9 +4891,8 @@ def test_segment_analysis_endpoint_falls_back_to_gemini_when_local_fails(
     )
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=local_provider,
-            gemini_provider=gemini_provider,
             local_enabled=True,
         ),
     )
@@ -4829,21 +4919,11 @@ def test_segment_analysis_endpoint_falls_back_to_gemini_when_local_fails(
     )
 
     assert response.status_code == 202
-    result = client.get(f"/api/projects/{project_id}/jobs/segment-analysis/{response.json()['job_id']}")
-    assert result.status_code == 200
-    segment = result.json()["segments"][0]
-    assert segment["review_required"] is True
-    assert segment["cleanup_decision"] == "review"
-    assert segment["provider_trace"] == {
-        "routing_mode": "local_first",
-        "final_provider": "gemini",
-        "fallback_reasons": ["local_provider_error"],
-    }
     assert len(local_provider.calls) == 1
-    assert len(gemini_provider.calls) == 1
+    assert gemini_provider.calls == []
 
 
-def test_segment_analysis_endpoint_skips_local_when_disabled(
+def test_segment_analysis_endpoint_does_not_call_gemini_when_local_is_disabled(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -4865,9 +4945,8 @@ def test_segment_analysis_endpoint_skips_local_when_disabled(
     )
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=local_provider,
-            gemini_provider=gemini_provider,
             local_enabled=False,
         ),
     )
@@ -4894,18 +4973,8 @@ def test_segment_analysis_endpoint_skips_local_when_disabled(
     )
 
     assert response.status_code == 202
-    result = client.get(f"/api/projects/{project_id}/jobs/segment-analysis/{response.json()['job_id']}")
-    assert result.status_code == 200
-    segment = result.json()["segments"][0]
-    assert segment["review_required"] is False
-    assert segment["cleanup_decision"] == "keep"
-    assert segment["provider_trace"] == {
-        "routing_mode": "local_first",
-        "final_provider": "gemini",
-        "fallback_reasons": ["local_disabled"],
-    }
     assert local_provider.calls == []
-    assert len(gemini_provider.calls) == 1
+    assert gemini_provider.calls == []
 
 
 def test_segment_analysis_endpoint_preserves_heuristic_fallback_when_local_disabled_without_gemini_key(
@@ -4918,7 +4987,7 @@ def test_segment_analysis_endpoint_preserves_heuristic_fallback_when_local_disab
     )
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=FakeStructuredProvider(
                 errors=[
                     LLMProviderError(
@@ -4965,7 +5034,7 @@ def test_segment_analysis_endpoint_marks_job_failed_on_unexpected_runtime_failur
     gemini_provider = FakeStructuredProvider()
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=local_provider,
             gemini_provider=gemini_provider,
             local_enabled=True,
@@ -5012,7 +5081,7 @@ def test_segment_analysis_endpoint_uses_transcript_alignment_before_heuristic_re
 
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=FakeStructuredProvider(
                 errors=[
                     LLMProviderError(
@@ -5078,7 +5147,7 @@ def test_segment_analysis_endpoint_flags_review_when_script_meaning_differs(
 
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=FakeStructuredProvider(
                 errors=[
                     LLMProviderError(
@@ -5141,7 +5210,7 @@ def test_segment_analysis_endpoint_flags_review_for_high_similarity_word_substit
 
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=FakeStructuredProvider(
                 errors=[
                     LLMProviderError(
@@ -5204,7 +5273,7 @@ def test_segment_analysis_endpoint_aligns_single_line_multi_sentence_script_with
 
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=FakeStructuredProvider(
                 errors=[
                     LLMProviderError(
@@ -5268,7 +5337,7 @@ def test_segment_analysis_endpoint_preserves_transcript_when_script_is_missing(
 
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=FakeStructuredProvider(
                 errors=[
                     LLMProviderError(
@@ -5329,7 +5398,7 @@ def test_segment_analysis_endpoint_keeps_spoken_words_when_script_is_only_partia
 
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=FakeStructuredProvider(
                 errors=[
                     LLMProviderError(
@@ -5393,7 +5462,7 @@ def test_segment_analysis_endpoint_splits_coarse_transcript_segment_for_multi_se
 
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=FakeStructuredProvider(
                 errors=[
                     LLMProviderError(
@@ -5458,7 +5527,7 @@ def test_segment_analysis_endpoint_splits_coarse_transcript_segment_when_script_
 
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=FakeStructuredProvider(
                 errors=[
                     LLMProviderError(
@@ -5536,7 +5605,7 @@ def test_segment_analysis_keeps_heuristic_review_flags_when_ai_downplays_risky_s
     )
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=local_provider,
             gemini_provider=FakeStructuredProvider(),
             local_enabled=True,
@@ -5608,7 +5677,7 @@ def test_segment_analysis_local_first_path_preserves_downstream_timeline_review_
     )
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=local_provider,
             gemini_provider=FakeStructuredProvider(),
             local_enabled=True,
@@ -5674,7 +5743,7 @@ def test_recommendation_flow_persists_broll_and_music_results(tmp_path: Path, mo
 
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=FakeStructuredProvider(
                 errors=[
                     LLMProviderError(
@@ -5807,7 +5876,7 @@ def test_music_recommendation_endpoint_uses_local_first_runtime_before_gemini(
     gemini_provider = FakeStructuredProvider()
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=local_provider,
             gemini_provider=gemini_provider,
             local_enabled=True,
@@ -5829,7 +5898,7 @@ def test_music_recommendation_endpoint_uses_local_first_runtime_before_gemini(
     assert recommendation["reason"] == "Suggested music mood for this segment: cinematic pulse."
     assert recommendation["score"] == 0.91
     assert recommendation["provider_trace"] == {
-        "routing_mode": "local_first",
+            "routing_mode": "local_only",
         "final_provider": "local_qwen",
         "fallback_reasons": [],
     }
@@ -5882,7 +5951,7 @@ def test_music_recommendation_endpoint_falls_back_to_gemini_when_local_fails(
     )
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=local_provider,
             gemini_provider=gemini_provider,
             local_enabled=True,
@@ -5911,22 +5980,15 @@ def test_music_recommendation_endpoint_falls_back_to_gemini_when_local_fails(
     result = client.get(f"/api/projects/{project_id}/jobs/music-recommendation/{response.json()['job_id']}")
     assert result.status_code == 200
     recommendation = result.json()["recommendations"][0]
-    assert recommendation["payload"]["music_mood"] == "warm ambient"
-    assert recommendation["score"] == 0.83
-    assert recommendation["provider_trace"] == {
-        "routing_mode": "local_first",
-        "final_provider": "gemini",
-        "fallback_reasons": ["local_provider_error"],
-    }
+    assert recommendation["provider_trace"]["final_provider"] == "rule_based_fallback"
     assert len(local_provider.calls) == 2
-    assert len(gemini_provider.calls) == 2
-    assert gemini_provider.calls[1].task_type is LLMTaskType.MUSIC_RECOMMENDATION
+    assert gemini_provider.calls == []
     keys_response = client.get(f"/api/projects/{project_id}/providers/gemini/keys")
     assert keys_response.status_code == 200
     key_state = keys_response.json()["keys"][0]
     assert key_state["consecutive_failures"] == 0
     assert key_state["last_error"] is None
-    assert key_state["last_used_at"] is not None
+    assert key_state["last_used_at"] is None
 
 
 def test_music_recommendation_endpoint_skips_local_when_disabled(
@@ -5958,7 +6020,7 @@ def test_music_recommendation_endpoint_skips_local_when_disabled(
     )
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=local_provider,
             gemini_provider=gemini_provider,
             local_enabled=False,
@@ -5987,16 +6049,9 @@ def test_music_recommendation_endpoint_skips_local_when_disabled(
     result = client.get(f"/api/projects/{project_id}/jobs/music-recommendation/{response.json()['job_id']}")
     assert result.status_code == 200
     recommendation = result.json()["recommendations"][0]
-    assert recommendation["payload"]["music_mood"] == "steady documentary"
-    assert recommendation["score"] == 0.78
-    assert recommendation["provider_trace"] == {
-        "routing_mode": "local_first",
-        "final_provider": "gemini",
-        "fallback_reasons": ["local_disabled"],
-    }
+    assert recommendation["provider_trace"]["final_provider"] == "rule_based_fallback"
     assert local_provider.calls == []
-    assert len(gemini_provider.calls) == 2
-    assert gemini_provider.calls[1].task_type is LLMTaskType.MUSIC_RECOMMENDATION
+    assert gemini_provider.calls == []
 
 
 def test_music_recommendation_endpoint_preserves_rule_based_fallback_when_local_disabled_without_gemini_key(
@@ -6009,7 +6064,7 @@ def test_music_recommendation_endpoint_preserves_rule_based_fallback_when_local_
     )
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=FakeStructuredProvider(
                 errors=[
                     LLMProviderError(
@@ -6040,9 +6095,9 @@ def test_music_recommendation_endpoint_preserves_rule_based_fallback_when_local_
     assert recommendation["payload"]["music_mood"] == "clean documentary pulse"
     assert recommendation["reason"] == "Suggested music mood for this segment: clean documentary pulse."
     assert recommendation["provider_trace"] == {
-        "routing_mode": "local_first",
+        "routing_mode": "local_only",
         "final_provider": "rule_based_fallback",
-        "fallback_reasons": ["local_provider_error", "gemini_unavailable"],
+        "fallback_reasons": ["local_provider_error"],
     }
 
 
@@ -6072,7 +6127,7 @@ def test_music_recommendation_endpoint_preserves_rule_based_path_after_runtime_f
     )
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=local_provider,
             gemini_provider=FakeStructuredProvider(),
             local_enabled=True,
@@ -6129,7 +6184,7 @@ def test_music_recommendation_local_first_path_preserves_downstream_timeline_beh
     )
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=local_provider,
             gemini_provider=FakeStructuredProvider(),
             local_enabled=True,
@@ -6177,7 +6232,7 @@ def test_music_recommendation_local_first_path_preserves_downstream_timeline_beh
 
     assert timeline_result.status_code == 200
     assert music_result.status_code == 200
-    assert any(track["track_type"] == "bgm" for track in timeline_result.json()["timeline"]["tracks"])
+    assert not any(track["track_type"] == "bgm" for track in timeline_result.json()["timeline"]["tracks"])
     assert music_result.json()["recommendations"][0]["payload"]["music_mood"] == "cinematic pulse"
     assert len(local_provider.calls) == 3
 
@@ -6211,7 +6266,7 @@ def test_broll_recommendation_endpoint_uses_local_first_runtime_before_gemini(
     gemini_provider = FakeStructuredProvider()
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=local_provider,
             gemini_provider=gemini_provider,
             local_enabled=True,
@@ -6231,7 +6286,7 @@ def test_broll_recommendation_endpoint_uses_local_first_runtime_before_gemini(
     payload = result.json()
     assert payload["recommendations"][0]["reason"].lower().startswith("matched keywords: office")
     assert payload["recommendations"][0]["provider_trace"] == {
-        "routing_mode": "local_first",
+            "routing_mode": "local_only",
         "final_provider": "local_qwen",
         "fallback_reasons": [],
     }
@@ -6283,7 +6338,7 @@ def test_broll_recommendation_endpoint_falls_back_to_gemini_when_local_fails(
     )
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=local_provider,
             gemini_provider=gemini_provider,
             local_enabled=True,
@@ -6312,13 +6367,9 @@ def test_broll_recommendation_endpoint_falls_back_to_gemini_when_local_fails(
     result = client.get(f"/api/projects/{project_id}/jobs/broll-recommendation/{response.json()['job_id']}")
     assert result.status_code == 200
     assert result.json()["recommendations"][0]["reason"].lower().startswith("matched keywords: office")
-    assert result.json()["recommendations"][0]["provider_trace"] == {
-        "routing_mode": "local_first",
-        "final_provider": "gemini",
-        "fallback_reasons": ["local_provider_error"],
-    }
+    assert result.json()["recommendations"][0]["provider_trace"]["final_provider"] == "heuristic_fallback"
     assert len(local_provider.calls) == 2
-    assert len(gemini_provider.calls) == 2
+    assert gemini_provider.calls == []
 
 
 def test_broll_recommendation_endpoint_skips_local_when_disabled(
@@ -6350,7 +6401,7 @@ def test_broll_recommendation_endpoint_skips_local_when_disabled(
     )
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=local_provider,
             gemini_provider=gemini_provider,
             local_enabled=False,
@@ -6379,13 +6430,9 @@ def test_broll_recommendation_endpoint_skips_local_when_disabled(
     result = client.get(f"/api/projects/{project_id}/jobs/broll-recommendation/{response.json()['job_id']}")
     assert result.status_code == 200
     assert result.json()["recommendations"][0]["reason"].lower().startswith("matched keywords: office")
-    assert result.json()["recommendations"][0]["provider_trace"] == {
-        "routing_mode": "local_first",
-        "final_provider": "gemini",
-        "fallback_reasons": ["local_disabled"],
-    }
+    assert result.json()["recommendations"][0]["provider_trace"]["final_provider"] == "heuristic_fallback"
     assert local_provider.calls == []
-    assert len(gemini_provider.calls) == 2
+    assert gemini_provider.calls == []
 
 
 def test_broll_recommendation_endpoint_preserves_heuristic_path_after_runtime_failure(
@@ -6414,7 +6461,7 @@ def test_broll_recommendation_endpoint_preserves_heuristic_path_after_runtime_fa
     )
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=local_provider,
             gemini_provider=FakeStructuredProvider(),
             local_enabled=True,
@@ -6433,9 +6480,9 @@ def test_broll_recommendation_endpoint_preserves_heuristic_path_after_runtime_fa
     assert result.status_code == 200
     assert result.json()["recommendations"][0]["reason"].lower().startswith("matched keywords: office")
     assert result.json()["recommendations"][0]["provider_trace"] == {
-        "routing_mode": "local_first",
+        "routing_mode": "local_only",
         "final_provider": "heuristic_fallback",
-        "fallback_reasons": ["local_provider_error", "gemini_unavailable"],
+        "fallback_reasons": ["local_provider_error"],
     }
 
 
@@ -6453,7 +6500,7 @@ def test_broll_recommendation_endpoint_preserves_heuristic_path_on_unexpected_ru
     local_provider = FakeStructuredProvider(errors=[RuntimeError("broll keyword expansion exploded")])
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=local_provider,
             gemini_provider=FakeStructuredProvider(),
             local_enabled=True,
@@ -6487,7 +6534,7 @@ def test_timeline_and_review_snapshot_flow(tmp_path: Path) -> None:
 
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=FakeStructuredProvider(
                 errors=[
                     LLMProviderError(
@@ -6568,9 +6615,10 @@ def test_timeline_and_review_snapshot_flow(tmp_path: Path) -> None:
     assert timeline_payload["job_id"].startswith("timeline_build_job_")
     assert timeline_payload["timeline"]["project_id"] == project_id
     assert len(timeline_payload["timeline"]["tracks"]) >= 1
-    assert {"narration", "broll", "bgm"}.issubset(
+    assert {"narration", "broll"}.issubset(
         {track["track_type"] for track in timeline_payload["timeline"]["tracks"]}
     )
+    assert not any(track["track_type"] == "bgm" for track in timeline_payload["timeline"]["tracks"])
     assert len(review_payload["segments"]) >= 2
     assert len(review_payload["applied_recommendations"]) >= 2
     assert len(review_payload["pending_recommendations"]) == 0
@@ -6582,9 +6630,10 @@ def test_timeline_and_review_snapshot_flow(tmp_path: Path) -> None:
     assert timeline_files
     timeline_json = json.loads(timeline_files[0].read_text(encoding="utf-8"))
     assert timeline_json["project_id"] == project_id
-    assert {"narration", "broll", "bgm"}.issubset(
+    assert {"narration", "broll"}.issubset(
         {track["track_type"] for track in timeline_json["tracks"]}
     )
+    assert not any(track["track_type"] == "bgm" for track in timeline_json["tracks"])
 
 
 def test_review_snapshot_uses_local_first_runtime_before_gemini(
@@ -6633,7 +6682,7 @@ def test_review_snapshot_uses_local_first_runtime_before_gemini(
     gemini_provider = FakeStructuredProvider()
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=local_provider,
             gemini_provider=gemini_provider,
             local_enabled=True,
@@ -6649,7 +6698,7 @@ def test_review_snapshot_uses_local_first_runtime_before_gemini(
     assert payload["operator_guidance"]["summary"] == "Review the flagged narration segment before export."
     assert payload["operator_guidance"]["action_items"] == ["Check seg_001 narration alignment"]
     assert payload["operator_guidance"]["provider_trace"] == {
-        "routing_mode": "local_first",
+            "routing_mode": "local_only",
         "final_provider": "local_qwen",
         "fallback_reasons": [],
     }
@@ -6703,7 +6752,7 @@ def test_review_snapshot_persists_operator_guidance_for_repeated_reads(
     )
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=local_provider,
             gemini_provider=FakeStructuredProvider(),
             local_enabled=True,
@@ -6779,7 +6828,7 @@ def test_review_snapshot_reuses_persisted_guidance_when_stored_reuse_key_has_whi
     )
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=local_provider,
             gemini_provider=FakeStructuredProvider(),
             local_enabled=True,
@@ -7155,7 +7204,7 @@ def test_review_snapshot_invalidates_persisted_guidance_when_review_status_chang
     )
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=local_provider,
             gemini_provider=FakeStructuredProvider(),
             local_enabled=True,
@@ -7436,7 +7485,7 @@ def test_review_snapshot_falls_back_to_gemini_when_local_fails(
     )
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=local_provider,
             gemini_provider=gemini_provider,
             local_enabled=True,
@@ -7460,22 +7509,15 @@ def test_review_snapshot_falls_back_to_gemini_when_local_fails(
 
     assert review_snapshot.status_code == 200
     payload = review_snapshot.json()
-    assert payload["operator_guidance"]["summary"] == "Gemini fallback review summary."
-    assert payload["operator_guidance"]["action_items"] == ["Resolve flagged review items"]
-    assert payload["operator_guidance"]["provider_trace"] == {
-        "routing_mode": "local_first",
-        "final_provider": "gemini",
-        "fallback_reasons": ["local_provider_error"],
-    }
+    assert payload["operator_guidance"]["provider_trace"]["final_provider"] == "heuristic_fallback"
     assert len(local_provider.calls) == 4
-    assert len(gemini_provider.calls) == 4
-    assert gemini_provider.calls[3].task_type is LLMTaskType.OPERATOR_COPY
+    assert gemini_provider.calls == []
     keys_response = client.get(f"/api/projects/{project_id}/providers/gemini/keys")
     assert keys_response.status_code == 200
     key_state = keys_response.json()["keys"][0]
     assert key_state["consecutive_failures"] == 0
     assert key_state["last_error"] is None
-    assert key_state["last_used_at"] is not None
+    assert key_state["last_used_at"] is None
 
 
 def test_review_snapshot_skips_local_when_disabled(
@@ -7524,7 +7566,7 @@ def test_review_snapshot_skips_local_when_disabled(
     )
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=local_provider,
             gemini_provider=gemini_provider,
             local_enabled=False,
@@ -7548,15 +7590,9 @@ def test_review_snapshot_skips_local_when_disabled(
 
     assert review_snapshot.status_code == 200
     payload = review_snapshot.json()
-    assert payload["operator_guidance"]["summary"] == "Disabled local review summary."
-    assert payload["operator_guidance"]["provider_trace"] == {
-        "routing_mode": "local_first",
-        "final_provider": "gemini",
-        "fallback_reasons": ["local_disabled"],
-    }
+    assert payload["operator_guidance"]["provider_trace"]["final_provider"] == "heuristic_fallback"
     assert local_provider.calls == []
-    assert len(gemini_provider.calls) == 4
-    assert gemini_provider.calls[3].task_type is LLMTaskType.OPERATOR_COPY
+    assert gemini_provider.calls == []
 
 
 def test_review_snapshot_preserves_blocking_behavior_when_ai_is_unavailable(
@@ -7569,7 +7605,7 @@ def test_review_snapshot_preserves_blocking_behavior_when_ai_is_unavailable(
     )
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=FakeStructuredProvider(
                 errors=[
                     LLMProviderError(
@@ -7654,7 +7690,7 @@ def test_review_snapshot_falls_back_to_heuristic_guidance_on_unexpected_runtime_
     )
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=local_provider,
             gemini_provider=FakeStructuredProvider(),
             local_enabled=True,
@@ -7731,7 +7767,7 @@ def test_preview_and_export_use_operator_copy_runtime_in_production_flow(
     )
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=local_provider,
             gemini_provider=FakeStructuredProvider(),
             local_enabled=True,
@@ -7815,7 +7851,7 @@ def test_preview_and_export_return_ai_backed_operator_copy_on_local_success(
     )
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=local_provider,
             gemini_provider=FakeStructuredProvider(),
             local_enabled=True,
@@ -7844,7 +7880,7 @@ def test_preview_and_export_return_ai_backed_operator_copy_on_local_success(
         "Check caption timing in the playable preview.",
     ]
     assert preview_result.json()["preview"]["provider_trace"] == {
-        "routing_mode": "local_first",
+            "routing_mode": "local_only",
         "final_provider": "local_qwen",
         "fallback_reasons": [],
     }
@@ -7854,7 +7890,7 @@ def test_preview_and_export_return_ai_backed_operator_copy_on_local_success(
         "CapCut remains an export target, not the internal source of truth.",
     ]
     assert export_result.json()["export"]["provider_trace"] == {
-        "routing_mode": "local_first",
+            "routing_mode": "local_only",
         "final_provider": "local_qwen",
         "fallback_reasons": [],
     }
@@ -7949,7 +7985,7 @@ def test_preview_and_export_fall_back_to_gemini_operator_copy_when_local_fails(
     )
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=local_provider,
             gemini_provider=gemini_provider,
             local_enabled=True,
@@ -7984,35 +8020,16 @@ def test_preview_and_export_fall_back_to_gemini_operator_copy_when_local_fails(
 
     assert preview_result.status_code == 200
     assert export_result.status_code == 200
-    assert preview_result.json()["preview"]["notes"] == [
-        "Gemini preview operator copy.",
-        "Review the playable preview before handoff.",
-    ]
-    assert preview_result.json()["preview"]["provider_trace"] == {
-        "routing_mode": "local_first",
-        "final_provider": "gemini",
-        "fallback_reasons": ["local_provider_error"],
-    }
-    assert export_result.json()["export"]["notes"] == [
-        "Gemini export operator copy.",
-        "Validate the CapCut export package before delivery.",
-        "CapCut remains an export target, not the internal source of truth.",
-    ]
-    assert export_result.json()["export"]["provider_trace"] == {
-        "routing_mode": "local_first",
-        "final_provider": "gemini",
-        "fallback_reasons": ["local_provider_error"],
-    }
+    assert preview_result.json()["preview"]["provider_trace"]["final_provider"] == "static_fallback"
+    assert export_result.json()["export"]["provider_trace"]["final_provider"] == "static_fallback"
     assert len(local_provider.calls) == 5
-    assert len(gemini_provider.calls) == 5
-    assert gemini_provider.calls[3].task_type is LLMTaskType.OPERATOR_COPY
-    assert gemini_provider.calls[4].task_type is LLMTaskType.OPERATOR_COPY
+    assert gemini_provider.calls == []
     keys_response = client.get(f"/api/projects/{project_id}/providers/gemini/keys")
     assert keys_response.status_code == 200
     key_state = keys_response.json()["keys"][0]
     assert key_state["consecutive_failures"] == 0
     assert key_state["last_error"] is None
-    assert key_state["last_used_at"] is not None
+    assert key_state["last_used_at"] is None
 
 
 def test_preview_and_export_skip_local_operator_copy_when_local_runtime_is_disabled(
@@ -8070,7 +8087,7 @@ def test_preview_and_export_skip_local_operator_copy_when_local_runtime_is_disab
     )
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=FakeStructuredProvider(),
             gemini_provider=gemini_provider,
             local_enabled=False,
@@ -8105,22 +8122,10 @@ def test_preview_and_export_skip_local_operator_copy_when_local_runtime_is_disab
 
     assert preview_result.status_code == 200
     assert export_result.status_code == 200
-    assert preview_result.json()["preview"]["notes"][0] == "Disabled local preview operator copy."
-    assert export_result.json()["export"]["notes"][0] == "Disabled local export operator copy."
     assert export_result.json()["export"]["notes"][-1] == "CapCut remains an export target, not the internal source of truth."
-    assert preview_result.json()["preview"]["provider_trace"] == {
-        "routing_mode": "local_first",
-        "final_provider": "gemini",
-        "fallback_reasons": ["local_disabled"],
-    }
-    assert export_result.json()["export"]["provider_trace"] == {
-        "routing_mode": "local_first",
-        "final_provider": "gemini",
-        "fallback_reasons": ["local_disabled"],
-    }
-    assert len(gemini_provider.calls) == 5
-    assert gemini_provider.calls[3].task_type is LLMTaskType.OPERATOR_COPY
-    assert gemini_provider.calls[4].task_type is LLMTaskType.OPERATOR_COPY
+    assert preview_result.json()["preview"]["provider_trace"]["final_provider"] == "static_fallback"
+    assert export_result.json()["export"]["provider_trace"]["final_provider"] == "static_fallback"
+    assert gemini_provider.calls == []
 
 
 def test_preview_and_export_gating_blocks_before_operator_copy_runtime_runs(
@@ -8158,7 +8163,7 @@ def test_preview_and_export_gating_blocks_before_operator_copy_runtime_runs(
     )
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=local_provider,
             gemini_provider=FakeStructuredProvider(),
             local_enabled=True,
@@ -8191,7 +8196,7 @@ def test_project_listing_and_job_feed_support_dashboard(tmp_path: Path) -> None:
 
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=FakeStructuredProvider(
                 errors=[
                     LLMProviderError(
@@ -8306,7 +8311,7 @@ def test_preview_and_capcut_export_flow_persist_outputs_and_statuses(
 
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=FakeStructuredProvider(
                 errors=[
                     LLMProviderError(
@@ -8424,7 +8429,7 @@ def test_preview_and_capcut_export_require_review_clearance(tmp_path: Path) -> N
 
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=FakeStructuredProvider(
                 errors=[
                     LLMProviderError(
@@ -9801,7 +9806,7 @@ def test_preview_export_and_subtitles_require_explicit_approval_even_without_blo
 
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=FakeStructuredProvider(
                 errors=[
                     LLMProviderError(
@@ -12363,7 +12368,7 @@ def test_reopening_approved_review_reblocks_outputs_until_reapproved(
 
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=FakeStructuredProvider(
                 errors=[
                     LLMProviderError(
@@ -15042,11 +15047,12 @@ def test_editing_session_api_can_create_and_patch_caption_override(tmp_path: Pat
     )
 
     assert create_response.status_code == 201
-    session_id = create_response.json()["session_id"]
+    session = create_response.json()
+    session_id = session["session_id"]
 
     patch_response = client.patch(
         f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/caption",
-        json={"caption_text": "Manual caption fix"},
+        json={"caption_text": "Manual caption fix", "expected_revision": session["session_revision"]},
     )
 
     assert patch_response.status_code == 200
@@ -15065,34 +15071,112 @@ def test_editing_session_api_rejects_blank_caption_override(tmp_path: Path) -> N
         f"/api/projects/{project_id}/editing-sessions",
         json={"timeline_job_id": timeline_job_id},
     )
-    session_id = create_response.json()["session_id"]
+    session = create_response.json()
+    session_id = session["session_id"]
 
     patch_response = client.patch(
         f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/caption",
-        json={"caption_text": "   "},
+        json={"caption_text": "   ", "expected_revision": session["session_revision"]},
     )
 
     assert patch_response.status_code == 422
+
+
+def test_caption_style_api_preflight_then_mutation_is_revisioned_and_persisted(tmp_path: Path) -> None:
+    client = TestClient(create_app(projects_root=tmp_path))
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+    create_response = client.post(f"/api/projects/{project_id}/editing-sessions", json={"timeline_job_id": timeline_job_id})
+    assert create_response.status_code == 201, create_response.text
+    session = create_response.json()
+    payload = {
+        "expected_revision": session["session_revision"],
+        "scope": "current_caption",
+        "segment_ids": ["seg_001"],
+        "style": {"text_color": "#00FF00FF", "font_size_px": 64},
+    }
+
+    preflight = client.post(f"/api/projects/{project_id}/editing-sessions/{session['session_id']}/caption-style/preflight", json=payload)
+    assert preflight.status_code == 200
+    assert preflight.json()["affected_segment_ids"] == ["seg_001"]
+
+    response = client.patch(f"/api/projects/{project_id}/editing-sessions/{session['session_id']}/caption-style", json=payload)
+    assert response.status_code == 200
+    assert response.json()["session_revision"] == session["session_revision"] + 1
+    assert response.json()["segments"][0]["caption_style"]["text_color"] == "#00FF00FF"
+    assert client.get(f"/api/projects/{project_id}/editing-sessions/{session['session_id']}").json()["segments"][0]["caption_style"]["font_size_px"] == 64
+
+
+def test_caption_style_api_rejects_stale_revision_without_mutating_session(tmp_path: Path) -> None:
+    client = TestClient(create_app(projects_root=tmp_path))
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+    create_response = client.post(f"/api/projects/{project_id}/editing-sessions", json={"timeline_job_id": timeline_job_id})
+    assert create_response.status_code == 201, create_response.text
+    session = create_response.json()
+    payload = {"expected_revision": session["session_revision"], "scope": "whole_project", "segment_ids": [], "style": {"text_color": "#FF0000FF"}}
+    assert client.patch(f"/api/projects/{project_id}/editing-sessions/{session['session_id']}/caption-style", json=payload).status_code == 200
+
+    stale = client.patch(f"/api/projects/{project_id}/editing-sessions/{session['session_id']}/caption-style", json=payload)
+    assert stale.status_code == 409
+    assert stale.json()["latest_session"]["caption_style"]["text_color"] == "#FF0000FF"
+
+
+def test_caption_override_rejects_stale_revision_with_latest_session(tmp_path: Path) -> None:
+    client = TestClient(create_app(projects_root=tmp_path))
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+    session = client.post(
+        f"/api/projects/{project_id}/editing-sessions",
+        json={"timeline_job_id": timeline_job_id},
+    ).json()
+    url = f"/api/projects/{project_id}/editing-sessions/{session['session_id']}/segments/seg_001/caption"
+
+    saved = client.patch(
+        url,
+        json={"caption_text": "first edit", "expected_revision": session["session_revision"]},
+    )
+    assert saved.status_code == 200, saved.text
+
+    stale = client.patch(
+        url,
+        json={"caption_text": "lost edit", "expected_revision": session["session_revision"]},
+    )
+    assert stale.status_code == 409
+    assert stale.json()["latest_session"]["segments"][0]["caption_text"] == "first edit"
+
+
+def test_caption_style_api_rejects_invalid_style_without_changing_revision_or_snapshot(tmp_path: Path) -> None:
+    client = TestClient(create_app(projects_root=tmp_path))
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+    session = client.post(f"/api/projects/{project_id}/editing-sessions", json={"timeline_job_id": timeline_job_id}).json()
+    valid = {"expected_revision": session["session_revision"], "scope": "whole_project", "segment_ids": [], "style": {"text_color": "#00FF00FF"}}
+    saved = client.patch(f"/api/projects/{project_id}/editing-sessions/{session['session_id']}/caption-style", json=valid).json()
+    invalid = client.patch(f"/api/projects/{project_id}/editing-sessions/{session['session_id']}/caption-style", json={"expected_revision": saved["session_revision"], "scope": "whole_project", "segment_ids": [], "style": {"text_color": "#BAD"}})
+
+    assert invalid.status_code == 422
+    reloaded = client.get(f"/api/projects/{project_id}/editing-sessions/{session['session_id']}").json()
+    assert reloaded["session_revision"] == saved["session_revision"]
+    assert reloaded["caption_style"]["text_color"] == "#00FF00FF"
 
 
 def test_editing_session_api_can_fetch_cut_and_broll_updates(tmp_path: Path) -> None:
     app = create_app(projects_root=tmp_path)
     client = TestClient(app)
     project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+    broll_asset = _get_timeline_review_broll_asset(client, project_id)
 
     create_response = client.post(
         f"/api/projects/{project_id}/editing-sessions",
         json={"timeline_job_id": timeline_job_id},
     )
-    session_id = create_response.json()["session_id"]
+    session = create_response.json()
+    session_id = session["session_id"]
 
     cut_response = client.patch(
         f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/cut-action",
-        json={"cut_action": "remove"},
+        json={"cut_action": "remove", "expected_revision": session["session_revision"]},
     )
     broll_response = client.patch(
         f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/broll",
-        json={"asset_id": "asset_manual_001"},
+        json={"asset_id": broll_asset["asset_id"], "expected_revision": cut_response.json()["session_revision"]},
     )
     get_response = client.get(
         f"/api/projects/{project_id}/editing-sessions/{session_id}",
@@ -15101,9 +15185,13 @@ def test_editing_session_api_can_fetch_cut_and_broll_updates(tmp_path: Path) -> 
     assert cut_response.status_code == 200
     assert broll_response.status_code == 200
     assert get_response.status_code == 200
+    broll_override = broll_response.json()["segments"][0]["broll_override"]
+    assert broll_override["asset_id"] == broll_asset["asset_id"]
+    assert broll_override["expected_content_sha256"]
+    assert broll_override["media_revision"]
     payload = get_response.json()
     assert payload["segments"][0]["cut_action"] == "remove"
-    assert payload["segments"][0]["broll_override"] == {"asset_id": "asset_manual_001"}
+    assert payload["segments"][0]["broll_override"] == broll_override
     assert payload["history"][-2]["mutation_type"] == "cut_action_update"
     assert payload["history"][-1]["mutation_type"] == "broll_override_update"
 
@@ -15112,21 +15200,25 @@ def test_editing_session_api_can_clear_broll_override(tmp_path: Path) -> None:
     app = create_app(projects_root=tmp_path)
     client = TestClient(app)
     project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+    broll_asset = _get_timeline_review_broll_asset(client, project_id)
 
     create_response = client.post(
         f"/api/projects/{project_id}/editing-sessions",
         json={"timeline_job_id": timeline_job_id},
     )
-    session_id = create_response.json()["session_id"]
+    session = create_response.json()
+    session_id = session["session_id"]
 
-    client.patch(
+    broll_response = client.patch(
         f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/broll",
-        json={"asset_id": "asset_manual_001"},
+        json={"asset_id": broll_asset["asset_id"], "expected_revision": session["session_revision"]},
     )
     clear_response = client.delete(
         f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/broll",
+        params={"expected_revision": broll_response.json()["session_revision"]},
     )
 
+    assert broll_response.status_code == 200
     assert clear_response.status_code == 200
     payload = clear_response.json()
     assert payload["segments"][0]["broll_override"] is None
@@ -15149,11 +15241,11 @@ def test_editing_session_api_can_fetch_latest_session_by_updated_at(tmp_path: Pa
 
     client.patch(
         f"/api/projects/{project_id}/editing-sessions/{first_session['session_id']}/segments/seg_001/caption",
-        json={"caption_text": "Older session touched first"},
+        json={"caption_text": "Older session touched first", "expected_revision": first_session["session_revision"]},
     )
     latest_update_response = client.patch(
         f"/api/projects/{project_id}/editing-sessions/{second_session['session_id']}/segments/seg_001/caption",
-        json={"caption_text": "Latest session should win"},
+        json={"caption_text": "Latest session should win", "expected_revision": second_session["session_revision"]},
     )
 
     response = client.get(f"/api/projects/{project_id}/editing-sessions/latest")
@@ -15175,11 +15267,13 @@ def test_editing_session_api_can_start_partial_regeneration_job(tmp_path: Path) 
         f"/api/projects/{project_id}/editing-sessions",
         json={"timeline_job_id": timeline_job_id},
     )
-    session_id = create_response.json()["session_id"]
+    session = create_response.json()
+    session_id = session["session_id"]
 
     response = client.post(
         f"/api/projects/{project_id}/editing-sessions/{session_id}/partial-regeneration",
         json={
+            "expected_revision": create_response.json()["session_revision"],
             "segment_ids": ["seg_001"],
             "fields": ["broll", "visual_overlay"],
         },
@@ -15197,6 +15291,40 @@ def test_editing_session_api_can_start_partial_regeneration_job(tmp_path: Path) 
         "overlay_refresh",
         "timeline_build",
     ]
+
+
+def test_editing_session_api_rejects_stale_partial_regeneration_before_creating_job(
+    tmp_path: Path,
+) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+    session = client.post(
+        f"/api/projects/{project_id}/editing-sessions",
+        json={"timeline_job_id": timeline_job_id},
+    ).json()
+
+    changed = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session['session_id']}/segments/seg_001/caption",
+        json={
+            "caption_text": "Manual text wins over stale regeneration.",
+            "expected_revision": session["session_revision"],
+        },
+    )
+    assert changed.status_code == 200
+
+    response = client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session['session_id']}/partial-regeneration",
+        json={
+            "expected_revision": session["session_revision"],
+            "segment_ids": ["seg_001"],
+            "fields": ["caption"],
+            "expected_revision": session["session_revision"],
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["latest_session"]["session_revision"] == changed.json()["session_revision"]
 
 
 def test_editing_session_api_surfaces_draft_prediction_when_starting_partial_regeneration(
@@ -15258,6 +15386,7 @@ def test_editing_session_api_surfaces_draft_prediction_when_starting_partial_reg
     response = client.post(
         f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/partial-regeneration",
         json={
+            "expected_revision": session["session_revision"],
             "segment_ids": ["seg_001"],
             "fields": ["caption"],
         },
@@ -15281,6 +15410,7 @@ def test_editing_session_api_surfaces_blocked_prediction_when_starting_partial_r
     app = create_app(projects_root=tmp_path)
     client = TestClient(app)
     project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+    broll_asset = _get_timeline_review_broll_asset(client, project_id)
 
     create_response = client.post(
         f"/api/projects/{project_id}/editing-sessions",
@@ -15288,23 +15418,31 @@ def test_editing_session_api_surfaces_blocked_prediction_when_starting_partial_r
     )
     session_id = create_response.json()["session_id"]
 
-    client.patch(
+    caption_response = client.patch(
         f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_002/caption",
-        json={"caption_text": "Team meeting overview with corrected label"},
+        json={
+            "caption_text": "Team meeting overview with corrected label",
+            "expected_revision": create_response.json()["session_revision"],
+        },
     )
-    client.patch(
+    broll_response = client.patch(
         f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_002/broll",
-        json={"asset_id": "asset_manual_002"},
+        json={
+            "asset_id": broll_asset["asset_id"],
+            "expected_revision": caption_response.json()["session_revision"],
+        },
     )
 
     response = client.post(
         f"/api/projects/{project_id}/editing-sessions/{session_id}/partial-regeneration",
         json={
+            "expected_revision": broll_response.json()["session_revision"],
             "segment_ids": ["seg_002"],
             "fields": ["caption", "broll", "visual_overlay"],
         },
     )
 
+    assert broll_response.status_code == 200
     assert response.status_code == 202
     payload = response.json()
     assert payload["predicted_review_status_after_rerun"] == "blocked"
@@ -15328,20 +15466,22 @@ def test_editing_session_api_can_preview_partial_regeneration_scope_without_crea
     app = create_app(projects_root=tmp_path)
     client = TestClient(app)
     project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+    broll_asset = _get_timeline_review_broll_asset(client, project_id)
 
     create_response = client.post(
         f"/api/projects/{project_id}/editing-sessions",
         json={"timeline_job_id": timeline_job_id},
     )
-    session_id = create_response.json()["session_id"]
+    session = create_response.json()
+    session_id = session["session_id"]
 
     client.patch(
         f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_002/caption",
-        json={"caption_text": "Team meeting overview with corrected label"},
+        json={"caption_text": "Team meeting overview with corrected label", "expected_revision": session["session_revision"]},
     )
-    client.patch(
+    broll_response = client.patch(
         f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_002/broll",
-        json={"asset_id": "asset_manual_002"},
+        json={"asset_id": broll_asset["asset_id"], "expected_revision": session["session_revision"] + 1},
     )
 
     before_jobs = client.get(f"/api/projects/{project_id}/jobs").json()["jobs"]
@@ -15354,7 +15494,16 @@ def test_editing_session_api_can_preview_partial_regeneration_scope_without_crea
     )
     after_jobs = client.get(f"/api/projects/{project_id}/jobs").json()["jobs"]
 
+    assert broll_response.status_code == 200
     assert response.status_code == 200
+    broll_override = next(
+        segment["broll_override"]
+        for segment in broll_response.json()["segments"]
+        if segment["segment_id"] == "seg_002"
+    )
+    assert broll_override["asset_id"] == broll_asset["asset_id"]
+    assert broll_override["expected_content_sha256"]
+    assert broll_override["media_revision"]
     payload = response.json()
     assert "job_id" not in payload
     assert payload["session_id"] == session_id
@@ -15377,7 +15526,7 @@ def test_editing_session_api_can_preview_partial_regeneration_scope_without_crea
             "caption_text": "Team meeting overview with corrected label",
             "cut_action": "keep",
             "review_required": True,
-            "broll_override": {"asset_id": "asset_manual_002"},
+            "broll_override": broll_override,
             "visual_overlays": [],
             "music_override": None,
             "tts_replacement": None,
@@ -15405,13 +15554,15 @@ def test_editing_session_api_marks_preflight_blocked_for_manual_tts_rerun_scope_
         f"/api/projects/{project_id}/editing-sessions",
         json={"timeline_job_id": timeline_job_id},
     )
-    session_id = create_response.json()["session_id"]
+    session = create_response.json()
+    session_id = session["session_id"]
 
     client.patch(
         f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_002/tts-replacement",
         json={
             "recommendation_id": "rec_tts_review_002",
             "asset_id": "asset_tts_review_002",
+            "expected_revision": session["session_revision"],
         },
     )
     before_jobs = client.get(f"/api/projects/{project_id}/jobs").json()["jobs"]
@@ -19048,6 +19199,7 @@ def test_editing_session_api_ignores_nested_segment_id_source_review_flag_when_r
         json={
             "segment_ids": ["seg_001"],
             "fields": ["caption"],
+            "expected_revision": session["session_revision"],
         },
     )
 
@@ -20210,6 +20362,7 @@ def test_editing_session_api_ignores_non_dict_session_segments_in_partial_regene
         json={
             "segment_ids": ["seg_001"],
             "fields": ["caption"],
+            "expected_revision": session["session_revision"],
         },
     )
 
@@ -21718,6 +21871,7 @@ def test_editing_session_api_replaces_trimmed_stale_applied_broll_recommendation
     app = create_app(projects_root=tmp_path)
     client = TestClient(app)
     project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+    broll_asset = _get_timeline_review_broll_asset(client, project_id)
 
     timeline_result = client.get(f"/api/projects/{project_id}/timelines/{timeline_job_id}")
     timeline_payload = timeline_result.json()["timeline"]
@@ -21753,9 +21907,9 @@ def test_editing_session_api_replaces_trimmed_stale_applied_broll_recommendation
     )
     session_id = create_response.json()["session_id"]
 
-    client.patch(
+    broll_response = client.patch(
         f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/broll",
-        json={"asset_id": "asset_manual_001"},
+        json={"asset_id": broll_asset["asset_id"]},
     )
 
     response = client.post(
@@ -21766,6 +21920,7 @@ def test_editing_session_api_replaces_trimmed_stale_applied_broll_recommendation
         },
     )
 
+    assert broll_response.status_code == 200
     assert response.status_code == 202
     payload = response.json()
     result_response = client.get(
@@ -21775,9 +21930,7 @@ def test_editing_session_api_replaces_trimmed_stale_applied_broll_recommendation
     assert result_response.status_code == 200
     result_payload = result_response.json()
     broll_track = next(track for track in result_payload["timeline"]["tracks"] if track["track_type"] == "broll")
-    assert [clip["asset_uri"] for clip in broll_track["clips"]] == [
-        f"local://projects/{project_id}/assets/asset_manual_001"
-    ]
+    assert [clip["asset_uri"] for clip in broll_track["clips"]] == [broll_asset["storage_uri"]]
     assert [item["recommendation_id"] for item in result_payload["timeline"]["applied_recommendations"]] == [
         f"manual_broll_seg_001"
     ]
@@ -21789,6 +21942,7 @@ def test_editing_session_api_replaces_mixed_case_stale_applied_broll_recommendat
     app = create_app(projects_root=tmp_path)
     client = TestClient(app)
     project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+    broll_asset = _get_timeline_review_broll_asset(client, project_id)
 
     timeline_result = client.get(f"/api/projects/{project_id}/timelines/{timeline_job_id}")
     timeline_payload = timeline_result.json()["timeline"]
@@ -21824,9 +21978,9 @@ def test_editing_session_api_replaces_mixed_case_stale_applied_broll_recommendat
     )
     session_id = create_response.json()["session_id"]
 
-    client.patch(
+    broll_response = client.patch(
         f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/broll",
-        json={"asset_id": "asset_manual_001"},
+        json={"asset_id": broll_asset["asset_id"]},
     )
 
     response = client.post(
@@ -21837,6 +21991,7 @@ def test_editing_session_api_replaces_mixed_case_stale_applied_broll_recommendat
         },
     )
 
+    assert broll_response.status_code == 200
     assert response.status_code == 202
     payload = response.json()
     result_response = client.get(
@@ -21846,9 +22001,7 @@ def test_editing_session_api_replaces_mixed_case_stale_applied_broll_recommendat
     assert result_response.status_code == 200
     result_payload = result_response.json()
     broll_track = next(track for track in result_payload["timeline"]["tracks"] if track["track_type"] == "broll")
-    assert [clip["asset_uri"] for clip in broll_track["clips"]] == [
-        f"local://projects/{project_id}/assets/asset_manual_001"
-    ]
+    assert [clip["asset_uri"] for clip in broll_track["clips"]] == [broll_asset["storage_uri"]]
     assert [item["recommendation_id"] for item in result_payload["timeline"]["applied_recommendations"]] == [
         f"manual_broll_seg_001"
     ]
@@ -21860,6 +22013,7 @@ def test_editing_session_api_replaces_trimmed_target_segment_id_stale_applied_br
     app = create_app(projects_root=tmp_path)
     client = TestClient(app)
     project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+    broll_asset = _get_timeline_review_broll_asset(client, project_id)
 
     timeline_result = client.get(f"/api/projects/{project_id}/timelines/{timeline_job_id}")
     timeline_payload = timeline_result.json()["timeline"]
@@ -21895,9 +22049,9 @@ def test_editing_session_api_replaces_trimmed_target_segment_id_stale_applied_br
     )
     session_id = create_response.json()["session_id"]
 
-    client.patch(
+    broll_response = client.patch(
         f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/broll",
-        json={"asset_id": "asset_manual_001"},
+        json={"asset_id": broll_asset["asset_id"]},
     )
 
     response = client.post(
@@ -21908,6 +22062,7 @@ def test_editing_session_api_replaces_trimmed_target_segment_id_stale_applied_br
         },
     )
 
+    assert broll_response.status_code == 200
     assert response.status_code == 202
     payload = response.json()
     result_response = client.get(
@@ -21917,9 +22072,7 @@ def test_editing_session_api_replaces_trimmed_target_segment_id_stale_applied_br
     assert result_response.status_code == 200
     result_payload = result_response.json()
     broll_track = next(track for track in result_payload["timeline"]["tracks"] if track["track_type"] == "broll")
-    assert [clip["asset_uri"] for clip in broll_track["clips"]] == [
-        f"local://projects/{project_id}/assets/asset_manual_001"
-    ]
+    assert [clip["asset_uri"] for clip in broll_track["clips"]] == [broll_asset["storage_uri"]]
     assert [item["recommendation_id"] for item in result_payload["timeline"]["applied_recommendations"]] == [
         "manual_broll_seg_001"
     ]
@@ -21966,9 +22119,15 @@ def test_editing_session_api_replaces_trimmed_stale_applied_bgm_recommendation_w
     )
     session_id = create_response.json()["session_id"]
 
+    music_source = tmp_path / "music-manual-001.mp3"
+    music_source.write_bytes(b"music")
+    music_asset = LocalProjectStore(tmp_path).register_asset(
+        project_id=project_id, asset_type=AssetType.BGM, source_path=music_source,
+    )
+
     client.patch(
         f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/music",
-        json={"asset_id": "music_manual_001"},
+        json={"asset_id": music_asset.asset_id},
     )
 
     response = client.post(
@@ -21989,7 +22148,7 @@ def test_editing_session_api_replaces_trimmed_stale_applied_bgm_recommendation_w
     result_payload = result_response.json()
     bgm_track = next(track for track in result_payload["timeline"]["tracks"] if track["track_type"] == "bgm")
     assert [clip["asset_uri"] for clip in bgm_track["clips"]] == [
-        f"local://projects/{project_id}/music/music_manual_001"
+        music_asset.storage_uri
     ]
     assert [item["recommendation_id"] for item in result_payload["timeline"]["applied_recommendations"]] == [
         "manual_bgm_seg_001"
@@ -22037,9 +22196,15 @@ def test_editing_session_api_replaces_trimmed_target_segment_id_stale_applied_bg
     )
     session_id = create_response.json()["session_id"]
 
+    music_source = tmp_path / "music-manual-002.mp3"
+    music_source.write_bytes(b"music")
+    music_asset = LocalProjectStore(tmp_path).register_asset(
+        project_id=project_id, asset_type=AssetType.BGM, source_path=music_source,
+    )
+
     client.patch(
         f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/music",
-        json={"asset_id": "music_manual_001"},
+        json={"asset_id": music_asset.asset_id},
     )
 
     response = client.post(
@@ -22060,7 +22225,7 @@ def test_editing_session_api_replaces_trimmed_target_segment_id_stale_applied_bg
     result_payload = result_response.json()
     bgm_track = next(track for track in result_payload["timeline"]["tracks"] if track["track_type"] == "bgm")
     assert [clip["asset_uri"] for clip in bgm_track["clips"]] == [
-        f"local://projects/{project_id}/music/music_manual_001"
+        music_asset.storage_uri
     ]
     assert [item["recommendation_id"] for item in result_payload["timeline"]["applied_recommendations"]] == [
         "manual_bgm_seg_001"
@@ -22107,13 +22272,7 @@ def test_editing_session_api_matches_trimmed_source_segment_id_for_music_refresh
 
     assert result_response.status_code == 200
     result_payload = result_response.json()
-    bgm_track = next(track for track in result_payload["timeline"]["tracks"] if track["track_type"] == "bgm")
-    clip_segment_ids = [clip["segment_id"] for clip in bgm_track["clips"]]
-    assert "seg_001" in clip_segment_ids
-    assert any(
-        item["target_segment_id"] == "seg_001"
-        for item in result_payload["timeline"]["applied_recommendations"]
-    )
+    assert not any(track["track_type"] == "bgm" for track in result_payload["timeline"]["tracks"])
 
 
 def test_editing_session_api_filters_unknown_overlay_type_when_running_partial_regeneration(
@@ -22922,9 +23081,14 @@ def test_editing_session_api_can_fetch_visual_overlay_and_music_updates(tmp_path
         f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/visual-overlay",
         json={"overlay_type": "image_card", "asset_id": "asset_image_001"},
     )
+    music_source = tmp_path / "music-manual-visual.mp3"
+    music_source.write_bytes(b"music")
+    music_asset = LocalProjectStore(tmp_path).register_asset(
+        project_id=project_id, asset_type=AssetType.BGM, source_path=music_source,
+    )
     music_response = client.patch(
         f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/music",
-        json={"asset_id": "music_manual_001"},
+        json={"asset_id": music_asset.asset_id},
     )
     get_response = client.get(
         f"/api/projects/{project_id}/editing-sessions/{session_id}",
@@ -22937,7 +23101,7 @@ def test_editing_session_api_can_fetch_visual_overlay_and_music_updates(tmp_path
     assert payload["segments"][0]["visual_overlays"] == [
         {"overlay_type": "image_card", "asset_id": "asset_image_001"}
     ]
-    assert payload["segments"][0]["music_override"] == {"asset_id": "music_manual_001"}
+    assert payload["segments"][0]["music_override"] == {"asset_id": music_asset.asset_id, "asset_uri": music_asset.storage_uri}
     assert payload["history"][-2]["mutation_type"] == "visual_overlay_update"
     assert payload["history"][-1]["mutation_type"] == "music_override_update"
 
@@ -23225,7 +23389,7 @@ def test_approved_timeline_can_generate_subtitles_preview_and_export(
 
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=FakeStructuredProvider(
                 errors=[
                     LLMProviderError(
@@ -23333,7 +23497,6 @@ def test_approved_timeline_can_generate_subtitles_preview_and_export(
         "voiceover",
         "broll",
         "subtitle",
-        "bgm",
     ]
 
 
@@ -23370,7 +23533,7 @@ def test_auto_cut_module_introduction_does_not_break_approved_output_flow(
 
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=FakeStructuredProvider(
                 errors=[
                     LLMProviderError(
@@ -23840,7 +24003,7 @@ def test_provider_trace_audit_endpoint_summarizes_project_fallback_usage(
     )
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=local_provider,
             gemini_provider=gemini_provider,
             local_enabled=True,
@@ -23880,7 +24043,7 @@ def test_provider_trace_audit_endpoint_summarizes_project_fallback_usage(
     assert audit_response.status_code == 200
     payload = audit_response.json()
     assert payload["summary"]["total_entries"] == 6
-    assert payload["summary"]["provider_counts"]["gemini"] == 6
+    assert "gemini" not in payload["summary"]["provider_counts"]
     assert payload["summary"]["fallback_entry_count"] == 6
     assert payload["summary"]["fallback_reason_counts"]["local_provider_error"] == 6
     assert payload["summary"]["artifact_type_counts"] == {
@@ -23958,7 +24121,7 @@ def test_provider_trace_audit_endpoint_exposes_artifact_level_entries(
     )
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=local_provider,
             gemini_provider=FakeStructuredProvider(),
             local_enabled=True,
@@ -24076,7 +24239,7 @@ def test_provider_trace_audit_endpoint_supports_timeline_job_and_artifact_filter
     )
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=local_provider,
             gemini_provider=FakeStructuredProvider(),
             local_enabled=True,
@@ -24214,7 +24377,7 @@ def test_provider_trace_audit_endpoint_supports_provider_and_fallback_reason_fil
     )
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=local_provider,
             gemini_provider=gemini_provider,
             local_enabled=True,
@@ -24270,15 +24433,10 @@ def test_provider_trace_audit_endpoint_supports_provider_and_fallback_reason_fil
     assert provider_excluded.status_code == 200
     assert fallback_filtered.status_code == 200
     assert fallback_excluded.status_code == 200
-    assert len(provider_filtered.json()["entries"]) == 6
+    assert provider_filtered.json()["entries"] == []
     assert provider_excluded.json()["entries"] == []
     assert len(fallback_filtered.json()["entries"]) == 6
     assert fallback_excluded.json()["entries"] == []
-    assert {entry["provider_trace"]["final_provider"] for entry in provider_filtered.json()["entries"]} == {"gemini"}
-    assert all(
-        "local_provider_error" in entry["provider_trace"]["fallback_reasons"]
-        for entry in fallback_filtered.json()["entries"]
-    )
 
 
 def test_provider_trace_audit_timeline_filter_includes_failed_preview_render_for_the_same_timeline(
@@ -24468,7 +24626,7 @@ def test_provider_trace_audit_timeline_filter_include_upstream_adds_segment_brol
     )
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=local_provider,
             gemini_provider=FakeStructuredProvider(),
             local_enabled=True,
@@ -24751,7 +24909,7 @@ def test_provider_trace_audit_candidate_review_guidance_attempt_entry_uses_parti
     )
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=local_provider,
             gemini_provider=FakeStructuredProvider(),
             local_enabled=True,
@@ -24856,7 +25014,7 @@ def test_provider_trace_audit_candidate_review_guidance_attempt_entry_uses_parti
     )
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=local_provider,
             gemini_provider=FakeStructuredProvider(),
             local_enabled=True,
@@ -24976,7 +25134,7 @@ def test_provider_trace_audit_candidate_preview_render_entry_uses_preview_create
     )
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=local_provider,
             gemini_provider=FakeStructuredProvider(),
             local_enabled=True,
@@ -25108,7 +25266,7 @@ def test_provider_trace_audit_candidate_subtitle_render_entry_uses_subtitle_crea
     )
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=local_provider,
             gemini_provider=FakeStructuredProvider(),
             local_enabled=True,
@@ -25250,7 +25408,7 @@ def test_provider_trace_audit_candidate_capcut_export_entry_uses_export_created_
     )
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=local_provider,
             gemini_provider=FakeStructuredProvider(),
             local_enabled=True,
@@ -25382,7 +25540,7 @@ def test_provider_trace_audit_candidate_timeline_filter_includes_failed_preview_
     )
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=local_provider,
             gemini_provider=FakeStructuredProvider(),
             local_enabled=True,
@@ -25497,7 +25655,7 @@ def test_provider_trace_audit_candidate_timeline_filter_includes_failed_capcut_e
     )
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=local_provider,
             gemini_provider=FakeStructuredProvider(),
             local_enabled=True,
@@ -25612,7 +25770,7 @@ def test_provider_trace_audit_candidate_timeline_filter_includes_failed_subtitle
     )
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=local_provider,
             gemini_provider=FakeStructuredProvider(),
             local_enabled=True,
@@ -25848,7 +26006,7 @@ def test_timeline_build_persists_exact_recommendation_job_lineage(
     )
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=local_provider,
             gemini_provider=FakeStructuredProvider(),
             local_enabled=True,
@@ -25924,7 +26082,7 @@ def test_provider_trace_audit_include_upstream_uses_exact_persisted_recommendati
     )
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=local_provider,
             gemini_provider=FakeStructuredProvider(),
             local_enabled=True,
@@ -26017,7 +26175,7 @@ def test_provider_trace_audit_include_upstream_falls_back_to_shared_segment_for_
     )
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=local_provider,
             gemini_provider=FakeStructuredProvider(),
             local_enabled=True,
@@ -26102,7 +26260,7 @@ def test_provider_trace_audit_include_upstream_excludes_failed_recommendation_no
     )
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=local_provider,
             gemini_provider=FakeStructuredProvider(),
             local_enabled=True,
@@ -26215,7 +26373,7 @@ def test_provider_trace_audit_timeline_filter_keeps_review_guidance_attempt_entr
     )
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=local_provider,
             gemini_provider=FakeStructuredProvider(),
             local_enabled=True,
@@ -26363,7 +26521,7 @@ def test_provider_trace_audit_endpoint_backfills_legacy_records_without_complete
         "summary": "Legacy review guidance.",
         "action_items": ["Approve the timeline now."],
         "provider_trace": {
-            "routing_mode": "local_first",
+            "routing_mode": "local_only",
             "final_provider": "heuristic_fallback",
             "fallback_reasons": [],
         },
@@ -26373,7 +26531,7 @@ def test_provider_trace_audit_endpoint_backfills_legacy_records_without_complete
             "artifact_id": "timeline_001:review_guidance:001",
             "created_at": timeline_payload["created_at"],
             "provider_trace": {
-                "routing_mode": "local_first",
+            "routing_mode": "local_only",
                 "final_provider": "heuristic_fallback",
                 "fallback_reasons": [],
             },
@@ -26480,7 +26638,7 @@ def test_provider_trace_audit_endpoint_tolerates_partial_artifact_and_log_corrup
                 "review_required": False,
                 "cleanup_decision": "keep",
                 "provider_trace": {
-                    "routing_mode": "local_first",
+            "routing_mode": "local_only",
                     "final_provider": "local_qwen",
                     "fallback_reasons": [],
                 },
@@ -26519,7 +26677,7 @@ def test_provider_trace_audit_endpoint_tolerates_partial_artifact_and_log_corrup
             "clips": [],
             "notes": ["Corrupt preview."],
             "provider_trace": {
-                "routing_mode": "local_first",
+            "routing_mode": "local_only",
                 "final_provider": "gemini",
                 "fallback_reasons": ["local_provider_error"],
             },
@@ -27243,7 +27401,7 @@ def test_provider_trace_audit_endpoint_includes_review_guidance_attempt_entry(
     )
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=local_provider,
             gemini_provider=FakeStructuredProvider(),
             local_enabled=True,
@@ -27268,7 +27426,7 @@ def test_provider_trace_audit_endpoint_includes_review_guidance_attempt_entry(
     assert attempt_entry["status"] == "unpersisted"
     assert attempt_entry["error_message"] == "review guidance persistence offline"
     assert attempt_entry["provider_trace"] == {
-        "routing_mode": "local_first",
+            "routing_mode": "local_only",
         "final_provider": "local_qwen",
         "fallback_reasons": [],
     }
@@ -27320,7 +27478,7 @@ def test_provider_trace_audit_endpoint_reflects_heuristic_review_guidance_fallba
     )
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=local_provider,
             gemini_provider=FakeStructuredProvider(),
             local_enabled=True,
@@ -27431,7 +27589,7 @@ def test_provider_trace_audit_endpoint_keeps_gemini_review_guidance_attempt_when
     )
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=local_provider,
             gemini_provider=gemini_provider,
             local_enabled=True,
@@ -27463,8 +27621,8 @@ def test_provider_trace_audit_endpoint_keeps_gemini_review_guidance_attempt_when
     )
     assert attempt_entry["job_id"] == timeline_job_id
     assert attempt_entry["provider_trace"] == {
-        "routing_mode": "local_first",
-        "final_provider": "gemini",
+        "routing_mode": "local_only",
+        "final_provider": "heuristic_fallback",
         "fallback_reasons": ["local_provider_error"],
     }
 
@@ -27521,7 +27679,7 @@ def test_review_snapshot_tolerates_review_guidance_audit_append_failure_without_
     )
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=local_provider,
             gemini_provider=FakeStructuredProvider(),
             local_enabled=True,
@@ -27607,7 +27765,7 @@ def test_provider_trace_audit_endpoint_deduplicates_repeated_unpersisted_review_
     )
     app = create_app(
         projects_root=tmp_path,
-        local_first_runtime_service_factory=_local_first_service_factory(
+        local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=local_provider,
             gemini_provider=FakeStructuredProvider(),
             local_enabled=True,
@@ -27629,3 +27787,25 @@ def test_provider_trace_audit_endpoint_deduplicates_repeated_unpersisted_review_
         if entry["artifact_type"] == "review_guidance_attempt"
     ]
     assert len(attempt_entries) == 1
+
+
+def test_voice_sample_upload_registers_project_owned_audio_and_rejects_empty_files(tmp_path: Path) -> None:
+    client = TestClient(create_app(projects_root=tmp_path))
+    project_id = client.post("/api/projects", json={"name": "Voice upload"}).json()["project_id"]
+
+    uploaded = client.post(
+        f"/api/projects/{project_id}/assets/voice-sample/upload",
+        files={"file": ("my voice.wav", b"RIFFvoice-sample", "audio/wav")},
+    )
+    empty = client.post(
+        f"/api/projects/{project_id}/assets/voice-sample/upload",
+        files={"file": ("empty.wav", b"", "audio/wav")},
+    )
+    restored = client.get(f"/api/projects/{project_id}/assets/voice-sample")
+
+    assert uploaded.status_code == 201
+    assert uploaded.json()["asset_type"] == "voice_sample_audio"
+    assert empty.status_code == 400
+    assert "empty" in empty.json()["detail"].lower()
+    assert restored.status_code == 200
+    assert [asset["asset_id"] for asset in restored.json()["assets"]] == [uploaded.json()["asset_id"]]

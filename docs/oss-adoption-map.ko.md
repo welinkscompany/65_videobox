@@ -83,7 +83,21 @@ VideoBox의 기본 반입 방식은 이 방식이다.
 
 ## 5. 외부 OSS 반입 판단
 
-여기서 중요한 원칙은 `외부 OSS는 source copy보다 dependency 우선`이다.
+여기서 중요한 원칙은 실행 엔진·라이브러리는 `source copy보다 dependency 우선`이라는 것이다. 다만 shadcn/ui처럼 공식 배포 방식 자체가 source ownership인 component system과, 제품에 직접 dependency로 넣지 않는 selective UI port는 pinned source map과 notice를 전제로 예외로 관리한다.
+
+### 5.1 2026-07-17 dashboard/editor UI 재분석
+
+| source project/repo | pinned source | target | decision | boundary |
+|---|---|---|---|---|
+| `shadcn-ui/ui` | `4396d5b2a5ee4e2ad5705e9b2522f92112f811a0`, CLI 4.13.0 | `apps/web/src/components/ui/` | `adopt locked source` | Radix base registry path와 normalized file SHA를 lock하고 VideoBox가 소유한다. live registry 결과만으로 pin을 주장하지 않는다 |
+| `satnaing/shadcn-admin` | `e16c87f213a5ba5e45964e9b67c792105ec74d26` | `apps/web/src/components/layout/` | `partial port` | shell/sidebar/header/project switcher/settings layout만 이식한다 |
+| `OpenCut-app/OpenCut` | `bab8af831b354a0b5a98a4a6e818ab7d633b94df` | 반입 없음 | `exclude as editor runtime` | current rewrite에는 아직 실제 editor가 없다 |
+| `OpenCut-app/opencut-classic` | `cf5e79e919144200294fb9fed22a222592a0aeea` | `apps/web/src/features/editor/` | `partial port / adapt` | panel composition과 pure geometry만; EditorCore/storage/renderer/export는 제외한다 |
+| `opencast/editor` | `1208afb64d9de0ab50b321f84f9dd2695780db87` | `apps/web/src/features/editor/transcript/` | `attributed behavioral adaptation` | Apache-2.0 고지와 변경 내역을 남기고 cue/time/cut UX만 재구현한다. Redux/MUI/player/browser waveform은 제외한다 |
+| `supabase/supabase` | `1c827c5cbb29cacc6e9052adff2e1659e3cb05fb` | 로컬 source 반입 없음 | `reference only` | project/settings/mobile IA만 참고한다 |
+| `orioncactus/pretendard` | `v1.3.9`, `5c41199ea0024a9e0b2cb31735265056e5472d76` | `apps/web/src/assets/fonts/` | `adopt pinned binary` | Variable WOFF2 SHA256 `9599f12fd42fc0bce1cd50b47a0c022e108d7aa64dd0d1bb0ed44f3282d900b4`, SIL OFL 1.1 notice, runtime CDN 0 |
+
+상세 조사와 실행 순서는 각각 `docs/research/2026-07-17-videobox-oss-dashboard-editor-adoption.ko.md`, `docs/superpowers/plans/2026-07-17-videobox-oss-dashboard-editor-adoption.md`를 따른다. 실제 port 파일은 `THIRD_PARTY_NOTICES.md`와 `docs/oss/editor-ui-source-map.json`에 upstream commit/path/license/test를 기록한다.
 
 | source project/repo | source file/path | target VideoBox package/path | decision | reason | dependency / license notes | risk notes |
 |---|---|---|---|---|---|---|

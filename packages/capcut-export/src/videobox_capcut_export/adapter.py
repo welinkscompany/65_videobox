@@ -23,7 +23,7 @@ def _canonical_source_uri(value: object) -> str:
     return str(value or "").strip()
 
 
-VALID_EXPORT_TRACK_TYPES = {"narration", "broll", "bgm"}
+VALID_EXPORT_TRACK_TYPES = {"narration", "broll", "bgm", "sfx"}
 
 
 class CapCutExportAdapter:
@@ -120,6 +120,14 @@ class CapCutExportAdapter:
                     self._build_clip_track(
                         track,
                         track_name="bgm",
+                        track_role="audio",
+                    )
+                )
+            elif track_type == "sfx":
+                deferred_audio_tracks.append(
+                    self._build_clip_track(
+                        track,
+                        track_name="sfx",
                         track_role="audio",
                     )
                 )

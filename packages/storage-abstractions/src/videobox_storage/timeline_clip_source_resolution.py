@@ -18,6 +18,7 @@ class ResolvedClipSource:
     path: Path
     trim_start_sec: float
     trim_duration_sec: float | None  # None means "use the source's natural length"
+    target_duration_sec: float | None = None
 
 
 def resolve_generic_asset_uri(*, store: Any, project_id: str, asset_uri: str) -> Path:
@@ -44,18 +45,29 @@ def resolve_narration_clip_source(
             path=path,
             trim_start_sec=float(clip["start_sec"]),
             trim_duration_sec=float(clip["end_sec"]) - float(clip["start_sec"]),
+            target_duration_sec=float(clip["end_sec"]) - float(clip["start_sec"]),
         )
     # A TTS-replacement (or any other override) asset is its own standalone
     # clip, not a slice of the original recording — play it in full rather
     # than guessing a trim window that might cut off synthesized speech.
     path = resolve_generic_asset_uri(store=store, project_id=project_id, asset_uri=asset_uri)
-    return ResolvedClipSource(path=path, trim_start_sec=0.0, trim_duration_sec=None)
+    return ResolvedClipSource(
+        path=path,
+        trim_start_sec=0.0,
+        trim_duration_sec=None,
+        target_duration_sec=float(clip["end_sec"]) - float(clip["start_sec"]),
+    )
 
 
 def resolve_broll_clip_source(*, store: Any, project_id: str, clip: dict[str, Any]) -> ResolvedClipSource:
     path = resolve_generic_asset_uri(store=store, project_id=project_id, asset_uri=str(clip.get("asset_uri") or ""))
     duration = float(clip["end_sec"]) - float(clip["start_sec"])
-    return ResolvedClipSource(path=path, trim_start_sec=0.0, trim_duration_sec=duration)
+    return ResolvedClipSource(
+        path=path,
+        trim_start_sec=0.0,
+        trim_duration_sec=duration,
+        target_duration_sec=duration,
+    )
 
 
 __all__ = [

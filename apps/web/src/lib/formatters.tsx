@@ -52,6 +52,7 @@ export function prettifyJobType(jobType: string) {
     segment_analysis: "세그먼트",
     broll_recommendation: "B롤 추천",
     music_recommendation: "음악 추천",
+    sfx: "효과음",
     timeline_build: "타임라인",
     subtitle_render: "자막",
     preview_render: "미리보기",
@@ -60,6 +61,7 @@ export function prettifyJobType(jobType: string) {
     music: "음악",
     manual_review: "수동 검수",
     broll_review_required: "B롤 검수",
+    sfx_review_required: "효과음 검수",
     partial_regeneration: "부분 재생성",
   };
   return labels[jobType] ?? jobType.replace(/_/g, " ");
@@ -123,6 +125,13 @@ export function findLatestSucceededJob(jobs: JobRecord[], jobType: string, input
     .sort((left, right) =>
       getLatestJobTimestamp(right).localeCompare(getLatestJobTimestamp(left)),
     );
+  return candidates.length > 0 ? candidates[0] : null;
+}
+
+export function findLatestJob(jobs: JobRecord[], jobType: string, inputRef?: string | null) {
+  const candidates = jobs
+    .filter((job) => job.job_type === jobType && (inputRef == null || job.input_ref === inputRef))
+    .sort((left, right) => getLatestJobTimestamp(right).localeCompare(getLatestJobTimestamp(left)));
   return candidates.length > 0 ? candidates[0] : null;
 }
 
@@ -314,6 +323,7 @@ export type EditingSegmentDraft = {
   cutAction: string;
   brollAssetId: string;
   musicAssetId: string;
+  sfxAssetId: string;
   explanationTitle: string;
   explanationBody: string;
   explanationText: string;
@@ -354,6 +364,7 @@ export function createEditingSegmentDraft(segment: EditingSessionSegment): Editi
     cutAction: segment.cut_action,
     brollAssetId: String(segment.broll_override?.asset_id ?? ""),
     musicAssetId: String(segment.music_override?.asset_id ?? ""),
+    sfxAssetId: String(segment.sfx_override?.asset_id ?? ""),
     explanationTitle: String(explanationCard?.title ?? ""),
     explanationBody: String(explanationCard?.body ?? ""),
     explanationText: String(explanationCard?.text ?? ""),
@@ -386,6 +397,9 @@ export function buildDefaultRegenerationFields(segment: EditingSessionSegment | 
   if (segment.music_override) {
     defaultFields.push("music");
   }
+  if (segment.sfx_override) {
+    defaultFields.push("sfx");
+  }
   if (readOverlay(segment, "visual_overlay")) {
     defaultFields.push("visual_overlay");
   }
@@ -410,6 +424,7 @@ export function buildDefaultEditingSelection(session: EditingSession) {
       (segment) =>
         segment.broll_override ||
         segment.music_override ||
+        segment.sfx_override ||
         segment.tts_replacement ||
         segment.visual_overlays.length > 0 ||
         segment.review_required,
@@ -429,11 +444,13 @@ export function formatFieldLabel(field: string) {
     cut_action: "컷",
     broll: "B롤",
     music: "음악",
+    sfx: "효과음",
     visual_overlay: "화면",
     explanation_card: "설명 카드",
     image_overlay: "이미지",
     table_overlay: "표",
     tts_replacement: "TTS",
+    timeline_structure: "타임라인 구조",
   };
   return labels[field] ?? field.replace(/_/g, " ");
 }
@@ -444,6 +461,9 @@ export function mapRecommendationTypeToEditingField(recommendationType: string) 
   }
   if (recommendationType === "broll") {
     return "broll";
+  }
+  if (recommendationType === "sfx") {
+    return "sfx";
   }
   return null;
 }
@@ -556,6 +576,9 @@ export function formatTrackLabel(trackType: string) {
   }
   if (trackType === "narration") {
     return "내레이션 트랙";
+  }
+  if (trackType === "sfx") {
+    return "효과음 트랙";
   }
   if (trackType === "bgm") {
     return "배경음악 트랙";

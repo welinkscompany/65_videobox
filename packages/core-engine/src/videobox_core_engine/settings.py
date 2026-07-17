@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import urlparse
 
 
 DEFAULT_PROJECTS_ROOT = Path(
@@ -18,12 +17,11 @@ class LocalOpenAICompatibleRuntimeConfig:
     timeout_seconds: int = 30
 
     def __post_init__(self) -> None:
-        base_url = self.base_url.strip().rstrip("/")
-        if not base_url:
-            raise ValueError("local_runtime_config.base_url must not be blank.")
-        parsed = urlparse(base_url)
-        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-            raise ValueError("local_runtime_config.base_url must be a valid HTTP(S) URL.")
+        base_url = self.base_url
+        if base_url != "http://127.0.0.1:1234/v1":
+            raise ValueError(
+                "local_runtime_config.base_url must be exactly http://127.0.0.1:1234/v1."
+            )
 
         model_name = self.model_name.strip()
         if not model_name:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from html import escape
+from dataclasses import dataclass
 from typing import Any
 
 from videobox_core_engine.canonical_recommendation import (
@@ -19,9 +20,12 @@ from videobox_core_engine.canonical_track import (
     canonical_track_type as _canonical_track_type,
     VALID_CANONICAL_TRACK_TYPES as VALID_PREVIEW_TRACK_TYPES,
 )
+from videobox_core_engine.output_source_verifier import OutputSourceStaleError, verify_output_sources
 
 
+@dataclass(slots=True)
 class PreviewRenderer:
+    store: Any | None = None
     def _promptable_tracks(self, timeline: dict[str, Any]) -> list[dict[str, Any]]:
         promptable_tracks: list[dict[str, Any]] = []
         for track in timeline.get("tracks", []):
@@ -49,6 +53,19 @@ class PreviewRenderer:
         project_id: str,
         timeline: dict[str, Any],
     ) -> dict[str, Any]:
+        has_immutable_source = any(
+            isinstance(clip, dict)
+            and (
+                str(clip.get("expected_content_sha256") or "").strip()
+                or str(clip.get("media_revision") or "").strip()
+            )
+            for track in timeline.get("tracks", []) if isinstance(track, dict)
+            for clip in (track.get("clips", []) if isinstance(track.get("clips", []), list) else [])
+        )
+        if has_immutable_source and self.store is None:
+            raise OutputSourceStaleError("preview verifier store is required")
+        if self.store is not None:
+            verify_output_sources(store=self.store, project_id=project_id, timeline=timeline)
         player_html = self._build_player_html(project_id=project_id, timeline=timeline)
         promptable_tracks = self._promptable_tracks(timeline)
         return {
@@ -62,6 +79,21 @@ class PreviewRenderer:
                     "clip_count": len(track["clips"]),
                 }
                 for track in promptable_tracks
+            ],
+            # The preview is intentionally non-destructive, but must expose
+            # the exact materialized controls used by final/CapCut output.
+            "source_controls": [
+                {
+                    "track_id": track["track_id"],
+                    "asset_id": clip.get("asset_id"),
+                    "asset_uri": clip.get("asset_uri"),
+                    "media_controls": dict(clip.get("media_controls") or {}),
+                    "expected_content_sha256": clip.get("expected_content_sha256"),
+                    "media_revision": clip.get("media_revision"),
+                    "warning_provenance": list(clip.get("warning_provenance") or []),
+                }
+                for track in promptable_tracks
+                for clip in track["clips"]
             ],
             "player_html": player_html,
             "notes": [

@@ -10,8 +10,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 from videobox_api.main import create_app
+from videobox_core_engine.capcut_handoff import CapCutHandoffService
 from videobox_core_engine.settings import CapCutDraftExportConfig
+from videobox_domain_models.jobs import JobStatus, JobType
 from videobox_provider_interfaces.stt import STTResult, STTSegment
+from videobox_storage.local_project_store import LocalProjectStore
 
 FFMPEG_AVAILABLE = shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
 PYCAPCUT_AVAILABLE = importlib.util.find_spec("pycapcut") is not None
@@ -30,6 +33,101 @@ def _poll_until_finished(get_result, *, timeout_seconds: float = 30.0):
             return body
         time.sleep(0.1)
     raise TimeoutError("Job did not finish in time.")
+
+
+def test_capcut_draft_export_result_api_preserves_null_artifact_and_failure_reason(tmp_path: Path) -> None:
+    app = create_app(
+        projects_root=tmp_path,
+        capcut_handoff_service=CapCutHandoffService(local_app_data=tmp_path / "NoCapCut"),
+    )
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "CapCut failure API contract"}).json()["project_id"]
+    store = LocalProjectStore(tmp_path)
+    job = store.create_job(
+        project_id=project_id,
+        job_type=JobType.CAPCUT_DRAFT_EXPORT,
+        input_ref="timeline_build_job_001",
+    )
+    store.update_job(
+        project_id=project_id,
+        job_id=job["job_id"],
+        status=JobStatus.FAILED,
+        error_message="CapCut draft package could not be written.",
+    )
+
+    response = client.get(f"/api/projects/{project_id}/capcut-draft-exports/{job['job_id']}")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "job_id": job["job_id"],
+        "status": "failed",
+        "export": None,
+        "error_message": "CapCut draft package could not be written.",
+    }
+
+
+def test_capcut_draft_handoff_api_persists_failed_registration_with_recovery_reason(tmp_path: Path) -> None:
+    app = create_app(
+        projects_root=tmp_path,
+        capcut_handoff_service=CapCutHandoffService(local_app_data=tmp_path / "NoCapCut"),
+    )
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "CapCut handoff API contract"}).json()["project_id"]
+    store = LocalProjectStore(tmp_path)
+    source_draft = tmp_path / "source_draft"
+    source_draft.mkdir()
+    (source_draft / "draft_content.json").write_text("{}", encoding="utf-8")
+    export = store.save_capcut_draft_export(
+        project_id=project_id,
+        timeline_id="timeline_001",
+        source_draft_path=source_draft,
+    )
+    job = store.create_job(
+        project_id=project_id,
+        job_type=JobType.CAPCUT_DRAFT_EXPORT,
+        input_ref="timeline_build_job_001",
+    )
+    store.update_job(
+        project_id=project_id,
+        job_id=job["job_id"],
+        status=JobStatus.SUCCEEDED,
+        output_ref=export["export_id"],
+    )
+
+    response = client.post(f"/api/projects/{project_id}/capcut-draft-exports/{job['job_id']}/handoff")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["handoff"]["status"] == "failed"
+    assert body["handoff"]["source_file_uri"] == export["file_uri"]
+    assert "CapCut 설치를 확인" in body["handoff"]["error_message"]
+
+
+def test_capcut_handoff_diagnostics_api_reports_injected_windows_readiness_without_llm_call(tmp_path: Path) -> None:
+    local_app_data = tmp_path / "LocalAppData"
+    executable = local_app_data / "CapCut" / "Apps" / "8.9.1.3802" / "CapCut.exe"
+    executable.parent.mkdir(parents=True)
+    executable.write_bytes(b"capcut")
+    project_root = local_app_data / "CapCut" / "User Data" / "Projects" / "com.lveditor.draft"
+    project_root.mkdir(parents=True)
+    app = create_app(
+        projects_root=tmp_path / "projects",
+        capcut_handoff_service=CapCutHandoffService(local_app_data=local_app_data),
+    )
+
+    response = TestClient(app).get("/api/capcut/handoff-diagnostics")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ready"
+    assert body["installation_path"] == str(executable)
+    assert body["detected_version"] == "8.9.1.3802"
+    assert body["is_supported"] is True
+    assert body["project_root_path"] == str(project_root)
+    assert body["project_root_exists"] is True
+    assert body["write_access"] is True
+    assert body["recovery_message"] is None
+    assert body["checked_at"]
 
 
 def _clean_high_confidence_transcribe(self, request):  # noqa: ANN001

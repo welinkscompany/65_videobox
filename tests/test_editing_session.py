@@ -4,9 +4,177 @@ import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from videobox_core_engine.local_pipeline import LocalPipelineRunner as _LocalPipelineRunner
 from videobox_domain_models.assets import AssetType
 from videobox_storage.local_project_store import LocalProjectStore
+
+
+def test_named_user_transactions_keep_ten_undo_entries_and_one_hundred_audit_entries() -> None:
+    """Task 11 RED: a user action is a named atomic snapshot, not 100 undo slots."""
+    from videobox_core_engine.editing_transactions import apply_user_transaction
+    from videobox_core_engine.editing_session import build_editing_session
+
+    session = build_editing_session(
+        project_id="project", timeline={"timeline_id": "timeline"},
+        segments=[{"segment_id": "segment", "text": "before", "start_sec": 0, "end_sec": 1}],
+    )
+    for index in range(101):
+        session = apply_user_transaction(
+            session=session,
+            label=f"작업 {index}",
+            affected_segment_ids=["segment"],
+            mutate=lambda draft, index=index: draft["segments"][0].__setitem__("caption_text", str(index)),
+        )
+    assert len(session["undo_stack"]) == 10
+    assert len(session["history"]) == 100
+    assert session["undo_stack"][-1]["label"] == "작업 100"
+
+
+def test_sqlite_session_truth_recovers_after_sidecar_replace_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Task 11 RED: a post-commit sidecar failure must recover from SQLite on next read."""
+    store = LocalProjectStore(tmp_path / "projects")
+    project = store.bootstrap_project("sidecar")
+    saved = store.save_editing_session(project_id=project.project_id, timeline_id="timeline", session_payload={
+        "segments": [{"segment_id": "seg", "caption_text": "before"}], "history": [],
+    })
+    original_replace = Path.replace
+    failed = {"value": False}
+    def fail_sidecar(path: Path, target: Path):
+        if not failed["value"] and "editing_session" in path.name and path.suffix == ".tmp":
+            failed["value"] = True
+            raise OSError("injected sidecar replace failure")
+        return original_replace(path, target)
+    monkeypatch.setattr(Path, "replace", fail_sidecar)
+    with pytest.raises(OSError, match="sidecar"):
+        store.update_editing_session(project_id=project.project_id, session_id=saved["session_id"], expected_revision=1, session_payload={
+            **saved, "segments": [{"segment_id": "seg", "caption_text": "after"}],
+        })
+    monkeypatch.undo()
+    assert store.get_editing_session(project_id=project.project_id, session_id=saved["session_id"])["segments"][0]["caption_text"] == "after"
+
+
+def test_stale_review_blocks_output_until_reapproval_restores_current_freshness(tmp_path: Path) -> None:
+    """A stale approval cannot authorize output; a fresh approval can."""
+    from videobox_core_engine.local_pipeline import LocalPipelineRunner
+    from videobox_domain_models.jobs import JobStatus, JobType
+
+    store = LocalProjectStore(tmp_path / "projects")
+    project = store.bootstrap_project("Stale review output")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="preview",
+        timeline_payload={
+            "tracks": [],
+            "caption_segments": [
+                {"segment_id": "seg_001", "text": "Current voice", "start_sec": 0.0, "end_sec": 1.0}
+            ],
+            "review_flags": [],
+            "pending_recommendations": [],
+        },
+    )
+    timeline_job = store.create_job(
+        project_id=project.project_id,
+        job_type=JobType.TIMELINE_BUILD,
+        status=JobStatus.SUCCEEDED,
+    )
+    store.update_job(
+        project_id=project.project_id,
+        job_id=timeline_job["job_id"],
+        status=JobStatus.SUCCEEDED,
+        output_ref=timeline["timeline_id"],
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={"segments": [{"segment_id": "seg_001", "caption_text": "Before"}], "history": []},
+    )
+    store.save_review_state(project_id=project.project_id, timeline_id=timeline["timeline_id"], status="approved")
+    store.update_editing_session(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+        expected_revision=session["session_revision"],
+        session_payload={**session, "segments": [{"segment_id": "seg_001", "caption_text": "After"}]},
+    )
+    runner = LocalPipelineRunner(store)
+
+    assert store.get_review_state(project_id=project.project_id, timeline_id=timeline["timeline_id"])["is_current"] is False
+    with pytest.raises(ValueError, match="explicit approval"):
+        runner.start_subtitle_render(project_id=project.project_id, timeline_job_id=timeline_job["job_id"])
+
+    approved = runner.approve_timeline_review(project_id=project.project_id, timeline_job_id=timeline_job["job_id"])
+    assert approved["status"] == "approved"
+    assert approved["is_current"] is True
+    assert runner.start_subtitle_render(project_id=project.project_id, timeline_job_id=timeline_job["job_id"])["status"] == "succeeded"
+
+    reopened = runner.reopen_timeline_review(project_id=project.project_id, timeline_job_id=timeline_job["job_id"])
+    assert reopened["status"] == "draft"
+    assert reopened["is_current"] is True
+
+
+def test_stale_subtitle_is_not_selected_until_a_fresh_render_replaces_it(tmp_path: Path) -> None:
+    """Selectors must not silently return stale subtitles after an edit."""
+    store = LocalProjectStore(tmp_path / "projects")
+    project = store.bootstrap_project("Subtitle freshness")
+    timeline = store.save_timeline_run(project_id=project.project_id, output_mode="preview", timeline_payload={"tracks": []})
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={"segments": [{"segment_id": "seg", "caption_text": "Before"}], "history": []},
+    )
+    stale = store.save_subtitle_run(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        subtitle_payload={"entries": [{"index": 1, "start_sec": 0, "end_sec": 1, "text": "Before"}]},
+    )
+
+    store.update_editing_session(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+        expected_revision=session["session_revision"],
+        session_payload={**session, "segments": [{"segment_id": "seg", "caption_text": "After"}]},
+    )
+
+    assert store.get_subtitle_run(project_id=project.project_id, subtitle_id=stale["subtitle_id"])["is_current"] is False
+    assert store.get_latest_subtitle_for_timeline(project_id=project.project_id, timeline_id=timeline["timeline_id"]) is None
+    fresh = store.save_subtitle_run(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        subtitle_payload={"entries": [{"index": 1, "start_sec": 0, "end_sec": 1, "text": "After"}]},
+    )
+    assert store.get_latest_subtitle_for_timeline(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+    )["subtitle_id"] == fresh["subtitle_id"]
+
+
+def test_legacy_preview_render_table_gains_every_freshness_column_on_open(tmp_path: Path) -> None:
+    """Opening a real pre-Task-11 preview table upgrades it without data loss assumptions."""
+    store = LocalProjectStore(tmp_path / "projects")
+    project = store.bootstrap_project("Legacy preview migration")
+    database_path = store.database_path(project.project_id)
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute("DROP TABLE preview_renders")
+        connection.execute(
+            """
+            CREATE TABLE preview_renders (
+                preview_id TEXT PRIMARY KEY, project_id TEXT NOT NULL, timeline_id TEXT NOT NULL,
+                file_uri TEXT NOT NULL, status TEXT NOT NULL, summary_json TEXT, created_at TEXT NOT NULL
+            )
+            """
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    migrated = store._connection(project.project_id)
+    try:
+        columns = {str(row[1]) for row in migrated.execute("PRAGMA table_info(preview_renders)").fetchall()}
+    finally:
+        migrated.close()
+    assert {"source_session_revision", "is_current", "invalidated_at", "invalidated_reason"} <= columns
 
 
 def test_build_editing_session_from_review_timeline_creates_editable_segment_state() -> None:
@@ -94,6 +262,265 @@ def test_save_editing_session_persists_current_state_and_history(tmp_path: Path)
     assert loaded["timeline_id"] == "timeline_001"
     assert loaded["segments"][0]["caption_text"] == "Updated caption"
     assert loaded["history"][0]["mutation_type"] == "caption_update"
+
+
+def test_editing_session_compare_and_swap_rejects_stale_write_without_replacing_json(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Editing Session CAS Project")
+    saved = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id="timeline_001",
+        session_payload={"session_revision": 1, "segments": [{"segment_id": "seg_001", "caption_text": "original"}], "history": []},
+    )
+    updated = {**saved, "session_revision": 2, "segments": [{"segment_id": "seg_001", "caption_text": "fresh"}]}
+    store.update_editing_session(
+        project_id=project.project_id, session_id=saved["session_id"], session_payload=updated, expected_revision=1
+    )
+
+    from videobox_storage.local_project_store import EditingSessionRevisionConflict
+    with pytest.raises(EditingSessionRevisionConflict):
+        store.update_editing_session(
+            project_id=project.project_id,
+            session_id=saved["session_id"],
+            session_payload={**saved, "session_revision": 2, "segments": [{"segment_id": "seg_001", "caption_text": "stale"}]},
+            expected_revision=1,
+        )
+
+    assert store.get_editing_session(project_id=project.project_id, session_id=saved["session_id"])["segments"][0]["caption_text"] == "fresh"
+
+
+def test_editing_session_recovers_canonical_db_snapshot_when_json_replace_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Editing Session Recovery Project")
+    saved = store.save_editing_session(project_id=project.project_id, timeline_id="timeline_001", session_payload={"segments": [{"segment_id": "seg_001", "caption_text": "old"}], "history": []})
+    import pathlib
+    original_replace = pathlib.Path.replace
+    monkeypatch.setattr(pathlib.Path, "replace", lambda self, target: (_ for _ in ()).throw(OSError("injected replace failure")))
+    with pytest.raises(OSError, match="injected"):
+        store.update_editing_session(project_id=project.project_id, session_id=saved["session_id"], expected_revision=saved["session_revision"], session_payload={**saved, "session_revision": saved["session_revision"] + 1, "segments": [{"segment_id": "seg_001", "caption_text": "new"}]})
+    monkeypatch.setattr(pathlib.Path, "replace", original_replace)
+    recovered = store.get_editing_session(project_id=project.project_id, session_id=saved["session_id"])
+    assert recovered["session_revision"] == saved["session_revision"] + 1
+    assert recovered["segments"][0]["caption_text"] == "new"
+
+
+def test_generic_editing_session_mutation_increments_revision(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Editing Session Revision Project")
+    saved = store.save_editing_session(project_id=project.project_id, timeline_id="timeline_001", session_payload={"segments": [], "history": []})
+    updated = store.update_editing_session(project_id=project.project_id, session_id=saved["session_id"], session_payload={**saved, "history": [{"mutation_type": "caption_update"}]})
+    assert updated["session_revision"] == saved["session_revision"] + 1
+
+
+def test_caption_style_scope_rules_resolve_snapshots_without_changing_default_for_single_caption() -> None:
+    from videobox_core_engine.editing_session import preview_caption_style_scope, update_caption_style
+    session = {"caption_style": {"text_color": "#FFFFFFFF"}, "session_revision": 1, "segments": [
+        {"segment_id": "a"}, {"segment_id": "b"}, {"segment_id": "c"}
+    ], "history": []}
+    assert preview_caption_style_scope(session=session, scope="current_caption", segment_ids=["b"]) == ["b"]
+    assert preview_caption_style_scope(session=session, scope="selected_captions", segment_ids=["c", "a"]) == ["a", "c"]
+    assert preview_caption_style_scope(session=session, scope="from_current", segment_ids=["b"]) == ["b", "c"]
+    assert preview_caption_style_scope(session=session, scope="whole_project", segment_ids=[]) == ["a", "b", "c"]
+    assert preview_caption_style_scope(session=session, scope="project_default", segment_ids=[]) == []
+    with pytest.raises(ValueError, match="whole_project does not accept segment_ids"):
+        preview_caption_style_scope(session=session, scope="whole_project", segment_ids=["a"])
+    with pytest.raises(ValueError, match="project_default does not accept segment_ids"):
+        preview_caption_style_scope(session=session, scope="project_default", segment_ids=["a"])
+    changed = update_caption_style(session=session, style={"text_color": "#00FF00FF"}, scope="current_caption", segment_ids=["b"])
+    assert changed["caption_style"]["text_color"] == "#FFFFFFFF"
+    assert changed["segments"][1]["caption_style"]["text_color"] == "#00FF00FF"
+
+
+def test_partial_regeneration_conflict_returns_latest_manual_caption_and_style_without_stale_timeline_save() -> None:
+    from videobox_core_engine.editing_session_and_regeneration import EditingSessionConflict, EditingSessionRegenerationMixin
+    from videobox_storage.local_project_store import EditingSessionRevisionConflict
+
+    stale = {"session_id": "session_001", "timeline_id": "timeline_001", "session_revision": 1, "segments": [{"segment_id": "seg_001", "caption_text": "old", "caption_style": {"text_color": "#FFFFFFFF"}}], "history": []}
+    latest = {**stale, "session_revision": 2, "segments": [{"segment_id": "seg_001", "caption_text": "manual", "caption_style": {"text_color": "#00FF00FF"}}]}
+
+    class Store:
+        def __init__(self) -> None: self.calls = 0; self.persisted = None
+        def get_editing_session(self, **_: object) -> dict: return latest if self.calls else stale
+        def create_job(self, **_: object) -> dict: return {"job_id": "job_001"}
+        def update_editing_session(self, **kwargs: object) -> dict:
+            self.calls += 1
+            if self.calls == 1: raise EditingSessionRevisionConflict("stale")
+            self.persisted = kwargs["session_payload"]
+            return {**self.persisted, "updated_at": "now"}
+        def save_partial_regeneration_run(self, **kwargs: object) -> dict: return {"partial_regeneration_id": "regen_001"}
+        def update_job(self, **_: object) -> None: pass
+
+    class Runner(EditingSessionRegenerationMixin):
+        def __init__(self) -> None: self.store = Store()
+        def _execute_partial_regeneration(self, **_: object) -> dict: return {"timeline_id": "timeline_002", "timeline": {}, "segment_ids": ["seg_001"], "fields": ["caption"], "downstream_steps": []}
+
+    runner = Runner()
+    with pytest.raises(EditingSessionConflict) as exc_info:
+        runner.start_editing_session_partial_regeneration(
+            project_id="project_001",
+            session_id="session_001",
+            segment_ids=["seg_001"],
+            fields=["caption"],
+            expected_revision=stale["session_revision"],
+        )
+
+    assert exc_info.value.latest_session["segments"][0]["caption_text"] == "manual"
+    assert exc_info.value.latest_session["segments"][0]["caption_style"]["text_color"] == "#00FF00FF"
+    assert runner.store.persisted is None
+
+
+def test_partial_regeneration_cas_conflict_discards_pre_published_timeline_and_review(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A concurrent edit must not leave a current output from the losing regeneration."""
+    from videobox_core_engine.editing_session_and_regeneration import EditingSessionConflict, EditingSessionRegenerationMixin
+    from videobox_storage.local_project_store import EditingSessionRevisionConflict
+
+    store = LocalProjectStore(tmp_path / "projects")
+    project = store.bootstrap_project("partial CAS conflict")
+    source = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={"tracks": [], "review_flags": [], "pending_recommendations": [], "applied_recommendations": []},
+    )
+    saved = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=source["timeline_id"],
+        session_payload={"segments": [{"segment_id": "seg_001", "caption_text": "before"}], "history": []},
+    )
+
+    class Runner(EditingSessionRegenerationMixin):
+        orphan_timeline_id: str
+
+        def __init__(self) -> None:
+            self.store = store
+
+        def _execute_partial_regeneration(self, **_: object) -> dict[str, object]:
+            orphan = store.save_timeline_run(
+                project_id=project.project_id,
+                output_mode="review",
+                timeline_payload={"tracks": [], "review_flags": [], "pending_recommendations": [], "applied_recommendations": []},
+                source_session_revision=2,
+            )
+            self.orphan_timeline_id = orphan["timeline_id"]
+            return {"timeline_id": orphan["timeline_id"], "timeline": orphan["timeline"], "segment_ids": ["seg_001"], "fields": ["caption"], "downstream_steps": ["timeline_build"]}
+
+    runner = Runner()
+    original_update = store.update_editing_session
+
+    def concurrent_edit_then_conflict(**_: object) -> dict[str, object]:
+        original_update(
+            project_id=project.project_id,
+            session_id=saved["session_id"],
+            timeline_id=source["timeline_id"],
+            session_payload={"segments": [{"segment_id": "seg_001", "caption_text": "concurrent"}], "history": []},
+            expected_revision=saved["session_revision"],
+        )
+        raise EditingSessionRevisionConflict("stale")
+
+    monkeypatch.setattr(store, "update_editing_session", concurrent_edit_then_conflict)
+    with pytest.raises(EditingSessionConflict):
+        runner.start_editing_session_partial_regeneration(
+            project_id=project.project_id,
+            session_id=saved["session_id"],
+            segment_ids=["seg_001"],
+            fields=["caption"],
+            expected_revision=saved["session_revision"],
+        )
+
+    assert store.get_editing_session(project_id=project.project_id, session_id=saved["session_id"])["segments"][0]["caption_text"] == "concurrent"
+    with pytest.raises(KeyError):
+        store.get_timeline_run(project_id=project.project_id, timeline_id=runner.orphan_timeline_id)
+    with pytest.raises(KeyError):
+        store.get_review_state(project_id=project.project_id, timeline_id=runner.orphan_timeline_id)
+
+
+def test_partial_regeneration_success_publication_failure_compensates_session_timeline_and_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed success-job update must not publish any part of a regeneration."""
+    from videobox_core_engine.editing_session_and_regeneration import EditingSessionRegenerationMixin
+    from videobox_domain_models.jobs import JobStatus
+
+    store = LocalProjectStore(tmp_path / "projects")
+    project = store.bootstrap_project("partial publication failure")
+    source = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={"tracks": [], "review_flags": [], "pending_recommendations": [], "applied_recommendations": []},
+    )
+    saved = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=source["timeline_id"],
+        session_payload={"segments": [{"segment_id": "seg_001", "caption_text": "before"}], "history": []},
+    )
+
+    class Runner(EditingSessionRegenerationMixin):
+        candidate_timeline_id: str
+
+        def __init__(self) -> None:
+            self.store = store
+
+        def _execute_partial_regeneration(self, **_: object) -> dict[str, object]:
+            candidate = store.save_timeline_run(
+                project_id=project.project_id,
+                output_mode="review",
+                timeline_payload={"tracks": [], "review_flags": [], "pending_recommendations": [], "applied_recommendations": []},
+                source_session_revision=2,
+            )
+            self.candidate_timeline_id = candidate["timeline_id"]
+            store.save_review_state(project_id=project.project_id, timeline_id=self.candidate_timeline_id, status="approved")
+            return {"timeline_id": self.candidate_timeline_id, "timeline": candidate["timeline"], "segment_ids": ["seg_001"], "fields": ["caption"], "downstream_steps": ["timeline_build"]}
+
+    runner = Runner()
+    original_update_job = store.update_job
+    original_discard_timeline = store.discard_partial_regeneration_timeline
+
+    def fail_only_success_publication(**kwargs: object) -> dict[str, object]:
+        if kwargs["status"] is JobStatus.SUCCEEDED:
+            raise OSError("injected job success publication failure")
+        return original_update_job(**kwargs)  # type: ignore[arg-type]
+
+    def fail_candidate_cleanup(**_: object) -> None:
+        raise OSError("injected candidate cleanup failure")
+
+    monkeypatch.setattr(store, "update_job", fail_only_success_publication)
+    monkeypatch.setattr(store, "discard_partial_regeneration_timeline", fail_candidate_cleanup)
+    with pytest.raises(OSError, match="success publication"):
+        runner.start_editing_session_partial_regeneration(
+            project_id=project.project_id,
+            session_id=saved["session_id"],
+            segment_ids=["seg_001"],
+            fields=["caption"],
+            expected_revision=saved["session_revision"],
+        )
+
+    recovered = store.get_editing_session(project_id=project.project_id, session_id=saved["session_id"])
+    assert recovered["timeline_id"] == source["timeline_id"]
+    assert recovered["segments"] == saved["segments"]
+    assert recovered["session_revision"] == saved["session_revision"]
+    assert store.get_timeline_run(project_id=project.project_id, timeline_id=runner.candidate_timeline_id)["timeline_id"] == runner.candidate_timeline_id
+    reconciliation = store.get_review_state(project_id=project.project_id, timeline_id=runner.candidate_timeline_id)
+    assert reconciliation["is_current"] is False
+    assert reconciliation["invalidated_reason"] == "partial_regeneration_cleanup_failed"
+    assert not list((store.project_root(project.project_id) / "analysis" / "partial_regenerations").glob("*.json"))
+    job = store.list_jobs(project_id=project.project_id)[0]
+    assert job["status"] == JobStatus.FAILED.value
+    assert job["output_ref"] is None
+    assert "success publication failure" in str(job["error_message"])
+    assert "candidate cleanup failure" in str(job["error_message"])
+    monkeypatch.setattr(store, "update_job", original_update_job)
+    monkeypatch.setattr(store, "discard_partial_regeneration_timeline", original_discard_timeline)
+    retried = runner.start_editing_session_partial_regeneration(
+        project_id=project.project_id,
+        session_id=saved["session_id"],
+        segment_ids=["seg_001"],
+        fields=["caption"],
+        expected_revision=saved["session_revision"],
+    )
+    assert retried["status"] == JobStatus.SUCCEEDED.value
 
 
 def test_save_editing_session_recovers_when_table_is_missing_on_existing_project(tmp_path: Path) -> None:
@@ -215,6 +642,96 @@ def test_update_segment_broll_override_records_history() -> None:
 
     assert updated["segments"][0]["broll_override"] == {"asset_id": "asset_manual_001"}
     assert updated["history"][-1]["mutation_type"] == "broll_override_update"
+
+
+def test_update_segment_sfx_override_records_history() -> None:
+    from videobox_core_engine.editing_session import build_editing_session, update_segment_sfx_override
+
+    session = build_editing_session(
+        project_id="project_001",
+        timeline={"timeline_id": "timeline_001"},
+        segments=[{"segment_id": "seg_001", "text": "Caption", "start_sec": 0.0, "end_sec": 1.0, "review_required": False, "cleanup_decision": "keep"}],
+    )
+
+    updated = update_segment_sfx_override(session=session, segment_id="seg_001", asset_id="asset_sfx_001")
+
+    assert updated["segments"][0]["sfx_override"] == {"asset_id": "asset_sfx_001"}
+    assert updated["history"][-1]["mutation_type"] == "sfx_override_update"
+
+
+def test_approved_sfx_recommendation_materializes_target_timeline_track() -> None:
+    from videobox_core_engine.review_action_mutations import apply_approved_recommendation_to_timeline
+
+    timeline = {
+        "project_id": "project_001",
+        "tracks": [
+            {
+                "track_id": "narration_primary",
+                "track_type": "narration",
+                "clips": [
+                    {
+                        "clip_id": "clip_narration_001",
+                        "segment_id": "seg_001",
+                        "asset_uri": "local://projects/project_001/segments/seg_001",
+                        "start_sec": 1.0,
+                        "end_sec": 3.0,
+                        "clip_type": "narration",
+                    }
+                ],
+            }
+        ],
+    }
+
+    apply_approved_recommendation_to_timeline(
+        timeline=timeline,
+        decided_recommendation={
+            "recommendation_id": "manual_sfx_seg_001",
+            "target_segment_id": "seg_001",
+            "recommendation_type": "sfx",
+            "selected_asset_id": "asset_sfx_001",
+            "payload": {"selected_asset_uri": "local://projects/project_001/assets/imported/sfx.wav"},
+        },
+    )
+
+    assert timeline["tracks"][-1] == {
+        "track_id": "sfx_overlay",
+        "track_type": "sfx",
+        "clips": [
+            {
+                "clip_id": "clip_sfx_001",
+                "segment_id": "seg_001",
+                "asset_uri": "local://projects/project_001/assets/imported/sfx.wav",
+                "start_sec": 1.0,
+                "end_sec": 3.0,
+                "clip_type": "sfx",
+                "recommendation_id": "manual_sfx_seg_001",
+                "asset_id": "asset_sfx_001",
+                "media_controls": {},
+                "expected_content_sha256": None,
+                "media_revision": None,
+                "warning_provenance": [],
+            }
+        ],
+    }
+
+
+def test_approved_sfx_recommendation_without_a_project_local_uri_is_rejected_without_timeline_mutation() -> None:
+    from copy import deepcopy
+    from videobox_core_engine.review_action_mutations import apply_approved_recommendation_to_timeline
+
+    timeline = {
+        "project_id": "project_001",
+        "tracks": [{"track_id": "narration_primary", "track_type": "narration", "clips": [{"segment_id": "seg_001", "start_sec": 0.0, "end_sec": 1.0}]}],
+    }
+    original = deepcopy(timeline)
+
+    with pytest.raises(ValueError, match="selected_asset_uri"):
+        apply_approved_recommendation_to_timeline(
+            timeline=timeline,
+            decided_recommendation={"recommendation_id": "rec_sfx", "target_segment_id": "seg_001", "recommendation_type": "sfx", "selected_asset_id": "asset_sfx_001", "payload": {}},
+        )
+
+    assert timeline == original
 
 
 def test_clear_segment_broll_override_records_history() -> None:
@@ -573,6 +1090,77 @@ def test_select_and_clear_segment_tts_replacement_records_history() -> None:
     assert cleared["history"][-1]["mutation_type"] == "tts_replacement_clear"
 
 
+def test_pending_or_rejected_tts_candidate_cannot_replace_narration_until_listening_approved(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="TTS Listening Gate")
+    runner = _LocalPipelineRunner(store)
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id="timeline_001",
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "기존 나레이션을 유지합니다.",
+                    "start_sec": 0.0,
+                    "end_sec": 3.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ],
+            "history": [],
+        },
+    )
+    candidate = store.save_tts_candidate(
+        project_id=project.project_id,
+        segment_id="seg_001",
+        asset_id="asset_tts_001",
+        source_text="생성된 후보입니다.",
+        acceptance=SimpleNamespace(
+            technical_status="accepted",
+            operator_review_status="pending",
+            target_duration_sec=3.0,
+            actual_duration_sec=3.0,
+            failure_code=None,
+        ),
+    )
+
+    with pytest.raises(ValueError, match="listening approval"):
+        runner.select_editing_session_segment_tts_replacement(
+            project_id=project.project_id,
+            session_id=session["session_id"],
+            segment_id="seg_001",
+            recommendation_id=candidate["candidate_id"],
+            asset_id=candidate["asset_id"],
+            expected_revision=session["session_revision"],
+        )
+
+    assert store.get_editing_session(project_id=project.project_id, session_id=session["session_id"])["segments"][0]["tts_replacement"] is None
+
+    store.update_tts_candidate_listening_review(
+        project_id=project.project_id,
+        candidate_id=candidate["candidate_id"],
+        decision="approved",
+    )
+    selected = runner.select_editing_session_segment_tts_replacement(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+        segment_id="seg_001",
+        recommendation_id=candidate["candidate_id"],
+        asset_id=candidate["asset_id"],
+        expected_revision=session["session_revision"],
+    )
+
+    assert selected["segments"][0]["tts_replacement"] == {
+        "recommendation_id": candidate["candidate_id"],
+        "asset_id": candidate["asset_id"],
+    }
+
+
 def test_update_segment_visual_overlay_preserves_other_overlay_types() -> None:
     from videobox_core_engine.editing_session import build_editing_session
     from videobox_core_engine.editing_session import update_segment_explanation_card
@@ -749,6 +1337,13 @@ def test_partial_regeneration_pipeline_keeps_scope_limited_to_selected_segments(
     store = LocalProjectStore(tmp_path)
     project = store.bootstrap_project(name="Partial Regeneration Scope Project")
     runner = _LocalPipelineRunner(store)
+    manual_broll_source = tmp_path / "manual-broll-002.mp4"
+    manual_broll_source.write_bytes(b"manual broll data")
+    manual_broll_asset = store.register_asset(
+        project_id=project.project_id,
+        asset_type=AssetType.BROLL_VIDEO,
+        source_path=manual_broll_source,
+    )
 
     store.save_timeline_run(
         project_id=project.project_id,
@@ -780,6 +1375,24 @@ def test_partial_regeneration_pipeline_keeps_scope_limited_to_selected_segments(
                 }
             ],
             "review_flags": [],
+            "caption_segments": [
+                {
+                    "segment_id": "seg_001",
+                    "text": "Original caption one",
+                    "start_sec": 0.0,
+                    "end_sec": 1.0,
+                    "review_required": False,
+                    "cleanup_decision": "keep",
+                },
+                {
+                    "segment_id": "seg_002",
+                    "text": "Original caption two",
+                    "start_sec": 1.0,
+                    "end_sec": 2.0,
+                    "review_required": False,
+                    "cleanup_decision": "keep",
+                },
+            ],
             "applied_recommendations": [
                 {
                     "recommendation_id": "rec_broll_seg_001",
@@ -825,7 +1438,7 @@ def test_partial_regeneration_pipeline_keeps_scope_limited_to_selected_segments(
                     "end_sec": 2.0,
                     "cut_action": "keep",
                     "review_required": False,
-                    "broll_override": {"asset_id": "asset_manual_002"},
+                    "broll_override": {"asset_id": manual_broll_asset.asset_id},
                     "visual_overlays": [],
                     "music_override": None,
                 },
@@ -833,7 +1446,7 @@ def test_partial_regeneration_pipeline_keeps_scope_limited_to_selected_segments(
             "history": [
                 {"mutation_type": "caption_update", "segment_id": "seg_001", "caption_text": "Manual caption one"},
                 {"mutation_type": "caption_update", "segment_id": "seg_002", "caption_text": "Manual caption two"},
-                {"mutation_type": "broll_override_update", "segment_id": "seg_002", "asset_id": "asset_manual_002"},
+                {"mutation_type": "broll_override_update", "segment_id": "seg_002", "asset_id": manual_broll_asset.asset_id},
             ],
         },
     )
@@ -843,6 +1456,7 @@ def test_partial_regeneration_pipeline_keeps_scope_limited_to_selected_segments(
         session_id=saved_session["session_id"],
         segment_ids=["seg_002"],
         fields=["caption", "broll"],
+        expected_revision=saved_session["session_revision"],
     )
     result = runner.get_partial_regeneration_result(
         project_id=project.project_id,
@@ -866,7 +1480,21 @@ def test_partial_regeneration_pipeline_keeps_scope_limited_to_selected_segments(
     broll_track = next(track for track in result["timeline"]["tracks"] if track["track_type"] == "broll")
     assert [clip["segment_id"] for clip in broll_track["clips"]] == ["seg_001", "seg_002"]
     manual_clip = next(clip for clip in broll_track["clips"] if clip["segment_id"] == "seg_002")
-    assert manual_clip["asset_uri"].endswith("/assets/asset_manual_002")
+    assert manual_clip["asset_uri"] == manual_broll_asset.storage_uri
+    runner.approve_timeline_review(project_id=project.project_id, timeline_job_id=started["job_id"])
+    subtitle_job = runner.start_subtitle_render(
+        project_id=project.project_id,
+        timeline_job_id=started["job_id"],
+    )
+    subtitle = runner.get_subtitle_result(project_id=project.project_id, job_id=subtitle_job["job_id"])
+    subtitle_path = store.resolve_storage_uri(
+        project_id=project.project_id,
+        storage_uri=subtitle["subtitle"]["file_uri"],
+    )
+    subtitle_text = subtitle_path.read_text(encoding="utf-8")
+
+    assert "Manual caption two" in subtitle_text
+    assert "Original caption two" not in subtitle_text
 
 
 def test_partial_regeneration_pipeline_runs_broll_refresh_when_no_manual_override_exists(tmp_path: Path) -> None:
@@ -982,6 +1610,7 @@ def test_partial_regeneration_pipeline_runs_broll_refresh_when_no_manual_overrid
         session_id=saved_session["session_id"],
         segment_ids=["seg_002"],
         fields=["broll"],
+        expected_revision=saved_session["session_revision"],
     )
     result = runner.get_partial_regeneration_result(
         project_id=project.project_id,
@@ -1067,6 +1696,7 @@ def test_partial_regeneration_pipeline_marks_job_failed_when_refresh_step_errors
             session_id=saved_session["session_id"],
             segment_ids=["seg_001"],
             fields=["broll"],
+            expected_revision=saved_session["session_revision"],
         )
 
     failed_job = store.list_jobs(project_id=project.project_id)[0]
@@ -1171,18 +1801,25 @@ def test_partial_regeneration_pipeline_carries_forward_previous_regeneration_res
         session_id=saved_session["session_id"],
         segment_ids=["seg_002"],
         fields=["broll"],
+        expected_revision=saved_session["session_revision"],
     )
-    runner.update_editing_session_segment_caption(
+    after_first = runner.get_editing_session(
+        project_id=project.project_id,
+        session_id=saved_session["session_id"],
+    )
+    updated_session = runner.update_editing_session_segment_caption(
         project_id=project.project_id,
         session_id=saved_session["session_id"],
         segment_id="seg_002",
         caption_text="Caption two updated",
+        expected_revision=after_first["session_revision"],
     )
     second = runner.start_editing_session_partial_regeneration(
         project_id=project.project_id,
         session_id=saved_session["session_id"],
         segment_ids=["seg_002"],
         fields=["caption"],
+        expected_revision=updated_session["session_revision"],
     )
     first_result = runner.get_partial_regeneration_result(project_id=project.project_id, job_id=first["job_id"])
     second_result = runner.get_partial_regeneration_result(project_id=project.project_id, job_id=second["job_id"])
@@ -1264,6 +1901,7 @@ def test_partial_regeneration_pipeline_preserves_overlay_shape_when_refreshing_v
         session_id=saved_session["session_id"],
         segment_ids=["seg_001"],
         fields=["visual_overlay"],
+        expected_revision=saved_session["session_revision"],
     )
     result = runner.get_partial_regeneration_result(project_id=project.project_id, job_id=started["job_id"])
 
@@ -1377,6 +2015,7 @@ def test_partial_regeneration_pipeline_clears_target_visual_overlays_when_sessio
         session_id=saved_session["session_id"],
         segment_ids=["seg_001"],
         fields=["visual_overlay"],
+        expected_revision=saved_session["session_revision"],
     )
     result = runner.get_partial_regeneration_result(project_id=project.project_id, job_id=started["job_id"])
 
@@ -1498,6 +2137,7 @@ def test_partial_regeneration_pipeline_preserves_explanation_overlay_shape(tmp_p
         session_id=saved_session["session_id"],
         segment_ids=["seg_001"],
         fields=["explanation_card"],
+        expected_revision=saved_session["session_revision"],
     )
     result = runner.get_partial_regeneration_result(project_id=project.project_id, job_id=started["job_id"])
 
@@ -1614,6 +2254,7 @@ def test_partial_regeneration_pipeline_preserves_image_and_table_overlay_shapes(
         session_id=saved_session["session_id"],
         segment_ids=["seg_001"],
         fields=["image_overlay", "table_overlay"],
+        expected_revision=saved_session["session_revision"],
     )
     result = runner.get_partial_regeneration_result(project_id=project.project_id, job_id=started["job_id"])
 
@@ -1733,6 +2374,7 @@ def test_partial_regeneration_pipeline_applies_tts_replacement_as_review_blocked
         session_id=saved_session["session_id"],
         segment_ids=["seg_001"],
         fields=["tts_replacement"],
+        expected_revision=saved_session["session_revision"],
     )
     result = runner.get_partial_regeneration_result(project_id=project.project_id, job_id=started["job_id"])
 
@@ -1865,6 +2507,7 @@ def test_partial_regeneration_pipeline_applies_approved_tts_replacement_to_targe
         session_id=saved_session["session_id"],
         segment_ids=["seg_001"],
         fields=["tts_replacement"],
+        expected_revision=saved_session["session_revision"],
     )
     result = runner.get_partial_regeneration_result(project_id=project.project_id, job_id=started["job_id"])
 
@@ -1900,3 +2543,26 @@ def test_partial_regeneration_pipeline_applies_approved_tts_replacement_to_targe
         tts_asset.storage_uri,
         f"local://projects/{project.project_id}/segments/seg_002",
     ]
+
+def test_partial_regeneration_store_update_returns_and_persists_updated_payload(tmp_path: Path) -> None:
+    from videobox_storage.local_project_store import LocalProjectStore
+
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project("partial regeneration persistence")
+    saved = store.save_partial_regeneration_run(
+        project_id=project.project_id,
+        payload={"status": "running", "segment_ids": ["seg-1"]},
+    )
+
+    updated = store.update_partial_regeneration_run(
+        project_id=project.project_id,
+        partial_regeneration_id=saved["partial_regeneration_id"],
+        payload={"status": "succeeded", "result": {"timeline_id": "timeline-2"}},
+    )
+
+    assert updated["status"] == "succeeded"
+    assert updated["created_at"] == saved["created_at"]
+    assert store.get_partial_regeneration_run(
+        project_id=project.project_id,
+        partial_regeneration_id=saved["partial_regeneration_id"],
+    ) == updated

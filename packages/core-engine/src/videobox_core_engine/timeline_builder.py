@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from uuid import uuid4
+from collections.abc import Callable
 
 from videobox_core_engine.canonical_recommendation import (
     canonical_recommendation_type as _canonical_recommendation_type,
@@ -12,6 +13,7 @@ from videobox_core_engine.canonical_source_uri import (
 )
 from videobox_domain_models.recommendations import RecommendationRecord
 from videobox_domain_models.segments import SegmentRecord
+from videobox_core_engine.media_controls import normalize_media_controls
 from videobox_timeline_schema.models import (
     TimelineClip,
     TimelineRecord,
@@ -26,6 +28,13 @@ def _normalize_boolish(value: object) -> bool:
     return bool(value)
 
 
+def _optional_text(value: object) -> str | None:
+    if value is None:
+        return None
+    normalized = str(value).strip()
+    return normalized or None
+
+
 class TimelineBuilder:
     def build(
         self,
@@ -35,6 +44,7 @@ class TimelineBuilder:
         recommendations: list[dict[str, object] | RecommendationRecord],
         narration_source_uri: str | None = None,
         export_overlays: list[dict[str, object]] | None = None,
+        asset_uri_validator: Callable[[str, str, str], bool] | None = None,
     ) -> TimelineRecord:
         normalized_segments = [self._segment_payload(segment) for segment in segments]
         normalized_recommendations = [
@@ -70,6 +80,7 @@ class TimelineBuilder:
         narration_clips: list[TimelineClip] = []
         broll_clips: list[TimelineClip] = []
         music_clips: list[TimelineClip] = []
+        sfx_clips: list[TimelineClip] = []
 
         for index, segment in enumerate(normalized_segments, start=1):
             segment_id = str(segment["segment_id"])
@@ -107,19 +118,44 @@ class TimelineBuilder:
                     )
                 )
             for recommendation in by_segment.get(segment_id, []):
+                rec_type = _canonical_recommendation_type(recommendation.get("recommendation_type"))
+                selected_asset_id = str(recommendation.get("selected_asset_id") or "").strip()
+                payload = recommendation.get("payload")
+                selected_asset_uri = _canonical_source_uri(
+                    payload.get("selected_asset_uri") if isinstance(payload, dict) else None
+                )
+                expected_content_sha256 = _optional_text(
+                    payload.get("expected_content_sha256") if isinstance(payload, dict) else None
+                )
+                media_revision = _optional_text(
+                    payload.get("media_revision") if isinstance(payload, dict) else None
+                )
+                raw_warning_provenance = (
+                    payload.get("warning_provenance") if isinstance(payload, dict) else []
+                )
+                warning_provenance = list(raw_warning_provenance) if isinstance(
+                    raw_warning_provenance, (list, tuple)
+                ) else []
+                if rec_type in {"bgm", "sfx"} and (not selected_asset_id or not selected_asset_uri or asset_uri_validator is None or not asset_uri_validator(selected_asset_id, rec_type, selected_asset_uri)):
+                    pending_recommendations.append(recommendation)
+                    continue
                 if bool(recommendation.get("auto_apply_allowed")) and not bool(recommendation.get("review_required")):
                     applied_recommendations.append(recommendation)
-                    rec_type = _canonical_recommendation_type(recommendation.get("recommendation_type"))
                     if rec_type == "broll" and recommendation.get("selected_asset_id"):
                         broll_clips.append(
                             TimelineClip(
                                 clip_id=f"clip_broll_{len(broll_clips) + 1:03d}",
                                 segment_id=segment_id,
-                                asset_uri=f"local://projects/{project_id}/assets/{recommendation['selected_asset_id']}",
+                                asset_uri=selected_asset_uri or f"local://projects/{project_id}/assets/{recommendation['selected_asset_id']}",
                                 start_sec=float(segment["start_sec"]),
                                 end_sec=float(segment["end_sec"]),
                                 clip_type="broll",
                                 recommendation_id=str(recommendation["recommendation_id"]),
+                                asset_id=selected_asset_id,
+                                media_controls=self._media_controls(recommendation, media_kind="broll", duration_sec=float(segment["end_sec"]) - float(segment["start_sec"])),
+                                expected_content_sha256=expected_content_sha256,
+                                media_revision=media_revision,
+                                warning_provenance=warning_provenance,
                             )
                         )
                     if rec_type == "bgm":
@@ -127,11 +163,33 @@ class TimelineBuilder:
                             TimelineClip(
                                 clip_id=f"clip_bgm_{len(music_clips) + 1:03d}",
                                 segment_id=segment_id,
-                                asset_uri=f"local://projects/{project_id}/music/{recommendation['selected_asset_id'] or 'suggested'}",
+                                asset_uri=selected_asset_uri,
                                 start_sec=float(segment["start_sec"]),
                                 end_sec=float(segment["end_sec"]),
                                 clip_type="bgm",
                                 recommendation_id=str(recommendation["recommendation_id"]),
+                                asset_id=selected_asset_id,
+                                media_controls=self._media_controls(recommendation, media_kind="audio", duration_sec=float(segment["end_sec"]) - float(segment["start_sec"])),
+                                expected_content_sha256=expected_content_sha256,
+                                media_revision=media_revision,
+                                warning_provenance=warning_provenance,
+                            )
+                        )
+                    if rec_type == "sfx":
+                        sfx_clips.append(
+                            TimelineClip(
+                                clip_id=f"clip_sfx_{len(sfx_clips) + 1:03d}",
+                                segment_id=segment_id,
+                                asset_uri=selected_asset_uri,
+                                start_sec=float(segment["start_sec"]),
+                                end_sec=float(segment["end_sec"]),
+                                clip_type="sfx",
+                                recommendation_id=str(recommendation["recommendation_id"]),
+                                asset_id=selected_asset_id,
+                                media_controls=self._media_controls(recommendation, media_kind="audio", duration_sec=float(segment["end_sec"]) - float(segment["start_sec"])),
+                                expected_content_sha256=expected_content_sha256,
+                                media_revision=media_revision,
+                                warning_provenance=warning_provenance,
                             )
                         )
                 else:
@@ -142,6 +200,8 @@ class TimelineBuilder:
             tracks.append(TimelineTrack(track_id="broll_overlay", track_type="broll", clips=broll_clips))
         if music_clips:
             tracks.append(TimelineTrack(track_id="music_bed", track_type="bgm", clips=music_clips))
+        if sfx_clips:
+            tracks.append(TimelineTrack(track_id="sfx_overlay", track_type="sfx", clips=sfx_clips))
 
         return TimelineRecord(
             timeline_id=f"timeline_{uuid4().hex[:12]}",
@@ -150,6 +210,7 @@ class TimelineBuilder:
             output_mode="review",
             tracks=tracks,
             review_flags=review_flags,
+            caption_segments=normalized_segments,
             narration_source_uri=narration_source_uri,
             export_overlays=export_overlays or [],
             applied_recommendations=applied_recommendations,
@@ -196,6 +257,11 @@ class TimelineBuilder:
         payload["auto_apply_allowed"] = _normalize_boolish(payload.get("auto_apply_allowed", False))
         payload["review_required"] = _normalize_boolish(payload.get("review_required", False))
         return payload
+
+    def _media_controls(self, recommendation: dict[str, object], *, media_kind: str, duration_sec: float) -> dict[str, object]:
+        payload = recommendation.get("payload")
+        controls = payload.get("media_controls") if isinstance(payload, dict) else {}
+        return normalize_media_controls(controls, media_kind=media_kind, duration_sec=duration_sec)
 
     def build_review_snapshot(
         self,

@@ -1,0 +1,42 @@
+{
+  "topic": "VideoBox OSS dashboard and editor adoption",
+  "decision_question": "Which source can be safely ported into VideoBox without replacing its authoritative editing and rendering contracts?",
+  "subtopics": [
+    {
+      "name": "SaaS shell",
+      "questions": ["Which shadcn-admin shell files are portable?", "Which Supabase patterns should remain reference-only?"],
+      "source_types": ["official repository", "official documentation"],
+      "priority": 1
+    },
+    {
+      "name": "Editor workbench",
+      "questions": ["Does current OpenCut contain an editor?", "Which classic editor interactions can be extracted safely?"],
+      "source_types": ["official repository", "official roadmap"],
+      "priority": 1
+    },
+    {
+      "name": "Transcript and waveform",
+      "questions": ["Which Opencast segment and cue interactions fit VideoBox?", "Which dependencies and API contracts must be rejected?"],
+      "source_types": ["official repository", "official application documentation"],
+      "priority": 1
+    },
+    {
+      "name": "VideoBox migration",
+      "questions": ["How should the monolithic App be decomposed?", "How are current API and output guarantees preserved?"],
+      "source_types": ["current local source", "authoritative VideoBox plans"],
+      "priority": 1
+    },
+    {
+      "name": "Governance",
+      "questions": ["What attribution and dependency audit is required?", "What TDD and release gates prevent regressions?"],
+      "source_types": ["licenses", "current test harness"],
+      "priority": 2
+    }
+  ],
+  "deliverables": [
+    "research report",
+    "approved-boundary design proposal",
+    "task-level implementation plan",
+    "SSOT status update"
+  ]
+}

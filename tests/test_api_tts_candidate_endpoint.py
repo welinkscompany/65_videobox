@@ -1,11 +1,24 @@
 from __future__ import annotations
 
 from pathlib import Path
+import wave
 
 from fastapi.testclient import TestClient
 
 from videobox_api.main import create_app
-from videobox_core_engine.settings import TTSEngineConfig
+from videobox_provider_interfaces.tts import TTSRequest, TTSResult
+
+
+class _DeterministicWaveTTSProvider:
+    provider_name = "deterministic_wave"
+
+    def synthesize(self, request: TTSRequest) -> TTSResult:
+        with wave.open(str(request.output_path), "wb") as wav_file:
+            wav_file.setnchannels(1)
+            wav_file.setsampwidth(2)
+            wav_file.setframerate(1000)
+            wav_file.writeframes(b"\x01\x00" * 3000)
+        return TTSResult(output_uri=str(request.output_path), provider_name=self.provider_name)
 
 
 def test_tts_candidate_endpoint_produces_a_real_synthesized_audio_asset_end_to_end(tmp_path: Path) -> None:
@@ -14,7 +27,7 @@ def test_tts_candidate_endpoint_produces_a_real_synthesized_audio_asset_end_to_e
 
     app = create_app(
         projects_root=tmp_path,
-        tts_engine_config=TTSEngineConfig(enabled=True, engine="gtts", language="en"),
+        tts_provider=_DeterministicWaveTTSProvider(),
     )
     client = TestClient(app)
     project_id = client.post("/api/projects", json={"name": "TTS Candidate Draft"}).json()["project_id"]
@@ -48,7 +61,7 @@ def test_tts_candidates_accumulate_per_segment_for_ab_comparison(tmp_path: Path)
 
     app = create_app(
         projects_root=tmp_path,
-        tts_engine_config=TTSEngineConfig(enabled=True, engine="gtts", language="en"),
+        tts_provider=_DeterministicWaveTTSProvider(),
     )
     client = TestClient(app)
     project_id = client.post("/api/projects", json={"name": "TTS AB Draft"}).json()["project_id"]
@@ -98,3 +111,59 @@ def test_tts_candidates_accumulate_per_segment_for_ab_comparison(tmp_path: Path)
     )
     assert content_response.status_code == 200
     assert len(content_response.content) > 0
+
+
+def test_tts_candidate_endpoint_serializes_pending_operator_review_with_fake_provider(tmp_path: Path) -> None:
+    voice_sample_path = tmp_path / "voice_sample.wav"
+    voice_sample_path.write_bytes(b"fake voice sample bytes")
+    app = create_app(projects_root=tmp_path, tts_provider=_DeterministicWaveTTSProvider())
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "TTS Acceptance"}).json()["project_id"]
+    voice_sample_asset_id = client.post(
+        f"/api/projects/{project_id}/assets/voice-sample",
+        json={"source_path": str(voice_sample_path)},
+    ).json()["asset_id"]
+
+    response = client.post(
+        f"/api/projects/{project_id}/tts-candidates",
+        json={
+            "segment_text": "안녕하세요.",
+            "voice_sample_asset_id": voice_sample_asset_id,
+            "segment_id": "seg_001",
+            "target_duration_sec": 3.0,
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["technical_status"] == "accepted"
+    assert response.json()["operator_review_status"] == "pending"
+
+
+def test_tts_candidate_listening_review_decision_persists_across_reads(tmp_path: Path) -> None:
+    voice_sample_path = tmp_path / "voice_sample.wav"
+    voice_sample_path.write_bytes(b"fake voice sample bytes")
+    client = TestClient(create_app(projects_root=tmp_path, tts_provider=_DeterministicWaveTTSProvider()))
+    project_id = client.post("/api/projects", json={"name": "Listening review"}).json()["project_id"]
+    voice_sample_asset_id = client.post(
+        f"/api/projects/{project_id}/assets/voice-sample",
+        json={"source_path": str(voice_sample_path)},
+    ).json()["asset_id"]
+    candidate = client.post(
+        f"/api/projects/{project_id}/tts-candidates",
+        json={
+            "segment_text": "청취 승인 대상입니다.",
+            "voice_sample_asset_id": voice_sample_asset_id,
+            "segment_id": "seg_001",
+            "target_duration_sec": 3.0,
+        },
+    ).json()
+
+    approved = client.patch(
+        f"/api/projects/{project_id}/tts-candidates/{candidate['candidate_id']}/listening-review",
+        json={"decision": "approved"},
+    )
+    restored = client.get(f"/api/projects/{project_id}/segments/seg_001/tts-candidates")
+
+    assert approved.status_code == 200
+    assert approved.json()["operator_review_status"] == "approved"
+    assert restored.json()["candidates"][0]["operator_review_status"] == "approved"

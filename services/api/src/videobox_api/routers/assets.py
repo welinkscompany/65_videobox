@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+from uuid import uuid4
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, BackgroundTasks, File, UploadFile, status
 from fastapi.responses import FileResponse
 
 from videobox_api.errors import _http_error
@@ -17,11 +18,16 @@ from videobox_api.models import (
     BrollAssetRegistrationRequest,
     BrollBatchAssetRegistrationRequest,
     TTSCandidateListResponse,
+    TTSCandidateResponse,
     TTSCandidateRecordResponse,
     TTSCandidateRequest,
+    TTSListeningReviewRequest,
 )
 from videobox_api.orchestration import ApiOrchestrator
 from videobox_storage.local_project_store import LocalProjectStore
+
+MAX_VOICE_SAMPLE_UPLOAD_BYTES = 128 * 1024 * 1024
+VOICE_SAMPLE_UPLOAD_CHUNK_BYTES = 1024 * 1024
 
 
 def build_assets_router(orchestrator: ApiOrchestrator, store: LocalProjectStore) -> APIRouter:
@@ -74,7 +80,7 @@ def build_assets_router(orchestrator: ApiOrchestrator, store: LocalProjectStore)
             storage_uri=asset.storage_uri,
         )
 
-    @router.get("/api/projects/{project_id}/assets/broll-video")
+    @router.get("/api/projects/{project_id}/assets/broll-video", response_model_exclude_none=True)
     def list_broll_assets(project_id: str) -> AssetListResponse:
         try:
             assets = orchestrator.list_broll_assets(project_id=project_id)
@@ -86,18 +92,34 @@ def build_assets_router(orchestrator: ApiOrchestrator, store: LocalProjectStore)
     def register_broll_assets_batch(
         project_id: str,
         payload: BrollBatchAssetRegistrationRequest,
-    ) -> AssetListResponse:
+        background_tasks: BackgroundTasks,
+    ) -> dict:
         try:
-            assets = orchestrator.register_broll_assets_batch(
+            batch = orchestrator.register_broll_assets_batch(
                 project_id=project_id,
                 source_paths=[Path(source_path) for source_path in payload.source_paths],
                 source_directory=Path(payload.source_directory) if payload.source_directory else None,
                 tags=payload.tags,
                 title_by_source_path=payload.title_by_source_path,
+                recursive=payload.recursive,
             )
         except Exception as exc:
             raise _http_error(exc) from exc
-        return AssetListResponse(assets=[AssetArchiveItemResponse(**asset) for asset in assets])
+        service = getattr(orchestrator, "media_analysis_service", None)
+        analyses = []
+        for asset in batch["assets"]:
+            if service is None:
+                continue
+            try:
+                analysis = service.enqueue_analysis(project_id=project_id, asset_id=asset["asset_id"])
+                dispatcher = getattr(orchestrator, "media_analysis_dispatcher", None)
+                if dispatcher is not None:
+                    background_tasks.add_task(dispatcher, project_id=project_id, analysis_id=analysis["analysis_id"])
+                analyses.append(service.get_analysis(project_id, analysis["analysis_id"]))
+            except Exception:
+                # Asset registration is durable even if analysis cannot start.
+                continue
+        return {"assets": [AssetArchiveItemResponse(**asset).model_dump() for asset in batch["assets"]], "analysis_jobs": analyses, "failures": batch["failures"]}
 
     @router.post("/api/projects/{project_id}/assets/raw-video", status_code=status.HTTP_201_CREATED)
     def register_raw_video(project_id: str, payload: AssetRegistrationRequest) -> AssetResponse:
@@ -114,6 +136,14 @@ def build_assets_router(orchestrator: ApiOrchestrator, store: LocalProjectStore)
             storage_uri=asset.storage_uri,
         )
 
+    @router.post("/api/projects/{project_id}/assets/sfx", status_code=status.HTTP_201_CREATED)
+    def register_sfx(project_id: str, payload: AssetRegistrationRequest) -> AssetResponse:
+        try:
+            asset = orchestrator.register_sfx_asset(project_id=project_id, source_path=Path(payload.source_path))
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return AssetResponse(asset_id=asset.asset_id, asset_type=asset.asset_type, storage_uri=asset.storage_uri)
+
     @router.post("/api/projects/{project_id}/assets/voice-sample", status_code=status.HTTP_201_CREATED)
     def register_voice_sample(project_id: str, payload: AssetRegistrationRequest) -> AssetResponse:
         try:
@@ -129,18 +159,63 @@ def build_assets_router(orchestrator: ApiOrchestrator, store: LocalProjectStore)
             storage_uri=asset.storage_uri,
         )
 
+    @router.get("/api/projects/{project_id}/assets/voice-sample")
+    def list_voice_sample_assets(project_id: str) -> AssetListResponse:
+        try:
+            assets = orchestrator.list_voice_sample_assets(project_id=project_id)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return AssetListResponse(assets=[AssetArchiveItemResponse(**asset) for asset in assets])
+
+    @router.post("/api/projects/{project_id}/assets/voice-sample/upload", status_code=status.HTTP_201_CREATED)
+    async def upload_voice_sample(
+        project_id: str,
+        file: UploadFile = File(...),
+    ) -> AssetResponse:
+        filename = Path(file.filename or "").name
+        suffix = Path(filename).suffix.lower()
+        if not filename or suffix not in {".wav", ".mp3", ".m4a", ".webm", ".ogg", ".flac"}:
+            raise _http_error(ValueError("Voice sample must be an audio file with a supported extension."))
+        staged_path = store.project_root(project_id) / "tmp" / "voice_sample_uploads" / f"{uuid4().hex}{suffix}"
+        try:
+            staged_path.parent.mkdir(parents=True, exist_ok=True)
+            total_bytes = 0
+            with staged_path.open("wb") as staged_file:
+                while chunk := await file.read(VOICE_SAMPLE_UPLOAD_CHUNK_BYTES):
+                    total_bytes += len(chunk)
+                    if total_bytes > MAX_VOICE_SAMPLE_UPLOAD_BYTES:
+                        raise ValueError("Voice sample upload exceeds the 128 MiB limit.")
+                    staged_file.write(chunk)
+            if total_bytes == 0:
+                raise ValueError("Voice sample upload is empty.")
+            asset = orchestrator.register_voice_sample_asset(
+                project_id=project_id,
+                source_path=staged_path,
+            )
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        finally:
+            await file.close()
+            staged_path.unlink(missing_ok=True)
+        return AssetResponse(
+            asset_id=asset.asset_id,
+            asset_type=asset.asset_type,
+            storage_uri=asset.storage_uri,
+        )
+
     @router.post("/api/projects/{project_id}/tts-candidates", status_code=status.HTTP_201_CREATED)
-    def generate_tts_candidate(project_id: str, payload: TTSCandidateRequest) -> AssetResponse:
+    def generate_tts_candidate(project_id: str, payload: TTSCandidateRequest) -> TTSCandidateResponse:
         try:
             asset = orchestrator.generate_tts_replacement_candidate(
                 project_id=project_id,
                 segment_text=payload.segment_text,
                 voice_sample_asset_id=payload.voice_sample_asset_id,
                 segment_id=payload.segment_id,
+                target_duration_sec=payload.target_duration_sec,
             )
         except Exception as exc:
             raise _http_error(exc) from exc
-        return AssetResponse(**asset)
+        return TTSCandidateResponse(**asset)
 
     @router.get("/api/projects/{project_id}/segments/{segment_id}/tts-candidates")
     def list_tts_candidates(project_id: str, segment_id: str) -> TTSCandidateListResponse:
@@ -153,6 +228,22 @@ def build_assets_router(orchestrator: ApiOrchestrator, store: LocalProjectStore)
         return TTSCandidateListResponse(
             candidates=[TTSCandidateRecordResponse(**candidate) for candidate in candidates]
         )
+
+    @router.patch("/api/projects/{project_id}/tts-candidates/{candidate_id}/listening-review")
+    def review_tts_candidate(
+        project_id: str,
+        candidate_id: str,
+        payload: TTSListeningReviewRequest,
+    ) -> TTSCandidateRecordResponse:
+        try:
+            candidate = orchestrator.review_tts_replacement_candidate(
+                project_id=project_id,
+                candidate_id=candidate_id,
+                decision=payload.decision,
+            )
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return TTSCandidateRecordResponse(**candidate)
 
     @router.get("/api/projects/{project_id}/assets/{asset_id}/content")
     def get_asset_content(project_id: str, asset_id: str) -> FileResponse:

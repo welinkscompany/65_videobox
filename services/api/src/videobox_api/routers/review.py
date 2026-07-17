@@ -48,6 +48,20 @@ def _build_review_snapshot_response(result: dict) -> ReviewSnapshotResponse:
 def build_review_router(orchestrator: ApiOrchestrator) -> APIRouter:
     router = APIRouter()
 
+    @router.get("/api/projects/{project_id}/review-approvals/timelines/{timeline_id}")
+    def get_review_approval(project_id: str, timeline_id: str) -> ReviewApprovalResponse:
+        """Read durable review freshness, independent of an old job snapshot."""
+        try:
+            result = orchestrator.pipeline.store.get_review_state(project_id=project_id, timeline_id=timeline_id)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return ReviewApprovalResponse(
+            timeline_id=result["timeline_id"], project_id=result["project_id"], review_status=result["status"],
+            approved_at=result.get("approved_at"), updated_at=result["updated_at"],
+            source_session_revision=result.get("source_session_revision"), is_current=result.get("is_current", True),
+            invalidated_at=result.get("invalidated_at"), invalidated_reason=result.get("invalidated_reason"),
+        )
+
     @router.get("/api/projects/{project_id}/review-snapshots/{job_id}")
     def get_review_snapshot(project_id: str, job_id: str) -> ReviewSnapshotResponse:
         try:
@@ -100,6 +114,8 @@ def build_review_router(orchestrator: ApiOrchestrator) -> APIRouter:
             review_status=result["status"],
             approved_at=result["approved_at"],
             updated_at=result["updated_at"],
+            source_session_revision=result.get("source_session_revision"), is_current=result.get("is_current", True),
+            invalidated_at=result.get("invalidated_at"), invalidated_reason=result.get("invalidated_reason"),
         )
 
     @router.post("/api/projects/{project_id}/review-approvals/{job_id}/reopen", status_code=status.HTTP_202_ACCEPTED)
@@ -114,6 +130,8 @@ def build_review_router(orchestrator: ApiOrchestrator) -> APIRouter:
             review_status=result["status"],
             approved_at=result["approved_at"],
             updated_at=result["updated_at"],
+            source_session_revision=result.get("source_session_revision"), is_current=result.get("is_current", True),
+            invalidated_at=result.get("invalidated_at"), invalidated_reason=result.get("invalidated_reason"),
         )
 
     return router

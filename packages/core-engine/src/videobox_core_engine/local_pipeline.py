@@ -33,9 +33,13 @@ from videobox_core_engine.canonical_track import (
 )
 from videobox_capcut_export import CapCutExportAdapter
 from videobox_core_engine.auto_cut import AutoCutPlanner
+from videobox_core_engine.capcut_handoff import CapCutHandoffError, CapCutHandoffService
 from videobox_core_engine.ffmpeg_auto_cut_executor import FfmpegAutoCutExecutor
 from videobox_core_engine.ffmpeg_final_renderer import FfmpegFinalRenderer
+from videobox_core_engine.output_source_verifier import OutputSourceStaleError, verify_output_freshness
+from videobox_core_engine.ass_subtitles import render_editing_session_ass
 from videobox_core_engine.thumbnail_generator import ThumbnailGenerationError, generate_video_thumbnail
+from videobox_core_engine.tts_acceptance import assess_tts_audio
 from videobox_core_engine.editing_session import (
     build_editing_session,
     build_partial_regeneration_request,
@@ -55,6 +59,10 @@ from videobox_core_engine.editing_session import (
     update_segment_music_override,
     update_segment_table_overlay,
     update_segment_visual_overlay,
+)
+from videobox_core_engine.script_draft_session import (
+    apply_narration_alignment_to_script_draft,
+    build_provisional_script_draft_session,
 )
 from videobox_core_engine.output_operator_copy import (
     OutputOperatorCopyBuilder,
@@ -79,7 +87,7 @@ from videobox_domain_models.recommendations import RecommendationType
 from videobox_provider_interfaces.recommenders import RecommendationProvider, RecommendationRequest
 from videobox_provider_interfaces.stt import MockSTTProvider, STTProvider, STTRequest
 from videobox_provider_interfaces.tts import TTSRequest
-from videobox_storage.local_project_store import LocalProjectStore
+from videobox_storage.local_project_store import EditingSessionRevisionConflict, LocalProjectStore
 from videobox_core_engine._pipeline_shared_helpers import (
     _build_review_guidance_reuse_key,
     _canonical_runtime_pending_recommendation_reason,
@@ -91,7 +99,7 @@ from videobox_core_engine._pipeline_shared_helpers import (
     _normalized_runtime_pending_recommendations,
     _runtime_pending_recommendation_identity_key,
 )
-from videobox_core_engine.editing_session_and_regeneration import EditingSessionRegenerationMixin
+from videobox_core_engine.editing_session_and_regeneration import EditingSessionConflict, EditingSessionRegenerationMixin
 from videobox_core_engine._pipeline_private_helpers import _PipelinePrivateHelpersMixin
 
 
@@ -113,6 +121,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         auto_cut_executor: FfmpegAutoCutExecutor | None = None,
         final_renderer: FfmpegFinalRenderer | None = None,
         pycapcut_exporter: Any | None = None,
+        capcut_handoff_service: CapCutHandoffService | None = None,
         tts_provider: Any | None = None,
         transcript_aligner: TranscriptAligner | None = None,
     ) -> None:
@@ -124,7 +133,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         self.review_guidance_builder = review_guidance_builder or HeuristicReviewGuidanceBuilder()
         self.output_operator_copy_builder = output_operator_copy_builder or StaticOutputOperatorCopyBuilder()
         self.timeline_builder = timeline_builder or TimelineBuilder()
-        self.preview_renderer = preview_renderer or PreviewRenderer()
+        self.preview_renderer = preview_renderer or PreviewRenderer(store=self.store)
         self.capcut_exporter = capcut_exporter or CapCutExportAdapter()
         self.auto_cut_planner = auto_cut_planner or AutoCutPlanner()
         self.auto_cut_executor = auto_cut_executor or FfmpegAutoCutExecutor(planner=self.auto_cut_planner)
@@ -133,6 +142,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         # aren't installed by default, so this stays unset unless the caller
         # (create_app, when CapCutDraftExportConfig.enabled) explicitly injects one.
         self.pycapcut_exporter = pycapcut_exporter
+        self.capcut_handoff_service = capcut_handoff_service or CapCutHandoffService()
         # No eager default: gtts needs network access, elevenlabs needs an API
         # key, and local_xtts needs a heavy optional install — none of these
         # should run implicitly for callers/tests that don't opt in.
@@ -215,6 +225,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         segment_text: str,
         voice_sample_asset_id: str,
         segment_id: str | None = None,
+        target_duration_sec: float | None = None,
     ) -> dict[str, Any]:
         if self.tts_provider is None:
             raise RuntimeError(
@@ -227,35 +238,69 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         voice_sample_path = self.store.resolve_storage_uri(
             project_id=project_id, storage_uri=voice_sample_asset["storage_uri"]
         )
-        with tempfile.TemporaryDirectory(prefix="videobox_tts_candidate_") as raw_work_dir:
-            output_path = Path(raw_work_dir) / "tts_candidate.mp3"
-            tts_result = self.tts_provider.synthesize(
-                TTSRequest(
-                    text=segment_text,
-                    voice_sample_uri=str(voice_sample_path),
-                    output_path=output_path,
+        try:
+            with tempfile.TemporaryDirectory(prefix="videobox_tts_candidate_") as raw_work_dir:
+                output_path = Path(raw_work_dir) / "tts_candidate.wav"
+                tts_result = self.tts_provider.synthesize(
+                    TTSRequest(
+                        text=segment_text,
+                        voice_sample_uri=str(voice_sample_path),
+                        output_path=output_path,
+                        target_duration_sec=target_duration_sec,
+                    )
                 )
-            )
-            asset = self.store.register_asset(
-                project_id=project_id,
-                asset_type=AssetType.GENERATED_TTS_AUDIO,
-                source_path=output_path,
-                metadata={"provider_name": tts_result.provider_name, "source_text": segment_text},
-            )
+                acceptance = (
+                    assess_tts_audio(path=output_path, target_duration_sec=target_duration_sec)
+                    if target_duration_sec is not None
+                    else None
+                )
+                asset = self.store.register_asset(
+                    project_id=project_id,
+                    asset_type=AssetType.GENERATED_TTS_AUDIO,
+                    source_path=output_path,
+                    metadata={"provider_name": tts_result.provider_name, "source_text": segment_text},
+                )
+        except Exception as exc:
+            raise RuntimeError(
+                "TTS candidate generation failed; original narration remains selected."
+            ) from exc
         # Recorded as a comparable A/B candidate only when the caller
         # associates it with a segment; ad-hoc previews without a segment_id
         # still work exactly as before, just without a saved comparison row.
         if segment_id:
-            self.store.save_tts_candidate(
+            candidate = self.store.save_tts_candidate(
                 project_id=project_id,
                 segment_id=segment_id,
                 asset_id=asset.asset_id,
                 source_text=segment_text,
+                acceptance=acceptance,
             )
+            return {**self._asset_payload(asset), **candidate}
+        return self._asset_payload(asset)
+
+    def register_sfx_asset(self, *, project_id: str, source_path: Path) -> dict[str, Any]:
+        asset = self.store.register_asset(
+            project_id=project_id,
+            asset_type=AssetType.SFX,
+            source_path=source_path,
+        )
         return self._asset_payload(asset)
 
     def list_tts_replacement_candidates(self, *, project_id: str, segment_id: str) -> list[dict[str, Any]]:
         return self.store.list_tts_candidates(project_id=project_id, segment_id=segment_id)
+
+    def review_tts_replacement_candidate(
+        self,
+        *,
+        project_id: str,
+        candidate_id: str,
+        decision: str,
+    ) -> dict[str, Any]:
+        return self.store.update_tts_candidate_listening_review(
+            project_id=project_id,
+            candidate_id=candidate_id,
+            decision=decision,
+        )
 
     def run_auto_cut_detection(self, *, project_id: str, raw_video_asset_id: str) -> dict[str, Any]:
         asset = self.store.get_asset(project_id=project_id, asset_id=raw_video_asset_id)
@@ -683,6 +728,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
             segments=analysis["segments"],
             recommendations=recommendations,
             narration_source_uri=str(narration_asset["storage_uri"]),
+            asset_uri_validator=lambda asset_id, expected_type, uri: self._is_valid_project_audio_recommendation_uri(asset_id, expected_type, uri, project_id),
         )
         timeline_payload = {
             "project_id": timeline.project_id,
@@ -700,6 +746,11 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                             "end_sec": clip.end_sec,
                             "clip_type": clip.clip_type,
                             "recommendation_id": clip.recommendation_id,
+                            "asset_id": clip.asset_id,
+                            "media_controls": clip.media_controls,
+                            "expected_content_sha256": clip.expected_content_sha256,
+                            "media_revision": clip.media_revision,
+                            "warning_provenance": clip.warning_provenance,
                         }
                         for clip in track.clips
                     ],
@@ -714,6 +765,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 }
                 for flag in timeline.review_flags
             ],
+            "caption_segments": timeline.caption_segments,
             "applied_recommendations": timeline.applied_recommendations,
             "pending_recommendations": timeline.pending_recommendations,
             "recommendation_decisions": timeline.recommendation_decisions,
@@ -917,6 +969,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         )
         self._persist_pending_recommendation_decision(
             project_id=project_id,
+            timeline_job_id=timeline_job_id,
             timeline=timeline,
             recommendation_id=recommendation_id,
             auto_apply_allowed=True,
@@ -949,6 +1002,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         )
         self._persist_pending_recommendation_decision(
             project_id=project_id,
+            timeline_job_id=timeline_job_id,
             timeline=timeline,
             recommendation_id=recommendation_id,
             auto_apply_allowed=False,
@@ -963,10 +1017,23 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
     def approve_timeline_review(self, *, project_id: str, timeline_job_id: str) -> dict[str, Any]:
         timeline = self.get_timeline_result(project_id=project_id, job_id=timeline_job_id)["timeline"]
         self._ensure_timeline_has_no_blockers(timeline)
+        session = self._editing_session_for_output_timeline(
+            project_id=project_id,
+            timeline=timeline,
+        )
+        source_session_revision = None
+        if session is not None:
+            source_session_revision = int(session["session_revision"])
+            self.store.bind_timeline_to_editing_session_revision(
+                project_id=project_id,
+                timeline_id=str(timeline["timeline_id"]),
+                session_revision=source_session_revision,
+            )
         return self.store.save_review_state(
             project_id=project_id,
             timeline_id=str(timeline["timeline_id"]),
             status="approved",
+            source_session_revision=source_session_revision,
         )
 
     def reopen_timeline_review(self, *, project_id: str, timeline_job_id: str) -> dict[str, Any]:
@@ -1045,10 +1112,8 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         try:
             timeline = self.get_timeline_result(project_id=project_id, job_id=timeline_job_id)["timeline"]
             self._ensure_timeline_ready_for_output(timeline)
-            preview_payload = self.preview_renderer.build_preview_payload(
-                project_id=project_id,
-                timeline=timeline,
-            )
+            self._ensure_output_dependencies_fresh(project_id=project_id, timeline=timeline)
+            preview_payload = self.preview_renderer.build_preview_payload(project_id=project_id, timeline=timeline)
         except Exception as exc:
             failed_job = self.store.update_job(
                 project_id=project_id,
@@ -1123,6 +1188,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         try:
             timeline = self.get_timeline_result(project_id=project_id, job_id=timeline_job_id)["timeline"]
             self._ensure_timeline_ready_for_output(timeline)
+            self._ensure_output_dependencies_fresh(project_id=project_id, timeline=timeline)
             latest_subtitle = self.store.get_latest_subtitle_for_timeline(
                 project_id=project_id,
                 timeline_id=str(timeline["timeline_id"]),
@@ -1230,6 +1296,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         try:
             timeline = self.get_timeline_result(project_id=project_id, job_id=timeline_job_id)["timeline"]
             self._ensure_timeline_ready_for_output(timeline)
+            self._ensure_output_dependencies_fresh(project_id=project_id, timeline=timeline)
             latest_subtitle = self.store.get_latest_subtitle_for_timeline(
                 project_id=project_id,
                 timeline_id=str(timeline["timeline_id"]),
@@ -1239,13 +1306,26 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 if latest_subtitle
                 else None
             )
+            editing_session = self._editing_session_for_output_timeline(project_id=project_id, timeline=timeline)
             with tempfile.TemporaryDirectory(prefix="videobox_final_render_") as raw_render_dir:
                 render_output_path = Path(raw_render_dir) / "output.mp4"
+                subtitle_ass_path = None
+                if editing_session is not None:
+                    subtitle_ass_path = Path(raw_render_dir) / "captions.ass"
+                    subtitle_ass_path.write_text(
+                        render_editing_session_ass(
+                            editing_session,
+                            video_width=self.final_renderer.video_width,
+                            video_height=self.final_renderer.video_height,
+                        ),
+                        encoding="utf-8",
+                    )
                 self.final_renderer.render_timeline_to_mp4(
                     project_id=project_id,
                     timeline=timeline,
                     output_path=render_output_path,
                     subtitle_file_path=subtitle_file_path,
+                    subtitle_ass_path=subtitle_ass_path,
                     on_progress=lambda percent: self.store.update_job_progress(
                         project_id=project_id, job_id=job["job_id"], progress_percent=percent
                     ),
@@ -1322,6 +1402,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         try:
             timeline = self.get_timeline_result(project_id=project_id, job_id=timeline_job_id)["timeline"]
             self._ensure_timeline_ready_for_output(timeline)
+            self._ensure_output_dependencies_fresh(project_id=project_id, timeline=timeline)
             latest_subtitle = self.store.get_latest_subtitle_for_timeline(
                 project_id=project_id,
                 timeline_id=str(timeline["timeline_id"]),
@@ -1331,6 +1412,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 if latest_subtitle
                 else None
             )
+            editing_session = self._editing_session_for_output_timeline(project_id=project_id, timeline=timeline)
             with tempfile.TemporaryDirectory(prefix="videobox_capcut_draft_") as raw_drafts_root:
                 draft_path = self.pycapcut_exporter.export_timeline(
                     project_id=project_id,
@@ -1338,11 +1420,13 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                     drafts_root=Path(raw_drafts_root),
                     draft_name=str(timeline["timeline_id"]),
                     subtitle_file_path=subtitle_file_path,
+                    editing_session=editing_session,
                 )
                 persisted = self.store.save_capcut_draft_export(
                     project_id=project_id,
                     timeline_id=str(timeline["timeline_id"]),
-                    source_draft_path=draft_path,
+                    source_draft_path=getattr(draft_path, "draft_path", draft_path),
+                    notes=list(getattr(draft_path, "capcut_compatibility_warnings", [])),
                 )
         except Exception as exc:
             failed_job = self.store.update_job(
@@ -1365,10 +1449,144 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
             output_ref=persisted["export_id"],
         )
 
+    def create_script_draft_editing_session(self, *, project_id: str, script_asset_id: str) -> dict[str, Any]:
+        asset = self.store.get_asset(project_id=project_id, asset_id=script_asset_id)
+        if str(asset.get("asset_type")) != AssetType.SCRIPT_DOCUMENT.value:
+            raise ValueError("script_asset_id must reference a script_document asset.")
+        script_path = self.store.resolve_storage_uri(project_id=project_id, storage_uri=str(asset["storage_uri"]))
+        session_payload = build_provisional_script_draft_session(
+            project_id=project_id,
+            script_asset_id=script_asset_id,
+            script_text=script_path.read_text(encoding="utf-8"),
+        )
+        return self.store.save_editing_session(
+            project_id=project_id,
+            timeline_id=str(session_payload["timeline_id"]),
+            session_payload=session_payload,
+        )
+
+    def apply_script_draft_narration_alignment(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        aligned_segments: list[dict[str, Any]],
+        expected_revision: int,
+    ) -> dict[str, Any]:
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        if int(session.get("session_revision") or 1) != expected_revision:
+            raise EditingSessionConflict(session)
+        updated, _ = apply_narration_alignment_to_script_draft(session=session, aligned_segments=aligned_segments)
+        try:
+            return self.store.update_script_draft_alignment_and_stale_proposals(
+                project_id=project_id, session_id=session_id, session_payload=updated,
+                expected_revision=expected_revision,
+                source_script_segment_ids=list(updated.get("stale_proposal_source_script_segment_ids") or []),
+            )
+        except EditingSessionRevisionConflict:
+            raise EditingSessionConflict(
+                self.store.get_editing_session(project_id=project_id, session_id=session_id)
+            ) from None
+
+    def _editing_session_for_output_timeline(
+        self, *, project_id: str, timeline: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        try:
+            session = self.store.get_latest_editing_session(project_id=project_id)
+        except KeyError:
+            return None
+        if str(session.get("timeline_id") or "") != str(timeline.get("timeline_id") or ""):
+            return None
+        return session
+
+    def _ensure_output_dependencies_fresh(self, *, project_id: str, timeline: dict[str, Any]) -> None:
+        """A stale approval/subtitle must never authorize a new output artifact."""
+        timeline_id = str(timeline.get("timeline_id") or "")
+        if not timeline_id:
+            return
+        try:
+            active_session = self.store.get_latest_editing_session(project_id=project_id)
+        except KeyError:
+            active_session = None
+        if active_session is not None and str(active_session.get("timeline_id") or "") != timeline_id:
+            raise OutputSourceStaleError("timeline is not the active editing session output")
+        try:
+            review = self.store.get_review_state(project_id=project_id, timeline_id=timeline_id)
+        except KeyError:
+            review = None
+        subtitle = self.store.get_latest_subtitle_for_timeline(
+            project_id=project_id, timeline_id=timeline_id, include_stale=True
+        )
+        verify_output_freshness(
+            editing_session=active_session,
+            timeline=timeline,
+            subtitle=subtitle,
+            review=review,
+        )
+
     def get_capcut_draft_export_result(self, *, project_id: str, job_id: str) -> dict[str, Any]:
         job = self.store.get_job(project_id=project_id, job_id=job_id)
         if not job["output_ref"]:
-            return {"job_id": job["job_id"], "status": job["status"], "export": None}
+            return {
+                "job_id": job["job_id"],
+                "status": job["status"],
+                "export": None,
+                "error_message": job.get("error_message"),
+            }
         export = self.store.get_capcut_draft_export(project_id=project_id, export_id=job["output_ref"])
-        return {"job_id": job["job_id"], "status": job["status"], "export": export}
+        return {
+            "job_id": job["job_id"],
+            "status": job["status"],
+            "export": export,
+            "error_message": job.get("error_message"),
+        }
+
+    def register_capcut_draft_handoff(self, *, project_id: str, job_id: str) -> dict[str, Any]:
+        result = self.get_capcut_draft_export_result(project_id=project_id, job_id=job_id)
+        export = result["export"]
+        if export is None:
+            raise RuntimeError("CapCut 초안 결과가 없어 등록할 수 없습니다. 실제 CapCut 초안 내보내기를 다시 실행하세요.")
+        source_path = self.store.resolve_storage_uri(project_id=project_id, storage_uri=export["file_uri"])
+        try:
+            registered = self.capcut_handoff_service.register(
+                source_draft_path=source_path,
+                export_id=str(export["export_id"]),
+            )
+            handoff = {
+                "status": registered.status,
+                "source_file_uri": export["file_uri"],
+                "registered_project_path": str(registered.registered_path),
+                "error_message": None,
+                "registered_at": registered.registered_at,
+                "reused": registered.reused,
+            }
+        except CapCutHandoffError as exc:
+            handoff = {
+                "status": "failed",
+                "source_file_uri": export["file_uri"],
+                "registered_project_path": None,
+                "error_message": str(exc),
+                "registered_at": None,
+                "reused": False,
+            }
+        self.store.update_capcut_draft_handoff(
+            project_id=project_id,
+            export_id=str(export["export_id"]),
+            handoff=handoff,
+        )
+        return handoff
+
+    def get_capcut_handoff_diagnostics(self) -> dict[str, Any]:
+        diagnostics = self.capcut_handoff_service.diagnose()
+        return {
+            "status": diagnostics.status,
+            "installation_path": str(diagnostics.installation_path) if diagnostics.installation_path else None,
+            "detected_version": diagnostics.detected_version,
+            "is_supported": diagnostics.is_supported,
+            "project_root_path": str(diagnostics.project_root_path),
+            "project_root_exists": diagnostics.project_root_exists,
+            "write_access": diagnostics.write_access,
+            "recovery_message": diagnostics.recovery_message,
+            "checked_at": diagnostics.checked_at,
+        }
 
