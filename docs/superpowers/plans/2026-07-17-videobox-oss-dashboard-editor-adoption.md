@@ -167,15 +167,15 @@ Commit: `feat: establish the VideoBox UI foundation`
 
 ### Task 5: Extract URL-owned workspace state and add code-based typed routing
 
-- [ ] **Task 5 완료**
+- [x] **Task 5 완료**
 
 **Files:** create `src/app/{AppRoot,AppRouter,routeManifest,ProjectWorkspaceProvider,LegacyWorkspacePage}.tsx` and tests; modify `main.tsx`, `App.tsx`, package/lockfile.
 
-- [ ] **RED:** direct URL, refresh restoration, zero/unknown project, redirects, project switch, active route, and request dedupe.
-- [ ] Install only `@tanstack/react-router@1.168.22`; do not add router plugin, Query, Redux, or Zustand.
-- [ ] Canonical redirects: `/` → last valid project home or `/projects`; `/projects` with zero projects → onboarding empty state; project create success → `/projects/$projectId/create`; invalid project → recovery page.
-- [ ] Provider derives project from route param. Project switch only navigates; it does not hold a second selected-project truth.
-- [ ] **GREEN:** router/provider/legacy baseline tests; full frontend; build; network guard; common closeout.
+- [x] **RED:** direct URL, refresh restoration, zero/unknown project, redirects, project switch, active route, and request dedupe.
+- [x] Install only `@tanstack/react-router@1.168.22`; do not add router plugin, Query, Redux, or Zustand.
+- [x] Canonical redirects: `/` → last valid project home or `/projects`; `/projects` with zero projects → onboarding empty state; project create success → `/projects/$projectId/create`; invalid project → recovery page.
+- [x] Provider derives project from route param. Project switch only navigates; it does not hold a second selected-project truth.
+- [x] **GREEN:** router/provider/legacy baseline tests; full frontend; build; network guard; common closeout.
 
 Commit: `refactor: route the VideoBox workspace`
 

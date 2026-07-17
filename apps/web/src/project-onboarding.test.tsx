@@ -88,12 +88,57 @@ describe("ProjectOnboarding", () => {
 
     expect(await screen.findByText("스크립트 등록 완료")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "나레이션 다시 등록" })).toBeInTheDocument();
-    expect(onProjectCreated).toHaveBeenCalledTimes(1);
+    expect(onProjectCreated).toHaveBeenCalledTimes(0);
 
     fireEvent.click(screen.getByRole("button", { name: "나레이션 다시 등록" }));
 
     expect(await screen.findByText("나레이션 등록 완료")).toBeInTheDocument();
     expect(narrationAttempts).toBe(2);
-    expect(onProjectCreated).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(onProjectCreated).toHaveBeenCalledTimes(1));
+  });
+
+  it("finishes local source registration before awaiting a failed routed callback and shows a safe retry message", async () => {
+    const onProjectCreated = vi.fn().mockRejectedValue(new Error("route refresh failed"));
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/projects") {
+        return new Response(JSON.stringify({ project_id: "project_callback", name: "새 영상", status: "active", root_storage_uri: "local://project_callback" }), { status: 201 });
+      }
+      if (url.endsWith("/assets/narration-audio") || url.endsWith("/assets/script-document")) {
+        return new Response(JSON.stringify({ asset_id: "asset_ok" }), { status: 201 });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<ProjectOnboarding onProjectCreated={onProjectCreated} />);
+    fireEvent.change(screen.getByLabelText("프로젝트 이름"), { target: { value: "새 영상" } });
+    fireEvent.change(screen.getByLabelText("나레이션 로컬 경로"), { target: { value: "D:\\narration.wav" } });
+    fireEvent.change(screen.getByLabelText("스크립트 로컬 경로"), { target: { value: "D:\\script.txt" } });
+    fireEvent.click(screen.getByRole("button", { name: "프로젝트 만들고 소스 등록" }));
+
+    expect(await screen.findByText("프로젝트를 시작하지 못했습니다.")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith("/api/projects/project_callback/assets/narration-audio", expect.anything());
+    expect(fetchMock).toHaveBeenCalledWith("/api/projects/project_callback/assets/script-document", expect.anything());
+  });
+
+  it("retries a failed route continuation without registering completed sources again", async () => {
+    const onProjectCreated = vi.fn().mockRejectedValueOnce(new Error("route failed")).mockResolvedValueOnce(undefined);
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/projects") return new Response(JSON.stringify({ project_id: "project_continue", name: "계속", status: "active", root_storage_uri: "local://continue" }), { status: 201 });
+      if (url.endsWith("/assets/narration-audio") || url.endsWith("/assets/script-document")) return new Response(JSON.stringify({ asset_id: "asset_ok" }), { status: 201 });
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ProjectOnboarding onProjectCreated={onProjectCreated} />);
+    fireEvent.change(screen.getByLabelText("프로젝트 이름"), { target: { value: "계속" } });
+    fireEvent.change(screen.getByLabelText("나레이션 로컬 경로"), { target: { value: "D:\\n.wav" } });
+    fireEvent.change(screen.getByLabelText("스크립트 로컬 경로"), { target: { value: "D:\\s.txt" } });
+    fireEvent.click(screen.getByRole("button", { name: "프로젝트 만들고 소스 등록" }));
+    expect(await screen.findByText("프로젝트를 시작하지 못했습니다.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "계속하기" }));
+    await waitFor(() => expect(onProjectCreated).toHaveBeenCalledTimes(2));
+    expect(fetchMock.mock.calls.filter(([request]) => String(request).includes("/assets/"))).toHaveLength(2);
   });
 });

@@ -73,14 +73,67 @@ import {
   reviewActions,
 } from "./lib/formatters";
 import { ProjectOnboarding } from "./ProjectOnboarding";
+import type { WorkspaceSection } from "./app/routeManifest";
 
-export function App() {
+type LegacySection = "overview" | "timeline" | "review" | "editing" | "settings";
+
+export type LegacyWorkspacePageProps = {
+  /** Undefined retains the pre-router test harness; a route value is authoritative. */
+  projectId?: string | null;
+  section?: WorkspaceSection;
+  onNavigate?: (projectId: string, section: WorkspaceSection) => void;
+  catalogProjects?: Project[];
+  onProjectCreated?: (project: Project) => void | Promise<void>;
+};
+
+const routeSectionToLegacy: Record<WorkspaceSection, LegacySection> = {
+  home: "overview",
+  create: "overview",
+  timeline: "timeline",
+  review: "review",
+  editing: "editing",
+  settings: "settings",
+};
+
+const legacySectionToRoute: Record<LegacySection, WorkspaceSection> = {
+  overview: "home",
+  timeline: "timeline",
+  review: "review",
+  editing: "editing",
+  settings: "settings",
+};
+
+export function App({
+  projectId: routeProjectId,
+  section: routeSection,
+  onNavigate,
+  catalogProjects,
+  onProjectCreated,
+}: LegacyWorkspacePageProps = {}) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [onboardingProject, setOnboardingProject] = useState<Project | null>(null);
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
-  const [selectedSection, setSelectedSection] = useState<
-    "overview" | "timeline" | "review" | "editing" | "settings"
-  >("overview");
+  const [legacyProjectId, setLegacyProjectId] = useState<string | null>(null);
+  const [legacySection, setLegacySection] = useState<LegacySection>("overview");
+  const selectedProjectId = routeProjectId === undefined ? legacyProjectId : routeProjectId;
+  const selectedSection = routeSection === undefined ? legacySection : routeSectionToLegacy[routeSection];
+  const activeRouteSection = routeSection ?? legacySectionToRoute[selectedSection];
+
+  function selectProject(projectId: string, section: WorkspaceSection = "home") {
+    if (onNavigate) {
+      onNavigate(projectId, section);
+      return;
+    }
+    setLegacyProjectId(projectId);
+    setLegacySection(routeSectionToLegacy[section]);
+  }
+
+  function selectSection(section: LegacySection) {
+    if (onNavigate && selectedProjectId) {
+      onNavigate(selectedProjectId, legacySectionToRoute[section]);
+      return;
+    }
+    setLegacySection(section);
+  }
   const [projectDetail, setProjectDetail] = useState<Project | null>(null);
   const [jobs, setJobs] = useState<JobRecord[]>([]);
   const [timelineJob, setTimelineJob] = useState<TimelineJob | null>(null);
@@ -217,6 +270,11 @@ export function App() {
     let cancelled = false;
 
     async function loadProjects() {
+      if (catalogProjects) {
+        setProjects(catalogProjects);
+        setLoadState("ready");
+        return;
+      }
       setLoadState("loading");
       setErrorMessage(null);
       try {
@@ -225,7 +283,11 @@ export function App() {
           return;
         }
         setProjects(projectItems);
-        setSelectedProjectId((current) => current ?? projectItems[0]?.project_id ?? null);
+        // The standalone compatibility export is only retained for the legacy suite.
+        // AppRoot always supplies a route project id and never falls back to this value.
+        if (routeProjectId === undefined) {
+          setLegacyProjectId((current) => current ?? projectItems[0]?.project_id ?? null);
+        }
         setLoadState("ready");
       } catch (error) {
         if (cancelled) {
@@ -240,7 +302,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [catalogProjects, routeProjectId]);
 
   useEffect(() => {
     void refreshCapcutHandoffDiagnostics();
@@ -1065,7 +1127,7 @@ export function App() {
       setSubtitleJob(null);
       setPreviewJob(null);
       setExportJob(null);
-      setSelectedSection("timeline");
+    selectSection("timeline");
     } catch (error) {
       setErrorMessage("요청을 완료하지 못했어요. 다시 시도해 주세요.");
     } finally {
@@ -1708,7 +1770,7 @@ export function App() {
     setPartialRegenerationRun(null);
   };
   const openSegmentInEditor = (segmentId: string, fields?: string[]) => {
-    setSelectedSection("editing");
+    selectSection("editing");
     setSelectedEditingSegmentId(segmentId);
     if (fields) {
       setSelectedRegenerationFields(fields);
@@ -1774,9 +1836,14 @@ export function App() {
     }
   }
 
-  function handleProjectCreated(project: Project) {
+  async function handleProjectCreated(project: Project) {
     setProjects((current) => [project, ...current.filter((item) => item.project_id !== project.project_id)]);
-    setSelectedProjectId(project.project_id);
+    if (onProjectCreated) {
+      await onProjectCreated(project);
+      return;
+    } else {
+      selectProject(project.project_id, "create");
+    }
     setLoadState("ready");
     setOnboardingProject(project);
   }
@@ -1877,7 +1944,7 @@ export function App() {
                   project.project_id === selectedProjectId ? "is-selected" : ""
                 }`}
                 aria-pressed={project.project_id === selectedProjectId}
-                onClick={() => setSelectedProjectId(project.project_id)}
+                onClick={() => selectProject(project.project_id, activeRouteSection)}
                 type="button"
               >
                 <strong>{formatDisplayText(project.name)}</strong>
@@ -1942,9 +2009,7 @@ export function App() {
                 className={selectedSection === value ? "tab-button is-active" : "tab-button"}
                 aria-pressed={selectedSection === value}
                 onClick={() =>
-                  setSelectedSection(
-                    value as "overview" | "timeline" | "review" | "editing" | "settings",
-                  )
+                  selectSection(value as LegacySection)
                 }
                 type="button"
               >
@@ -2125,7 +2190,7 @@ export function App() {
           </details>
         </section>
 
-        {selectedProjectId ? <MediaAnalysisPanel projectId={selectedProjectId} onSelectAsset={() => setSelectedSection("editing")} /> : null}
+        {selectedProjectId ? <MediaAnalysisPanel projectId={selectedProjectId} onSelectAsset={() => selectSection("editing")} /> : null}
 
         {selectedSection === "overview" ? (
           <section className="workspace-grid">

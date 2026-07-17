@@ -1,8 +1,15 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 256. 2026-07-18 OSS Slice 1 Task 4 closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 257. 2026-07-18 OSS Slice 1 Task 5 closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
 > 이 문서의 기존 날짜 기반 섹션은 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. Local Media Director release truth는 `## 250`, 현재 다음 frontend 계획은 `## 251`을 기준으로 본다.
 > 단, `2일 내 1차 데모 완성` 실행 레일은 `## 189`의 장기 우선순위를 그대로 넓게 집행하지 않고, `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`의 축소된 실행 계획을 우선 적용한다.
+
+## 257. 2026-07-18 OSS Slice 1 Task 5 closeout
+
+- 계획: `docs/superpowers/plans/2026-07-17-videobox-oss-dashboard-editor-adoption.md`; handoff: `docs/handoffs/2026-07-18-videobox-oss-dashboard-editor-adoption-slice-1-task-5-closeout.ko.md`; commit은 closeout staging 뒤 pending이다.
+- typed routing과 URL-owned workspace state를 검증했다. direct URL·refresh restore·zero/unknown project recovery·canonical redirect·project switch·active route·request dedupe는 route param에서 project truth를 파생하며 별도 선택 state를 만들지 않는다.
+- verification: provenance `14 passed`, routing/router-provider/legacy baseline focused tests와 current full frontend evidence pass, production build 및 network guard pass. external/Gemini provider call 0과 Hermes/container 미구현 경계는 유지한다.
+- OSS dashboard/editor 누적은 5/22 (22.7%), 잔여 77.3%다. 다음 실행 단위는 Task 6 app shell, Home/settings/empty-state routes이며 Task 5 routing truth를 우회하거나 legacy parity를 깨지 않는다.
 
 ## 256. 2026-07-18 OSS Slice 1 Task 4 closeout
 

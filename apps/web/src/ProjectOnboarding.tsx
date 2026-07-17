@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { api, type Project } from "./api";
 
 type ProjectOnboardingProps = {
-  onProjectCreated: (project: Project) => void;
+  onProjectCreated: (project: Project) => void | Promise<void>;
   onIngestComplete?: () => void;
   existingProject?: Project;
 };
@@ -42,9 +42,11 @@ export function ProjectOnboarding({ onProjectCreated, onIngestComplete, existing
     try {
       await api.registerNarrationAudio(projectId, { source_path: narrationPath.trim() });
       setNarrationStatus("succeeded");
+      return true;
     } catch (caught) {
       setNarrationStatus("failed");
       setNarrationError(errorMessage(caught, "나레이션을 등록하지 못했습니다."));
+      return false;
     }
   }
 
@@ -54,9 +56,11 @@ export function ProjectOnboarding({ onProjectCreated, onIngestComplete, existing
     try {
       await api.registerScriptDocument(projectId, { source_path: scriptPath.trim() });
       setScriptStatus("succeeded");
+      return true;
     } catch (caught) {
       setScriptStatus("failed");
       setScriptError(errorMessage(caught, "스크립트를 등록하지 못했습니다."));
+      return false;
     }
   }
 
@@ -78,8 +82,12 @@ export function ProjectOnboarding({ onProjectCreated, onIngestComplete, existing
       }
       const createdProject = await api.createProject({ name: name.trim() });
       setProject(createdProject);
-      onProjectCreated(createdProject);
-      await Promise.all([registerNarration(createdProject.project_id), registerScript(createdProject.project_id)]);
+      const [narrationRegistered, scriptRegistered] = await Promise.all([
+        registerNarration(createdProject.project_id),
+        registerScript(createdProject.project_id),
+      ]);
+      if (!narrationRegistered || !scriptRegistered) return;
+      await onProjectCreated(createdProject);
     } catch (caught) {
       setCreationError(errorMessage(caught, "프로젝트를 시작하지 못했습니다."));
     } finally {
@@ -113,7 +121,9 @@ export function ProjectOnboarding({ onProjectCreated, onIngestComplete, existing
       {narrationStatus === "failed" && project ? (
         <div className="error-banner" role="alert">
           <p>{narrationError ?? "나레이션을 등록하지 못했습니다."}</p>
-          <button className="action-button subtle" onClick={() => void registerNarration(project.project_id)} type="button">
+          <button className="action-button subtle" onClick={() => void registerNarration(project.project_id).then(async (ok) => {
+            if (ok && scriptStatus === "succeeded") await onProjectCreated(project);
+          }).catch(() => setCreationError("프로젝트를 시작하지 못했습니다."))} type="button">
             나레이션 다시 등록
           </button>
         </div>
@@ -122,12 +132,19 @@ export function ProjectOnboarding({ onProjectCreated, onIngestComplete, existing
       {scriptStatus === "failed" && project ? (
         <div className="error-banner" role="alert">
           <p>{scriptError ?? "스크립트를 등록하지 못했습니다."}</p>
-          <button className="action-button subtle" onClick={() => void registerScript(project.project_id)} type="button">
+          <button className="action-button subtle" onClick={() => void registerScript(project.project_id).then(async (ok) => {
+            if (ok && narrationStatus === "succeeded") await onProjectCreated(project);
+          }).catch(() => setCreationError("프로젝트를 시작하지 못했습니다."))} type="button">
             스크립트 다시 등록
           </button>
         </div>
       ) : null}
       {creationError ? <p className="error-banner" role="alert">{creationError}</p> : null}
+      {creationError && project && narrationStatus === "succeeded" && scriptStatus === "succeeded" ? (
+        <button className="action-button subtle" type="button" onClick={() => void Promise.resolve(onProjectCreated(project)).catch(() => setCreationError("프로젝트를 시작하지 못했습니다."))}>
+          계속하기
+        </button>
+      ) : null}
     </section>
   );
 }
