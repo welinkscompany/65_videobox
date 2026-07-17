@@ -1,6 +1,6 @@
 # VideoBox OSS Dashboard/Editor Adoption Slice 0 Task 1 Closeout
 
-**Date:** 2026-07-17  
+**Date:** 2026-07-17
 **State:** Task 1 complete; Task 2 visual approval is next.
 
 ## Closed scope
