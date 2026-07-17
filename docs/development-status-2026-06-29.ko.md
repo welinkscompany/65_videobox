@@ -1,8 +1,19 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 251. 2026-07-17 OSS dashboard/editor adoption planning`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 252. 2026-07-17 Hermes container design handoff`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
 > 이 문서의 기존 날짜 기반 섹션은 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. Local Media Director release truth는 `## 250`, 현재 다음 frontend 계획은 `## 251`을 기준으로 본다.
 > 단, `2일 내 1차 데모 완성` 실행 레일은 `## 189`의 장기 우선순위를 그대로 넓게 집행하지 않고, `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`의 축소된 실행 계획을 우선 적용한다.
+
+## 252. 2026-07-17 Hermes container design handoff
+
+- 설계: `docs/superpowers/specs/2026-07-17-videobox-hermes-hybrid-runtime-design.md`
+- handoff: `docs/handoffs/2026-07-17-videobox-hermes-container-design-handoff.ko.md`
+- commit/push: `6d9d0a5 docs: design local VideoBox Hermes stack`, `origin/codex/production-readiness-blocker-slice-1` 동기화 확인.
+- 결정: VideoBox와 Hermes는 하나의 `videobox-local` Compose 제품 스택 안에서 web/API/render worker/Hermes/분리 egress/memory gateway/storage-only mem0으로 분리한다. Windows host에는 LM Studio, CapCut Desktop과 최소 host bridge만 남긴다.
+- security/architecture 독립 재리뷰의 최종 미폐쇄 P0/P1은 0이다. 이는 설계 검증이며 container/runtime 구현 또는 OAuth live call 성공을 뜻하지 않는다.
+- OSS dashboard/editor 22개 Task 구현 누적은 계속 0/22 (0%), 잔여 100%다. Hermes 구현은 user written-spec review와 별도 implementation plan 전에는 시작하지 않는다.
+- 즉시 next action은 기존 dirty Lumi copy를 OSS Slice 0 Task 1으로 closeout하는 것이다. 현재 worktree의 Lumi UI 변경은 preserve 대상이며 새 container/Hermes 구현과 섞지 않는다.
+- 기록: session/status/handoff 저장, AK-Wiki promotion 보류, 삭제 없음.
 
 ## 251. 2026-07-17 OSS dashboard/editor adoption planning
 
