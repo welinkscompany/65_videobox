@@ -1,4 +1,11 @@
-:root {
+/* Legacy dashboard CSS is structurally scoped so it cannot style Task 4 primitives. */
+/* This concrete legacy control rule is kept in the namespace for browsers and CSSOM tests. */
+.vb-legacy .action-button {
+  font-family: "Space Grotesk", "Segoe UI Variable", "Segoe UI", sans-serif;
+}
+
+@scope (.vb-legacy) {
+.vb-legacy {
   --bg-page: #faf8f5;
   --bg-surface: #ffffff;
   --bg-surface-raised: #fdf3e9;
@@ -29,14 +36,14 @@
   box-sizing: border-box;
 }
 
-body {
+.vb-legacy {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
   background: transparent;
 }
 
-#root {
+.vb-legacy {
   min-height: 100vh;
 }
 
@@ -959,4 +966,6 @@ video:focus-visible {
   .brand-card h1 {
     font-size: 2.3rem;
   }
+}
+
 }

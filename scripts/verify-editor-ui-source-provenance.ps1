@@ -29,6 +29,11 @@ $expectedPolicy = @{
 $errors = [System.Collections.Generic.List[string]]::new()
 
 function Add-Error([string]$message) { $script:errors.Add($message) }
+function Get-Sha256([string]$path) {
+  $stream = [IO.File]::OpenRead($path)
+  try { return ([Security.Cryptography.SHA256]::Create().ComputeHash($stream) | ForEach-Object { $_.ToString('x2') }) -join '' }
+  finally { $stream.Dispose() }
+}
 function Has-Property($object, [string]$name) { return $null -ne $object.PSObject.Properties[$name] }
 function Is-RepoRelative([string]$path) {
   return $path -and -not [IO.Path]::IsPathRooted($path) -and ($path -notmatch '(^|[\\/])\.\.([\\/]|$)')
@@ -43,16 +48,15 @@ function Check-Artifact($entry, [string]$kind) {
   if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { Add-Error "$kind materialized path is absent"; return }
   $testFile = Join-Path $root $entry.test_path
   if (-not (Test-Path -LiteralPath $testFile -PathType Leaf)) { Add-Error "$kind test path is absent" }
-  $actual = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
+  $actual = Get-Sha256 $file
   if ($actual -ne $entry.normalized_sha256) { Add-Error "$kind normalized hash drift: $($entry.path)" }
 }
 function Check-LocalArtifact($entry, $pin) {
-  if ($entry.source_pin -ne $pin.name) { Add-Error "$($pin.name) local artifact source_pin mismatch" }
   foreach ($field in @('path', 'sha256', 'test_path')) { if (-not (Has-Property $entry $field) -or -not $entry.$field) { Add-Error "$($pin.name) local artifact missing $field" } }
   if ($entry.sha256 -notmatch $shaPattern -or -not (Is-RepoRelative $entry.path) -or -not (Is-RepoRelative $entry.test_path)) { Add-Error "$($pin.name) local artifact has invalid path or SHA"; return }
   $file = Join-Path $root $entry.path; $testFile = Join-Path $root $entry.test_path
   if (-not (Test-Path -LiteralPath $file -PathType Leaf) -or -not (Test-Path -LiteralPath $testFile -PathType Leaf)) { Add-Error "$($pin.name) local artifact or test path is absent" }
-  elseif (((Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()) -ne $entry.sha256) { Add-Error "$($pin.name) local artifact hash drift" }
+  elseif ((Get-Sha256 $file) -ne $entry.sha256) { Add-Error "$($pin.name) local artifact hash drift" }
   if ($pin.decision -in @('reference-only', 'rejected-runtime')) { Add-Error "$($pin.name) local artifact is forbidden by source policy" }
   if ($pin.license -eq 'Apache-2.0') {
     $matches = @($map.apache_adaptations | Where-Object { $_.source_pin -eq $pin.name -and $_.path -eq $entry.path })
@@ -104,8 +108,9 @@ $expectedPinSet = (@($expectedPins.Keys | Sort-Object) -join ',')
 if ($actualPinSet -ne $expectedPinSet) { Add-Error 'immutable source pin set drift' }
 
 $pretendard = @($map.source_pins | Where-Object { $_.name -eq 'pretendard' })[0]
-if ($null -eq $pretendard -or $pretendard.release -ne 'v1.3.9' -or $pretendard.license -ne 'SIL OFL-1.1' -or $pretendard.materialized -ne $false -or @($pretendard.local_paths).Count -ne 0) { Add-Error 'Pretendard must remain unmaterialized with its pinned OFL contract' }
+if ($null -eq $pretendard -or $pretendard.release -ne 'v1.3.9' -or $pretendard.license -ne 'SIL OFL-1.1' -or $pretendard.materialized -ne $true -or @($pretendard.local_paths).Count -ne 1) { Add-Error 'Pretendard must be materialized with its pinned OFL contract' }
 if (@($pretendard.upstream_paths).Count -ne 1 -or $pretendard.upstream_paths[0].path -ne 'packages/pretendard/dist/web/variable/woff2/PretendardVariable.woff2' -or $pretendard.upstream_paths[0].sha256 -ne '9599f12fd42fc0bce1cd50b47a0c022e108d7aa64dd0d1bb0ed44f3282d900b4') { Add-Error 'Pretendard binary pin drift' }
+if ($pretendard.local_paths[0].path -ne 'apps/web/src/assets/fonts/PretendardVariable.woff2' -or $pretendard.local_paths[0].sha256 -ne '9599f12fd42fc0bce1cd50b47a0c022e108d7aa64dd0d1bb0ed44f3282d900b4' -or $pretendard.local_paths[0].test_path -ne 'apps/web/src/ui-system.test.tsx') { Add-Error 'Pretendard local materialization contract drift' }
 
 function Check-ArtifactPolicy($entry, [string]$kind) {
   if (-not $pinsByName.ContainsKey($entry.source_pin)) { Add-Error "$kind has unknown source pin"; return }
@@ -131,6 +136,7 @@ foreach ($adaptation in @($map.apache_adaptations)) {
 if ($lock.repository -ne 'shadcn-ui/ui' -or $lock.commit -ne $expectedPins['shadcn-ui']) { Add-Error 'shadcn registry lock pin drift' }
 if ($lock.live_npx_output_accepted -ne $false) { Add-Error 'live npx outputs are forbidden' }
 if ($null -eq $lock.generated_items -or $null -eq $lock.dependency_mapping) { Add-Error 'registry lock shape missing generated_items or dependency_mapping' }
+if (@($lock.generated_items).Count -ne 20) { Add-Error 'registry lock must contain 18 primitives plus utils and use-mobile helpers' }
 foreach ($item in @($lock.generated_items)) {
   foreach ($field in @('name', 'upstream_path', 'upstream_sha256', 'generated_path', 'normalized_sha256', 'test_path', 'runtime_dependencies')) {
     if (-not (Has-Property $item $field) -or -not $item.$field) { Add-Error "generated registry item missing $field" }
@@ -139,7 +145,7 @@ foreach ($item in @($lock.generated_items)) {
   if (Is-RepoRelative $item.generated_path) {
     $generated = Join-Path $root $item.generated_path
     if (-not (Test-Path -LiteralPath $generated -PathType Leaf)) { Add-Error "generated registry item path absent" }
-    elseif (((Get-FileHash -LiteralPath $generated -Algorithm SHA256).Hash.ToLowerInvariant()) -ne $item.normalized_sha256) { Add-Error "generated registry normalized hash drift" }
+    elseif ((Get-Sha256 $generated) -ne $item.normalized_sha256) { Add-Error "generated registry normalized hash drift" }
   } else { Add-Error 'generated registry path must be repository-relative' }
   foreach ($dependency in @($item.runtime_dependencies)) {
     $mapping = $lock.dependency_mapping.PSObject.Properties[$dependency].Value

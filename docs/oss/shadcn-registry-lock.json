@@ -3,6 +3,291 @@
   "repository": "shadcn-ui/ui",
   "commit": "4396d5b2a5ee4e2ad5705e9b2522f92112f811a0",
   "live_npx_output_accepted": false,
-  "generated_items": [],
-  "dependency_mapping": {}
+  "generated_items": [
+    {
+      "name": "utils",
+      "upstream_path": "apps/v4/registry/new-york-v4/lib/utils.ts",
+      "upstream_sha256": "7c8c3dfc0cdd370d44932828eb067ef771c8fe7996693221d5d4b90af6d54f2d",
+      "generated_path": "apps/web/src/lib/utils.ts",
+      "normalized_sha256": "a4f151d5aa87b6ba0671a417fd31ecc5db44e196ff08067194b5a32aa5017d8b",
+      "test_path": "apps/web/src/ui-system.test.tsx",
+      "runtime_dependencies": [
+        "clsx",
+        "tailwind-merge"
+      ]
+    },
+    {
+      "name": "use-mobile",
+      "upstream_path": "apps/v4/registry/new-york-v4/hooks/use-mobile.ts",
+      "upstream_sha256": "ad0936f84f1df79d3697bfbff9c18f8ad58431c1cbaf2359c6a853b0fcc9f28b",
+      "generated_path": "apps/web/src/hooks/use-mobile.ts",
+      "normalized_sha256": "bf59edce4f4f0ee978eeec36747857d26e4450e5a6f869aa76fa4261da0b841e",
+      "test_path": "apps/web/src/ui-system.test.tsx",
+      "runtime_dependencies": [
+        "react"
+      ]
+    },
+    {
+      "name": "button",
+      "upstream_path": "apps/v4/registry/new-york-v4/ui/button.tsx",
+      "upstream_sha256": "cc36af0f8b5019c33cc039fbf03bb952a513072b15b55b53c592b78af3e5f4c4",
+      "generated_path": "apps/web/src/components/ui/button.tsx",
+      "normalized_sha256": "bb78651a5f9af302277ad75f511f766e42bba0b0f77929f5dd22e1a77605cb03",
+      "test_path": "apps/web/src/ui-system.test.tsx",
+      "runtime_dependencies": [
+        "react",
+        "class-variance-authority",
+        "radix-ui"
+      ]
+    },
+    {
+      "name": "card",
+      "upstream_path": "apps/v4/registry/new-york-v4/ui/card.tsx",
+      "upstream_sha256": "c48dd3b96be90a7066f1aebf294f0af9d00ebcdc367d5d4aca55429ade570c1c",
+      "generated_path": "apps/web/src/components/ui/card.tsx",
+      "normalized_sha256": "9a1f039ab3388d61ddfc2b0dfacb1387c049801e5d115d1192beed559f43fcc4",
+      "test_path": "apps/web/src/ui-system.test.tsx",
+      "runtime_dependencies": [
+        "react"
+      ]
+    },
+    {
+      "name": "input",
+      "upstream_path": "apps/v4/registry/new-york-v4/ui/input.tsx",
+      "upstream_sha256": "8c4612a7c41319ac5049daa3b34b080f9784b6245c17780eb87c127e58e473db",
+      "generated_path": "apps/web/src/components/ui/input.tsx",
+      "normalized_sha256": "c46e0082707d3cb3fc813f271a95c9e0cd27aaa3b2d3970bc6478572dbde74be",
+      "test_path": "apps/web/src/ui-system.test.tsx",
+      "runtime_dependencies": [
+        "react"
+      ]
+    },
+    {
+      "name": "textarea",
+      "upstream_path": "apps/v4/registry/new-york-v4/ui/textarea.tsx",
+      "upstream_sha256": "253cdeb487c73beaaccdf47fc163e36e7d5b7ae6ddf09a4f64998a109a112979",
+      "generated_path": "apps/web/src/components/ui/textarea.tsx",
+      "normalized_sha256": "4e9c89a5dd727d97173de8017ccd56f5f9f0a9be414b830647bddededc6e48c5",
+      "test_path": "apps/web/src/ui-system.test.tsx",
+      "runtime_dependencies": [
+        "react"
+      ]
+    },
+    {
+      "name": "dialog",
+      "upstream_path": "apps/v4/registry/new-york-v4/ui/dialog.tsx",
+      "upstream_sha256": "604b7782195aef7666dc2ec09a8992d60977696c07f75382f22d3d1b33691559",
+      "generated_path": "apps/web/src/components/ui/dialog.tsx",
+      "normalized_sha256": "cc571ee34b25c30a7fa8202e3ee8cba61a92f52c947ed2def388427c87269ac5",
+      "test_path": "apps/web/src/ui-system.test.tsx",
+      "runtime_dependencies": [
+        "react",
+        "radix-ui"
+      ]
+    },
+    {
+      "name": "sheet",
+      "upstream_path": "apps/v4/registry/new-york-v4/ui/sheet.tsx",
+      "upstream_sha256": "63863cf2df8f8973e52b3459ac9bdbf81be1262dbc70eb53d5271ffb03488e16",
+      "generated_path": "apps/web/src/components/ui/sheet.tsx",
+      "normalized_sha256": "392c31f1be27f9f13785dbef08f752a0cd54b7ef224a40518825bc0aa7bc9955",
+      "test_path": "apps/web/src/ui-system.test.tsx",
+      "runtime_dependencies": [
+        "react",
+        "radix-ui"
+      ]
+    },
+    {
+      "name": "dropdown-menu",
+      "upstream_path": "apps/v4/registry/new-york-v4/ui/dropdown-menu.tsx",
+      "upstream_sha256": "98f0dcdae38225b73734aceeb9213dd751fea2c72ea520df31003cd133deac8a",
+      "generated_path": "apps/web/src/components/ui/dropdown-menu.tsx",
+      "normalized_sha256": "0a010f6ff952551cd50914472219c5d4c564611f15e8573ee638c9d3526e1537",
+      "test_path": "apps/web/src/ui-system.test.tsx",
+      "runtime_dependencies": [
+        "react",
+        "radix-ui"
+      ]
+    },
+    {
+      "name": "sidebar",
+      "upstream_path": "apps/v4/registry/new-york-v4/ui/sidebar.tsx",
+      "upstream_sha256": "78dd9a5c50628d7bc8d5c637fdbfe613e49f4174fd3d525c9cc0be2152e67994",
+      "generated_path": "apps/web/src/components/ui/sidebar.tsx",
+      "normalized_sha256": "9b2c5f6e3c06585b19b248bc86133b3972d7663103ee6587b371e94d15a4aea1",
+      "test_path": "apps/web/src/ui-system.test.tsx",
+      "runtime_dependencies": [
+        "react",
+        "radix-ui",
+        "lucide-react"
+      ]
+    },
+    {
+      "name": "empty",
+      "upstream_path": "apps/v4/registry/new-york-v4/ui/empty.tsx",
+      "upstream_sha256": "ae95bdcf367a076ae02e7925f14522a148798f72d9651749c6d55497dba584c0",
+      "generated_path": "apps/web/src/components/ui/empty.tsx",
+      "normalized_sha256": "cb0eb4b9c9bbb0fa2db82fb496ebe1204a5adc31c0bc2f67c0e0edf3058991d5",
+      "test_path": "apps/web/src/ui-system.test.tsx",
+      "runtime_dependencies": [
+        "react",
+        "lucide-react"
+      ]
+    },
+    {
+      "name": "badge",
+      "upstream_path": "apps/v4/registry/new-york-v4/ui/badge.tsx",
+      "upstream_sha256": "46a0de5224f6a5d5d63d45246534288518dce888f031064bff925bbc7fe6ad97",
+      "generated_path": "apps/web/src/components/ui/badge.tsx",
+      "normalized_sha256": "2a479d128aa3b9f3d023cb6658577ef87c56965bb348c9c03e3b5a5b936ee6c3",
+      "test_path": "apps/web/src/ui-system.test.tsx",
+      "runtime_dependencies": [
+        "react",
+        "class-variance-authority"
+      ]
+    },
+    {
+      "name": "tooltip",
+      "upstream_path": "apps/v4/registry/new-york-v4/ui/tooltip.tsx",
+      "upstream_sha256": "a0784eb77831a799fad7991df4f1b666f876201565a80175e1aa68733574a2e4",
+      "generated_path": "apps/web/src/components/ui/tooltip.tsx",
+      "normalized_sha256": "5f7890f712a77adfce7bda2d95a3953e586ef42615e3d7aa5526cc350376da8f",
+      "test_path": "apps/web/src/ui-system.test.tsx",
+      "runtime_dependencies": [
+        "react",
+        "radix-ui"
+      ]
+    },
+    {
+      "name": "skeleton",
+      "upstream_path": "apps/v4/registry/new-york-v4/ui/skeleton.tsx",
+      "upstream_sha256": "ba48dd5be5a6a1378bd4e011028654b5bf419f1e7d20ee4b9f8330c1264e7239",
+      "generated_path": "apps/web/src/components/ui/skeleton.tsx",
+      "normalized_sha256": "8fbc36d26ca5537ab7731dccc00e33131010e33b9dc2e54b55de1f27b57fbe20",
+      "test_path": "apps/web/src/ui-system.test.tsx",
+      "runtime_dependencies": [
+        "react"
+      ]
+    },
+    {
+      "name": "tabs",
+      "upstream_path": "apps/v4/registry/new-york-v4/ui/tabs.tsx",
+      "upstream_sha256": "865d0194331b9b2be36723fa79d3575dc83078b4cb941cafee87cb72fc2cff46",
+      "generated_path": "apps/web/src/components/ui/tabs.tsx",
+      "normalized_sha256": "a8a6c5860c28f84c3a62f6333f8942966edecb0ba86f3ee5371311b6f5a2d40f",
+      "test_path": "apps/web/src/ui-system.test.tsx",
+      "runtime_dependencies": [
+        "react",
+        "radix-ui"
+      ]
+    },
+    {
+      "name": "select",
+      "upstream_path": "apps/v4/registry/new-york-v4/ui/select.tsx",
+      "upstream_sha256": "0b796a108a4eb5ba52d9ad938b7aea36dc56ae66c703a6d0a23dbc24f96daff3",
+      "generated_path": "apps/web/src/components/ui/select.tsx",
+      "normalized_sha256": "da30de9bce4b5de68dfcd113105dd724010732fbedf4cdaff0ba73aeb65c5e13",
+      "test_path": "apps/web/src/ui-system.test.tsx",
+      "runtime_dependencies": [
+        "react",
+        "radix-ui"
+      ]
+    },
+    {
+      "name": "scroll-area",
+      "upstream_path": "apps/v4/registry/new-york-v4/ui/scroll-area.tsx",
+      "upstream_sha256": "8bd9d986b2844c9a87de825c6de4787b6739b36c3dc9a05ccf3eb107160e4043",
+      "generated_path": "apps/web/src/components/ui/scroll-area.tsx",
+      "normalized_sha256": "a606d4dda1485f62cad39d5921482f5366f7091efb2f7f360ad609792efba686",
+      "test_path": "apps/web/src/ui-system.test.tsx",
+      "runtime_dependencies": [
+        "react",
+        "radix-ui"
+      ]
+    },
+    {
+      "name": "separator",
+      "upstream_path": "apps/v4/registry/new-york-v4/ui/separator.tsx",
+      "upstream_sha256": "6da346505c8629a4668420d2a5ca48891383bbe0b0ceb14163537c671879427e",
+      "generated_path": "apps/web/src/components/ui/separator.tsx",
+      "normalized_sha256": "d96ad1287dbccd4109e1409ee44ab790722105f216d9673a29a9fe16931bb0a0",
+      "test_path": "apps/web/src/ui-system.test.tsx",
+      "runtime_dependencies": [
+        "react",
+        "radix-ui"
+      ]
+    },
+    {
+      "name": "sonner",
+      "upstream_path": "apps/v4/registry/new-york-v4/ui/sonner.tsx",
+      "upstream_sha256": "13ccc9b0fe4248e622f83a1d3b2f0566b72b5e04162d7d0c8db8945ecc71b55f",
+      "generated_path": "apps/web/src/components/ui/sonner.tsx",
+      "normalized_sha256": "def32848d8fa84e9a3325f285bd8cfb30d2af781f0665ec8d613bcd48d3f78c4",
+      "test_path": "apps/web/src/ui-system.test.tsx",
+      "runtime_dependencies": [
+        "react",
+        "sonner",
+        "next-themes"
+      ]
+    },
+    {
+      "name": "resizable",
+      "upstream_path": "apps/v4/registry/new-york-v4/ui/resizable.tsx",
+      "upstream_sha256": "bc63958467aa00557c551bb0d96a5ae4c965c1e1ba2380e595949d933b132f7c",
+      "generated_path": "apps/web/src/components/ui/resizable.tsx",
+      "normalized_sha256": "9af9302f6d992724ca8d5fe34a191c2475c864057243550934b1e8d106974391",
+      "test_path": "apps/web/src/ui-system.test.tsx",
+      "runtime_dependencies": [
+        "react",
+        "react-resizable-panels"
+      ]
+    }
+  ],
+  "dependency_mapping": {
+    "react": {
+      "version": "19.1.0",
+      "license": "MIT",
+      "package_lock_entry": "node_modules/react"
+    },
+    "clsx": {
+      "version": "2.1.1",
+      "license": "MIT",
+      "package_lock_entry": "node_modules/clsx"
+    },
+    "tailwind-merge": {
+      "version": "3.6.0",
+      "license": "MIT",
+      "package_lock_entry": "node_modules/tailwind-merge"
+    },
+    "class-variance-authority": {
+      "version": "0.7.1",
+      "license": "Apache-2.0",
+      "package_lock_entry": "node_modules/class-variance-authority"
+    },
+    "radix-ui": {
+      "version": "1.4.3",
+      "license": "MIT",
+      "package_lock_entry": "node_modules/radix-ui"
+    },
+    "lucide-react": {
+      "version": "0.474.0",
+      "license": "ISC",
+      "package_lock_entry": "node_modules/lucide-react"
+    },
+    "next-themes": {
+      "version": "0.4.6",
+      "license": "MIT",
+      "package_lock_entry": "node_modules/next-themes"
+    },
+    "sonner": {
+      "version": "2.0.7",
+      "license": "MIT",
+      "package_lock_entry": "node_modules/sonner"
+    },
+    "react-resizable-panels": {
+      "version": "4.5.8",
+      "license": "MIT",
+      "package_lock_entry": "node_modules/react-resizable-panels"
+    }
+  }
 }

@@ -1834,7 +1834,7 @@ export function App() {
   }
 
   return (
-    <div className="shell">
+    <div className="vb-legacy shell">
       <aside className="sidebar" aria-label="프로젝트 탐색">
         <div className="brand-card">
           <p className="eyebrow">영상 만들기</p>

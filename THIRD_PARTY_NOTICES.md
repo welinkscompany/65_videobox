@@ -2,8 +2,9 @@
 
 ## Current status
 
-Task 3 pins upstream sources only. No third-party source, generated shadcn
-component, or Pretendard binary is materialized in this repository yet.
+Task 4 materializes the reviewed Pretendard v1.3.9 variable WOFF2 byte stream
+and the locked shadcn/ui new-york-v4 source files. Their upstream and local
+SHA256 values are recorded in the source map and registry lock.
 No Apache-2.0 source is materialized, modified, or attributed as copied yet.
 
 ## Future materialization rule

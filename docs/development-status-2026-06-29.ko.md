@@ -1,8 +1,16 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 255. 2026-07-18 OSS Slice 0 Task 3 closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 256. 2026-07-18 OSS Slice 1 Task 4 closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
 > 이 문서의 기존 날짜 기반 섹션은 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. Local Media Director release truth는 `## 250`, 현재 다음 frontend 계획은 `## 251`을 기준으로 본다.
 > 단, `2일 내 1차 데모 완성` 실행 레일은 `## 189`의 장기 우선순위를 그대로 넓게 집행하지 않고, `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`의 축소된 실행 계획을 우선 적용한다.
+
+## 256. 2026-07-18 OSS Slice 1 Task 4 closeout
+
+- 계획: `docs/superpowers/plans/2026-07-17-videobox-oss-dashboard-editor-adoption.md`; handoff: `docs/handoffs/2026-07-18-videobox-oss-dashboard-editor-adoption-slice-1-task-4-closeout.ko.md`; commit은 closeout staging 뒤 pending이다.
+- locked shadcn/ui source, local Pretendard, token/legacy CSS isolation, `@/*` alias, deterministic browser network guard와 UI-system verifier를 구현했다. legacy scope는 migrated roots 밖에서 유지하며, global preflight와 remote font/provider 요청은 도입하지 않았다.
+- verification: provenance `14 passed`, frontend `22 files / 240 tests passed`, production build pass, provenance/UI-system 두 verifier pass, independent spec/quality review와 source→runtime reverse review의 open P0/P1은 0이다.
+- external/Gemini provider call 0과 Hermes/container 미구현 경계를 유지했다. untracked `apps/web/pnpm-lock.yaml`, `apps/web/pnpm-workspace.yaml`은 보존하고 Task 4 commit에서 제외한다.
+- OSS dashboard/editor 누적은 4/22 (18.2%), 잔여 81.8%다. 다음은 Task 5 URL-owned workspace state와 typed routing이며, 그 Task의 executable TDD sub-plan과 독립 review가 먼저다.
 
 ## 255. 2026-07-18 OSS Slice 0 Task 3 closeout
 

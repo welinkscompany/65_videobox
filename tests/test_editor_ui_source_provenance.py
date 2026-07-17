@@ -136,8 +136,13 @@ def validate_source_map(source_map: dict, root: Path) -> list[str]:
             if not (root / path).is_file():
                 errors.append(f"{name}: declared local path is absent")
         if name == "pretendard":
-            if pin.get("materialized") is not False or local_paths:
-                errors.append("pretendard: must remain unmaterialized until OFL copy review")
+            expected_font = {
+                "path": "apps/web/src/assets/fonts/PretendardVariable.woff2",
+                "sha256": "9599f12fd42fc0bce1cd50b47a0c022e108d7aa64dd0d1bb0ed44f3282d900b4",
+                "test_path": "apps/web/src/ui-system.test.tsx",
+            }
+            if pin.get("materialized") is not True or local_paths != [expected_font]:
+                errors.append("pretendard: exact reviewed OFL binary materialization is required")
     if seen != set(EXPECTED_PINS):
         errors.append("immutable source pins do not match the approved set")
     known_pins = set(EXPECTED_PINS)
@@ -202,20 +207,30 @@ def validate_registry_lock(lock: dict) -> list[str]:
     return errors
 
 
-def test_checked_in_provenance_contract_has_all_immutable_pins_and_empty_materialization() -> None:
+def test_checked_in_provenance_contract_has_all_immutable_pins_and_task4_materialization() -> None:
     source_map = read_json(SOURCE_MAP_PATH)
     assert not validate_source_map(source_map, ROOT)
     pins = {pin["name"]: pin for pin in source_map["source_pins"]}
     assert {name: pins[name]["commit"] for name in EXPECTED_PINS} == EXPECTED_PINS
-    assert source_map["materialized_files"] == []
-    assert source_map["generated_items"] == []
     pretendard = pins["pretendard"]
     assert pretendard["upstream_paths"] == [{
         "path": "packages/pretendard/dist/web/variable/woff2/PretendardVariable.woff2",
         "sha256": "9599f12fd42fc0bce1cd50b47a0c022e108d7aa64dd0d1bb0ed44f3282d900b4",
     }]
-    assert pretendard["materialized"] is False
+    assert pretendard["materialized"] is True
     assert (pretendard["repository"], pretendard["decision"], pretendard["license"], pretendard["license_url"]) == EXPECTED_PIN_POLICY["pretendard"]
+
+
+def test_task4_requires_the_pinned_pretendard_binary_to_be_materialized_with_its_raw_sha() -> None:
+    """Task 4 must copy the reviewed OFL font, not merely permit a future copy."""
+    source_map = read_json(SOURCE_MAP_PATH)
+    pretendard = next(pin for pin in source_map["source_pins"] if pin["name"] == "pretendard")
+    assert pretendard["materialized"] is True
+    assert pretendard["local_paths"] == [{
+        "path": "apps/web/src/assets/fonts/PretendardVariable.woff2",
+        "sha256": "9599f12fd42fc0bce1cd50b47a0c022e108d7aa64dd0d1bb0ed44f3282d900b4",
+        "test_path": "apps/web/src/ui-system.test.tsx",
+    }]
 
 
 def test_source_map_rejects_missing_fields_and_forbidden_reference_copy() -> None:

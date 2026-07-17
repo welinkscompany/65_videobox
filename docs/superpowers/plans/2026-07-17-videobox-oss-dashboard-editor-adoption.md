@@ -152,16 +152,16 @@ Commit: `docs: govern editor OSS source adoption`
 
 ### Task 4: Introduce locked shadcn/ui source, tokens, local font, and deterministic network guards
 
-- [ ] **Task 4 완료**
+- [x] **Task 4 완료**
 
 **Files:** modify `apps/web/package.json`, lockfile, `vite.config.ts`, real `tsconfig.json`, `vitest.setup.ts`; create `components.json`, `src/lib/utils.ts`, `src/styles/{index,theme,legacy}.css`, local font files, approved `src/components/ui/*`, `src/test/networkGuard.ts`, UI/network tests, `scripts/verify-editor-ui-system.ps1`; update source map/notices.
 
-- [ ] **RED:** component semantics, `@/*` alias build, legacy computed-style fixtures, external fetch/XHR/WebSocket/EventSource deny, remote URL scan, and migrated-surface native-control/custom-class allowlist must fail first.
-- [ ] Install Tailwind 4.2.2 and `@tailwindcss/vite` without React/Vite/TS upgrades. Add `baseUrl/paths` and Vite resolve alias.
-- [ ] Omit Tailwind global preflight during migration; import theme/utilities explicitly and keep legacy reset isolated. A wrapper class alone is not accepted as isolation.
-- [ ] Materialize shadcn Button/Card/Input/Textarea/Dialog/Sheet/Dropdown/Sidebar/Empty/Badge/Tooltip/Skeleton/Tabs/Select/ScrollArea/Separator/Sonner/Resizable only from the locked sources and record normalized hashes.
-- [ ] Bundle pinned Pretendard locally; runtime CDN/font/provider calls remain 0.
-- [ ] **GREEN:** focused UI/network tests; full frontend; build; provenance/UI-system verifiers; common closeout.
+- [x] **RED:** component semantics, `@/*` alias build, legacy computed-style fixtures, external fetch/XHR/WebSocket/EventSource deny, remote URL scan, and migrated-surface native-control/custom-class allowlist must fail first.
+- [x] Install Tailwind 4.2.2 and `@tailwindcss/vite` without React/Vite/TS upgrades. Add `baseUrl/paths` and Vite resolve alias.
+- [x] Omit Tailwind global preflight during migration; import theme/utilities explicitly and keep legacy reset isolated. A wrapper class alone is not accepted as isolation.
+- [x] Materialize shadcn Button/Card/Input/Textarea/Dialog/Sheet/Dropdown/Sidebar/Empty/Badge/Tooltip/Skeleton/Tabs/Select/ScrollArea/Separator/Sonner/Resizable only from the locked sources and record normalized hashes.
+- [x] Bundle pinned Pretendard locally; runtime CDN/font/provider calls remain 0.
+- [x] **GREEN:** focused UI/network tests; full frontend; build; provenance/UI-system verifiers; common closeout.
 
 Commit: `feat: establish the VideoBox UI foundation`
 
