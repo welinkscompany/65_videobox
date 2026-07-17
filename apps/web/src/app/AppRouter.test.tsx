@@ -5,7 +5,7 @@ import { createMemoryHistory } from "@tanstack/react-router";
 import { api } from "../api";
 import { AppRouter, createAppRouter, ProjectCatalog } from "./AppRouter";
 
-beforeEach(() => vi.stubGlobal("scrollTo", vi.fn()));
+beforeEach(() => { vi.stubGlobal("scrollTo", vi.fn()); vi.stubGlobal("matchMedia", (query: string) => ({ matches: false, media: query, onchange: null, addEventListener: () => {}, removeEventListener: () => {}, addListener: () => {}, removeListener: () => {}, dispatchEvent: () => false })); });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 describe("ProjectCatalog", () => {

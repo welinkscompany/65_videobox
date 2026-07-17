@@ -1,3 +1,4 @@
 /* Explicit style composition: tokens/primitives first, legacy dashboard second. */
 @import "./theme.css";
 @import "./legacy.css";
+@import "./product-shell.css";

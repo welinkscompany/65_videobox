@@ -181,7 +181,7 @@ Commit: `refactor: route the VideoBox workspace`
 
 ### Task 6: Port the app shell and ship useful Home/settings/empty-state routes
 
-- [ ] **Task 6 완료**
+- [x] **Task 6 완료**
 
 **Files:** create layout components/tests, Home/Projects pages, `deploymentCapabilities.ts`, minimal functional Settings layout/pages, initial `playwright.config.ts`, loopback-only fake API/provider webServer harness, and shell E2E; update package scripts, route manifest, source map, notices.
 

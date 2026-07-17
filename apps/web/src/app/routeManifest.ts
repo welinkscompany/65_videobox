@@ -1,4 +1,4 @@
-export const workspaceSections = ["home", "create", "timeline", "review", "editing", "settings"] as const;
+export const workspaceSections = ["home", "create", "timeline", "review", "editing", "settings", "media", "outputs"] as const;
 
 export type WorkspaceSection = (typeof workspaceSections)[number];
 

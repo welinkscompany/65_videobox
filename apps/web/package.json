@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "test": "vitest run",
-    "test:focused": "vitest run --run src/app.test.tsx"
+    "test:focused": "vitest run --run src/app.test.tsx",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.2.2",
@@ -25,6 +26,7 @@
     "tailwindcss": "^4.2.2"
   },
   "devDependencies": {
+    "@playwright/test": "1.61.1",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.0.1",
     "@types/react": "^19.1.2",

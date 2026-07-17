@@ -93,6 +93,8 @@ const routeSectionToLegacy: Record<WorkspaceSection, LegacySection> = {
   review: "review",
   editing: "editing",
   settings: "settings",
+  media: "timeline",
+  outputs: "review",
 };
 
 const legacySectionToRoute: Record<LegacySection, WorkspaceSection> = {

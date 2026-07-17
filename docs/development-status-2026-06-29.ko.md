@@ -1,6 +1,12 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 257. 2026-07-18 OSS Slice 1 Task 5 closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 258. 2026-07-18 OSS Slice 1 Task 6 closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+
+## 258. 2026-07-18 OSS Slice 1 Task 6 closeout
+
+- Task 6 product shell, Home/settings/empty routes, local-only capability visibility, and loopback-only Playwright harness를 완료했다. Hermes/container, OpenCut runtime, SaaS auth/billing은 시작하지 않았다.
+- 검증: frontend 27 files/260 tests, production build, Playwright 10 tests with deterministic 1920/1440/1280/768/390 snapshots, UI/provenance verifiers, provenance pytest 14 passed. external/Gemini provider call은 0이다.
+- OSS dashboard/editor 누적은 6/22 (27.3%), 잔여 72.7%다. 다음 실행 단위는 Task 7 persisted Eugene creation brief/adaptive interview이며, Task 6 route truth와 loopback E2E harness를 확장해서 사용한다.
 > 이 문서의 기존 날짜 기반 섹션은 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. Local Media Director release truth는 `## 250`, 현재 다음 frontend 계획은 `## 251`을 기준으로 본다.
 > 단, `2일 내 1차 데모 완성` 실행 레일은 `## 189`의 장기 우선순위를 그대로 넓게 집행하지 않고, `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`의 축소된 실행 계획을 우선 적용한다.
 

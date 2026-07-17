@@ -7,6 +7,13 @@ and the locked shadcn/ui new-york-v4 source files. Their upstream and local
 SHA256 values are recorded in the source map and registry lock.
 No Apache-2.0 source is materialized, modified, or attributed as copied yet.
 
+Task 6 adapts the structural shell composition of shadcn-admin's pinned
+`authenticated-layout.tsx` into `apps/web/src/app/ProductShell.tsx`. The
+MIT-licensed source is recorded with its raw upstream and local SHA256 values
+in the source map. VideoBox rewrites navigation, project data, copy, and all
+authentication/team/administration behavior; none of those upstream features
+are materialized.
+
 ## Future materialization rule
 
 Before a source file or generated component is added, record its pinned source
