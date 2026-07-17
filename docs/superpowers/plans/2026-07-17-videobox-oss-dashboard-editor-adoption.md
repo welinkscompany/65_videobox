@@ -113,21 +113,21 @@ Commit: `feat: finish Lumi dashboard copy`
 
 ### Task 2: Approve three source-grounded visual prototypes before production UI code
 
-- [ ] **Task 2 완료**
+- [x] **Task 2 완료**
 
 **Files:** create `docs/prototypes/2026-07-17-creator-workspace/README.ko.md`; create committed 1920/1440/1280/768/390 artifacts and `manifest.json`; create `docs/decisions/creator-workspace-visual-approval.ko.md`; create artifact-link/hash verifier test.
 
 **허용된 pre-approval production copy 범위:** 현재 렌더되는 default dashboard 전체의 사용자 노출 문자열·접근성 이름·placeholder·status/error copy와 그 테스트만 바꾼다. 여기에는 `App.tsx`의 sidebar/tab/project/output/onboarding/error copy, Director/추천, 직접 미디어 선택 surface가 포함된다. layout, API, state, provider 호출, dependency는 바꾸지 않는다. 별도 관리/diagnostic 설정은 default dashboard가 아니면 이 Task에서 삭제·rename하지 않되 dashboard로 새로 노출하지 않는다. 이 예외는 `유진` 표시명과 아래 creator-language policy를 정합시키기 위한 것으로, Task 3 이후의 production shell 구현을 앞당기지 않는다.
 
-- [ ] Build realistic Korean prototypes for zero-project Home, script/유진 interview, and asset-populated editor. 모든 prototype의 사용자 노출/접근성 assistant name은 `유진`이며, 기존 runtime identifier는 바꾸지 않는다.
-- [ ] Use an off-white `#F8FAFC` canvas, white panels, `#CBD5E1` borders, `#0F172A` primary text, `#475569` secondary text, and one `#2563EB` action accent; retain only the video preview stage as dark `#0F172A`. Body text contrast targets 4.5:1 or better, non-text focus/border contrast 3:1 or better, and state is never color-only.
-- [ ] In Home/Interview/Editor, retain simple action-copy: `새 영상 만들기`; `유진의 질문` with `모르겠어요`/`추천해줘`/`건너뛰기`; and `추천 적용` with `적용 전에는 편집본이 바뀌지 않습니다`. Narrow drawers visibly expose assets/script/captions/Inspector actions.
-- [ ] Default dashboard 전체와 유진/추천 surface의 copy는 사용자가 만드는 결과와 행동만 말한다: `영상`, `프로젝트`, `대본`, `장면`, `미디어`, `음악`, `자막`, `미리보기`, `추천`, `고르기`, `적용`, `내보내기`. visible text와 accessible name에 `provider`, `runtime`, `fallback`, `loopback`, `API key`, `model`, `context`, `revision`, `pipeline`, `job` 및 `시스템`, `개발`, `런타임`, `공급자`, `제공자`, `모델`, `API 키`, `루프백`, `폴백`, `컨텍스트`, `리비전`, `파이프라인`, `job`을 쓰지 않는다. `App.tsx`의 `로컬 검수`, `job 현황`, `파이프라인`, `로컬 AI 기능`, `LM Studio`, `자동 런타임`, `loopback`, `fallback`, `API 키` 같은 기본 dashboard copy도 사용자 결과/행동 언어로 교체하거나 default dashboard에서 제거한다. 실패/차단 안내는 `추천을 준비하지 못했어요. 직접 미디어를 고르거나 다시 시도해 주세요.`처럼 다음 행동을 말한다.
-- [ ] Provider/모델 설정은 default dashboard에 노출하지 않는다. 별도 관리 설정의 기술적 label/API contract는 이 Task에서 삭제·rename하지 않으며, dashboard로 새로 노출하지 않는다.
-- [ ] Annotate which structure comes from shadcn-admin, OpenCut classic, Opencast, or Supabase reference; do not place those annotations in production UI.
-- [ ] Prove editor density rules: collapsed sidebar; one dock open by default at 1280–1599; preview at least 50% of content or 640px; 1920px populated-editor shows both docks while preview remains at least 720px; drawers below 1280.
-- [ ] Record explicit user approval before Task 4. A rejection keeps this Task unchecked and blocks production shell styling.
-- [ ] Verify artifact dimensions, SHA manifest, links, diff/status; commit and push.
+- [x] Build realistic Korean prototypes for zero-project Home, script/유진 interview, and asset-populated editor. 모든 prototype의 사용자 노출/접근성 assistant name은 `유진`이며, 기존 runtime identifier는 바꾸지 않는다.
+- [x] Use a warm-white `#FAFAF9` canvas, white panels, soft warm-gray `#E7E5E4` borders, charcoal `#292524` primary text, `#57534E` secondary text, and one muted indigo `#4F46E5` action accent; retain only the video preview stage as dark `#18181B`. Use the local Noto Sans KR Variable font for approval artifacts; no CDN/font request. Body text contrast targets 4.5:1 or better, non-text focus/border contrast 3:1 or better, and state is never color-only.
+- [x] In Home/Interview/Editor, retain simple action-copy: `새 영상 만들기`; `유진의 질문` with `모르겠어요`/`추천해줘`/`건너뛰기`; and `추천 적용` with `적용 전에는 편집본이 바뀌지 않습니다`. Narrow drawers visibly expose assets/script/captions/Inspector actions.
+- [x] Default dashboard 전체와 유진/추천 surface의 copy는 사용자가 만드는 결과와 행동만 말한다: `영상`, `프로젝트`, `대본`, `장면`, `미디어`, `음악`, `자막`, `미리보기`, `추천`, `고르기`, `적용`, `내보내기`. visible text와 accessible name에 `provider`, `runtime`, `fallback`, `loopback`, `API key`, `model`, `context`, `revision`, `pipeline`, `job` 및 `시스템`, `개발`, `런타임`, `공급자`, `제공자`, `모델`, `API 키`, `루프백`, `폴백`, `컨텍스트`, `리비전`, `파이프라인`, `job`을 쓰지 않는다. `App.tsx`의 `로컬 검수`, `job 현황`, `파이프라인`, `로컬 AI 기능`, `LM Studio`, `자동 런타임`, `loopback`, `fallback`, `API 키` 같은 기본 dashboard copy도 사용자 결과/행동 언어로 교체하거나 default dashboard에서 제거한다. 실패/차단 안내는 `추천을 준비하지 못했어요. 직접 미디어를 고르거나 다시 시도해 주세요.`처럼 다음 행동을 말한다.
+- [x] Provider/모델 설정은 default dashboard에 노출하지 않는다. 별도 관리 설정의 기술적 label/API contract는 이 Task에서 삭제·rename하지 않으며, dashboard로 새로 노출하지 않는다.
+- [x] Annotate which structure comes from shadcn-admin, OpenCut classic, Opencast, or Supabase reference; do not place those annotations in production UI.
+- [x] Prove editor density rules: collapsed sidebar; one dock open by default at 1280–1599; preview at least 50% of content or 640px; 1920px populated-editor shows both docks while preview remains at least 720px; drawers below 1280.
+- [x] Record explicit user approval before Task 4. A rejection keeps this Task unchecked and blocks production shell styling.
+- [x] Verify artifact dimensions, SHA manifest, links, diff/status; commit and push.
 
 Commit: `docs: approve VideoBox creator workspace direction`
 

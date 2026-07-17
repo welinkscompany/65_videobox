@@ -1,0 +1,455 @@
+{
+  "approval": {
+    "approver": "user",
+    "artifact_manifest_sha": "56c654ee46d85f3e11f889744379c1043e643c3cc2dccd3fa3443811b7f1710f",
+    "decided_at": "2026-07-17",
+    "status": "approved"
+  },
+  "artifact_set": "creator-workspace-visual-prototype",
+  "artifact_version": 1,
+  "artifacts": [
+    {
+      "bytes": 23013,
+      "image_mode": "RGB",
+      "measurements": {
+        "layout": "작업 도구",
+        "question_progress": "2 / 4",
+        "required_state": "아직 승인 전"
+      },
+      "png_path": "png/create-interview-390x844.png",
+      "required_korean_labels": [
+        "대본 맥락",
+        "유진 질문",
+        "2 / 4",
+        "모르겠어요",
+        "추천해줘",
+        "건너뛰기",
+        "요약 수정",
+        "대본 보기"
+      ],
+      "screen_id": "create-interview",
+      "sha256": "2932e19f08aedd317cccd411114ceea1d7da1d8e0c97d367ad48be7d59b89f3b",
+      "viewport": {
+        "height": 844,
+        "width": 390
+      }
+    },
+    {
+      "bytes": 44628,
+      "image_mode": "RGB",
+      "measurements": {
+        "layout": "질문과 대본",
+        "question_progress": "2 / 4",
+        "required_state": "아직 승인 전"
+      },
+      "png_path": "png/create-interview-768x1024.png",
+      "required_korean_labels": [
+        "대본 맥락",
+        "유진 질문",
+        "2 / 4",
+        "모르겠어요",
+        "추천해줘",
+        "건너뛰기",
+        "요약 수정",
+        "대본 보기"
+      ],
+      "screen_id": "create-interview",
+      "sha256": "1e0969a8daa08081537b5fcb70450a4ba5b6f0bd1c869ddfc17526fa8f85f0f3",
+      "viewport": {
+        "height": 1024,
+        "width": 768
+      }
+    },
+    {
+      "bytes": 46883,
+      "image_mode": "RGB",
+      "measurements": {
+        "layout": "질문과 대본",
+        "question_progress": "2 / 4",
+        "required_state": "아직 승인 전"
+      },
+      "png_path": "png/create-interview-1280x800.png",
+      "required_korean_labels": [
+        "대본 맥락",
+        "유진 질문",
+        "2 / 4",
+        "모르겠어요",
+        "추천해줘",
+        "건너뛰기",
+        "요약 수정",
+        "대본 보기"
+      ],
+      "screen_id": "create-interview",
+      "sha256": "78152ae7df13cbb31095b991088c78d997d40554591e21f4c833ced68a3bcf0e",
+      "viewport": {
+        "height": 800,
+        "width": 1280
+      }
+    },
+    {
+      "bytes": 48466,
+      "image_mode": "RGB",
+      "measurements": {
+        "layout": "질문과 대본",
+        "question_progress": "2 / 4",
+        "required_state": "아직 승인 전"
+      },
+      "png_path": "png/create-interview-1440x900.png",
+      "required_korean_labels": [
+        "대본 맥락",
+        "유진 질문",
+        "2 / 4",
+        "모르겠어요",
+        "추천해줘",
+        "건너뛰기",
+        "요약 수정",
+        "대본 보기"
+      ],
+      "screen_id": "create-interview",
+      "sha256": "a56802efc54de6ccd06b247539ced48f68abd763762ae3e7b701f46f9f68e92d",
+      "viewport": {
+        "height": 900,
+        "width": 1440
+      }
+    },
+    {
+      "bytes": 51756,
+      "image_mode": "RGB",
+      "measurements": {
+        "layout": "질문과 대본",
+        "question_progress": "2 / 4",
+        "required_state": "아직 승인 전"
+      },
+      "png_path": "png/create-interview-1920x1080.png",
+      "required_korean_labels": [
+        "대본 맥락",
+        "유진 질문",
+        "2 / 4",
+        "모르겠어요",
+        "추천해줘",
+        "건너뛰기",
+        "요약 수정",
+        "대본 보기"
+      ],
+      "screen_id": "create-interview",
+      "sha256": "edf02de83bf41feddeacc2e7992ca05f4a65817883afcd1de15a52c49b172d38",
+      "viewport": {
+        "height": 1080,
+        "width": 1920
+      }
+    },
+    {
+      "bytes": 26157,
+      "image_mode": "RGB",
+      "measurements": {
+        "content_width": 358,
+        "context": "유진/편집 도우미/자산 상태/빈 구간",
+        "dock_mode": "drawers",
+        "fixed_tracks": [
+          "내레이션",
+          "자막",
+          "B-roll",
+          "BGM/SFX",
+          "오버레이"
+        ],
+        "preview_width": 358,
+        "sidebar": "작업 도구"
+      },
+      "png_path": "png/editor-populated-390x844.png",
+      "required_korean_labels": [
+        "편집본 미리보기",
+        "선택한 클립 보기",
+        "유진",
+        "적용",
+        "편집 도우미",
+        "자산 상태",
+        "빈 구간",
+        "적용 전에는 편집본이 바뀌지 않습니다",
+        "내레이션",
+        "자막",
+        "B-roll",
+        "BGM/SFX",
+        "오버레이"
+      ],
+      "screen_id": "editor-populated",
+      "sha256": "1160d5bfb8706ddd620352dfaba035482a344cfa284aba7b7b098856942ed3b0",
+      "viewport": {
+        "height": 844,
+        "width": 390
+      }
+    },
+    {
+      "bytes": 31900,
+      "image_mode": "RGB",
+      "measurements": {
+        "content_width": 664,
+        "context": "유진/편집 도우미/자산 상태/빈 구간",
+        "dock_mode": "drawers",
+        "fixed_tracks": [
+          "내레이션",
+          "자막",
+          "B-roll",
+          "BGM/SFX",
+          "오버레이"
+        ],
+        "preview_width": 664,
+        "sidebar": "접힘"
+      },
+      "png_path": "png/editor-populated-768x1024.png",
+      "required_korean_labels": [
+        "편집본 미리보기",
+        "선택한 클립 보기",
+        "유진",
+        "적용",
+        "편집 도우미",
+        "자산 상태",
+        "빈 구간",
+        "적용 전에는 편집본이 바뀌지 않습니다",
+        "내레이션",
+        "자막",
+        "B-roll",
+        "BGM/SFX",
+        "오버레이"
+      ],
+      "screen_id": "editor-populated",
+      "sha256": "a4216fea64a7e1875baa4fab34a204070d58ff87c449143423158c3eadba6e46",
+      "viewport": {
+        "height": 1024,
+        "width": 768
+      }
+    },
+    {
+      "bytes": 31391,
+      "image_mode": "RGB",
+      "measurements": {
+        "content_width": 1176,
+        "context": "유진/편집 도우미/자산 상태/빈 구간",
+        "dock_mode": "one-dock",
+        "fixed_tracks": [
+          "내레이션",
+          "자막",
+          "B-roll",
+          "BGM/SFX",
+          "오버레이"
+        ],
+        "preview_width": 867,
+        "sidebar": "접힘"
+      },
+      "png_path": "png/editor-populated-1280x800.png",
+      "required_korean_labels": [
+        "편집본 미리보기",
+        "선택한 클립 보기",
+        "유진",
+        "적용",
+        "편집 도우미",
+        "자산 상태",
+        "빈 구간",
+        "적용 전에는 편집본이 바뀌지 않습니다",
+        "내레이션",
+        "자막",
+        "B-roll",
+        "BGM/SFX",
+        "오버레이"
+      ],
+      "screen_id": "editor-populated",
+      "sha256": "c4069527830aa96b4dcbf8781a97c993587039ca430a9d1b281fc43f9edae9b2",
+      "viewport": {
+        "height": 800,
+        "width": 1280
+      }
+    },
+    {
+      "bytes": 32787,
+      "image_mode": "RGB",
+      "measurements": {
+        "content_width": 1336,
+        "context": "유진/편집 도우미/자산 상태/빈 구간",
+        "dock_mode": "one-dock",
+        "fixed_tracks": [
+          "내레이션",
+          "자막",
+          "B-roll",
+          "BGM/SFX",
+          "오버레이"
+        ],
+        "preview_width": 1027,
+        "sidebar": "접힘"
+      },
+      "png_path": "png/editor-populated-1440x900.png",
+      "required_korean_labels": [
+        "편집본 미리보기",
+        "선택한 클립 보기",
+        "유진",
+        "적용",
+        "편집 도우미",
+        "자산 상태",
+        "빈 구간",
+        "적용 전에는 편집본이 바뀌지 않습니다",
+        "내레이션",
+        "자막",
+        "B-roll",
+        "BGM/SFX",
+        "오버레이"
+      ],
+      "screen_id": "editor-populated",
+      "sha256": "de0c414c12e8da866f76d6c986bdac346093f1e1698c8bfdeb828c4a3d52e444",
+      "viewport": {
+        "height": 900,
+        "width": 1440
+      }
+    },
+    {
+      "bytes": 44468,
+      "image_mode": "RGB",
+      "measurements": {
+        "content_width": 1816,
+        "context": "유진/편집 도우미/자산 상태/빈 구간",
+        "dock_mode": "both-docks",
+        "fixed_tracks": [
+          "내레이션",
+          "자막",
+          "B-roll",
+          "BGM/SFX",
+          "오버레이"
+        ],
+        "preview_width": 1158,
+        "sidebar": "접힘"
+      },
+      "png_path": "png/editor-populated-1920x1080.png",
+      "required_korean_labels": [
+        "편집본 미리보기",
+        "선택한 클립 보기",
+        "유진",
+        "적용",
+        "편집 도우미",
+        "자산 상태",
+        "빈 구간",
+        "적용 전에는 편집본이 바뀌지 않습니다",
+        "내레이션",
+        "자막",
+        "B-roll",
+        "BGM/SFX",
+        "오버레이"
+      ],
+      "screen_id": "editor-populated",
+      "sha256": "fd51a08e1c05a9c528274e95c7f955354d0233e06a8255b75d6404d6204bc823",
+      "viewport": {
+        "height": 1080,
+        "width": 1920
+      }
+    },
+    {
+      "bytes": 19043,
+      "image_mode": "RGB",
+      "measurements": {
+        "primary_action": "새 영상 만들기",
+        "shell": "mobile-header"
+      },
+      "png_path": "png/home-empty-390x844.png",
+      "required_korean_labels": [
+        "아직 프로젝트가 없습니다",
+        "새 영상 만들기"
+      ],
+      "screen_id": "home-empty",
+      "sha256": "df5c6c83e48cd0db10016b8bf098836ce236449746e4fc1f456b6849957d2344",
+      "viewport": {
+        "height": 844,
+        "width": 390
+      }
+    },
+    {
+      "bytes": 41186,
+      "image_mode": "RGB",
+      "measurements": {
+        "primary_action": "새 영상 만들기",
+        "shell": "sidebar"
+      },
+      "png_path": "png/home-empty-768x1024.png",
+      "required_korean_labels": [
+        "아직 프로젝트가 없습니다",
+        "새 영상 만들기"
+      ],
+      "screen_id": "home-empty",
+      "sha256": "cf4a904877f837ca969a11f54d6893e36b67d8a4495c6bc6e905ccc32d9e4ef6",
+      "viewport": {
+        "height": 1024,
+        "width": 768
+      }
+    },
+    {
+      "bytes": 42566,
+      "image_mode": "RGB",
+      "measurements": {
+        "primary_action": "새 영상 만들기",
+        "shell": "sidebar"
+      },
+      "png_path": "png/home-empty-1280x800.png",
+      "required_korean_labels": [
+        "아직 프로젝트가 없습니다",
+        "새 영상 만들기"
+      ],
+      "screen_id": "home-empty",
+      "sha256": "26140da07fd35ed5787187666ccfc1aa728f86642e3935b9591817d80c95f2a5",
+      "viewport": {
+        "height": 800,
+        "width": 1280
+      }
+    },
+    {
+      "bytes": 44143,
+      "image_mode": "RGB",
+      "measurements": {
+        "primary_action": "새 영상 만들기",
+        "shell": "sidebar"
+      },
+      "png_path": "png/home-empty-1440x900.png",
+      "required_korean_labels": [
+        "아직 프로젝트가 없습니다",
+        "새 영상 만들기"
+      ],
+      "screen_id": "home-empty",
+      "sha256": "33634e69ab5e2bd9456802f7ef500374a86248826f4c8106945ad90bd450ecaf",
+      "viewport": {
+        "height": 900,
+        "width": 1440
+      }
+    },
+    {
+      "bytes": 47448,
+      "image_mode": "RGB",
+      "measurements": {
+        "primary_action": "새 영상 만들기",
+        "shell": "sidebar"
+      },
+      "png_path": "png/home-empty-1920x1080.png",
+      "required_korean_labels": [
+        "아직 프로젝트가 없습니다",
+        "새 영상 만들기"
+      ],
+      "screen_id": "home-empty",
+      "sha256": "7fc95b27dd467fc8eb7302ac1a71453e7b74049738168309ebf5150cedbc725d",
+      "viewport": {
+        "height": 1080,
+        "width": 1920
+      }
+    }
+  ],
+  "design_tokens": {
+    "accent": "#4F46E5",
+    "border": "#E7E5E4",
+    "canvas": "#FAFAF9",
+    "panel": "#FFFFFF",
+    "preview": "#18181B",
+    "primary": "#292524",
+    "secondary": "#57534E"
+  },
+  "renderer": {
+    "font": {
+      "absolute_path": "C:\\Windows\\Fonts\\NotoSansKR-VF.ttf",
+      "sha256": "018174e8cdd366aff67c8d366c7dc806a7babbe7f2819fc23b00d59f7b8353d0"
+    },
+    "image_mode": "RGB",
+    "name": "Pillow",
+    "pillow_major": 12
+  }
+}

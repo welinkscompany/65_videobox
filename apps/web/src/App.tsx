@@ -29,6 +29,7 @@ import {
   type JobRecordWithProject,
   type MediaLibraryAsset,
   type MediaLibraryInstallState,
+  type AssetResponse,
 } from "./api";
 import { MediaAnalysisPanel } from "./features/media/MediaAnalysisPanel";
 import { ManualMediaLibrary } from "./features/media/ManualMediaLibrary";
@@ -49,7 +50,6 @@ import {
   formatDisplayText,
   formatEditingMutationFeedbackLabel,
   formatFieldLabel,
-  formatJobValue,
   formatNullableValue,
   formatOperatorNote,
   formatPredictedReviewStatusDescription,
@@ -110,6 +110,7 @@ export function App() {
   const [capcutHandoffDiagnosticsError, setCapcutHandoffDiagnosticsError] = useState<string | null>(null);
   const [voiceSamplePath, setVoiceSamplePath] = useState("");
   const [voiceSampleFile, setVoiceSampleFile] = useState<File | null>(null);
+  const [voiceSamples, setVoiceSamples] = useState<AssetResponse[]>([]);
   const [voiceSampleAssetId, setVoiceSampleAssetId] = useState("");
   const [isRegisteringVoiceSample, setIsRegisteringVoiceSample] = useState(false);
   const [voiceSampleMessage, setVoiceSampleMessage] = useState<string | null>(null);
@@ -205,7 +206,7 @@ export function App() {
       setCapcutHandoffDiagnosticsError(null);
     } catch (error) {
       setCapcutHandoffDiagnosticsError(
-        error instanceof Error ? error.message : "CapCut 연결 상태를 확인하지 못했습니다.",
+        "연결 상태를 확인하지 못했어요. 다시 시도해 주세요.",
       );
     } finally {
       setIsLoadingCapcutHandoffDiagnostics(false);
@@ -230,7 +231,7 @@ export function App() {
         if (cancelled) {
           return;
         }
-        setErrorMessage(error instanceof Error ? error.message : "알 수 없는 오류");
+        setErrorMessage("요청을 완료하지 못했어요. 다시 시도해 주세요.");
         setLoadState("error");
       }
     }
@@ -283,7 +284,7 @@ export function App() {
       setRecentPresetIds(recent);
       setSelectedPresetId((current) => current || presets[0]?.preset_id || "");
     }).catch((error) => {
-      if (!cancelled) setErrorMessage(error instanceof Error ? error.message : "프리셋을 불러오지 못했습니다");
+      if (!cancelled) setErrorMessage("프리셋을 불러오지 못했어요. 다시 시도해 주세요.");
     });
     return () => {
       cancelled = true;
@@ -317,9 +318,11 @@ export function App() {
     }
     void api.listVoiceSamples(selectedProjectId).then(
       (assets) => {
-        if (cancelled || assets.length === 0) {
+        if (cancelled) {
           return;
         }
+        setVoiceSamples(assets);
+        if (assets.length === 0) return;
         const latestAssetId = assets[0].asset_id;
         setVoiceSampleAssetId((current) => current || latestAssetId);
         setTtsCandidateVoiceSampleId((current) => current || latestAssetId);
@@ -385,9 +388,7 @@ export function App() {
           latestEditingSession = await api.getLatestEditingSession(projectId);
         } catch (error) {
           setEditingSessionRestoreError(
-            error instanceof Error
-              ? `편집 세션 복구 실패 · 기존 타임라인 유지 (${error.message})`
-              : "편집 세션 복구 실패 · 기존 타임라인 유지",
+            "편집 세션 복구 실패 · 기존 타임라인 유지",
           );
           latestEditingSession = null;
         }
@@ -630,7 +631,7 @@ export function App() {
         if (cancelled) {
           return;
         }
-        setErrorMessage(error instanceof Error ? error.message : "알 수 없는 오류");
+        setErrorMessage("요청을 완료하지 못했어요. 다시 시도해 주세요.");
         setLoadState("error");
       }
     }
@@ -913,7 +914,7 @@ export function App() {
           message: "다른 편집 내용이 있습니다 · 내 입력은 유지됩니다",
         });
       } else {
-        const message = error instanceof Error ? error.message : "알 수 없는 오류";
+        const message = "요청을 완료하지 못했어요. 다시 시도해 주세요.";
         setErrorMessage(message);
         setEditingMutationFeedback({
           kind: "error",
@@ -942,7 +943,7 @@ export function App() {
       setPartialRegenerationPreflight(null);
       setPartialRegenerationRun(null);
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "알 수 없는 오류");
+      setErrorMessage("요청을 완료하지 못했어요. 다시 시도해 주세요.");
     } finally {
       setIsStartingEditingSession(false);
     }
@@ -974,7 +975,7 @@ export function App() {
       setPartialRegenerationPreflight(preflight);
       setPartialRegenerationRun(null);
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "알 수 없는 오류");
+      setErrorMessage("요청을 완료하지 못했어요. 다시 시도해 주세요.");
     } finally {
       setIsRequestingRegenerationPreflight(false);
     }
@@ -1030,7 +1031,7 @@ export function App() {
         setReviewSnapshot(review);
       }
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "알 수 없는 오류");
+      setErrorMessage("요청을 완료하지 못했어요. 다시 시도해 주세요.");
     } finally {
       setIsRunningPartialRegeneration(false);
     }
@@ -1066,7 +1067,7 @@ export function App() {
       setExportJob(null);
       setSelectedSection("timeline");
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "알 수 없는 오류");
+      setErrorMessage("요청을 완료하지 못했어요. 다시 시도해 주세요.");
     } finally {
       setIsRebuildingTimeline(false);
     }
@@ -1091,7 +1092,7 @@ export function App() {
       if (preview.status === "succeeded") setLastSuccessfulPreviewJob(preview);
       if (preview.status === "failed") setErrorMessage("미리보기 실패: 결과 파일을 만들지 못했습니다.");
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "알 수 없는 오류");
+      setErrorMessage("요청을 완료하지 못했어요. 다시 시도해 주세요.");
     } finally {
       setIsRenderingPreview(false);
     }
@@ -1114,7 +1115,7 @@ export function App() {
       setJobs(jobItems);
       setExportJob(capcutExport);
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "알 수 없는 오류");
+      setErrorMessage("요청을 완료하지 못했어요. 다시 시도해 주세요.");
     } finally {
       setIsExportingCapcut(false);
     }
@@ -1168,10 +1169,10 @@ export function App() {
       setFinalRenderJob(finalRender);
       if (finalRender.status === "succeeded") setLastSuccessfulFinalRenderJob(finalRender);
       if (finalRender.status === "failed") {
-        setErrorMessage(`완성본 렌더 실패: ${finalRender.error_message ?? "결과 파일을 만들지 못했습니다."}`);
+        setErrorMessage("완성본을 만들지 못했어요. 다시 시도해 주세요.");
       }
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "알 수 없는 오류");
+      setErrorMessage("요청을 완료하지 못했어요. 다시 시도해 주세요.");
     } finally {
       setIsRenderingFinal(false);
       setFinalRenderProgress(null);
@@ -1197,11 +1198,11 @@ export function App() {
       if (capcutDraftExport.status === "succeeded") setLastSuccessfulCapcutDraftJob(capcutDraftExport);
       if (capcutDraftExport.status === "failed") {
         setErrorMessage(
-          `CapCut 초안 내보내기 실패: ${capcutDraftExport.error_message ?? "결과 파일을 만들지 못했습니다."}`,
+          "초안을 만들지 못했어요. 다시 시도해 주세요.",
         );
       }
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "알 수 없는 오류");
+      setErrorMessage("요청을 완료하지 못했어요. 다시 시도해 주세요.");
     } finally {
       setIsExportingCapcutDraft(false);
     }
@@ -1218,7 +1219,7 @@ export function App() {
       const jobItems = await api.listJobs(selectedProjectId);
       setJobs(jobItems);
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "알 수 없는 오류");
+      setErrorMessage("요청을 완료하지 못했어요. 다시 시도해 주세요.");
     } finally {
       setRetryingJobId(null);
     }
@@ -1236,7 +1237,7 @@ export function App() {
       const jobItems = await api.listAllJobs();
       setAllJobs(jobItems);
     } catch (error) {
-      setAllJobsError(error instanceof Error ? error.message : "알 수 없는 오류");
+      setAllJobsError("작업 목록을 불러오지 못했어요. 다시 시도해 주세요.");
     } finally {
       setIsLoadingAllJobs(false);
     }
@@ -1255,10 +1256,10 @@ export function App() {
       });
       setVoiceSampleAssetId(asset.asset_id);
       setTtsCandidateVoiceSampleId(asset.asset_id);
-      setVoiceSampleMessage(`등록됨 · ${asset.asset_id}`);
+      setVoiceSampleMessage("내 목소리를 추가했어요.");
     } catch (error) {
       setVoiceSampleError(
-        error instanceof Error ? `음성 샘플 등록 실패 · ${error.message}` : "음성 샘플 등록 실패",
+        "내 목소리를 추가하지 못했어요. 다시 시도해 주세요.",
       );
     } finally {
       setIsRegisteringVoiceSample(false);
@@ -1275,7 +1276,7 @@ export function App() {
       setTtsCandidates(result.candidates);
     } catch (error) {
       setTtsCandidateError(
-        error instanceof Error ? `TTS 후보 목록 조회 실패 · ${error.message}` : "TTS 후보 목록 조회 실패",
+        "목소리 후보를 불러오지 못했어요. 다시 시도해 주세요.",
       );
     } finally {
       setIsLoadingTtsCandidates(false);
@@ -1297,14 +1298,14 @@ export function App() {
         target_duration_sec: targetDurationSec,
       });
       if (asset.technical_status === "accepted") {
-        setTtsCandidateMessage(`기술 검증 통과 · 청취 승인 대기 · ${asset.asset_id}`);
+        setTtsCandidateMessage("후보를 만들었어요. 들어 보고 사용할지 골라주세요.");
       } else {
-        setTtsCandidateMessage(`후보 거부 · ${asset.failure_code ?? "기술 검증 실패"}`);
+        setTtsCandidateMessage("목소리 후보를 지금은 만들지 못했어요. 다른 후보를 만들어 보세요.");
       }
       await loadTtsCandidates(segmentId);
     } catch (error) {
       setTtsCandidateError(
-        error instanceof Error ? `TTS 후보 생성 실패 · ${error.message}` : "TTS 후보 생성 실패",
+        "목소리 후보를 만들지 못했어요. 다시 시도해 주세요.",
       );
     } finally {
       setIsGeneratingTtsCandidate(false);
@@ -1327,7 +1328,7 @@ export function App() {
       setTimelineJob(timeline);
       setReviewSnapshot(review);
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "알 수 없는 오류");
+      setErrorMessage("요청을 완료하지 못했어요. 다시 시도해 주세요.");
     } finally {
       setIsApprovingTimeline(false);
     }
@@ -1355,7 +1356,7 @@ export function App() {
       setReviewSnapshot(review);
       setTimelineJob(timeline);
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "알 수 없는 오류");
+      setErrorMessage("요청을 완료하지 못했어요. 다시 시도해 주세요.");
     }
   }
 
@@ -1399,7 +1400,7 @@ export function App() {
       setPreviewJob(null);
       setExportJob(null);
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "알 수 없는 오류");
+      setErrorMessage("요청을 완료하지 못했어요. 다시 시도해 주세요.");
     } finally {
       setIsReopeningTimeline(false);
     }
@@ -1422,7 +1423,7 @@ export function App() {
       setJobs(jobItems);
       setSubtitleJob(subtitle);
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "알 수 없는 오류");
+      setErrorMessage("요청을 완료하지 못했어요. 다시 시도해 주세요.");
     } finally {
       setIsRenderingSubtitle(false);
     }
@@ -1476,7 +1477,7 @@ export function App() {
       );
     } catch (error) {
       setBrollImportError(
-        error instanceof Error ? `B롤 가져오기 실패 · ${error.message}` : "B롤 가져오기 실패",
+        "B롤을 가져오지 못했어요. 다시 시도해 주세요.",
       );
       setBrollImportMessage(null);
     } finally {
@@ -1534,7 +1535,7 @@ export function App() {
       await refreshGeminiKeys(selectedProjectId);
       closeGeminiForm();
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "알 수 없는 오류");
+      setErrorMessage("요청을 완료하지 못했어요. 다시 시도해 주세요.");
     } finally {
       setIsSavingGeminiKey(false);
     }
@@ -1554,7 +1555,7 @@ export function App() {
       }
       await refreshGeminiKeys(selectedProjectId);
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "알 수 없는 오류");
+      setErrorMessage("요청을 완료하지 못했어요. 다시 시도해 주세요.");
     } finally {
       setTogglingGeminiKeyId(null);
     }
@@ -1764,10 +1765,10 @@ export function App() {
         current?.export ? { ...current, export: { ...current.export, handoff: result.handoff } } : current,
       );
       if (result.handoff.status === "failed") {
-        setErrorMessage(`CapCut 등록 실패: ${result.handoff.error_message ?? "등록 경로를 준비하지 못했습니다."}`);
+        setErrorMessage("CapCut 등록을 완료하지 못했어요. 다시 시도해 주세요.");
       }
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "CapCut 프로젝트 등록에 실패했습니다.");
+      setErrorMessage("초안 등록을 완료하지 못했어요. 다시 시도해 주세요.");
     } finally {
       setIsRegisteringCapcutHandoff(false);
     }
@@ -1791,10 +1792,10 @@ export function App() {
       const asset = await api.uploadVoiceSample(selectedProjectId, voiceSampleFile);
       setVoiceSampleAssetId(asset.asset_id);
       setTtsCandidateVoiceSampleId(asset.asset_id);
-      setVoiceSampleMessage(`업로드·등록됨 · ${asset.asset_id}`);
+      setVoiceSampleMessage("내 목소리를 추가했어요.");
     } catch (error) {
       setVoiceSampleError(
-        error instanceof Error ? `음성 샘플 업로드 실패 · ${error.message}` : "음성 샘플 업로드 실패",
+        "내 목소리를 추가하지 못했어요. 다시 시도해 주세요.",
       );
     } finally {
       setIsRegisteringVoiceSample(false);
@@ -1820,12 +1821,12 @@ export function App() {
       });
       setTtsCandidateMessage(
         decision === "approved"
-          ? `청취 승인 완료 · 후보를 선택해 나레이션에 적용하세요 · ${candidate.asset_id}`
-          : `청취 거부 완료 · 기존 나레이션을 유지합니다 · ${candidate.asset_id}`,
+          ? "청취 승인을 저장했어요. 이 후보를 선택해 나레이션에 적용하세요."
+          : "청취 거부를 저장했어요. 기존 나레이션을 유지합니다.",
       );
     } catch (error) {
       setTtsCandidateError(
-        error instanceof Error ? `TTS 청취 승인 실패 · ${error.message}` : "TTS 청취 승인 실패",
+        "청취 승인을 저장하지 못했어요. 다시 시도해 주세요.",
       );
     } finally {
       setIsReviewingTtsCandidate(null);
@@ -1836,7 +1837,7 @@ export function App() {
     <div className="shell">
       <aside className="sidebar" aria-label="프로젝트 탐색">
         <div className="brand-card">
-          <p className="eyebrow">로컬 검수</p>
+          <p className="eyebrow">영상 만들기</p>
           <h1>VideoBox 작업판</h1>
           <p className="lede">프로젝트 · 타임라인 · 검수 · 출력</p>
         </div>
@@ -1892,17 +1893,17 @@ export function App() {
         <section className="sidebar-section" aria-labelledby="all-jobs-heading">
           <div className="sidebar-header">
             <p className="section-kicker">전체 프로젝트</p>
-            <h2 id="all-jobs-heading">job 현황</h2>
+            <h2 id="all-jobs-heading">작업 진행</h2>
           </div>
           <button className="action-button" onClick={() => void handleToggleAllJobsPanel()} type="button">
-            {isAllJobsPanelOpen ? "전체 job 현황 닫기" : "전체 job 현황 보기"}
+            {isAllJobsPanelOpen ? "전체 작업 진행 닫기" : "전체 작업 진행 보기"}
           </button>
           {isAllJobsPanelOpen ? (
             <div className="all-jobs-list">
               {isLoadingAllJobs ? <p className="meta-copy">불러오는 중...</p> : null}
               {allJobsError ? <p className="error-banner">{allJobsError}</p> : null}
               {!isLoadingAllJobs && allJobs.length === 0 ? (
-                <p className="empty-state">등록된 job 없음</p>
+                <p className="empty-state">진행 중인 작업이 없어요</p>
               ) : null}
               {allJobs.map((job) => (
                 <div className="all-jobs-row" key={job.job_id}>
@@ -2075,7 +2076,7 @@ export function App() {
         <section className="panel" aria-labelledby="status-heading">
           <div className="panel-header">
             <div>
-              <p className="section-kicker">파이프라인</p>
+              <p className="section-kicker">영상 만들기</p>
               <h2 id="status-heading">진행</h2>
             </div>
           </div>
@@ -2102,13 +2103,13 @@ export function App() {
             ))}
           </div>
           <details className="stage-detail-toggle">
-            <summary>단계별 job ID 보기</summary>
+            <summary>단계별 진행 보기</summary>
             <div className="stage-detail-list">
               {stageStatus.map((stage) => (
                 <span key={stage.jobType}>
                   <strong>{`${stage.label}:`}</strong>
                   <span>{formatStatusLabel(stage.status)}</span>
-                  <span>{formatJobValue(stage.jobId)}</span>
+                  <span>{stage.jobId === "not-started" ? "대기" : "준비됨"}</span>
                   {stage.status === "failed" ? (
                     <button
                       type="button"
@@ -2200,15 +2201,15 @@ export function App() {
               <dl className="summary-list">
                 <div>
                   <dt>자막 작업</dt>
-                  <dd>{formatJobValue(subtitleJob?.job_id)}</dd>
+                  <dd>{subtitleJob ? "준비됨" : "대기"}</dd>
                 </div>
                 <div>
                   <dt>자막 파일</dt>
-                  <dd>{formatJobValue(subtitleJob?.subtitle.file_uri)}</dd>
+                  <dd>{subtitleJob?.subtitle ? "준비됨" : "대기"}</dd>
                 </div>
                 <div>
                   <dt>미리보기 작업</dt>
-                  <dd>{formatJobValue(previewJob?.job_id)}</dd>
+                  <dd>{previewJob ? "준비됨" : "대기"}</dd>
                 </div>
                 <div>
                   <dt>미리보기 파일</dt>
@@ -2222,7 +2223,7 @@ export function App() {
                 </div>
                 <div>
                   <dt>내보내기 작업</dt>
-                  <dd>{formatJobValue(exportJob?.job_id)}</dd>
+                  <dd>{exportJob ? "준비됨" : "대기"}</dd>
                 </div>
                 <div>
                   <dt>내보내기 대상</dt>
@@ -2230,15 +2231,15 @@ export function App() {
                 </div>
                 <div>
                   <dt>완성본 렌더</dt>
-                  <dd>{formatJobValue(finalRenderJob?.job_id)}</dd>
+                  <dd>{finalRenderJob ? "준비됨" : "대기"}</dd>
                 </div>
                 <div>
                   <dt>완성본 파일</dt>
                   <dd>
                     {finalRenderJob?.render
-                      ? formatDisplayText(finalRenderJob.render.file_uri)
+                      ? "완성본 준비됨"
                       : lastSuccessfulFinalRenderJob?.render
-                        ? `마지막 성공 유지 · ${formatDisplayText(lastSuccessfulFinalRenderJob.render.file_uri)}`
+                        ? "마지막 완성본 유지"
                         : finalRenderJob?.status === "failed"
                           ? "완성본 렌더 실패"
                         : "미시작"}
@@ -2246,15 +2247,15 @@ export function App() {
                 </div>
                 <div>
                   <dt>CapCut 초안(실제)</dt>
-                  <dd>{formatJobValue(capcutDraftJob?.job_id)}</dd>
+                  <dd>{capcutDraftJob ? "준비됨" : "대기"}</dd>
                 </div>
                 <div>
                   <dt>CapCut 초안 파일</dt>
                   <dd>
                     {capcutDraftJob?.export
-                      ? formatDisplayText(capcutDraftJob.export.file_uri)
+                      ? "초안 준비됨"
                       : lastSuccessfulCapcutDraftJob?.export
-                        ? `마지막 성공 유지 · ${formatDisplayText(lastSuccessfulCapcutDraftJob.export.file_uri)}`
+                        ? "마지막 초안 유지"
                         : capcutDraftJob?.status === "failed"
                           ? "CapCut 초안 내보내기 실패"
                         : "미시작"}
@@ -2266,7 +2267,7 @@ export function App() {
                   <strong>CapCut에서 후처리 필요</strong>
                   <ul>
                     {(capcutDraftJob?.export?.notes ?? lastSuccessfulCapcutDraftJob?.export?.notes ?? []).map((note) => (
-                      <li key={note}>{note}</li>
+                      <li key={note}>후처리가 필요해요. CapCut에서 확인해 주세요.</li>
                     ))}
                   </ul>
                 </div>
@@ -2295,17 +2296,8 @@ export function App() {
                       <div>
                         <dt>설치 버전</dt>
                         <dd>
-                          {formatDisplayText(capcutHandoffDiagnostics.detected_version ?? "미감지")}
-                          {capcutHandoffDiagnostics.is_supported ? " · 지원됨" : " · 미지원"}
+                          {capcutHandoffDiagnostics.is_supported ? "지원됨" : "확인 필요"}
                         </dd>
-                      </div>
-                      <div>
-                        <dt>설치 경로</dt>
-                        <dd>{formatDisplayText(capcutHandoffDiagnostics.installation_path ?? "미감지")}</dd>
-                      </div>
-                      <div>
-                        <dt>프로젝트 경로</dt>
-                        <dd>{formatDisplayText(capcutHandoffDiagnostics.project_root_path)}</dd>
                       </div>
                       <div>
                         <dt>쓰기 권한</dt>
@@ -2314,7 +2306,7 @@ export function App() {
                     </dl>
                     {capcutHandoffDiagnostics.status !== "ready" ? (
                       <p className="error-banner">
-                        {formatDisplayText(capcutHandoffDiagnostics.recovery_message ?? "CapCut 연결 상태를 다시 확인하세요.")}
+                        CapCut 연결 상태를 다시 확인해 주세요.
                       </p>
                     ) : null}
                   </>
@@ -2327,22 +2319,22 @@ export function App() {
           {capcutDraftJob?.export?.handoff?.status === "ready" ? (
                 <div className="loading-banner" role="status">
                   <strong>CapCut에 열기 준비</strong>
-                  <p>{formatDisplayText(capcutDraftJob.export.handoff.registered_project_path ?? "등록 경로 없음")}</p>
+                  <p>CapCut에서 초안을 열 수 있어요.</p>
                 </div>
           ) : null}
               {capcutDraftJob?.export?.handoff?.status === "failed" ? (
                 <p className="error-banner">
-                  CapCut 등록 실패: {formatDisplayText(capcutDraftJob.export.handoff.error_message ?? "알 수 없는 오류")}
+                  CapCut 등록을 완료하지 못했어요. 다시 시도해 주세요.
                 </p>
               ) : null}
               {capcutDraftJob?.status === "failed" ? (
                 <p className="error-banner">
-                  CapCut 초안 내보내기 실패: {capcutDraftJob.error_message ?? "결과 파일을 만들지 못했습니다."}
+                  초안 내보내기를 완료하지 못했어요. 다시 시도해 주세요.
                 </p>
               ) : null}
               {finalRenderJob?.status === "failed" ? (
                 <p className="error-banner">
-                  완성본 렌더 실패: {finalRenderJob.error_message ?? "결과 파일을 만들지 못했습니다."}
+                  완성본을 만들지 못했어요. 다시 시도해 주세요.
                 </p>
               ) : null}
             </article>
@@ -2355,12 +2347,12 @@ export function App() {
             <article className="panel">
               <div className="panel-header">
                 <div>
-                  <p className="section-kicker">TTS</p>
-                  <h2>음성 샘플</h2>
+                  <p className="section-kicker">음성</p>
+                  <h2>내 목소리</h2>
                 </div>
               </div>
               <label className="field">
-                <span>음성 샘플 파일 선택</span>
+                <span>내 목소리 고르기</span>
                 <input
                   accept="audio/*,.m4a,.webm"
                   onChange={(event) => {
@@ -2378,46 +2370,41 @@ export function App() {
                   onClick={() => void handleUploadVoiceSample()}
                   type="button"
                 >
-                  {isRegisteringVoiceSample ? "업로드 중" : "선택한 파일 업로드"}
+                  {isRegisteringVoiceSample ? "추가 중" : "내 목소리 추가"}
                 </button>
               </div>
-              <label className="field">
-                <span>음성 샘플 파일 경로</span>
-                <input
-                  onChange={(event) => setVoiceSamplePath(event.target.value)}
-                  placeholder="C:\path\to\voice_sample.wav"
-                  value={voiceSamplePath}
-                />
-              </label>
-              <div className="action-row">
-                <button
-                  className="action-button primary"
-                  disabled={!selectedProjectId || !voiceSamplePath.trim() || isRegisteringVoiceSample}
-                  onClick={() => void handleRegisterVoiceSample()}
-                  type="button"
-                >
-                  {isRegisteringVoiceSample ? "등록 중" : "음성 샘플 등록"}
-                </button>
-              </div>
+              {voiceSamples.length > 0 ? (
+                <div className="tts-candidate-comparison">
+                  <p className="section-kicker">저장한 목소리</p>
+                  {voiceSamples.map((sample, index) => (
+                    <button
+                      aria-pressed={ttsCandidateVoiceSampleId === sample.asset_id}
+                      className="action-button"
+                      key={sample.asset_id}
+                      onClick={() => {
+                        setVoiceSampleAssetId(sample.asset_id);
+                        setTtsCandidateVoiceSampleId(sample.asset_id);
+                      }}
+                      type="button"
+                    >
+                      {`내 목소리 ${index + 1} 사용`}
+                    </button>
+                  ))}
+                  {ttsCandidateVoiceSampleId ? (
+                    <p className="meta-copy">
+                      {`현재 사용할 목소리: 내 목소리 ${voiceSamples.findIndex((sample) => sample.asset_id === ttsCandidateVoiceSampleId) + 1}`}
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
               {voiceSampleMessage ? <p className="meta-copy">{voiceSampleMessage}</p> : null}
               {voiceSampleError ? <p className="error-banner">{voiceSampleError}</p> : null}
-              <label className="field">
-                <span>TTS 후보 생성에 쓸 음성 샘플 자산 ID</span>
-                <input
-                  onChange={(event) => setTtsCandidateVoiceSampleId(event.target.value)}
-                  value={ttsCandidateVoiceSampleId || voiceSampleAssetId}
-                />
-              </label>
               <p className="meta-copy">
-                편집 탭의 세그먼트에서 &quot;TTS 후보 생성&quot; 버튼으로 이 음성 샘플 기반 나레이션을
-                만들 수 있습니다.
+                편집에서 내 목소리로 나레이션을 만들 수 있어요.
               </p>
             </article>
 
-            <article className="panel" aria-label="로컬 AI 기능">
-              <div className="panel-header"><div><p className="section-kicker">로컬 AI</p><h2>LM Studio 기능</h2></div></div>
-              <p className="meta-copy">자동 런타임은 이 컴퓨터의 LM Studio loopback 기능만 사용합니다. 외부 자동 fallback과 API 키 설정은 기본 화면에 노출하지 않습니다.</p>
-              {false ? <>
+            {false ? <>
               {isGeminiFormOpen ? (
                 <div className="provider-form">
                   <label className="field">
@@ -2573,8 +2560,7 @@ export function App() {
                   <p className="empty-state">제미나이 키 없음</p>
                 ) : null}
               </div>
-              </> : null}
-            </article>
+            </> : null}
           </section>
         ) : null}
 
@@ -2590,22 +2576,22 @@ export function App() {
               <div className="track-stack">
                 {previewJob ? (
                   <article className="artifact-card">
-                    <h3>{formatDisplayText(previewJob.preview.artifact_kind)}</h3>
-                    <p>{previewJob.preview.player_uri ?? previewJob.preview.file_uri}</p>
+                    <h3>미리보기</h3>
+                    <p>미리보기 준비됨</p>
                   </article>
                 ) : null}
                 {subtitleJob ? (
                   <article className="artifact-card">
-                    <h3>{subtitleJob.subtitle.format}</h3>
-                    <p>{subtitleJob.subtitle.file_uri}</p>
+                    <h3>자막</h3>
+                    <p>자막 파일 준비됨</p>
                   </article>
                 ) : null}
                 {exportJob ? (
                   <article className="artifact-card">
-                    <h3>{formatDisplayText(exportJob.export.export_type)}</h3>
-                    <p>{exportJob.export.file_uri}</p>
-                    <p>{exportJob.export.subtitle_file_uri ?? "자막 없음"}</p>
-                    <p>{formatDisplayText(exportJob.export.notes[0])}</p>
+                    <h3>캡컷 내보내기</h3>
+                    <p>내보낸 영상 준비됨</p>
+                    <p>{exportJob.export.subtitle_file_uri ? "자막 포함" : "자막 없음"}</p>
+                    {exportJob.export.notes.length > 0 ? <p>내보낸 영상에서 확인할 내용이 있어요.</p> : null}
                   </article>
                 ) : null}
                 {timelineJob.timeline.tracks.map((track) => (
@@ -2931,7 +2917,7 @@ export function App() {
                       <button
                         className="action-button"
                         disabled={!selectedProjectId || !activeEditingSessionId}
-                        onClick={() => void api.previewEditingSessionSelectedRange(selectedProjectId!, activeEditingSessionId!, { start_sec: selectedRangeStartSec, end_sec: selectedRangeEndSec }).then(setSelectedRangePreview).catch((error) => setErrorMessage(error instanceof Error ? error.message : "선택 구간 미리보기를 만들지 못했습니다"))}
+                        onClick={() => void api.previewEditingSessionSelectedRange(selectedProjectId!, activeEditingSessionId!, { start_sec: selectedRangeStartSec, end_sec: selectedRangeEndSec }).then(setSelectedRangePreview).catch(() => setErrorMessage("선택 구간 미리보기를 만들지 못했어요. 다시 시도해 주세요."))}
                         type="button"
                       >선택 구간 미리보기</button>
                     </div>
@@ -3002,7 +2988,7 @@ export function App() {
                         }).then(() => setEditorFavorites((current) => enabled
                           ? [...current.filter((item) => item.favorite_id !== favoriteId), { favorite_id: favoriteId, favorite_type: "preset" }]
                           : current.filter((item) => item.favorite_id !== favoriteId),
-                        )).catch((error) => setErrorMessage(error instanceof Error ? error.message : "즐겨찾기를 저장하지 못했습니다"));
+                        )).catch(() => setErrorMessage("즐겨찾기를 저장하지 못했어요. 다시 시도해 주세요."));
                       }}
                       type="button"
                     >
@@ -3045,7 +3031,7 @@ export function App() {
                           scope: captionStyleScope,
                           segment_ids: segmentIds,
                           style: preset.style,
-                        }).then(setCaptionStylePreflight).catch((error) => setErrorMessage(error instanceof Error ? error.message : "범위를 확인하지 못했습니다"));
+                        }).then(setCaptionStylePreflight).catch(() => setErrorMessage("범위를 확인하지 못했어요. 다시 시도해 주세요."));
                       }}
                       type="button"
                     >
@@ -3221,9 +3207,9 @@ export function App() {
                 <>
                   {partialRegenerationRun ? (
                     <div className="track-card">
-                      <h3>{partialRegenerationRun.job_id}</h3>
+                      <h3>재생성 결과</h3>
                       <p>{formatStatusLabel(partialRegenerationRun.status)}</p>
-                      <p>{partialRegenerationRun.delta?.timeline_id ?? "타임라인 대기"}</p>
+                      <p>{partialRegenerationRun.delta ? "변경 내용을 확인해 주세요." : "타임라인 대기"}</p>
                       <h3>재개 범위</h3>
                       <p>{`범위 ${resumedScopeSegmentIds.length}개`}</p>
                       <div className="clip-list">
@@ -3362,10 +3348,10 @@ export function App() {
                   <span>
                     {selectedEditingDraft.explanationText ? "설명 카드 있음" : "설명 카드 없음"}
                   </span>
-                  <span>{selectedEditingDraft.imageAssetId || "이미지 없음"}</span>
+                  <span>{selectedEditingDraft.imageAssetId ? "이미지 선택됨" : "이미지 없음"}</span>
                   <span>{selectedEditingDraft.tableText || "표 없음"}</span>
-                  <span>{selectedEditingDraft.sfxAssetId || "효과음 없음"}</span>
-                  <span>{selectedEditingDraft.ttsAssetId || "TTS 없음"}</span>
+                  <span>{selectedEditingDraft.sfxAssetId ? "효과음 선택됨" : "효과음 없음"}</span>
+                  <span>{selectedEditingDraft.ttsAssetId ? "내 목소리 선택됨" : "내 목소리 없음"}</span>
                   {editingMutationFeedback ? (
                     <p
                       className={
@@ -3502,17 +3488,6 @@ export function App() {
                   </button>
                   {brollImportError ? <p className="error-copy">{brollImportError}</p> : null}
                   {brollImportMessage ? <p className="meta-copy">{brollImportMessage}</p> : null}
-                  <label className="field">
-                    <span>음악 자산 ID</span>
-                    <input
-                      onChange={(event) =>
-                        updateEditingDraft(selectedEditingSegment.segment_id, {
-                          musicAssetId: event.target.value,
-                        })
-                      }
-                      value={selectedEditingDraft.musicAssetId}
-                    />
-                  </label>
                   <button
                     aria-describedby={
                       !selectedEditingDraft.musicAssetId
@@ -3549,7 +3524,7 @@ export function App() {
                   </button>
                   {!selectedEditingDraft.musicAssetId ? (
                     <p className="meta-copy" id={`${selectedEditingSegment.segment_id}-music-save-help`}>
-                      음악 ID 필요
+                      수동 미디어 라이브러리에서 음악을 골라주세요.
                     </p>
                   ) : null}
                   {selectedEditingSegment.music_override ? (
@@ -3578,17 +3553,6 @@ export function App() {
                       음악 해제
                     </button>
                   ) : null}
-                  <label className="field">
-                    <span>효과음 자산 ID</span>
-                    <input
-                      onChange={(event) =>
-                        updateEditingDraft(selectedEditingSegment.segment_id, {
-                          sfxAssetId: event.target.value,
-                        })
-                      }
-                      value={selectedEditingDraft.sfxAssetId}
-                    />
-                  </label>
                   <div className="action-row" aria-label="오디오 재생 제어">
                     <label className="field"><span>Gain dB</span><input onChange={(event) => setAudioGainDb(Number(event.target.value))} step="1" type="number" value={audioGainDb} /></label>
                     <label className="field"><span>Fade in(초)</span><input min="0" onChange={(event) => setAudioFadeInSec(Number(event.target.value))} step="0.1" type="number" value={audioFadeInSec} /></label>
@@ -3631,7 +3595,7 @@ export function App() {
                     효과음 저장
                   </button>
                   {!selectedEditingDraft.sfxAssetId ? (
-                    <p className="meta-copy">효과음 ID 필요 · 부분 재생성 후 검수가 필요합니다.</p>
+                    <p className="meta-copy">수동 미디어 라이브러리에서 효과음을 골라주세요.</p>
                   ) : null}
                   {selectedEditingSegment.sfx_override ? (
                     <button
@@ -3761,17 +3725,6 @@ export function App() {
                     </button>
                   ) : null}
                   <label className="field">
-                    <span>이미지 자산 ID</span>
-                    <input
-                      onChange={(event) =>
-                        updateEditingDraft(selectedEditingSegment.segment_id, {
-                          imageAssetId: event.target.value,
-                        })
-                      }
-                      value={selectedEditingDraft.imageAssetId}
-                    />
-                  </label>
-                  <label className="field">
                     <span>이미지 텍스트</span>
                     <textarea
                       onChange={(event) =>
@@ -3818,7 +3771,7 @@ export function App() {
                       className="meta-copy"
                       id={`${selectedEditingSegment.segment_id}-image-save-help`}
                     >
-                      이미지 ID 필요
+                      이미지를 먼저 선택해 주세요.
                     </p>
                   ) : null}
                   {Boolean(readOverlay(selectedEditingSegment, "image_overlay")) ? (
@@ -3953,28 +3906,6 @@ export function App() {
                       표 삭제
                     </button>
                   ) : null}
-                  <label className="field">
-                    <span>TTS 추천 ID</span>
-                    <input
-                      onChange={(event) =>
-                        updateEditingDraft(selectedEditingSegment.segment_id, {
-                          ttsRecommendationId: event.target.value,
-                        })
-                      }
-                      value={selectedEditingDraft.ttsRecommendationId}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>TTS 자산 ID</span>
-                    <input
-                      onChange={(event) =>
-                        updateEditingDraft(selectedEditingSegment.segment_id, {
-                          ttsAssetId: event.target.value,
-                        })
-                      }
-                      value={selectedEditingDraft.ttsAssetId}
-                    />
-                  </label>
                   <button
                     aria-describedby={
                       !selectedEditingDraft.ttsRecommendationId || !selectedEditingDraft.ttsAssetId
@@ -4005,14 +3936,14 @@ export function App() {
                     }
                     type="button"
                   >
-                    TTS 저장
+                    내 목소리로 저장
                   </button>
                   {!selectedEditingDraft.ttsRecommendationId || !selectedEditingDraft.ttsAssetId ? (
                     <p
                       className="meta-copy"
                       id={`${selectedEditingSegment.segment_id}-tts-save-help`}
                     >
-                      TTS 추천 ID · 자산 ID 필요
+                      아래에서 마음에 드는 목소리 후보를 골라주세요.
                     </p>
                   ) : null}
                   <button
@@ -4032,7 +3963,7 @@ export function App() {
                     }
                     type="button"
                   >
-                    {isGeneratingTtsCandidate ? "TTS 후보 생성 중" : "TTS 후보 생성 (음성 클로닝)"}
+                    {isGeneratingTtsCandidate ? "목소리 후보 만드는 중" : "내 목소리 후보 만들기"}
                   </button>
                   {!ttsCandidateVoiceSampleId.trim() ? (
                     <p className="meta-copy">설정 탭에서 음성 샘플을 먼저 등록하세요</p>
@@ -4040,7 +3971,7 @@ export function App() {
                   {ttsCandidateMessage ? <p className="meta-copy">{ttsCandidateMessage}</p> : null}
                   {ttsCandidateError ? <p className="error-banner">{ttsCandidateError}</p> : null}
                   <div className="tts-candidate-comparison">
-                    <p className="section-kicker">TTS 후보 비교 (A/B)</p>
+                    <p className="section-kicker">내 목소리 후보 비교</p>
                     {isLoadingTtsCandidates ? <p className="meta-copy">불러오는 중...</p> : null}
                     {!isLoadingTtsCandidates && ttsCandidates.length === 0 ? (
                       <p className="empty-state">이 세그먼트의 TTS 후보가 아직 없습니다</p>
@@ -4048,12 +3979,12 @@ export function App() {
                     {ttsCandidates.map((candidate, index) => (
                       <div className="tts-candidate-row" key={candidate.candidate_id}>
                         <span>
-                          {`후보 ${index + 1} · ${candidate.candidate_id}`}
+                          {`후보 ${index + 1}`}
                         </span>
                         <p className="meta-copy">{formatDisplayText(candidate.source_text)}</p>
                         <p className="meta-copy">
                           {candidate.technical_status !== "accepted"
-                            ? `선택 불가 · ${candidate.failure_code ?? "기술 검증 실패"}`
+                            ? "이 후보는 아직 사용할 수 없어요. 다른 후보를 골라주세요."
                             : candidate.operator_review_status === "approved"
                               ? "기술 검증 통과 · 청취 승인됨"
                               : candidate.operator_review_status === "rejected"

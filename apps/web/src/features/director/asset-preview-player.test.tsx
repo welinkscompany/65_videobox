@@ -18,7 +18,7 @@ describe("AssetPreviewPlayer", () => {
       { candidateId: "m-02", referenceCode: "P1-M-02", mediaType: "bgm", controls: {} },
     ]} previewUrl={(id) => `/preview/${id}`} />);
     expect(screen.getAllByTestId("director-audio-preview")[0]).not.toHaveAttribute("autoplay");
-    fireEvent.click(screen.getByRole("button", { name: "루미 추천 1의 배경음악 2번 미리듣기" }));
+    fireEvent.click(screen.getByRole("button", { name: "유진 추천 1의 배경음악 2번 미리듣기" }));
     expect(pause).toHaveBeenCalled();
   });
 
@@ -26,7 +26,7 @@ describe("AssetPreviewPlayer", () => {
     vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
     const { container } = render(<AssetPreviewPlayer proposalId="p-1" candidates={[{ candidateId: "b-01", referenceCode: "B-01", mediaType: "broll", controls: { in_sec: 2, out_sec: 4 } }]} previewUrl={(id) => `/preview/${id}`} />);
     const video = container.querySelector("video") as HTMLVideoElement;
-    fireEvent.click(screen.getByRole("button", { name: "루미 추천의 비롤 1번 미리보기" }));
+    fireEvent.click(screen.getByRole("button", { name: "유진 추천의 비롤 1번 미리보기" }));
     expect(video.currentTime).toBe(2);
   });
 
@@ -67,10 +67,10 @@ describe("AssetPreviewPlayer", () => {
   it("원시 후보 ID와 참조 코드 대신 친숙한 추천 이름으로 재생 상태와 버튼을 표시한다", () => {
     render(<AssetPreviewPlayer proposalId="p-1" candidates={[{ candidateId: "candidate_003", referenceCode: "P12-B-03", mediaType: "broll", controls: {} }]} previewUrl={(id) => `/preview/${id}`} />);
 
-    const button = screen.getByRole("button", { name: "루미 추천 12의 비롤 3번 미리보기" });
+    const button = screen.getByRole("button", { name: "유진 추천 12의 비롤 3번 미리보기" });
     expect(button).toBeVisible();
     fireEvent.click(button);
-    expect(screen.getByText("루미 추천 12의 비롤 3번 미리보기 중")).toBeVisible();
+    expect(screen.getByText("유진 추천 12의 비롤 3번 미리보기 중")).toBeVisible();
     expect(screen.queryByText(/candidate_003|P12-B-03/)).not.toBeInTheDocument();
   });
 });

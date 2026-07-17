@@ -47,10 +47,10 @@ describe("legacy dashboard baseline", () => {
 
     expect(overview).toHaveAttribute("aria-pressed", "false");
     expect(settings).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("heading", { name: "음성 샘플" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "내 목소리" })).toBeVisible();
   });
 
-  it("루미를 사용할 수 없으면 직접 편집으로 계속할 수 있다", () => {
+  it("유진를 사용할 수 없으면 직접 편집으로 계속할 수 있다", () => {
     const onManualMode = vi.fn();
 
     render(<DirectorWorkspace

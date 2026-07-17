@@ -39,6 +39,14 @@ function renderedCopy(source: string): string {
 
   function collectExpressionCopy(node: Parameters<typeof forEachChild>[0]): void {
     if (isConditionalExpression(node)) {
+      if (node.condition.kind === SyntaxKind.TrueKeyword) {
+        collectExpressionCopy(node.whenTrue);
+        return;
+      }
+      if (node.condition.kind === SyntaxKind.FalseKeyword) {
+        collectExpressionCopy(node.whenFalse);
+        return;
+      }
       collectExpressionCopy(node.whenTrue);
       collectExpressionCopy(node.whenFalse);
       return;
@@ -84,6 +92,14 @@ function dashboardCopy(): string {
   return uiFiles
     .map((file) => renderedCopy(readFileSync(resolve(import.meta.dirname, file), "utf8")))
     .join("\n");
+}
+
+function containsForbiddenDashboardCopy(copy: string, forbiddenTerm: string): boolean {
+  if (/[가-힣]/u.test(forbiddenTerm)) {
+    return copy.includes(forbiddenTerm);
+  }
+  const escapedTerm = forbiddenTerm.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`\\b${escapedTerm}\\b`, "i").test(copy);
 }
 
 describe("user-facing dashboard copy", () => {
@@ -141,13 +157,55 @@ describe("user-facing dashboard copy", () => {
     expect(copy).toBe("");
   });
 
-  it("uses Lumi in rendered UI", () => {
-    expect(dashboardCopy()).toContain("루미");
+  it("uses Eugene and creator-language guidance in rendered UI", () => {
+    const copy = dashboardCopy();
+
+    expect(copy).toContain("유진");
+    expect(copy).toContain("유진 영상 도우미");
+    expect(copy).toMatch(/영상|편집|대본|자막/);
+    expect(copy).not.toContain("루미");
   });
 
-  for (const forbiddenTerm of ["Local Media Director", "immutable preflight diff", "revision"]) {
+  it("detects Korean forbidden dashboard copy", () => {
+    const copy = "시스템 개발 안내는 루미가 도와드려요.";
+
+    for (const forbiddenTerm of ["시스템", "개발", "루미"]) {
+      expect(containsForbiddenDashboardCopy(copy, forbiddenTerm)).toBe(true);
+    }
+    expect(containsForbiddenDashboardCopy("modeling a scene", "model")).toBe(false);
+    expect(containsForbiddenDashboardCopy("model choice", "model")).toBe(true);
+  });
+
+  for (const forbiddenTerm of [
+    "Local Media Director",
+    "immutable preflight diff",
+    "revision",
+    "provider",
+    "runtime",
+    "fallback",
+    "loopback",
+    "API key",
+    "model",
+    "context",
+    "pipeline",
+    "job",
+    "로컬 검수",
+    "등록된 job 없음",
+    "시스템",
+    "개발",
+    "런타임",
+    "공급자",
+    "제공자",
+    "모델",
+    "API 키",
+    "루프백",
+    "폴백",
+    "컨텍스트",
+    "리비전",
+    "파이프라인",
+  ]) {
     it(`does not expose ${forbiddenTerm} in rendered UI`, () => {
-      expect(dashboardCopy()).not.toMatch(new RegExp(`\\b${forbiddenTerm}\\b`, "i"));
+      expect(containsForbiddenDashboardCopy(dashboardCopy(), forbiddenTerm)).toBe(false);
     });
   }
 });

@@ -1,8 +1,17 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 253. 2026-07-17 OSS Slice 0 Task 1 closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 254. 2026-07-17 OSS Slice 0 Task 2 closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
 > 이 문서의 기존 날짜 기반 섹션은 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. Local Media Director release truth는 `## 250`, 현재 다음 frontend 계획은 `## 251`을 기준으로 본다.
 > 단, `2일 내 1차 데모 완성` 실행 레일은 `## 189`의 장기 우선순위를 그대로 넓게 집행하지 않고, `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`의 축소된 실행 계획을 우선 적용한다.
+
+## 254. 2026-07-17 OSS Slice 0 Task 2 closeout
+
+- 계획: `docs/superpowers/plans/2026-07-17-videobox-oss-dashboard-editor-adoption.md`; handoff: `docs/handoffs/2026-07-17-videobox-oss-dashboard-editor-adoption-slice-0-task-2-closeout.ko.md`.
+- 세 화면(빈 Home, 대본/유진 인터뷰, 자산이 채워진 편집기)과 다섯 viewport(1920×1080, 1440×900, 1280×800, 768×1024, 390×844)의 정적 승인 자료를 완성했다. 사용자는 warm-white `#FAFAF9`, muted indigo `#4F46E5`, local Noto Sans KR Variable, dark-only preview `#18181B` 방향을 명시 승인했다. 이 결정은 manifest artifact aggregate SHA에만 연결되며, artifact 변경에는 재승인이 필요하다.
+- fresh verification: `.venv\\Scripts\\python.exe -m pytest -q tests/test_ui_prototype_artifacts.py`는 `2 passed`; artifact verifier는 pass; Task 2 exact frontend 12 files는 `206 passed`; `npm --prefix apps/web run build`는 pass였다. 독립 spec/quality review와 source→runtime reverse review의 open P0/P1은 0이다. 승인 전 `--require-approved` 실패는 의도된 gate였고, 승인 record 뒤에는 성공해야 한다.
+- 기본 dashboard copy는 제작 결과와 다음 행동을 말하고 표시 도우미 이름은 `유진`이다. 이 Task는 runtime/API/provider identifier, dependency, Hermes/container, Tailwind, shadcn, router, OpenCut runtime을 추가하거나 바꾸지 않았으며 external/Gemini provider call 0 계약을 유지한다.
+- worktree에서 보존·제외할 관련 없는 항목은 untracked `apps/web/pnpm-lock.yaml`, `apps/web/pnpm-workspace.yaml` 두 파일뿐이다.
+- OSS dashboard/editor 누적은 2/22 (9.1%), 잔여 90.9%다. 다음 실행 단위는 Task 3의 OSS source/license/dependency/generated-file provenance gate다. 경량 컷편집은 이후 Task 14→15→16에서 timeline geometry → navigation/performance → split/merge/bounds/reorder mutation 순서로 다루며 CapCut remote control이 아니다.
 
 ## 253. 2026-07-17 OSS Slice 0 Task 1 closeout
 

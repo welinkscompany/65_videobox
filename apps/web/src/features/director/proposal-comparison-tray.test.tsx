@@ -10,7 +10,7 @@ describe("ProposalComparisonTray", () => {
     const proposal = { ...base, candidates: [candidate] } satisfies DirectorProposal;
     render(<ProposalComparisonTray proposal={proposal} selectedIds={["c"]} preflight={{ status: "ready", diff: { placements: {} } }} />);
 
-    expect(screen.getByRole("region", { name: "루미 추천 비교" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "유진 추천 비교" })).toBeInTheDocument();
     expect(screen.getByText("추천을 적용하기 전에 변경된 내용이 있는지 확인하고 있어요.")).toBeInTheDocument();
     expect(screen.queryByText(/revision/i)).not.toBeInTheDocument();
   });

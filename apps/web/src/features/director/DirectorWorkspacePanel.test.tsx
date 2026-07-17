@@ -16,10 +16,10 @@ describe("DirectorWorkspacePanel recovery", () => {
     preflightDirectorProposal.mockResolvedValue({ status: "ready" });
     render(<DirectorWorkspacePanel projectId="project-1" sessionId="session-1" sessionRevision={1} />);
 
-    await screen.findByRole("button", { name: "루미에게 추천받기" });
+    await screen.findByRole("button", { name: "유진에게 추천받기" });
     expect(createDirectorConversation).not.toHaveBeenCalled();
     expect(createDirectorProposal).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "루미에게 추천받기" }));
+    fireEvent.click(screen.getByRole("button", { name: "유진에게 추천받기" }));
     await waitFor(() => expect(createDirectorConversation).toHaveBeenCalledTimes(1));
     expect(createDirectorProposal).toHaveBeenCalledTimes(1);
   });
@@ -29,8 +29,8 @@ describe("DirectorWorkspacePanel recovery", () => {
     prepareDirectorMessage.mockReturnValue({ send: vi.fn().mockResolvedValue({ kind: "exchange", exchange: { user_message: {}, assistant_message: { text: "재개 응답", proposal_id: null } } }) });
     render(<DirectorWorkspacePanel projectId="project-1" sessionId="session-1" sessionRevision={1} />);
 
-    await screen.findByText("루미가 추천을 준비하고 있어요.");
-    fireEvent.change(screen.getByLabelText("루미에게 요청하기"), { target: { value: "이어가기" } });
+    await screen.findByText("유진이 추천을 준비하고 있어요.");
+    fireEvent.change(screen.getByLabelText("유진에게 요청하기"), { target: { value: "이어가기" } });
     fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
     await waitFor(() => expect(prepareDirectorMessage).toHaveBeenCalledWith("project-1", "conversation-recovered", expect.objectContaining({ text: "이어가기" })));
     expect(createDirectorConversation).not.toHaveBeenCalled();
@@ -43,9 +43,9 @@ describe("DirectorWorkspacePanel recovery", () => {
     preflightDirectorProposal.mockResolvedValue({ status: "ready" });
     render(<DirectorWorkspacePanel projectId="project-1" sessionId="session-1" sessionRevision={1} />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "루미에게 추천받기" }));
-    expect(await screen.findByRole("button", { name: "루미에게 추천받기" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "루미에게 추천받기" }));
+    fireEvent.click(await screen.findByRole("button", { name: "유진에게 추천받기" }));
+    expect(await screen.findByRole("button", { name: "유진에게 추천받기" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "유진에게 추천받기" }));
     await waitFor(() => expect(createDirectorProposal).toHaveBeenCalledTimes(2));
     expect(createDirectorConversation).toHaveBeenCalledTimes(1);
   });

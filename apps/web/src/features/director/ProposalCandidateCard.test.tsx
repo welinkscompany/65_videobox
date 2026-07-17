@@ -20,8 +20,8 @@ describe("ProposalCandidateCard", () => {
   it.each(["PR-1-B-01", "PR-B-01"])("keeps the raw reference %s out of accessible names", (visibleReferenceCode) => {
     render(<ProposalCandidateCard candidate={{ candidate_id: "candidate-1", visible_reference_code: visibleReferenceCode, media_type: "broll", asset_id: "asset-1", library_asset_id: null, reason_chips: [], scores: {}, availability: "available", review_status: "approved", preview_uri: null, controls: {}, expected_content_sha256: "sha", media_revision: "1", canonical_metadata: {}, license_policy: "verified", warning_provenance: [] }} selected={false} onToggle={vi.fn()} />);
 
-    expect(screen.getByRole("article", { name: /루미 추천/i })).toBeVisible();
-    expect(screen.getByRole("checkbox", { name: /루미 추천/i })).toBeVisible();
+    expect(screen.getByRole("article", { name: /유진 추천/i })).toBeVisible();
+    expect(screen.getByRole("checkbox", { name: /유진 추천/i })).toBeVisible();
     expect(screen.queryByRole("article", { name: visibleReferenceCode })).not.toBeInTheDocument();
     expect(screen.queryByRole("checkbox", { name: visibleReferenceCode })).not.toBeInTheDocument();
   });
@@ -30,8 +30,8 @@ describe("ProposalCandidateCard", () => {
     const candidate = (candidateId: string, visibleReferenceCode: string) => ({ candidate_id: candidateId, visible_reference_code: visibleReferenceCode, media_type: "broll" as const, asset_id: candidateId, library_asset_id: null, reason_chips: [], scores: {}, availability: "available", review_status: "approved", preview_uri: null, controls: {}, expected_content_sha256: "sha", media_revision: "1", canonical_metadata: {}, license_policy: "verified", warning_provenance: [] });
     render(<><ProposalCandidateCard candidate={candidate("candidate-b", "PR-B-01")} selected={false} onToggle={vi.fn()} /><ProposalCandidateCard candidate={candidate("candidate-m", "PR-M-01")} selected={false} onToggle={vi.fn()} /></>);
 
-    expect(screen.getByRole("checkbox", { name: "루미 추천의 비롤 1번 고르기" })).toBeVisible();
-    expect(screen.getByRole("checkbox", { name: "루미 추천의 배경음악 1번 고르기" })).toBeVisible();
+    expect(screen.getByRole("checkbox", { name: "유진 추천의 비롤 1번 고르기" })).toBeVisible();
+    expect(screen.getByRole("checkbox", { name: "유진 추천의 배경음악 1번 고르기" })).toBeVisible();
     expect(screen.queryByText("PR-B-01")).not.toBeInTheDocument();
     expect(screen.queryByText("PR-M-01")).not.toBeInTheDocument();
   });

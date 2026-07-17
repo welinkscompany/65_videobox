@@ -33,6 +33,20 @@ const projectResponse = {
   root_storage_uri: "local://projects/project_001",
 };
 
+const approvedTtsCandidate: TtsCandidateRecord = {
+  candidate_id: "rec_tts_002",
+  project_id: "project_001",
+  segment_id: "seg_002",
+  asset_id: "tts_asset_002",
+  source_text: "팀 회의 개요를 내 목소리로 안내합니다.",
+  technical_status: "accepted",
+  operator_review_status: "approved",
+  target_duration_sec: 3,
+  actual_duration_sec: 3,
+  failure_code: null,
+  created_at: "2026-07-12T00:00:00Z",
+};
+
 const capcutDiagnosticsReadyResponse = {
   status: "ready",
   installation_path: "C:/Users/operator/AppData/Local/CapCut/Apps/8.9.1.3802/CapCut.exe",
@@ -646,6 +660,9 @@ function createFetchMock({
   partialRegenerationResult = partialRegenerationResultResponse,
   partialRegenerationPreflight = partialRegenerationPreflightResponse,
   jobs = jobsResponse,
+  preview = previewResponse,
+  subtitle = subtitleResponse,
+  capcutExport = exportResponse,
   finalRenderResult,
   capcutDraftResult,
   capcutDraftResults,
@@ -655,6 +672,7 @@ function createFetchMock({
   ttsCandidates = [],
   ttsListeningReviewStatuses,
   voiceSampleUploadStatus,
+  voiceSampleUploadError = "voice upload failed",
   voiceSamples = { assets: [] },
   mediaLibraryAssets = [],
   mediaLibraryUnavailable = false,
@@ -676,6 +694,9 @@ function createFetchMock({
   partialRegenerationResult?: typeof partialRegenerationResultResponse;
   partialRegenerationPreflight?: typeof partialRegenerationPreflightResponse;
   jobs?: typeof jobsResponse;
+  preview?: typeof previewResponse;
+  subtitle?: typeof subtitleResponse;
+  capcutExport?: typeof exportResponse;
   finalRenderResult?: Record<string, unknown>;
   capcutDraftResult?: Record<string, unknown>;
   capcutDraftResults?: Record<string, Record<string, unknown>>;
@@ -685,6 +706,7 @@ function createFetchMock({
   ttsCandidates?: TtsCandidateRecord[];
   ttsListeningReviewStatuses?: number[];
   voiceSampleUploadStatus?: number;
+  voiceSampleUploadError?: string;
   voiceSamples?: { assets: Array<Record<string, unknown>> };
   mediaLibraryAssets?: Array<Record<string, unknown>>;
   mediaLibraryUnavailable?: boolean;
@@ -814,7 +836,7 @@ function createFetchMock({
       init?.method === "POST"
     ) {
       if (voiceSampleUploadStatus != null && voiceSampleUploadStatus >= 400) {
-        return new Response("voice upload failed", { status: voiceSampleUploadStatus });
+        return new Response(voiceSampleUploadError, { status: voiceSampleUploadStatus });
       }
       const uploadedAsset = {
         asset_id: "asset_voice_uploaded_001",
@@ -1104,13 +1126,13 @@ function createFetchMock({
       );
     }
     if (url.endsWith("/api/projects/project_001/previews/preview_render_job_006")) {
-      return new Response(JSON.stringify(previewResponse));
+      return new Response(JSON.stringify(preview));
     }
     if (url.endsWith("/api/projects/project_001/subtitles/subtitle_render_job_008")) {
-      return new Response(JSON.stringify(subtitleResponse));
+      return new Response(JSON.stringify(subtitle));
     }
     if (url.endsWith("/api/projects/project_001/exports/capcut_export_job_007")) {
-      return new Response(JSON.stringify(exportResponse));
+      return new Response(JSON.stringify(capcutExport));
     }
     if (
       url.endsWith("/api/projects/project_001/editing-sessions") &&
@@ -1623,8 +1645,100 @@ it("does not copy a rejected TTS candidate into the editing draft", async () => 
   fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
   fireEvent.click(await screen.findByRole("button", { name: /편집 시작/i }));
 
-  expect(await screen.findByText(/선택 불가 · duration_mismatch/i)).toBeInTheDocument();
+  expect(await screen.findByText("이 후보는 아직 사용할 수 없어요. 다른 후보를 골라주세요.")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: /이 후보 선택/i })).toBeDisabled();
+});
+
+it("keeps rejected voice and CapCut registration failures in creator-safe copy", async () => {
+  const rawFailureCode = "tts_duration_mismatch_internal_901";
+  const rawHandoffError = "EACCES C:/internal/capcut/projects/videobox-draft";
+  const restoredJobs = structuredClone(jobsResponse);
+  restoredJobs.jobs.push({
+    job_id: "capcut_draft_job_009",
+    job_type: "capcut_draft_export",
+    status: "succeeded",
+    input_ref: "timeline_build_job_005",
+    output_ref: "capcut_draft_001",
+    error_message: null,
+    started_at: "2026-07-12T00:01:00Z",
+    finished_at: "2026-07-12T00:02:00Z",
+  });
+  const baseFetch = createFetchMock({
+    jobs: restoredJobs,
+    voiceSamples: {
+      assets: [{
+        asset_id: "asset_voice_creator_safe_001",
+        asset_type: "voice_sample_audio",
+        storage_uri: "local://projects/project_001/assets/imported/creator-safe.wav",
+      }],
+    },
+    capcutDraftResult: {
+      job_id: "capcut_draft_job_009",
+      status: "succeeded",
+      export: {
+        export_id: "capcut_draft_001",
+        timeline_id: "timeline_001",
+        export_type: "capcut_draft_export",
+        file_uri: "local://projects/project_001/exports/capcut-draft/draft",
+        status: "succeeded",
+        notes: [],
+        handoff: {
+          status: "pending",
+          source_file_uri: "local://projects/project_001/exports/capcut-draft/draft",
+          registered_project_path: null,
+          error_message: null,
+          registered_at: null,
+          reused: false,
+        },
+      },
+      error_message: null,
+    },
+  });
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/api/projects/project_001/tts-candidates") && init?.method === "POST") {
+      return new Response(JSON.stringify({
+        asset_id: "asset_tts_creator_safe_001",
+        technical_status: "rejected",
+        failure_code: rawFailureCode,
+      }));
+    }
+    if (url.endsWith("/api/projects/project_001/capcut-draft-exports/capcut_draft_job_009/handoff") && init?.method === "POST") {
+      return new Response(JSON.stringify({
+        handoff: {
+          status: "failed",
+          source_file_uri: "local://projects/project_001/exports/capcut-draft/draft",
+          registered_project_path: null,
+          error_message: rawHandoffError,
+          registered_at: null,
+          reused: false,
+        },
+      }));
+    }
+    return baseFetch(input, init);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
+  fireEvent.click(await screen.findByRole("button", { name: /편집 시작/i }));
+  fireEvent.click(await screen.findByRole("button", { name: "내 목소리 후보 만들기" }));
+
+  expect(await screen.findByText("목소리 후보를 지금은 만들지 못했어요. 다른 후보를 만들어 보세요.")).toBeInTheDocument();
+  const registerButton = screen.getByRole("button", { name: "CapCut에 등록" });
+  expect(registerButton).toBeEnabled();
+  fireEvent.click(registerButton);
+  await waitFor(() =>
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/projects/project_001/capcut-draft-exports/capcut_draft_job_009/handoff",
+      expect.objectContaining({ method: "POST" }),
+    ),
+  );
+  expect(await screen.findByRole("button", { name: "CapCut 등록 다시 시도" })).toBeInTheDocument();
+  const renderedCopy = document.body.textContent ?? "";
+  expect(renderedCopy).not.toContain(rawFailureCode);
+  expect(renderedCopy).not.toContain(rawHandoffError);
+  expect(renderedCopy).not.toContain("C:/internal/capcut/projects/videobox-draft");
 });
 
 it("requires listening approval before selecting a TTS candidate and restores the approval after reload", async () => {
@@ -1666,10 +1780,11 @@ it("requires listening approval before selecting a TTS candidate and restores th
   );
   expect(screen.getByRole("button", { name: /이 후보 선택/i })).toBeEnabled();
   fireEvent.click(screen.getByRole("button", { name: /이 후보 선택/i }));
-  expect(screen.getByLabelText("TTS 추천 ID")).toHaveValue(
-    "tts_candidate_approved_001",
-  );
-  expect(screen.getByLabelText("TTS 자산 ID")).toHaveValue("asset_tts_approved");
+  expect(screen.getByRole("button", { name: "내 목소리로 저장" })).toBeEnabled();
+  expect(document.body.textContent).not.toContain("tts_candidate_approved_001");
+  expect(document.body.textContent).not.toContain("asset_tts_approved");
+  expect(screen.queryByLabelText("TTS 추천 ID")).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("TTS 자산 ID")).not.toBeInTheDocument();
 
   view.unmount();
   render(<App />);
@@ -1706,7 +1821,7 @@ it("recovers after a failed TTS listening approval save", async () => {
   fireEvent.click(await screen.findByRole("button", { name: /편집 시작/i }));
 
   fireEvent.click(await screen.findByRole("button", { name: "청취 승인" }));
-  expect(await screen.findByText(/TTS 청취 승인 실패/i)).toBeInTheDocument();
+  expect(await screen.findByText("청취 승인을 저장하지 못했어요. 다시 시도해 주세요.")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: /이 후보 선택/i })).toBeDisabled();
 
   fireEvent.click(screen.getByRole("button", { name: "청취 승인" }));
@@ -1728,9 +1843,9 @@ describe("App", () => {
     render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
     fireEvent.click(await screen.findByRole("button", { name: /편집 시작/i }));
-    expect(await screen.findByRole("button", { name: "루미에게 추천받기" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "유진에게 추천받기" })).toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/director/conversations"))).toBe(false);
-    fireEvent.click(screen.getByRole("button", { name: "루미에게 추천받기" }));
+    fireEvent.click(screen.getByRole("button", { name: "유진에게 추천받기" }));
     await waitFor(() => expect(fetchMock.mock.calls.filter(([input]) => String(input).endsWith("/director/conversations")).length).toBe(1));
   });
 
@@ -1744,7 +1859,7 @@ describe("App", () => {
     vi.stubGlobal("fetch", fetchMock); render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: /^편집$/i })); fireEvent.click(await screen.findByRole("button", { name: /편집 시작/i }));
     expect(await screen.findByLabelText("현재 선택 위치")).toHaveTextContent("선택한 장면");
-    expect(screen.queryByRole("button", { name: "루미에게 추천받기" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "유진에게 추천받기" })).not.toBeInTheDocument();
   });
 
   it("Director integration: materialize failure leaves the editing session untouched and keeps manual editing available", async () => {
@@ -1761,7 +1876,7 @@ describe("App", () => {
     });
     vi.stubGlobal("fetch", fetchMock); render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: /^편집$/i })); fireEvent.click(await screen.findByRole("button", { name: /편집 시작/i }));
-    fireEvent.change(await screen.findByLabelText("루미에게 요청하기"), { target: { value: "P01-B-01 적용" } }); fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
+    fireEvent.change(await screen.findByLabelText("유진에게 요청하기"), { target: { value: "P01-B-01 적용" } }); fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
     const apply = await screen.findByRole("button", { name: "이 추천 적용" }); await waitFor(() => expect(apply).toBeEnabled()); fireEvent.click(apply);
     expect(await screen.findByText("추천을 적용하지 못했어요. 직접 골라 계속 편집할 수 있어요.")).toBeInTheDocument();
     expect(screen.getByLabelText("현재 선택 위치")).toHaveTextContent("선택한 장면");
@@ -1783,9 +1898,9 @@ describe("App", () => {
     });
     vi.stubGlobal("fetch", fetchMock); render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: /^편집$/i })); fireEvent.click(await screen.findByRole("button", { name: /편집 시작/i }));
-    fireEvent.change(await screen.findByLabelText("루미에게 요청하기"), { target: { value: "3번 영상 교체" } }); fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
-    expect(await screen.findByRole("region", { name: "추천 항목 고르기" })).toHaveTextContent("루미 추천 1의 비롤 3번");
-    expect(screen.getByRole("region", { name: "추천 항목 고르기" })).toHaveTextContent("루미 추천 1의 비롤 4번");
+    fireEvent.change(await screen.findByLabelText("유진에게 요청하기"), { target: { value: "3번 영상 교체" } }); fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
+    expect(await screen.findByRole("region", { name: "추천 항목 고르기" })).toHaveTextContent("유진 추천 1의 비롤 3번");
+    expect(screen.getByRole("region", { name: "추천 항목 고르기" })).toHaveTextContent("유진 추천 1의 비롤 4번");
     expect(screen.getByRole("button", { name: "이 추천 적용" })).toBeDisabled();
     expect(fetchMock.mock.calls.some(([input, request]) => String(input).endsWith("/batch-apply") && request?.method === "POST")).toBe(false);
   });
@@ -1818,7 +1933,7 @@ describe("App", () => {
     });
     vi.stubGlobal("fetch", fetchMock); render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: /^편집$/i })); fireEvent.click(await screen.findByRole("button", { name: /편집 시작/i }));
-    const input = await screen.findByLabelText("루미에게 요청하기"); fireEvent.change(input, { target: { value: "P01-B-01 적용" } }); fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
+    const input = await screen.findByLabelText("유진에게 요청하기"); fireEvent.change(input, { target: { value: "P01-B-01 적용" } }); fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
     const apply = await screen.findByRole("button", { name: "이 추천 적용" }); await waitFor(() => expect(apply).toBeEnabled()); fireEvent.click(apply);
     await waitFor(() => expect(fetchMock.mock.calls.filter(([url, init]) => String(url).endsWith("/batch-apply") && init?.method === "POST")).toHaveLength(1));
     expect(await screen.findByText("추천을 편집본에 적용했어요.")).toBeInTheDocument();
@@ -1826,17 +1941,17 @@ describe("App", () => {
     expect(screen.getByRole("button", { name: "완성본 렌더" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "CapCut 초안(실제)" })).toBeDisabled();
   });
-  it("uploads a selected voice sample and makes its asset ID available to TTS generation", async () => {
+  it("uploads a selected voice recording without exposing its internal asset ID", async () => {
     const fetchMock = createFetchMock();
     vi.stubGlobal("fetch", fetchMock);
     render(<App />);
 
     fireEvent.click(await screen.findByRole("button", { name: /^설정$/i }));
-    const picker = screen.getByLabelText("음성 샘플 파일 선택");
+    const picker = screen.getByLabelText("내 목소리 고르기");
     fireEvent.change(picker, {
       target: { files: [new File(["voice"], "my voice.wav", { type: "audio/wav" })] },
     });
-    fireEvent.click(screen.getByRole("button", { name: "선택한 파일 업로드" }));
+    fireEvent.click(screen.getByRole("button", { name: "내 목소리 추가" }));
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
@@ -1844,26 +1959,31 @@ describe("App", () => {
         expect.objectContaining({ method: "POST", body: expect.any(FormData) }),
       ),
     );
-    expect(await screen.findByDisplayValue("asset_voice_uploaded_001")).toBeInTheDocument();
+    expect(await screen.findByText("내 목소리를 추가했어요.")).toBeInTheDocument();
+    expect(screen.queryByDisplayValue("asset_voice_uploaded_001")).not.toBeInTheDocument();
   });
 
-  it("keeps the selected voice file recoverable after an upload failure", async () => {
-    const fetchMock = createFetchMock({ voiceSampleUploadStatus: 500 });
+  it("keeps the selected voice file recoverable after an upload failure without exposing runtime details", async () => {
+    const runtimeFailure = "LM Studio runtime failed for asset_internal_voice_812 candidate_internal_410";
+    const fetchMock = createFetchMock({ voiceSampleUploadStatus: 500, voiceSampleUploadError: runtimeFailure });
     vi.stubGlobal("fetch", fetchMock);
     render(<App />);
 
     fireEvent.click(await screen.findByRole("button", { name: /^설정$/i }));
-    const picker = screen.getByLabelText("음성 샘플 파일 선택");
+    const picker = screen.getByLabelText("내 목소리 고르기");
     fireEvent.change(picker, {
       target: { files: [new File(["voice"], "retry.wav", { type: "audio/wav" })] },
     });
-    fireEvent.click(screen.getByRole("button", { name: "선택한 파일 업로드" }));
+    fireEvent.click(screen.getByRole("button", { name: "내 목소리 추가" }));
 
-    expect(await screen.findByText(/음성 샘플 업로드 실패/i)).toBeInTheDocument();
+    expect(await screen.findByText("내 목소리를 추가하지 못했어요. 다시 시도해 주세요.")).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain(runtimeFailure);
+    expect(document.body.textContent).not.toContain("asset_internal_voice_812");
+    expect(document.body.textContent).not.toContain("candidate_internal_410");
     expect(screen.getByText("선택됨 · retry.wav")).toBeInTheDocument();
   });
 
-  it("restores the latest registered voice sample ID after refresh", async () => {
+  it("restores the latest voice sample for creation without showing its internal ID", async () => {
     const fetchMock = createFetchMock({
       voiceSamples: {
         assets: [
@@ -1879,7 +1999,37 @@ describe("App", () => {
     render(<App />);
 
     fireEvent.click(await screen.findByRole("button", { name: /^설정$/i }));
-    expect(await screen.findByDisplayValue("asset_voice_restored_001")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "내 목소리" })).toBeInTheDocument();
+    expect(screen.queryByDisplayValue("asset_voice_restored_001")).not.toBeInTheDocument();
+  });
+
+  it("lets the creator choose a saved voice sample for narration without exposing internal IDs", async () => {
+    const fetchMock = createFetchMock({
+      voiceSamples: {
+        assets: [
+          {
+            asset_id: "asset_voice_first_001",
+            asset_type: "voice_sample_audio",
+            storage_uri: "local://projects/project_001/assets/imported/first.wav",
+          },
+          {
+            asset_id: "asset_voice_second_002",
+            asset_type: "voice_sample_audio",
+            storage_uri: "local://projects/project_001/assets/imported/second.wav",
+          },
+        ],
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^설정$/i }));
+    fireEvent.click(await screen.findByRole("button", { name: "내 목소리 2 사용" }));
+
+    expect(screen.getByText("현재 사용할 목소리: 내 목소리 2")).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain("asset_voice_first_001");
+    expect(document.body.textContent).not.toContain("asset_voice_second_002");
+    expect(document.body.textContent).not.toContain("local://projects/project_001/assets/imported/second.wav");
   });
 
   it("restores the last successful final and CapCut artifacts after reload", async () => {
@@ -1910,15 +2060,15 @@ describe("App", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const firstRender = render(<App />);
-    expect(await screen.findByText(/exports\/final\/output.mp4/i)).toBeInTheDocument();
-    expect(screen.getByText(/exports\/capcut-draft\/draft/i)).toBeInTheDocument();
+    expect(await screen.findByText("완성본 준비됨")).toBeInTheDocument();
+    expect(screen.getByText("초안 준비됨")).toBeInTheDocument();
     expect(screen.getByText(/CapCut에서 후처리 필요/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "CapCut 초안 다시 시도" })).not.toBeInTheDocument();
     firstRender.unmount();
 
     render(<App />);
-    expect(await screen.findByText(/exports\/final\/output.mp4/i)).toBeInTheDocument();
-    expect(screen.getByText(/exports\/capcut-draft\/draft/i)).toBeInTheDocument();
+    expect(await screen.findByText("완성본 준비됨")).toBeInTheDocument();
+    expect(screen.getByText("초안 준비됨")).toBeInTheDocument();
     expect(screen.getByText(/CapCut에서 후처리 필요/i)).toBeInTheDocument();
   });
 
@@ -1956,7 +2106,7 @@ describe("App", () => {
 
     render(<App />);
 
-    expect(await screen.findByText(/exports\/capcut-draft\/draft/i)).toBeInTheDocument();
+    expect(await screen.findByText("초안 준비됨")).toBeInTheDocument();
     expect(screen.queryByText(/CapCut에서 후처리 필요/i)).not.toBeInTheDocument();
   });
 
@@ -2003,7 +2153,7 @@ describe("App", () => {
     render(<App />);
 
     expect(await screen.findByText("CapCut에 열기 준비")).toBeInTheDocument();
-    expect(screen.getByText(/videobox export 001/i)).toBeInTheDocument();
+    expect(screen.getByText("CapCut에서 초안을 열 수 있어요.")).toBeInTheDocument();
   });
 
   it("shows and restores CapCut connection readiness details after reload", async () => {
@@ -2013,8 +2163,7 @@ describe("App", () => {
     const firstRender = render(<App />);
     expect(await screen.findByText("CapCut 연결 진단")).toBeInTheDocument();
     expect(screen.getByText("연결 준비 완료")).toBeInTheDocument();
-    expect(screen.getByText("8.9.1.3802 · 지원됨")).toBeInTheDocument();
-    expect(screen.getByText(/CapCut\/Apps\/8.9.1.3802\/CapCut.exe/i)).toBeInTheDocument();
+    expect(screen.getByText("지원됨")).toBeInTheDocument();
     firstRender.unmount();
 
     render(<App />);
@@ -2043,7 +2192,7 @@ describe("App", () => {
 
     expect(await screen.findByText("CapCut 연결 진단")).toBeInTheDocument();
     expect(screen.getByText("연결 준비 필요")).toBeInTheDocument();
-    expect(screen.getByText(/CapCut을 한 번 실행해 프로젝트 폴더를 만든 뒤/i)).toBeInTheDocument();
+    expect(screen.getByText("CapCut 연결 상태를 다시 확인해 주세요.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "다시 진단" }));
 
     expect(await screen.findByText("연결 준비 완료")).toBeInTheDocument();
@@ -2092,8 +2241,8 @@ describe("App", () => {
 
     render(<App />);
 
-    expect(await screen.findByText(/CapCut 등록 실패: CapCut 설치를 확인/i)).toBeInTheDocument();
-    expect(screen.getByText(/exports\/capcut-draft\/draft/i)).toBeInTheDocument();
+    expect(await screen.findByText("CapCut 등록을 완료하지 못했어요. 다시 시도해 주세요.")).toBeInTheDocument();
+    expect(screen.getByText("초안 준비됨")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "CapCut 등록 다시 시도" }));
 
     await waitFor(() =>
@@ -2161,9 +2310,8 @@ describe("App", () => {
 
     render(<App />);
 
-    expect(await screen.findByText(/CapCut 초안 내보내기 실패/)).toBeInTheDocument();
-    expect(screen.getByText(/CapCut draft package could not be written/i)).toBeInTheDocument();
-    expect(screen.getByText(/마지막 성공 유지.*exports\/capcut-draft\/draft/i)).toBeInTheDocument();
+    expect(await screen.findByText("초안 내보내기를 완료하지 못했어요. 다시 시도해 주세요.")).toBeInTheDocument();
+    expect(screen.getByText("마지막 초안 유지")).toBeInTheDocument();
   });
 
   it("renders a final-render failure with a null artifact without unmounting the dashboard", async () => {
@@ -2190,7 +2338,7 @@ describe("App", () => {
     );
 
     expect(await screen.findByText("완성본 렌더 실패")).toBeInTheDocument();
-    expect(screen.getByText(/B-roll source/)).toBeInTheDocument();
+    expect(screen.getByText("완성본을 만들지 못했어요. 다시 시도해 주세요.")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "VideoBox 작업판" })).toBeInTheDocument();
   });
 
@@ -2217,10 +2365,83 @@ describe("App", () => {
       );
     });
 
-    expect(await screen.findByText("CapCut 초안 내보내기 실패")).toBeInTheDocument();
-    expect(screen.getByText(/CapCut draft package/)).toBeInTheDocument();
+    expect(await screen.findByText("초안 내보내기를 완료하지 못했어요. 다시 시도해 주세요.")).toBeInTheDocument();
+    expect(screen.getByText("초안 내보내기를 완료하지 못했어요. 다시 시도해 주세요.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "CapCut 초안 다시 시도" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "VideoBox 작업판" })).toBeInTheDocument();
+  });
+
+  it("does not expose raw CapCut or output backend values in the dashboard DOM", async () => {
+    const rawOutputUri = "local://private-output/exports/secret-final.mp4";
+    const rawSubtitleUri = "file:///C:/private-output/captions/secret.srt";
+    const rawCapcutPath = "C:/Users/private/AppData/Local/CapCut/User Data/Projects/secret-draft";
+    const rawFailure = "CAPCUT_EXPORT_FAILED code=EACCES output_ref=export_secret_001";
+    const rawRenderFailure = "FFMPEG_OUTPUT_FAILED uri=local://private-output/exports/secret-final.mp4";
+
+    const fetchMock = createFetchMock({
+      preview: {
+        ...previewResponse,
+        preview: { ...previewResponse.preview, player_uri: rawOutputUri, file_uri: rawOutputUri },
+      },
+      subtitle: {
+        ...subtitleResponse,
+        subtitle: { ...subtitleResponse.subtitle, file_uri: rawSubtitleUri },
+      },
+      capcutExport: {
+        ...exportResponse,
+        export: {
+          ...exportResponse.export,
+          file_uri: rawOutputUri,
+          subtitle_file_uri: rawSubtitleUri,
+          notes: [rawFailure],
+        },
+      },
+      capcutDiagnostics: {
+        status: "failed",
+        installation_path: rawCapcutPath,
+        detected_version: "private-version-9.9.9",
+        is_supported: false,
+        project_root_path: rawCapcutPath,
+        project_root_exists: false,
+        write_access: false,
+        recovery_message: rawFailure,
+        checked_at: "2026-07-13T00:00:00Z",
+      },
+      finalRenderResult: {
+        job_id: "final_render_job_009",
+        status: "failed",
+        render: null,
+        error_message: rawRenderFailure,
+      },
+      capcutDraftResult: {
+        job_id: "capcut_draft_job_009",
+        status: "failed",
+        export: null,
+        error_message: rawFailure,
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "VideoBox 작업판" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "타임라인" }));
+    expect(await screen.findByRole("heading", { name: "트랙 · 클립" })).toBeInTheDocument();
+    expect(screen.getByText("미리보기 준비됨")).toBeInTheDocument();
+    expect(screen.getByText("자막 파일 준비됨")).toBeInTheDocument();
+    expect(screen.getByText("내보낸 영상 준비됨")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "완성본 렌더" }));
+    fireEvent.click(screen.getByRole("button", { name: "CapCut 초안(실제)" }));
+    fireEvent.click(screen.getByRole("button", { name: "개요" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("완성본을 만들지 못했어요. 다시 시도해 주세요.")).toBeInTheDocument();
+      expect(screen.getByText("초안 내보내기를 완료하지 못했어요. 다시 시도해 주세요.")).toBeInTheDocument();
+    });
+    expect(document.body.textContent).not.toContain(rawOutputUri);
+    expect(document.body.textContent).not.toContain(rawSubtitleUri);
+    expect(document.body.textContent).not.toContain(rawCapcutPath);
+    expect(document.body.textContent).not.toContain(rawFailure);
+    expect(document.body.textContent).not.toContain(rawRenderFailure);
   });
 
   it("offers a retry action after a failed final render", async () => {
@@ -2260,7 +2481,7 @@ describe("App", () => {
     expect(screen.getByText(/프로젝트 · 타임라인 · 검수 · 출력/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /개요/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^검수$/i })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: /진행/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "진행" })).toBeInTheDocument();
     expect(screen.getByText(/^전사$/i)).toBeInTheDocument();
     expect(screen.queryByText(/Local-first review shell/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Inspect projects/i)).not.toBeInTheDocument();
@@ -2278,8 +2499,7 @@ describe("App", () => {
     expect(await screen.findByText(/작업자 검수 데모/i)).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /타임라인/i })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /스냅샷/i })).toBeInTheDocument();
-    expect((await screen.findAllByText(/preview_render_job_006/i)).length).toBeGreaterThan(0);
-    expect((await screen.findAllByText(/capcut_export_job_007/i)).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText("준비됨")).length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByRole("button", { name: /^검수$/i }));
 
@@ -2304,9 +2524,9 @@ describe("App", () => {
     fireEvent.click(await screen.findByRole("button", { name: /미리보기 생성/i }));
     fireEvent.click(await screen.findByRole("button", { name: /캡컷 내보내기/i }));
 
-    expect(await screen.findByText(/HTML 미리보기/i)).toBeInTheDocument();
-    expect(await screen.findAllByText(/subtitle_001\.srt/i)).toHaveLength(2);
-    expect(await screen.findByText(/캡컷 초안 생성/i)).toBeInTheDocument();
+    expect(await screen.findByText("미리보기 준비됨")).toBeInTheDocument();
+    expect(await screen.findByText("자막 파일 준비됨")).toBeInTheDocument();
+    expect(await screen.findByText("내보낸 영상 준비됨")).toBeInTheDocument();
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith("/api/projects", undefined);
@@ -2794,11 +3014,11 @@ describe("App", () => {
     expect(within(previewCard!).getByText("대기")).toBeInTheDocument();
     expect(within(exportCard!).getByText("대기")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByText(/단계별 job ID 보기/i));
+    fireEvent.click(screen.getByText("단계별 진행 보기"));
     expect(screen.getAllByText(/미시작/i).length).toBeGreaterThan(0);
   });
 
-  it("does not request Gemini keys and shows only LM Studio capability in default settings", async () => {
+  it("does not request Gemini keys from the default settings", async () => {
     const fetchMock = vi.fn((input: RequestInfo | URL) => {
       const url = String(input);
       if (url.endsWith("/api/projects")) {
@@ -2838,9 +3058,25 @@ describe("App", () => {
     expect(await screen.findByText(/작업자 검수 데모/i)).toBeInTheDocument();
     expect(await screen.findByText(/timeline_001/i)).toBeInTheDocument();
     fireEvent.click(await screen.findByRole("button", { name: /^설정$/i }));
-    expect(await screen.findByRole("heading", { name: /LM Studio 기능/i })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "내 목소리" })).toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/providers/gemini/keys"))).toBe(false);
     expect(screen.queryByText(/제미나이/i)).not.toBeInTheDocument();
+  });
+
+  it("keeps the default settings surface in creator language", async () => {
+    const fetchMock = createFetchMock();
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: /^설정$/i }));
+    expect(await screen.findByRole("heading", { name: "내 목소리" })).toBeInTheDocument();
+
+    const renderedSettings = document.body.textContent ?? "";
+    for (const forbiddenTerm of ["로컬 AI 기능", "LM Studio", "자동 런타임", "loopback", "fallback", "API 키", "TTS", "파일 경로", "자산 ID", "C:\\path\\to\\voice_sample.wav"]) {
+      expect(renderedSettings).not.toContain(forbiddenTerm);
+    }
+    expect(screen.queryByRole("heading", { name: /LM Studio/i })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/API 키/i)).not.toBeInTheDocument();
   });
 
   it("keeps legacy Gemini CRUD isolated from the default local-only UI", async () => {
@@ -2850,7 +3086,7 @@ describe("App", () => {
     render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: /^설정$/i }));
 
-    expect(await screen.findByRole("heading", { name: /LM Studio 기능/i })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "내 목소리" })).toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/providers/gemini/keys"))).toBe(false);
     expect(screen.queryByText(/AIzaSyDANGER_SECRET/i)).not.toBeInTheDocument();
     expect(screen.queryByDisplayValue(/AIzaSyDANGER_SECRET/i)).not.toBeInTheDocument();
@@ -2863,7 +3099,7 @@ describe("App", () => {
     render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: /^설정$/i }));
 
-    expect(await screen.findByRole("heading", { name: /LM Studio 기능/i })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "내 목소리" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /키 추가/i })).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/API 키/i)).not.toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([input, init]) => String(input).includes("/providers/gemini") && init?.method !== "GET")).toBe(false);
@@ -2895,7 +3131,7 @@ describe("App", () => {
 
     expect(await screen.findByText(/editing_session_001/i)).toBeInTheDocument();
     expect(await screen.findByRole("button", { name: /seg_002/i })).toBeInTheDocument();
-    expect(await screen.findByText(/asset_broll_archive_002/i)).toBeInTheDocument();
+    expect(await screen.findByText("Team whiteboard")).toBeInTheDocument();
     expect(
       screen.getByText(/meeting context: summarize the active discussion\./i),
     ).toBeInTheDocument();
@@ -2940,9 +3176,9 @@ describe("App", () => {
       );
     });
 
-    expect(await screen.findByText(/partial_regeneration_job_001/i)).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "재생성 결과" })).toBeInTheDocument();
     expect(screen.getAllByText(/B롤 교체/i).length).toBeGreaterThan(0);
-    expect(screen.getByText(/timeline_002/i)).toBeInTheDocument();
+    expect(screen.getByText("변경 내용을 확인해 주세요.")).toBeInTheDocument();
   });
 
   it("requires a fresh preflight before partial regeneration can run for the current scope", async () => {
@@ -2986,13 +3222,13 @@ describe("App", () => {
     expect(runButton).toBeDisabled();
   });
 
-  it("keeps explanation image table and tts validation in the thin editor and exposes a read-only preflight scope before execution", async () => {
+  it("keeps image selection and narration controls free of internal IDs", async () => {
     const fetchMock = createFetchMock({
+      ttsCandidates: [approvedTtsCandidate],
       partialRegenerationPreflight: {
         ...partialRegenerationPreflightResponse,
         fields: [
           "explanation_card",
-          "image_overlay",
           "table_overlay",
           "tts_replacement",
         ],
@@ -3012,19 +3248,18 @@ describe("App", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
     fireEvent.click(await screen.findByRole("button", { name: /편집 시작/i }));
+    expect(screen.queryByLabelText(/이미지 자산 ID|음악 자산 ID|효과음 자산 ID/i)).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText(/설명 텍스트/i), {
       target: { value: "Meeting context: capture the approved discussion points." },
     });
     fireEvent.click(screen.getByRole("button", { name: /설명 저장/i }));
-
-    fireEvent.change(screen.getByLabelText(/이미지 자산 ID/i), {
-      target: { value: "asset_image_002" },
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/explanation-card",
+        expect.objectContaining({ method: "PATCH" }),
+      );
     });
-    fireEvent.change(screen.getByLabelText(/이미지 텍스트/i), {
-      target: { value: "Image overlay summary for the discussion." },
-    });
-    fireEvent.click(screen.getByRole("button", { name: /이미지 저장/i }));
 
     fireEvent.change(screen.getByLabelText(/표 열/i), {
       target: { value: "Topic, Owner" },
@@ -3036,14 +3271,15 @@ describe("App", () => {
       target: { value: "Table overlay summary for operator review." },
     });
     fireEvent.click(screen.getByRole("button", { name: /표 저장/i }));
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/table-overlay",
+        expect.objectContaining({ method: "PATCH" }),
+      );
+    });
 
-    fireEvent.change(screen.getByLabelText(/TTS 추천 ID/i), {
-      target: { value: "rec_tts_002" },
-    });
-    fireEvent.change(screen.getByLabelText(/TTS 자산 ID/i), {
-      target: { value: "tts_asset_002" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: /TTS 저장/i }));
+    await selectApprovedTtsCandidate();
+    fireEvent.click(screen.getByRole("button", { name: "내 목소리로 저장" }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -3059,17 +3295,6 @@ describe("App", () => {
         }),
       );
     });
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/image-overlay",
-      expect.objectContaining({
-        method: "PATCH",
-        body: JSON.stringify({
-          expected_revision: 1,
-          asset_id: "asset_image_002",
-          text: "Image overlay summary for the discussion.",
-        }),
-      }),
-    );
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/table-overlay",
       expect.objectContaining({
@@ -3098,7 +3323,6 @@ describe("App", () => {
     );
 
     fireEvent.click(screen.getByRole("checkbox", { name: /B롤/i }));
-    fireEvent.click(screen.getByRole("checkbox", { name: /이미지/i }));
     fireEvent.click(screen.getByRole("checkbox", { name: /표/i }));
     fireEvent.click(screen.getByRole("checkbox", { name: /TTS/i }));
 
@@ -3113,7 +3337,6 @@ describe("App", () => {
             segment_ids: ["seg_002"],
             fields: [
               "explanation_card",
-              "image_overlay",
               "table_overlay",
               "tts_replacement",
             ],
@@ -3127,13 +3350,12 @@ describe("App", () => {
     ).toBeInTheDocument();
     expect(screen.getAllByText(/seg_002 포함/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/설명 카드 선택/i)).toBeInTheDocument();
-    expect(screen.getByText(/이미지 선택/i)).toBeInTheDocument();
     expect(screen.getByText(/표 선택/i)).toBeInTheDocument();
     expect(screen.getByText(/TTS 선택/i)).toBeInTheDocument();
     expect(
       screen.getByText(/읽기 전용 · 타임라인 유지/i),
     ).toBeInTheDocument();
-    expect(screen.queryByText(/partial_regeneration_job_001/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "재생성 결과" })).not.toBeInTheDocument();
     expect(
       fetchMock,
     ).not.toHaveBeenCalledWith(
@@ -3160,7 +3382,7 @@ describe("App", () => {
     const imageButton = screen.getByRole("button", { name: /이미지 저장/i });
     const tableButton = screen.getByRole("button", { name: /표 저장/i });
     const musicButton = screen.getByRole("button", { name: /음악 저장/i });
-    const ttsButton = screen.getByRole("button", { name: /TTS 저장/i });
+    const ttsButton = screen.getByRole("button", { name: "내 목소리로 저장" });
 
     expect(explanationButton).toBeDisabled();
     expect(imageButton).toBeDisabled();
@@ -3173,11 +3395,11 @@ describe("App", () => {
     expect(musicButton).toHaveAttribute("aria-describedby", "seg_002-music-save-help");
     expect(ttsButton).toHaveAttribute("aria-describedby", "seg_002-tts-save-help");
     expect(screen.getByText(/설명 텍스트 필요/i)).toBeInTheDocument();
-    expect(screen.getByText(/이미지 ID 필요/i)).toBeInTheDocument();
+    expect(screen.getByText(/이미지를 먼저 선택해 주세요/i)).toBeInTheDocument();
     expect(screen.getByText(/표 텍스트 필요/i)).toBeInTheDocument();
-    expect(screen.getByText(/음악 ID 필요/i)).toBeInTheDocument();
+    expect(screen.getByText(/수동 미디어 라이브러리에서 음악을 골라주세요/i)).toBeInTheDocument();
     expect(
-      screen.getByText(/TTS 추천 ID · 자산 ID 필요/i),
+      screen.getByText(/아래에서 마음에 드는 목소리 후보를 골라주세요/i),
     ).toBeInTheDocument();
 
     fireEvent.click(explanationButton);
@@ -3208,12 +3430,18 @@ describe("App", () => {
     );
   });
 
-  async function renderStartedEditingSession(fetchMock = createFetchMock()) {
+  async function renderStartedEditingSession(fetchMock = createFetchMock({ ttsCandidates: [approvedTtsCandidate] })) {
     vi.stubGlobal("fetch", fetchMock);
     render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
     fireEvent.click(await screen.findByRole("button", { name: /편집 시작/i }));
     return fetchMock;
+  }
+
+  async function selectApprovedTtsCandidate() {
+    const button = await screen.findByRole("button", { name: "이 후보 선택" });
+    expect(button).toBeEnabled();
+    fireEvent.click(button);
   }
 
   async function runCandidateToApprovalReady() {
@@ -3228,13 +3456,13 @@ describe("App", () => {
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /타임라인 승인/i })).toBeDisabled();
     });
-    expect(screen.queryByText(/partial_regeneration_job_001/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "재생성 결과" })).not.toBeInTheDocument();
   }
 
   it("places an archived B-roll card through the sole manual library path with SHA identity", async () => {
     const fetchMock = await renderStartedEditingSession();
 
-    const card = (await screen.findByText("asset_broll_archive_002")).closest("article");
+    const card = (await screen.findByText("Team whiteboard")).closest("article");
     expect(card).not.toBeNull();
     fireEvent.click(card!.querySelector("button:last-of-type")!);
 
@@ -3254,7 +3482,7 @@ describe("App", () => {
     const recentCallsBeforeApply = fetchMock.mock.calls.filter(([url, init]) =>
       String(url).endsWith("/api/projects/project_001/media-library/recent") && !init,
     ).length;
-    const card = (await screen.findByText("asset_broll_archive_002")).closest("article");
+    const card = (await screen.findByText("Team whiteboard")).closest("article");
     expect(card).not.toBeNull();
 
     fireEvent.click(within(card!).getByRole("button", { name: /선택 구간에 B롤 적용/i }));
@@ -3263,7 +3491,7 @@ describe("App", () => {
       String(url).endsWith("/api/projects/project_001/media-library/recent") && !init,
     )).toHaveLength(recentCallsBeforeApply + 1));
     fireEvent.click(screen.getByRole("button", { name: "B롤 필터: 최근" }));
-    expect(screen.getByText("asset_broll_archive_002")).toBeInTheDocument();
+    expect(screen.getByText("Team whiteboard")).toBeInTheDocument();
   });
 
   it("shows a short success message after saving an editing change", async () => {
@@ -3331,7 +3559,7 @@ describe("App", () => {
 
   it("marks a ManualMediaLibrary B-roll card with a project-scoped favorite id", async () => {
     const fetchMock = await renderStartedEditingSession();
-    const card = (await screen.findByText("asset_broll_archive_002")).closest("article");
+    const card = (await screen.findByText("Team whiteboard")).closest("article");
     expect(card).not.toBeNull();
     fireEvent.click(within(card!).getByRole("button", { name: /B롤 즐겨찾기$/i }));
 
@@ -3412,7 +3640,7 @@ describe("App", () => {
       expect(screen.getByText(/factory-line/i)).toBeInTheDocument();
     });
     expect(await screen.findByText(/가져옴 1개/i)).toBeInTheDocument();
-    expect(screen.getByText(/asset_broll_archive_003/i)).toBeInTheDocument();
+    expect(screen.getByText("factory-line")).toBeInTheDocument();
   });
 
   it("shows a B-roll import error when folder import fails", async () => {
@@ -3423,12 +3651,12 @@ describe("App", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: /B롤 가져오기/i }));
 
-    expect(await screen.findByText(/B롤 가져오기 실패/i)).toBeInTheDocument();
+    expect(await screen.findByText("B롤을 가져오지 못했어요. 다시 시도해 주세요.")).toBeInTheDocument();
   });
 
   it("removes the saved explanation card and invalidates the active candidate", async () => {
     const fetchMock = await renderStartedEditingSession(
-      createFetchMock({ candidateReviewSnapshot: candidateReviewSnapshotResponse }),
+      createFetchMock({ candidateReviewSnapshot: candidateReviewSnapshotResponse, ttsCandidates: [approvedTtsCandidate] }),
     );
 
     await runCandidateToApprovalReady();
@@ -3448,17 +3676,29 @@ describe("App", () => {
     expect(screen.getByLabelText(/설명 텍스트/i)).toHaveValue("");
   });
 
-  it("removes the saved image overlay and invalidates the active candidate", async () => {
-    const fetchMock = await renderStartedEditingSession(
-      createFetchMock({ candidateReviewSnapshot: candidateReviewSnapshotResponse }),
+  it("removes a saved image through creator controls without exposing an internal ID", async () => {
+    const editingSessionWithSavedImage = structuredClone(editingSessionResponse);
+    editingSessionWithSavedImage.segments = editingSessionWithSavedImage.segments.map((segment) =>
+      segment.segment_id === "seg_002"
+        ? {
+            ...segment,
+            visual_overlays: [
+              ...segment.visual_overlays,
+              { overlay_type: "image_overlay", asset_id: "asset_image_002", text: "회의 핵심 장면" },
+            ],
+          }
+        : segment,
     );
-
-    fireEvent.change(screen.getByLabelText(/이미지 자산 ID/i), {
-      target: { value: "asset_image_002" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: /이미지 저장/i }));
-
-    await runCandidateToApprovalReady();
+    const fetchMock = await renderStartedEditingSession(
+      createFetchMock({
+        editingSession: editingSessionWithSavedImage,
+        latestEditingSession: editingSessionWithSavedImage,
+        candidateReviewSnapshot: candidateReviewSnapshotResponse,
+        ttsCandidates: [approvedTtsCandidate],
+      }),
+    );
+    expect(screen.queryByLabelText(/이미지 자산 ID/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /이미지 삭제/i })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /이미지 삭제/i }));
 
     await waitFor(() => {
@@ -3469,10 +3709,9 @@ describe("App", () => {
         }),
       );
     });
-    await expectCandidateInvalidated();
     expect(screen.queryByRole("button", { name: /이미지 삭제/i })).not.toBeInTheDocument();
     expect(screen.getByText(/이미지 없음/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/이미지 자산 ID/i)).toHaveValue("");
+    expect(screen.queryByLabelText(/이미지 자산 ID/i)).not.toBeInTheDocument();
   });
 
   it("removes the saved table overlay and invalidates the active candidate", async () => {
@@ -3504,16 +3743,12 @@ describe("App", () => {
 
   it("clears the saved tts replacement and invalidates the active candidate", async () => {
     const fetchMock = await renderStartedEditingSession(
-      createFetchMock({ candidateReviewSnapshot: candidateReviewSnapshotResponse }),
+      createFetchMock({ candidateReviewSnapshot: candidateReviewSnapshotResponse, ttsCandidates: [approvedTtsCandidate] }),
     );
+    expect(screen.queryByLabelText(/이미지 자산 ID/i)).not.toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText(/TTS 추천 ID/i), {
-      target: { value: "rec_tts_002" },
-    });
-    fireEvent.change(screen.getByLabelText(/TTS 자산 ID/i), {
-      target: { value: "tts_asset_002" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: /TTS 저장/i }));
+    await selectApprovedTtsCandidate();
+    fireEvent.click(screen.getByRole("button", { name: "내 목소리로 저장" }));
 
     await runCandidateToApprovalReady();
     fireEvent.click(screen.getByRole("button", { name: /TTS 해제/i }));
@@ -3528,37 +3763,45 @@ describe("App", () => {
     });
     await expectCandidateInvalidated();
     expect(screen.queryByRole("button", { name: /TTS 해제/i })).not.toBeInTheDocument();
-    expect(screen.getByText(/TTS 없음/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/TTS 추천 ID/i)).toHaveValue("");
-    expect(screen.getByLabelText(/TTS 자산 ID/i)).toHaveValue("");
+    expect(screen.getByText("내 목소리 없음")).toBeInTheDocument();
+    expect(screen.queryByLabelText("TTS 추천 ID")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("TTS 자산 ID")).not.toBeInTheDocument();
   });
 
-  it("saves the music override, invalidates the active candidate, and exposes music in the rerun scope", async () => {
+  it("applies music from the manual library without exposing an internal ID", async () => {
     const fetchMock = await renderStartedEditingSession(
-      createFetchMock({ candidateReviewSnapshot: candidateReviewSnapshotResponse }),
+      createFetchMock({
+        candidateReviewSnapshot: candidateReviewSnapshotResponse,
+        mediaLibraryAssets: [
+          {
+            library_asset_id: "pack:starter-001:music-001",
+            asset_id: "music-001",
+            media_type: "music",
+            duration_seconds: 12.5,
+            version: "1.0.0",
+            verified: true,
+            available: true,
+            tags: ["calm", "office"],
+            source: "Synthetic source",
+            creator: "Synthetic creator",
+            official_license_url: "https://example.test/license",
+          },
+        ],
+      }),
     );
-
-    await runCandidateToApprovalReady();
-
-    fireEvent.change(screen.getByLabelText(/음악 자산 ID/i), {
-      target: { value: "music_manual_002" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: /음악 저장/i }));
+    expect(screen.queryByLabelText(/음악 자산 ID|효과음 자산 ID/i)).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "BGM 적용" }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
+        "/api/media-library/assets/pack%3Astarter-001%3Amusic-001/materialize",
+        expect.objectContaining({ method: "POST", body: JSON.stringify({ project_id: "project_001" }) }),
+      );
+      expect(fetchMock).toHaveBeenCalledWith(
         "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/music",
-        expect.objectContaining({
-          method: "PATCH",
-          body: JSON.stringify({
-            expected_revision: 1,
-            asset_id: "music_manual_002",
-          }),
-        }),
+        expect.objectContaining({ method: "PATCH" }),
       );
     });
-    await expectCandidateInvalidated();
-    expect(screen.getByLabelText(/음악 자산 ID/i)).toHaveValue("music_manual_002");
     expect(screen.getByRole("checkbox", { name: /^음악$/i })).toBeChecked();
 
     fireEvent.click(screen.getByRole("button", { name: /사전 확인/i }));
@@ -3577,7 +3820,7 @@ describe("App", () => {
     });
   });
 
-  it("defaults the editor focus to a later segment that only carries a saved music override", async () => {
+  it("shows an existing music choice without revealing its internal ID", async () => {
     const musicOnlyEditingSession = {
       ...editingSessionResponse,
       segments: editingSessionResponse.segments.map((segment) =>
@@ -3613,7 +3856,7 @@ describe("App", () => {
 
     expect(await screen.findByText(/editing_session_001/i)).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: /대상 세그먼트/i })).toHaveValue("seg_002");
-    expect(screen.getByLabelText(/음악 자산 ID/i)).toHaveValue("music_manual_001");
+    expect(screen.queryByLabelText(/음악 자산 ID/i)).not.toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: /^음악$/i })).toBeChecked();
     expect(screen.getByRole("checkbox", { name: /B롤/i })).not.toBeChecked();
   });
@@ -3855,6 +4098,14 @@ describe("App", () => {
   });
 
   it("clears the saved music override and invalidates the active candidate", async () => {
+    const musicOnlyEditingSession = {
+      ...editingSessionResponse,
+      segments: editingSessionResponse.segments.map((segment) =>
+        segment.segment_id === "seg_002"
+          ? { ...segment, music_override: { asset_id: "music_manual_002" } }
+          : segment,
+      ),
+    };
     const musicPreflightResponse: PartialRegenerationPreflight = {
       ...partialRegenerationPreflightResponse,
       fields: ["broll", "explanation_card", "music"],
@@ -3886,21 +4137,15 @@ describe("App", () => {
     };
     const fetchMock = await renderStartedEditingSession(
       createFetchMock({
+        editingSession: musicOnlyEditingSession,
+        latestEditingSession: musicOnlyEditingSession,
         candidateReviewSnapshot: candidateReviewSnapshotResponse,
         partialRegenerationPreflight: musicPreflightResponse,
         partialRegenerationResult: musicResultResponse,
       }),
     );
-
-    fireEvent.change(screen.getByLabelText(/음악 자산 ID/i), {
-      target: { value: "music_manual_002" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: /음악 저장/i }));
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: /음악 해제/i })).toBeInTheDocument();
-    });
-
-    await runCandidateToApprovalReady();
+    expect(screen.queryByLabelText(/음악 자산 ID/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /음악 해제/i })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /음악 해제/i }));
 
     await waitFor(() => {
@@ -3911,9 +4156,8 @@ describe("App", () => {
         }),
       );
     });
-    await expectCandidateInvalidated();
     expect(screen.queryByRole("button", { name: /음악 해제/i })).not.toBeInTheDocument();
-    expect(screen.getByLabelText(/음악 자산 ID/i)).toHaveValue("");
+    expect(screen.queryByLabelText(/음악 자산 ID/i)).not.toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: /^음악$/i })).not.toBeChecked();
   });
 
@@ -3939,30 +4183,30 @@ describe("App", () => {
     expect(screen.getByRole("checkbox", { name: /B롤/i })).not.toBeChecked();
   });
 
-  it("blocks preflight and rerun while an editing save is still in flight", async () => {
-    const baseFetch = createFetchMock();
-    let resolveImageSave: ((response: Response) => void) | null = null;
+  it("blocks preflight and rerun while a creator-facing save is in flight without an image asset-ID control", async () => {
+    const baseFetch = createFetchMock({ ttsCandidates: [approvedTtsCandidate] });
+    let resolveExplanationSave: ((response: Response) => void) | null = null;
     const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (
         url.endsWith(
-          "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/image-overlay",
+          "/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/explanation-card",
         ) &&
         init?.method === "PATCH"
       ) {
         return new Promise<Response>((resolve) => {
-          resolveImageSave = resolve;
+          resolveExplanationSave = resolve;
         });
       }
       return baseFetch(input, init);
     });
 
     await renderStartedEditingSession(fetchMock);
-
-    fireEvent.change(screen.getByLabelText(/이미지 자산 ID/i), {
-      target: { value: "asset_image_002" },
+    expect(screen.queryByLabelText(/이미지 자산 ID/i)).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/설명 텍스트/i), {
+      target: { value: "회의의 핵심 내용을 짧게 정리합니다." },
     });
-    fireEvent.click(screen.getByRole("button", { name: /이미지 저장/i }));
+    fireEvent.click(screen.getByRole("button", { name: /설명 저장/i }));
 
     const requestButton = screen.getByRole("button", {
       name: /사전 확인/i,
@@ -3984,32 +4228,9 @@ describe("App", () => {
       expect.anything(),
     );
 
-    const imageSaveResolver = resolveImageSave as unknown as (response: Response) => void;
-    expect(imageSaveResolver).not.toBeNull();
-    imageSaveResolver(
-      new Response(
-        JSON.stringify({
-          ...editingSessionResponse,
-          segments: editingSessionResponse.segments.map((segment) =>
-            segment.segment_id === "seg_002"
-              ? {
-                  ...segment,
-                  visual_overlays: [
-                    ...segment.visual_overlays.filter(
-                      (overlay) => String(overlay.overlay_type ?? "") !== "image_overlay",
-                    ),
-                    {
-                      overlay_type: "image_overlay",
-                      asset_id: "asset_image_002",
-                      text: "",
-                    },
-                  ],
-                }
-              : segment,
-          ),
-        }),
-      ),
-    );
+    const explanationSaveResolver = resolveExplanationSave as unknown as (response: Response) => void;
+    expect(explanationSaveResolver).not.toBeNull();
+    explanationSaveResolver(new Response(JSON.stringify(editingSessionResponse)));
 
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /사전 확인/i })).toBeEnabled();
@@ -4017,7 +4238,7 @@ describe("App", () => {
   });
 
   it("blocks preflight and rerun while a clear mutation is still in flight", async () => {
-    const baseFetch = createFetchMock();
+    const baseFetch = createFetchMock({ ttsCandidates: [approvedTtsCandidate] });
     let resolveTtsClear: ((response: Response) => void) | null = null;
     const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
@@ -4036,13 +4257,8 @@ describe("App", () => {
 
     await renderStartedEditingSession(fetchMock);
 
-    fireEvent.change(screen.getByLabelText(/TTS 추천 ID/i), {
-      target: { value: "rec_tts_002" },
-    });
-    fireEvent.change(screen.getByLabelText(/TTS 자산 ID/i), {
-      target: { value: "tts_asset_002" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: /TTS 저장/i }));
+    await selectApprovedTtsCandidate();
+    fireEvent.click(screen.getByRole("button", { name: "내 목소리로 저장" }));
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /TTS 해제/i })).toBeInTheDocument();
     });
@@ -4371,7 +4587,7 @@ describe("App", () => {
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /타임라인 승인/i })).toBeDisabled();
     });
-    expect(screen.queryByText(/partial_regeneration_job_001/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "재생성 결과" })).not.toBeInTheDocument();
   });
 
   it("resumes the latest editing session candidate after refresh when freshness is provable", async () => {
@@ -4424,7 +4640,7 @@ describe("App", () => {
     fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
 
     expect(await screen.findByText(/editing_session_001/i)).toBeInTheDocument();
-    expect(await screen.findByText(/partial_regeneration_job_001/i)).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "재생성 결과" })).toBeInTheDocument();
     expect(screen.getByText(/재생성 초안/i)).toBeInTheDocument();
     expect(
       screen.getByText(/초안 · 승인 필요/i),
@@ -4523,7 +4739,7 @@ describe("App", () => {
 
     expect(await screen.findByText(/후보 복구 실패/i)).toBeInTheDocument();
     expect(screen.getByText(/기존 타임라인 유지/i)).toBeInTheDocument();
-    expect(screen.queryByText(/partial_regeneration_job_001/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "재생성 결과" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /자막 생성/i })).toBeEnabled();
     expect(screen.getByRole("button", { name: /검수 재개/i })).toBeEnabled();
   });
@@ -4554,7 +4770,7 @@ describe("App", () => {
 
     expect(await screen.findByText(/후보 복구 실패/i)).toBeInTheDocument();
     expect(screen.getByText(/기존 타임라인 유지/i)).toBeInTheDocument();
-    expect(screen.queryByText(/partial_regeneration_job_001/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "재생성 결과" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /자막 생성/i })).toBeEnabled();
     expect(screen.getByRole("button", { name: /검수 재개/i })).toBeEnabled();
   });
@@ -4585,9 +4801,9 @@ describe("App", () => {
 
     expect(await screen.findByText(/재개 범위 확인 · 검수 예측 없음/i)).toBeInTheDocument();
     expect(screen.getByText(/재개 범위 확인 · 검수 예측 없음/i)).toBeInTheDocument();
-    expect(screen.getByText(/partial_regeneration_job_001/i)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "재생성 결과" })).toBeInTheDocument();
     expect(screen.getByText(/^재개 범위$/i)).toBeInTheDocument();
-    expect(screen.getAllByText("미시작").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("대기").length).toBeGreaterThan(0);
     expect(screen.getAllByText("대기").length).toBeGreaterThan(0);
     expect(screen.queryByText(/재생성 초안/i)).not.toBeInTheDocument();
   });
@@ -4862,7 +5078,7 @@ describe("App", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
 
-    expect(await screen.findByText(/partial_regeneration_job_001/i)).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "재생성 결과" })).toBeInTheDocument();
     expect(screen.getByText(/재검수 보류/i)).toBeInTheDocument();
     expect(
       screen.getByText(/기존 보류 유지/i),
@@ -4913,7 +5129,7 @@ describe("App", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
 
-    expect(await screen.findByText(/partial_regeneration_job_001/i)).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "재생성 결과" })).toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: /자막/i })).toBeChecked();
     expect(screen.getByRole("checkbox", { name: /B롤/i })).not.toBeChecked();
     expect(screen.getByRole("checkbox", { name: /설명 카드/i })).not.toBeChecked();
@@ -4961,7 +5177,7 @@ describe("App", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
 
-    expect(await screen.findByText(/partial_regeneration_job_001/i)).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "재생성 결과" })).toBeInTheDocument();
     expect(
       screen.getByText(/재개 범위 확인 · 검수 예측 없음/i),
     ).toBeInTheDocument();
@@ -5011,7 +5227,7 @@ describe("App", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
 
-    expect(await screen.findByText(/partial_regeneration_job_001/i)).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "재생성 결과" })).toBeInTheDocument();
     expect(
       screen.getByText(/재개 범위 확인 · 검수 예측 없음/i),
     ).toBeInTheDocument();
@@ -5060,7 +5276,7 @@ describe("App", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
 
-    expect(await screen.findByText(/partial_regeneration_job_001/i)).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "재생성 결과" })).toBeInTheDocument();
     expect(
       screen.getByText(/재개 범위 확인 · 검수 예측 없음/i),
     ).toBeInTheDocument();
@@ -5111,7 +5327,7 @@ describe("App", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
 
-    expect(await screen.findByText(/partial_regeneration_job_001/i)).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "재생성 결과" })).toBeInTheDocument();
     expect(
       screen.getByText(/재개 범위 확인 · 검수 예측 없음/i),
     ).toBeInTheDocument();
@@ -5167,7 +5383,7 @@ describe("App", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
 
-    expect(await screen.findByText(/partial_regeneration_job_001/i)).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "재생성 결과" })).toBeInTheDocument();
     expect(
       screen.getByText(/재개 범위 확인 · 검수 예측 없음/i),
     ).toBeInTheDocument();
@@ -5226,7 +5442,7 @@ describe("App", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
 
-    expect(await screen.findByText(/partial_regeneration_job_001/i)).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "재생성 결과" })).toBeInTheDocument();
     expect(
       screen.getByText(/재개 범위 확인 · 검수 예측 없음/i),
     ).toBeInTheDocument();
@@ -5289,7 +5505,7 @@ describe("App", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
 
-    expect(await screen.findByText(/partial_regeneration_job_001/i)).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "재생성 결과" })).toBeInTheDocument();
     expect(
       screen.getByText(/재개 범위 확인 · 검수 예측 없음/i),
     ).toBeInTheDocument();
@@ -5347,7 +5563,7 @@ describe("App", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
 
-    expect(await screen.findByText(/partial_regeneration_job_001/i)).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "재생성 결과" })).toBeInTheDocument();
     expect(
       screen.getByText(/재개 범위 확인 · 검수 예측 없음/i),
     ).toBeInTheDocument();
@@ -5405,7 +5621,7 @@ describe("App", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
 
-    expect(await screen.findByText(/partial_regeneration_job_001/i)).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "재생성 결과" })).toBeInTheDocument();
     expect(
       screen.getByText(/재개 범위 확인 · 검수 예측 없음/i),
     ).toBeInTheDocument();
@@ -5455,7 +5671,7 @@ describe("App", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
 
-    expect(await screen.findByText(/partial_regeneration_job_001/i)).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "재생성 결과" })).toBeInTheDocument();
     expect(screen.getByText(/^재개 범위$/i)).toBeInTheDocument();
     expect(screen.getByText(/범위 2개/i)).toBeInTheDocument();
     expect(screen.getByText(/seg_001 포함/i)).toBeInTheDocument();
@@ -5503,14 +5719,14 @@ describe("App", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
 
-    expect(await screen.findByText(/partial_regeneration_job_001/i)).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "재생성 결과" })).toBeInTheDocument();
     expect(screen.getByText(/범위 2개/i)).toBeInTheDocument();
     expect(screen.getByText(/다중 세그먼트 · 수동 확인/i)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /seg_001/i }));
 
     await waitFor(() => {
-      expect(screen.queryByText(/partial_regeneration_job_001/i)).not.toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: "재생성 결과" })).not.toBeInTheDocument();
     });
     expect(screen.queryByText(/범위 2개/i)).not.toBeInTheDocument();
     expect(
@@ -5547,14 +5763,14 @@ describe("App", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
 
-    expect(await screen.findByText(/partial_regeneration_job_001/i)).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "재생성 결과" })).toBeInTheDocument();
     expect(screen.getByText(/범위 2개/i)).toBeInTheDocument();
     expect(screen.getByText(/다중 세그먼트 · 수동 확인/i)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("checkbox", { name: /자막/i }));
 
     await waitFor(() => {
-      expect(screen.queryByText(/partial_regeneration_job_001/i)).not.toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: "재생성 결과" })).not.toBeInTheDocument();
     });
     expect(screen.queryByText(/범위 2개/i)).not.toBeInTheDocument();
     expect(
@@ -5599,7 +5815,7 @@ describe("App", () => {
     fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
 
     expect(await screen.findByText(/editing_session_001/i)).toBeInTheDocument();
-    expect(screen.queryByText(/partial_regeneration_job_001/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "재생성 결과" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /타임라인 승인/i })).toBeDisabled();
     expect(screen.getByRole("button", { name: /자막 생성/i })).toBeEnabled();
   });
@@ -5679,12 +5895,12 @@ describe("App", () => {
 
     const search = screen.getByPlaceholderText("BGM, SFX, 태그 또는 길이");
     fireEvent.change(search, { target: { value: "BGM" } });
-    expect(screen.getByText("music-001")).toBeInTheDocument();
+    expect(screen.getByText("BGM 음원 1")).toBeInTheDocument();
     expect(screen.queryByText("sfx-missing")).not.toBeInTheDocument();
     fireEvent.change(search, { target: { value: "calm" } });
-    expect(screen.getByText("music-001")).toBeInTheDocument();
+    expect(screen.getByText("BGM 음원 1")).toBeInTheDocument();
     fireEvent.change(search, { target: { value: "12.5" } });
-    expect(screen.getByText("music-001")).toBeInTheDocument();
+    expect(screen.getByText("BGM 음원 1")).toBeInTheDocument();
     fireEvent.change(search, { target: { value: "" } });
 
     fireEvent.click(screen.getByRole("button", { name: "BGM 미리보기" }));
@@ -5704,7 +5920,7 @@ describe("App", () => {
       expect.objectContaining({ method: "PUT" }),
     ));
     fireEvent.click(screen.getByRole("button", { name: "즐겨찾기" }));
-    expect(screen.getByText("music-001")).toBeInTheDocument();
+    expect(screen.getByText("BGM 음원 1")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "BGM 적용" }));
     await waitFor(() => {
@@ -5721,7 +5937,7 @@ describe("App", () => {
       );
     });
     fireEvent.click(screen.getByRole("button", { name: "최근" }));
-    expect(screen.getByText("music-001")).toBeInTheDocument();
+    expect(screen.getByText("BGM 음원 1")).toBeInTheDocument();
   });
 
   it("keeps the restored editor usable when the global media library is unavailable", async () => {
@@ -5780,8 +5996,8 @@ describe("App", () => {
       String(url).endsWith("/api/projects/project_001/media-library/recent") && !init,
     )).toHaveLength(3));
     fireEvent.click(screen.getByRole("button", { name: "즐겨찾기" }));
-    expect(screen.getByText("music-001")).toBeInTheDocument();
+    expect(screen.getByText("BGM 음원 1")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "최근" }));
-    expect(screen.getByText("music-001")).toBeInTheDocument();
+    expect(screen.getByText("BGM 음원 1")).toBeInTheDocument();
   });
 });

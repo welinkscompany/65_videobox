@@ -26,7 +26,7 @@ describe("MediaAnalysisPanel", () => {
     render(<MediaAnalysisPanel projectId="project_1" onSelectAsset={onSelectAsset} />);
 
     expect(await screen.findByText(/확인이 필요해요/)).toBeInTheDocument();
-    expect(screen.getByLabelText("asset_1 수동 태그")).toBeInTheDocument();
+    expect(screen.getByLabelText("미디어 1 수동 태그")).toBeInTheDocument();
     expect(screen.queryByText(/needs_review|세션|파이프라인|job/i)).not.toBeInTheDocument();
 
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "미리보기" })); });
@@ -48,5 +48,19 @@ describe("MediaAnalysisPanel", () => {
     expect(await screen.findByText("분석을 마치지 못했어요. 다시 시도하거나 직접 선택해 주세요.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "다시 분석하기" })).toBeInTheDocument();
     expect(screen.queryByText("provider session failed")).not.toBeInTheDocument();
+  });
+
+  it("keeps internal media and analysis IDs out of rendered copy and accessible names", async () => {
+    mocks.listMediaAnalysis.mockResolvedValueOnce({
+      items: [{ analysis_id: "analysis_internal_991", asset_id: "asset_internal_video_772", status: "needs_review", progress_percent: 100, queue_position: null, error_code: null, error_message: null, result: { source_asset_id: "library_internal_330" }, created_at: "now" }],
+    });
+    render(<MediaAnalysisPanel projectId="project_1" />);
+
+    expect(await screen.findByText("확인이 필요해요 · 100%")).toBeInTheDocument();
+    const renderedCopy = document.body.textContent ?? "";
+    expect(renderedCopy).not.toContain("analysis_internal_991");
+    expect(renderedCopy).not.toContain("asset_internal_video_772");
+    expect(renderedCopy).not.toContain("library_internal_330");
+    expect(screen.getByLabelText("미디어 1 수동 태그")).toBeInTheDocument();
   });
 });

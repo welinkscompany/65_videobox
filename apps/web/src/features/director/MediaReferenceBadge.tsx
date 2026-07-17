@@ -8,9 +8,9 @@ export function mediaReferenceLabel(code: string, kind: Props["kind"]) {
   const media = mediaCode === "B" ? "비롤" : mediaCode === "M" ? "배경음악" : mediaCode === "S" ? "효과음" : "미디어";
   const proposalNumber = prefixed ? match?.[1].match(/\d+/)?.[0] : undefined;
   if (kind === "proposal") {
-    if (proposalNumber && index) return `루미 추천 ${Number(proposalNumber)}의 ${media} ${Number(index)}번`;
-    if (mediaCode && index) return `루미 추천의 ${media} ${Number(index)}번`;
-    return "루미 추천 항목";
+    if (proposalNumber && index) return `유진 추천 ${Number(proposalNumber)}의 ${media} ${Number(index)}번`;
+    if (mediaCode && index) return `유진 추천의 ${media} ${Number(index)}번`;
+    return "유진 추천 항목";
   }
   if (index) return `편집 순서의 ${media} ${Number(index)}번`;
   return "편집 순서의 항목";
