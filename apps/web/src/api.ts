@@ -5,6 +5,38 @@ export type Project = {
   root_storage_uri: string;
 };
 
+export type CreationInterviewQuestion = {
+  question_id: string;
+  field: string;
+  prompt: string;
+};
+
+export type CreationBrief = {
+  brief_id: string;
+  project_id: string;
+  idempotency_key: string;
+  script_filename: string;
+  script_text: string;
+  script_asset_id: string | null;
+  capability_profile: Record<string, unknown>;
+  questions: CreationInterviewQuestion[];
+  answers: Record<string, string>;
+  current_step: number;
+  status: string;
+  revision: number;
+  summary?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CreateCreationBriefRequest = {
+  script_filename: string;
+  script_text: string;
+  idempotency_key: string;
+  capability_profile: Record<string, unknown>;
+  script_asset_id?: string;
+};
+
 export type JobRecord = {
   job_id: string;
   project_id: string;
@@ -636,6 +668,49 @@ async function preflightDirectorProposalRequest(path: string): Promise<DirectorP
 }
 
 export const api = {
+  createCreationBrief: (projectId: string, payload: CreateCreationBriefRequest) =>
+    request<CreationBrief>(`/api/projects/${encodeURIComponent(projectId)}/creation-briefs`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+  uploadCreationBrief: (projectId: string, scriptFile: File, payload: { idempotency_key: string; capability_profile: Record<string, unknown> }) => {
+    const form = new FormData();
+    form.append("script_file", scriptFile);
+    form.append("idempotency_key", payload.idempotency_key);
+    form.append("capability_profile_json", JSON.stringify(payload.capability_profile));
+    return request<CreationBrief>(`/api/projects/${encodeURIComponent(projectId)}/creation-briefs/upload`, { method: "POST", body: form });
+  },
+  getCreationBrief: (projectId: string, briefId: string) =>
+    request<CreationBrief>(`/api/projects/${encodeURIComponent(projectId)}/creation-briefs/${encodeURIComponent(briefId)}`),
+  answerCreationBriefQuestion: (projectId: string, briefId: string, questionId: string, payload: { answer: string; expected_revision?: number }) =>
+    request<CreationBrief>(`/api/projects/${encodeURIComponent(projectId)}/creation-briefs/${encodeURIComponent(briefId)}/answers`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question_id: questionId, ...payload }),
+    }),
+  updateCreationBriefSummary: (projectId: string, briefId: string, payload: { summary: string; expected_revision: number }) =>
+    request<CreationBrief>(`/api/projects/${encodeURIComponent(projectId)}/creation-briefs/${encodeURIComponent(briefId)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+  approveCreationBrief: (projectId: string, briefId: string, payload: { expected_revision: number }) =>
+    request<CreationBrief>(`/api/projects/${encodeURIComponent(projectId)}/creation-briefs/${encodeURIComponent(briefId)}/approve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+  bypassCreationBriefInterview: (projectId: string, briefId: string, payload: { expected_revision: number }) =>
+    request<CreationBrief>(`/api/projects/${encodeURIComponent(projectId)}/creation-briefs/${encodeURIComponent(briefId)}/bypass`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+  deleteCreationBrief: async (projectId: string, briefId: string): Promise<void> => {
+    const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/creation-briefs/${encodeURIComponent(briefId)}`, { method: "DELETE" });
+    if (!response.ok) throw new Error(`Request failed: creation brief delete (${response.status})`);
+  },
   reloadDirectorSession: (projectId: string, sessionId: string) =>
     request<DirectorReloadState>(`/api/projects/${projectId}/director/sessions/${sessionId}/reload`),
   createDirectorConversation: (projectId: string, payload: { session_id: string }) =>

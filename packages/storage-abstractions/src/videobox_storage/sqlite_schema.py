@@ -1,5 +1,26 @@
 PROJECT_SCHEMA_STATEMENTS = (
     """
+    CREATE TABLE IF NOT EXISTS creation_briefs (
+        brief_id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        idempotency_key TEXT NOT NULL,
+        script_filename TEXT NOT NULL,
+        script_text TEXT NOT NULL,
+        script_asset_id TEXT,
+        script_asset_owned INTEGER NOT NULL DEFAULT 0,
+        capability_profile_json TEXT NOT NULL,
+        questions_json TEXT NOT NULL,
+        answers_json TEXT NOT NULL DEFAULT '{}',
+        summary_text TEXT NOT NULL DEFAULT '',
+        current_step INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'interviewing',
+        revision INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(project_id, idempotency_key)
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS projects (
         project_id TEXT PRIMARY KEY,
         name TEXT NOT NULL,

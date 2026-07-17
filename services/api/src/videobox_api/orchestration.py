@@ -22,6 +22,7 @@ from videobox_provider_interfaces.llm import (
     StructuredLLMResponse,
 )
 from videobox_core_engine.local_pipeline import LocalPipelineRunner
+from videobox_core_engine.creation_interview import CreationInterviewRuntime, DeterministicCreationInterviewRuntime
 from videobox_domain_models.assets import AssetType
 from videobox_storage.local_project_store import LocalProjectStore
 
@@ -210,9 +211,18 @@ def build_local_only_runtime_service(
 
 
 class ApiOrchestrator:
-    def __init__(self, store: LocalProjectStore, *, pipeline: LocalPipelineRunner | None = None) -> None:
+    def __init__(
+        self, store: LocalProjectStore, *, pipeline: LocalPipelineRunner | None = None,
+        creation_interview_runtime: CreationInterviewRuntime | None = None,
+    ) -> None:
         self.store = store
         self.pipeline = pipeline or LocalPipelineRunner(store)
+        # This is intentionally a provider-neutral local planning seam. No
+        # LLM/provider transport is constructed for an interview.
+        self.creation_interview_runtime = creation_interview_runtime or DeterministicCreationInterviewRuntime()
+
+    def create_creation_brief(self, **kwargs: Any) -> dict[str, Any]:
+        return self.pipeline.create_creation_brief(runtime=self.creation_interview_runtime, **kwargs)
 
     def register_narration_audio(self, *, project_id: str, source_path: Path) -> RegisteredAsset:
         asset = self.pipeline.register_narration_asset(

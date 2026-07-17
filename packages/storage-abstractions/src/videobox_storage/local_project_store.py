@@ -23,6 +23,11 @@ from videobox_core_engine.provider_trace import build_provider_trace
 from videobox_storage.sqlite_schema import PROJECT_SCHEMA_STATEMENTS
 from videobox_domain_models.director_proposals import DirectorProposal
 from videobox_core_engine.director_proposals import proposal_from_payload, proposal_to_payload
+from videobox_core_engine.creation_interview import (
+    CreationInterviewRuntime,
+    DeterministicCreationInterviewRuntime,
+    MAX_CREATION_INTERVIEW_QUESTIONS,
+)
 
 # Heavy exports (rendered mp4s, CapCut drafts) can be large; keep only the most
 # recent N per export_type per project so disk usage does not grow unbounded.
@@ -403,6 +408,322 @@ class LocalProjectStore:
         if row is None:
             raise KeyError(f"Project not found: {project_id}")
         return dict(row)
+
+    def create_creation_brief(
+        self,
+        *,
+        project_id: str,
+        script_filename: str,
+        script_text: str,
+        idempotency_key: str,
+        capability_profile: dict[str, Any],
+        script_asset_id: str | None = None,
+        runtime: CreationInterviewRuntime | None = None,
+    ) -> dict[str, Any]:
+        """Persist a local-only interview before any optional provider exists."""
+        self._validate_creation_brief_input(
+            script_filename=script_filename, script_text=script_text, idempotency_key=idempotency_key
+        )
+        existing = self._fetchone(
+            project_id, "SELECT * FROM creation_briefs WHERE project_id = ? AND idempotency_key = ?", (project_id, idempotency_key)
+        )
+        if existing is not None:
+            return self._creation_brief_payload(existing)
+        owned_script_asset = script_asset_id is None
+        if script_asset_id is None:
+            script_asset_id = self._materialize_creation_brief_script(
+                project_id=project_id, script_filename=script_filename, script_text=script_text
+            )
+        else:
+            asset = self.get_asset(project_id=project_id, asset_id=script_asset_id)
+            if asset["asset_type"] != AssetType.SCRIPT_DOCUMENT.value:
+                raise ValueError("creation_brief_script_asset_invalid")
+        planner = runtime or DeterministicCreationInterviewRuntime()
+        try:
+            questions = self._normalize_creation_interview_questions(
+                planner.plan_questions(script_text=script_text)
+            )
+        except Exception:
+            if owned_script_asset and script_asset_id:
+                self.delete_asset(project_id=project_id, asset_id=script_asset_id)
+            raise
+        now = self._clock().isoformat()
+        brief_id = f"brief-{uuid.uuid4().hex}"
+        connection = self._connection(project_id)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            existing = connection.execute(
+                "SELECT * FROM creation_briefs WHERE project_id = ? AND idempotency_key = ?",
+                (project_id, idempotency_key),
+            ).fetchone()
+            if existing is not None:
+                connection.commit()
+                payload = self._creation_brief_payload(existing)
+                # A competing request may have materialized its retained
+                # input while waiting for the idempotency-row lock. It never
+                # became part of the winning brief, so remove it before
+                # returning the durable winner.
+                if owned_script_asset and script_asset_id:
+                    connection.close()
+                    self.delete_asset(project_id=project_id, asset_id=script_asset_id)
+                return payload
+            connection.execute(
+                """
+                INSERT INTO creation_briefs (
+                    brief_id, project_id, idempotency_key, script_filename, script_text,
+                    script_asset_id, script_asset_owned, capability_profile_json, questions_json, answers_json,
+                    current_step, status, revision, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '{}', 0, 'interviewing', 1, ?, ?)
+                """,
+                (
+                    brief_id, project_id, idempotency_key, script_filename, script_text,
+                    script_asset_id, int(owned_script_asset), json.dumps(capability_profile, ensure_ascii=False, sort_keys=True),
+                    json.dumps(questions, ensure_ascii=False), now, now,
+                ),
+            )
+            row = connection.execute("SELECT * FROM creation_briefs WHERE brief_id = ?", (brief_id,)).fetchone()
+            connection.commit()
+            return self._creation_brief_payload(row)
+        except sqlite3.IntegrityError:
+            connection.rollback()
+            existing = self._fetchone(
+                project_id, "SELECT * FROM creation_briefs WHERE project_id = ? AND idempotency_key = ?", (project_id, idempotency_key)
+            )
+            if owned_script_asset and script_asset_id:
+                self.delete_asset(project_id=project_id, asset_id=script_asset_id)
+            if existing is None:
+                raise
+            return self._creation_brief_payload(existing)
+        except Exception:
+            connection.rollback()
+            if owned_script_asset and script_asset_id:
+                self.delete_asset(project_id=project_id, asset_id=script_asset_id)
+            raise
+        finally:
+            connection.close()
+
+    def get_creation_brief(self, *, project_id: str, brief_id: str) -> dict[str, Any]:
+        row = self._fetchone(
+            project_id,
+            "SELECT * FROM creation_briefs WHERE project_id = ? AND brief_id = ?",
+            (project_id, brief_id),
+        )
+        if row is None:
+            raise KeyError(f"Creation brief not found: {brief_id}")
+        return self._creation_brief_payload(row)
+
+    def list_creation_briefs(self, *, project_id: str) -> list[dict[str, Any]]:
+        connection = self._connection(project_id)
+        try:
+            rows = connection.execute(
+                "SELECT * FROM creation_briefs WHERE project_id = ? ORDER BY created_at DESC, brief_id DESC",
+                (project_id,),
+            ).fetchall()
+            return [self._creation_brief_payload(row) for row in rows]
+        finally:
+            connection.close()
+
+    def answer_creation_brief_question(
+        self, *, project_id: str, brief_id: str, question_id: str, answer: str, expected_revision: int
+    ) -> dict[str, Any]:
+        normalized = answer.strip()
+        if not normalized:
+            raise ValueError("creation_brief_answer_required")
+        connection = self._connection(project_id)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT * FROM creation_briefs WHERE project_id = ? AND brief_id = ?", (project_id, brief_id)
+            ).fetchone()
+            if row is None:
+                raise KeyError(f"Creation brief not found: {brief_id}")
+            self._assert_creation_brief_mutable(row)
+            if int(row["revision"]) != expected_revision:
+                raise ValueError("creation_brief_revision_conflict")
+            if row["status"] != "interviewing":
+                raise ValueError("creation_brief_not_interviewing")
+            questions = json.loads(row["questions_json"])
+            question = next((item for item in questions if item["question_id"] == question_id), None)
+            if question is None:
+                raise ValueError("creation_brief_question_not_found")
+            if questions[int(row["current_step"])]["question_id"] != question_id:
+                raise ValueError("creation_brief_question_not_current")
+            answers = json.loads(row["answers_json"])
+            answers[question["field"]] = normalized
+            current_step = sum(1 for item in questions if item["field"] in answers)
+            status = "ready_for_approval" if current_step == len(questions) else "interviewing"
+            connection.execute(
+                """UPDATE creation_briefs
+                   SET answers_json = ?, current_step = ?, status = ?, revision = revision + 1, updated_at = ?
+                   WHERE project_id = ? AND brief_id = ?""",
+                (json.dumps(answers, ensure_ascii=False, sort_keys=True), current_step, status, self._clock().isoformat(), project_id, brief_id),
+            )
+            updated = connection.execute("SELECT * FROM creation_briefs WHERE brief_id = ?", (brief_id,)).fetchone()
+            connection.commit()
+            return self._creation_brief_payload(updated)
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def bypass_creation_interview(
+        self, *, project_id: str, brief_id: str, expected_revision: int | None = None
+    ) -> dict[str, Any]:
+        """Make the explicit manual choice durable; approval remains separate."""
+        return self._mutate_creation_brief(
+            project_id=project_id, brief_id=brief_id, expected_revision=expected_revision,
+            mutation=lambda row: (
+                {item["field"]: json.loads(row["answers_json"]).get(item["field"], "건너뛰기") for item in json.loads(row["questions_json"])},
+                len(json.loads(row["questions_json"])), "ready_for_approval", row["summary_text"],
+            ),
+        )
+
+    def update_creation_brief_summary(
+        self, *, project_id: str, brief_id: str, summary: str, expected_revision: int
+    ) -> dict[str, Any]:
+        if not summary.strip():
+            raise ValueError("creation_brief_summary_required")
+        return self._mutate_creation_brief(
+            project_id=project_id, brief_id=brief_id, expected_revision=expected_revision,
+            mutation=lambda row: (json.loads(row["answers_json"]), row["current_step"], "ready_for_approval", summary.strip()),
+        )
+
+    def approve_creation_brief(self, *, project_id: str, brief_id: str, expected_revision: int) -> dict[str, Any]:
+        return self._mutate_creation_brief(
+            project_id=project_id, brief_id=brief_id, expected_revision=expected_revision,
+            mutation=lambda row: self._creation_brief_approval_mutation(row),
+        )
+
+    @staticmethod
+    def _creation_brief_approval_mutation(row: sqlite3.Row) -> tuple[dict[str, str], int, str, str]:
+        if str(row["status"]) != "ready_for_approval":
+            raise ValueError("creation_brief_not_ready_for_approval")
+        if not str(row["summary_text"]).strip():
+            raise ValueError("creation_brief_summary_required")
+        return json.loads(row["answers_json"]), int(row["current_step"]), "approved", str(row["summary_text"])
+
+    def _mutate_creation_brief(
+        self, *, project_id: str, brief_id: str, expected_revision: int | None,
+        mutation: Callable[[sqlite3.Row], tuple[dict[str, str], int, str, str]],
+    ) -> dict[str, Any]:
+        connection = self._connection(project_id)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute("SELECT * FROM creation_briefs WHERE project_id = ? AND brief_id = ?", (project_id, brief_id)).fetchone()
+            if row is None:
+                raise KeyError(f"Creation brief not found: {brief_id}")
+            self._assert_creation_brief_mutable(row)
+            if expected_revision is not None and int(row["revision"]) != expected_revision:
+                raise ValueError("creation_brief_revision_conflict")
+            answers, current_step, status, summary = mutation(row)
+            connection.execute(
+                """UPDATE creation_briefs SET answers_json = ?, current_step = ?, status = ?, summary_text = ?,
+                   revision = revision + 1, updated_at = ? WHERE project_id = ? AND brief_id = ?""",
+                (json.dumps(answers, ensure_ascii=False, sort_keys=True), current_step, status, summary, self._clock().isoformat(), project_id, brief_id),
+            )
+            updated = connection.execute("SELECT * FROM creation_briefs WHERE brief_id = ?", (brief_id,)).fetchone()
+            connection.commit()
+            return self._creation_brief_payload(updated)
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    @staticmethod
+    def _assert_creation_brief_mutable(row: sqlite3.Row) -> None:
+        if row["status"] == "approved":
+            raise ValueError("creation_brief_immutable")
+
+    def delete_creation_brief(self, *, project_id: str, brief_id: str) -> None:
+        connection = self._connection(project_id)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT script_asset_id, script_asset_owned FROM creation_briefs WHERE project_id = ? AND brief_id = ?", (project_id, brief_id)
+            ).fetchone()
+            cursor = connection.execute(
+                "DELETE FROM creation_briefs WHERE project_id = ? AND brief_id = ?", (project_id, brief_id)
+            )
+            if cursor.rowcount != 1:
+                raise KeyError(f"Creation brief not found: {brief_id}")
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+        if row is not None and bool(row["script_asset_owned"]) and row["script_asset_id"]:
+            self.delete_asset(project_id=project_id, asset_id=str(row["script_asset_id"]))
+
+    def _materialize_creation_brief_script(self, *, project_id: str, script_filename: str, script_text: str) -> str:
+        directory = self.project_root(project_id) / "inputs" / "scripts"
+        directory.mkdir(parents=True, exist_ok=True)
+        staging = directory / f".creation-brief-{uuid.uuid4().hex}-{Path(script_filename).name}"
+        try:
+            staging.write_text(script_text, encoding="utf-8")
+            asset = self.register_asset(
+                project_id=project_id, asset_type=AssetType.SCRIPT_DOCUMENT, source_path=staging,
+                source_kind="creation_brief_retained_input", mime_type="text/plain",
+            )
+            return asset.asset_id
+        finally:
+            staging.unlink(missing_ok=True)
+
+    @staticmethod
+    def _validate_creation_brief_input(*, script_filename: str, script_text: str, idempotency_key: str) -> None:
+        if Path(script_filename).suffix.lower() not in {".txt", ".md", ".srt"}:
+            raise ValueError("creation_brief_script_extension_invalid")
+        if not idempotency_key.strip():
+            raise ValueError("creation_brief_idempotency_key_required")
+        if not script_text.strip():
+            raise ValueError("creation_brief_script_empty")
+        try:
+            size = len(script_text.encode("utf-8"))
+        except UnicodeEncodeError as exc:
+            raise ValueError("creation_brief_script_not_utf8") from exc
+        if size > 1024 * 1024:
+            raise ValueError("creation_brief_script_too_large")
+
+    @staticmethod
+    def _normalize_creation_interview_questions(items: object) -> list[dict[str, str]]:
+        if not isinstance(items, list):
+            raise ValueError("creation_brief_questions_invalid")
+        if len(items) > MAX_CREATION_INTERVIEW_QUESTIONS:
+            raise ValueError("creation_brief_questions_too_many")
+        normalized: list[dict[str, str]] = []
+        seen_ids: set[str] = set()
+        seen_fields: set[str] = set()
+        for index, item in enumerate(items):
+            field = str(getattr(item, "field", "")).strip()
+            prompt = str(getattr(item, "prompt", "")).strip()
+            provided_id = getattr(item, "question_id", None)
+            question_id = f"question-{index + 1}" if provided_id is None else str(provided_id).strip()
+            if not field or not prompt:
+                raise ValueError("creation_brief_question_invalid")
+            if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", question_id):
+                raise ValueError("creation_brief_question_id_invalid")
+            if question_id in seen_ids:
+                raise ValueError("creation_brief_question_id_duplicate")
+            if field in seen_fields:
+                raise ValueError("creation_brief_question_field_duplicate")
+            seen_ids.add(question_id)
+            seen_fields.add(field)
+            normalized.append({"question_id": question_id, "field": field, "prompt": prompt})
+        return normalized
+
+    @staticmethod
+    def _creation_brief_payload(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "brief_id": row["brief_id"], "project_id": row["project_id"],
+            "idempotency_key": row["idempotency_key"], "script_filename": row["script_filename"],
+            "script_text": row["script_text"], "script_asset_id": row["script_asset_id"], "script_asset_owned": bool(row["script_asset_owned"]),
+            "capability_profile": json.loads(row["capability_profile_json"]),
+            "questions": json.loads(row["questions_json"]), "answers": json.loads(row["answers_json"]),
+            "current_step": row["current_step"], "status": row["status"], "summary": row["summary_text"], "revision": row["revision"],
+            "created_at": row["created_at"], "updated_at": row["updated_at"],
+        }
 
     def register_asset(
         self,
@@ -4210,10 +4531,18 @@ class LocalProjectStore:
         self._ensure_artifact_freshness_columns(connection)
         self._ensure_director_message_metadata_column(connection)
         self._ensure_director_claim_columns(connection)
+        self._ensure_creation_brief_columns(connection)
         self._ensure_artifact_freshness_triggers(connection)
         connection.commit()
         connection.row_factory = sqlite3.Row
         return connection
+
+    def _ensure_creation_brief_columns(self, connection: sqlite3.Connection) -> None:
+        columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(creation_briefs)").fetchall()}
+        if columns and "summary_text" not in columns:
+            connection.execute("ALTER TABLE creation_briefs ADD COLUMN summary_text TEXT NOT NULL DEFAULT ''")
+        if columns and "script_asset_owned" not in columns:
+            connection.execute("ALTER TABLE creation_briefs ADD COLUMN script_asset_owned INTEGER NOT NULL DEFAULT 0")
 
     def _ensure_director_message_metadata_column(self, connection: sqlite3.Connection) -> None:
         columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(director_messages)").fetchall()}

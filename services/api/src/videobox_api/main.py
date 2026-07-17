@@ -21,6 +21,7 @@ from videobox_api.response_normalizers import (
     _normalize_review_flags_for_response,
 )
 from videobox_api.routers.assets import build_assets_router
+from videobox_api.routers.creation_briefs import build_creation_briefs_router
 from videobox_api.routers.editing_session import build_editing_session_router
 from videobox_api.routers.director_proposals import build_director_proposals_router
 from videobox_api.routers.editor_library import build_editor_library_router
@@ -33,6 +34,7 @@ from videobox_api.routers.projects import build_projects_router
 from videobox_api.routers.review import build_review_router
 from videobox_api.routers.timeline import build_timeline_router
 from videobox_core_engine.auto_cut import AutoCutPlanner
+from videobox_core_engine.creation_interview import CreationInterviewRuntime, DeterministicCreationInterviewRuntime
 from videobox_core_engine.local_pipeline import LocalPipelineRunner
 from videobox_core_engine.media_analysis import MediaAnalysisService
 from videobox_core_engine.media_analysis import AnalysisProfile
@@ -171,6 +173,7 @@ def create_app(
     enable_local_media_analysis: bool = False,
     media_analysis_http_client=None,
     allow_test_media_analysis_providers: bool = False,
+    creation_interview_runtime: CreationInterviewRuntime | None = None,
 ) -> FastAPI:
     app = FastAPI(title="VideoBox API", version="0.1.0", lifespan=_media_analysis_lifespan)
     store = LocalProjectStore(projects_root or DEFAULT_PROJECTS_ROOT, now=analysis_clock)
@@ -215,7 +218,10 @@ def create_app(
         tts_provider=tts_provider or _build_tts_provider(resolved_tts_engine_config),
         final_renderer=final_renderer,
     )
-    orchestrator = ApiOrchestrator(store, pipeline=pipeline)
+    resolved_creation_interview_runtime = creation_interview_runtime or DeterministicCreationInterviewRuntime()
+    orchestrator = ApiOrchestrator(
+        store, pipeline=pipeline, creation_interview_runtime=resolved_creation_interview_runtime
+    )
     # Analysis is opt-in by dependency injection in normal API tests and runtime wiring.
     # Enqueue remains durable even where a local vision profile is unavailable.
     resolved_vision_provider = vision_provider
@@ -281,6 +287,7 @@ def create_app(
         return {"status": "ok"}
 
     app.include_router(build_projects_router(store))
+    app.include_router(build_creation_briefs_router(orchestrator))
     app.include_router(build_assets_router(orchestrator, store))
     app.include_router(build_media_analysis_router(store, orchestrator.media_analysis_service, orchestrator.media_analysis_dispatcher))
     app.include_router(build_jobs_router(orchestrator))

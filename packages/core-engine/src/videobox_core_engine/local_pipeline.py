@@ -165,6 +165,14 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         )
         return self._asset_payload(asset)
 
+    def create_creation_brief(self, *, runtime: object, **kwargs: Any) -> dict[str, Any]:
+        """Keep script-first intake on the local pipeline boundary.
+
+        Retained-input atomicity remains owned by ``LocalProjectStore``; this
+        adapter deliberately constructs no provider or network transport.
+        """
+        return self.store.create_creation_brief(runtime=runtime, **kwargs)
+
     def register_broll_asset(
         self,
         *,

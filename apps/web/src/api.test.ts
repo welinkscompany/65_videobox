@@ -2,6 +2,47 @@ import { describe, expect, it, vi } from "vitest";
 import { ApiConflictError, api, type DirectorProposal } from "./api";
 
 describe("caption style API conflicts", () => {
+  it("uses project-scoped persisted creation brief routes and preserves creator answers", async () => {
+    const created = {
+      brief_id: "brief_1", project_id: "project_001", idempotency_key: "stable-key", script_filename: "intro.txt", script_text: "소개 영상",
+      script_asset_id: null, capability_profile: { ai_execution: "disabled" }, questions: [{ question_id: "q_audience", field: "audience", prompt: "누구에게 보여줄까요?" }],
+      answers: {}, current_step: 0, status: "interview", revision: 1, created_at: "now", updated_at: "now",
+    };
+    const answered = { ...created, answers: { audience: "처음 방문한 고객" }, current_step: 1, revision: 2 };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(created), { status: 201 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(answered), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(answered), { status: 200 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.createCreationBrief("project_001", { script_filename: "intro.txt", script_text: "소개 영상", idempotency_key: "stable-key", capability_profile: { ai_execution: "disabled" } });
+    await api.answerCreationBriefQuestion("project_001", "brief_1", "q_audience", { answer: "처음 방문한 고객", expected_revision: 1 });
+    await api.getCreationBrief("project_001", "brief_1");
+    await api.deleteCreationBrief("project_001", "brief_1");
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/projects/project_001/creation-briefs", expect.objectContaining({ method: "POST", body: JSON.stringify({ script_filename: "intro.txt", script_text: "소개 영상", idempotency_key: "stable-key", capability_profile: { ai_execution: "disabled" } }) }));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/projects/project_001/creation-briefs/brief_1/answers", expect.objectContaining({ method: "POST", body: JSON.stringify({ question_id: "q_audience", answer: "처음 방문한 고객", expected_revision: 1 }) }));
+    expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/projects/project_001/creation-briefs/brief_1", undefined);
+    expect(fetchMock).toHaveBeenNthCalledWith(4, "/api/projects/project_001/creation-briefs/brief_1", expect.objectContaining({ method: "DELETE" }));
+    vi.unstubAllGlobals();
+  });
+
+  it("keeps summary approval and manual bypass project-scoped with an expected revision", async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(
+      new Response(JSON.stringify({ brief_id: "brief_1", revision: 3, status: "approved" }), { status: 200 }),
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.updateCreationBriefSummary("project_001", "brief_1", { summary: "처음 방문한 고객에게 차분하게 소개", expected_revision: 2 });
+    await api.approveCreationBrief("project_001", "brief_1", { expected_revision: 3 });
+    await api.bypassCreationBriefInterview("project_001", "brief_1", { expected_revision: 2 });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/projects/project_001/creation-briefs/brief_1", expect.objectContaining({ method: "PATCH", body: JSON.stringify({ summary: "처음 방문한 고객에게 차분하게 소개", expected_revision: 2 }) }));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/projects/project_001/creation-briefs/brief_1/approve", expect.objectContaining({ method: "POST", body: JSON.stringify({ expected_revision: 3 }) }));
+    expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/projects/project_001/creation-briefs/brief_1/bypass", expect.objectContaining({ method: "POST", body: JSON.stringify({ expected_revision: 2 }) }));
+    vi.unstubAllGlobals();
+  });
   it("uses director conversation routes, preserves caller client id, and represents Retry-After as in-progress", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ conversation_id: "c-1", project_id: "project_001", session_id: "s-1" }), { status: 201 }))

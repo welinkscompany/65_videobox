@@ -23,6 +23,7 @@ const uiFiles = [
   "ErrorBoundary.tsx",
   "features/director/AssetPreviewPlayer.tsx",
   "ProjectOnboarding.tsx",
+  "features/creation/CreationInterview.tsx",
   "features/director/DirectorWorkspace.tsx",
   "features/director/DirectorWorkspacePanel.tsx",
   "features/director/ProposalComparisonTray.tsx",

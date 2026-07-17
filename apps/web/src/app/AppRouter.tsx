@@ -11,6 +11,7 @@ import {
 
 import { api, type Project } from "../api";
 import { ProjectOnboarding } from "../ProjectOnboarding";
+import { CreationInterview } from "../features/creation/CreationInterview";
 import { LegacyWorkspacePage } from "./LegacyWorkspacePage";
 import { HomePage, opensLastProjectOnStart, ProductEmptyPage, ProductShell, SettingsPage } from "./ProductShell";
 import { ProjectWorkspaceProvider, resolveLastValidProjectId } from "./ProjectWorkspaceProvider";
@@ -132,6 +133,11 @@ function WorkspacePage() {
   if (section === "home") {
     return <ProductShell projectId={projectId} projects={projects} section="home" onNavigate={navigateTo} onOpenSettings={() => void navigate({ to: "/settings/general" })}>
       <HomePage projectId={projectId} onNavigate={navigateTo} />
+    </ProductShell>;
+  }
+  if (section === "create") {
+    return <ProductShell projectId={projectId} projects={projects} section="create" onNavigate={navigateTo} onOpenSettings={() => void navigate({ to: "/settings/general" })}>
+      <CreationInterview projectId={projectId} />
     </ProductShell>;
   }
   if (section === "media" || section === "outputs") {

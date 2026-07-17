@@ -202,7 +202,7 @@ Commit: `feat: port the VideoBox product shell`
 
 ### Task 7: Persist a provider-neutral Eugene creation brief and adaptive interview
 
-- [ ] **Task 7 완료**
+- [x] **Task 7 완료**
 
 **Files:** create creation-brief domain/core/API/UI modules/tests; modify SQLite schema, `LocalProjectStore`, API models/main/orchestration, `local_pipeline.py`, `api.ts`, route manifest.
 

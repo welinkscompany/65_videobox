@@ -151,6 +151,19 @@ describe("AppRouter URL ownership", () => {
     expect(router.state.location.pathname).toBe("/projects/project_b/create");
   });
 
+  it("renders the durable Eugene creation interview at the routed create leaf", async () => {
+    vi.spyOn(api, "listProjects").mockResolvedValue([
+      { project_id: "project_a", name: "A", status: "active", root_storage_uri: "local://a" },
+    ]);
+    const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects/project_a/create"] }));
+
+    render(<AppRouter router={router} />);
+
+    await screen.findByRole("heading", { name: "유진과 영상 기획을 시작해요" });
+    expect(screen.getByLabelText("대본 붙여넣기")).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "영상 만들기 시작" })).toBeNull();
+  });
+
   it("does not let a late A workspace response overwrite the currently routed B workspace", async () => {
     const projects = [
       { project_id: "project_a", name: "A", status: "active", root_storage_uri: "local://a" },

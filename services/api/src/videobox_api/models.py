@@ -9,6 +9,27 @@ class CreateProjectRequest(BaseModel):
     name: str = Field(min_length=1)
 
 
+class CreationBriefCreateRequest(BaseModel):
+    script_filename: str = Field(min_length=1)
+    script_text: str
+    idempotency_key: str = Field(min_length=1)
+    capability_profile: dict[str, Any] = Field(default_factory=dict)
+    script_asset_id: str | None = None
+
+
+class CreationBriefRevisionRequest(BaseModel):
+    expected_revision: int = Field(ge=1)
+
+
+class CreationBriefAnswerRequest(CreationBriefRevisionRequest):
+    question_id: str | None = None
+    answer: str = Field(min_length=1)
+
+
+class CreationBriefSummaryRequest(CreationBriefRevisionRequest):
+    summary: str = Field(min_length=1)
+
+
 class ProjectResponse(BaseModel):
     project_id: str
     name: str

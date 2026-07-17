@@ -1,6 +1,13 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 258. 2026-07-18 OSS Slice 1 Task 6 closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 259. 2026-07-18 OSS Slice 2 Task 7 closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+
+## 259. 2026-07-18 OSS Slice 2 Task 7 closeout
+
+- Task 7의 유진 영상 기획 인터뷰를 완료했다. 사용자는 대본을 붙여넣거나 `.txt`/`.md`/`.srt` 파일을 선택해 기획을 시작하고, 이미 적힌 내용은 건너뛴 최대 5개의 질문에 답한 뒤 요약을 고치고 승인한다. `모르겠어요`, `추천해줘`, `건너뛰기`, 바로 요약 보기와 대본·기획 삭제를 제공한다.
+- 기획·답변·현재 단계·대본 보관 참조·기능 설정·재시도 키를 프로젝트별 SQLite에 저장한다. 새로고침 재개, 중복 요청, 질문/요약 변경 충돌, 다른 프로젝트 접근, 잘못된 파일/문자 인코딩/1 MiB 초과를 막고, 삭제하면 보관한 대본 파일과 기록도 함께 지운다. 유진 인터뷰는 provider-neutral runtime이며 현재는 deterministic local driver만 연결한다.
+- 검증: Task 7 backend/API focused `23 passed`, frontend full `28 files / 271 tests passed`, production build, loopback-only Playwright `10 passed`, OSS provenance/UI-system verifier, provenance pytest `14 passed`, `git diff --check`가 통과했다. 독립 코드리뷰, 계획 gap, source→runtime 역방향 검증의 open P0/P1은 0이다. external/Gemini provider call은 0이고 Hermes/container, OpenCut runtime, SaaS auth/billing은 시작하지 않았다.
+- OSS dashboard/editor 누적은 7/22 (31.8%), 잔여 68.2%다. 다음 실행 단위는 Task 8 narration과 자산 readiness를 명시적 draft plan으로 만드는 일이며, 이 Task의 승인된 기획을 입력으로만 사용하고 editing session은 바꾸지 않는다.
 
 ## 258. 2026-07-18 OSS Slice 1 Task 6 closeout
 
