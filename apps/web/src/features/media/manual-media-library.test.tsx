@@ -27,7 +27,9 @@ describe("ManualMediaLibrary", () => {
 
   it("does not let a blocked Director disable manual placement", () => {
     render(<ManualMediaLibrary projectId="p" assets={[music]} brollAssets={[broll]} favoriteIds={[]} localFavoriteIds={[]} recentIds={[]} directorState="blocked" selectedSegment={{ segmentId: "seg-1", startSec: 1, endSec: 2 }} busy={false} onToggleFavorite={vi.fn()} onToggleLocalFavorite={vi.fn()} onApplyGlobal={vi.fn()} onApplyBroll={vi.fn()} />);
-    expect(screen.getByRole("status")).toHaveTextContent("수동 라이브러리는 계속 사용할 수 있습니다");
+    expect(screen.getByRole("status")).toHaveTextContent("루미의 추천을 사용할 수 없어도 직접 미디어를 골라 계속 편집할 수 있어요.");
+    expect(screen.getByText("미리보기는 현재 편집본을 바꾸지 않아요. 마음에 들면 프로젝트에 추가해 주세요.")).toBeInTheDocument();
+    expect(screen.queryByText(/Director blocked|세션|파이프라인|job/i)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "BGM 적용" })).toBeEnabled();
   });
 

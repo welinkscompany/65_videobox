@@ -32,20 +32,20 @@ const broll = { asset_id: "broll-1", asset_type: "broll_video", storage_uri: "lo
 describe("responsive Director workspace", () => {
   it("640px sheet preserves the draft and returns focus after Escape", async () => {
     renderResponsiveDirector(640);
-    const openButton = screen.getByRole("button", { name: "디렉터 열기" });
+    const openButton = screen.getByRole("button", { name: "루미 열기" });
     fireEvent.click(openButton);
-    const textbox = screen.getByRole("textbox", { name: "디렉터 메시지" });
+    const textbox = screen.getByRole("textbox", { name: "루미에게 요청하기" });
     fireEvent.change(textbox, { target: { value: "사람 없는 영상" } });
     fireEvent.keyDown(textbox, { key: "Escape" });
     await waitFor(() => expect(openButton).toHaveFocus());
     fireEvent.click(openButton);
-    expect(screen.getByRole("textbox", { name: "디렉터 메시지" })).toHaveValue("사람 없는 영상");
+    expect(screen.getByRole("textbox", { name: "루미에게 요청하기" })).toHaveValue("사람 없는 영상");
   });
 
   it("640px sheet is an aria-modal dialog and traps keyboard focus", async () => {
     renderResponsiveDirector(640);
-    fireEvent.click(screen.getByRole("button", { name: "디렉터 열기" }));
-    const dialog = screen.getByRole("dialog", { name: "Local Media Director" });
+    fireEvent.click(screen.getByRole("button", { name: "루미 열기" }));
+    const dialog = screen.getByRole("dialog", { name: "루미 영상 도우미" });
     expect(dialog).toHaveAttribute("aria-modal", "true");
     const closeButton = screen.getByRole("button", { name: "닫기" });
     closeButton.focus();
@@ -55,7 +55,7 @@ describe("responsive Director workspace", () => {
 
   it("moves initial focus into the dialog and wraps both Tab directions", async () => {
     renderResponsiveDirector(640);
-    fireEvent.click(screen.getByRole("button", { name: "디렉터 열기" }));
+    fireEvent.click(screen.getByRole("button", { name: "루미 열기" }));
     const backButton = screen.getByRole("button", { name: "뒤로" });
     const closeButton = screen.getByRole("button", { name: "닫기" });
     await waitFor(() => expect(backButton).toHaveFocus());
@@ -67,44 +67,44 @@ describe("responsive Director workspace", () => {
 
   it("back and close both return to the trigger while preserving the draft", async () => {
     renderResponsiveDirector(640);
-    const openButton = screen.getByRole("button", { name: "디렉터 열기" });
+    const openButton = screen.getByRole("button", { name: "루미 열기" });
     fireEvent.click(openButton);
-    fireEvent.change(screen.getByRole("textbox", { name: "디렉터 메시지" }), { target: { value: "유지할 초안" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "루미에게 요청하기" }), { target: { value: "유지할 초안" } });
     fireEvent.click(screen.getByRole("button", { name: "뒤로" }));
     await waitFor(() => expect(openButton).toHaveFocus());
     fireEvent.click(openButton);
-    expect(screen.getByRole("textbox", { name: "디렉터 메시지" })).toHaveValue("유지할 초안");
+    expect(screen.getByRole("textbox", { name: "루미에게 요청하기" })).toHaveValue("유지할 초안");
     fireEvent.click(screen.getByRole("button", { name: "닫기" }));
     await waitFor(() => expect(openButton).toHaveFocus());
     fireEvent.click(openButton);
-    expect(screen.getByRole("textbox", { name: "디렉터 메시지" })).toHaveValue("유지할 초안");
+    expect(screen.getByRole("textbox", { name: "루미에게 요청하기" })).toHaveValue("유지할 초안");
   });
 
   it("uses a bounded desktop aside and an accessible collapse control", async () => {
     renderResponsiveDirector(1000);
-    await screen.findByLabelText("immutable preflight diff");
-    const aside = screen.getByRole("complementary", { name: "Local Media Director" });
+    await screen.findByText("추천을 적용하기 전에 변경된 내용이 있는지 확인하고 있어요.");
+    const aside = screen.getByRole("complementary", { name: "루미 영상 도우미" });
     expect(aside).toHaveClass("director-aside");
-    fireEvent.click(screen.getByRole("button", { name: "디렉터 접기" }));
-    expect(screen.getByRole("button", { name: "디렉터 펼치기" })).toHaveAttribute("aria-expanded", "false");
-    expect(screen.queryByRole("textbox", { name: "디렉터 메시지" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "디렉터 펼치기" }));
-    expect(screen.getByRole("textbox", { name: "디렉터 메시지" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "루미 접기" }));
+    expect(screen.getByRole("button", { name: "루미 펼치기" })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("textbox", { name: "루미에게 요청하기" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "루미 펼치기" }));
+    expect(screen.getByRole("textbox", { name: "루미에게 요청하기" })).toBeVisible();
   });
 
   it("marks the narrow candidate tray as a carousel and exposes reduced-motion preference", async () => {
     renderResponsiveDirector(640, true);
-    fireEvent.click(screen.getByRole("button", { name: "디렉터 열기" }));
-    await screen.findByLabelText("immutable preflight diff");
-    expect(screen.getByLabelText("후보 캐러셀")).toHaveAttribute("data-responsive-candidate-tray", "carousel");
-    expect(screen.getByRole("dialog", { name: "Local Media Director" })).toHaveAttribute("data-reduced-motion", "true");
+    fireEvent.click(screen.getByRole("button", { name: "루미 열기" }));
+    await screen.findByText("추천을 적용하기 전에 변경된 내용이 있는지 확인하고 있어요.");
+    expect(screen.getByLabelText("추천 항목")).toHaveAttribute("data-responsive-candidate-tray", "carousel");
+    expect(screen.getByRole("dialog", { name: "루미 영상 도우미" })).toHaveAttribute("data-reduced-motion", "true");
   });
 
   it("blocks Task16 manual library background focus and apply while the sheet is open", async () => {
     const applyGlobal = vi.fn(); const applyBroll = vi.fn();
     renderResponsiveDirector(640, false, <ManualMediaLibrary projectId="p" assets={[music]} brollAssets={[broll]} favoriteIds={[]} localFavoriteIds={[]} recentIds={[]} selectedSegment={{ segmentId: "seg-1", startSec: 1, endSec: 2 }} busy={false} onToggleFavorite={vi.fn()} onToggleLocalFavorite={vi.fn()} onApplyGlobal={applyGlobal} onApplyBroll={applyBroll} />);
-    fireEvent.click(screen.getByRole("button", { name: "디렉터 열기" }));
-    await screen.findByRole("dialog", { name: "Local Media Director" });
+    fireEvent.click(screen.getByRole("button", { name: "루미 열기" }));
+    await screen.findByRole("dialog", { name: "루미 영상 도우미" });
     const backgroundApply = screen.getByRole("button", { name: "BGM 적용", hidden: true });
     const backgroundBrollApply = screen.getByRole("button", { name: "선택 구간에 B롤 적용", hidden: true });
     fireEvent.focus(backgroundApply);
@@ -118,17 +118,17 @@ describe("responsive Director workspace", () => {
 
   it("returns focus to the mounted desktop control when the narrow sheet exits at the breakpoint", async () => {
     renderResponsiveDirector(640);
-    fireEvent.click(screen.getByRole("button", { name: "디렉터 열기" }));
+    fireEvent.click(screen.getByRole("button", { name: "루미 열기" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "뒤로" })).toHaveFocus());
     act(() => setViewport(1000));
-    await waitFor(() => expect(screen.getByRole("button", { name: "디렉터 접기" })).toHaveFocus());
+    await waitFor(() => expect(screen.getByRole("button", { name: "루미 접기" })).toHaveFocus());
   });
 
   it("does not close the sheet while an IME composition handles Escape", async () => {
     renderResponsiveDirector(640);
-    fireEvent.click(screen.getByRole("button", { name: "디렉터 열기" }));
-    await screen.findByLabelText("immutable preflight diff");
-    fireEvent.keyDown(screen.getByRole("textbox", { name: "디렉터 메시지" }), { key: "Escape", isComposing: true });
-    expect(screen.getByRole("dialog", { name: "Local Media Director" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "루미 열기" }));
+    await screen.findByText("추천을 적용하기 전에 변경된 내용이 있는지 확인하고 있어요.");
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "루미에게 요청하기" }), { key: "Escape", isComposing: true });
+    expect(screen.getByRole("dialog", { name: "루미 영상 도우미" })).toBeVisible();
   });
 });

@@ -11,7 +11,8 @@ type ProjectOnboardingProps = {
 type IngestStatus = "idle" | "loading" | "succeeded" | "failed";
 
 function errorMessage(error: unknown, fallback: string) {
-  return error instanceof Error ? error.message : fallback;
+  void error;
+  return fallback;
 }
 
 export function ProjectOnboarding({ onProjectCreated, onIngestComplete, existingProject }: ProjectOnboardingProps) {
@@ -89,8 +90,8 @@ export function ProjectOnboarding({ onProjectCreated, onIngestComplete, existing
   return (
     <section className="panel" aria-labelledby="project-onboarding-heading">
       <p className="section-kicker">새 작업</p>
-      <h2 id="project-onboarding-heading">{project ? "기존 프로젝트 소스 등록" : "새 프로젝트 시작"}</h2>
-      <p className="meta-copy">현재 PC에서 API 서버가 접근할 수 있는 파일의 로컬 경로를 입력하세요.</p>
+      <h2 id="project-onboarding-heading">영상 만들기 시작</h2>
+      <p className="meta-copy">이 컴퓨터에 저장한 나레이션과 대본 파일의 위치를 입력해 주세요.</p>
       <form onSubmit={(event) => void handleSubmit(event)}>
         <label>
           프로젝트 이름

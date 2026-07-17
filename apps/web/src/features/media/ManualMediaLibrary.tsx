@@ -91,7 +91,7 @@ export function ManualMediaLibrary({
   };
   return <section className="media-library" aria-label="수동 미디어 라이브러리">
     <h3>수동 미디어 라이브러리</h3>
-    {directorState === "blocked" || directorState === "error" ? <p role="status">Director {directorState === "blocked" ? "차단" : "오류"} 상태입니다. 수동 라이브러리는 계속 사용할 수 있습니다.</p> : null}
+    {directorState === "blocked" || directorState === "error" ? <p role="status">루미의 추천을 사용할 수 없어도 직접 미디어를 골라 계속 편집할 수 있어요.</p> : null}
     <p className="meta-copy">설치된 검증 미디어 {assets.length}개</p>
     {assets.length ? <p className="meta-copy">Starter pack 설치됨</p> : null}
     <p className="meta-copy" aria-live="polite">{selectedSegment ? `대상 구간 ${selectedSegment.segmentId} · ${selectedSegment.startSec.toFixed(2)}–${selectedSegment.endSec.toFixed(2)}초` : "배치할 구간 또는 범위를 먼저 선택하세요."}</p>
@@ -102,7 +102,7 @@ export function ManualMediaLibrary({
       <button className="action-button subtle" onClick={() => setView("favorites")} type="button">즐겨찾기</button>
       <button className="action-button subtle" onClick={() => setView("recent")} type="button">최근</button>
     </div>
-    <p className="meta-copy">미리보기는 편집 세션을 변경하지 않습니다. 배치는 아래 ‘적용’으로만 수행합니다.</p>
+    <p className="meta-copy">미리보기는 현재 편집본을 바꾸지 않아요. 마음에 들면 프로젝트에 추가해 주세요.</p>
     {preview ? <p className="meta-copy" aria-live="polite">미리보기 선택됨</p> : null}
     {unavailableMessage ? <p role="status">{unavailableMessage}</p> : null}
     {(["music", "sfx"] as const).map((mediaType) => <section className="media-library-group" key={mediaType}>

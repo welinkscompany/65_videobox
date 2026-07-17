@@ -1,5 +1,5 @@
 import type { DirectorProposal } from "../../api";
 
 export function ProposalComparisonTray({ proposal, selectedIds, preflight }: { proposal: DirectorProposal; selectedIds: string[]; preflight: { status?: string; code?: string; diff?: Record<string, unknown> } | null }) {
-  return <section aria-label="제안 비교와 사전 확인"><p>{proposal.revision_code} · revision {proposal.base_session_revision} · 선택 {selectedIds.length}개</p>{proposal.candidates.length < 2 ? <p>비교할 후보가 부족합니다. 현재 후보 하나만 검토할 수 있습니다.</p> : <p>선택 후보는 하나의 원자적 변경으로 적용됩니다.</p>}{preflight ? <pre aria-label="immutable preflight diff">{JSON.stringify(preflight.diff ?? {})}</pre> : <p>사전 확인 중</p>}</section>;
+  return <section aria-label="루미 추천 비교"><p>추천 {selectedIds.length}개를 골랐어요.</p>{proposal.candidates.length < 2 ? <p>비교할 추천이 하나예요. 이 항목을 확인해 주세요.</p> : <p>고른 추천은 한 번에 편집본에 반영돼요.</p>}{preflight ? <p>추천을 적용하기 전에 변경된 내용이 있는지 확인하고 있어요.</p> : <p>추천을 확인하고 있어요.</p>}</section>;
 }

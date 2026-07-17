@@ -1728,9 +1728,9 @@ describe("App", () => {
     render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: /^편집$/i }));
     fireEvent.click(await screen.findByRole("button", { name: /편집 시작/i }));
-    expect(await screen.findByRole("button", { name: "디렉터 시작" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "루미에게 추천받기" })).toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/director/conversations"))).toBe(false);
-    fireEvent.click(screen.getByRole("button", { name: "디렉터 시작" }));
+    fireEvent.click(screen.getByRole("button", { name: "루미에게 추천받기" }));
     await waitFor(() => expect(fetchMock.mock.calls.filter(([input]) => String(input).endsWith("/director/conversations")).length).toBe(1));
   });
 
@@ -1743,8 +1743,8 @@ describe("App", () => {
     });
     vi.stubGlobal("fetch", fetchMock); render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: /^편집$/i })); fireEvent.click(await screen.findByRole("button", { name: /편집 시작/i }));
-    expect((await screen.findAllByText(/revision 1/i)).length).toBeGreaterThan(0);
-    expect(screen.queryByRole("button", { name: "디렉터 시작" })).not.toBeInTheDocument();
+    expect(await screen.findByLabelText("현재 선택 위치")).toHaveTextContent("선택한 장면");
+    expect(screen.queryByRole("button", { name: "루미에게 추천받기" })).not.toBeInTheDocument();
   });
 
   it("Director integration: materialize failure leaves the editing session untouched and keeps manual editing available", async () => {
@@ -1761,12 +1761,12 @@ describe("App", () => {
     });
     vi.stubGlobal("fetch", fetchMock); render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: /^편집$/i })); fireEvent.click(await screen.findByRole("button", { name: /편집 시작/i }));
-    fireEvent.change(await screen.findByLabelText("디렉터 메시지"), { target: { value: "P01-B-01 적용" } }); fireEvent.click(screen.getByRole("button", { name: "보내기" }));
-    const apply = await screen.findByRole("button", { name: "변경 적용" }); await waitFor(() => expect(apply).toBeEnabled()); fireEvent.click(apply);
-    expect(await screen.findByText("적용에 실패했습니다. 수동 편집은 계속할 수 있습니다.")).toBeInTheDocument();
-    expect(screen.getByLabelText("디렉터 컨텍스트")).toHaveTextContent("revision 1");
-    expect(screen.queryByText("초안 적용됨")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "수동 편집 계속" }));
+    fireEvent.change(await screen.findByLabelText("루미에게 요청하기"), { target: { value: "P01-B-01 적용" } }); fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
+    const apply = await screen.findByRole("button", { name: "이 추천 적용" }); await waitFor(() => expect(apply).toBeEnabled()); fireEvent.click(apply);
+    expect(await screen.findByText("추천을 적용하지 못했어요. 직접 골라 계속 편집할 수 있어요.")).toBeInTheDocument();
+    expect(screen.getByLabelText("현재 선택 위치")).toHaveTextContent("선택한 장면");
+    expect(screen.queryByText("편집본에 적용됨")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "직접 편집하기" }));
     fireEvent.change(screen.getByDisplayValue("Team meeting overview"), { target: { value: "materialize failure 뒤 수동 편집" } }); fireEvent.click(screen.getByRole("button", { name: /자막 저장/i }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/projects/project_001/editing-sessions/editing_session_001/segments/seg_002/caption", expect.objectContaining({ method: "PATCH", body: JSON.stringify({ expected_revision: 1, caption_text: "materialize failure 뒤 수동 편집" }) })));
   });
@@ -1783,17 +1783,17 @@ describe("App", () => {
     });
     vi.stubGlobal("fetch", fetchMock); render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: /^편집$/i })); fireEvent.click(await screen.findByRole("button", { name: /편집 시작/i }));
-    fireEvent.change(await screen.findByLabelText("디렉터 메시지"), { target: { value: "3번 영상 교체" } }); fireEvent.click(screen.getByRole("button", { name: "보내기" }));
-    expect(await screen.findByRole("region", { name: "참조 선택 필요" })).toHaveTextContent("P01-B-03");
-    expect(screen.getByRole("region", { name: "참조 선택 필요" })).toHaveTextContent("P01-B-04");
-    expect(screen.getByRole("button", { name: "변경 적용" })).toBeDisabled();
+    fireEvent.change(await screen.findByLabelText("루미에게 요청하기"), { target: { value: "3번 영상 교체" } }); fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
+    expect(await screen.findByRole("region", { name: "추천 항목 고르기" })).toHaveTextContent("루미 추천 1의 비롤 3번");
+    expect(screen.getByRole("region", { name: "추천 항목 고르기" })).toHaveTextContent("루미 추천 1의 비롤 4번");
+    expect(screen.getByRole("button", { name: "이 추천 적용" })).toBeDisabled();
     expect(fetchMock.mock.calls.some(([input, request]) => String(input).endsWith("/batch-apply") && request?.method === "POST")).toBe(false);
   });
 
   it("Director integration: blocked local runtime exposes manual continuation rather than an automatic fallback", async () => {
     const fetchMock = createFetchMock(); vi.stubGlobal("fetch", fetchMock); render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: /^편집$/i })); fireEvent.click(await screen.findByRole("button", { name: /편집 시작/i }));
-    fireEvent.click(await screen.findByRole("button", { name: /수동 편집 계속/i }));
+    fireEvent.click(await screen.findByRole("button", { name: "직접 편집하기" }));
     expect(screen.getByRole("button", { name: /^편집$/i })).toBeInTheDocument();
   });
 
@@ -1818,10 +1818,10 @@ describe("App", () => {
     });
     vi.stubGlobal("fetch", fetchMock); render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: /^편집$/i })); fireEvent.click(await screen.findByRole("button", { name: /편집 시작/i }));
-    const input = await screen.findByLabelText("디렉터 메시지"); fireEvent.change(input, { target: { value: "P01-B-01 적용" } }); fireEvent.click(screen.getByRole("button", { name: "보내기" }));
-    const apply = await screen.findByRole("button", { name: "변경 적용" }); await waitFor(() => expect(apply).toBeEnabled()); fireEvent.click(apply);
+    const input = await screen.findByLabelText("루미에게 요청하기"); fireEvent.change(input, { target: { value: "P01-B-01 적용" } }); fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
+    const apply = await screen.findByRole("button", { name: "이 추천 적용" }); await waitFor(() => expect(apply).toBeEnabled()); fireEvent.click(apply);
     await waitFor(() => expect(fetchMock.mock.calls.filter(([url, init]) => String(url).endsWith("/batch-apply") && init?.method === "POST")).toHaveLength(1));
-    expect(await screen.findByText("변경을 적용했습니다.")).toBeInTheDocument();
+    expect(await screen.findByText("추천을 편집본에 적용했어요.")).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByText("preview_001")).not.toBeInTheDocument());
     expect(screen.getByRole("button", { name: "완성본 렌더" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "CapCut 초안(실제)" })).toBeDisabled();
@@ -5611,7 +5611,7 @@ describe("App", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "소스 등록" }));
 
-    expect(await screen.findByRole("heading", { name: "기존 프로젝트 소스 등록" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "영상 만들기 시작" })).toBeInTheDocument();
     expect(screen.getByLabelText("나레이션 로컬 경로")).toBeInTheDocument();
     expect(screen.getByLabelText("스크립트 로컬 경로")).toBeInTheDocument();
   });

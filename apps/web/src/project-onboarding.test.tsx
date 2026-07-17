@@ -30,6 +30,9 @@ describe("ProjectOnboarding", () => {
 
     render(<ProjectOnboarding onProjectCreated={onProjectCreated} />);
 
+    expect(screen.getByRole("heading", { name: "영상 만들기 시작" })).toBeInTheDocument();
+    expect(screen.queryByText(/세션|파이프라인|job/i)).not.toBeInTheDocument();
+
     fireEvent.change(screen.getByLabelText("프로젝트 이름"), { target: { value: "신규 유튜브 영상" } });
     fireEvent.change(screen.getByLabelText("나레이션 로컬 경로"), { target: { value: "D:\\input\\narration.wav" } });
     fireEvent.change(screen.getByLabelText("스크립트 로컬 경로"), { target: { value: "D:\\input\\script.txt" } });

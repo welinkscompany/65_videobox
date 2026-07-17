@@ -1,12 +1,22 @@
 type Props = { code: string; kind: "proposal" | "timeline" };
 
-function koreanLabel(code: string, kind: Props["kind"]) {
-  const match = code.match(/^(?:P(\d+)-)?([BMS])-(\d+)$/);
-  const media = match?.[2] === "B" ? "비롤" : match?.[2] === "M" ? "배경음악" : "효과음";
-  const index = match?.[3] ? Number(match[3]) : code;
-  return kind === "proposal" && match?.[1] ? `제안 ${Number(match[1])}의 ${media} 후보 ${index}번` : `타임라인 ${media} 배치 ${index}번`;
+export function mediaReferenceLabel(code: string, kind: Props["kind"]) {
+  const match = code.match(/^([A-Z]+\d*(?:-\d+)?)-([BMS])-(\d+)$/) ?? code.match(/^([BMS])-(\d+)$/);
+  const prefixed = match?.length === 4;
+  const mediaCode = prefixed ? match?.[2] : match?.[1];
+  const index = prefixed ? match?.[3] : match?.[2];
+  const media = mediaCode === "B" ? "비롤" : mediaCode === "M" ? "배경음악" : mediaCode === "S" ? "효과음" : "미디어";
+  const proposalNumber = prefixed ? match?.[1].match(/\d+/)?.[0] : undefined;
+  if (kind === "proposal") {
+    if (proposalNumber && index) return `루미 추천 ${Number(proposalNumber)}의 ${media} ${Number(index)}번`;
+    if (mediaCode && index) return `루미 추천의 ${media} ${Number(index)}번`;
+    return "루미 추천 항목";
+  }
+  if (index) return `편집 순서의 ${media} ${Number(index)}번`;
+  return "편집 순서의 항목";
 }
 
 export function MediaReferenceBadge({ code, kind }: Props) {
-  return <span aria-label={koreanLabel(code, kind)} data-reference-kind={kind}>{code}</span>;
+  const label = mediaReferenceLabel(code, kind);
+  return <span aria-label={label} data-reference-kind={kind}>{label}</span>;
 }
