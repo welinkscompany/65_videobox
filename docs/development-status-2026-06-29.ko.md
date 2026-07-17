@@ -1,8 +1,16 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 254. 2026-07-17 OSS Slice 0 Task 2 closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 255. 2026-07-18 OSS Slice 0 Task 3 closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
 > 이 문서의 기존 날짜 기반 섹션은 당시 시점 판단과 검증 수치를 보존한 historical snapshot이다. Local Media Director release truth는 `## 250`, 현재 다음 frontend 계획은 `## 251`을 기준으로 본다.
 > 단, `2일 내 1차 데모 완성` 실행 레일은 `## 189`의 장기 우선순위를 그대로 넓게 집행하지 않고, `docs/superpowers/plans/2026-07-03-v1-two-day-completion-and-upgrade-plan.ko.md`의 축소된 실행 계획을 우선 적용한다.
+
+## 255. 2026-07-18 OSS Slice 0 Task 3 closeout
+
+- 계획: `docs/superpowers/plans/2026-07-17-videobox-oss-dashboard-editor-adoption.md`; handoff: `docs/handoffs/2026-07-18-videobox-oss-dashboard-editor-adoption-slice-0-task-3-closeout.ko.md`; implementation commit: `a2a3cdc docs: govern editor OSS source adoption`.
+- 7개 source( shadcn-admin, shadcn/ui, OpenCut current/classic, Opencast, Supabase, Pretendard)를 exact commit/path/SHA/license/disposition으로 고정했다. OpenCut current와 Supabase는 reference-only이고, source map·registry/dependency lock·NOTICE·generated-file drift contract가 이를 검증한다.
+- RED는 누락 pin/path/hash/license/test, reference-only local copy, notice, runtime import, generated-file hash drift를 각각 실패시키는 assertion으로 관찰했다. GREEN: `.venv\\Scripts\\python.exe -m pytest -q tests/test_editor_ui_source_provenance.py` `12 passed`, PowerShell provenance verifier pass, production build pass, `git diff --check` pass.
+- 실제 OSS UI code, dependency, Pretendard font binary는 아직 도입하지 않았다. external/Gemini provider call 0과 Hermes/container 미구현 경계도 유지한다. untracked `apps/web/pnpm-lock.yaml`, `apps/web/pnpm-workspace.yaml`은 보존하고 이 Task에서 제외했다.
+- OSS dashboard/editor 누적은 3/22 (13.6%), 잔여 86.4%다. 다음 실행 단위는 Task 4 UI foundation이며, 그 Task의 executable TDD sub-plan과 독립 review가 먼저다.
 
 ## 254. 2026-07-17 OSS Slice 0 Task 2 closeout
 

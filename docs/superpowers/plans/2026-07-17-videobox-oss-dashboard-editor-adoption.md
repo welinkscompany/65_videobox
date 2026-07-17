@@ -133,16 +133,16 @@ Commit: `docs: approve VideoBox creator workspace direction`
 
 ### Task 3: Add deterministic OSS source, license, and generated-file provenance gates
 
-- [ ] **Task 3 완료**
+- [x] **Task 3 완료**
 
 **Files:** create `docs/oss/editor-ui-source-map.json`; `docs/oss/shadcn-registry-lock.json`; `THIRD_PARTY_NOTICES.md`; `tests/test_editor_ui_source_provenance.py`; `scripts/verify-editor-ui-source-provenance.ps1`; modify `docs/oss-adoption-map.ko.md`.
 
-- [ ] **RED:** fail on missing 40-char commit/upstream path/local path/license/test/file SHA; reference-only local copy; missing notice; rejected runtime import; generated-file hash drift.
-- [ ] Pin shadcn-admin `e16c87f213a5ba5e45964e9b67c792105ec74d26`, shadcn/ui `4396d5b2a5ee4e2ad5705e9b2522f92112f811a0`, OpenCut current `bab8af831b354a0b5a98a4a6e818ab7d633b94df` reject, classic `cf5e79e919144200294fb9fed22a222592a0aeea`, Opencast `1208afb64d9de0ab50b321f84f9dd2695780db87`, Supabase `1c827c5cbb29cacc6e9052adff2e1659e3cb05fb` reference-only.
-- [ ] Pin Pretendard release `v1.3.9`, commit `5c41199ea0024a9e0b2cb31735265056e5472d76`, path `packages/pretendard/dist/web/variable/woff2/PretendardVariable.woff2`, SHA256 `9599f12fd42fc0bce1cd50b47a0c022e108d7aa64dd0d1bb0ed44f3282d900b4`, and OFL text before copying the binary.
-- [ ] Lock every approved shadcn registry item to the pinned GitHub source path and SHA256. Record each generated item’s runtime dependency name, exact resolved version, license, and package-lock entry; verifier fails source-lock/dependency-lock drift. Do not accept live `npx shadcn add` output without normalized diff/hash verification.
-- [ ] Include direct LICENSE/NOTICE links and Apache-2.0 modified-source attribution.
-- [ ] **GREEN:** `.venv\Scripts\python.exe -m pytest -q tests/test_editor_ui_source_provenance.py`; `./scripts/verify-editor-ui-source-provenance.ps1`; common closeout.
+- [x] **RED:** fail on missing 40-char commit/upstream path/local path/license/test/file SHA; reference-only local copy; missing notice; rejected runtime import; generated-file hash drift.
+- [x] Pin shadcn-admin `e16c87f213a5ba5e45964e9b67c792105ec74d26`, shadcn/ui `4396d5b2a5ee4e2ad5705e9b2522f92112f811a0`, OpenCut current `bab8af831b354a0b5a98a4a6e818ab7d633b94df` reject, classic `cf5e79e919144200294fb9fed22a222592a0aeea`, Opencast `1208afb64d9de0ab50b321f84f9dd2695780db87`, Supabase `1c827c5cbb29cacc6e9052adff2e1659e3cb05fb` reference-only.
+- [x] Pin Pretendard release `v1.3.9`, commit `5c41199ea0024a9e0b2cb31735265056e5472d76`, path `packages/pretendard/dist/web/variable/woff2/PretendardVariable.woff2`, SHA256 `9599f12fd42fc0bce1cd50b47a0c022e108d7aa64dd0d1bb0ed44f3282d900b4`, and OFL text before copying the binary.
+- [x] Lock every approved shadcn registry item to the pinned GitHub source path and SHA256. Record each generated item’s runtime dependency name, exact resolved version, license, and package-lock entry; verifier fails source-lock/dependency-lock drift. Do not accept live `npx shadcn add` output without normalized diff/hash verification.
+- [x] Include direct LICENSE/NOTICE links and Apache-2.0 modified-source attribution.
+- [x] **GREEN:** `.venv\Scripts\python.exe -m pytest -q tests/test_editor_ui_source_provenance.py`; `./scripts/verify-editor-ui-source-provenance.ps1`; common closeout.
 
 Commit: `docs: govern editor OSS source adoption`
 
