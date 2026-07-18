@@ -177,3 +177,7 @@ Run focused migration/config/compose tests, current renderer tests, relevant API
 - [ ] PostgreSQL store의 모든 편집 mutation/복구 경로에 대한 전면 parity suite는 Hermes 도입 전 별도 hardening slice로 계속 검증한다. 이번 단계에서 검증한 것은 실제 데이터 import, project listing, proxied playback 및 새 project 생성 API다.
 
 Task 9 사람/환경 acceptance 상태는 이 컨테이너 이전으로 변경하지 않는다.
+
+## 다음 통합 slice: Hermes (새 계획서 생성 금지)
+
+Hermes는 이 계획과 최상위 `docs/implementation-plan.ko.md`의 §23을 이어서 구현한다. 시작 순서는 GPT OAuth device/PKCE 경계, internal-only Hermes service와 VideoBox typed-handler allowlist, read-only status/승인 요청 vertical slice, mem0 보조기억 경계, OAuth/logout·restart·Gemini 0 runtime gate다. VideoBox PostgreSQL/snapshot/runtime media direct mount와 편집 mutation·CapCut host bridge는 이 첫 Hermes slice 범위 밖이다.

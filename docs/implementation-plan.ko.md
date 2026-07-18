@@ -1158,3 +1158,15 @@ production-readiness blocker slice 1의 9개 Task는 구현·회귀·600초 smok
 - 2026-07-15 후속 독립 감사는 Task 9 preflight가 BGM/SFX에 B-roll analysis를 잘못 요구하고, empty B-roll analysis result와 nullable candidate `media_revision`을 허용하며, proposal lifecycle state/event가 원자적이지 않음을 확인했다. Task 10은 materializer 전에 이 세 계약을 RED-first로 고친다. B-roll은 non-empty succeeded analysis+SHA, BGM/SFX는 indexed canonical metadata+SHA로 재검증하고, `media_revision`은 asset registration `created_at`으로 고정한다.
 - Task 10은 copy 전후 SHA·staged SHA, per-SHA idempotent lock, cleanup과 source-mutation race, candidate preview까지 닫는다. Task 11은 SQLite authoritative session/sidecar reconciliation·durable output freshness·manual mutation parity를, Task 12는 preview/FFmpeg/CapCut shared stale verifier를 명시했다. Task 13은 idempotent message API와 local-only assistant response contract를 추가했고, Task 18은 Gemini UI뿐 아니라 bootstrap Gemini request 0을 검증한다.
 - OpenCut/full NLE와 Voice Capture & Narration은 현재 18 Task 계획에 섞지 않고 별도 후속 판단으로 유지한다.
+
+## 23. Hermes 다음 slice — 기존 Compose 기반 확장 (2026-07-19)
+
+컨테이너 이전은 `codex/videobox-container-compatibility`의 `635a9bb`까지 완료됐다. Compose project는 `65_videobox`이며, 검증된 immutable `snapshot/`, writable `runtime/`, internal PostgreSQL과 loopback web 경계를 기준선으로 사용한다. Hermes 작업은 새 독립 계획서를 만들지 않고 이 최상위 계획의 다음 slice로 추적한다.
+
+1. **권한·OAuth 경계 고정** — Hermes는 GPT OAuth device/PKCE 사용자 로그인만 사용한다. OAuth credential은 전용 Hermes state volume에만 두며, repository·일반 `.env`·VideoBox DB·mem0에 복사하지 않는다.
+2. **서비스 경계 구현** — Hermes는 별도 internal service이며 VideoBox PostgreSQL, snapshot, runtime media directory를 직접 mount하거나 읽지 않는다. 허용된 요청은 VideoBox API의 typed handler를 통해서만 처리한다.
+3. **최소 기능 vertical slice** — 먼저 대화, read-only project status 조회, 명시적 승인 요청만 제공한다. 편집 mutation, CapCut/host bridge, 외부 egress, 자동 실행은 이 단계에서 시작하지 않는다.
+4. **mem0 위치 고정** — mem0는 Hermes의 보조기억이다. VideoBox의 project·editing·asset·conversation truth나 approval 기록을 대체하지 않는다.
+5. **검증 gate** — OAuth bootstrap/logout, no direct DB/media access, typed-handler allowlist, restart 후 session/approval 보존, external Gemini call 0을 focused/runtime 검증한다. 이 gate가 통과한 뒤에만 승인 기반 editing mutation을 별도 slice로 연다.
+
+Task 9 사람/환경 acceptance와 CapCut Desktop evidence는 Hermes slice와 독립이며, 완료 상태를 이 계획 추가로 바꾸지 않는다.
