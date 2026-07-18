@@ -12,6 +12,7 @@ from videobox_api.models import (
     CreateScriptDraftEditingSessionRequest,
     CutActionOverrideRequest,
     EditingSessionResponse,
+    EditorPlaybackManifestResponse,
     EditingSessionRevisionRequest,
     ExplanationCardRequest,
     ImageOverlayRequest,
@@ -105,6 +106,16 @@ def build_editing_session_router(orchestrator: ApiOrchestrator, store: LocalProj
         except Exception as exc:
             raise _http_error(exc) from exc
         return EditingSessionResponse(**result)
+
+    @router.get("/api/projects/{project_id}/editing-sessions/{session_id}/playback-manifest", response_model_exclude_none=True)
+    def get_editor_playback_manifest(project_id: str, session_id: str) -> EditorPlaybackManifestResponse:
+        try:
+            result = orchestrator.get_editor_playback_manifest(project_id=project_id, session_id=session_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return EditorPlaybackManifestResponse(**result)
 
     @router.get("/api/projects/{project_id}/editing-sessions/{session_id}/fixed-timeline")
     def get_editing_session_fixed_timeline(project_id: str, session_id: str) -> dict[str, object]:

@@ -37,9 +37,11 @@ export type CreateCreationBriefRequest = {
   script_asset_id?: string;
 };
 
-export type DraftReadiness = { readiness_id: string; brief_id: string; status: "asset_check" | "planning" | "ready" | "needs_assets" | "failed" | "cancelled"; revision: number; result: { gap_slots?: { gap_slot_id: string; reason: string }[]; broll_candidates?: { asset_id: string; label: string; target_range: { start_sec: number; end_sec: number } }[] } | null };
+export type DraftReadiness = { readiness_id: string; brief_id: string; status: "asset_check" | "planning" | "ready" | "needs_assets" | "failed" | "cancelled"; revision: number; result: { gap_slots?: { gap_slot_id: string; reason: string }[]; broll_candidates?: { asset_id: string; label: string; target_range: { start_sec: number; end_sec: number }; media_duration_sec?: number | null }[] } | null };
 export type DraftReadinessRequest = { brief_id: string; narration_choice: { kind: "silent" | "existing" | "source_video"; asset_id?: string }; idempotency_key: string; expected_brief_revision: number; capability?: Record<string, unknown> };
 export type NarrationOption = { asset_id: string; asset_type: "raw_video" | "narration_audio" };
+export type AtomicDraftBundle = { bundle_id: string; session_id: string; timeline_id: string; timeline_job_id: string; segment_ids: string[]; asset_ids: string[]; clip_ids: string[]; gap_slots: { gap_slot_id: string; reason: string }[]; output_blocked: boolean };
+export type AtomicDraftBundleRequest = { brief_id: string; readiness_id: string; expected_brief_revision: number; expected_readiness_revision: number; idempotency_key: string; allow_placeholder?: boolean };
 
 export type JobRecord = {
   job_id: string;
@@ -292,6 +294,43 @@ export type EditorPreset = {
 export type EditorFavorite = {
   favorite_id: string;
   favorite_type: "media" | "preset";
+};
+
+/** Authoritative, project/session-scoped editor read contract. Times are seconds. */
+export type EditorMediaControls = {
+  volume?: number;
+  crop?: string;
+  speed?: number;
+  fade_in_sec?: number;
+  fade_out_sec?: number;
+};
+export type EditorPlaybackManifest = {
+  project_id: string;
+  session_id: string;
+  timeline_id: string;
+  session_revision: number;
+  timeline_version: string;
+  timebase: "seconds";
+  fps: { num: number; den: number };
+  output: { width: number; height: number; sample_aspect_ratio: string; rotation: number; duration_sec: number };
+  tracks: Array<{
+    track_id: string;
+    track_type: "narration" | "broll" | "bgm" | "sfx" | "overlay";
+    clips: Array<{
+      clip_id: string; segment_id: string; clip_type: "narration" | "broll" | "bgm" | "sfx" | "overlay";
+      asset_id: string | null; asset_uri: string | null; start_sec: number; end_sec: number;
+      media_controls: EditorMediaControls; expected_content_sha256?: string | null; media_revision?: string | null;
+      overlay_type?: "explanation_card" | "image_overlay" | "table_overlay" | null; overlay_payload?: Record<string, unknown>;
+    }>;
+  }>;
+  captions: Array<{
+    segment_id: string; text: string; start_sec: number; end_sec: number;
+    style: { font_family: string; font_size_px: number; text_color: string; outline_color: string; outline_width_px: number; background_color: string; position_x_percent: number; position_y_percent: number; horizontal_align: "left" | "center" | "right"; safe_area_enabled: boolean; shadow_blur_px: number };
+  }>;
+  gap_slots: Array<{ gap_id: string; segment_id: string; start_sec: number; end_sec: number; reason: string }>;
+  source_status: { status: "current" | "stale"; source_session_id?: string | null; source_session_revision?: number | null };
+  audition: { asset_urls: Record<string, string> };
+  exact_preview: { status: "current" | "stale" | "unavailable"; url?: string | null; source_session_id?: string | null; source_session_revision?: number | null };
 };
 
 type RevisionedEditingSessionMutation = {
@@ -578,6 +617,8 @@ export type FinalRenderArtifact = {
   file_uri: string;
   status: string;
   created_at?: string | null;
+  source_session_revision?: number | null;
+  is_current?: boolean;
 };
 
 export type FinalRenderJob = {
@@ -693,6 +734,12 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ question_id: questionId, ...payload }),
     }),
+  previousCreationBriefQuestion: (projectId: string, briefId: string, payload: { expected_revision: number }) =>
+    request<CreationBrief>(`/api/projects/${encodeURIComponent(projectId)}/creation-briefs/${encodeURIComponent(briefId)}/previous-question`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
   updateCreationBriefSummary: (projectId: string, briefId: string, payload: { summary: string; expected_revision: number }) =>
     request<CreationBrief>(`/api/projects/${encodeURIComponent(projectId)}/creation-briefs/${encodeURIComponent(briefId)}`, {
       method: "PATCH",
@@ -723,6 +770,7 @@ export const api = {
   updateDraftReadinessCandidate: (projectId: string, readinessId: string, asset_id: string, skipped: boolean, expected_revision: number) => request<DraftReadiness>(`/api/projects/${encodeURIComponent(projectId)}/draft-readiness/${encodeURIComponent(readinessId)}/candidates`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ asset_id, skipped, expected_revision }) }),
   updateDraftReadinessCandidateRange: (projectId: string, readinessId: string, asset_id: string, start_sec: number, end_sec: number, expected_revision: number) => request<DraftReadiness>(`/api/projects/${encodeURIComponent(projectId)}/draft-readiness/${encodeURIComponent(readinessId)}/candidates/range`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ asset_id, start_sec, end_sec, expected_revision }) }),
   cancelDraftReadiness: (projectId: string, readinessId: string, expected_revision: number) => request<DraftReadiness>(`/api/projects/${encodeURIComponent(projectId)}/draft-readiness/${encodeURIComponent(readinessId)}/cancel`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ expected_revision }) }),
+  createAtomicDraftBundle: (projectId: string, payload: AtomicDraftBundleRequest) => request<AtomicDraftBundle>(`/api/projects/${encodeURIComponent(projectId)}/draft-bundles`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
   listDraftNarrationOptions: async (projectId: string): Promise<NarrationOption[]> => (await request<{ assets: NarrationOption[] }>(`/api/projects/${encodeURIComponent(projectId)}/draft-readiness/narration-options`)).assets,
   uploadDraftNarration: (projectId: string, file: File) => { const form = new FormData(); form.append("file", file); return request<{ asset_id: string; asset_type: string }>(`/api/projects/${encodeURIComponent(projectId)}/draft-readiness/narration/upload`, { method: "POST", body: form }); },
   uploadDraftBroll: (projectId: string, file: File) => { const form = new FormData(); form.append("file", file); return request<{ asset_id: string; asset_type: string; scan_status: string }>(`/api/projects/${encodeURIComponent(projectId)}/draft-readiness/broll/upload`, { method: "POST", body: form }); },
@@ -938,6 +986,8 @@ export const api = {
   mediaAnalysisPreview: (projectId: string, assetId: string) => request<{ analysis_id: string; preview: unknown }>(`/api/projects/${projectId}/assets/${assetId}/analysis-preview`),
   getEditingSessionFixedTimeline: (projectId: string, sessionId: string) =>
     request<FixedTimeline>(`/api/projects/${projectId}/editing-sessions/${sessionId}/fixed-timeline`),
+  getEditorPlaybackManifest: (projectId: string, sessionId: string) =>
+    request<EditorPlaybackManifest>(`/api/projects/${encodeURIComponent(projectId)}/editing-sessions/${encodeURIComponent(sessionId)}/playback-manifest`),
   previewEditingSessionSelectedRange: (projectId: string, sessionId: string, payload: { start_sec: number; end_sec: number }) =>
     request<SelectedRangePreview>(`/api/projects/${projectId}/editing-sessions/${sessionId}/selected-range-preview`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),

@@ -1,5 +1,13 @@
 PROJECT_SCHEMA_STATEMENTS = (
     """
+    CREATE TABLE IF NOT EXISTS atomic_draft_bundles (
+        bundle_id TEXT PRIMARY KEY, project_id TEXT NOT NULL, brief_id TEXT NOT NULL,
+        readiness_id TEXT NOT NULL, input_fingerprint TEXT NOT NULL, idempotency_key TEXT NOT NULL,
+        session_id TEXT NOT NULL, timeline_id TEXT NOT NULL, result_json TEXT NOT NULL,
+        created_at TEXT NOT NULL, UNIQUE(project_id, idempotency_key)
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS draft_readiness (
         readiness_id TEXT PRIMARY KEY, project_id TEXT NOT NULL, brief_id TEXT NOT NULL,
         approved_brief_revision INTEGER NOT NULL, input_fingerprint TEXT NOT NULL,
@@ -332,7 +340,7 @@ PROJECT_SCHEMA_STATEMENTS = (
         status TEXT NOT NULL,
         metadata_json TEXT,
         created_at TEXT NOT NULL,
-        source_session_revision INTEGER, is_current INTEGER NOT NULL DEFAULT 1,
+        source_session_id TEXT, source_session_revision INTEGER, is_current INTEGER NOT NULL DEFAULT 1,
         invalidated_at TEXT, invalidated_reason TEXT
     )
     """,

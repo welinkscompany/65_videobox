@@ -935,6 +935,8 @@ function createFetchMock({
               export_type: "final_render",
               file_uri: "local://projects/project_001/exports/final/output.mp4",
               status: "succeeded",
+              source_session_revision: 1,
+              is_current: true,
             },
             error_message: null,
           },
@@ -2061,6 +2063,7 @@ describe("App", () => {
 
     const firstRender = render(<App />);
     expect(await screen.findByText("완성본 준비됨")).toBeInTheDocument();
+    expect(screen.getByLabelText("완성본 재생")).toHaveAttribute("src", "/api/projects/project_001/final-renders/final_render_job_009/content");
     expect(screen.getByText("초안 준비됨")).toBeInTheDocument();
     expect(screen.getByText(/CapCut에서 후처리 필요/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "CapCut 초안 다시 시도" })).not.toBeInTheDocument();
@@ -2369,6 +2372,41 @@ describe("App", () => {
     expect(screen.getByText("초안 내보내기를 완료하지 못했어요. 다시 시도해 주세요.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "CapCut 초안 다시 시도" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "VideoBox 작업판" })).toBeInTheDocument();
+  });
+
+  it("does not offer playback for a final render without its source session revision", async () => {
+    const restoredJobs = structuredClone(jobsResponse);
+    restoredJobs.jobs.push({
+      job_id: "final_render_job_009",
+      job_type: "final_render",
+      status: "succeeded",
+      input_ref: "timeline_build_job_005",
+      output_ref: "final_render_001",
+      error_message: null,
+      started_at: "2026-07-12T00:00:00Z",
+      finished_at: "2026-07-12T00:01:00Z",
+    });
+    const fetchMock = createFetchMock({
+      jobs: restoredJobs,
+      finalRenderResult: {
+        job_id: "final_render_job_009",
+        status: "succeeded",
+        render: {
+          export_id: "final_render_001",
+          timeline_id: "timeline_001",
+          export_type: "final_render",
+          file_uri: "local://projects/project_001/exports/final/output.mp4",
+          status: "succeeded",
+          source_session_revision: null,
+          is_current: true,
+        },
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    await screen.findByText("완성본이 최신 편집본과 달라 다시 만들 수 있어요.");
+    expect(screen.queryByLabelText("완성본 재생")).not.toBeInTheDocument();
   });
 
   it("does not expose raw CapCut or output backend values in the dashboard DOM", async () => {

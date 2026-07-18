@@ -4,6 +4,7 @@ import { createMemoryHistory } from "@tanstack/react-router";
 
 import { api } from "../api";
 import { AppRouter, createAppRouter, ProjectCatalog } from "./AppRouter";
+import { parseWorkspaceLocation, resolveWorkspaceLocation } from "./routeManifest";
 
 beforeEach(() => { vi.stubGlobal("scrollTo", vi.fn()); vi.stubGlobal("matchMedia", (query: string) => ({ matches: false, media: query, onchange: null, addEventListener: () => {}, removeEventListener: () => {}, addListener: () => {}, removeListener: () => {}, dispatchEvent: () => false })); });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
@@ -45,6 +46,23 @@ describe("ProjectCatalog", () => {
 });
 
 describe("AppRouter URL ownership", () => {
+  it("uses /editor for new editing links while continuing to read the prior editing URL", () => {
+    expect(resolveWorkspaceLocation("project_a", "editing")).toBe("/projects/project_a/editor");
+    expect(parseWorkspaceLocation("/projects/project_a/editor")).toEqual({ projectId: "project_a", section: "editing" });
+    expect(parseWorkspaceLocation("/projects/project_a/editing")).toEqual({ projectId: "project_a", section: "editing" });
+  });
+
+  it("pins the latest session before opening a canonical editor URL without a session", async () => {
+    vi.spyOn(api, "listProjects").mockResolvedValue([{ project_id: "project_a", name: "A", status: "active", root_storage_uri: "local://a" }]);
+    const latest = vi.spyOn(api, "getLatestEditingSession").mockResolvedValue({ session_id: "editing_session_latest" } as never);
+    const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects/project_a/editor"] }));
+
+    render(<AppRouter router={router} />);
+
+    await waitFor(() => expect(latest).toHaveBeenCalledWith("project_a"));
+    await waitFor(() => expect(router.state.location.href).toBe("/projects/project_a/editor?session_id=editing_session_latest"));
+  });
+
   it("redirects / to the catalog-validated last project with only one catalog request", async () => {
     window.localStorage.setItem("videobox.last-valid-project", "project_b");
     const listProjects = vi.spyOn(api, "listProjects").mockResolvedValue([
@@ -97,6 +115,101 @@ describe("AppRouter URL ownership", () => {
     const remounted = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects/project_a/editing"] }));
     render(<AppRouter router={remounted} />);
     await waitFor(() => expect(remounted.state.location.pathname).toBe("/projects/project_a/editing"));
+  });
+
+  it("loads the atomic editing session named by the canonical editor URL instead of replacing it with the latest session", async () => {
+    const project = { project_id: "project_a", name: "A", status: "active", root_storage_uri: "local://a" };
+    const atomicSession = { session_id: "editing_session_draft_1", project_id: "project_a", timeline_id: "timeline_draft_1", session_revision: 1, history: [], undo_count: 0, redo_count: 0, segments: [{ segment_id: "segment_1", caption_text: "소개", start_sec: 0, end_sec: 2, cut_action: "keep", review_required: false, broll_override: null, visual_overlays: [], music_override: null, sfx_override: null, tts_replacement: null }] } as never;
+    vi.spyOn(api, "listProjects").mockResolvedValue([project]);
+    vi.spyOn(api, "getProject").mockResolvedValue(project);
+    vi.spyOn(api, "listJobs").mockResolvedValue([
+      { job_id: "timeline_build_job_selected", job_type: "timeline_build", status: "succeeded", input_ref: "ready-selected", output_ref: "timeline_draft_1", error_message: null, started_at: "2026-07-18T00:00:00Z", finished_at: "2026-07-18T00:00:01Z" },
+      { job_id: "timeline_build_job_other", job_type: "timeline_build", status: "succeeded", input_ref: "ready-other", output_ref: "timeline_other", error_message: null, started_at: "2026-07-18T00:02:00Z", finished_at: "2026-07-18T00:03:00Z" },
+      { job_id: "final_render_from_session_a", job_type: "final_render", status: "succeeded", input_ref: "timeline_build_job_selected", output_ref: "final_from_session_a", error_message: null, started_at: "2026-07-18T00:04:00Z", finished_at: "2026-07-18T00:04:01Z" },
+    ] as never);
+    vi.spyOn(api, "listBrollAssets").mockResolvedValue([]);
+    const getTimeline = vi.spyOn(api, "getTimeline").mockResolvedValue({ job_id: "timeline_build_job_selected", status: "succeeded", timeline: { timeline_id: "timeline_draft_1", tracks: [], review_flags: [], pending_recommendations: [] } } as never);
+    vi.spyOn(api, "getReviewSnapshot").mockResolvedValue({ project_id: "project_a", timeline_id: "timeline_draft_1", review_status: "draft", segments: [], applied_recommendations: [], pending_recommendations: [], review_flags: [] } as never);
+    vi.spyOn(api, "getFinalRender").mockResolvedValue({
+      job_id: "final_render_from_session_a", status: "succeeded", render: {
+        export_id: "final_from_session_a", timeline_id: "timeline_draft_1", export_type: "final_render", file_uri: "local://project_a/final-from-session-a.mp4", status: "succeeded", source_session_revision: 1, is_current: false,
+      },
+    } as never);
+    const loadSession = vi.spyOn(api, "getEditingSession").mockResolvedValue(atomicSession);
+    const split = vi.spyOn(api, "splitEditingSessionSegment").mockResolvedValue(atomicSession);
+    const saveMusic = vi.spyOn(api, "updateEditingSessionMusicOverride").mockResolvedValue({ ...atomicSession, session_revision: 2 } as never);
+    const previewPartialRegeneration = vi.spyOn(api, "previewPartialRegeneration");
+    const runPartialRegeneration = vi.spyOn(api, "runPartialRegeneration");
+    const importBrollBatch = vi.spyOn(api, "importBrollBatch");
+    const generateTtsCandidate = vi.spyOn(api, "generateTtsCandidate");
+    const listTtsCandidates = vi.spyOn(api, "listTtsCandidates");
+    const loadLatest = vi.spyOn(api, "getLatestEditingSession").mockResolvedValue(null);
+    const loadManifest = vi.spyOn(api, "getEditorPlaybackManifest").mockResolvedValue({
+      project_id: "project_a", session_id: "editing_session_draft_1", timeline_id: "timeline_draft_1", session_revision: 1, timeline_version: "v1",
+      timebase: "seconds", fps: { num: 30, den: 1 }, output: { width: 1080, height: 1920, sample_aspect_ratio: "1:1", rotation: 0, duration_sec: 2 }, tracks: [{ track_id: "narration", track_type: "narration", clips: [{ clip_id: "clip_1", segment_id: "segment_1", clip_type: "narration", asset_id: null, asset_uri: null, start_sec: 0, end_sec: 2, media_controls: {} }] }, { track_id: "music", track_type: "bgm", clips: [{ clip_id: "music_1", segment_id: "segment_1", clip_type: "bgm", asset_id: "asset_music", asset_uri: null, start_sec: 0, end_sec: 2, media_controls: { volume: 0.6, fade_in_sec: 0.5, fade_out_sec: 0.25 } }] }], captions: [{ segment_id: "segment_1", text: "소개", start_sec: 0, end_sec: 2, style: { font_family: "Pretendard", font_size_px: 20, text_color: "#fff", outline_color: "#000", outline_width_px: 1, background_color: "#00000000", position_x_percent: 50, position_y_percent: 90, horizontal_align: "center", safe_area_enabled: true, shadow_blur_px: 0 } }], gap_slots: [],
+      source_status: { status: "current", source_session_id: "editing_session_draft_1", source_session_revision: 1 }, audition: { asset_urls: { narration: "/api/projects/project_a/assets/narration/content" } },
+      exact_preview: { status: "current", url: "/api/projects/project_a/final-renders/current-b/content", source_session_id: "editing_session_draft_1", source_session_revision: 1 },
+    });
+    const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects/project_a/editor?session_id=editing_session_draft_1"] }));
+
+    render(<AppRouter router={router} />);
+
+    await waitFor(() => expect(loadSession).toHaveBeenCalledWith("project_a", "editing_session_draft_1"));
+    await waitFor(() => expect(loadManifest).toHaveBeenCalledWith("project_a", "editing_session_draft_1"));
+    await waitFor(() => expect(getTimeline).toHaveBeenCalledWith("project_a", "timeline_build_job_selected"));
+    expect(getTimeline).not.toHaveBeenCalledWith("project_a", "timeline_build_job_other");
+    expect(loadLatest).not.toHaveBeenCalled();
+    expect(await screen.findByText("editing_session_draft_1")).toBeVisible();
+    expect(screen.getByLabelText("소리 미리 듣기")).toBeVisible();
+    expect(screen.getByLabelText("현재 편집본 재생")).toHaveAttribute("src", "/api/projects/project_a/final-renders/current-b/content");
+    expect(screen.queryByText("완성본이 최신 편집본과 달라 다시 만들 수 있어요.")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("완성본 재생")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "편집 시작" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "사전 확인" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "부분 재생성" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "B롤 가져오기" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "내 목소리 후보 만들기" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "컷 저장" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "설명 저장" })).not.toBeInTheDocument();
+    expect(previewPartialRegeneration).not.toHaveBeenCalled();
+    expect(runPartialRegeneration).not.toHaveBeenCalled();
+    expect(importBrollBatch).not.toHaveBeenCalled();
+    expect(generateTtsCandidate).not.toHaveBeenCalled();
+    expect(listTtsCandidates).not.toHaveBeenCalled();
+    expect(screen.getByText("내 목소리 후보 비교")).not.toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "음악 저장" }));
+    await waitFor(() => expect(saveMusic).toHaveBeenCalledWith("project_a", "editing_session_draft_1", "segment_1", expect.objectContaining({
+      asset_id: "asset_music",
+      media_controls: { volume: 0.6, fade_in_sec: 0.5, fade_out_sec: 0.25 },
+      expected_revision: 1,
+    })));
+    await waitFor(() => expect(screen.queryByLabelText("현재 편집본 재생")).not.toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "분할" }));
+    await waitFor(() => expect(split).toHaveBeenCalledWith("project_a", "editing_session_draft_1", "segment_1", {
+      expected_revision: 2,
+      split_sec: 1,
+    }));
+  });
+
+  it("keeps pinned editing actions offline when its manifest cannot be loaded", async () => {
+    const project = { project_id: "project_a", name: "A", status: "active", root_storage_uri: "local://a" };
+    const session = { session_id: "editing_session_pinned", project_id: "project_a", timeline_id: "timeline_pinned", session_revision: 1, history: [], undo_count: 0, redo_count: 0, segments: [{ segment_id: "segment_pinned", caption_text: "소개", start_sec: 0, end_sec: 2, cut_action: "keep", review_required: false, broll_override: null, visual_overlays: [], music_override: null, sfx_override: null, tts_replacement: null }] } as never;
+    vi.spyOn(api, "listProjects").mockResolvedValue([project]);
+    vi.spyOn(api, "getProject").mockResolvedValue(project);
+    vi.spyOn(api, "listJobs").mockResolvedValue([{ job_id: "timeline_build_pinned", job_type: "timeline_build", status: "succeeded", input_ref: "ready", output_ref: "timeline_pinned", error_message: null, started_at: "now", finished_at: "now" }] as never);
+    vi.spyOn(api, "listBrollAssets").mockResolvedValue([]);
+    vi.spyOn(api, "getEditingSession").mockResolvedValue(session);
+    vi.spyOn(api, "getEditorPlaybackManifest").mockRejectedValue(new Error("not ready"));
+    vi.spyOn(api, "getTimeline").mockResolvedValue({ job_id: "timeline_build_pinned", status: "succeeded", timeline: { timeline_id: "timeline_pinned", tracks: [], review_flags: [], pending_recommendations: [] } } as never);
+    vi.spyOn(api, "getReviewSnapshot").mockResolvedValue({ project_id: "project_a", timeline_id: "timeline_pinned", review_status: "draft", segments: [], applied_recommendations: [], pending_recommendations: [], review_flags: [] } as never);
+    const split = vi.spyOn(api, "splitEditingSessionSegment").mockResolvedValue(session);
+    const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects/project_a/editor?session_id=editing_session_pinned"] }));
+
+    render(<AppRouter router={router} />);
+
+    expect(await screen.findByText("재생 내용을 불러오지 못했어요. 새로고침 후 다시 확인해 주세요.")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "분할" })).not.toBeInTheDocument();
+    expect(split).not.toHaveBeenCalled();
   });
 
   it("refreshes the catalog and moves a newly created project to its create route", async () => {

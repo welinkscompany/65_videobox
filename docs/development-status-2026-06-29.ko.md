@@ -1,6 +1,32 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 260. 2026-07-18 OSS Slice 2 Task 8 closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 263. 2026-07-18 OSS Slice 2/3 commit and creator-flow recovery handoff`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+
+## 263. 2026-07-18 OSS Slice 2/3 commit and creator-flow recovery handoff
+
+- 이번 closeout은 Task 9의 atomic draft bundle·current-revision playback 기술 구현, Task 10의 editor playback manifest/typed command boundary, 그리고 현장 제작 흐름에서 재현된 질문 답변 누수·이전 질문·빈 요약·재생 불가 B-roll 후보·누락 장면 차단 회귀를 함께 기록한다. 이 변경은 서로 겹친 파일이 있어 실제 범위를 왜곡해 분리하지 않고 한 커밋으로 보존한다.
+- 제작 readiness는 로컬 `ffprobe`로 재생 가능한 영상 스트림과 양수 길이를 확인한 B-roll만 후보로 고른다. 장면당 후보는 최대 하나이며 구간은 유효 범위만 허용한다. 기존 readiness도 원본 SHA가 같을 때만 안전하게 정규화한다. 후보가 장면 수보다 적으면 누락 장면을 gap으로 기록해 일반 초안 생성을 막고, 사용자가 명시적으로 허용한 placeholder만 예외로 둔다.
+- 현장 데이터 `b-roll-smoke-test` 역방향 확인: `Preview Test Clip`(34초)만 `script-1`의 `0–5초` 후보이고, `script-2`의 `5–10초`는 `needs_assets` gap이다. 가짜 0초 MP4와 역전된 구간은 더 이상 API 응답에 없다. 이것은 실제 완성 영상 승인이나 CapCut Desktop import 승인과 다르다.
+- Task 9은 계속 unchecked다. 사용자가 실제 current-revision MP4를 재생·승인하고 대상 PC에서 실제 CapCut Desktop handoff 등록/열기/import를 확인하기 전에는 누적을 올리지 않는다. Task 10은 완료로 유지한다. 누적은 **9/22 (40.9%)**, 잔여 **59.1%**다.
+- 이번 commit 직전 fresh 검증은 Python 전체 suite, frontend 전체 suite, production build, loopback-only Playwright, `git diff --check`로 다시 수행한다. external/Gemini provider call은 0이며 Hermes/container, OpenCut runtime, SaaS auth/billing은 시작하지 않았다.
+
+
+## 262. 2026-07-18 OSS Slice 3 Task 10 closeout
+
+- Task 10은 project/session/revision에 고정된 authoritative editor playback manifest를 만들었다. API의 시간 기준은 seconds이고 FPS는 `fps_num/fps_den` rational로 보존한다. frame 변환은 지정된 한 지점에서만 half-up을 적용하며, project/session/revision provenance, output geometry, typed track/clip/control, caption style, gap, source SHA/media revision과 current/stale 상태를 함께 전달한다.
+- 재생 URL은 project-scoped path containment, 교차 프로젝트 404, Range `206`/invalid `416`, MIME과 `nosniff` 계약을 통과한 delivery만 사용한다. source audition은 exact/current preview 상태와 별도이며, stale artifact를 current playback으로 표시하지 않는다.
+- frontend는 raw session/timeline DTO나 generic trim mutation 대신 typed `EditorViewModel`과 role별 `EditorCommandPort`만 사용한다. narration split/merge/bounds/reorder, B-roll/BGM/SFX의 apply/clear/update-media-controls, 지원된 overlay apply/clear, caption text/style만 노출한다. pinned `/projects/$projectId/editor?session_id=` boundary는 해당 manifest와 expected revision을 사용하며 manifest/port 실패 시 raw mutation fallback 없이 안전하게 막는다.
+- 검증: Task 10 focused/backend manifest·delivery·atomic 호환 suite `37 passed`, frontend full `28 files / 290 tests passed`, loopback-only Playwright `13 passed`, production build, provenance/UI-system verifier와 provenance pytest `14 passed`, `git diff --check`가 통과했다. 독립 written-spec·코드 품질·계획 gap·source→runtime 역방향 검증에서 확인된 P0/P1은 TDD로 보완했다. external/Gemini provider call은 0이며 Hermes/container, OpenCut runtime, SaaS auth/billing은 시작하지 않았다.
+- **Task 9 보존:** Task 9은 실제 current-revision composited MP4의 사람 승인과 대상 PC의 실제 CapCut Desktop 등록/열기 결과가 없으므로 unchecked/technical-gate 상태다. 이 Task 10 완료는 그 gate를 대체하지 않는다.
+- 누적은 **9/22 (40.9%)**, 잔여 **59.1%**다. Task 7·8·10은 완료로 집계하고 Task 9은 집계하지 않는다. Task 9과 Task 10 구현이 하나의 dirty worktree에 얽혀 있어 Task 10만의 clean logical commit을 거짓으로 만들 수 없으므로, 이번 closeout에서는 **commit/push를 하지 않았다**. Task 9 acceptance 뒤 실제 diff 경계를 다시 검사해 commit/push 전략을 결정한다.
+
+## 261. 2026-07-18 OSS Slice 2 Task 9 technical gate
+
+- Task 9의 코드와 자동 검증 범위는 준비됐다. 한 번의 명시적 `초안 만들기` 승인만 editing session·timeline placement bundle을 만들며, brief/draft-plan revision과 source SHA/media revision을 다시 확인한다. 중복·동시 요청은 같은 결과를 재사용하고, N번째 materialize 실패·재시작 orphan·부분 파일은 per-SHA staging/atomic rename/rollback으로 정리한다.
+- 실제 timeline에는 대본 구간, 자막, 선택한 B-roll, BGM/SFX 정책, unresolved gap이 저장된다. 원본 영상 소리·완성 나레이션·녹음 업로드·결정적 project-local 무음 narration은 FFmpeg와 PyCapCut 경로 모두에서 검증했고, `voice_sample_audio`는 완성 나레이션으로 거절한다. gap-only 초안은 사용자의 명시적 임시 장면 승인이 있어야 만들 수 있고, 라벨된 placeholder를 보여 주되 final/CapCut 출력은 계속 막는다.
+- `/projects/$projectId/editor`는 방금 만든 session을 열고, 실제 current revision FFmpeg output의 progress/stale/retry/download/content 경로와 in-app MP4 playback, CapCut handoff route를 browser smoke로 연결했다. 자동 smoke의 CapCut 등록은 쓰기 가능한 로컬 fake handoff 경로이며 Desktop 앱을 열거나 등록하지 않는다.
+- 검증: atomic/API/readiness focused backend `34 passed`, frontend full `28 files / 281 tests passed`, loopback-only Playwright `13 passed`, production build, provenance/UI-system verifier와 provenance pytest `14 passed`, `git diff --check`가 통과했다. 독립 코드리뷰·계획 gap·source→runtime 역방향 검증에서 찾은 P1은 TDD로 보완했고, external/Gemini call 0, Hermes/container·OpenCut runtime·SaaS auth/billing 미도입을 유지했다. 이 기술 검증의 기준 HEAD는 Task 8 commit `93c5b7161` 위의 아직 closeout 전 작업이다.
+- **완료 보류:** 실제 current-revision 합성 MP4를 사람이 재생·확인해 Task 9 가치를 승인하고, 대상 환경의 실제 CapCut Desktop 등록/열기 결과를 기록해야 한다. 따라서 Task 9 체크박스와 누적 진행률은 **8/22 (36.4%), 잔여 63.6%**로 유지한다. 다음 goal은 이 두 사람/환경 gate를 수행·기록한 뒤에만 Task 9 closeout/commit/push 여부를 결정한다.
 
 ## 260. 2026-07-18 OSS Slice 2 Task 8 closeout
 

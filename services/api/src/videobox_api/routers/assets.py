@@ -3,9 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import APIRouter, BackgroundTasks, File, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, File, Request, UploadFile, status
 from fastapi.responses import FileResponse
 
+from videobox_api.content_delivery import deliver_file
 from videobox_api.errors import _http_error
 from videobox_api.models import (
     AssetArchiveItemResponse,
@@ -246,7 +247,7 @@ def build_assets_router(orchestrator: ApiOrchestrator, store: LocalProjectStore)
         return TTSCandidateRecordResponse(**candidate)
 
     @router.get("/api/projects/{project_id}/assets/{asset_id}/content")
-    def get_asset_content(project_id: str, asset_id: str) -> FileResponse:
+    def get_asset_content(project_id: str, asset_id: str, request: Request):
         try:
             asset = store.get_asset(project_id=project_id, asset_id=asset_id)
             resolved_path = store.resolve_storage_uri(
@@ -256,7 +257,7 @@ def build_assets_router(orchestrator: ApiOrchestrator, store: LocalProjectStore)
             raise _http_error(exc) from exc
         if not resolved_path.exists():
             raise _http_error(FileNotFoundError(f"Asset file not found: '{resolved_path}'."))
-        return FileResponse(resolved_path)
+        return deliver_file(request=request, path=resolved_path, media_type=asset.get("mime_type"))
 
     @router.get("/api/projects/{project_id}/assets/{asset_id}/thumbnail")
     def get_asset_thumbnail(project_id: str, asset_id: str) -> FileResponse:

@@ -66,6 +66,35 @@ def test_creation_brief_accepts_only_current_question_with_cas_and_never_mutates
         store.update_creation_brief_summary(project_id=project.project_id, brief_id=brief["brief_id"], summary="바꾸기", expected_revision=approved["revision"])
 
 
+def test_creation_brief_can_return_to_the_previous_question_and_preserve_its_saved_answer(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project("Interview navigation")
+    brief = store.create_creation_brief(
+        project_id=project.project_id,
+        script_filename="script.txt",
+        script_text="새 영상을 소개합니다.",
+        idempotency_key="previous-question",
+        capability_profile={},
+    )
+    first = store.answer_creation_brief_question(
+        project_id=project.project_id,
+        brief_id=brief["brief_id"],
+        question_id=brief["questions"][0]["question_id"],
+        answer="처음 방문한 고객",
+        expected_revision=brief["revision"],
+    )
+
+    returned = store.previous_creation_brief_question(
+        project_id=project.project_id,
+        brief_id=brief["brief_id"],
+        expected_revision=first["revision"],
+    )
+
+    assert returned["current_step"] == 0
+    assert returned["status"] == "interviewing"
+    assert returned["answers"]["audience"] == "처음 방문한 고객"
+
+
 def test_creation_brief_materializes_owned_script_asset_and_delete_erases_it(tmp_path: Path) -> None:
     store = LocalProjectStore(tmp_path)
     project = store.bootstrap_project("Retained asset")

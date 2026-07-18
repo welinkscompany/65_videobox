@@ -74,6 +74,9 @@ import {
 } from "./lib/formatters";
 import { ProjectOnboarding } from "./ProjectOnboarding";
 import type { WorkspaceSection } from "./app/routeManifest";
+import { VideoBoxEditorAdapter, type EditorControls, type EditorViewModel } from "./features/editor/editorViewModel";
+import { createEditorCommandPort } from "./features/editor/editorCommandPort";
+import { projectLegacySession } from "./features/editor/legacySessionProjection";
 
 type LegacySection = "overview" | "timeline" | "review" | "editing" | "settings";
 
@@ -81,6 +84,8 @@ export type LegacyWorkspacePageProps = {
   /** Undefined retains the pre-router test harness; a route value is authoritative. */
   projectId?: string | null;
   section?: WorkspaceSection;
+  /** A route-selected durable session takes precedence over the latest session. */
+  editingSessionId?: string | null;
   onNavigate?: (projectId: string, section: WorkspaceSection) => void;
   catalogProjects?: Project[];
   onProjectCreated?: (project: Project) => void | Promise<void>;
@@ -105,9 +110,22 @@ const legacySectionToRoute: Record<LegacySection, WorkspaceSection> = {
   settings: "settings",
 };
 
+function readEditorControls(override: Record<string, unknown> | null | undefined): EditorControls | undefined {
+  const controls = readRecordValue(override?.media_controls);
+  if (!controls) return undefined;
+  return {
+    volume: typeof controls.volume === "number" ? controls.volume : undefined,
+    crop: typeof controls.crop === "string" ? controls.crop : undefined,
+    speed: typeof controls.speed === "number" ? controls.speed : undefined,
+    fadeInSec: typeof controls.fade_in_sec === "number" ? controls.fade_in_sec : undefined,
+    fadeOutSec: typeof controls.fade_out_sec === "number" ? controls.fade_out_sec : undefined,
+  };
+}
+
 export function App({
   projectId: routeProjectId,
   section: routeSection,
+  editingSessionId: routeEditingSessionId,
   onNavigate,
   catalogProjects,
   onProjectCreated,
@@ -141,6 +159,8 @@ export function App({
   const [timelineJob, setTimelineJob] = useState<TimelineJob | null>(null);
   const [reviewSnapshot, setReviewSnapshot] = useState<ReviewSnapshot | null>(null);
   const [editingSession, setEditingSession] = useState<EditingSession | null>(null);
+  const [routedEditorView, setRoutedEditorView] = useState<EditorViewModel | null>(null);
+  const [routedEditorViewMessage, setRoutedEditorViewMessage] = useState<string | null>(null);
   const [editingDrafts, setEditingDrafts] = useState<Record<string, EditingSegmentDraft>>({});
   const editingDraftsRef = useRef<Record<string, EditingSegmentDraft>>({});
   const editingUserEditsRef = useRef<Record<string, Partial<EditingSegmentDraft>>>({});
@@ -159,6 +179,38 @@ export function App({
   const [lastSuccessfulFinalRenderJob, setLastSuccessfulFinalRenderJob] = useState<FinalRenderJob | null>(null);
   const [capcutDraftJob, setCapcutDraftJob] = useState<CapCutDraftExportJob | null>(null);
   const [lastSuccessfulCapcutDraftJob, setLastSuccessfulCapcutDraftJob] = useState<CapCutDraftExportJob | null>(null);
+  const playableFinalRenderJob = [finalRenderJob, lastSuccessfulFinalRenderJob].find((job) => {
+    const render = job?.render;
+    return job?.status === "succeeded" && render && render.is_current === true &&
+      (!editingSession || (render.timeline_id === editingSession.timeline_id &&
+        (render.source_session_revision != null && render.source_session_revision === editingSession.session_revision)));
+  }) ?? null;
+  const finalRenderNeedsRefresh = Boolean(
+    ([finalRenderJob, lastSuccessfulFinalRenderJob].some((job) =>
+      job?.status === "succeeded" && job.render && !(
+        job.render.is_current === true &&
+        (!editingSession || (
+          job.render.timeline_id === editingSession.timeline_id &&
+          job.render.source_session_revision != null &&
+          job.render.source_session_revision === editingSession.session_revision
+        ))
+      ),
+    )),
+  );
+  // A route-pinned editor session may share a timeline/revision with an older
+  // legacy render. Only its manifest has session provenance, so that route
+  // owns exact playback and the legacy fallback remains for unpinned views.
+  const canShowLegacyFinalRender = !routeEditingSessionId;
+  const routedEditorCommandPort = useMemo(
+    () => routedEditorView
+      ? createEditorCommandPort({
+          projectId: routedEditorView.projectId,
+          sessionId: routedEditorView.sessionId,
+          expectedRevision: routedEditorView.expectedRevision,
+        })
+      : null,
+    [routedEditorView],
+  );
   const [isRegisteringCapcutHandoff, setIsRegisteringCapcutHandoff] = useState(false);
   const [capcutHandoffDiagnostics, setCapcutHandoffDiagnostics] = useState<CapCutHandoffDiagnostics | null>(null);
   const [isLoadingCapcutHandoffDiagnostics, setIsLoadingCapcutHandoffDiagnostics] = useState(false);
@@ -405,6 +457,8 @@ export function App({
       setTimelineJob(null);
       setReviewSnapshot(null);
       setEditingSession(null);
+      setRoutedEditorView(null);
+      setRoutedEditorViewMessage(null);
       setEditingDrafts({});
       setSelectedEditingSegmentId(null);
       setSelectedRegenerationFields([]);
@@ -436,6 +490,8 @@ export function App({
       setBrollImportMessage(null);
       setGeminiLoadError(null);
       setEditingSessionRestoreError(null);
+      setRoutedEditorView(null);
+      setRoutedEditorViewMessage(null);
       setPartialRegenerationRestoreWarning(null);
       try {
         const project = await api.getProject(projectId);
@@ -449,14 +505,36 @@ export function App({
         }
         let latestEditingSession: EditingSession | null = null;
         try {
-          latestEditingSession = await api.getLatestEditingSession(projectId);
+          latestEditingSession = routeEditingSessionId
+            ? await api.getEditingSession(projectId, routeEditingSessionId)
+            : await api.getLatestEditingSession(projectId);
         } catch (error) {
           setEditingSessionRestoreError(
             "편집 세션 복구 실패 · 기존 타임라인 유지",
           );
           latestEditingSession = null;
         }
-        const latestTimelineJob = findLatestTimelineJob(jobItems);
+        let selectedEditorView: EditorViewModel | null = null;
+        let selectedEditorViewMessage: string | null = null;
+        if (routeEditingSessionId && latestEditingSession) {
+          try {
+            const manifest = await api.getEditorPlaybackManifest(projectId, routeEditingSessionId);
+            if (manifest.project_id !== projectId || manifest.session_id !== routeEditingSessionId) {
+              throw new Error("The selected editing session does not match its playback manifest.");
+            }
+            selectedEditorView = new VideoBoxEditorAdapter(manifest).viewModel;
+          } catch {
+            selectedEditorViewMessage = "재생 내용을 불러오지 못했어요. 새로고침 후 다시 확인해 주세요.";
+          }
+        }
+        const latestTimelineJob = findLatestTimelineJob(
+          routeEditingSessionId && latestEditingSession
+            ? jobItems.filter((job) => (
+              job.job_type === "timeline_build" &&
+              job.output_ref === latestEditingSession.timeline_id
+            ))
+            : jobItems,
+        );
         const [stableTimeline, stableReview] = latestTimelineJob
           ? await Promise.all([
               api.getTimeline(projectId, latestTimelineJob.job_id),
@@ -502,7 +580,7 @@ export function App({
         let activeSubtitle = subtitle;
         let activePreview = preview;
         let activeExport = capcutExport;
-        if (latestEditingSession) {
+        if (latestEditingSession && !routeEditingSessionId) {
           const latestCandidateJob = findLatestSucceededJob(
             jobItems,
             "partial_regeneration",
@@ -662,8 +740,12 @@ export function App({
         setJobs(jobItems);
         setTimelineJob(activeTimeline);
         setReviewSnapshot(activeReview);
-        if (latestEditingSession) {
-          applyEditingSessionState(latestEditingSession);
+        setRoutedEditorView(selectedEditorView);
+        setRoutedEditorViewMessage(selectedEditorViewMessage);
+        if (latestEditingSession && (!routeEditingSessionId || selectedEditorView)) {
+          applyEditingSessionState(routeEditingSessionId && selectedEditorView
+            ? projectLegacySession(selectedEditorView)
+            : latestEditingSession);
           if (resumedSelection) {
             setSelectedEditingSegmentId(resumedSelection.segmentId);
             setSelectedRegenerationFields(resumedSelection.fields);
@@ -704,20 +786,27 @@ export function App({
     return () => {
       cancelled = true;
     };
-  }, [selectedProjectId]);
+  }, [selectedProjectId, routeEditingSessionId]);
 
   useEffect(() => {
-    if (!selectedProjectId || !selectedEditingSegmentId) {
+    if (routeEditingSessionId || !selectedProjectId || !selectedEditingSegmentId) {
       setTtsCandidates([]);
       return;
     }
     void loadTtsCandidates(selectedEditingSegmentId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedProjectId, selectedEditingSegmentId]);
+  }, [routeEditingSessionId, selectedProjectId, selectedEditingSegmentId]);
 
   const latestTimelineBuildJob = useMemo(
-    () => findLatestTimelineJob(jobs),
-    [jobs],
+    () => findLatestTimelineJob(
+      routeEditingSessionId && editingSession
+        ? jobs.filter((job) => (
+          job.job_type === "timeline_build" &&
+          job.output_ref === editingSession.timeline_id
+        ))
+        : jobs,
+    ),
+    [editingSession, jobs, routeEditingSessionId],
   );
   const activeTimelineJobId = timelineJob?.job_id ?? latestTimelineBuildJob?.job_id ?? null;
 
@@ -933,6 +1022,10 @@ export function App({
       onSuccess?: () => void;
     },
   ) {
+    if (routeEditingSessionId && !routedEditorCommandPort) {
+      setEditingMutationFeedback({ kind: "error", message: "편집 내용을 불러온 뒤 다시 시도해 주세요." });
+      return null as never;
+    }
     const feedbackLabel = formatEditingMutationFeedbackLabel(mutationKey);
     const feedbackAction = options?.feedbackAction ?? "저장";
     setIsSavingEditingMutation(mutationKey);
@@ -941,6 +1034,16 @@ export function App({
     try {
       const session = await action();
       editingUserEditsRef.current = {};
+      if (routeEditingSessionId) {
+        setRoutedEditorView((current) => current
+          ? {
+              ...current,
+              expectedRevision: session.session_revision,
+              source: { ...current.source, status: "stale" },
+              playback: { ...current.playback, exactPreview: { ...current.playback.exactPreview, status: "stale", url: null } },
+            }
+          : current);
+      }
       applyEditingSessionState(session);
       options?.onSuccess?.();
       if (options?.addRegenerationField) {
@@ -1015,6 +1118,7 @@ export function App({
 
   async function handleRequestRegenerationPreflight() {
     if (
+      routeEditingSessionId ||
       !selectedProjectId ||
       !editingSession ||
       isSavingEditingMutation ||
@@ -1047,6 +1151,7 @@ export function App({
 
   async function handleRunPartialRegeneration() {
     if (
+      routeEditingSessionId ||
       !selectedProjectId ||
       !editingSession ||
       isSavingEditingMutation ||
@@ -1331,7 +1436,10 @@ export function App({
   }
 
   async function loadTtsCandidates(segmentId: string) {
-    if (!selectedProjectId) {
+    if (routeEditingSessionId) {
+      return;
+    }
+    if (routeEditingSessionId || !selectedProjectId) {
       return;
     }
     setIsLoadingTtsCandidates(true);
@@ -1348,7 +1456,7 @@ export function App({
   }
 
   async function handleGenerateTtsCandidate(segmentId: string, segmentText: string, targetDurationSec: number) {
-    if (!selectedProjectId || !ttsCandidateVoiceSampleId.trim() || !segmentText.trim()) {
+    if (routeEditingSessionId || !selectedProjectId || !ttsCandidateVoiceSampleId.trim() || !segmentText.trim()) {
       return;
     }
     setIsGeneratingTtsCandidate(true);
@@ -1506,7 +1614,7 @@ export function App({
   }
 
   async function handleImportBrollBatch() {
-    if (!selectedProjectId) {
+    if (routeEditingSessionId || !selectedProjectId) {
       return;
     }
     const sourceDirectory = brollFolderPath.trim();
@@ -1630,7 +1738,17 @@ export function App({
   const selectedEditingDraft = selectedEditingSegmentId
     ? editingDrafts[selectedEditingSegmentId]
     : undefined;
+  const selectedBrollControls = readEditorControls(selectedEditingSegment?.broll_override);
+  const selectedMusicControls = readEditorControls(selectedEditingSegment?.music_override);
+  const selectedSfxControls = readEditorControls(selectedEditingSegment?.sfx_override);
   const activeEditingSessionId = editingSession?.session_id ?? null;
+
+  useEffect(() => {
+    const audioControls = selectedMusicControls ?? selectedSfxControls;
+    setAudioFadeInSec(audioControls?.fadeInSec ?? 0);
+    setAudioFadeOutSec(audioControls?.fadeOutSec ?? 0);
+    setBrollFit(selectedBrollControls?.crop === "crop" ? "crop" : "fit");
+  }, [selectedBrollControls?.crop, selectedMusicControls?.fadeInSec, selectedMusicControls?.fadeOutSec, selectedSfxControls?.fadeInSec, selectedSfxControls?.fadeOutSec]);
   const visibleMediaLibraryAssets = useMemo(() => {
     const search = mediaLibraryFilter.trim().toLowerCase();
     return mediaLibraryAssets.filter((asset) => {
@@ -1813,11 +1931,13 @@ export function App({
       bounds_by_id[segment.segment_id] = { start_sec: cursor, end_sec: cursor + duration };
       cursor += duration;
     }
-    void applyEditingMutation("timeline-reorder", () => api.reorderEditingSessionSegments(selectedProjectId, activeEditingSessionId, {
-      expected_revision: editingSession.session_revision,
-      segment_ids: reordered.map((segment) => segment.segment_id),
-      bounds_by_id,
-    }), { addRegenerationField: "timeline_structure" });
+    void applyEditingMutation("timeline-reorder", () => routedEditorCommandPort
+      ? routedEditorCommandPort.reorderNarration({ segmentIds: reordered.map((segment) => segment.segment_id) })
+      : api.reorderEditingSessionSegments(selectedProjectId, activeEditingSessionId, {
+          expected_revision: editingSession.session_revision,
+          segment_ids: reordered.map((segment) => segment.segment_id),
+          bounds_by_id,
+        }), { addRegenerationField: "timeline_structure" });
   }
 
   async function handleCapcutDraftHandoff() {
@@ -1875,7 +1995,7 @@ export function App({
     candidateId: string,
     decision: "approved" | "rejected",
   ) {
-    if (!selectedProjectId) {
+    if (routeEditingSessionId || !selectedProjectId) {
       return;
     }
     setIsReviewingTtsCandidate(candidateId);
@@ -2329,6 +2449,22 @@ export function App({
                   </dd>
                 </div>
               </dl>
+              {canShowLegacyFinalRender && finalRenderNeedsRefresh ? (
+                <p className="status-copy">완성본이 최신 편집본과 달라 다시 만들 수 있어요.</p>
+              ) : null}
+              {canShowLegacyFinalRender && playableFinalRenderJob?.render && selectedProjectId ? (
+                <section className="panel" aria-label="완성본 미리보기">
+                  <h3>완성본 미리보기</h3>
+                  <video
+                    aria-label="완성본 재생"
+                    controls
+                    preload="metadata"
+                    src={`/api/projects/${encodeURIComponent(selectedProjectId)}/final-renders/${encodeURIComponent(playableFinalRenderJob.job_id)}/content`}
+                  >
+                    이 브라우저에서는 완성본을 재생할 수 없어요.
+                  </video>
+                </section>
+              ) : null}
               {(capcutDraftJob?.export?.notes ?? lastSuccessfulCapcutDraftJob?.export?.notes ?? []).length > 0 ? (
                 <div className="warning-banner" role="status">
                   <strong>CapCut에서 후처리 필요</strong>
@@ -2540,6 +2676,7 @@ export function App({
                   <div className="action-row">
                     <button
                       className="action-button primary"
+                      hidden={Boolean(routeEditingSessionId)}
                       disabled={
                         isSavingGeminiKey ||
                         !geminiForm.label ||
@@ -2864,18 +3001,23 @@ export function App({
                 </div>
               </div>
               <div className="action-row">
-                <button
-                  className="action-button primary"
-                  disabled={!latestTimelineBuildJob || isStartingEditingSession}
-                  onClick={() => void handleStartEditingSession()}
-                  type="button"
-                >
-                  {isStartingEditingSession ? "편집 시작 중" : "편집 시작"}
-                </button>
+                {!routeEditingSessionId ? (
+                  <button
+                    className="action-button primary"
+                    disabled={!latestTimelineBuildJob || isStartingEditingSession}
+                    onClick={() => void handleStartEditingSession()}
+                    type="button"
+                  >
+                    {isStartingEditingSession ? "편집 시작 중" : "편집 시작"}
+                  </button>
+                ) : null}
               </div>
-              {editingSessionRestoreError ? (
-                <p className="error-banner">{editingSessionRestoreError}</p>
-              ) : null}
+                  {editingSessionRestoreError ? (
+                    <p className="error-banner">{editingSessionRestoreError}</p>
+                  ) : null}
+                  {routedEditorViewMessage ? (
+                    <p className="error-banner">{routedEditorViewMessage}</p>
+                  ) : null}
               {partialRegenerationRestoreWarning ? (
                 <p className="error-banner">{partialRegenerationRestoreWarning}</p>
               ) : null}
@@ -2907,7 +3049,45 @@ export function App({
                       <dd>{preservedEditingSegments.length}</dd>
                     </div>
                   </dl>
-                  {selectedProjectId ? <DirectorWorkspacePanel projectId={selectedProjectId} sessionId={editingSession.session_id} sessionRevision={editingSession.session_revision} selectedSegment={selectedEditingSegment ? { segmentId: selectedEditingSegment.segment_id, startSec: selectedEditingSegment.start_sec, endSec: selectedEditingSegment.end_sec, draftApplied: changedSegmentIds.has(selectedEditingSegment.segment_id) } : undefined} onStateChange={setDirectorWorkspaceState} applyEditingMutation={(action) => applyEditingMutation("director-proposal-apply", action as () => Promise<EditingSession>)} /> : null}
+                  {canShowLegacyFinalRender && finalRenderNeedsRefresh ? (
+                    <p className="status-copy">완성본이 최신 편집본과 달라 다시 만들 수 있어요.</p>
+                  ) : null}
+                  {routedEditorView ? (
+                    <section className="panel" aria-label="재생 확인">
+                      <h3>재생 확인</h3>
+                      {Object.entries(routedEditorView.playback.auditionUrls).map(([assetId, url]) => (
+                        <audio aria-label="소리 미리 듣기" controls key={assetId} preload="metadata" src={url}>
+                          이 브라우저에서는 소리를 재생할 수 없어요.
+                        </audio>
+                      ))}
+                      {routedEditorView.playback.exactPreview.status === "current" && routedEditorView.playback.exactPreview.url ? (
+                        <section aria-label="현재 편집본">
+                          <h4>현재 편집본 재생</h4>
+                          <video aria-label="현재 편집본 재생" controls preload="metadata" src={routedEditorView.playback.exactPreview.url}>
+                            이 브라우저에서는 영상을 재생할 수 없어요.
+                          </video>
+                        </section>
+                      ) : routedEditorView.playback.exactPreview.status === "stale" ? (
+                        <p className="status-copy">완성본을 다시 만들어 주세요.</p>
+                      ) : (
+                        <p className="status-copy">완성본을 만들면 여기서 확인할 수 있어요.</p>
+                      )}
+                    </section>
+                  ) : null}
+                  {canShowLegacyFinalRender && playableFinalRenderJob?.render && selectedProjectId ? (
+                    <section className="panel" aria-label="완성본 미리보기">
+                      <h3>완성본 미리보기</h3>
+                      <video
+                        aria-label="완성본 재생"
+                        controls
+                        preload="metadata"
+                        src={`/api/projects/${encodeURIComponent(selectedProjectId)}/final-renders/${encodeURIComponent(playableFinalRenderJob.job_id)}/content`}
+                      >
+                        이 브라우저에서는 완성본을 재생할 수 없어요.
+                      </video>
+                    </section>
+                  ) : null}
+                  {selectedProjectId && !routeEditingSessionId ? <DirectorWorkspacePanel projectId={selectedProjectId} sessionId={editingSession.session_id} sessionRevision={editingSession.session_revision} selectedSegment={selectedEditingSegment ? { segmentId: selectedEditingSegment.segment_id, startSec: selectedEditingSegment.start_sec, endSec: selectedEditingSegment.end_sec, draftApplied: changedSegmentIds.has(selectedEditingSegment.segment_id) } : undefined} onStateChange={setDirectorWorkspaceState} applyEditingMutation={(action) => applyEditingMutation("director-proposal-apply", action as () => Promise<EditingSession>)} /> : null}
                   <section className="editor-library" aria-label="고정 트랙 타임라인">
                     <h3>고정 트랙 타임라인</h3>
                     <p className="meta-copy">나레이션·B롤·BGM·SFX·오버레이만 사용합니다. 임의 트랙은 추가할 수 없습니다.</p>
@@ -2925,15 +3105,18 @@ export function App({
                     <div className="action-row">
                       <button
                         className="action-button subtle"
-                        disabled={!selectedEditingSegment || !selectedProjectId || !activeEditingSessionId || Boolean(isSavingEditingMutation)}
-                        onClick={() => selectedEditingSegment && void applyEditingMutation("timeline-split", () => api.splitEditingSessionSegment(selectedProjectId!, activeEditingSessionId!, selectedEditingSegment.segment_id, {
-                          expected_revision: editingSession.session_revision,
-                          split_sec: (selectedEditingSegment.start_sec + selectedEditingSegment.end_sec) / 2,
-                        }), { addRegenerationField: "timeline_structure" })}
+                        disabled={!selectedEditingSegment || !selectedProjectId || !activeEditingSessionId || Boolean(isSavingEditingMutation) || Boolean(routeEditingSessionId && !routedEditorCommandPort)}
+                        onClick={() => selectedEditingSegment && void applyEditingMutation("timeline-split", () => routedEditorCommandPort
+                          ? routedEditorCommandPort.splitNarration({ segmentId: selectedEditingSegment.segment_id, splitSec: (selectedEditingSegment.start_sec + selectedEditingSegment.end_sec) / 2 })
+                          : api.splitEditingSessionSegment(selectedProjectId!, activeEditingSessionId!, selectedEditingSegment.segment_id, {
+                              expected_revision: editingSession.session_revision,
+                              split_sec: (selectedEditingSegment.start_sec + selectedEditingSegment.end_sec) / 2,
+                            }), { addRegenerationField: "timeline_structure" })}
                         type="button"
                       >분할</button>
                       <button
                         className="action-button subtle"
+                        hidden={Boolean(routeEditingSessionId)}
                         disabled={!selectedEditingSegment || editingSession.segments[0]?.segment_id === selectedEditingSegment.segment_id || Boolean(isSavingEditingMutation)}
                         onClick={() => moveSelectedTimelineSegment(-1)}
                         type="button"
@@ -2951,20 +3134,24 @@ export function App({
                           if (!selectedEditingSegment || !selectedProjectId || !activeEditingSessionId) return;
                           const index = editingSession.segments.findIndex((segment) => segment.segment_id === selectedEditingSegment.segment_id);
                           const right = editingSession.segments[index + 1];
-                          if (right) void applyEditingMutation("timeline-merge", () => api.mergeEditingSessionSegments(selectedProjectId, activeEditingSessionId, {
-                            expected_revision: editingSession.session_revision, left_segment_id: selectedEditingSegment.segment_id, right_segment_id: right.segment_id,
-                          }), { addRegenerationField: "timeline_structure" });
+                          if (right) void applyEditingMutation("timeline-merge", () => routedEditorCommandPort
+                            ? routedEditorCommandPort.mergeNarration({ leftSegmentId: selectedEditingSegment.segment_id, rightSegmentId: right.segment_id })
+                            : api.mergeEditingSessionSegments(selectedProjectId, activeEditingSessionId, {
+                                expected_revision: editingSession.session_revision, left_segment_id: selectedEditingSegment.segment_id, right_segment_id: right.segment_id,
+                              }), { addRegenerationField: "timeline_structure" });
                         }}
                         type="button"
                       >다음과 병합</button>
                       <button
                         className="action-button subtle"
+                        hidden={Boolean(routeEditingSessionId)}
                         disabled={!selectedProjectId || !activeEditingSessionId || !(editingSession.undo_count ?? editingSession.history.some((entry) => entry.inverse_payload)) || Boolean(isSavingEditingMutation)}
                         onClick={() => void applyEditingMutation("timeline-undo", () => api.undoEditingSession(selectedProjectId!, activeEditingSessionId!, editingSession.session_revision), { addRegenerationField: "timeline_structure" })}
                         type="button"
                       >실행 취소</button>
                       <button
                         className="action-button subtle"
+                        hidden={Boolean(routeEditingSessionId)}
                         disabled={!selectedProjectId || !activeEditingSessionId || !(editingSession.redo_count ?? 0) || Boolean(isSavingEditingMutation)}
                         onClick={() => void applyEditingMutation("timeline-redo", () => api.redoEditingSession(selectedProjectId!, activeEditingSessionId!, editingSession.session_revision), { addRegenerationField: "timeline_structure" })}
                         type="button"
@@ -2976,13 +3163,16 @@ export function App({
                       <button
                         className="action-button"
                         disabled={!selectedEditingSegment || !selectedProjectId || !activeEditingSessionId || Boolean(isSavingEditingMutation)}
-                        onClick={() => selectedEditingSegment && void applyEditingMutation("timeline-bounds", () => api.updateEditingSessionSegmentBounds(selectedProjectId!, activeEditingSessionId!, selectedEditingSegment.segment_id, {
-                          expected_revision: editingSession.session_revision, start_sec: selectedRangeStartSec, end_sec: selectedRangeEndSec,
-                        }), { addRegenerationField: "timeline_structure" })}
+                        onClick={() => selectedEditingSegment && void applyEditingMutation("timeline-bounds", () => routedEditorCommandPort
+                          ? routedEditorCommandPort.setNarrationBounds({ segmentId: selectedEditingSegment.segment_id, startSec: selectedRangeStartSec, endSec: selectedRangeEndSec })
+                          : api.updateEditingSessionSegmentBounds(selectedProjectId!, activeEditingSessionId!, selectedEditingSegment.segment_id, {
+                              expected_revision: editingSession.session_revision, start_sec: selectedRangeStartSec, end_sec: selectedRangeEndSec,
+                            }), { addRegenerationField: "timeline_structure" })}
                         type="button"
                       >구간 길이 저장</button>
                       <button
                         className="action-button"
+                        hidden={Boolean(routeEditingSessionId)}
                         disabled={!selectedProjectId || !activeEditingSessionId}
                         onClick={() => void api.previewEditingSessionSelectedRange(selectedProjectId!, activeEditingSessionId!, { start_sec: selectedRangeStartSec, end_sec: selectedRangeEndSec }).then(setSelectedRangePreview).catch(() => setErrorMessage("선택 구간 미리보기를 만들지 못했어요. 다시 시도해 주세요."))}
                         type="button"
@@ -3002,6 +3192,8 @@ export function App({
                     selectedSegment={selectedEditingSegment ? { segmentId: selectedEditingSegment.segment_id, startSec: selectedEditingSegment.start_sec, endSec: selectedEditingSegment.end_sec } : null}
                     activeBrollAssetId={typeof selectedEditingSegment?.broll_override?.asset_id === "string" ? selectedEditingSegment.broll_override.asset_id : null}
                     busy={Boolean(isSavingEditingMutation)}
+                    allowLegacyMutations={!routeEditingSessionId}
+                    allowPreferences={!routeEditingSessionId}
                     onToggleFavorite={(libraryAssetId) => { const asset = mediaLibraryAssets.find((item) => item.library_asset_id === libraryAssetId); if (asset) void toggleMediaLibraryFavorite(asset); }}
                     onToggleLocalFavorite={(assetId) => {
                       const favoriteId = `pack:local:${assetId}`;
@@ -3011,17 +3203,21 @@ export function App({
                     onApplyGlobal={(asset) => void applyMediaLibraryAsset(asset)}
                     onApplyBroll={(asset) => {
                       if (!activeEditingSessionId || !selectedEditingSegment || !editingSession) return;
-                      void applyEditingMutation(`${selectedEditingSegment.segment_id}-broll`, () => api.updateEditingSessionBroll(selectedProjectId, activeEditingSessionId, selectedEditingSegment.segment_id, {
-                        expected_revision: editingSession.session_revision,
-                        asset_id: asset.asset_id,
-                        media_controls: { expected_content_sha256: String(asset.metadata.content_sha256 ?? asset.metadata.sha256 ?? ""), media_revision: asset.created_at },
-                      }), {
+                      void applyEditingMutation(`${selectedEditingSegment.segment_id}-broll`, () => routedEditorCommandPort
+                        ? routedEditorCommandPort.applyMedia({ kind: "broll", segmentId: selectedEditingSegment.segment_id, assetId: asset.asset_id, controls: selectedBrollControls })
+                        : api.updateEditingSessionBroll(selectedProjectId, activeEditingSessionId, selectedEditingSegment.segment_id, {
+                            expected_revision: editingSession.session_revision,
+                            asset_id: asset.asset_id,
+                            media_controls: { expected_content_sha256: String(asset.metadata.content_sha256 ?? asset.metadata.sha256 ?? ""), media_revision: asset.created_at },
+                          }), {
                         onSuccess: () => void api.listProjectRecentMediaLibraryAssetIds(selectedProjectId).then((recent) => setRecentMediaLibraryAssetIds(recent.asset_ids)).catch(() => undefined),
                       });
                     }}
                     onClearBroll={() => {
                       if (!activeEditingSessionId || !selectedEditingSegment || !editingSession) return;
-                      void applyEditingMutation(`${selectedEditingSegment.segment_id}-broll`, () => api.clearEditingSessionBrollOverride(selectedProjectId, activeEditingSessionId, selectedEditingSegment.segment_id, editingSession.session_revision), { feedbackAction: "해제", removeRegenerationField: "broll" });
+                      void applyEditingMutation(`${selectedEditingSegment.segment_id}-broll`, () => routedEditorCommandPort
+                        ? routedEditorCommandPort.clearMedia({ kind: "broll", segmentId: selectedEditingSegment.segment_id })
+                        : api.clearEditingSessionBrollOverride(selectedProjectId, activeEditingSessionId, selectedEditingSegment.segment_id, editingSession.session_revision), { feedbackAction: "해제", removeRegenerationField: "broll" });
                     }}
                   /> : null}
                   <div className="editor-library" aria-label="자막 스타일 라이브러리">
@@ -3044,6 +3240,7 @@ export function App({
                     </label>
                     <button
                       className="action-button subtle"
+                      hidden={Boolean(routeEditingSessionId)}
                       disabled={!selectedProjectId || !selectedPresetId}
                       onClick={() => {
                         if (!selectedProjectId || !selectedPresetId) return;
@@ -3112,13 +3309,15 @@ export function App({
                           onClick={() => {
                             const preset = editorPresets.find((item) => item.preset_id === selectedPresetId);
                             if (!preset || !selectedProjectId || !activeEditingSessionId) return;
-                            void applyEditingMutation("caption-style", () => api.updateEditingSessionCaptionStyle(selectedProjectId, activeEditingSessionId, {
-                              expected_revision: editingSession.session_revision,
-                              scope: captionStyleScope,
-                              segment_ids: captionStylePreflight.affected_segment_ids,
-                              style: preset.style,
-                            }));
-                            void api.markRecentEditorPreset(selectedProjectId, preset.preset_id).then(setRecentPresetIds);
+                            void applyEditingMutation("caption-style", () => routedEditorCommandPort
+                              ? routedEditorCommandPort.setCaptionStyle({ segmentIds: captionStylePreflight.affected_segment_ids, scope: captionStyleScope, style: preset.style as never })
+                              : api.updateEditingSessionCaptionStyle(selectedProjectId, activeEditingSessionId, {
+                                  expected_revision: editingSession.session_revision,
+                                  scope: captionStyleScope,
+                                  segment_ids: captionStylePreflight.affected_segment_ids,
+                                  style: preset.style,
+                                }));
+                            if (!routeEditingSessionId) void api.markRecentEditorPreset(selectedProjectId, preset.preset_id).then(setRecentPresetIds);
                           }}
                           type="button"
                         >
@@ -3159,7 +3358,7 @@ export function App({
                       </button>
                     ))}
                   </div>
-                  <div className="action-row">
+                  <div className="action-row" hidden={Boolean(routeEditingSessionId)}>
                     {regenerationFieldOptions.map((field) => (
                       <label className="pill" key={field}>
                         <input
@@ -3183,6 +3382,7 @@ export function App({
                   <div className="action-row">
                     <button
                       className="action-button"
+                      hidden={Boolean(routeEditingSessionId)}
                       disabled={
                         !selectedEditingSegmentId ||
                         selectedRegenerationFields.length === 0 ||
@@ -3198,6 +3398,7 @@ export function App({
                     </button>
                     <button
                       className="action-button primary"
+                      hidden={Boolean(routeEditingSessionId)}
                       disabled={
                         !selectedEditingSegmentId ||
                         selectedRegenerationFields.length === 0 ||
@@ -3214,7 +3415,7 @@ export function App({
                         : "부분 재생성"}
                     </button>
                   </div>
-                  {partialRegenerationPreflight ? (
+                  {!routeEditingSessionId && partialRegenerationPreflight ? (
                     <div className="track-card">
                       <h3>{formatPredictedReviewStatusLabel(partialRegenerationPreflight.predicted_review_status_after_rerun)}</h3>
                       <p>
@@ -3272,7 +3473,7 @@ export function App({
               </div>
               {editingSession ? (
                 <>
-                  {partialRegenerationRun ? (
+                  {!routeEditingSessionId && partialRegenerationRun ? (
                     <div className="track-card">
                       <h3>재생성 결과</h3>
                       <p>{formatStatusLabel(partialRegenerationRun.status)}</p>
@@ -3332,7 +3533,7 @@ export function App({
                 </div>
               </div>
               {editingSession ? (
-                partialRegenerationRun ? (
+                !routeEditingSessionId && partialRegenerationRun ? (
                   <>
                     <dl className="summary-list">
                       <div>
@@ -3464,23 +3665,24 @@ export function App({
                       isSavingEditingMutation === `${selectedEditingSegment.segment_id}-caption`
                     }
                     onClick={() =>
-                      void applyEditingMutation(`${selectedEditingSegment.segment_id}-caption`, () =>
-                        api.updateEditingSessionCaption(
-                          selectedProjectId!,
-                          activeEditingSessionId!,
-                          selectedEditingSegment.segment_id,
-                          {
-                            expected_revision: editingSession!.session_revision,
-                            caption_text: selectedEditingDraft.captionText,
-                          },
-                        ),
+                      void applyEditingMutation(`${selectedEditingSegment.segment_id}-caption`, () => routedEditorCommandPort
+                        ? routedEditorCommandPort.setCaptionText({ segmentId: selectedEditingSegment.segment_id, text: selectedEditingDraft.captionText })
+                        : api.updateEditingSessionCaption(
+                            selectedProjectId!,
+                            activeEditingSessionId!,
+                            selectedEditingSegment.segment_id,
+                            {
+                              expected_revision: editingSession!.session_revision,
+                              caption_text: selectedEditingDraft.captionText,
+                            },
+                          ),
                       )
                     }
                     type="button"
                   >
                     자막 저장
                   </button>
-                  <label className="field">
+                  <label className="field" hidden={Boolean(routeEditingSessionId)}>
                     <span>컷</span>
                     <select
                       onChange={(event) =>
@@ -3497,6 +3699,7 @@ export function App({
                   </label>
                   <button
                     className="action-button"
+                    hidden={Boolean(routeEditingSessionId)}
                     disabled={
                       !selectedProjectId ||
                       !activeEditingSessionId ||
@@ -3519,14 +3722,14 @@ export function App({
                   >
                     컷 저장
                   </button>
-                  <label className="field">
+                  <label className="field" hidden={Boolean(routeEditingSessionId)}>
                     <span>B롤 폴더</span>
                     <input
                       onChange={(event) => setBrollFolderPath(event.target.value)}
                       value={brollFolderPath}
                     />
                   </label>
-                  <label className="field">
+                  <label className="field" hidden={Boolean(routeEditingSessionId)}>
                     <span>B롤 파일</span>
                     <textarea
                       onChange={(event) => setBrollSourcePaths(event.target.value)}
@@ -3534,7 +3737,7 @@ export function App({
                       value={brollSourcePaths}
                     />
                   </label>
-                  <label className="field">
+                  <label className="field" hidden={Boolean(routeEditingSessionId)}>
                     <span>B롤 태그</span>
                     <input
                       onChange={(event) => setBrollImportTags(event.target.value)}
@@ -3543,6 +3746,7 @@ export function App({
                   </label>
                   <button
                     className="action-button"
+                    hidden={Boolean(routeEditingSessionId)}
                     disabled={
                       !selectedProjectId ||
                       isImportingBroll ||
@@ -3571,8 +3775,9 @@ export function App({
                     onClick={() =>
                       void applyEditingMutation(
                         `${selectedEditingSegment.segment_id}-music`,
-                        () =>
-                          api.updateEditingSessionMusicOverride(
+                        () => routedEditorCommandPort
+                          ? routedEditorCommandPort.updateMediaControls({ kind: "bgm", segmentId: selectedEditingSegment.segment_id, assetId: selectedEditingDraft.musicAssetId, controls: selectedMusicControls })
+                          : api.updateEditingSessionMusicOverride(
                             selectedProjectId!,
                             activeEditingSessionId!,
                             selectedEditingSegment.segment_id,
@@ -3606,7 +3811,9 @@ export function App({
                         void applyEditingMutation(
                           `${selectedEditingSegment.segment_id}-music`,
                           () =>
-                            api.clearEditingSessionMusicOverride(
+                          routedEditorCommandPort
+                            ? routedEditorCommandPort.clearMedia({ kind: "bgm", segmentId: selectedEditingSegment.segment_id })
+                            : api.clearEditingSessionMusicOverride(
                               selectedProjectId!,
                               activeEditingSessionId!,
                               selectedEditingSegment.segment_id,
@@ -3634,6 +3841,7 @@ export function App({
                   </div>
                   <button
                     className="action-button"
+                    hidden={Boolean(routeEditingSessionId)}
                     disabled={
                       !selectedProjectId ||
                       !activeEditingSessionId ||
@@ -3643,8 +3851,9 @@ export function App({
                     onClick={() =>
                       void applyEditingMutation(
                         `${selectedEditingSegment.segment_id}-sfx`,
-                        () =>
-                          api.updateEditingSessionSfxOverride(
+                        () => routedEditorCommandPort
+                          ? routedEditorCommandPort.updateMediaControls({ kind: "sfx", segmentId: selectedEditingSegment.segment_id, assetId: selectedEditingDraft.sfxAssetId, controls: selectedSfxControls })
+                          : api.updateEditingSessionSfxOverride(
                             selectedProjectId!,
                             activeEditingSessionId!,
                             selectedEditingSegment.segment_id,
@@ -3676,7 +3885,9 @@ export function App({
                         void applyEditingMutation(
                           `${selectedEditingSegment.segment_id}-sfx`,
                           () =>
-                            api.clearEditingSessionSfxOverride(
+                          routedEditorCommandPort
+                            ? routedEditorCommandPort.clearMedia({ kind: "sfx", segmentId: selectedEditingSegment.segment_id })
+                            : api.clearEditingSessionSfxOverride(
                               selectedProjectId!,
                               activeEditingSessionId!,
                               selectedEditingSegment.segment_id,
@@ -3690,6 +3901,7 @@ export function App({
                       효과음 해제
                     </button>
                   ) : null}
+                  <div hidden={Boolean(routeEditingSessionId)}>
                   <label className="field">
                     <span>설명 제목</span>
                     <input
@@ -3737,8 +3949,9 @@ export function App({
                       isSavingEditingMutation === `${selectedEditingSegment.segment_id}-explanation`
                     }
                     onClick={() =>
-                      void applyEditingMutation(`${selectedEditingSegment.segment_id}-explanation`, () =>
-                        api.updateEditingSessionExplanationCard(
+                      void applyEditingMutation(`${selectedEditingSegment.segment_id}-explanation`, () => routedEditorCommandPort
+                        ? routedEditorCommandPort.applyOverlay({ kind: "explanation-card", segmentId: selectedEditingSegment.segment_id, title: selectedEditingDraft.explanationTitle, body: selectedEditingDraft.explanationBody, text: selectedEditingDraft.explanationText })
+                        : api.updateEditingSessionExplanationCard(
                           selectedProjectId!,
                           activeEditingSessionId!,
                           selectedEditingSegment.segment_id,
@@ -3776,8 +3989,9 @@ export function App({
                       onClick={() =>
                         void applyEditingMutation(
                           `${selectedEditingSegment.segment_id}-explanation`,
-                          () =>
-                            api.removeEditingSessionExplanationCard(
+                          () => routedEditorCommandPort
+                            ? routedEditorCommandPort.clearOverlay({ kind: "explanation-card", segmentId: selectedEditingSegment.segment_id })
+                            : api.removeEditingSessionExplanationCard(
                               selectedProjectId!,
                               activeEditingSessionId!,
                               selectedEditingSegment.segment_id,
@@ -3816,8 +4030,9 @@ export function App({
                       isSavingEditingMutation === `${selectedEditingSegment.segment_id}-image`
                     }
                     onClick={() =>
-                      void applyEditingMutation(`${selectedEditingSegment.segment_id}-image`, () =>
-                        api.updateEditingSessionImageOverlay(
+                      void applyEditingMutation(`${selectedEditingSegment.segment_id}-image`, () => routedEditorCommandPort
+                        ? routedEditorCommandPort.applyOverlay({ kind: "image", segmentId: selectedEditingSegment.segment_id, assetId: selectedEditingDraft.imageAssetId, text: selectedEditingDraft.imageText })
+                        : api.updateEditingSessionImageOverlay(
                           selectedProjectId!,
                           activeEditingSessionId!,
                           selectedEditingSegment.segment_id,
@@ -3850,8 +4065,9 @@ export function App({
                         isSavingEditingMutation === `${selectedEditingSegment.segment_id}-image`
                       }
                       onClick={() =>
-                        void applyEditingMutation(`${selectedEditingSegment.segment_id}-image`, () =>
-                          api.removeEditingSessionImageOverlay(
+                      void applyEditingMutation(`${selectedEditingSegment.segment_id}-image`, () => routedEditorCommandPort
+                          ? routedEditorCommandPort.clearOverlay({ kind: "image", segmentId: selectedEditingSegment.segment_id })
+                          : api.removeEditingSessionImageOverlay(
                             selectedProjectId!,
                             activeEditingSessionId!,
                             selectedEditingSegment.segment_id,
@@ -3912,8 +4128,9 @@ export function App({
                       isSavingEditingMutation === `${selectedEditingSegment.segment_id}-table`
                     }
                     onClick={() =>
-                      void applyEditingMutation(`${selectedEditingSegment.segment_id}-table`, () =>
-                        api.updateEditingSessionTableOverlay(
+                      void applyEditingMutation(`${selectedEditingSegment.segment_id}-table`, () => routedEditorCommandPort
+                        ? routedEditorCommandPort.applyOverlay({ kind: "table", segmentId: selectedEditingSegment.segment_id, columns: selectedEditingDraft.tableColumns.split(",").map((item) => item.trim()).filter(Boolean), rows: selectedEditingDraft.tableRows.split("\n").map((row) => row.split(",").map((cell) => cell.trim()).filter(Boolean)).filter((row) => row.length > 0), text: selectedEditingDraft.tableText })
+                        : api.updateEditingSessionTableOverlay(
                           selectedProjectId!,
                           activeEditingSessionId!,
                           selectedEditingSegment.segment_id,
@@ -3958,8 +4175,9 @@ export function App({
                         isSavingEditingMutation === `${selectedEditingSegment.segment_id}-table`
                       }
                       onClick={() =>
-                        void applyEditingMutation(`${selectedEditingSegment.segment_id}-table`, () =>
-                          api.removeEditingSessionTableOverlay(
+                      void applyEditingMutation(`${selectedEditingSegment.segment_id}-table`, () => routedEditorCommandPort
+                          ? routedEditorCommandPort.clearOverlay({ kind: "table", segmentId: selectedEditingSegment.segment_id })
+                          : api.removeEditingSessionTableOverlay(
                             selectedProjectId!,
                             activeEditingSessionId!,
                             selectedEditingSegment.segment_id,
@@ -3973,6 +4191,7 @@ export function App({
                       표 삭제
                     </button>
                   ) : null}
+                  </div>
                   <button
                     aria-describedby={
                       !selectedEditingDraft.ttsRecommendationId || !selectedEditingDraft.ttsAssetId
@@ -3980,6 +4199,7 @@ export function App({
                         : undefined
                     }
                     className="action-button"
+                    hidden={Boolean(routeEditingSessionId)}
                     disabled={
                       !selectedProjectId ||
                       !activeEditingSessionId ||
@@ -4015,6 +4235,7 @@ export function App({
                   ) : null}
                   <button
                     className="action-button"
+                    hidden={Boolean(routeEditingSessionId)}
                     disabled={
                       !selectedProjectId ||
                       !ttsCandidateVoiceSampleId.trim() ||
@@ -4037,7 +4258,7 @@ export function App({
                   ) : null}
                   {ttsCandidateMessage ? <p className="meta-copy">{ttsCandidateMessage}</p> : null}
                   {ttsCandidateError ? <p className="error-banner">{ttsCandidateError}</p> : null}
-                  <div className="tts-candidate-comparison">
+                  <div className="tts-candidate-comparison" hidden={Boolean(routeEditingSessionId)}>
                     <p className="section-kicker">내 목소리 후보 비교</p>
                     {isLoadingTtsCandidates ? <p className="meta-copy">불러오는 중...</p> : null}
                     {!isLoadingTtsCandidates && ttsCandidates.length === 0 ? (

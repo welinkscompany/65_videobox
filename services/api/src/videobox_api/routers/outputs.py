@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import threading
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, Request, status
+from fastapi.responses import FileResponse
 
+from videobox_api.content_delivery import deliver_file
 from videobox_api.errors import _http_error
 from videobox_api.models import (
     CapCutHandoffDiagnosticsResponse,
@@ -113,6 +115,7 @@ def build_outputs_router(orchestrator: ApiOrchestrator) -> APIRouter:
     @router.post("/api/projects/{project_id}/jobs/final-render", status_code=status.HTTP_202_ACCEPTED)
     def start_final_render(project_id: str, payload: OutputJobRequest) -> StartJobResponse:
         try:
+            orchestrator.assert_timeline_output_allowed(project_id=project_id, timeline_job_id=payload.timeline_job_id)
             result = orchestrator.start_final_render_job(
                 project_id=project_id,
                 timeline_job_id=payload.timeline_job_id,
@@ -144,9 +147,24 @@ def build_outputs_router(orchestrator: ApiOrchestrator) -> APIRouter:
             render=FinalRenderArtifactResponse(**result["render"]) if result["render"] else None,
         )
 
+    @router.get("/api/projects/{project_id}/final-renders/{job_id}/content")
+    def get_final_render_content(project_id: str, job_id: str, request: Request):
+        """Project-scoped browser playback for the composited MP4 artifact."""
+        try:
+            result = orchestrator.get_final_render_result(project_id=project_id, job_id=job_id)
+            render = result.get("render")
+            if not render or str(result.get("status")) != "succeeded":
+                raise KeyError("final_render_not_ready")
+            path = orchestrator.store.resolve_storage_uri(project_id=project_id, storage_uri=str(render["file_uri"]))
+            if not path.is_file(): raise KeyError("final_render_content_missing")
+            return deliver_file(request=request, path=path, media_type="video/mp4")
+        except Exception as exc:
+            raise _http_error(exc) from exc
+
     @router.post("/api/projects/{project_id}/jobs/capcut-draft-export", status_code=status.HTTP_202_ACCEPTED)
     def start_capcut_draft_export(project_id: str, payload: OutputJobRequest) -> StartJobResponse:
         try:
+            orchestrator.assert_timeline_output_allowed(project_id=project_id, timeline_job_id=payload.timeline_job_id)
             result = orchestrator.start_capcut_draft_export_job(
                 project_id=project_id,
                 timeline_job_id=payload.timeline_job_id,

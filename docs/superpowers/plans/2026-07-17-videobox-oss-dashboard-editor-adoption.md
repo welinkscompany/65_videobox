@@ -233,6 +233,8 @@ Commit: `feat: prepare a playable draft plan`
 
 - [ ] **Task 9 완료**
 
+> **2026-07-18 technical gate:** 구현·자동 검증은 완료했지만, 이 체크박스는 아직 열어 둔다. 실제 현재 revision 합성본을 사람이 재생해 승인하고, 실제 CapCut Desktop 등록을 확인해야 한다. 자동화된 로컬 FFmpeg/PyCapCut 및 브라우저 handoff smoke는 이 사람/환경 승인을 대체하지 않는다.
+
 **Files:** create atomic draft-bundle service/tests and script-first E2E; modify SQLite schema/store transaction, `local_pipeline.py`, API orchestration/router/models, Director proposal transaction adapter, create flow.
 
 - [ ] **RED:** approval-before-mutation, one atomic session+placement bundle, expected `brief_revision` and `draft_plan_revision`, idempotency key, concurrent duplicate submit, source SHA/media revision change after readiness, Nth asset materialization failure, per-SHA staging+atomic rename, staged-file cleanup, restart orphan cleanup, rollback on any failure, same-session retry, and no partial applied session.
@@ -251,7 +253,9 @@ Commit: `feat: create an edited draft from one approval`
 
 ### Task 10: Define the editor view model, role-action matrix, and playback manifest
 
-- [ ] **Task 10 완료**
+- [x] **Task 10 완료**
+
+> **2026-07-18 closeout:** project/session-scoped authoritative playback manifest, rational FPS/seconds timing, typed role-action `EditorCommandPort`, and the legacy editor boundary integration are independently verified. Task 9 remains unchecked: its human current-revision playback and actual CapCut Desktop gates are not replaced by this Task 10 completion. Task 9/10 and the creation-flow recovery changes are intentionally kept in one honest closeout commit; this does not turn the Task 9 human/environment gate into a completed task.
 
 **Files:** create backend playback domain/core/router/tests; create frontend adapter types/adapter/tests; modify API models/main/orchestration/local pipeline and `api.ts`.
 
@@ -458,7 +462,7 @@ Commit: `feat: release the VideoBox creator workspace`
 | 5. Assets/Eugene | 19–20 | previewable assets and inline recommendations apply explicitly |
 | 6. Release | 21–22 | responsive/a11y/visual/perf/parity/provenance gates and full release audit |
 
-Initial production progress is **0/22 Tasks (0%)**. Research/design/plan creation does not count as production implementation.
+Initial production progress was **0/22 Tasks (0%)**. Research/design/plan creation does not count as production implementation. Current verified cumulative implementation progress is **9/22 Tasks (40.9%)**, with **59.1%** remaining: Tasks 1–8 and Task 10 are complete; Task 9 remains open for its human/environment acceptance gate.
 
 ## 4. Explicitly deferred work
 

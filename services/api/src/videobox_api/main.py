@@ -23,6 +23,7 @@ from videobox_api.response_normalizers import (
 from videobox_api.routers.assets import build_assets_router
 from videobox_api.routers.creation_briefs import build_creation_briefs_router
 from videobox_api.routers.draft_readiness import build_draft_readiness_router
+from videobox_api.routers.atomic_draft_bundles import build_atomic_draft_bundles_router
 from videobox_api.routers.editing_session import build_editing_session_router
 from videobox_api.routers.director_proposals import build_director_proposals_router
 from videobox_api.routers.editor_library import build_editor_library_router
@@ -290,6 +291,7 @@ def create_app(
     app.include_router(build_projects_router(store))
     app.include_router(build_creation_briefs_router(orchestrator))
     app.include_router(build_draft_readiness_router(orchestrator))
+    app.include_router(build_atomic_draft_bundles_router(orchestrator))
     app.include_router(build_assets_router(orchestrator, store))
     app.include_router(build_media_analysis_router(store, orchestrator.media_analysis_service, orchestrator.media_analysis_dispatcher))
     app.include_router(build_jobs_router(orchestrator))

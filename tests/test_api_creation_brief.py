@@ -56,6 +56,29 @@ def test_creation_brief_api_supports_answer_bypass_edit_and_approval(tmp_path: P
     assert approved.json()["status"] == "approved"
 
 
+def test_creation_brief_api_returns_to_the_previous_saved_question(tmp_path: Path) -> None:
+    client = TestClient(create_app(projects_root=tmp_path))
+    project_id = client.post("/api/projects", json={"name": "Previous question"}).json()["project_id"]
+    path = f"/api/projects/{project_id}/creation-briefs"
+    brief = client.post(path, json={
+        "script_filename": "script.txt", "script_text": "소개 영상", "idempotency_key": "previous",
+        "capability_profile": {"ai_execution": "disabled"},
+    }).json()
+    answered = client.post(f"{path}/{brief['brief_id']}/answers", json={
+        "question_id": brief["questions"][0]["question_id"], "answer": "처음 방문한 고객",
+        "expected_revision": brief["revision"],
+    }).json()
+
+    previous = client.post(
+        f"{path}/{brief['brief_id']}/previous-question",
+        json={"expected_revision": answered["revision"]},
+    )
+
+    assert previous.status_code == 200
+    assert previous.json()["current_step"] == 0
+    assert previous.json()["answers"]["audience"] == "처음 방문한 고객"
+
+
 def test_creation_brief_api_accepts_utf8_script_upload_only(tmp_path: Path) -> None:
     client = TestClient(create_app(projects_root=tmp_path))
     project_id = client.post("/api/projects", json={"name": "Upload"}).json()["project_id"]

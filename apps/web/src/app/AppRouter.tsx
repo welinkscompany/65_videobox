@@ -8,6 +8,7 @@ import {
   useNavigate,
   useRouter,
 } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 
 import { api, type Project } from "../api";
 import { ProjectOnboarding } from "../ProjectOnboarding";
@@ -124,37 +125,45 @@ function WorkspacePage() {
   const projects = rootRoute.useLoaderData() as Project[];
   const navigate = useNavigate();
   const router = useRouter();
-  if (!isWorkspaceSection(section) || !projects.some((project) => project.project_id === projectId)) {
+  const requestedEditingSessionId = typeof router.state.location.search.session_id === "string"
+    ? router.state.location.search.session_id
+    : null;
+  const normalizedSection = section === "editor" ? "editing" : section;
+  if (!isWorkspaceSection(normalizedSection) || !projects.some((project) => project.project_id === projectId)) {
     return <RecoveryPage />;
   }
   window.localStorage.setItem(lastProjectKey, projectId);
   const navigateTo = (nextProjectId: string, nextSection: WorkspaceSection) => {
     void navigate({ to: resolveWorkspaceLocation(nextProjectId, nextSection) });
   };
-  if (section === "home") {
+  if (normalizedSection === "home") {
     return <ProductShell projectId={projectId} projects={projects} section="home" onNavigate={navigateTo} onOpenSettings={() => void navigate({ to: "/settings/general" })}>
       <HomePage projectId={projectId} onNavigate={navigateTo} />
     </ProductShell>;
   }
-  if (section === "create") {
+  if (normalizedSection === "create") {
     return <ProductShell projectId={projectId} projects={projects} section="create" onNavigate={navigateTo} onOpenSettings={() => void navigate({ to: "/settings/general" })}>
       <CreationInterview projectId={projectId} />
     </ProductShell>;
   }
-  if (section === "media" || section === "outputs") {
-    const isMedia = section === "media";
+  if (normalizedSection === "media" || normalizedSection === "outputs") {
+    const isMedia = normalizedSection === "media";
     const requestedReturn = isMedia ? new URLSearchParams(window.location.search).get("return_to") : null;
     const safeReturn = requestedReturn && requestedReturn.startsWith(`/projects/${projectId}/create`) ? requestedReturn : null;
     if (isMedia && safeReturn) return <ProductShell projectId={projectId} projects={projects} section={section} onNavigate={navigateTo} onOpenSettings={() => void navigate({ to: "/settings/general" })}><DraftGapMedia projectId={projectId} returnTo={safeReturn} /></ProductShell>;
-    return <ProductShell projectId={projectId} projects={projects} section={section} onNavigate={navigateTo} onOpenSettings={() => void navigate({ to: "/settings/general" })}>
+    return <ProductShell projectId={projectId} projects={projects} section={normalizedSection} onNavigate={navigateTo} onOpenSettings={() => void navigate({ to: "/settings/general" })}>
       <ProductEmptyPage title={isMedia ? "자산을 준비해 주세요" : "아직 완성본이 없어요"} description={isMedia ? "영상에 넣을 사진, 영상, 소리를 추가하면 여기에서 고를 수 있어요." : "편집을 마치면 이곳에서 완성본을 확인할 수 있어요."} action={safeReturn ? "기획으로 돌아가기" : isMedia ? "새 영상 만들기" : "편집 열기"} onClick={() => safeReturn ? window.location.assign(safeReturn) : navigateTo(projectId, isMedia ? "create" : "editing")} />
     </ProductShell>;
+  }
+  if (section === "editor" && !requestedEditingSessionId) {
+    return <CanonicalEditorEntry projectId={projectId} />;
   }
   return (
     <ProjectWorkspaceProvider value={{ projectId, section, projects }}>
       <LegacyWorkspacePage
         projectId={projectId}
-        section={section}
+        section={normalizedSection}
+        editingSessionId={normalizedSection === "editing" ? requestedEditingSessionId : null}
         catalogProjects={projects}
         onNavigate={navigateTo}
         onProjectCreated={async (project) => {
@@ -165,6 +174,31 @@ function WorkspacePage() {
       />
     </ProjectWorkspaceProvider>
   );
+}
+
+function CanonicalEditorEntry({ projectId }: { projectId: string }) {
+  const navigate = useNavigate();
+  const [message, setMessage] = useState("편집할 초안을 불러오는 중이에요.");
+  useEffect(() => {
+    let cancelled = false;
+    void api.getLatestEditingSession(projectId).then((session) => {
+      if (cancelled) return;
+      if (!session) {
+        setMessage("먼저 영상 초안을 만들어 주세요.");
+        return;
+      }
+      void navigate({
+        to: "/projects/$projectId/$section",
+        params: { projectId, section: "editor" },
+        search: { session_id: session.session_id },
+        replace: true,
+      });
+    }).catch(() => {
+      if (!cancelled) setMessage("초안을 불러오지 못했어요. 다시 시도해 주세요.");
+    });
+    return () => { cancelled = true; };
+  }, [navigate, projectId]);
+  return <main aria-live="polite"><p>{message}</p></main>;
 }
 
 function SettingsRoutePage() {

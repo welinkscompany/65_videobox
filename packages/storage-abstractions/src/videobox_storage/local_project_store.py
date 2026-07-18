@@ -7,6 +7,7 @@ from copy import deepcopy
 import re
 import shutil
 import sqlite3
+import subprocess
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -207,10 +208,46 @@ def _timeline_summary_json(payload: dict[str, Any]) -> str:
 
 
 class LocalProjectStore:
-    def __init__(self, projects_root: Path, now: Callable[[], datetime] | None = None) -> None:
+    def __init__(
+        self,
+        projects_root: Path,
+        now: Callable[[], datetime] | None = None,
+        *,
+        atomic_bundle_fault_hook: Callable[[str], None] | None = None,
+    ) -> None:
         self.projects_root = Path(projects_root)
         self._clock = now or (lambda: datetime.now(UTC))
+        # Deliberately injectable only for deterministic failure-contract tests.
+        # Production callers leave this unset; it is never a runtime provider hook.
+        self._atomic_bundle_fault_hook = atomic_bundle_fault_hook
         self._reconcile_batch_director_operations()
+        self._reconcile_atomic_draft_bundle_operations()
+
+    def _reconcile_atomic_draft_bundle_operations(self) -> None:
+        """Discard uncommitted draft-bundle stages left by a crash.
+
+        The SQLite bundle row is authoritative.  A stage with no matching
+        committed bundle is disposable and must never become a later draft.
+        """
+        projects = self.projects_root / "projects"
+        if not projects.exists(): return
+        for project_root in projects.iterdir():
+            staging = project_root / "staging"
+            if not staging.is_dir(): continue
+            for candidate in staging.glob("draft-bundle-*"):
+                manifest = candidate / "operation.json"
+                if candidate.is_dir() and manifest.exists(): shutil.rmtree(candidate, ignore_errors=True)
+
+    def _write_atomic_bundle_manifest(self, stage: Path, manifest: dict[str, Any]) -> None:
+        """Durably publish the stage inventory before any mirror is made visible."""
+        target = stage / "operation.json"
+        temporary = target.with_suffix(".tmp")
+        temporary.write_text(json.dumps(manifest, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+        temporary.replace(target)
+
+    def _atomic_bundle_fault(self, event: str) -> None:
+        if self._atomic_bundle_fault_hook is not None:
+            self._atomic_bundle_fault_hook(event)
 
     def bootstrap_project(self, name: str) -> ProjectRecord:
         project = ProjectRecord.create(name=name)
@@ -550,7 +587,10 @@ class LocalProjectStore:
                 raise ValueError("creation_brief_question_not_current")
             answers = json.loads(row["answers_json"])
             answers[question["field"]] = normalized
-            current_step = sum(1 for item in questions if item["field"] in answers)
+            # The cursor advances from the question just answered.  Counting all
+            # saved answers would skip a question after the creator returns to
+            # revise an earlier answer.
+            current_step = questions.index(question) + 1
             status = "ready_for_approval" if current_step == len(questions) else "interviewing"
             connection.execute(
                 """UPDATE creation_briefs
@@ -577,6 +617,33 @@ class LocalProjectStore:
                 {item["field"]: json.loads(row["answers_json"]).get(item["field"], "건너뛰기") for item in json.loads(row["questions_json"])},
                 len(json.loads(row["questions_json"])), "ready_for_approval", row["summary_text"],
             ),
+        )
+
+    def previous_creation_brief_question(
+        self, *, project_id: str, brief_id: str, expected_revision: int
+    ) -> dict[str, Any]:
+        """Return to the prior durable question without discarding saved answers.
+
+        A changed answer can alter the generated summary, so any earlier summary is
+        cleared and must be reviewed again before approval.
+        """
+        def previous(row: sqlite3.Row) -> tuple[dict[str, str], int, str, str]:
+            questions = json.loads(row["questions_json"])
+            current_step = int(row["current_step"])
+            if current_step <= 0 or not questions:
+                raise ValueError("creation_brief_previous_question_unavailable")
+            return (
+                json.loads(row["answers_json"]),
+                min(current_step - 1, len(questions) - 1),
+                "interviewing",
+                "",
+            )
+
+        return self._mutate_creation_brief(
+            project_id=project_id,
+            brief_id=brief_id,
+            expected_revision=expected_revision,
+            mutation=previous,
         )
 
     def update_creation_brief_summary(
@@ -736,17 +803,96 @@ class LocalProjectStore:
             "error_code": row["error_code"], "created_at": row["created_at"], "updated_at": row["updated_at"],
         }
 
+    def _probe_playable_broll_duration(self, *, project_id: str, asset: dict[str, Any]) -> float | None:
+        path = self.resolve_storage_uri(project_id=project_id, storage_uri=str(asset["storage_uri"]))
+        if not path.is_file() or shutil.which("ffprobe") is None:
+            return None
+        try:
+            result = subprocess.run(
+                ["ffprobe", "-v", "error", "-show_entries", "format=duration:stream=codec_type", "-of", "json", str(path)],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+            probe = json.loads(result.stdout) if result.returncode == 0 else {}
+            duration_sec = float((probe.get("format") or {}).get("duration"))
+            has_video = any(stream.get("codec_type") == "video" for stream in probe.get("streams") or [])
+            return duration_sec if has_video and math.isfinite(duration_sec) and duration_sec > 0 else None
+        except (OSError, subprocess.SubprocessError, TypeError, ValueError, json.JSONDecodeError):
+            return None
+
+    @staticmethod
+    def _candidate_range_is_usable(candidate: dict[str, Any], duration_sec: float) -> bool:
+        target_range = candidate.get("target_range") or {}
+        try:
+            start_sec, end_sec = float(target_range.get("start_sec")), float(target_range.get("end_sec"))
+        except (TypeError, ValueError):
+            return False
+        return math.isfinite(start_sec) and math.isfinite(end_sec) and 0 <= start_sec < end_sec <= duration_sec
+
+    def _draft_readiness_sources_match(self, *, project_id: str, result: dict[str, Any]) -> bool:
+        try:
+            for item in result.get("source_snapshot") or []:
+                asset = self.get_asset(project_id=project_id, asset_id=str(item["asset_id"]))
+                path = self.resolve_storage_uri(project_id=project_id, storage_uri=str(asset["storage_uri"]))
+                if not path.is_file() or sha256_file(path) != item.get("sha256"):
+                    return False
+        except (KeyError, TypeError, ValueError, OSError):
+            return False
+        return True
+
+    def _normalize_draft_readiness_result(self, *, project_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        if not self._draft_readiness_sources_match(project_id=project_id, result=payload["result"]):
+            return payload["result"]
+        try:
+            brief = self.get_creation_brief(project_id=project_id, brief_id=str(payload["brief_id"]))
+            planned = self._draft_readiness_plan(project_id=project_id, brief=brief, narration=dict(payload["narration"]))
+        except (KeyError, ValueError, TypeError):
+            return payload["result"]
+        existing = {str(item.get("asset_id")): item for item in payload["result"].get("broll_candidates", []) if isinstance(item, dict)}
+        candidates = []
+        for item in planned["broll_candidates"]:
+            restored = deepcopy(item)
+            previous = existing.get(str(item["asset_id"]))
+            if previous and self._candidate_range_is_usable(previous, float(item["media_duration_sec"])):
+                restored["target_range"] = deepcopy(previous["target_range"])
+                restored["skipped"] = bool(previous.get("skipped"))
+            candidates.append(restored)
+        result = deepcopy(payload["result"])
+        result["broll_candidates"] = candidates
+        if candidates != payload["result"].get("broll_candidates", []) or (not result.get("gap_slots") and planned["gap_slots"]):
+            result["gap_slots"] = planned["gap_slots"]
+        result["source_snapshot"] = planned["source_snapshot"]
+        return result
+
     def _draft_readiness_plan(self, *, project_id: str, brief: dict[str, Any], narration: dict[str, Any]) -> dict[str, Any]:
         sentences = [value.strip() for value in re.split(r"[.!?\n]+", str(brief["script_text"])) if value.strip()]
         segments = [{"segment_id": f"script-{index + 1}", "text": text, "start_sec": index * 5, "end_sec": (index + 1) * 5} for index, text in enumerate(sentences or [str(brief["script_text"]).strip()])]
         assets = self.list_assets(project_id=project_id)
-        broll = [{"asset_id": item["asset_id"], "rank": index + 1, "label": item["metadata"].get("title") or f"장면 영상 {index + 1}", "segment_id": segments[min(index, len(segments) - 1)]["segment_id"], "target_range": {"start_sec": index * 5, "end_sec": min((index + 1) * 5, len(segments) * 5)}, "media_type": "broll_video", "selection": item["asset_id"], "skipped": False} for index, item in enumerate(item for item in assets if item["asset_type"] == AssetType.BROLL_VIDEO.value)]
+        playable_broll = [(item, self._probe_playable_broll_duration(project_id=project_id, asset=item)) for item in assets if item["asset_type"] == AssetType.BROLL_VIDEO.value]
+        playable_broll = [(item, duration_sec) for item, duration_sec in playable_broll if duration_sec is not None]
+        broll = []
+        for index, (segment, (item, duration_sec)) in enumerate(zip(segments, playable_broll)):
+            broll.append({"asset_id": item["asset_id"], "rank": index + 1, "label": item["metadata"].get("title") or f"장면 영상 {index + 1}", "segment_id": segment["segment_id"], "target_range": {"start_sec": 0, "end_sec": min(5.0, duration_sec)}, "media_duration_sec": duration_sec, "media_type": "broll_video", "selection": item["asset_id"], "skipped": False})
         def choice(asset_type: AssetType, label: str) -> dict[str, Any]:
             item = next((asset for asset in assets if asset["asset_type"] == asset_type.value), None)
             return {"selection": item["asset_id"], "reason": "프로젝트 자산에서 골랐어요."} if item else {"selection": None, "reason": f"프로젝트에 사용할 {label}이 없어요."}
-        gaps = [] if broll else [{"gap_slot_id": "gap-broll-1", "reason": "장면을 보여 줄 영상이 없어요.", "target_range": {"start_sec": 0, "end_sec": min(5, len(segments) * 5)}, "media_type": "broll_video"}]
+        covered_segment_ids = {str(item["segment_id"]) for item in broll}
+        gaps = [
+            {"gap_slot_id": f"gap-broll-{index + 1}", "segment_id": segment["segment_id"], "reason": "장면을 보여 줄 영상이 없어요.", "target_range": {"start_sec": segment["start_sec"], "end_sec": segment["end_sec"]}, "media_type": "broll_video"}
+            for index, segment in enumerate(segments)
+            if str(segment["segment_id"]) not in covered_segment_ids
+        ]
+        selected_ids = [brief.get("script_asset_id"), narration.get("asset_id")] + [item["asset_id"] for item in broll]
+        snapshots = []
+        for asset_id in dict.fromkeys(str(item) for item in selected_ids if item):
+            asset = self.get_asset(project_id=project_id, asset_id=asset_id)
+            path = self.resolve_storage_uri(project_id=project_id, storage_uri=str(asset["storage_uri"]))
+            if not path.is_file(): raise ValueError("draft_readiness_source_missing")
+            snapshots.append({"asset_id": asset_id, "sha256": sha256_file(path), "media_revision": asset["created_at"], "asset_type": asset["asset_type"]})
         return {"script_segments": segments, "caption_texts": [item["text"] for item in segments], "narration": narration,
-                "broll_candidates": broll, "bgm": choice(AssetType.BGM, "배경음"), "sfx": choice(AssetType.SFX, "효과음"), "gap_slots": gaps}
+                "broll_candidates": broll, "bgm": choice(AssetType.BGM, "배경음"), "sfx": choice(AssetType.SFX, "효과음"), "gap_slots": gaps, "source_snapshot": snapshots}
 
     def start_draft_readiness(self, *, project_id: str, brief_id: str, narration_choice: dict[str, Any], idempotency_key: str, expected_brief_revision: int, capability: dict[str, Any] | None = None, defer: bool = True) -> dict[str, Any]:
         brief = self.get_creation_brief(project_id=project_id, brief_id=brief_id)
@@ -782,17 +928,231 @@ class LocalProjectStore:
     def get_draft_readiness(self, *, project_id: str, readiness_id: str) -> dict[str, Any]:
         row = self._fetchone(project_id, "SELECT * FROM draft_readiness WHERE project_id = ? AND readiness_id = ?", (project_id, readiness_id))
         if row is None: raise KeyError(f"Draft readiness not found: {readiness_id}")
-        return self._draft_readiness_payload(row)
+        payload = self._draft_readiness_payload(row)
+        if payload["status"] not in {"ready", "needs_assets"} or not payload["result"]:
+            return payload
+        normalized_result = self._normalize_draft_readiness_result(project_id=project_id, payload=payload)
+        normalized_status = "needs_assets" if normalized_result.get("gap_slots") else payload["status"]
+        if normalized_result == payload["result"] and normalized_status == payload["status"]:
+            return payload
+        self._execute(project_id, "UPDATE draft_readiness SET result_json = ?, status = ?, revision = revision + 1, updated_at = ? WHERE readiness_id = ? AND revision = ?", (json.dumps(normalized_result, ensure_ascii=False), normalized_status, self._now_iso(), readiness_id, payload["revision"]))
+        refreshed = self._fetchone(project_id, "SELECT * FROM draft_readiness WHERE project_id = ? AND readiness_id = ?", (project_id, readiness_id))
+        if refreshed is None: raise KeyError(f"Draft readiness not found: {readiness_id}")
+        return self._draft_readiness_payload(refreshed)
 
     def list_draft_readiness(self, *, project_id: str) -> list[dict[str, Any]]:
         connection = self._connection(project_id)
-        try: return [self._draft_readiness_payload(row) for row in connection.execute("SELECT * FROM draft_readiness WHERE project_id = ? ORDER BY created_at DESC", (project_id,)).fetchall()]
-        finally: connection.close()
+        try:
+            readiness_ids = [str(row["readiness_id"]) for row in connection.execute("SELECT readiness_id FROM draft_readiness WHERE project_id = ? ORDER BY created_at DESC", (project_id,)).fetchall()]
+        finally:
+            connection.close()
+        return [self.get_draft_readiness(project_id=project_id, readiness_id=readiness_id) for readiness_id in readiness_ids]
 
     def list_editing_sessions(self, *, project_id: str) -> list[dict[str, Any]]:
         connection = self._connection(project_id)
         try: return [dict(row) for row in connection.execute("SELECT * FROM editing_sessions WHERE project_id = ?", (project_id,)).fetchall()]
         finally: connection.close()
+
+    def materialize_atomic_draft_bundle(
+        self, *, project_id: str, brief_id: str, expected_brief_revision: int,
+        readiness_id: str, expected_readiness_revision: int, idempotency_key: str,
+        allow_placeholder: bool = False,
+    ) -> dict[str, Any]:
+        """Create the first editable draft as one durable operation.
+
+        This intentionally does not call ``save_timeline_run`` followed by
+        ``save_editing_session``: either both rows (and their staged mirrors)
+        become visible, or neither does.  A readiness snapshot is rechecked
+        under the writer lock so a later script/media change cannot be applied.
+        """
+        if not idempotency_key.strip():
+            raise ValueError("atomic_draft_bundle_idempotency_required")
+        brief = self.get_creation_brief(project_id=project_id, brief_id=brief_id)
+        readiness = self.get_draft_readiness(project_id=project_id, readiness_id=readiness_id)
+        if brief["status"] != "approved": raise ValueError("atomic_draft_bundle_brief_not_approved")
+        if int(brief["revision"]) != int(expected_brief_revision): raise ValueError("atomic_draft_bundle_brief_revision_conflict")
+        if readiness["brief_id"] != brief_id: raise ValueError("atomic_draft_bundle_brief_mismatch")
+        if int(readiness["revision"]) != int(expected_readiness_revision): raise ValueError("atomic_draft_bundle_readiness_revision_conflict")
+        if readiness["status"] not in {"ready", "needs_assets"}: raise ValueError("atomic_draft_bundle_not_ready")
+        result = readiness.get("result") or {}
+        gaps = list(result.get("gap_slots") or [])
+        if gaps and not allow_placeholder: raise ValueError("atomic_draft_bundle_gaps_require_placeholder_approval")
+        fingerprint = hashlib.sha256(json.dumps({"brief": [brief_id, brief["revision"], brief.get("script_asset_id")], "readiness": [readiness_id, readiness["revision"], readiness.get("input_fingerprint")], "placeholder": allow_placeholder}, sort_keys=True).encode()).hexdigest()
+        root = self.project_root(project_id); stage = root / "staging" / f"draft-bundle-{uuid.uuid4().hex}"
+        stage.mkdir(parents=True, exist_ok=True)
+        manifest: dict[str, Any] = {
+            "kind": "atomic_draft_bundle",
+            "status": "staging",
+            "fingerprint": fingerprint,
+            "artifacts": [],
+        }
+        self._write_atomic_bundle_manifest(stage, manifest)
+        created: list[Path] = []
+        try:
+            def publish(staged: Path, target: Path, *, kind: str) -> None:
+                """Record source SHA first, then atomically mirror one staged artifact."""
+                digest = sha256_file(staged)
+                manifest["artifacts"].append(
+                    {
+                        "kind": kind,
+                        "staged_name": staged.name,
+                        "target_uri": self._path_to_uri(project_id, target),
+                        "sha256": digest,
+                    }
+                )
+                self._write_atomic_bundle_manifest(stage, manifest)
+                temporary = target.with_suffix(target.suffix + ".stage")
+                shutil.copy2(staged, temporary)
+                if sha256_file(temporary) != digest:
+                    temporary.unlink(missing_ok=True)
+                    raise OSError("atomic_draft_bundle_staged_copy_sha_mismatch")
+                temporary.replace(target)
+                created.append(target)
+                self._atomic_bundle_fault(f"after_copy:{len(created)}")
+            connection = self._connection(project_id)
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                existing = connection.execute("SELECT * FROM atomic_draft_bundles WHERE project_id=? AND idempotency_key=?", (project_id, idempotency_key)).fetchone()
+                if existing is not None:
+                    if str(existing["input_fingerprint"]) != fingerprint: raise ValueError("atomic_draft_bundle_idempotency_conflict")
+                    connection.commit(); return json.loads(str(existing["result_json"]))
+                current_brief = connection.execute("SELECT revision,status FROM creation_briefs WHERE brief_id=? AND project_id=?", (brief_id, project_id)).fetchone()
+                current_readiness = connection.execute("SELECT revision,status,result_json FROM draft_readiness WHERE readiness_id=? AND project_id=?", (readiness_id, project_id)).fetchone()
+                if current_brief is None or str(current_brief["status"]) != "approved" or int(current_brief["revision"]) != int(expected_brief_revision): raise ValueError("atomic_draft_bundle_brief_revision_conflict")
+                if current_readiness is None or int(current_readiness["revision"]) != int(expected_readiness_revision): raise ValueError("atomic_draft_bundle_readiness_revision_conflict")
+                current_result = json.loads(str(current_readiness["result_json"] or "{}")); current_gaps = list(current_result.get("gap_slots") or [])
+                if current_gaps and not allow_placeholder: raise ValueError("atomic_draft_bundle_gaps_require_placeholder_approval")
+                for snapshot in current_result.get("source_snapshot", []):
+                    source = connection.execute("SELECT storage_uri,created_at FROM assets WHERE project_id=? AND asset_id=?", (project_id, str(snapshot.get("asset_id") or ""))).fetchone()
+                    if source is None or str(source["created_at"]) != str(snapshot.get("media_revision") or ""):
+                        raise ValueError("atomic_draft_bundle_source_revision_conflict")
+                    path = self.resolve_storage_uri(project_id=project_id, storage_uri=str(source["storage_uri"]))
+                    if not path.is_file() or sha256_file(path) != str(snapshot.get("sha256") or ""):
+                        raise ValueError("atomic_draft_bundle_source_sha_conflict")
+                timeline_id = f"timeline_draft_{uuid.uuid4().hex[:12]}"; session_id = f"editing_session_draft_{uuid.uuid4().hex[:12]}"; bundle_id = f"draft_bundle_{uuid.uuid4().hex[:12]}"; timeline_job_id = f"timeline_build_job_draft_{uuid.uuid4().hex[:12]}"
+                narration = dict(readiness.get("narration") or {}); narration_asset_id = narration.get("asset_id")
+                asset_ids: list[str] = []; silence_stage: Path | None = None
+                if narration.get("kind") == "silent":
+                    import wave
+                    narration_asset_id = f"asset_silence_{uuid.uuid4().hex[:12]}"; silence_stage = stage / "silence.wav"
+                    with wave.open(str(silence_stage), "wb") as wav:
+                        wav.setnchannels(1); wav.setsampwidth(2); wav.setframerate(16000); wav.writeframes(b"\x00\x00" * 16000)
+                    destination = root / "assets" / "narration_audio" / f"{narration_asset_id}.wav"; destination.parent.mkdir(parents=True, exist_ok=True)
+                    publish(silence_stage, destination, kind="narration_silence")
+                    uri = self._path_to_uri(project_id, destination)
+                    connection.execute("INSERT INTO assets (asset_id,project_id,asset_type,storage_uri,source_kind,mime_type,duration_sec,metadata_json,created_at) VALUES (?,?,?,?,?,?,?,?,?)", (narration_asset_id, project_id, AssetType.NARRATION_AUDIO.value, uri, "deterministic_silence", "audio/wav", 1.0, json.dumps({"draft_bundle_id": bundle_id, "provenance": "local deterministic silence"}), self._now_iso()))
+                    asset_ids.append(narration_asset_id)
+                elif narration.get("kind") == "source_video" and narration_asset_id:
+                    source = connection.execute("SELECT asset_type,storage_uri FROM assets WHERE project_id=? AND asset_id=?", (project_id, narration_asset_id)).fetchone()
+                    if source is None or str(source["asset_type"]) != AssetType.RAW_VIDEO.value:
+                        raise ValueError("atomic_draft_bundle_narration_invalid")
+                    # CapCut's narration track accepts audio only.  Keep the raw-video
+                    # source snapshot immutable and derive a local, inspectable WAV
+                    # inside this operation rather than silently asking an external
+                    # provider to extract it.
+                    normalized_stage = stage / "source-video-narration.wav"
+                    source_path = self.resolve_storage_uri(project_id=project_id, storage_uri=str(source["storage_uri"]))
+                    try:
+                        subprocess.run(
+                            ["ffmpeg", "-y", "-i", str(source_path), "-vn", "-ac", "1", "-ar", "16000", str(normalized_stage)],
+                            check=True, capture_output=True, timeout=60,
+                        )
+                    except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+                        raise ValueError("atomic_draft_bundle_source_video_audio_normalization_failed") from exc
+                    narration_asset_id = f"asset_source_video_narration_{uuid.uuid4().hex[:12]}"
+                    destination = root / "assets" / "narration_audio" / f"{narration_asset_id}.wav"
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    publish(normalized_stage, destination, kind="source_video_narration")
+                    uri = self._path_to_uri(project_id, destination)
+                    connection.execute(
+                        "INSERT INTO assets (asset_id,project_id,asset_type,storage_uri,source_kind,mime_type,duration_sec,metadata_json,created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                        (narration_asset_id, project_id, AssetType.NARRATION_AUDIO.value, uri, "source_video_audio_normalized", "audio/wav", None, json.dumps({"draft_bundle_id": bundle_id, "source_asset_id": narration.get("asset_id")}), self._now_iso()),
+                    )
+                    asset_ids.append(narration_asset_id)
+                elif narration_asset_id:
+                    source = connection.execute("SELECT asset_type FROM assets WHERE project_id=? AND asset_id=?", (project_id, narration_asset_id)).fetchone()
+                    if source is None or str(source["asset_type"]) == AssetType.VOICE_SAMPLE_AUDIO.value: raise ValueError("atomic_draft_bundle_narration_invalid")
+                    asset_ids.append(str(narration_asset_id))
+                else: raise ValueError("atomic_draft_bundle_narration_missing")
+                narration_asset = connection.execute("SELECT storage_uri,created_at FROM assets WHERE project_id=? AND asset_id=?", (project_id, narration_asset_id)).fetchone()
+                if narration_asset is None:
+                    raise ValueError("atomic_draft_bundle_narration_missing")
+                narration_path = self.resolve_storage_uri(project_id=project_id, storage_uri=str(narration_asset["storage_uri"]))
+                narration_sha256 = sha256_file(narration_path)
+                narration_provenance = {"sha256": narration_sha256, "media_revision": str(narration_asset["created_at"])}
+                placeholder_assets: list[tuple[str, dict[str, Any], str, str]] = []
+                if current_gaps:
+                    for gap in current_gaps:
+                        placeholder_asset_id = f"asset_gap_placeholder_{uuid.uuid4().hex[:12]}"
+                        destination = root / "assets" / "broll_video" / f"{placeholder_asset_id}.svg"; destination.parent.mkdir(parents=True, exist_ok=True)
+                        placeholder_svg = "<svg xmlns='http://www.w3.org/2000/svg' width='1280' height='720'><rect width='100%' height='100%' fill='#f7f7f7'/><text x='640' y='360' text-anchor='middle' fill='#555' font-size='36'>자산이 필요한 임시 장면</text></svg>"
+                        staged_placeholder = stage / destination.name
+                        staged_placeholder.write_text(placeholder_svg, encoding="utf-8")
+                        publish(staged_placeholder, destination, kind="gap_placeholder")
+                        uri = self._path_to_uri(project_id, destination)
+                        placeholder_created_at = self._now_iso(); placeholder_sha256 = sha256_file(destination)
+                        connection.execute("INSERT INTO assets (asset_id,project_id,asset_type,storage_uri,source_kind,mime_type,duration_sec,metadata_json,created_at) VALUES (?,?,?,?,?,?,?,?,?)", (placeholder_asset_id, project_id, AssetType.BROLL_VIDEO.value, uri, "draft_gap_placeholder", "image/svg+xml", None, json.dumps({"draft_bundle_id": bundle_id, "gap_slot_id": gap.get("gap_slot_id"), "label": "자산이 필요한 임시 장면", "in_app_only": True}), placeholder_created_at))
+                        asset_ids.append(placeholder_asset_id)
+                        placeholder_assets.append((placeholder_asset_id, gap, placeholder_sha256, placeholder_created_at))
+                provenance_by_asset = {str(item.get("asset_id")): item for item in current_result.get("source_snapshot", []) if isinstance(item, dict)}
+                segments = list(current_result.get("script_segments") or []); clips: list[dict[str, Any]] = []
+                for index, item in enumerate(segments):
+                    segment_id = f"segment_draft_{uuid.uuid4().hex[:10]}"; clips.append({"clip_id": f"clip_caption_{uuid.uuid4().hex[:10]}", "segment_id": segment_id, "text": item.get("text", ""), "start_sec": item.get("start_sec", index * 5), "end_sec": item.get("end_sec", (index + 1) * 5)})
+                    connection.execute("INSERT INTO segments (segment_id,project_id,start_sec,end_sec,text,source_asset_id,metadata_json) VALUES (?,?,?,?,?,?,?)", (segment_id, project_id, clips[-1]["start_sec"], clips[-1]["end_sec"], clips[-1]["text"], brief.get("script_asset_id"), json.dumps({"draft_bundle_id": bundle_id})))
+                broll = [item for item in current_result.get("broll_candidates", []) if not item.get("skipped")]
+                for item in broll:
+                    asset_ids.append(str(item["asset_id"])); provenance = provenance_by_asset.get(str(item["asset_id"]), {})
+                    clips.append({"clip_id": f"clip_broll_{uuid.uuid4().hex[:10]}", "clip_type": "broll", "asset_id": item["asset_id"], "segment_id": item.get("segment_id") or (clips[0]["segment_id"] if clips else "segment_broll"), "start_sec": item.get("target_range", {}).get("start_sec", 0), "end_sec": item.get("target_range", {}).get("end_sec", 5), "media_controls": {}, "expected_content_sha256": provenance.get("sha256"), "media_revision": provenance.get("media_revision")})
+                for placeholder_asset_id, gap, placeholder_sha256, placeholder_created_at in placeholder_assets:
+                    clips.append({"clip_id": f"clip_gap_placeholder_{uuid.uuid4().hex[:10]}", "clip_type": "broll", "asset_id": placeholder_asset_id, "segment_id": gap.get("segment_id") or gap.get("gap_slot_id"), "gap_slot_id": gap.get("gap_slot_id"), "label": "자산이 필요한 임시 장면", "start_sec": gap.get("target_range", {}).get("start_sec", 0), "end_sec": gap.get("target_range", {}).get("end_sec", 5), "media_controls": {}, "expected_content_sha256": placeholder_sha256, "media_revision": placeholder_created_at})
+                asset_uris = {str(row["asset_id"]): str(row["storage_uri"]) for row in connection.execute("SELECT asset_id,storage_uri FROM assets WHERE project_id=?", (project_id,)).fetchall()}
+                narration_clip = {"clip_id": f"clip_narration_{uuid.uuid4().hex[:10]}", "clip_type": "narration", "asset_id": narration_asset_id, "segment_id": clips[0]["segment_id"] if clips else "segment_narration", "asset_uri": asset_uris[str(narration_asset_id)], "start_sec": 0, "end_sec": max([c["end_sec"] for c in clips] or [1]), "media_controls": {}, "expected_content_sha256": narration_provenance.get("sha256"), "media_revision": narration_provenance.get("media_revision")}
+                broll_clips = [{**c, "asset_uri": asset_uris.get(str(c.get("asset_id")), "")} for c in clips if "asset_id" in c and c.get("asset_id") != narration_asset_id]
+                tracks = [{"track_id": f"track_narration_{uuid.uuid4().hex[:8]}", "track_type": "narration", "clips": [narration_clip]}, {"track_id": f"track_caption_{uuid.uuid4().hex[:8]}", "track_type": "caption", "clips": [c for c in clips if "text" in c]}, {"track_id": f"track_broll_{uuid.uuid4().hex[:8]}", "track_type": "broll", "clips": broll_clips}]
+                review_flags = [{"code": "draft_gap_placeholder", "segment_id": gap.get("gap_slot_id"), "message": "자산이 필요한 임시 장면입니다."} for gap in current_gaps]
+                timeline = {"timeline_id": timeline_id, "project_id": project_id, "version": "draft-v1", "source_session_id": session_id, "source_session_revision": 1, "tracks": tracks, "gap_slots": current_gaps, "review_flags": review_flags, "pending_recommendations": [], "applied_recommendations": [], "bgm_policy": current_result.get("bgm"), "sfx_policy": current_result.get("sfx"), "placeholder_policy": "in_app_only" if current_gaps else None}
+                session_segments = [
+                    {
+                        "segment_id": clip["segment_id"],
+                        "caption_text": str(clip.get("text") or ""),
+                        "start_sec": float(clip["start_sec"]),
+                        "end_sec": float(clip["end_sec"]),
+                        "cut_action": "keep",
+                        "review_required": bool(current_gaps),
+                        "broll_override": None,
+                        "visual_overlays": [],
+                        "music_override": None,
+                        "sfx_override": None,
+                        "tts_replacement": None,
+                    }
+                    for clip in clips if "text" in clip
+                ]
+                session = {"session_id": session_id, "project_id": project_id, "timeline_id": timeline_id, "tracks": tracks, "segments": session_segments, "gap_slots": current_gaps, "draft_bundle_id": bundle_id, "session_revision": 1, "history": [], "undo_stack": [], "redo_stack": []}
+                timeline_path = root / "timelines" / f"{timeline_id}.json"; session_path = root / "editing_sessions" / f"{session_id}.json"; timeline_path.parent.mkdir(parents=True, exist_ok=True); session_path.parent.mkdir(parents=True, exist_ok=True)
+                for target, payload, kind in ((timeline_path, timeline, "timeline_mirror"), (session_path, session, "session_mirror")):
+                    staged = stage / target.name
+                    staged.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+                    publish(staged, target, kind=kind)
+                now = self._now_iso(); timeline_uri = self._path_to_uri(project_id, timeline_path); session_uri = self._path_to_uri(project_id, session_path)
+                connection.execute("INSERT INTO timelines (timeline_id,project_id,version,output_mode,file_uri,summary_json,created_at) VALUES (?,?,?,?,?,?,?)", (timeline_id, project_id, "draft-v1", "review", timeline_uri, json.dumps({"track_count": len(tracks), "gap_count": len(current_gaps)}), now))
+                connection.execute("INSERT INTO editing_sessions (session_id,project_id,timeline_id,file_uri,summary_json,session_revision,session_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)", (session_id, project_id, timeline_id, session_uri, json.dumps({"draft_bundle_id": bundle_id}), 1, json.dumps(session, ensure_ascii=False), now, now))
+                connection.execute("INSERT INTO jobs (job_id,project_id,job_type,status,input_ref,output_ref,error_message,started_at,finished_at) VALUES (?,?,?,?,?,?,?,?,?)", (timeline_job_id, project_id, JobType.TIMELINE_BUILD.value, JobStatus.SUCCEEDED.value, readiness_id, timeline_id, None, now, now))
+                connection.execute("INSERT INTO review_approvals (timeline_id,project_id,status,approved_at,updated_at,source_session_revision,is_current) VALUES (?,?,?,?,?,?,?)", (timeline_id, project_id, "blocked" if current_gaps else "draft", None, now, 1, 1))
+                response = {"bundle_id": bundle_id, "session_id": session_id, "timeline_id": timeline_id, "timeline_job_id": timeline_job_id, "segment_ids": [c["segment_id"] for c in clips if "segment_id" in c], "asset_ids": list(dict.fromkeys(asset_ids)), "clip_ids": [c["clip_id"] for c in clips], "gap_slots": current_gaps, "output_blocked": bool(current_gaps)}
+                connection.execute("INSERT INTO atomic_draft_bundles (bundle_id,project_id,brief_id,readiness_id,input_fingerprint,idempotency_key,session_id,timeline_id,result_json,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)", (bundle_id, project_id, brief_id, readiness_id, fingerprint, idempotency_key, session_id, timeline_id, json.dumps(response, ensure_ascii=False), now))
+                self._atomic_bundle_fault("before_db_commit")
+                connection.commit()
+                manifest["status"] = "committed"
+                self._write_atomic_bundle_manifest(stage, manifest)
+                return response
+            except Exception:
+                if connection.in_transaction: connection.rollback()
+                for path in created:
+                    path.unlink(missing_ok=True)
+                raise
+            finally: connection.close()
+        finally:
+            shutil.rmtree(stage, ignore_errors=True)
 
     def cancel_draft_readiness(self, *, project_id: str, readiness_id: str, expected_revision: int) -> dict[str, Any]:
         connection = self._connection(project_id)
@@ -854,6 +1214,12 @@ class LocalProjectStore:
 
     def update_draft_readiness_candidate_range(self, *, project_id: str, readiness_id: str, asset_id: str, start_sec: float, end_sec: float, expected_revision: int) -> dict[str, Any]:
         if not math.isfinite(start_sec) or not math.isfinite(end_sec) or start_sec < 0 or end_sec <= start_sec: raise ValueError("draft_readiness_candidate_range_invalid")
+        asset = self.get_asset(project_id=project_id, asset_id=asset_id)
+        raw_duration = asset.get("duration_sec")
+        if raw_duration is not None:
+            duration_sec = float(raw_duration)
+            if not math.isfinite(duration_sec) or duration_sec <= 0 or end_sec > duration_sec:
+                raise ValueError("draft_readiness_candidate_range_invalid")
         row = self.get_draft_readiness(project_id=project_id, readiness_id=readiness_id)
         if row["revision"] != expected_revision: raise ValueError("draft_readiness_revision_conflict")
         if not row["result"]: raise ValueError("draft_readiness_candidate_not_editable")
@@ -1265,6 +1631,7 @@ class LocalProjectStore:
             self.bind_timeline_to_editing_session_revision(
                 project_id=project_id,
                 timeline_id=timeline_id,
+                session_id=session_id,
                 session_revision=int(saved["session_revision"]),
             )
         except KeyError:
@@ -1277,10 +1644,12 @@ class LocalProjectStore:
         *,
         project_id: str,
         timeline_id: str,
+        session_id: str,
         session_revision: int,
     ) -> dict[str, Any]:
         """Persist the editing-session revision consumed by a timeline and review."""
         timeline = self.get_timeline_run(project_id=project_id, timeline_id=timeline_id)
+        timeline["source_session_id"] = str(session_id)
         timeline["source_session_revision"] = int(session_revision)
         updated = self.update_timeline_run(
             project_id=project_id,
@@ -2820,6 +3189,8 @@ class LocalProjectStore:
         project_id: str,
         timeline_id: str,
         source_output_path: Path,
+        source_session_id: str | None = None,
+        source_session_revision: int | None = None,
     ) -> dict[str, Any]:
         sequence = self._next_export_sequence(project_id)
         export_id = f"export_{sequence:03d}"
@@ -2842,7 +3213,8 @@ class LocalProjectStore:
                     status,
                     metadata_json,
                     created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ,source_session_id,source_session_revision
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     export_id,
@@ -2853,6 +3225,8 @@ class LocalProjectStore:
                     "succeeded",
                     json.dumps({}, ensure_ascii=True),
                     created_at,
+                    source_session_id,
+                    source_session_revision,
                 ),
             )
         except Exception:
@@ -2865,7 +3239,7 @@ class LocalProjectStore:
         row = self._fetchone(
             project_id,
             """
-            SELECT export_id, project_id, timeline_id, export_type, file_uri, status, created_at, source_session_revision, is_current, invalidated_at, invalidated_reason
+            SELECT export_id, project_id, timeline_id, export_type, file_uri, status, created_at, source_session_id, source_session_revision, is_current, invalidated_at, invalidated_reason
             FROM exports
             WHERE export_id = ?
             """,
@@ -2883,6 +3257,7 @@ class LocalProjectStore:
             "file_uri": row["file_uri"],
             "status": row["status"],
             "created_at": row["created_at"],
+            "source_session_id": row["source_session_id"],
             "source_session_revision": row["source_session_revision"],
             "is_current": bool(row["is_current"]),
             "invalidated_at": row["invalidated_at"],
@@ -4567,8 +4942,12 @@ class LocalProjectStore:
         prefix = f"local://projects/{project_id}/"
         if not storage_uri.startswith(prefix):
             raise ValueError(f"Unsupported storage URI: {storage_uri}")
-        relative_parts = storage_uri.removeprefix(prefix).split("/")
-        return self.project_root(project_id).joinpath(*relative_parts)
+        project_root = self.project_root(project_id).resolve()
+        relative_path = Path(*storage_uri.removeprefix(prefix).split("/"))
+        resolved_path = (project_root / relative_path).resolve()
+        if not _is_relative_to(resolved_path, project_root):
+            raise ValueError("storage_uri_path_escape")
+        return resolved_path
 
     def _create_project_layout(self, project_root: Path) -> None:
         for directory in (
@@ -4727,16 +5106,32 @@ class LocalProjectStore:
             connection.execute("ALTER TABLE editing_sessions ADD COLUMN session_revision INTEGER NOT NULL DEFAULT 1")
 
     def _ensure_artifact_freshness_columns(self, connection: sqlite3.Connection) -> None:
-        for table in ("review_approvals", "preview_renders", "subtitle_renders", "exports"):
-            existing = {str(row[1]) for row in connection.execute(f"PRAGMA table_info({table})").fetchall()}
-            for column, declaration in (
-                ("source_session_revision", "INTEGER"),
-                ("is_current", "INTEGER NOT NULL DEFAULT 1"),
-                ("invalidated_at", "TEXT"),
-                ("invalidated_reason", "TEXT"),
-            ):
-                if column not in existing:
-                    connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
+        # The schema intentionally remains backward-compatible with project
+        # databases created before artifact lineage existed.  The column check
+        # and ALTER therefore have to share a writer transaction: otherwise
+        # two first-use connections can both observe a missing column and the
+        # losing connection raises "duplicate column name".
+        owns_transaction = not connection.in_transaction
+        if owns_transaction:
+            connection.execute("BEGIN IMMEDIATE")
+        try:
+            for table in ("review_approvals", "preview_renders", "subtitle_renders", "exports"):
+                existing = {str(row[1]) for row in connection.execute(f"PRAGMA table_info({table})").fetchall()}
+                for column, declaration in (
+                    ("source_session_id", "TEXT"),
+                    ("source_session_revision", "INTEGER"),
+                    ("is_current", "INTEGER NOT NULL DEFAULT 1"),
+                    ("invalidated_at", "TEXT"),
+                    ("invalidated_reason", "TEXT"),
+                ):
+                    if column not in existing:
+                        connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
+            if owns_transaction:
+                connection.commit()
+        except Exception:
+            if owns_transaction:
+                connection.rollback()
+            raise
 
     def _ensure_artifact_freshness_triggers(self, connection: sqlite3.Connection) -> None:
         # This migration deliberately replaces an earlier trigger definition so
@@ -4751,7 +5146,7 @@ class LocalProjectStore:
                 connection.execute(f"DROP TRIGGER IF EXISTS {trigger}")
                 connection.execute(
                     f"CREATE TRIGGER {trigger} AFTER INSERT ON {table} BEGIN "
-                    f"UPDATE {table} SET source_session_revision = COALESCE(NEW.source_session_revision, (SELECT session_revision FROM editing_sessions WHERE project_id = NEW.project_id AND timeline_id = NEW.timeline_id ORDER BY updated_at DESC LIMIT 1), 1), is_current = 1 WHERE {identifier} = NEW.{identifier}; END"
+                    f"UPDATE {table} SET source_session_id = COALESCE(NEW.source_session_id, (SELECT session_id FROM editing_sessions WHERE project_id = NEW.project_id AND timeline_id = NEW.timeline_id ORDER BY updated_at DESC LIMIT 1)), source_session_revision = COALESCE(NEW.source_session_revision, (SELECT session_revision FROM editing_sessions WHERE project_id = NEW.project_id AND timeline_id = NEW.timeline_id AND (NEW.source_session_id IS NULL OR session_id = NEW.source_session_id) ORDER BY updated_at DESC LIMIT 1), 1), is_current = 1 WHERE {identifier} = NEW.{identifier}; END"
                 )
             connection.commit()
         except Exception:

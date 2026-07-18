@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -19,6 +19,10 @@ class CreationBriefCreateRequest(BaseModel):
 
 class CreationBriefRevisionRequest(BaseModel):
     expected_revision: int = Field(ge=1)
+
+
+class CreationBriefPreviousQuestionRequest(CreationBriefRevisionRequest):
+    pass
 
 
 class CreationBriefAnswerRequest(CreationBriefRevisionRequest):
@@ -51,6 +55,15 @@ class DraftReadinessCandidateRangeRequest(DraftReadinessRevisionRequest):
     asset_id: str
     start_sec: float = Field(ge=0)
     end_sec: float = Field(gt=0)
+
+
+class AtomicDraftBundleCreateRequest(BaseModel):
+    brief_id: str = Field(min_length=1)
+    readiness_id: str = Field(min_length=1)
+    expected_brief_revision: int = Field(ge=1)
+    expected_readiness_revision: int = Field(ge=1)
+    idempotency_key: str = Field(min_length=1)
+    allow_placeholder: bool = False
 
 
 class ProjectResponse(BaseModel):
@@ -628,6 +641,115 @@ class EditingSessionResponse(BaseModel):
     timing_source: str | None = Field(default=None, exclude_if=lambda value: value is None)
     narration_alignment_required: bool | None = Field(default=None, exclude_if=lambda value: value is None)
     stale_proposal_source_script_segment_ids: list[str] | None = Field(default=None, exclude_if=lambda value: value is None)
+
+
+class EditorFpsResponse(BaseModel):
+    num: int = Field(gt=0)
+    den: int = Field(gt=0)
+
+
+class EditorOutputResponse(BaseModel):
+    width: int = Field(gt=0)
+    height: int = Field(gt=0)
+    sample_aspect_ratio: str
+    rotation: int
+    duration_sec: float = Field(ge=0)
+
+
+class EditorMediaControlsResponse(BaseModel):
+    volume: float | None = None
+    crop: str | None = None
+    speed: float | None = None
+    fade_in_sec: float | None = None
+    fade_out_sec: float | None = None
+    model_config = {"extra": "forbid"}
+
+
+class EditorClipResponse(BaseModel):
+    clip_id: str
+    segment_id: str
+    clip_type: Literal["narration", "broll", "bgm", "sfx", "overlay"]
+    asset_id: str | None = None
+    asset_uri: str | None = None
+    start_sec: float = Field(ge=0)
+    end_sec: float = Field(ge=0)
+    media_controls: EditorMediaControlsResponse
+    expected_content_sha256: str | None = None
+    media_revision: str | None = None
+    overlay_type: Literal["explanation_card", "image_overlay", "table_overlay"] | None = None
+    overlay_payload: dict[str, object] = Field(default_factory=dict)
+
+
+class EditorTrackResponse(BaseModel):
+    track_id: str
+    track_type: Literal["narration", "broll", "bgm", "sfx", "overlay"]
+    clips: list[EditorClipResponse]
+
+
+class EditorCaptionStyleResponse(BaseModel):
+    font_family: str
+    font_size_px: int = Field(ge=12, le=160)
+    text_color: str
+    outline_color: str
+    outline_width_px: int = Field(ge=0, le=12)
+    background_color: str
+    position_x_percent: int = Field(ge=0, le=100)
+    position_y_percent: int = Field(ge=0, le=94)
+    horizontal_align: Literal["left", "center", "right"]
+    safe_area_enabled: bool
+    shadow_blur_px: int = Field(ge=0)
+    model_config = {"extra": "forbid"}
+
+
+class EditorCaptionResponse(BaseModel):
+    segment_id: str
+    text: str
+    start_sec: float = Field(ge=0)
+    end_sec: float = Field(ge=0)
+    style: EditorCaptionStyleResponse
+
+
+class EditorGapSlotResponse(BaseModel):
+    gap_id: str
+    segment_id: str
+    start_sec: float = Field(ge=0)
+    end_sec: float = Field(ge=0)
+    reason: str
+
+
+class EditorSourceStatusResponse(BaseModel):
+    status: Literal["current", "stale"]
+    source_session_id: str | None = None
+    source_session_revision: int | None = None
+
+
+class EditorAuditionResponse(BaseModel):
+    asset_urls: dict[str, str]
+
+
+class EditorExactPreviewResponse(BaseModel):
+    status: Literal["current", "stale", "unavailable"]
+    url: str | None = None
+    source_session_id: str | None = None
+    source_session_revision: int | None = None
+
+
+class EditorPlaybackManifestResponse(BaseModel):
+    """The editor boundary intentionally exposes seconds, never stored frames."""
+    project_id: str
+    session_id: str
+    timeline_id: str
+    session_revision: int
+    timeline_version: str
+    timebase: str
+    fps: EditorFpsResponse
+    output: EditorOutputResponse
+    tracks: list[EditorTrackResponse]
+    captions: list[EditorCaptionResponse]
+    gap_slots: list[EditorGapSlotResponse]
+    source_status: EditorSourceStatusResponse
+    audition: EditorAuditionResponse
+    exact_preview: EditorExactPreviewResponse
 
 
 class SegmentAnalysisRecord(BaseModel):

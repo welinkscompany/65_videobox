@@ -24,6 +24,7 @@ from videobox_provider_interfaces.llm import (
 from videobox_core_engine.local_pipeline import LocalPipelineRunner
 from videobox_core_engine.creation_interview import CreationInterviewRuntime, DeterministicCreationInterviewRuntime
 from videobox_domain_models.assets import AssetType
+from videobox_domain_models.jobs import JobStatus, JobType
 from videobox_storage.local_project_store import LocalProjectStore
 
 BROLL_VIDEO_EXTENSIONS = {".mp4", ".mov", ".mkv", ".webm"}
@@ -228,6 +229,15 @@ class ApiOrchestrator:
         # Readiness is deterministic local storage planning only; it never
         # constructs a provider transport or editing-session mutation path.
         return self.store.start_draft_readiness(**kwargs)
+
+    def materialize_atomic_draft_bundle(self, **kwargs: Any) -> dict[str, Any]:
+        # Approval is represented only by this explicit request; preparation
+        # paths never call this method or mutate editing truth.
+        return self.store.materialize_atomic_draft_bundle(**kwargs)
+
+    def assert_timeline_output_allowed(self, *, project_id: str, timeline_job_id: str) -> None:
+        """Fail closed before queueing output for an in-app-only gap draft."""
+        self.pipeline.assert_timeline_output_allowed(project_id=project_id, timeline_job_id=timeline_job_id)
 
     def register_narration_audio(self, *, project_id: str, source_path: Path) -> RegisteredAsset:
         asset = self.pipeline.register_narration_asset(
@@ -556,6 +566,33 @@ class ApiOrchestrator:
 
     def get_editing_session_fixed_timeline(self, *, project_id: str, session_id: str) -> dict[str, Any]:
         return self.pipeline.get_editing_session_fixed_timeline(project_id=project_id, session_id=session_id)
+
+    def get_editor_playback_manifest(self, *, project_id: str, session_id: str) -> dict[str, Any]:
+        from videobox_core_engine.editor_playback_manifest import build_editor_playback_manifest
+
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        timeline = self.store.get_timeline_run(project_id=project_id, timeline_id=str(session["timeline_id"]))
+        exact_preview = {"status": "unavailable", "url": None, "source_session_revision": None}
+        for job in reversed(self.store.list_jobs(project_id=project_id)):
+            if job.get("job_type") != JobType.FINAL_RENDER.value or job.get("status") != JobStatus.SUCCEEDED.value or not job.get("output_ref"):
+                continue
+            export = self.store.get_final_render_export(project_id=project_id, export_id=str(job["output_ref"]))
+            if str(export.get("timeline_id")) != str(timeline["timeline_id"]):
+                continue
+            exact_preview = {
+                "status": "current" if bool(export.get("is_current")) and export.get("source_session_id") == session.get("session_id") and export.get("source_session_revision") == session.get("session_revision") else "stale",
+                "url": f"/api/projects/{project_id}/final-renders/{job['job_id']}/content",
+                "source_session_id": export.get("source_session_id"),
+                "source_session_revision": export.get("source_session_revision"),
+            }
+            break
+        return build_editor_playback_manifest(
+            project_id=project_id,
+            session=session,
+            timeline=timeline,
+            asset_content_url_prefix=f"/api/projects/{project_id}/assets",
+            exact_preview=exact_preview,
+        )
 
     def preview_editing_session_selected_range(self, *, project_id: str, session_id: str, start_sec: float, end_sec: float) -> dict[str, Any]:
         return self.pipeline.preview_editing_session_selected_range(project_id=project_id, session_id=session_id, start_sec=start_sec, end_sec=end_sec)

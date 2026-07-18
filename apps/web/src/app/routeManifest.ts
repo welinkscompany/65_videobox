@@ -3,7 +3,8 @@ export const workspaceSections = ["home", "create", "timeline", "review", "editi
 export type WorkspaceSection = (typeof workspaceSections)[number];
 
 export function resolveWorkspaceLocation(projectId: string, section: WorkspaceSection = "home") {
-  return `/projects/${encodeURIComponent(projectId)}/${section}`;
+  const canonicalSection = section === "editing" ? "editor" : section;
+  return `/projects/${encodeURIComponent(projectId)}/${canonicalSection}`;
 }
 
 export function isWorkspaceSection(value: string): value is WorkspaceSection {
@@ -12,6 +13,8 @@ export function isWorkspaceSection(value: string): value is WorkspaceSection {
 
 export function parseWorkspaceLocation(pathname: string): { projectId: string; section: WorkspaceSection } | null {
   const match = /^\/projects\/([^/]+)\/([^/]+)$/.exec(pathname);
-  if (!match || !isWorkspaceSection(match[2])) return null;
-  return { projectId: decodeURIComponent(match[1]), section: match[2] };
+  if (!match) return null;
+  const section = match[2] === "editor" ? "editing" : match[2];
+  if (!isWorkspaceSection(section)) return null;
+  return { projectId: decodeURIComponent(match[1]), section };
 }

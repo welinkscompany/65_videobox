@@ -7,7 +7,7 @@ from fastapi import APIRouter, File, Form, Response, UploadFile, status
 from videobox_api.errors import _http_error
 from videobox_api.models import (
     CreationBriefAnswerRequest, CreationBriefCreateRequest, CreationBriefRevisionRequest,
-    CreationBriefSummaryRequest,
+    CreationBriefPreviousQuestionRequest, CreationBriefSummaryRequest,
 )
 from videobox_api.orchestration import ApiOrchestrator
 from videobox_storage.local_project_store import LocalProjectStore
@@ -91,6 +91,19 @@ def build_creation_briefs_router(orchestrator: ApiOrchestrator) -> APIRouter:
         if not payload.question_id:
             raise _http_error(ValueError("creation_brief_question_id_required"))
         return answer(project_id, brief_id, payload.question_id, payload)
+
+    @router.post("/api/projects/{project_id}/creation-briefs/{brief_id}/previous-question")
+    def previous_question(
+        project_id: str, brief_id: str, payload: CreationBriefPreviousQuestionRequest
+    ) -> dict[str, object]:
+        try:
+            return store.previous_creation_brief_question(
+                project_id=project_id,
+                brief_id=brief_id,
+                expected_revision=payload.expected_revision,
+            )
+        except Exception as exc:
+            raise _http_error(exc) from exc
 
     @router.post("/api/projects/{project_id}/creation-briefs/{brief_id}/bypass")
     def bypass(project_id: str, brief_id: str, payload: CreationBriefRevisionRequest) -> dict[str, object]:

@@ -24,7 +24,7 @@ function creatorMetadataLabel(value: unknown) {
 }
 
 export function ManualMediaLibrary({
-  projectId, assets, brollAssets, favoriteIds, localFavoriteIds, recentIds, unavailableMessage, directorState, selectedSegment, activeBrollAssetId, busy, onToggleFavorite, onToggleLocalFavorite, onApplyGlobal, onApplyBroll, onClearBroll,
+  projectId, assets, brollAssets, favoriteIds, localFavoriteIds, recentIds, unavailableMessage, directorState, selectedSegment, activeBrollAssetId, busy, allowLegacyMutations = true, allowPreferences = true, onToggleFavorite, onToggleLocalFavorite, onApplyGlobal, onApplyBroll, onClearBroll,
 }: {
   projectId: string;
   assets: MediaLibraryAsset[];
@@ -37,6 +37,8 @@ export function ManualMediaLibrary({
   selectedSegment: SelectedSegment;
   activeBrollAssetId?: string | null;
   busy: boolean;
+  allowLegacyMutations?: boolean;
+  allowPreferences?: boolean;
   onToggleFavorite: (id: string) => void;
   onToggleLocalFavorite: (id: string) => void;
   onApplyGlobal: (asset: MediaLibraryAsset) => void;
@@ -128,7 +130,7 @@ export function ManualMediaLibrary({
       <h4>{mediaType === "music" ? "BGM 라이브러리" : "SFX 라이브러리"}</h4>
       {visible.filter((asset) => asset.media_type === mediaType).map((asset, index) => <article className="media-library-card" key={asset.library_asset_id} draggable onDragStart={(event) => event.dataTransfer.setData("application/x-videobox-library-asset", asset.library_asset_id)}>
         <strong>{mediaType === "music" ? `BGM 음원 ${index + 1}` : `효과음 ${index + 1}`}</strong><p className="meta-copy">{asset.source} · {asset.creator} · {asset.version} · {asset.duration_seconds}초</p>{asset.attribution_required ? <p className="meta-copy">표기 필요: {asset.attribution_text}</p> : null}<p className="meta-copy">{asset.tags.join(", ")}</p>
-        <div className="action-row"><button className="action-button subtle" disabled={!asset.available || !asset.verified} onClick={() => setPreview(asset.library_asset_id)} type="button">{mediaType === "music" ? "BGM" : "SFX"} 미리보기</button><button className="action-button subtle" onClick={() => onToggleFavorite(asset.library_asset_id)} type="button">{mediaType === "music" ? "BGM" : "SFX"} {favoriteIds.includes(asset.library_asset_id) ? "즐겨찾기 해제" : "즐겨찾기"}</button><button className="action-button" disabled={!canPlace || !asset.available || !asset.verified} onClick={() => onApplyGlobal(asset)} type="button">{mediaType === "music" ? "BGM" : "SFX"} 적용</button></div>
+        <div className="action-row"><button className="action-button subtle" disabled={!asset.available || !asset.verified} onClick={() => setPreview(asset.library_asset_id)} type="button">{mediaType === "music" ? "BGM" : "SFX"} 미리보기</button>{allowLegacyMutations ? <><button className="action-button subtle" onClick={() => onToggleFavorite(asset.library_asset_id)} type="button">{mediaType === "music" ? "BGM" : "SFX"} {favoriteIds.includes(asset.library_asset_id) ? "즐겨찾기 해제" : "즐겨찾기"}</button><button className="action-button" disabled={!canPlace || !asset.available || !asset.verified} onClick={() => onApplyGlobal(asset)} type="button">{mediaType === "music" ? "BGM" : "SFX"} 적용</button></> : null}</div>
         {preview === asset.library_asset_id ? <audio controls data-testid="media-library-preview" src={api.mediaLibraryPreviewUrl(asset.library_asset_id)} /> : null}
       </article>)}</section>)}
     <section className="media-library-group"><h4>B롤 (프로젝트 로컬)</h4>
@@ -143,7 +145,7 @@ export function ManualMediaLibrary({
       </div>
       {visibleBroll.map((asset, index) => { const metadata = asset.metadata ?? {}; const title = typeof metadata.title === "string" && metadata.title.trim() ? metadata.title : `B롤 영상 ${index + 1}`; return <article aria-label={`B롤 영상 ${index + 1}`} className="media-library-card" key={asset.asset_id} draggable onDragStart={(event) => event.dataTransfer.setData("application/x-videobox-local-broll", asset.asset_id)} onFocus={() => setKeyboardBrollAssetId(asset.asset_id)} tabIndex={0}>
         <strong>{title}</strong><p className="meta-copy">종류: {brollTypeLabel(asset.asset_type)} · 화면비: {creatorMetadataLabel(metadata.aspect_ratio)} · 길이: {creatorMetadataLabel(metadata.duration_seconds)}초 · 준비: {brollPreparationLabel(metadata.analysis_status)} · {metadata.review_required ? "확인 필요" : "확인됨"}{pinned.includes(asset.asset_id) ? " · 고정됨" : ""}{excluded.includes(asset.asset_id) ? " · 제외됨" : ""}</p>
-        <div className="action-row"><button className="action-button subtle" onClick={() => setPreview(`broll:${asset.asset_id}`)} type="button">B롤 미리보기</button><button className="action-button subtle" onClick={() => onToggleLocalFavorite(asset.asset_id)} type="button">{localFavoriteIds.includes(asset.asset_id) ? "B롤 즐겨찾기 해제" : "B롤 즐겨찾기"}</button><button className="action-button subtle" onClick={() => togglePreference("pin_asset", asset.asset_id)} type="button">{pinned.includes(asset.asset_id) ? "고정 해제" : "고정"}</button><button className="action-button subtle" onClick={() => togglePreference("exclude_asset", asset.asset_id)} type="button">{excluded.includes(asset.asset_id) ? "제외 해제" : "제외"}</button><button className="action-button" disabled={!canPlace || excluded.includes(asset.asset_id)} onClick={() => onApplyBroll(asset)} type="button">선택 구간에 B롤 적용</button></div>
+        <div className="action-row"><button className="action-button subtle" onClick={() => setPreview(`broll:${asset.asset_id}`)} type="button">B롤 미리보기</button>{allowLegacyMutations ? <button className="action-button subtle" onClick={() => onToggleLocalFavorite(asset.asset_id)} type="button">{localFavoriteIds.includes(asset.asset_id) ? "B롤 즐겨찾기 해제" : "B롤 즐겨찾기"}</button> : null}{allowPreferences ? <><button className="action-button subtle" onClick={() => togglePreference("pin_asset", asset.asset_id)} type="button">{pinned.includes(asset.asset_id) ? "고정 해제" : "고정"}</button><button className="action-button subtle" onClick={() => togglePreference("exclude_asset", asset.asset_id)} type="button">{excluded.includes(asset.asset_id) ? "제외 해제" : "제외"}</button></> : null}<button className="action-button" disabled={!canPlace || excluded.includes(asset.asset_id)} onClick={() => onApplyBroll(asset)} type="button">선택 구간에 B롤 적용</button></div>
         {preview === `broll:${asset.asset_id}` ? <video controls data-testid="manual-broll-preview" src={api.assetContentUrl(projectId, asset.asset_id)} /> : null}
       </article>; })}
     </section>

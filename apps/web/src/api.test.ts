@@ -2,6 +2,13 @@ import { describe, expect, it, vi } from "vitest";
 import { ApiConflictError, api, type DirectorProposal } from "./api";
 
 describe("caption style API conflicts", () => {
+  it("loads the editor manifest from the explicit project and session boundary", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ session_id: "s" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await api.getEditorPlaybackManifest("project/1", "session/1");
+    expect(fetchMock).toHaveBeenCalledWith("/api/projects/project%2F1/editing-sessions/session%2F1/playback-manifest", undefined);
+    vi.unstubAllGlobals();
+  });
   it("uses project-scoped persisted creation brief routes and preserves creator answers", async () => {
     const created = {
       brief_id: "brief_1", project_id: "project_001", idempotency_key: "stable-key", script_filename: "intro.txt", script_text: "소개 영상",

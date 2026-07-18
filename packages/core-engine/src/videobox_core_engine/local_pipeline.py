@@ -1035,6 +1035,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
             self.store.bind_timeline_to_editing_session_revision(
                 project_id=project_id,
                 timeline_id=str(timeline["timeline_id"]),
+                session_id=str(session["session_id"]),
                 session_revision=source_session_revision,
             )
         return self.store.save_review_state(
@@ -1276,6 +1277,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         inline. Used by direct pipeline callers/tests. Real API usage should prefer
         start_final_render_job + run_final_render_job so the HTTP request does not
         block for the full render duration."""
+        self.assert_timeline_output_allowed(project_id=project_id, timeline_job_id=timeline_job_id)
         job = self.store.create_job(
             project_id=project_id,
             job_type=JobType.FINAL_RENDER,
@@ -1292,6 +1294,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         """Create a RUNNING final-render job and return immediately. The caller
         (the API layer) is responsible for invoking run_final_render_job in the
         background so the HTTP request does not block for the render duration."""
+        self.assert_timeline_output_allowed(project_id=project_id, timeline_job_id=timeline_job_id)
         job = self.store.create_job(
             project_id=project_id,
             job_type=JobType.FINAL_RENDER,
@@ -1302,6 +1305,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
 
     def run_final_render_job(self, *, project_id: str, timeline_job_id: str, job: dict[str, Any]) -> None:
         try:
+            self.assert_timeline_output_allowed(project_id=project_id, timeline_job_id=timeline_job_id)
             timeline = self.get_timeline_result(project_id=project_id, job_id=timeline_job_id)["timeline"]
             self._ensure_timeline_ready_for_output(timeline)
             self._ensure_output_dependencies_fresh(project_id=project_id, timeline=timeline)
@@ -1342,6 +1346,8 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                     project_id=project_id,
                     timeline_id=str(timeline["timeline_id"]),
                     source_output_path=render_output_path,
+                    source_session_id=str(editing_session["session_id"]) if editing_session is not None else None,
+                    source_session_revision=int(editing_session["session_revision"]) if editing_session is not None else None,
                 )
         except Exception as exc:
             failed_job = self.store.update_job(
@@ -1376,6 +1382,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         inline. Used by direct pipeline callers/tests. Real API usage should prefer
         start_capcut_draft_export_job + run_capcut_draft_export_job so the HTTP
         request does not block for the full export duration."""
+        self.assert_timeline_output_allowed(project_id=project_id, timeline_job_id=timeline_job_id)
         job = self.start_capcut_draft_export_job(project_id=project_id, timeline_job_id=timeline_job_id)
         self.run_capcut_draft_export_job(
             project_id=project_id,
@@ -1391,6 +1398,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         """Create a RUNNING CapCut draft export job and return immediately. The
         caller (the API layer) is responsible for invoking run_capcut_draft_export_job
         in the background so the HTTP request does not block for the export duration."""
+        self.assert_timeline_output_allowed(project_id=project_id, timeline_job_id=timeline_job_id)
         if self.pycapcut_exporter is None:
             raise RuntimeError(
                 "Real CapCut draft export is not configured. Enable CapCutDraftExportConfig "
@@ -1548,6 +1556,11 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
             "export": export,
             "error_message": job.get("error_message"),
         }
+
+    def assert_timeline_output_allowed(self, *, project_id: str, timeline_job_id: str) -> None:
+        timeline = self.get_timeline_result(project_id=project_id, job_id=timeline_job_id)["timeline"]
+        if timeline.get("gap_slots") or timeline.get("placeholder_policy") == "in_app_only":
+            raise ValueError("draft_bundle_gap_blocks_final_and_capcut_output")
 
     def register_capcut_draft_handoff(self, *, project_id: str, job_id: str) -> dict[str, Any]:
         result = self.get_capcut_draft_export_result(project_id=project_id, job_id=job_id)

@@ -69,6 +69,76 @@ describe("CreationInterview", () => {
     expect(screen.getByText("2 / 2")).toBeVisible();
   });
 
+  it("keeps each question answer separate and restores only that question after going back", async () => {
+    window.localStorage.setItem("videobox.creation-brief.project_1", "brief_1");
+    const afterFirst = { ...firstBrief, answers: { audience: "처음 방문한 고객" }, current_step: 1, revision: 2 };
+    const backAtFirst = { ...afterFirst, current_step: 0, revision: 3 };
+    vi.spyOn(api, "getCreationBrief").mockResolvedValue(firstBrief);
+    vi.spyOn(api, "answerCreationBriefQuestion").mockResolvedValue(afterFirst);
+    const previous = vi.spyOn(api, "previousCreationBriefQuestion").mockResolvedValue(backAtFirst);
+    render(<CreationInterview projectId="project_1" />);
+
+    const answer = await screen.findByLabelText("답변");
+    fireEvent.change(answer, { target: { value: "처음 방문한 고객" } });
+    fireEvent.click(screen.getByRole("button", { name: "답변 저장" }));
+    const nextAnswer = await screen.findByLabelText("답변");
+    expect(nextAnswer).toHaveValue("");
+    fireEvent.click(screen.getByRole("button", { name: "이전 질문" }));
+
+    await screen.findByText("누구에게 보여줄까요?");
+    expect(previous).toHaveBeenCalledWith("project_1", "brief_1", { expected_revision: 2 });
+    expect(screen.getByLabelText("답변")).toHaveValue("처음 방문한 고객");
+  });
+
+  it("creates an editable non-empty summary from the script and saved creator answers", async () => {
+    window.localStorage.setItem("videobox.creation-brief.project_1", "brief_1");
+    const ready = {
+      ...firstBrief,
+      script_text: "사무실에서 일하는 작은 팀을 소개합니다.",
+      questions: [
+        { question_id: "q_audience", field: "audience", prompt: "누구에게 보여줄까요?" },
+        { question_id: "q_format", field: "format", prompt: "어디에 올릴 영상인가요?" },
+        { question_id: "q_cta", field: "call_to_action", prompt: "시청자가 다음에 무엇을 하면 좋을까요?" },
+      ],
+      answers: { audience: "신규 고객", format: "인스타그램 릴스", call_to_action: "상담을 문의하기" },
+      current_step: 3,
+      status: "ready_for_approval",
+      summary: "",
+      revision: 4,
+    };
+    vi.spyOn(api, "getCreationBrief").mockResolvedValue(ready);
+    render(<CreationInterview projectId="project_1" />);
+
+    const summary = await screen.findByLabelText("기획 요약");
+    expect((summary as HTMLTextAreaElement).value).toContain("사무실에서 일하는 작은 팀을 소개합니다.");
+    expect((summary as HTMLTextAreaElement).value).toContain("신규 고객");
+    expect((summary as HTMLTextAreaElement).value).toContain("인스타그램 릴스");
+    expect((summary as HTMLTextAreaElement).value).toContain("상담을 문의하기");
+    expect(screen.getByRole("button", { name: "요약 승인" })).toBeEnabled();
+  });
+
+  it("saves a generated summary before approving it", async () => {
+    window.localStorage.setItem("videobox.creation-brief.project_1", "brief_1");
+    const ready = {
+      ...firstBrief,
+      answers: { audience: "신규 고객", tone: "차분하게" },
+      current_step: 2,
+      status: "ready_for_approval",
+      summary: "",
+      revision: 3,
+    };
+    const saved = { ...ready, summary: "영상 내용: 신제품을 소개합니다.\n보여줄 사람: 신규 고객\n분위기: 차분하게", revision: 4 };
+    vi.spyOn(api, "getCreationBrief").mockResolvedValue(ready);
+    const update = vi.spyOn(api, "updateCreationBriefSummary").mockResolvedValue(saved);
+    const approve = vi.spyOn(api, "approveCreationBrief").mockResolvedValue({ ...saved, status: "approved", revision: 5 });
+    render(<CreationInterview projectId="project_1" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "요약 승인" }));
+
+    await waitFor(() => expect(update).toHaveBeenCalledWith("project_1", "brief_1", expect.objectContaining({ expected_revision: 3 })));
+    await waitFor(() => expect(approve).toHaveBeenCalledWith("project_1", "brief_1", { expected_revision: 4 }));
+  });
+
   it("lets a creator durably skip the remaining interview and move to the editable summary", async () => {
     window.localStorage.setItem("videobox.creation-brief.project_1", "brief_1");
     const bypassed = { ...firstBrief, current_step: 2, status: "ready_for_approval", revision: 2, summary: "영상 기획을 직접 정리합니다." };
@@ -146,6 +216,28 @@ describe("CreationInterview", () => {
     expect(start).toHaveBeenCalledWith("project_1", expect.objectContaining({ brief_id: "brief_1", narration_choice: { kind: "silent" }, expected_brief_revision: 5 }));
   });
 
+  it("requires an explicit creator confirmation before making an in-app-only gap draft", async () => {
+    window.localStorage.setItem("videobox.creation-brief.project_1", "brief_1");
+    const approved = { ...firstBrief, questions: [], current_step: 0, status: "approved", revision: 5 };
+    const needsAssets = { readiness_id: "readiness_gap", brief_id: "brief_1", status: "needs_assets", revision: 3, result: { gap_slots: [{ gap_slot_id: "gap-1", reason: "영상이 없어요." }] } } as never;
+    vi.spyOn(api, "getCreationBrief").mockResolvedValue(approved);
+    vi.spyOn(api, "getDraftReadiness").mockResolvedValue(needsAssets);
+    const create = vi.spyOn(api, "createAtomicDraftBundle").mockResolvedValue({ session_id: "editing_1" } as never);
+    window.localStorage.setItem("videobox.draft-readiness.project_1", "readiness_gap");
+    render(<CreationInterview projectId="project_1" />);
+
+    expect(await screen.findByText("누락된 장면은 빈 구간으로 남습니다. 이 초안은 내보낼 수 없어요.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "빈 구간 포함 초안 만들기" })).toBeDisabled();
+    expect(create).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByLabelText("빈 구간을 남긴 채 편집용 초안을 만들겠습니다"));
+    fireEvent.click(screen.getByRole("button", { name: "빈 구간 포함 초안 만들기" }));
+
+    await waitFor(() => expect(create).toHaveBeenCalledWith("project_1", {
+      brief_id: "brief_1", readiness_id: "readiness_gap", expected_brief_revision: 5,
+      expected_readiness_revision: 3, idempotency_key: "draft-bundle-readiness_gap-3", allow_placeholder: true,
+    }));
+  });
+
   it("saves each B-roll candidate's chosen seconds with the current readiness revision", async () => {
     window.localStorage.setItem("videobox.creation-brief.project_1", "brief_1");
     const approved = { ...firstBrief, questions: [], current_step: 0, status: "approved", revision: 5 };
@@ -163,6 +255,25 @@ describe("CreationInterview", () => {
 
     await waitFor(() => expect(updateRange).toHaveBeenCalledWith("project_1", "readiness_1", "asset_1", 1.5, 4, 3));
     expect(screen.getByDisplayValue("1.5")).toBeVisible();
+  });
+
+  it("does not show or submit B-roll candidates with an unusable time range", async () => {
+    window.localStorage.setItem("videobox.creation-brief.project_1", "brief_1");
+    window.localStorage.setItem("videobox.draft-readiness.project_1", "readiness_1");
+    const approved = { ...firstBrief, questions: [], current_step: 0, status: "approved", revision: 5 };
+    const readiness = { readiness_id: "readiness_1", brief_id: "brief_1", status: "ready", revision: 3, result: { broll_candidates: [
+      { asset_id: "asset_ok", label: "쓸 수 있는 장면", target_range: { start_sec: 0, end_sec: 4 }, media_duration_sec: 4 },
+      { asset_id: "asset_bad", label: "잘못된 장면", target_range: { start_sec: 10, end_sec: 10 }, media_duration_sec: 10 },
+    ] } } as never;
+    vi.spyOn(api, "getCreationBrief").mockResolvedValue(approved);
+    vi.spyOn(api, "getDraftReadiness").mockResolvedValue(readiness);
+    const updateRange = vi.spyOn(api, "updateDraftReadinessCandidateRange");
+    render(<CreationInterview projectId="project_1" />);
+
+    expect(await screen.findByLabelText("쓸 수 있는 장면 시작")).toBeVisible();
+    expect(screen.queryByLabelText("잘못된 장면 시작")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "잘못된 장면 건너뛰기" })).not.toBeInTheDocument();
+    expect(updateRange).not.toHaveBeenCalled();
   });
 
   it("resumes only a server-confirmed readiness id from the route", async () => {
