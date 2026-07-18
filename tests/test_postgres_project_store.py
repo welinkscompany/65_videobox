@@ -1,6 +1,12 @@
 from __future__ import annotations
 
+import json
 import os
+import sqlite3
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
+from unittest.mock import patch
+from hashlib import sha256
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
@@ -11,7 +17,50 @@ from fastapi.testclient import TestClient
 from videobox_api.main import create_app
 from videobox_domain_models.assets import AssetType
 from videobox_domain_models.jobs import JobStatus, JobType
-from videobox_storage.postgres_project_store import PostgresProjectStore
+from videobox_storage.postgres_project_store import PostgresProjectStore, _PostgresConnection
+
+
+def _approve_postgres_brief(store: PostgresProjectStore, project_id: str) -> dict:
+    source = store.project_root(project_id) / "brief-source.txt"
+    source.write_text("동시 요청을 검증하는 짧은 대본입니다.", encoding="utf-8")
+    script_asset = store.register_asset(
+        project_id=project_id,
+        asset_type=AssetType.SCRIPT_DOCUMENT,
+        source_path=source,
+    )
+    brief = store.create_creation_brief(
+        project_id=project_id,
+        script_filename="script.txt",
+        script_text="동시 요청을 검증하는 짧은 대본입니다.",
+        idempotency_key="brief",
+        capability_profile={},
+        script_asset_id=script_asset.asset_id,
+        runtime=type("NoQuestions", (), {"plan_questions": lambda *_args, **_kwargs: []})(),
+    )
+    brief = store.bypass_creation_interview(
+        project_id=project_id, brief_id=brief["brief_id"], expected_revision=brief["revision"]
+    )
+    brief = store.update_creation_brief_summary(
+        project_id=project_id, brief_id=brief["brief_id"], summary="동시성 확인", expected_revision=brief["revision"]
+    )
+    return store.approve_creation_brief(
+        project_id=project_id, brief_id=brief["brief_id"], expected_revision=brief["revision"]
+    )
+
+
+def _run_two_requests_at_same_insert(*, statement_marker: str, request) -> list[dict]:
+    """Make both real PostgreSQL transactions observe the pre-insert state."""
+    barrier = Barrier(2)
+    original_execute = _PostgresConnection.execute
+
+    def gate_insert(self, statement: str, parameters=None):
+        if statement_marker in statement:
+            barrier.wait(timeout=10)
+        return original_execute(self, statement, parameters)
+
+    with patch.object(_PostgresConnection, "execute", gate_insert):
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            return list(executor.map(lambda _: request(), range(2)))
 
 
 @pytest.fixture
@@ -35,6 +84,94 @@ def test_postgres_store_bootstraps_and_lists_a_project(tmp_path: Path, postgres_
         "created_at": project.created_at.isoformat(),
         "updated_at": project.updated_at.isoformat(),
     }
+
+
+def test_postgres_concurrent_creation_brief_reuses_one_idempotency_winner(
+    tmp_path: Path, postgres_url: str
+) -> None:
+    store = PostgresProjectStore(tmp_path, database_url=postgres_url)
+    project = store.bootstrap_project(f"PostgreSQL concurrent brief {uuid4().hex}")
+    script = tmp_path / "same.txt"
+    script.write_text("동일한 클릭은 하나의 brief만 만들어야 합니다.", encoding="utf-8")
+    script_asset = store.register_asset(
+        project_id=project.project_id,
+        asset_type=AssetType.SCRIPT_DOCUMENT,
+        source_path=script,
+    )
+    payload = {
+        "project_id": project.project_id,
+        "script_filename": "same.txt",
+        "script_text": "동일한 클릭은 하나의 brief만 만들어야 합니다.",
+        "idempotency_key": "same-click",
+        "capability_profile": {},
+        "script_asset_id": script_asset.asset_id,
+        "runtime": type("NoQuestions", (), {"plan_questions": lambda *_args, **_kwargs: []})(),
+    }
+
+    results = _run_two_requests_at_same_insert(
+        statement_marker="INSERT INTO creation_briefs",
+        request=lambda: store.create_creation_brief(**payload),
+    )
+
+    assert {result["brief_id"] for result in results}.__len__() == 1
+    assert len(store.list_creation_briefs(project_id=project.project_id)) == 1
+
+
+def test_postgres_concurrent_readiness_reuses_one_idempotency_winner(
+    tmp_path: Path, postgres_url: str
+) -> None:
+    store = PostgresProjectStore(tmp_path, database_url=postgres_url)
+    project = store.bootstrap_project(f"PostgreSQL concurrent readiness {uuid4().hex}")
+    brief = _approve_postgres_brief(store, project.project_id)
+    payload = {
+        "project_id": project.project_id,
+        "brief_id": brief["brief_id"],
+        "narration_choice": {"kind": "silent"},
+        "idempotency_key": "same-click",
+        "expected_brief_revision": brief["revision"],
+        "defer": False,
+    }
+
+    results = _run_two_requests_at_same_insert(
+        statement_marker="INSERT INTO draft_readiness",
+        request=lambda: store.start_draft_readiness(**payload),
+    )
+
+    assert {result["readiness_id"] for result in results}.__len__() == 1
+    assert len(store.list_draft_readiness(project_id=project.project_id)) == 1
+
+
+def test_postgres_concurrent_atomic_bundle_reuses_one_idempotency_winner(
+    tmp_path: Path, postgres_url: str
+) -> None:
+    store = PostgresProjectStore(tmp_path, database_url=postgres_url)
+    project = store.bootstrap_project(f"PostgreSQL concurrent bundle {uuid4().hex}")
+    brief = _approve_postgres_brief(store, project.project_id)
+    readiness = store.start_draft_readiness(
+        project_id=project.project_id,
+        brief_id=brief["brief_id"],
+        narration_choice={"kind": "silent"},
+        idempotency_key="ready",
+        expected_brief_revision=brief["revision"],
+        defer=False,
+    )
+    payload = {
+        "project_id": project.project_id,
+        "brief_id": brief["brief_id"],
+        "expected_brief_revision": brief["revision"],
+        "readiness_id": readiness["readiness_id"],
+        "expected_readiness_revision": readiness["revision"],
+        "idempotency_key": "same-click",
+        "allow_placeholder": True,
+    }
+
+    results = _run_two_requests_at_same_insert(
+        statement_marker="INSERT INTO atomic_draft_bundles",
+        request=lambda: store.materialize_atomic_draft_bundle(**payload),
+    )
+
+    assert {result["bundle_id"] for result in results}.__len__() == 1
+    assert len(store.list_editing_sessions(project_id=project.project_id)) == 1
 
 
 def test_api_selects_postgres_store_when_database_url_is_configured(
@@ -107,6 +244,57 @@ def test_postgres_store_persists_existing_project_asset_and_timeline_mutation(
     assert updated["version"] == "v002"
     assert fetched["tracks"][0]["clips"][0]["asset_id"] == asset.asset_id
     assert fetched["summary"]["track_count"] == 1
+
+
+def test_postgres_restart_reconciliation_preserves_batch_destination_registered_in_postgres_despite_stale_sqlite(
+    tmp_path: Path, postgres_url: str
+) -> None:
+    root = tmp_path / "projects"
+    store = PostgresProjectStore(root, database_url=postgres_url)
+    project = store.bootstrap_project(f"PostgreSQL reconciliation project {uuid4().hex}")
+    source = tmp_path / "registered.mp4"
+    source.write_bytes(b"registered-by-postgres")
+    registered = store.register_asset(
+        project_id=project.project_id,
+        asset_type=AssetType.BROLL_VIDEO,
+        source_path=source,
+    )
+    destination = store.resolve_storage_uri(project_id=project.project_id, storage_uri=registered.storage_uri)
+    operations = store.project_root(project.project_id) / ".batch-director-operations"
+    stage = operations / "op-postgres-authority" / "stage.mp4"
+    stage.parent.mkdir(parents=True)
+    stage.write_bytes(b"discarded-stage")
+    (store.project_root(project.project_id) / "db").mkdir(exist_ok=True)
+    stale_sqlite = store.database_path(project.project_id)
+    with sqlite3.connect(stale_sqlite) as stale_connection:
+        stale_connection.execute("CREATE TABLE assets (asset_id TEXT, project_id TEXT, storage_uri TEXT)")
+        stale_connection.execute(
+            "INSERT INTO assets (asset_id, project_id, storage_uri) VALUES (?, ?, ?)",
+            ("stale-asset", project.project_id, "local://projects/stale/assets/imported/other.mp4"),
+        )
+    manifest = operations / "op-postgres-authority.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "operation_id": "op-postgres-authority",
+                "status": "staging",
+                "entries": [
+                    {
+                        "staged_path": str(stage),
+                        "destination_path": str(destination),
+                        "sha256": sha256(destination.read_bytes()).hexdigest(),
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    PostgresProjectStore(root, database_url=postgres_url)
+
+    assert destination.read_bytes() == b"registered-by-postgres"
+    assert not stage.exists()
+    assert not manifest.exists()
 
 
 def test_postgres_store_scopes_identical_timeline_ids_to_their_projects(

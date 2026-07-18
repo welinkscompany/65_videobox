@@ -54,9 +54,11 @@ from videobox_core_engine.settings import (
     TTSEngineConfig,
     WhisperSTTConfig,
     resolve_database_url,
+    resolve_container_snapshot_root,
     resolve_projects_root,
     resolve_user_library_root,
 )
+from videobox_core_engine.container_snapshot import ContainerSnapshotError, verify_container_snapshot
 from videobox_storage.local_project_store import LocalProjectStore, sha256_file
 from videobox_storage.media_library_store import MediaLibraryStore
 from videobox_storage.postgres_project_store import PostgresProjectStore
@@ -184,6 +186,12 @@ def create_app(
     app = FastAPI(title="VideoBox API", version="0.1.0", lifespan=_media_analysis_lifespan)
     resolved_projects_root = projects_root or resolve_projects_root()
     database_url = resolve_database_url()
+    snapshot_root = resolve_container_snapshot_root()
+    if snapshot_root is not None:
+        try:
+            verify_container_snapshot(snapshot_root)
+        except ContainerSnapshotError as error:
+            raise ValueError(f"container mode requires a verified container snapshot: {error}") from error
     store = (
         PostgresProjectStore(resolved_projects_root, database_url=database_url, now=analysis_clock)
         if database_url is not None

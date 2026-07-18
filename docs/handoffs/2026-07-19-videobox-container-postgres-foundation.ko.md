@@ -43,7 +43,7 @@
 ```powershell
 .\.venv\Scripts\python.exe scripts\migrate_container_data.py --source 'D:\AI_Workspace_louis_office_50\20_project\65_videobox-project' --target 'D:\AI_Workspace_louis_office_50\20_project\65_videobox-container-data'
 docker compose --env-file .env.container up -d --build
-docker compose --env-file .env.container exec -T videobox-api sh -c 'python scripts/import_sqlite_snapshot_to_postgres.py --source /videobox-data --database-url "$VIDEOBOX_DATABASE_URL"'
+docker compose --env-file .env.container exec -T videobox-api sh -c 'python scripts/import_sqlite_snapshot_to_postgres.py --source /videobox-snapshot --database-url "$VIDEOBOX_DATABASE_URL"'
 .\scripts\verify_container_stack.ps1 -DataRoot 'D:\AI_Workspace_louis_office_50\20_project\65_videobox-container-data'
 ```
 

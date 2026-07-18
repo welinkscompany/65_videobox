@@ -17,14 +17,16 @@ Browser
   -> videobox-web (loopback only)
   -> videobox-api (internal only; compatibility FFmpeg renderer included)
   -> videobox-postgres (internal only; VideoBox operational records)
-  -> /videobox-data (host-managed copied assets and SQLite preservation snapshot)
+  -> /videobox-data (writable runtime copy)
+  -> /videobox-snapshot (read-only verified SQLite preservation snapshot)
 ```
 
 - Compose project name is exactly `65_videobox`.
 - `videobox-web` is the only loopback host port. API remains internal.
 - `videobox-postgres` is internal only. It is the operational database for the container runtime; publishing PostgreSQL to the host is prohibited.
 - `videobox-api` runs the existing API plus current FFmpeg render path. This is a compatibility boundary, not the final isolated render-worker design.
-- Data inside containers uses `/videobox-data`; durable records keep project-relative storage URIs, never container paths.
+- API bind mounts are exact: `${VIDEOBOX_CONTAINER_DATA_ROOT}/runtime:/videobox-data` is writable and `${VIDEOBOX_CONTAINER_DATA_ROOT}/snapshot:/videobox-snapshot:ro` is read-only. The API receives `VIDEOBOX_DATA_ROOT=/videobox-data` and `VIDEOBOX_SNAPSHOT_ROOT=/videobox-snapshot`; it must not mount the parent data root or source root.
+- Durable records keep project-relative storage URIs, never container paths.
 - API images run non-root with a read-only root filesystem where current dependencies allow it. No Docker socket, user home, arbitrary media library, Hermes state, or OAuth secret is mounted.
 
 ## 3. Data Migration Contract
@@ -33,19 +35,20 @@ The existing default root is `D:\AI_Workspace_louis_office_50\20_project\65_vide
 
 1. A snapshot command requires explicit source and target roots.
 2. It refuses source=target, missing source, target inside source, and a non-empty unrecognized target.
-3. It copies project files to staging, computes streaming SHA-256 for copied files, verifies SQLite/project metadata, then atomically publishes the target project directory.
-4. It records a migration manifest with source path, target path, file count, hashes, timestamp, and source-preserved status.
-5. A separate PostgreSQL import command reads only the verified snapshot, records a source-SQLite hash and import revision, then commits one project atomically. Re-running the identical verified snapshot is idempotent; a changed source requires an explicit new import revision.
-6. It never deletes, renames, or mutates the source root.
-6. Re-running with the same verified manifest is idempotent; mismatched content fails closed.
+3. It copies project files to a sibling staging root, computes streaming SHA-256 for copied files, verifies SQLite/project metadata, then atomically publishes `snapshot/` and an initial writable `runtime/` copy.
+4. The manifest is inside `snapshot/` and records source path, final target path, snapshot/runtime layout version, hashes, and source-preserved status. Runtime mutations never change snapshot verification.
+5. A legacy flat target is upgraded only after its legacy manifest and file hashes verify. A crash is resumable only for proven states (`.staging` completed layout and/or `.legacy-backup` verified legacy copy). Unknown or incomplete recovery artifacts fail closed and are retained. A backup is removed only after the published target verifies completely.
+6. A separate PostgreSQL import command reads only `/videobox-snapshot`, records a source-SQLite hash and import revision, then commits one project atomically. Re-running the identical verified snapshot is idempotent; a changed source requires an explicit new import revision.
+7. It never deletes, renames, or mutates the source root.
+8. Re-running with the same verified manifest is idempotent; mismatched content fails closed.
 
 The first container launch refuses to use an empty target root unless the migration command has completed successfully.
 
 ## 4. Runtime Configuration
 
 - `VIDEOBOX_DATABASE_URL` is required for the container API and points only to the internal PostgreSQL service. SQLite is not an operational container database.
-- `VIDEOBOX_DATA_ROOT` is the authoritative path for mounted project assets and the preserved SQLite snapshot. The current path remains the host-development default only.
-- Compose resolves its bind mount from `VIDEOBOX_CONTAINER_DATA_ROOT` and passes `/videobox-data` plus the internal PostgreSQL URL to the API.
+- `VIDEOBOX_DATA_ROOT=/videobox-data` is the writable runtime root for mounted project assets. `VIDEOBOX_SNAPSHOT_ROOT=/videobox-snapshot` is the separately mounted, read-only verified SQLite snapshot root. The current host path remains the host-development default only.
+- Compose resolves both bind mounts from `VIDEOBOX_CONTAINER_DATA_ROOT` and passes the runtime root, snapshot root, and internal PostgreSQL URL to the API.
 - The web service proxies `/api` to the internal API service. It does not call an external provider.
 - A health command verifies Compose service health, API readiness, the mounted root, and a project inventory count.
 

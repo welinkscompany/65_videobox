@@ -7,6 +7,8 @@ from videobox_core_engine.settings import (
     resolve_projects_root,
     resolve_user_library_root,
 )
+from videobox_storage.local_project_store import LocalProjectStore
+import pytest
 
 
 def test_projects_root_uses_videobox_data_root_environment(monkeypatch, tmp_path: Path) -> None:
@@ -63,3 +65,22 @@ def test_database_url_is_opt_in_and_never_has_a_default(monkeypatch) -> None:
 
     monkeypatch.setenv("VIDEOBOX_DATABASE_URL", "postgresql://videobox:secret@postgres/videobox")
     assert resolve_database_url() == "postgresql://videobox:secret@postgres/videobox"
+
+
+def test_create_app_refuses_database_mode_without_a_verified_snapshot(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("VIDEOBOX_DATA_ROOT", str(tmp_path / "runtime"))
+    monkeypatch.setenv("VIDEOBOX_SNAPSHOT_ROOT", str(tmp_path / "snapshot"))
+    monkeypatch.setenv("VIDEOBOX_DATABASE_URL", "postgresql://videobox:secret@postgres/videobox")
+
+    with pytest.raises(ValueError, match="verified container snapshot"):
+        create_app()
+
+
+def test_create_app_keeps_host_sqlite_mode_without_container_environment(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.delenv("VIDEOBOX_DATABASE_URL", raising=False)
+    monkeypatch.delenv("VIDEOBOX_SNAPSHOT_ROOT", raising=False)
+    monkeypatch.delenv("VIDEOBOX_DATA_ROOT", raising=False)
+
+    app = create_app(projects_root=tmp_path / "host-projects")
+
+    assert isinstance(app.state.store, LocalProjectStore)

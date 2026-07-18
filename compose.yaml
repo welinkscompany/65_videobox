@@ -23,9 +23,11 @@ services:
       dockerfile: docker/api.Dockerfile
     environment:
       VIDEOBOX_DATA_ROOT: /videobox-data
+      VIDEOBOX_SNAPSHOT_ROOT: /videobox-snapshot
       VIDEOBOX_DATABASE_URL: postgresql://${POSTGRES_USER:-videobox}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.container}@videobox-postgres:5432/${POSTGRES_DB:-videobox}
     volumes:
-      - ${VIDEOBOX_CONTAINER_DATA_ROOT:?set VIDEOBOX_CONTAINER_DATA_ROOT in .env.container}:/videobox-data
+      - ${VIDEOBOX_CONTAINER_DATA_ROOT:?set VIDEOBOX_CONTAINER_DATA_ROOT in .env.container}/runtime:/videobox-data
+      - ${VIDEOBOX_CONTAINER_DATA_ROOT:?set VIDEOBOX_CONTAINER_DATA_ROOT in .env.container}/snapshot:/videobox-snapshot:ro
     depends_on:
       videobox-postgres:
         condition: service_healthy

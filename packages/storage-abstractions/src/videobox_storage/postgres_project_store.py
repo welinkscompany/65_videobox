@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
+import sqlite3
 from typing import Any, Callable, Sequence
 
 import psycopg
 
 from videobox_domain_models.projects import ProjectRecord
-from videobox_storage.local_project_store import LocalProjectStore
+from videobox_storage.local_project_store import LocalProjectStore, sha256_file
 from videobox_storage.postgres_compat import translate_sql
 from videobox_storage.postgres_schema import (
     POSTGRES_IMPORT_SCHEMA_STATEMENTS,
@@ -66,7 +67,14 @@ class _PostgresConnection:
         if translated == "BEGIN":
             return _PostgresCursor(self._connection.cursor())
         cursor = self._connection.cursor()
-        cursor.execute(translated, parameters or ())
+        try:
+            cursor.execute(translated, parameters or ())
+        except psycopg.errors.UniqueViolation as error:
+            # LocalProjectStore's durable idempotency branches deliberately
+            # handle SQLite's integrity contract.  Preserve that narrow
+            # contract at this adapter boundary without treating unrelated
+            # PostgreSQL errors as idempotent duplicate requests.
+            raise sqlite3.IntegrityError(str(error)) from error
         return _PostgresCursor(cursor)
 
     def commit(self) -> None:
@@ -113,6 +121,26 @@ class PostgresProjectStore(LocalProjectStore):
 
     def _connection(self, project_id: str) -> _PostgresConnection:
         return _PostgresConnection(self.database_url)
+
+    def _batch_destination_is_registered(self, project_id: str, destination: Path, digest: str) -> bool:
+        """Use PostgreSQL, not a copied SQLite snapshot, for crash recovery truth."""
+        try:
+            root = self.project_root(project_id).resolve()
+            resolved = destination.resolve()
+            if root not in resolved.parents or not digest or not resolved.is_file() or sha256_file(resolved) != digest:
+                return False
+            uri = self._path_to_uri(project_id, resolved)
+            connection = self._connection(project_id)
+            try:
+                row = connection.execute(
+                    "SELECT asset_id FROM assets WHERE project_id = ? AND storage_uri = ?",
+                    (project_id, uri),
+                ).fetchone()
+                return row is not None
+            finally:
+                connection.close()
+        except (OSError, ValueError, psycopg.Error):
+            return False
 
     def _bootstrap_database(self, database_path: Path, project: ProjectRecord) -> None:
         connection = self._connection(project.project_id)

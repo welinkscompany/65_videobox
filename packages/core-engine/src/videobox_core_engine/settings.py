@@ -27,6 +27,11 @@ def resolve_database_url() -> str | None:
     return configured or None
 
 
+def resolve_container_snapshot_root() -> Path | None:
+    configured = os.environ.get("VIDEOBOX_SNAPSHOT_ROOT", "").strip()
+    return Path(configured) if configured else None
+
+
 @dataclass(slots=True, frozen=True)
 class LocalOpenAICompatibleRuntimeConfig:
     enabled: bool = True

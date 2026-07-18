@@ -12,18 +12,37 @@ function Get-Sha256([string]$Path) {
 }
 
 $resolvedRoot = (Resolve-Path -LiteralPath $DataRoot).Path
-$manifestPath = Join-Path $resolvedRoot "container-migration-manifest.json"
+$snapshotRoot = Join-Path $resolvedRoot "snapshot"
+$runtimeRoot = Join-Path $resolvedRoot "runtime"
+$manifestPath = Join-Path $snapshotRoot "container-migration-manifest.json"
 if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
-    throw "Container data root has no migration manifest: $resolvedRoot"
+    throw "Container snapshot has no migration manifest: $snapshotRoot"
+}
+if (-not (Test-Path -LiteralPath $runtimeRoot -PathType Container)) {
+    throw "Container runtime data directory is missing: $runtimeRoot"
 }
 
 $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
 if (-not $manifest.source_preserved) {
     throw "Migration manifest does not prove source preservation."
 }
+if ($manifest.layout_version -ne 1 -or $manifest.snapshot_root -ne "snapshot") {
+    throw "Migration manifest does not match the snapshot layout."
+}
+
+$expectedPaths = @($manifest.file_hashes.PSObject.Properties.Name)
+$actualPaths = @(
+    Get-ChildItem -LiteralPath $snapshotRoot -File -Recurse |
+        Where-Object { $_.FullName -ne $manifestPath } |
+        ForEach-Object { [IO.Path]::GetRelativePath($snapshotRoot, $_.FullName).Replace('\', '/') }
+)
+$extraPaths = @($actualPaths | Where-Object { $_ -notin $expectedPaths })
+if ($extraPaths.Count -gt 0) {
+    throw "Snapshot contains unmanifested file(s): $($extraPaths -join ', ')"
+}
 
 foreach ($entry in $manifest.file_hashes.PSObject.Properties) {
-    $path = Join-Path $resolvedRoot $entry.Name.Replace('/', [IO.Path]::DirectorySeparatorChar)
+    $path = Join-Path $snapshotRoot $entry.Name.Replace('/', [IO.Path]::DirectorySeparatorChar)
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
         throw "Snapshot file is missing: $($entry.Name)"
     }

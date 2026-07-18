@@ -4,7 +4,7 @@
 
 **Goal:** Move the current VideoBox web/API/FFmpeg compatibility runtime into Compose project `65_videobox`, run operational data on internal PostgreSQL, and preserve existing SQLite project data as a non-mutated migration source.
 
-**Architecture:** Add an environment-resolved data-root boundary, a verified SQLite snapshot command, and a PostgreSQL storage adapter/import path. Build a three-service Compose compatibility stack: loopback-only web reverse proxy, internal API containing the existing renderer, and internal PostgreSQL. Hermes, OAuth, mem0, host bridge, and a split render worker remain later work; mem0 is Hermes auxiliary memory only.
+**Architecture:** Add an environment-resolved runtime-data boundary, a separately mounted read-only verified SQLite snapshot, and a PostgreSQL storage adapter/import path. Build a three-service Compose compatibility stack: loopback-only web reverse proxy, internal API containing the existing renderer, and internal PostgreSQL. The API mount contract is exact: `${VIDEOBOX_CONTAINER_DATA_ROOT}/runtime:/videobox-data` (writable) and `${VIDEOBOX_CONTAINER_DATA_ROOT}/snapshot:/videobox-snapshot:ro` (read-only). Hermes, OAuth, mem0, host bridge, and a split render worker remain later work; mem0 is Hermes auxiliary memory only.
 
 **Tech Stack:** Python 3.12, FastAPI/Uvicorn, PostgreSQL, psycopg, pytest, Node/Vite production build, Nginx, Docker Compose.
 
@@ -75,7 +75,7 @@ Expected: import failure for `migrate_container_data`.
 
 - [ ] **Step 3: Implement staging-copy and manifest verification**
 
-Copy into a sibling staging directory, compute SHA-256 per file, require a `projects/*/db/project.sqlite` tree, write `container-migration-manifest.json`, and rename staging only after verification. Refuse unsafe/nonempty targets and never call delete/move on source.
+Copy into a sibling staging directory, compute SHA-256 per file, require a `projects/*/db/project.sqlite` tree, write `snapshot/container-migration-manifest.json`, initialize `runtime/` from that snapshot, and rename staging only after verification. Legacy flat targets must resume only proven `.staging`/`.legacy-backup` states; preserve unknown recovery artifacts and delete a verified backup only after the published snapshot/runtime layout verifies. Refuse unsafe/nonempty targets and never call delete/move on source.
 
 - [ ] **Step 4: Run GREEN and commit**
 
@@ -134,7 +134,7 @@ Expected: failure because `compose.yaml` is absent.
 
 - [ ] **Step 3: Implement images and Compose**
 
-`videobox-postgres` has a named data volume and no host port. `videobox-api` installs Python dependencies plus FFmpeg, runs non-root Uvicorn, mounts only `${VIDEOBOX_CONTAINER_DATA_ROOT}:/videobox-data`, and sets both `VIDEOBOX_DATA_ROOT=/videobox-data` and an internal `VIDEOBOX_DATABASE_URL`. `videobox-web` builds the Vite app and proxies `/api` to `videobox-api:8000`. Apply `read_only`, `cap_drop: [ALL]`, `security_opt: [no-new-privileges:true]`, tmpfs, and loopback-only web publication.
+`videobox-postgres` has a named data volume and no host port. `videobox-api` installs Python dependencies plus FFmpeg, runs non-root Uvicorn, mounts exactly `${VIDEOBOX_CONTAINER_DATA_ROOT}/runtime:/videobox-data` and `${VIDEOBOX_CONTAINER_DATA_ROOT}/snapshot:/videobox-snapshot:ro`, and sets `VIDEOBOX_DATA_ROOT=/videobox-data`, `VIDEOBOX_SNAPSHOT_ROOT=/videobox-snapshot`, and an internal `VIDEOBOX_DATABASE_URL`. `videobox-web` builds the Vite app and proxies `/api` to `videobox-api:8000`. Apply `read_only`, `cap_drop: [ALL]`, `security_opt: [no-new-privileges:true]`, tmpfs, and loopback-only web publication.
 
 - [ ] **Step 4: Run GREEN and Compose validation**
 
@@ -173,6 +173,7 @@ Run focused migration/config/compose tests, current renderer tests, relevant API
 - [x] Task 3 (foundation): PostgreSQL schema, SQLite SQL compatibility surface, read-only SQLite snapshot importer, API store 선택 경계를 구현했다.
 - [x] Task 4: Compose 프로젝트 이름 `65_videobox`, internal PostgreSQL/API, loopback-only web edge, non-root/read-only runtime을 구현했다.
 - [x] Task 5 (runtime): 실제 데이터 snapshot 2개 프로젝트를 PostgreSQL에 import하고, `/api/projects`와 current-revision MP4 delivery를 `127.0.0.1:5173`에서 확인했다.
+- [x] Recovery hardening: legacy flat copy를 `snapshot/` + `runtime/` layout으로 올릴 때, verified staging/backup crash state만 재개하고 불명확한 recovery artifact는 보존한 채 fail-closed한다. Compose contract은 runtime writable / snapshot read-only 두 bind mount로 고정한다.
 - [ ] PostgreSQL store의 모든 편집 mutation/복구 경로에 대한 전면 parity suite는 Hermes 도입 전 별도 hardening slice로 계속 검증한다. 이번 단계에서 검증한 것은 실제 데이터 import, project listing, proxied playback 및 새 project 생성 API다.
 
 Task 9 사람/환경 acceptance 상태는 이 컨테이너 이전으로 변경하지 않는다.

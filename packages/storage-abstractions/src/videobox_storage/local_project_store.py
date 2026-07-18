@@ -920,6 +920,17 @@ class LocalProjectStore:
             status = "asset_check" if defer else ("needs_assets" if result["gap_slots"] else "ready")
             connection.execute("INSERT INTO draft_readiness (readiness_id, project_id, brief_id, approved_brief_revision, input_fingerprint, narration_json, capability_json, idempotency_key, status, revision, result_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)", (readiness_id, project_id, brief_id, brief["revision"], fingerprint, json.dumps(narration_choice, ensure_ascii=False), json.dumps(capability or {}, ensure_ascii=False), idempotency_key, status, json.dumps(result, ensure_ascii=False) if result else None, now, now))
             row = connection.execute("SELECT * FROM draft_readiness WHERE readiness_id = ?", (readiness_id,)).fetchone(); connection.commit(); return self._draft_readiness_payload(row)
+        except sqlite3.IntegrityError:
+            if connection.in_transaction:
+                connection.rollback()
+            existing = self._fetchone(
+                project_id,
+                "SELECT * FROM draft_readiness WHERE project_id = ? AND idempotency_key = ?",
+                (project_id, idempotency_key),
+            )
+            if existing is None:
+                raise
+            return self._draft_readiness_payload(existing)
         except Exception:
             if connection.in_transaction: connection.rollback()
             raise
@@ -1145,6 +1156,20 @@ class LocalProjectStore:
                 manifest["status"] = "committed"
                 self._write_atomic_bundle_manifest(stage, manifest)
                 return response
+            except sqlite3.IntegrityError:
+                if connection.in_transaction:
+                    connection.rollback()
+                existing = connection.execute(
+                    "SELECT * FROM atomic_draft_bundles WHERE project_id=? AND idempotency_key=?",
+                    (project_id, idempotency_key),
+                ).fetchone()
+                for path in created:
+                    path.unlink(missing_ok=True)
+                if existing is None:
+                    raise
+                if str(existing["input_fingerprint"]) != fingerprint:
+                    raise ValueError("atomic_draft_bundle_idempotency_conflict")
+                return json.loads(str(existing["result_json"]))
             except Exception:
                 if connection.in_transaction: connection.rollback()
                 for path in created:

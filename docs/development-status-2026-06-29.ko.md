@@ -1,6 +1,14 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 265. 2026-07-19 container PostgreSQL shared-store isolation hardening`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 266. 2026-07-19 container snapshot/runtime and PostgreSQL recovery hardening`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+
+## 266. 2026-07-19 container snapshot/runtime and PostgreSQL recovery hardening
+
+- verified immutable `snapshot/`과 writable `runtime/`을 분리했다. Compose API는 runtime만 write mount하고 snapshot은 `/videobox-snapshot:ro`로 mount한다. startup/importer/verifier 모두 manifest hash와 exact file set을 fail-closed로 확인한다.
+- 기존 legacy flat copy가 runtime write로 hash mismatch이면 안전하게 거부하고 원본·legacy copy를 보존한다. 실제 컨테이너 운영은 원본에서 새 `65_videobox-container-data-v2` snapshot/runtime copy를 생성해 전환했다.
+- PostgreSQL restart reconciliation은 copied SQLite가 아니라 PostgreSQL asset truth를 사용한다. concurrent creation brief/readiness/atomic draft는 한 durable winner를 재사용하도록 unique conflict를 정규화하고 PostgreSQL integration regression으로 검증했다.
+- 최신 Compose runtime은 2 imported projects, snapshot 49 hashes, source preserved, internal API/PostgreSQL host-port 미공개, proxied current-revision MP4 `200 video/mp4`를 확인했다. focused suite `41 passed`, frontend production build, full Python suite `1164 passed, 3 skipped`가 통과했다.
+- Hermes, GPT OAuth, mem0, Gemini provider call, OpenCut, host bridge, SaaS auth/billing은 여전히 구현하지 않았다. 다음 Hermes slice는 이 verified base 위에서 별도 설계/승인으로 시작한다.
 
 ## 265. 2026-07-19 container PostgreSQL shared-store isolation hardening
 
@@ -8,6 +16,7 @@
 - 두 프로젝트가 같은 deterministic ID를 만들어도 서로의 timeline, editing session, export, asset, segment, recommendation, job, TTS candidate, provider-key를 읽거나 수정하거나 삭제하지 않는 PostgreSQL 통합 회귀를 추가했다. Gemini provider 호출은 하지 않았고 local persistence만 검증했다.
 - 이전 단일-key import로 `progress-bar-live-test` timeline이 누락된 파생 PostgreSQL volume은 원본이 아닌 snapshot에서만 재생성했다. 재import 뒤 PostgreSQL에는 `b-roll-smoke-test` timeline 7개와 `progress-bar-live-test` timeline 1개가 존재한다.
 - 최신 Compose 재build 뒤 verifier는 source preserved, snapshot hash 49개, project 2개, API/PostgreSQL host-port 미공개를 통과했다. `final_render_job_009/content`도 web proxy에서 `200 video/mp4`로 다시 확인했다. API의 user/media library root는 `/videobox-data/videobox-user-library`로 mount 안에 남는다.
+- PostgreSQL 재import는 write 가능한 `/videobox-data`가 아니라 Compose가 read-only로 mount한 검증 snapshot `/videobox-snapshot`만 입력으로 사용한다.
 - Task 9 사람/환경 acceptance와 CapCut Desktop evidence는 이 hardening으로 완료 처리하지 않는다. Hermes, GPT OAuth, mem0, OpenCut, host bridge, SaaS auth/billing은 계속 시작하지 않았다. Gemini provider call은 0이다.
 - 최종 full suite와 closeout 전에는 모든 `LocalProjectStore` surface의 PostgreSQL parity를 완결했다고 주장하지 않는다. 다음 Hermes slice 전에는 별도 migration/recovery/concurrency audit를 다시 수행한다.
 
