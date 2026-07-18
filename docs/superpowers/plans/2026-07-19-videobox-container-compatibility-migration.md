@@ -168,16 +168,16 @@ Run focused migration/config/compose tests, current renderer tests, relevant API
 
 ## 2026-07-19 implementation record
 
-- [x] Task 1: `VIDEOBOX_DATA_ROOT`와 opt-in `VIDEOBOX_DATABASE_URL` 경계를 추가했다.
-- [x] Task 2: 원본을 변경하지 않는 staging snapshot 복사기를 추가했다. 실행 중인 SQLite는 read-only backup API로 복사한다.
-- [x] Task 3 (foundation): PostgreSQL schema, SQLite SQL compatibility surface, read-only SQLite snapshot importer, API store 선택 경계를 구현했다.
-- [x] Task 4: Compose 프로젝트 이름 `65_videobox`, internal PostgreSQL/API, loopback-only web edge, non-root/read-only runtime을 구현했다.
-- [x] Task 5 (runtime): 실제 데이터 snapshot 2개 프로젝트를 PostgreSQL에 import하고, `/api/projects`와 current-revision MP4 delivery를 `127.0.0.1:5173`에서 확인했다.
-- [x] Recovery hardening: legacy flat copy를 `snapshot/` + `runtime/` layout으로 올릴 때, verified staging/backup crash state만 재개하고 불명확한 recovery artifact는 보존한 채 fail-closed한다. Compose contract은 runtime writable / snapshot read-only 두 bind mount로 고정한다.
-- [ ] PostgreSQL store의 모든 편집 mutation/복구 경로에 대한 전면 parity suite는 Hermes 도입 전 별도 hardening slice로 계속 검증한다. 이번 단계에서 검증한 것은 실제 데이터 import, project listing, proxied playback 및 새 project 생성 API다.
+- [x] **완료 (done)** Task 1: `VIDEOBOX_DATA_ROOT`와 opt-in `VIDEOBOX_DATABASE_URL` 경계를 추가했다.
+- [x] **완료 (done)** Task 2: 원본을 변경하지 않는 staging snapshot 복사기를 추가했다. 실행 중인 SQLite는 read-only backup API로 복사한다.
+- [x] **완료 (done)** Task 3 (foundation): PostgreSQL schema, SQLite SQL compatibility surface, read-only SQLite snapshot importer, API store 선택 경계를 구현했다.
+- [x] **완료 (done)** Task 4: Compose 프로젝트 이름 `65_videobox`, internal PostgreSQL/API, loopback-only web edge, non-root/read-only runtime을 구현했다.
+- [x] **완료 (done)** Task 5 (runtime): 실제 데이터 snapshot 2개 프로젝트를 PostgreSQL에 import하고, `/api/projects`와 current-revision MP4 delivery를 `127.0.0.1:5173`에서 확인했다.
+- [x] **완료 (done)** Recovery hardening: legacy flat copy를 `snapshot/` + `runtime/` layout으로 올릴 때, verified staging/backup crash state만 재개하고 불명확한 recovery artifact는 보존한 채 fail-closed한다. Compose contract은 runtime writable / snapshot read-only 두 bind mount로 고정한다.
+- [ ] **미완료 (pending)** PostgreSQL store의 모든 편집 mutation/복구 경로에 대한 전면 parity suite는 Hermes 도입 전 별도 hardening slice로 계속 검증한다. 이번 단계에서 검증한 것은 실제 데이터 import, project listing, proxied playback 및 새 project 생성 API다.
 
 Task 9 사람/환경 acceptance 상태는 이 컨테이너 이전으로 변경하지 않는다.
 
 ## 다음 통합 slice: Hermes (새 계획서 생성 금지)
 
-Hermes는 이 계획과 최상위 `docs/implementation-plan.ko.md`의 §23을 이어서 구현한다. 시작 순서는 GPT OAuth device/PKCE 경계, internal-only Hermes service와 VideoBox typed-handler allowlist, read-only status/승인 요청 vertical slice, mem0 보조기억 경계, OAuth/logout·restart·Gemini 0 runtime gate다. VideoBox PostgreSQL/snapshot/runtime media direct mount와 편집 mutation·CapCut host bridge는 이 첫 Hermes slice 범위 밖이다.
+Hermes는 이 계획과 최상위 `docs/implementation-plan.ko.md`의 §23을 이어서 구현한다. 첫 agent는 **유진 (Yujin)** 이며, 시작 순서는 공식 OAuth 방식 확정, Gemini disabled·unwired SSOT 정리, service capability와 typed-handler allowlist, read-only status·action 없는 approval proposal, mem0 보조기억 경계, OAuth/logout·restart·Gemini 0 runtime gate다. VideoBox PostgreSQL/snapshot/runtime media direct mount와 편집 mutation·CapCut host bridge는 이 첫 Hermes slice 범위 밖이다.

@@ -366,7 +366,7 @@ Local Media Director 18개 Task와 editing-session revision, source provenance, 
 
 OpenCut EditorCore, IndexedDB/OPFS, browser renderer/export, WASM, browser STT와 Opencast Redux/MUI/full snapshot API/player fork/browser waveform decode는 반입하지 않는다. Supabase source도 직접 복사하지 않는다. editing-session, revision, FFmpeg, PyCapCut, output-source verifier는 계속 authoritative하다.
 
-새 shell은 local/cloud capability slot을 갖지만 실제 SaaS auth/team/billing과 Hermes agent/container는 이번 22개 Task에 넣지 않는다. Slice 0 Task 1은 기존 Lumi copy를 closeout하고 project/section 선택, Director 수동 fallback, current/stale preview·output, settings의 legacy baseline을 고정했다. 다음은 production shell 코드가 아니라 Task 2의 세 화면/다섯 viewport(1920/1440/1280/768/390) 시각 prototype과 명시적 사용자 승인이다. shell 직후에는 advanced timeline보다 `대본→루미 인터뷰→자산 점검→한 번 승인→atomic real draft→editor/output handoff` 수직 Slice를 먼저 검증한다. browser source audition은 실제 합성 preview가 아니며, current revision의 정확한 미리보기는 기존 FFmpeg composition path를 재사용한 freshness-bound proxy artifact로 고정한다. caption timing은 현 backend 권한에 맞춰 segment-linked로 제한한다.
+새 shell은 local/cloud capability slot을 갖지만 실제 SaaS auth/team/billing과 Hermes agent/container는 이번 22개 Task에 넣지 않는다. Slice 0 Task 1은 기존 Yujin copy를 closeout하고 project/section 선택, Director 수동 fallback, current/stale preview·output, settings의 legacy baseline을 고정했다. 다음은 production shell 코드가 아니라 Task 2의 세 화면/다섯 viewport(1920/1440/1280/768/390) 시각 prototype과 명시적 사용자 승인이다. shell 직후에는 advanced timeline보다 `대본→유진 인터뷰→자산 점검→한 번 승인→atomic real draft→editor/output handoff` 수직 Slice를 먼저 검증한다. browser source audition은 실제 합성 preview가 아니며, current revision의 정확한 미리보기는 기존 FFmpeg composition path를 재사용한 freshness-bound proxy artifact로 고정한다. caption timing은 현 backend 권한에 맞춰 segment-linked로 제한한다.
 
 ## 8.3 구현 완료 시 적용 여부 보고
 
@@ -1161,12 +1161,79 @@ production-readiness blocker slice 1의 9개 Task는 구현·회귀·600초 smok
 
 ## 23. Hermes 다음 slice — 기존 Compose 기반 확장 (2026-07-19)
 
-컨테이너 이전은 `codex/videobox-container-compatibility`의 `635a9bb`까지 완료됐다. Compose project는 `65_videobox`이며, 검증된 immutable `snapshot/`, writable `runtime/`, internal PostgreSQL과 loopback web 경계를 기준선으로 사용한다. Hermes 작업은 새 독립 계획서를 만들지 않고 이 최상위 계획의 다음 slice로 추적한다.
+컨테이너 이전은 `codex/videobox-container-compatibility`의 `635a9bb`까지 **완료 (done)** 됐다. Compose project는 `65_videobox`이며, 검증된 immutable `snapshot/`, writable `runtime/`, internal PostgreSQL과 loopback web 경계를 기준선으로 사용한다. Hermes 작업은 새 독립 계획서를 만들지 않고 이 최상위 계획의 다음 slice로 추적한다.
 
-1. **권한·OAuth 경계 고정** — Hermes는 GPT OAuth device/PKCE 사용자 로그인만 사용한다. OAuth credential은 전용 Hermes state volume에만 두며, repository·일반 `.env`·VideoBox DB·mem0에 복사하지 않는다.
-2. **서비스 경계 구현** — Hermes는 별도 internal service이며 VideoBox PostgreSQL, snapshot, runtime media directory를 직접 mount하거나 읽지 않는다. 허용된 요청은 VideoBox API의 typed handler를 통해서만 처리한다.
-3. **최소 기능 vertical slice** — 먼저 대화, read-only project status 조회, 명시적 승인 요청만 제공한다. 편집 mutation, CapCut/host bridge, 외부 egress, 자동 실행은 이 단계에서 시작하지 않는다.
-4. **mem0 위치 고정** — mem0는 Hermes의 보조기억이다. VideoBox의 project·editing·asset·conversation truth나 approval 기록을 대체하지 않는다.
-5. **검증 gate** — OAuth bootstrap/logout, no direct DB/media access, typed-handler allowlist, restart 후 session/approval 보존, external Gemini call 0을 focused/runtime 검증한다. 이 gate가 통과한 뒤에만 승인 기반 editing mutation을 별도 slice로 연다.
+### 23.0 상태 표기와 선행 결정
 
-Task 9 사람/환경 acceptance와 CapCut Desktop evidence는 Hermes slice와 독립이며, 완료 상태를 이 계획 추가로 바꾸지 않는다.
+- `[x] 완료 (done)`: 구현·범위에 맞는 검증·커밋이 끝난 항목이다.
+- `[~] 진행 중 (in progress)`: 구현 또는 검증 중이며 완료 주장으로 쓰지 않는다.
+- `[ ] 미완료 (pending)`: 아직 시작하지 않았거나, 명시적 gate가 남은 항목이다.
+- `[x] 완료 (done)`: Hermes가 올라갈 Compose/PostgreSQL/snapshot/runtime 기준선과 실제 두 장면 current-revision MP4 재생 경로를 고정했다. Task 9 사람/환경 acceptance와 CapCut Desktop evidence의 완료 상태는 이 항목으로 바꾸지 않는다.
+- `[ ] 미완료 (pending)`: Hermes/Yujin은 아직 생성하지 않았다. 이 계획의 각 gate를 통과하기 전에는 서비스, OAuth credential, mem0, 편집 mutation을 추가하지 않는다.
+
+이 절은 Hermes 범위에서 `docs/llm-provider-strategy.ko.md`의 과거 `Qwen → Gemini → OpenAI` fallback보다 우선한다. 첫 구현 작업에서 해당 문서를 현재 결정으로 갱신하기 전까지 Gemini provider, key pool, router는 **disabled·unwired** 상태를 유지한다. 정적 검사와 실제 runtime 모두 external Gemini provider call `0`을 증명해야 하며, Gemini 경로를 되살리는 구현은 허용하지 않는다.
+
+### 23.1 [ ] 미완료 (pending) — GPT OAuth·egress 계약 고정
+
+1. 구현 전에 provider의 공식 문서와 현재 약관으로 OAuth 지원 여부를 증명한다. device authorization flow와 authorization-code + PKCE는 서로 다른 방식이므로 동시에 가정하지 않고, 지원되는 **한 방식**만 선택해 issuer, client type, scope, redirect/verification UX, state/nonce/verifier, polling·expiry·error mapping을 versioned contract에 기록한다. 공식 지원 근거가 없으면 이 slice는 OAuth 구현 없이 blocked로 기록한다.
+2. OAuth credential은 전용 Hermes state volume에만 저장한다. refresh/access token 암호화 키는 별도 host secret/keychain에 두며 repository, 일반 `.env`, VideoBox DB, mem0, snapshot, backup, log/trace에는 기록하지 않는다. 최소 scope, expiry/rotation, logout의 local 삭제와 provider revoke best-effort, device loss/re-auth를 테스트한다.
+3. egress는 기본 거부다. OAuth issuer/token endpoint와 사용자가 별도로 data-transfer 동의한 GPT endpoint만 egress proxy allowlist로 허용하고, DNS/IP 우회도 차단한다. OAuth bootstrap은 모델 호출 동의가 아니며, 창작 요청·project data 전송은 request별 동의와 endpoint pinning·audit을 거친다. 유료 entitlement가 불명확하면 자동 유료 호출은 꺼 둔다.
+
+### 23.2 [ ] 미완료 (pending) — 서비스 identity와 VideoBox 권한중개
+
+1. `videobox-hermes-agent`는 internal-only 별도 service로 둔다. VideoBox PostgreSQL, `snapshot/`, `runtime/` media directory, renderer, CapCut/host bridge를 직접 mount·읽기·실행하지 않는다.
+2. internal network만으로 권한을 인정하지 않는다. Hermes는 audience=`videobox-api`, operation·project allowlist, expiry·rotation·revocation·replay 방지를 포함한 짧은 수명 service capability로만 VideoBox API를 호출한다.
+3. 모든 handler는 최종 `(principal, project_id, operation)`을 검사한다. 초기 `get_project_status`는 명시적으로 선택한 한 project의 allowlisted read model만 반환하며 project list, global job, raw script/caption/media path/voice/transcript/PII를 반환하지 않는다. 단일 local owner MVP만 범위에 넣고 multi-user SaaS auth는 별도 slice다.
+
+### 23.3 [ ] 미완료 (pending) — 유진 profile, prompt와 업무 영역
+
+첫 slice의 에이전트는 **유진 (Yujin), `yujin-video-director`** 하나로 고정한다. 유진은 대화 요약, 사용자가 명시적으로 선택한 한 project의 상태 설명, action 없는 approval request 제안만 한다. 영상·자막·소리·전환의 근거 없는 품질 주장, DB/SQL, filesystem, shell, renderer, CapCut, raw HTTP, credential, 직접 편집·render·export는 금지한다. 화면 문구는 유진의 짧고 행동 중심적인 안내를 유지한다.
+
+| 역할 | 허용 입력·도구 | 거부 범위 | 사람 gate | 결과 |
+|---|---|---|---|---|
+| 유진 Project Copilot (첫 slice) | 선택 project ID, allowlisted status read model, 사용자가 입력한 대화 | project list, 원본 미디어·대본·자막, DB/filesystem/shell/renderer/CapCut, mutation | OAuth 연결, 외부 전송 동의 | 구조화된 상태 설명 또는 action 없는 proposal |
+| Review/approval coordinator (후속) | immutable proposal과 deterministic preflight 결과 | approval 자체 결정, mutation 실행 | owner의 개별 approval card | 승인·거절 기록 요청 |
+| Editing planner (후속) | 승인된 brief와 allowlisted asset metadata | asset/media 원문, 직접 mutation/render/export | project별 변경 approval | deterministic handler에 보낼 draft proposal |
+
+prompt는 system/developer/task/user context 우선순위, template version·manifest hash, structured response schema·size limit·timeout/failure fallback을 가진 versioned registry로 관리한다. project·script·subtitle·asset metadata, mem0, tool result와 사용자 첨부 내용은 모두 **untrusted data**이며 instruction이 아니다. 모델 출력도 untrusted proposal일 뿐이고, policy middleware가 매 tool call마다 다시 권한을 검사한다. 역할 간 memory와 tool 공유는 기본 거부다.
+
+| 사용자 의도 | 유진의 허용 산출물 | Gateway가 허용하는 tool | 금지·처리 |
+|---|---|---|---|
+| 영상 목표·톤 인터뷰 | 짧은 질문 또는 brief candidate | 선택 project의 status read | 사실·asset 존재를 추정하지 않는다 |
+| 현재 상태·자산 문의 | source revision을 포함한 상태 요약 | `get_project_status` 한 개 | 다른 project, raw media/script/caption은 거부한다 |
+| 장면·자산·음향 제안 | action 없는 proposal candidate | 첫 slice에서는 없음 | timeline 변경·render·export를 하지 않는다 |
+| 편집·export·CapCut 요청 | 별도 UI approval 경로 안내 | 첫 slice에서는 없음 | apply/register/export를 호출하지 않는다 |
+| “기억해줘” | memory candidate와 opt-in 설명 | 첫 slice에서는 없음 | mem0 직접 write를 하지 않는다 |
+| credential·설정·다른 project 요청 | `blocked`와 짧은 이유 | 없음 | 정보 노출·권한 우회·scope 확대를 거부한다 |
+
+Agent Gateway는 run ownership, context filtering, tool allowlist, idempotency, event/audit를 맡고 창작 판단을 실행으로 확정하지 않는다. deterministic handler는 revision·rights·availability 검사와 정책 실행만 하며 자유 텍스트 지시를 해석하지 않는다. 각 ToolSpec은 `name`, request/result schema, action family, backend-derived project scope, revision precondition, redaction, result byte cap, timeout, idempotency, audit event, allowed run phase를 versioned registry에 가진다. 모델이 반환한 tool name·ID·scope는 권한 근거가 아니며 Gateway가 registry와 capability로 다시 선택·검증한다.
+
+### 23.4 [ ] 미완료 (pending) — read-only workflow와 승인 경계
+
+첫 vertical slice 상태 전이는 다음으로 고정한다.
+
+`intake → clarification_needed → brief_candidate → brief_confirmed → read_only_research → proposal_or_approval_request → deterministic_preflight → pending_human_approval → applied | rejected | cancelled | blocked | failed`
+
+- OAuth 연결, 외부 GPT data-transfer, brief 확정, 개별 mutation/render/export/CapCut은 각각 별도 사람 gate다.
+- 채팅의 “네”는 approval이 아니다. approval card는 project/conversation/run/proposal/action hash, base revision, change summary, rights blocker, prompt/skill version, expiry를 immutable하게 묶는다.
+- reject·expire·stale·권한 부족은 side effect `0`으로 끝낸다. `applied`는 이 slice 범위 밖이며, 첫 slice에서 proposal은 durable하지만 action 없는 기록이다.
+- retry는 idempotency key, duplicate winner, timeout/backoff/circuit breaker를 사용한다. API/GPT/mem0 장애와 token revoke/expiry, partial tool failure, restart/recovery는 수동 편집과 프로젝트 truth를 손상시키지 않고 명시적인 blocked/offline 상태로 보인다.
+
+### 23.5 [ ] 미완료 (pending) — mem0와 기록 보존
+
+mem0는 유진의 선택적 보조기억이다. tenant/project namespace, opt-in, TTL·retention·size cap, encryption, retrieval provenance, 사용자 clear-memory/delete/forget 경로를 둔다. token, approval, VideoBox project/editing/asset/conversation SSOT, hidden instruction은 저장·검색·복원하지 않는다. mem0 장애는 대화를 막지 않고 장기 기억 없이 계속하며 audit에만 기록한다.
+
+VideoBox typed audit handler는 actor/principal, project, correlation ID, prompt/skill version hash, 허용 tool, sanitised argument/result digest, proposal/approval decision, 시간을 append-only ledger에 남긴다. secret, raw prompt, media, OAuth token은 audit에 남기지 않는다. retention/export/redaction와 incident/recovery runbook, restart restore drill의 acceptance도 이 slice의 산출물이다.
+
+### 23.6 [ ] 미완료 (pending) — 검증·release gate
+
+다음 항목을 모두 통과해야 read-only Hermes slice를 완료 (done)로 표시한다.
+
+1. OAuth contract와 bootstrap/logout/revoke/expiry/reuse 실패가 23.1 선택 방식대로 동작하며 secret이 log·snapshot·mem0에 없다.
+2. Compose inspect에서 Hermes에 DB/media/snapshot mount가 없고, approved network와 egress allowlist 외 연결이 없다.
+3. API integration에서 unauthenticated, expired capability, cross-project, allowlist 밖 tool, injected instruction, poisoned mem0, rate/cost limit 요청이 fail-closed한다.
+4. 프로젝트 status read model field allowlist, prompt-injection, structured-output size/timeout, audit redaction·complete correlation, restart/idempotent duplicate/recovery를 focused와 runtime으로 검증한다.
+5. Gemini provider/key pool/router가 static·runtime 모두 `0 call`이며, OAuth/GPT endpoint도 user consent·budget·audit 없이 호출되지 않는다.
+6. 코드리뷰, 계획 gap 검증, source→runtime 역방향 검증, focused/full relevant tests, production build를 다시 수행하고 논리적으로 닫힌 단위만 commit/push한다.
+
+승인 기반 editing mutation, CapCut/host bridge, multi-agent fan-out, SaaS auth/billing, 대규모 UI framework는 위 gate 뒤 별도 slice다. 다중 에이전트가 필요해도 Gateway가 child scope·allowed tools·budget·deadline·audit correlation을 소유하며, child는 독립 DB/media/OAuth/mem0 권한을 받지 않는다.
