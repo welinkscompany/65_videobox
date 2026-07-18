@@ -15,6 +15,11 @@ def resolve_projects_root() -> Path:
     return Path(configured) if configured else DEFAULT_PROJECTS_ROOT
 
 
+def resolve_database_url() -> str | None:
+    configured = os.environ.get("VIDEOBOX_DATABASE_URL", "").strip()
+    return configured or None
+
+
 @dataclass(slots=True, frozen=True)
 class LocalOpenAICompatibleRuntimeConfig:
     enabled: bool = True

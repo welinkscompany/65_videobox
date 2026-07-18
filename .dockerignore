@@ -1,0 +1,15 @@
+.git
+.worktrees
+.venv
+node_modules
+apps/web/node_modules
+__pycache__
+.pytest_cache
+test-results
+playwright-report
+docs
+external
+*.sqlite
+*.mp4
+*.wav
+*.mp3

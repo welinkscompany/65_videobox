@@ -3,6 +3,7 @@ pycapcut==0.0.3
 gtts==2.5.4
 requests==2.34.2
 python-multipart==0.0.20
+psycopg[binary]==3.2.9
 
 # Optional TTS engines (enable via TTSEngineConfig.engine):
 # - "gtts" (default, no extra deps beyond gtts above, needs network access)

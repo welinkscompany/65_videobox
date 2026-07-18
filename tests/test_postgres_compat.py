@@ -1,0 +1,28 @@
+from videobox_storage.postgres_compat import translate_sql
+from videobox_storage.postgres_schema import POSTGRES_SCHEMA_STATEMENTS
+
+
+def test_translate_sql_preserves_postgres_upsert_and_converts_sqlite_placeholders() -> None:
+    statement = "UPDATE jobs SET status = ? WHERE project_id = ?"
+
+    assert translate_sql(statement) == "UPDATE jobs SET status = %s WHERE project_id = %s"
+
+
+def test_translate_sql_converts_sqlite_insert_or_ignore() -> None:
+    statement = "INSERT OR IGNORE INTO media_analysis_cache (cache_id) VALUES (?)"
+
+    assert translate_sql(statement) == "INSERT INTO media_analysis_cache (cache_id) VALUES (%s) ON CONFLICT DO NOTHING"
+
+
+def test_translate_sql_converts_known_sqlite_replace_into_postgres_upsert() -> None:
+    statement = "INSERT OR REPLACE INTO media_embeddings (embedding_id, embedding_json) VALUES (?, ?)"
+
+    assert translate_sql(statement) == (
+        "INSERT INTO media_embeddings (embedding_id, embedding_json) VALUES (%s, %s) "
+        "ON CONFLICT (embedding_id) DO UPDATE SET embedding_json = EXCLUDED.embedding_json"
+    )
+
+
+def test_postgres_schema_has_no_sqlite_only_autoincrement_syntax() -> None:
+    assert POSTGRES_SCHEMA_STATEMENTS
+    assert all("AUTOINCREMENT" not in statement for statement in POSTGRES_SCHEMA_STATEMENTS)

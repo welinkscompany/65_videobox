@@ -53,10 +53,12 @@ from videobox_core_engine.settings import (
     LocalOpenAICompatibleRuntimeConfig,
     TTSEngineConfig,
     WhisperSTTConfig,
+    resolve_database_url,
     resolve_projects_root,
 )
 from videobox_storage.local_project_store import LocalProjectStore, sha256_file
 from videobox_storage.media_library_store import MediaLibraryStore
+from videobox_storage.postgres_project_store import PostgresProjectStore
 from videobox_storage.user_library_store import UserLibraryStore
 
 # Re-exported for backward compatibility: tests/test_api.py and a few other
@@ -179,7 +181,13 @@ def create_app(
     creation_interview_runtime: CreationInterviewRuntime | None = None,
 ) -> FastAPI:
     app = FastAPI(title="VideoBox API", version="0.1.0", lifespan=_media_analysis_lifespan)
-    store = LocalProjectStore(projects_root or resolve_projects_root(), now=analysis_clock)
+    resolved_projects_root = projects_root or resolve_projects_root()
+    database_url = resolve_database_url()
+    store = (
+        PostgresProjectStore(resolved_projects_root, database_url=database_url, now=analysis_clock)
+        if database_url is not None
+        else LocalProjectStore(resolved_projects_root, now=analysis_clock)
+    )
     user_library_store = UserLibraryStore(store.projects_root.parent / "videobox-user-library")
     resolved_media_library_store = media_library_store or MediaLibraryStore(
         store.projects_root.parent / "videobox-user-library"

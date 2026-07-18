@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Move the current VideoBox web/API/FFmpeg compatibility runtime into Compose project `65_videobox` while copying existing project data without mutating its source.
+**Goal:** Move the current VideoBox web/API/FFmpeg compatibility runtime into Compose project `65_videobox`, run operational data on internal PostgreSQL, and preserve existing SQLite project data as a non-mutated migration source.
 
-**Architecture:** Add an environment-resolved data-root boundary and a standalone migration command. Build a two-service Compose compatibility stack: loopback-only web reverse proxy and internal API containing the existing renderer. Hermes, OAuth, mem0, host bridge, and a split render worker remain later work; mem0 is Hermes auxiliary memory only.
+**Architecture:** Add an environment-resolved data-root boundary, a verified SQLite snapshot command, and a PostgreSQL storage adapter/import path. Build a three-service Compose compatibility stack: loopback-only web reverse proxy, internal API containing the existing renderer, and internal PostgreSQL. Hermes, OAuth, mem0, host bridge, and a split render worker remain later work; mem0 is Hermes auxiliary memory only.
 
-**Tech Stack:** Python 3.12, FastAPI/Uvicorn, pytest, Node/Vite production build, Nginx, Docker Compose.
+**Tech Stack:** Python 3.12, FastAPI/Uvicorn, PostgreSQL, psycopg, pytest, Node/Vite production build, Nginx, Docker Compose.
 
 ---
 
@@ -82,7 +82,31 @@ Copy into a sibling staging directory, compute SHA-256 per file, require a `proj
 Run: `\.venv\Scripts\pytest.exe tests/test_container_data_migration.py -q`  
 Commit: `feat: add non-destructive container data migration`
 
-### Task 3: Compose compatibility stack
+### Task 3: PostgreSQL operational-store migration
+
+**Files:**
+- Create: `packages/storage-abstractions/src/videobox_storage/postgres_project_store.py`
+- Create: `packages/storage-abstractions/src/videobox_storage/postgres_schema.py`
+- Create: `scripts/import_sqlite_snapshot_to_postgres.py`
+- Create: focused PostgreSQL store/import tests
+
+- [ ] **Step 1: Define the storage boundary and write failing contract tests**
+
+The container runtime must select PostgreSQL only when `VIDEOBOX_DATABASE_URL` is configured. Existing host-development tests retain SQLite until the PostgreSQL store has parity.
+
+- [ ] **Step 2: Implement schema, repository compatibility, and SQLite snapshot importer**
+
+Keep project asset files in `/videobox-data`, but import every operational record needed by the current web/API flow into PostgreSQL. Record source SQLite SHA-256 and import revision. Never write the source or snapshot SQLite files.
+
+- [ ] **Step 3: Run PostgreSQL integration tests**
+
+Run against an ephemeral local Compose PostgreSQL service. Prove idempotent import and reject a source hash mismatch.
+
+- [ ] **Step 4: Commit**
+
+Commit: `feat: add PostgreSQL operational store migration`
+
+### Task 4: Compose compatibility stack
 
 **Files:**
 - Create: `compose.yaml`
@@ -110,7 +134,7 @@ Expected: failure because `compose.yaml` is absent.
 
 - [ ] **Step 3: Implement images and Compose**
 
-`videobox-api` installs Python dependencies plus FFmpeg, runs non-root Uvicorn, mounts only `${VIDEOBOX_CONTAINER_DATA_ROOT}:/videobox-data`, and sets `VIDEOBOX_DATA_ROOT=/videobox-data`. `videobox-web` builds the Vite app and proxies `/api` to `videobox-api:8000`. Apply `read_only`, `cap_drop: [ALL]`, `security_opt: [no-new-privileges:true]`, tmpfs, and loopback-only web publication.
+`videobox-postgres` has a named data volume and no host port. `videobox-api` installs Python dependencies plus FFmpeg, runs non-root Uvicorn, mounts only `${VIDEOBOX_CONTAINER_DATA_ROOT}:/videobox-data`, and sets both `VIDEOBOX_DATA_ROOT=/videobox-data` and an internal `VIDEOBOX_DATABASE_URL`. `videobox-web` builds the Vite app and proxies `/api` to `videobox-api:8000`. Apply `read_only`, `cap_drop: [ALL]`, `security_opt: [no-new-privileges:true]`, tmpfs, and loopback-only web publication.
 
 - [ ] **Step 4: Run GREEN and Compose validation**
 
@@ -118,7 +142,7 @@ Run: `\.venv\Scripts\pytest.exe tests/test_compose_contract.py -q`
 Run: `docker compose -f compose.yaml config --quiet`  
 Commit: `feat: add VideoBox Compose compatibility stack`
 
-### Task 4: Runtime migration and smoke verification
+### Task 5: Runtime migration and smoke verification
 
 **Files:**
 - Create: `scripts/verify_container_stack.ps1`
@@ -141,3 +165,14 @@ Confirm `docker compose -p 65_videobox ps`, web loopback health, proxied API hea
 - [ ] **Step 4: Run affected/full tests, build, review, and commit**
 
 Run focused migration/config/compose tests, current renderer tests, relevant API tests, frontend production build, `git diff --check`, and source→runtime inspection. Update SSOT/handoff without marking Task 9 complete. Commit and push the closed container-migration unit.
+
+## 2026-07-19 implementation record
+
+- [x] Task 1: `VIDEOBOX_DATA_ROOT`와 opt-in `VIDEOBOX_DATABASE_URL` 경계를 추가했다.
+- [x] Task 2: 원본을 변경하지 않는 staging snapshot 복사기를 추가했다. 실행 중인 SQLite는 read-only backup API로 복사한다.
+- [x] Task 3 (foundation): PostgreSQL schema, SQLite SQL compatibility surface, read-only SQLite snapshot importer, API store 선택 경계를 구현했다.
+- [x] Task 4: Compose 프로젝트 이름 `65_videobox`, internal PostgreSQL/API, loopback-only web edge, non-root/read-only runtime을 구현했다.
+- [x] Task 5 (runtime): 실제 데이터 snapshot 2개 프로젝트를 PostgreSQL에 import하고, `/api/projects`와 current-revision MP4 delivery를 `127.0.0.1:5173`에서 확인했다.
+- [ ] PostgreSQL store의 모든 편집 mutation/복구 경로에 대한 전면 parity suite는 Hermes 도입 전 별도 hardening slice로 계속 검증한다. 이번 단계에서 검증한 것은 실제 데이터 import, project listing, proxied playback 및 새 project 생성 API다.
+
+Task 9 사람/환경 acceptance 상태는 이 컨테이너 이전으로 변경하지 않는다.

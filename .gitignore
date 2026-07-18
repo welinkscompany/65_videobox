@@ -15,6 +15,7 @@ Thumbs.db
 # Local env
 .env
 .env.*
+!.env.container.example
 
 # Build / cache
 dist/

@@ -1,0 +1,62 @@
+name: 65_videobox
+
+services:
+  videobox-postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-videobox}
+      POSTGRES_USER: ${POSTGRES_USER:-videobox}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.container}
+    volumes:
+      - videobox_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [videobox-internal]
+    security_opt: [no-new-privileges:true]
+
+  videobox-api:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    environment:
+      VIDEOBOX_DATA_ROOT: /videobox-data
+      VIDEOBOX_DATABASE_URL: postgresql://${POSTGRES_USER:-videobox}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.container}@videobox-postgres:5432/${POSTGRES_DB:-videobox}
+    volumes:
+      - ${VIDEOBOX_CONTAINER_DATA_ROOT:?set VIDEOBOX_CONTAINER_DATA_ROOT in .env.container}:/videobox-data
+    depends_on:
+      videobox-postgres:
+        condition: service_healthy
+    networks: [videobox-internal]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+
+  videobox-web:
+    build:
+      context: .
+      dockerfile: docker/web.Dockerfile
+    depends_on:
+      videobox-api:
+        condition: service_started
+    ports:
+      - "127.0.0.1:${VIDEOBOX_WEB_PORT:-5173}:8080"
+    networks: [videobox-edge, videobox-internal]
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx:uid=101,gid=101,mode=0755
+      - /var/run:uid=101,gid=101,mode=0755
+      - /tmp:uid=101,gid=101,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+
+networks:
+  videobox-edge:
+  videobox-internal:
+    internal: true
+
+volumes:
+  videobox_postgres_data:

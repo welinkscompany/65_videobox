@@ -18,7 +18,13 @@ def test_normalized_media_controls_validate_audio_and_broll_contracts() -> None:
     )
 
     assert audio == {"gain_db": -6.0, "fade_in_sec": 0.5, "fade_out_sec": 0.75, "ducking": True}
-    assert broll == {"fit": "crop", "loop": True, "pad": False, "trim_start_sec": 0.25}
+    assert broll == {
+        "fit": "crop",
+        "loop": True,
+        "pad": False,
+        "trim_start_sec": 0.25,
+        "preserve_source_audio": False,
+    }
     with pytest.raises(ValueError, match="fade"):
         normalize_media_controls({"fade_in_sec": 3.0, "fade_out_sec": 2.0}, media_kind="audio", duration_sec=4.0)
     with pytest.raises(ValueError, match="fit"):
@@ -46,7 +52,13 @@ def test_timeline_builder_carries_manual_media_controls_to_renderable_clips() ->
         ],
     )
 
-    assert timeline.tracks[1].clips[0].media_controls == {"fit": "crop", "loop": False, "pad": True, "trim_start_sec": 0.5}
+    assert timeline.tracks[1].clips[0].media_controls == {
+        "fit": "crop",
+        "loop": False,
+        "pad": True,
+        "trim_start_sec": 0.5,
+        "preserve_source_audio": False,
+    }
 
 
 def test_editing_session_media_override_persists_normalized_controls() -> None:

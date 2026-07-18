@@ -6,7 +6,7 @@
 
 ## 1. Decision
 
-현재 호스트에서 직접 실행하는 VideoBox web/API/FFmpeg 경로를 먼저 Compose로 옮긴다. 기존 프로젝트 데이터는 새 host-managed data root로 **복사**하고, 원본 데이터는 삭제하거나 이동하지 않는다.
+현재 호스트에서 직접 실행하는 VideoBox web/API/FFmpeg 경로를 Compose로 옮기고, 컨테이너의 운영 데이터베이스는 PostgreSQL로 사용한다. 기존 프로젝트 SQLite 데이터와 자산은 새 host-managed data root로 **복사**한 뒤 PostgreSQL 이관의 입력으로 사용하며, 원본 데이터는 삭제·이동·변환하지 않는다.
 
 이 단계는 Hermes, GPT OAuth, mem0, host bridge, egress proxy, 별도 render worker를 구현하지 않는다. 이들은 컨테이너화된 VideoBox 호환 경로가 검증된 뒤 별도 단계로 도입한다. mem0는 이후에도 Hermes 에이전트의 보조기억일 뿐이며 VideoBox의 프로젝트·편집·자산·대화 SSOT를 대체하지 않는다.
 
@@ -16,11 +16,13 @@
 Browser
   -> videobox-web (loopback only)
   -> videobox-api (internal only; compatibility FFmpeg renderer included)
-  -> /videobox-data (host-managed copied data root)
+  -> videobox-postgres (internal only; VideoBox operational records)
+  -> /videobox-data (host-managed copied assets and SQLite preservation snapshot)
 ```
 
 - Compose project name is exactly `65_videobox`.
 - `videobox-web` is the only loopback host port. API remains internal.
+- `videobox-postgres` is internal only. It is the operational database for the container runtime; publishing PostgreSQL to the host is prohibited.
 - `videobox-api` runs the existing API plus current FFmpeg render path. This is a compatibility boundary, not the final isolated render-worker design.
 - Data inside containers uses `/videobox-data`; durable records keep project-relative storage URIs, never container paths.
 - API images run non-root with a read-only root filesystem where current dependencies allow it. No Docker socket, user home, arbitrary media library, Hermes state, or OAuth secret is mounted.
@@ -29,19 +31,21 @@ Browser
 
 The existing default root is `D:\AI_Workspace_louis_office_50\20_project\65_videobox-project`. The new container root is a separately configured host directory (`VIDEOBOX_CONTAINER_DATA_ROOT`).
 
-1. A migration command requires explicit source and target roots.
+1. A snapshot command requires explicit source and target roots.
 2. It refuses source=target, missing source, target inside source, and a non-empty unrecognized target.
 3. It copies project files to staging, computes streaming SHA-256 for copied files, verifies SQLite/project metadata, then atomically publishes the target project directory.
 4. It records a migration manifest with source path, target path, file count, hashes, timestamp, and source-preserved status.
-5. It never deletes, renames, or mutates the source root.
+5. A separate PostgreSQL import command reads only the verified snapshot, records a source-SQLite hash and import revision, then commits one project atomically. Re-running the identical verified snapshot is idempotent; a changed source requires an explicit new import revision.
+6. It never deletes, renames, or mutates the source root.
 6. Re-running with the same verified manifest is idempotent; mismatched content fails closed.
 
 The first container launch refuses to use an empty target root unless the migration command has completed successfully.
 
 ## 4. Runtime Configuration
 
-- `VIDEOBOX_DATA_ROOT` becomes the authoritative runtime data-root override. The current path remains the host-development default only.
-- Compose resolves its bind mount from `VIDEOBOX_CONTAINER_DATA_ROOT` and passes `/videobox-data` as `VIDEOBOX_DATA_ROOT` to the API.
+- `VIDEOBOX_DATABASE_URL` is required for the container API and points only to the internal PostgreSQL service. SQLite is not an operational container database.
+- `VIDEOBOX_DATA_ROOT` is the authoritative path for mounted project assets and the preserved SQLite snapshot. The current path remains the host-development default only.
+- Compose resolves its bind mount from `VIDEOBOX_CONTAINER_DATA_ROOT` and passes `/videobox-data` plus the internal PostgreSQL URL to the API.
 - The web service proxies `/api` to the internal API service. It does not call an external provider.
 - A health command verifies Compose service health, API readiness, the mounted root, and a project inventory count.
 
@@ -57,11 +61,12 @@ The first container launch refuses to use an empty target root unless the migrat
 
 The implementation must prove:
 
-1. Compose project name is `65_videobox` and the API has no host port.
-2. Migration copies a fixture project, preserves source bytes, rejects unsafe targets, and is idempotent.
-3. API resolves the mounted `/videobox-data` root from configuration rather than the hard-coded Windows default.
-4. The Compose stack starts from copied data, exposes the web service only on loopback, and returns API health through the proxy.
-5. Existing focused API/render tests still pass; container-specific tests run without Gemini, OAuth, Hermes, or external HTTP calls.
+1. Compose project name is `65_videobox`; API and PostgreSQL have no host ports.
+2. Snapshot migration copies a fixture project, preserves source bytes, rejects unsafe targets, and is idempotent.
+3. PostgreSQL import proves the imported project records and asset references match the verified SQLite snapshot without using the SQLite file as the running database.
+4. API resolves the mounted `/videobox-data` root and its internal PostgreSQL URL from configuration rather than hard-coded host paths.
+5. The Compose stack starts from imported data, exposes the web service only on loopback, and returns API health through the proxy.
+6. Existing focused API/render tests still pass; container-specific tests run without Gemini, OAuth, Hermes, or external HTTP calls.
 
 ## 7. Later Stages
 

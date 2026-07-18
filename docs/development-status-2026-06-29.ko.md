@@ -1,5 +1,17 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
+> 현재 authoritative 상태/next slice 판단은 `## 264. 2026-07-19 container PostgreSQL foundation`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+
+## 264. 2026-07-19 container PostgreSQL foundation
+
+- 사용자의 명시 지시로 이전의 “host web/API/FFmpeg compatibility only” 경계를 PostgreSQL 포함 컨테이너 기반으로 확장했다. 이 변경은 Task 9 사람/환경 acceptance나 Hermes 구현을 완료 처리하지 않는다.
+- Compose project는 `65_videobox`다. `videobox-web`만 `127.0.0.1:5173`에 공개하고, API/PostgreSQL은 `videobox-internal`에만 두었다. web은 edge+internal 두 네트워크를 사용해 loopback proxy만 제공한다.
+- 원본 `D:\AI_Workspace_louis_office_50\20_project\65_videobox-project`는 변경하지 않았다. 새 `65_videobox-container-data`에 running SQLite를 read-only backup으로 snapshot했으며 49개 파일 hash 매니페스트로 검증한다.
+- 실제 snapshot의 두 프로젝트를 internal PostgreSQL에 import했다. proxy `/api/projects`와 `b-roll-smoke-test`의 `final_render_job_009/content`는 `200 video/mp4`로 확인했다. verifier는 source preservation, 49개 snapshot hash, 2개 imported project, API/PostgreSQL host-port 미공개를 통과했다.
+- PostgreSQL store는 새 project 생성·목록, snapshot import, 실제 playback path를 통합 검증했다. 전 편집 mutation/복구/concurrency PostgreSQL parity는 Hermes보다 먼저 끝낼 후속 hardening slice로 남긴다.
+- external/Gemini provider call은 0이다. Hermes, GPT OAuth, mem0, OpenCut, host bridge, SaaS auth/billing은 아직 구현하지 않았다. mem0는 이후에도 Hermes 보조기억이며 VideoBox SSOT가 아니다.
+- Task 9은 기존 사람/환경 acceptance 기록을 그대로 유지한다. 누적은 Task 9과 무관하게 기존 **9/22 (40.9%)**, 잔여 **59.1%**다.
+
 > 현재 authoritative 상태/next slice 판단은 `## 263. 2026-07-18 OSS Slice 2/3 commit and creator-flow recovery handoff`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
 
 ## 263. 2026-07-18 OSS Slice 2/3 commit and creator-flow recovery handoff

@@ -1,4 +1,5 @@
 import importlib.util
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -15,7 +16,10 @@ def _migration_module():
 
 def _source(root: Path) -> Path:
     (root / "projects" / "demo" / "db").mkdir(parents=True)
-    (root / "projects" / "demo" / "db" / "project.sqlite").write_bytes(b"sqlite-fixture")
+    database_path = root / "projects" / "demo" / "db" / "project.sqlite"
+    with sqlite3.connect(database_path) as connection:
+        connection.execute("CREATE TABLE fixture (value TEXT NOT NULL)")
+        connection.execute("INSERT INTO fixture (value) VALUES ('source')")
     (root / "projects" / "demo" / "asset.bin").write_bytes(b"source-bytes")
     return root
 
