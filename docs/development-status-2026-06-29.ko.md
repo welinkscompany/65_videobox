@@ -1,6 +1,15 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 264. 2026-07-19 container PostgreSQL foundation`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 265. 2026-07-19 container PostgreSQL shared-store isolation hardening`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+
+## 265. 2026-07-19 container PostgreSQL shared-store isolation hardening
+
+- PostgreSQL은 프로젝트별 SQLite 파일과 달리 하나의 공유 DB이므로, deterministic ID를 쓰는 project-owned table의 기존 SQLite SQL을 그대로 쓰면 다른 프로젝트 행이 섞일 수 있었다. 이를 인지한 뒤 타임라인·리뷰·편집 세션·export·transcript·분석·preview·subtitle·asset·segment·recommendation·job·TTS candidate·Gemini provider-key의 composite key와 query scope를 보완했다.
+- 두 프로젝트가 같은 deterministic ID를 만들어도 서로의 timeline, editing session, export, asset, segment, recommendation, job, TTS candidate, provider-key를 읽거나 수정하거나 삭제하지 않는 PostgreSQL 통합 회귀를 추가했다. Gemini provider 호출은 하지 않았고 local persistence만 검증했다.
+- 이전 단일-key import로 `progress-bar-live-test` timeline이 누락된 파생 PostgreSQL volume은 원본이 아닌 snapshot에서만 재생성했다. 재import 뒤 PostgreSQL에는 `b-roll-smoke-test` timeline 7개와 `progress-bar-live-test` timeline 1개가 존재한다.
+- 최신 Compose 재build 뒤 verifier는 source preserved, snapshot hash 49개, project 2개, API/PostgreSQL host-port 미공개를 통과했다. `final_render_job_009/content`도 web proxy에서 `200 video/mp4`로 다시 확인했다. API의 user/media library root는 `/videobox-data/videobox-user-library`로 mount 안에 남는다.
+- Task 9 사람/환경 acceptance와 CapCut Desktop evidence는 이 hardening으로 완료 처리하지 않는다. Hermes, GPT OAuth, mem0, OpenCut, host bridge, SaaS auth/billing은 계속 시작하지 않았다. Gemini provider call은 0이다.
+- 최종 full suite와 closeout 전에는 모든 `LocalProjectStore` surface의 PostgreSQL parity를 완결했다고 주장하지 않는다. 다음 Hermes slice 전에는 별도 migration/recovery/concurrency audit를 다시 수행한다.
 
 ## 264. 2026-07-19 container PostgreSQL foundation
 

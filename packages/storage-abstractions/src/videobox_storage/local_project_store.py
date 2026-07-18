@@ -2487,8 +2487,8 @@ class LocalProjectStore:
         try:
             connection.execute("BEGIN")
             session_row = connection.execute(
-                "SELECT session_json, summary_json, session_revision, created_at, updated_at FROM editing_sessions WHERE session_id = ?",
-                (session_id,),
+                "SELECT session_json, summary_json, session_revision, created_at, updated_at FROM editing_sessions WHERE project_id = ? AND session_id = ?",
+                (project_id, session_id),
             ).fetchone()
             if session_row is None:
                 raise KeyError(f"Editing session not found: {session_id}")
@@ -2496,7 +2496,7 @@ class LocalProjectStore:
             session["summary"] = json.loads(str(session_row["summary_json"] or "{}"))
             session["session_revision"] = int(session_row["session_revision"])
             session["created_at"], session["updated_at"] = session_row["created_at"], session_row["updated_at"]
-            asset_rows = connection.execute("SELECT asset_id, project_id, asset_type, storage_uri, source_kind, mime_type, duration_sec, metadata_json, created_at FROM assets ORDER BY created_at ASC").fetchall()
+            asset_rows = connection.execute("SELECT asset_id, project_id, asset_type, storage_uri, source_kind, mime_type, duration_sec, metadata_json, created_at FROM assets WHERE project_id = ? ORDER BY created_at ASC", (project_id,)).fetchall()
             analysis_rows = connection.execute("SELECT * FROM media_analysis_runs WHERE project_id = ? ORDER BY created_at ASC, analysis_id ASC", (project_id,)).fetchall()
             preference_row = connection.execute("SELECT preferences_json FROM director_preferences WHERE project_id = ?", (project_id,)).fetchone()
             revision_row = connection.execute("SELECT revision FROM director_asset_index_revisions WHERE project_id = ?", (project_id,)).fetchone()
@@ -2663,10 +2663,10 @@ class LocalProjectStore:
                    technical_status, operator_review_status, target_duration_sec,
                    actual_duration_sec, failure_code, created_at
             FROM tts_candidates
-            WHERE segment_id = ?
+            WHERE project_id = ? AND segment_id = ?
             ORDER BY created_at ASC, candidate_id ASC
             """,
-            (segment_id,),
+            (project_id, segment_id),
         )
         return [dict(row) for row in rows]
 
@@ -2678,9 +2678,9 @@ class LocalProjectStore:
                    technical_status, operator_review_status, target_duration_sec,
                    actual_duration_sec, failure_code, created_at
             FROM tts_candidates
-            WHERE candidate_id = ?
+            WHERE project_id = ? AND candidate_id = ?
             """,
-            (candidate_id,),
+            (project_id, candidate_id),
         )
         if row is None:
             raise KeyError(f"TTS candidate not found: {candidate_id}")
@@ -2703,8 +2703,8 @@ class LocalProjectStore:
             raise ValueError("TTS candidate listening review has already been decided.")
         self._execute(
             project_id,
-            "UPDATE tts_candidates SET operator_review_status = ? WHERE candidate_id = ?",
-            (normalized_decision, candidate_id),
+            "UPDATE tts_candidates SET operator_review_status = ? WHERE project_id = ? AND candidate_id = ?",
+            (normalized_decision, project_id, candidate_id),
         )
         candidate["operator_review_status"] = normalized_decision
         return candidate
@@ -2772,8 +2772,10 @@ class LocalProjectStore:
                        status, cooldown_until, consecutive_failures, last_error, last_used_at,
                        created_at, updated_at, api_key_secret
                 FROM gemini_provider_keys
+                WHERE project_id = ?
                 ORDER BY created_at ASC, key_id ASC
-                """
+                """,
+                (project_id,),
             ).fetchall()
         finally:
             connection.close()
@@ -2788,8 +2790,10 @@ class LocalProjectStore:
                        status, cooldown_until, consecutive_failures, last_error, last_used_at,
                        created_at, updated_at, api_key_secret
                 FROM gemini_provider_keys
+                WHERE project_id = ?
                 ORDER BY created_at ASC, key_id ASC
-                """
+                """,
+                (project_id,),
             ).fetchall()
         finally:
             connection.close()
@@ -2809,9 +2813,9 @@ class LocalProjectStore:
                    status, cooldown_until, consecutive_failures, last_error, last_used_at,
                    created_at, updated_at, api_key_secret
             FROM gemini_provider_keys
-            WHERE key_id = ?
+            WHERE project_id = ? AND key_id = ?
             """,
-            (key_id,),
+            (project_id, key_id),
         )
         if row is None:
             raise KeyError(f"Gemini provider key not found: {key_id}")
@@ -2841,7 +2845,7 @@ class LocalProjectStore:
                 cheap_model = ?,
                 high_quality_model = ?,
                 updated_at = ?
-            WHERE key_id = ?
+            WHERE project_id = ? AND key_id = ?
             """,
             (
                 label or current["label"],
@@ -2849,6 +2853,7 @@ class LocalProjectStore:
                 cheap_model or current["cheap_model"],
                 high_quality_model or current["high_quality_model"],
                 self._now_iso(),
+                project_id,
                 key_id,
             ),
         )
@@ -2871,9 +2876,9 @@ class LocalProjectStore:
             SET status = ?,
                 cooldown_until = ?,
                 updated_at = ?
-            WHERE key_id = ?
+            WHERE project_id = ? AND key_id = ?
             """,
-            (status, cooldown_until, self._now_iso(), key_id),
+            (status, cooldown_until, self._now_iso(), project_id, key_id),
         )
         return self.get_gemini_provider_key(project_id=project_id, key_id=key_id)
 
@@ -2900,7 +2905,7 @@ class LocalProjectStore:
                 last_error = ?,
                 last_used_at = ?,
                 updated_at = ?
-            WHERE key_id = ?
+            WHERE project_id = ? AND key_id = ?
             """,
             (
                 status,
@@ -2909,6 +2914,7 @@ class LocalProjectStore:
                 last_error,
                 last_used_at,
                 self._now_iso(),
+                project_id,
                 key_id,
             ),
         )
@@ -2920,9 +2926,9 @@ class LocalProjectStore:
             """
             SELECT timeline_id, project_id, status, approved_at, updated_at, source_session_revision, is_current, invalidated_at, invalidated_reason
             FROM review_approvals
-            WHERE timeline_id = ?
+            WHERE project_id = ? AND timeline_id = ?
             """,
-            (timeline_id,),
+            (project_id, timeline_id),
         )
         if row is None:
             raise KeyError(f"Review state not found: {timeline_id}")
@@ -3070,7 +3076,7 @@ class LocalProjectStore:
         # written to its own subdirectory. Numbering per-subdirectory would let two
         # different export types both compute "export_001" and collide on insert,
         # so the sequence must be derived from the shared table, not a directory.
-        rows = self._fetchall(project_id, "SELECT export_id FROM exports", ())
+        rows = self._fetchall(project_id, "SELECT export_id FROM exports WHERE project_id = ?", (project_id,))
         highest = 0
         for row in rows:
             match = re.search(r"(\d+)$", str(row["export_id"]))
@@ -3090,18 +3096,18 @@ class LocalProjectStore:
             """
             SELECT export_id, file_uri
             FROM exports
-            WHERE export_type = ?
+            WHERE project_id = ? AND export_type = ?
             ORDER BY created_at DESC
             """,
-            (export_type,),
+            (project_id, export_type),
         )
         for row in rows[keep_last:]:
             artifact_path = self.resolve_storage_uri(project_id=project_id, storage_uri=str(row["file_uri"]))
             shutil.rmtree(artifact_path.parent, ignore_errors=True)
             self._execute(
                 project_id,
-                "DELETE FROM exports WHERE export_id = ?",
-                (row["export_id"],),
+                "DELETE FROM exports WHERE project_id = ? AND export_id = ?",
+                (project_id, row["export_id"]),
             )
 
     def save_capcut_export(
@@ -3241,9 +3247,9 @@ class LocalProjectStore:
             """
             SELECT export_id, project_id, timeline_id, export_type, file_uri, status, created_at, source_session_id, source_session_revision, is_current, invalidated_at, invalidated_reason
             FROM exports
-            WHERE export_id = ?
+            WHERE project_id = ? AND export_id = ?
             """,
-            (export_id,),
+            (project_id, export_id),
         )
         if row is None:
             raise KeyError(f"Export not found: {export_id}")
@@ -3318,9 +3324,9 @@ class LocalProjectStore:
             """
             SELECT export_id, project_id, timeline_id, export_type, file_uri, status, metadata_json, created_at, source_session_revision, is_current, invalidated_at, invalidated_reason
             FROM exports
-            WHERE export_id = ?
+            WHERE project_id = ? AND export_id = ?
             """,
-            (export_id,),
+            (project_id, export_id),
         )
         if row is None:
             raise KeyError(f"Export not found: {export_id}")
@@ -3348,8 +3354,8 @@ class LocalProjectStore:
     ) -> dict[str, Any]:
         row = self._fetchone(
             project_id,
-            "SELECT metadata_json FROM exports WHERE export_id = ? AND export_type = ?",
-            (export_id, "capcut_draft_export"),
+            "SELECT metadata_json FROM exports WHERE project_id = ? AND export_id = ? AND export_type = ?",
+            (project_id, export_id, "capcut_draft_export"),
         )
         if row is None:
             raise KeyError(f"CapCut draft export not found: {export_id}")
@@ -3357,8 +3363,8 @@ class LocalProjectStore:
         metadata["handoff"] = handoff
         self._execute(
             project_id,
-            "UPDATE exports SET metadata_json = ? WHERE export_id = ?",
-            (json.dumps(metadata, ensure_ascii=True), export_id),
+            "UPDATE exports SET metadata_json = ? WHERE project_id = ? AND export_id = ?",
+            (json.dumps(metadata, ensure_ascii=True), project_id, export_id),
         )
         return self.get_capcut_draft_export(project_id=project_id, export_id=export_id)
 
@@ -3909,17 +3915,17 @@ class LocalProjectStore:
                 started_at = COALESCE(started_at, ?),
                 finished_at = COALESCE(?, finished_at),
                 progress_percent = COALESCE(?, progress_percent)
-            WHERE job_id = ?
+            WHERE project_id = ? AND job_id = ?
             """,
-            (status.value, output_ref, error_message, started_at, finished_at, finished_progress_percent, job_id),
+            (status.value, output_ref, error_message, started_at, finished_at, finished_progress_percent, project_id, job_id),
         )
         return self.get_job(project_id=project_id, job_id=job_id)
 
     def update_job_progress(self, *, project_id: str, job_id: str, progress_percent: int) -> None:
         self._execute(
             project_id,
-            "UPDATE jobs SET progress_percent = ? WHERE job_id = ?",
-            (max(0, min(100, progress_percent)), job_id),
+            "UPDATE jobs SET progress_percent = ? WHERE project_id = ? AND job_id = ?",
+            (max(0, min(100, progress_percent)), project_id, job_id),
         )
 
     def get_job(self, *, project_id: str, job_id: str) -> dict[str, Any]:
@@ -3938,9 +3944,9 @@ class LocalProjectStore:
                 finished_at,
                 progress_percent
             FROM jobs
-            WHERE job_id = ?
+            WHERE project_id = ? AND job_id = ?
             """,
-            (job_id,),
+            (project_id, job_id),
         )
         if row is None:
             raise KeyError(f"Job not found: {job_id}")
@@ -3963,8 +3969,10 @@ class LocalProjectStore:
                     finished_at,
                     progress_percent
                 FROM jobs
-                ORDER BY rowid ASC
-                """
+                WHERE project_id = ?
+                ORDER BY COALESCE(started_at, ''), job_id ASC
+                """,
+                (project_id,),
             ).fetchall()
         finally:
             connection.close()
@@ -3975,8 +3983,8 @@ class LocalProjectStore:
         merged_metadata = {**asset["metadata"], **metadata_patch}
         self._execute_asset_index_mutation(
             project_id,
-            "UPDATE assets SET metadata_json = ? WHERE asset_id = ?",
-            (json.dumps(merged_metadata, ensure_ascii=True), asset_id),
+            "UPDATE assets SET metadata_json = ? WHERE project_id = ? AND asset_id = ?",
+            (json.dumps(merged_metadata, ensure_ascii=True), project_id, asset_id),
         )
         return self.get_asset(project_id=project_id, asset_id=asset_id)
 
@@ -3986,9 +3994,9 @@ class LocalProjectStore:
             """
             SELECT asset_id, project_id, asset_type, storage_uri, source_kind, mime_type, duration_sec, metadata_json, created_at
             FROM assets
-            WHERE asset_id = ?
+            WHERE project_id = ? AND asset_id = ?
             """,
-            (asset_id,),
+            (project_id, asset_id),
         )
         if row is None:
             raise KeyError(f"Asset not found: {asset_id}")
@@ -4006,17 +4014,18 @@ class LocalProjectStore:
             query = """
             SELECT asset_id, project_id, asset_type, storage_uri, source_kind, mime_type, duration_sec, metadata_json, created_at
             FROM assets
+            WHERE project_id = ?
             ORDER BY created_at ASC
             """
-            params: tuple[Any, ...] = ()
+            params: tuple[Any, ...] = (project_id,)
         else:
             query = """
             SELECT asset_id, project_id, asset_type, storage_uri, source_kind, mime_type, duration_sec, metadata_json, created_at
             FROM assets
-            WHERE asset_type = ?
+            WHERE project_id = ? AND asset_type = ?
             ORDER BY created_at ASC
             """
-            params = (asset_type.value,)
+            params = (project_id, asset_type.value)
         connection = self._connection(project_id)
         try:
             rows = connection.execute(query, params).fetchall()
@@ -4037,8 +4046,10 @@ class LocalProjectStore:
                 SELECT segment_id, project_id, start_sec, end_sec, text, source_asset_id,
                        confidence, cleanup_decision, review_required, metadata_json
                 FROM segments
+                WHERE project_id = ?
                 ORDER BY start_sec ASC, segment_id ASC
-                """
+                """,
+                (project_id,),
             ).fetchall()
         finally:
             connection.close()
@@ -4062,8 +4073,10 @@ class LocalProjectStore:
                        selected_asset_id, score, reason, auto_apply_allowed,
                        review_required, decision_state, payload_json, created_at
                 FROM recommendations
+                WHERE project_id = ?
                 ORDER BY created_at ASC
-                """
+                """,
+                (project_id,),
             ).fetchall()
         finally:
             connection.close()
@@ -4088,9 +4101,9 @@ class LocalProjectStore:
             """
             SELECT transcript_id, project_id, source_asset_id, transcript_uri, transcript_text, provider_name, segments_json, created_at
             FROM transcripts
-            WHERE transcript_id = ?
+            WHERE project_id = ? AND transcript_id = ?
             """,
-            (transcript_id,),
+            (project_id, transcript_id),
         )
         if row is None:
             raise KeyError(f"Transcript not found: {transcript_id}")
@@ -4104,9 +4117,9 @@ class LocalProjectStore:
             """
             SELECT segment_analysis_id, project_id, transcript_id, script_asset_id, file_uri, segments_json, created_at
             FROM segment_analysis_runs
-            WHERE segment_analysis_id = ?
+            WHERE project_id = ? AND segment_analysis_id = ?
             """,
-            (segment_analysis_id,),
+            (project_id, segment_analysis_id),
         )
         if row is None:
             raise KeyError(f"Segment analysis not found: {segment_analysis_id}")
@@ -4163,9 +4176,9 @@ class LocalProjectStore:
             """
             SELECT timeline_id, project_id, version, output_mode, file_uri, summary_json, created_at
             FROM timelines
-            WHERE timeline_id = ?
+            WHERE project_id = ? AND timeline_id = ?
             """,
-            (timeline_id,),
+            (project_id, timeline_id),
         )
         if row is None:
             raise KeyError(f"Timeline not found: {timeline_id}")
@@ -4278,9 +4291,9 @@ class LocalProjectStore:
             """
             SELECT preview_id, project_id, timeline_id, file_uri, status, summary_json, created_at, source_session_revision, is_current, invalidated_at, invalidated_reason
             FROM preview_renders
-            WHERE preview_id = ?
+            WHERE project_id = ? AND preview_id = ?
             """,
-            (preview_id,),
+            (project_id, preview_id),
         )
         if row is None:
             raise KeyError(f"Preview not found: {preview_id}")
@@ -4303,9 +4316,9 @@ class LocalProjectStore:
             """
             SELECT subtitle_id, project_id, timeline_id, format, file_uri, status, summary_json, created_at, source_session_revision, is_current, invalidated_at, invalidated_reason
             FROM subtitle_renders
-            WHERE subtitle_id = ?
+            WHERE project_id = ? AND subtitle_id = ?
             """,
-            (subtitle_id,),
+            (project_id, subtitle_id),
         )
         if row is None:
             raise KeyError(f"Subtitle not found: {subtitle_id}")
@@ -4322,9 +4335,9 @@ class LocalProjectStore:
             """
             SELECT export_id, project_id, timeline_id, export_type, file_uri, status, metadata_json, created_at, source_session_revision, is_current, invalidated_at, invalidated_reason
             FROM exports
-            WHERE export_id = ?
+            WHERE project_id = ? AND export_id = ?
             """,
-            (export_id,),
+            (project_id, export_id),
         )
         if row is None:
             raise KeyError(f"Export not found: {export_id}")
@@ -4348,9 +4361,9 @@ class LocalProjectStore:
             """
             SELECT session_id, project_id, timeline_id, file_uri, summary_json, session_revision, session_json, created_at, updated_at
             FROM editing_sessions
-            WHERE session_id = ?
+            WHERE project_id = ? AND session_id = ?
             """,
-            (session_id,),
+            (project_id, session_id),
         )
         if row is None:
             raise KeyError(f"Editing session not found: {session_id}")
@@ -4383,10 +4396,11 @@ class LocalProjectStore:
             """
             SELECT session_id
             FROM editing_sessions
+            WHERE project_id = ?
             ORDER BY updated_at DESC, created_at DESC, session_id DESC
             LIMIT 1
             """,
-            (),
+            (project_id,),
         )
         if row is None:
             raise KeyError(f"Editing session not found for project: {project_id}")
@@ -5219,7 +5233,7 @@ class LocalProjectStore:
             connection.close()
 
     def _count_rows(self, project_id: str, table_name: str) -> int:
-        row = self._fetchone(project_id, f"SELECT COUNT(*) AS count FROM {table_name}", ())
+        row = self._fetchone(project_id, f"SELECT COUNT(*) AS count FROM {table_name} WHERE project_id = ?", (project_id,))
         return int(row["count"]) if row is not None else 0
 
     def _now_iso(self) -> str:
@@ -5232,11 +5246,11 @@ class LocalProjectStore:
             """
             SELECT subtitle_id
             FROM subtitle_renders
-            WHERE timeline_id = ?""" + current_filter + """
+            WHERE project_id = ? AND timeline_id = ?""" + current_filter + """
             ORDER BY created_at DESC
             LIMIT 1
             """,
-            (timeline_id,),
+            (project_id, timeline_id),
         )
         if row is None:
             return None
@@ -5371,7 +5385,7 @@ class LocalProjectStore:
                     """
                     UPDATE editing_sessions
                     SET timeline_id = ?, summary_json = ?, session_revision = ?, session_json = ?, updated_at = ?
-                    WHERE session_id = ? AND (? IS NULL OR session_revision = ?)
+                    WHERE project_id = ? AND session_id = ? AND (? IS NULL OR session_revision = ?)
                     """,
                     (
                         timeline_id,
@@ -5379,6 +5393,7 @@ class LocalProjectStore:
                         payload["session_revision"],
                         serialized_payload,
                         updated_at,
+                        project_id,
                         session_id,
                         expected_revision,
                         expected_revision,
@@ -5430,9 +5445,9 @@ class LocalProjectStore:
             """
             SELECT file_uri
             FROM timelines
-            WHERE timeline_id = ?
+            WHERE project_id = ? AND timeline_id = ?
             """,
-            (timeline_id,),
+            (project_id, timeline_id),
         )
         if row is None:
             raise KeyError(f"Timeline not found: {timeline_id}")
@@ -5568,8 +5583,10 @@ class LocalProjectStore:
                 """
                 SELECT timeline_id
                 FROM timelines
+                WHERE project_id = ?
                 ORDER BY created_at ASC, timeline_id ASC
-                """
+                """,
+                (project_id,),
             ).fetchall()
         finally:
             connection.close()

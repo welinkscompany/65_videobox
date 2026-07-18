@@ -2,7 +2,7 @@
 
 **날짜:** 2026-07-19
 **브랜치:** `codex/videobox-container-compatibility`
-**상태:** 컨테이너 호환 기반 구현·실데이터 runtime 검증 완료. PostgreSQL 전체 mutation parity hardening은 후속 slice.
+**상태:** 컨테이너 호환 기반과 identified shared-store isolation hardening·실데이터 runtime 검증 완료. 모든 mutation/recovery/concurrency parity는 후속 audit.
 
 ## 확정된 경계
 
@@ -22,10 +22,18 @@
 3. `b-roll-smoke-test`의 `final_render_job_009/content`가 프록시를 통해 `200`, `video/mp4`, `841742` bytes로 전달됐다.
 4. `scripts/verify_container_stack.ps1`은 snapshot hash 49개, 프로젝트 2개, source preserved, API/PostgreSQL host-port 미공개를 확인했다.
 
+## 2026-07-19 shared-store isolation 보완
+
+- 기존 SQLite는 프로젝트별 파일이어서 deterministic ID가 파일 안에서만 고유했다. PostgreSQL 공유 DB에서는 동일 ID가 충돌하거나 미범위 query가 다른 프로젝트를 볼 수 있어, 해당 per-project table을 `(project_id, identifier)` composite key로 전환하고 CRUD/list/count query를 project scope로 제한했다.
+- 대상은 timelines, review approvals, editing sessions, exports, transcripts, segment analysis runs, preview renders, subtitle renders, assets, segments, recommendations, jobs, TTS candidates, Gemini provider keys다.
+- PG two-project regression은 동일 timeline/session/export/asset/job/TTS/key ID의 읽기·수정·삭제 격리를 확인한다. provider-key는 로컬 persistence만 다루며 Gemini provider/network call은 하지 않는다.
+- 기존 파생 PostgreSQL volume은 정확히 `65_videobox_videobox_postgres_data`만 재생성해 immutable snapshot을 다시 import했다. 원본 source는 유지됐다. 재import 후 `b-roll-smoke-test` timeline 7개, `progress-bar-live-test` timeline 1개를 확인했다.
+- 최신 API 컨테이너는 user/media library를 `/videobox-data/videobox-user-library`에 두므로 read-only root 밖에 쓰려던 이전 mount 결함도 없다.
+
 ## 검증 상태
 
 - 통과: container config/migration/compose tests `10 passed`, PostgreSQL store/import integration `4 passed`, source-audio media controls `6 passed`, FFmpeg final renderer + playback delivery `18 passed`, web production build, Docker image build, runtime verifier.
-- 전체 Python suite 첫 실행: `1129 passed, 7 skipped, 4 failed` (10분 13초). 2건은 `preserve_source_audio=False` 기본 계약이 이미 main에 추가됐지만 기대값이 갱신되지 않은 테스트였고 이번 커밋에 수정했다. 나머지 2건은 이번 diff가 건드리지 않은 editor UI source-provenance registry의 기존 normalized hash drift다. 전면 rerun은 아직 하지 않았으므로 full green으로 주장하지 않는다.
+- 최신 focused 검증: provenance, container data-root, PostgreSQL compatibility/store/import, media controls, user library/favorites/media library를 합쳐 `65 passed`다. PostgreSQL two-project suite는 `15 passed`다. full suite는 closeout 직전 최신 코드로 다시 실행해 기록한다.
 - `npm audit`은 moderate 1, high 1, critical 1을 보고했다. 이번 전환 범위 밖의 기존 dependency 상태여서 자동 업그레이드는 하지 않았다.
 
 ## 재현 명령
@@ -41,6 +49,6 @@ docker compose --env-file .env.container exec -T videobox-api sh -c 'python scri
 
 ## 아직 열어 둘 항목
 
-- `PostgresProjectStore`는 기존 `LocalProjectStore`의 SQLite SQL surface를 명시적으로 변환한다. 실데이터 project listing, playback, 새 project 생성과 snapshot import는 확인했지만, 모든 편집 mutation·복구·concurrency 경로를 PostgreSQL로 전면 검증한 것은 아니다.
+- `PostgresProjectStore`는 기존 `LocalProjectStore`의 SQLite SQL surface를 명시적으로 변환한다. 위 identified deterministic-ID/shared-store path는 보완했지만, 모든 편집 mutation·복구·concurrency 경로를 PostgreSQL로 전면 검증한 것은 아니다.
 - 이 parity hardening을 마친 뒤에만 Hermes agent를 추가한다. Hermes의 GPT OAuth·mem0는 별도 서비스/volume/승인 경계를 가진다.
 - Task 9 사람/환경 acceptance 및 CapCut Desktop evidence는 이 작업으로 완료 처리하지 않는다.

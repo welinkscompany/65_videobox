@@ -1,0 +1,23 @@
+# Provenance registry hashes are raw-file SHA-256 values.  Keep these
+# materialized UI sources byte-stable across Windows and Unix checkouts.
+apps/web/src/app/ProductShell.tsx text eol=lf
+apps/web/src/lib/utils.ts text eol=lf
+apps/web/src/hooks/use-mobile.ts text eol=lf
+apps/web/src/components/ui/button.tsx text eol=lf
+apps/web/src/components/ui/card.tsx text eol=lf
+apps/web/src/components/ui/input.tsx text eol=lf
+apps/web/src/components/ui/textarea.tsx text eol=lf
+apps/web/src/components/ui/dialog.tsx text eol=lf
+apps/web/src/components/ui/sheet.tsx text eol=lf
+apps/web/src/components/ui/dropdown-menu.tsx text eol=lf
+apps/web/src/components/ui/sidebar.tsx text eol=lf
+apps/web/src/components/ui/empty.tsx text eol=lf
+apps/web/src/components/ui/badge.tsx text eol=lf
+apps/web/src/components/ui/tooltip.tsx text eol=lf
+apps/web/src/components/ui/skeleton.tsx text eol=lf
+apps/web/src/components/ui/tabs.tsx text eol=lf
+apps/web/src/components/ui/select.tsx text eol=lf
+apps/web/src/components/ui/scroll-area.tsx text eol=lf
+apps/web/src/components/ui/separator.tsx text eol=lf
+apps/web/src/components/ui/sonner.tsx text eol=lf
+apps/web/src/components/ui/resizable.tsx text eol=lf

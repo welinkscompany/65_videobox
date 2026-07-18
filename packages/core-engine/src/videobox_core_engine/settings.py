@@ -15,6 +15,13 @@ def resolve_projects_root() -> Path:
     return Path(configured) if configured else DEFAULT_PROJECTS_ROOT
 
 
+def resolve_user_library_root() -> Path:
+    configured = os.environ.get("VIDEOBOX_DATA_ROOT", "").strip()
+    if configured:
+        return Path(configured) / "videobox-user-library"
+    return DEFAULT_PROJECTS_ROOT.parent / "videobox-user-library"
+
+
 def resolve_database_url() -> str | None:
     configured = os.environ.get("VIDEOBOX_DATABASE_URL", "").strip()
     return configured or None

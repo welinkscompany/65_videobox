@@ -55,6 +55,7 @@ from videobox_core_engine.settings import (
     WhisperSTTConfig,
     resolve_database_url,
     resolve_projects_root,
+    resolve_user_library_root,
 )
 from videobox_storage.local_project_store import LocalProjectStore, sha256_file
 from videobox_storage.media_library_store import MediaLibraryStore
@@ -188,9 +189,14 @@ def create_app(
         if database_url is not None
         else LocalProjectStore(resolved_projects_root, now=analysis_clock)
     )
-    user_library_store = UserLibraryStore(store.projects_root.parent / "videobox-user-library")
+    user_library_root = (
+        resolve_user_library_root()
+        if projects_root is None
+        else store.projects_root.parent / "videobox-user-library"
+    )
+    user_library_store = UserLibraryStore(user_library_root)
     resolved_media_library_store = media_library_store or MediaLibraryStore(
-        store.projects_root.parent / "videobox-user-library"
+        user_library_root
     )
     resolved_local_runtime_config = local_runtime_config or LocalOpenAICompatibleRuntimeConfig()
     if local_only_runtime_service_factory is not None:
@@ -291,6 +297,7 @@ def create_app(
     app.state.stt_provider = pipeline.stt_provider
     app.state.tts_provider = pipeline.tts_provider
     app.state.final_renderer = pipeline.final_renderer
+    app.state.user_library_store = user_library_store
     app.state.media_library_store = resolved_media_library_store
 
     @app.get("/health")

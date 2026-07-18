@@ -23,6 +23,31 @@ def test_translate_sql_converts_known_sqlite_replace_into_postgres_upsert() -> N
     )
 
 
+def test_translate_sql_qualifies_revision_increment_for_known_operational_index_tables() -> None:
+    for table in ("director_proposal_revisions", "director_asset_index_revisions"):
+        statement = (
+            f"INSERT INTO {table} (project_id, revision) VALUES (?, 1) "
+            "ON CONFLICT(project_id) DO UPDATE SET revision = revision + 1"
+        )
+
+        assert translate_sql(statement) == (
+            f"INSERT INTO {table} (project_id, revision) VALUES (%s, 1) "
+            f"ON CONFLICT(project_id) DO UPDATE SET revision = {table}.revision + 1"
+        )
+
+
+def test_translate_sql_preserves_unknown_revision_upsert() -> None:
+    statement = (
+        "INSERT INTO unrelated_revisions (project_id, revision) VALUES (?, 1) "
+        "ON CONFLICT(project_id) DO UPDATE SET revision = revision + 1"
+    )
+
+    assert translate_sql(statement) == (
+        "INSERT INTO unrelated_revisions (project_id, revision) VALUES (%s, 1) "
+        "ON CONFLICT(project_id) DO UPDATE SET revision = revision + 1"
+    )
+
+
 def test_postgres_schema_has_no_sqlite_only_autoincrement_syntax() -> None:
     assert POSTGRES_SCHEMA_STATEMENTS
     assert all("AUTOINCREMENT" not in statement for statement in POSTGRES_SCHEMA_STATEMENTS)

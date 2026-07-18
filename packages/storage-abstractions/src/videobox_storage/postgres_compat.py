@@ -11,6 +11,15 @@ _REPLACE_PRIMARY_KEYS = {
     "provider_trace_failed_runs": "job_id",
 }
 
+_REVISION_INCREMENT_TABLES = {
+    "director_asset_index_revisions",
+    "director_proposal_revisions",
+}
+
+_PROJECT_SCOPED_CONFLICT_TARGETS = {
+    "review_approvals": ("timeline_id",),
+}
+
 
 def translate_sql(statement: str) -> str:
     """Translate the small, explicit SQLite dialect surface used by VideoBox.
@@ -46,5 +55,30 @@ def translate_sql(statement: str) -> str:
             f"INSERT INTO {table} ({', '.join(columns)}) {replace_match.group('values')} "
             f"ON CONFLICT ({primary_key}) DO UPDATE SET {', '.join(updates)}"
         )
+
+    revision_increment_match = re.match(
+        r"(?P<prefix>INSERT\s+INTO\s+(?P<table>[a-z_]+)\s*\([^)]*\)\s*VALUES\s*\([^)]*\)\s*"
+        r"ON\s+CONFLICT\s*\([^)]*\)\s+DO\s+UPDATE\s+SET\s+revision\s*=\s*)revision\s*\+\s*1$",
+        normalized,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if revision_increment_match and revision_increment_match.group("table").lower() in _REVISION_INCREMENT_TABLES:
+        normalized = (
+            f"{revision_increment_match.group('prefix')}"
+            f"{revision_increment_match.group('table')}.revision + 1"
+        )
+
+    insert_table_match = re.match(r"INSERT\s+INTO\s+([a-z_]+)", normalized, flags=re.IGNORECASE)
+    if insert_table_match:
+        table_name = insert_table_match.group(1).lower()
+        conflict_columns = _PROJECT_SCOPED_CONFLICT_TARGETS.get(table_name)
+        if conflict_columns is not None:
+            conflict_pattern = ",\\s*".join(conflict_columns)
+            normalized = re.sub(
+                rf"ON\s+CONFLICT\s*\(\s*{conflict_pattern}\s*\)",
+                f"ON CONFLICT (project_id, {', '.join(conflict_columns)})",
+                normalized,
+                flags=re.IGNORECASE,
+            )
 
     return normalized.replace("?", "%s")
