@@ -53,6 +53,7 @@ from videobox_core_engine.settings import (
     LocalOpenAICompatibleRuntimeConfig,
     TTSEngineConfig,
     WhisperSTTConfig,
+    resolve_projects_root,
 )
 from videobox_storage.local_project_store import LocalProjectStore, sha256_file
 from videobox_storage.media_library_store import MediaLibraryStore
@@ -178,7 +179,7 @@ def create_app(
     creation_interview_runtime: CreationInterviewRuntime | None = None,
 ) -> FastAPI:
     app = FastAPI(title="VideoBox API", version="0.1.0", lifespan=_media_analysis_lifespan)
-    store = LocalProjectStore(projects_root or DEFAULT_PROJECTS_ROOT, now=analysis_clock)
+    store = LocalProjectStore(projects_root or resolve_projects_root(), now=analysis_clock)
     user_library_store = UserLibraryStore(store.projects_root.parent / "videobox-user-library")
     resolved_media_library_store = media_library_store or MediaLibraryStore(
         store.projects_root.parent / "videobox-user-library"

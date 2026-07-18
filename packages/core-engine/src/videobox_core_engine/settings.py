@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 from pathlib import Path
 
 
 DEFAULT_PROJECTS_ROOT = Path(
     r"D:\AI_Workspace_louis_office_50\20_project\65_videobox-project"
 )
+
+
+def resolve_projects_root() -> Path:
+    configured = os.environ.get("VIDEOBOX_DATA_ROOT", "").strip()
+    return Path(configured) if configured else DEFAULT_PROJECTS_ROOT
 
 
 @dataclass(slots=True, frozen=True)
