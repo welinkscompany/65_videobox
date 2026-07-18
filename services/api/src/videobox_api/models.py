@@ -30,6 +30,29 @@ class CreationBriefSummaryRequest(CreationBriefRevisionRequest):
     summary: str = Field(min_length=1)
 
 
+class DraftReadinessCreateRequest(BaseModel):
+    brief_id: str = Field(min_length=1)
+    narration_choice: dict[str, Any]
+    idempotency_key: str = Field(min_length=1)
+    expected_brief_revision: int = Field(ge=1)
+    capability: dict[str, Any] = Field(default_factory=dict)
+
+
+class DraftReadinessRevisionRequest(CreationBriefRevisionRequest):
+    pass
+
+
+class DraftReadinessCandidateRequest(DraftReadinessRevisionRequest):
+    asset_id: str
+    skipped: bool
+
+
+class DraftReadinessCandidateRangeRequest(DraftReadinessRevisionRequest):
+    asset_id: str
+    start_sec: float = Field(ge=0)
+    end_sec: float = Field(gt=0)
+
+
 class ProjectResponse(BaseModel):
     project_id: str
     name: str

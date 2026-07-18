@@ -30,3 +30,6 @@ artifacts/
 tmp/
 .tmp/
 cache/
+
+# Playwright is invoked from the repository root by the web package script.
+/test-results/

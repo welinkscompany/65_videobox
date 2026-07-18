@@ -216,7 +216,7 @@ Commit: `feat: interview creators with a persisted Eugene brief`
 
 ### Task 8: Resolve narration and asset readiness into an explicit draft plan
 
-- [ ] **Task 8 완료**
+- [x] **Task 8 완료**
 
 **Files:** create draft-readiness domain/core/API/UI modules/tests; modify creation brief storage/orchestration and existing asset APIs only through adapters.
 

@@ -1,5 +1,15 @@
 PROJECT_SCHEMA_STATEMENTS = (
     """
+    CREATE TABLE IF NOT EXISTS draft_readiness (
+        readiness_id TEXT PRIMARY KEY, project_id TEXT NOT NULL, brief_id TEXT NOT NULL,
+        approved_brief_revision INTEGER NOT NULL, input_fingerprint TEXT NOT NULL,
+        narration_json TEXT NOT NULL, capability_json TEXT NOT NULL, idempotency_key TEXT NOT NULL,
+        status TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 1, cancel_requested INTEGER NOT NULL DEFAULT 0,
+        result_json TEXT, error_code TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+        UNIQUE(project_id, idempotency_key)
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS creation_briefs (
         brief_id TEXT PRIMARY KEY,
         project_id TEXT NOT NULL,

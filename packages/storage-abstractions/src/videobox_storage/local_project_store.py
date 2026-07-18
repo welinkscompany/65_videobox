@@ -725,6 +725,149 @@ class LocalProjectStore:
             "created_at": row["created_at"], "updated_at": row["updated_at"],
         }
 
+    @staticmethod
+    def _draft_readiness_payload(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "readiness_id": row["readiness_id"], "project_id": row["project_id"], "brief_id": row["brief_id"],
+            "approved_brief_revision": row["approved_brief_revision"], "input_fingerprint": row["input_fingerprint"],
+            "narration": json.loads(row["narration_json"]), "capability": json.loads(row["capability_json"]),
+            "idempotency_key": row["idempotency_key"], "status": row["status"], "revision": row["revision"],
+            "cancel_requested": bool(row["cancel_requested"]), "result": json.loads(row["result_json"]) if row["result_json"] else None,
+            "error_code": row["error_code"], "created_at": row["created_at"], "updated_at": row["updated_at"],
+        }
+
+    def _draft_readiness_plan(self, *, project_id: str, brief: dict[str, Any], narration: dict[str, Any]) -> dict[str, Any]:
+        sentences = [value.strip() for value in re.split(r"[.!?\n]+", str(brief["script_text"])) if value.strip()]
+        segments = [{"segment_id": f"script-{index + 1}", "text": text, "start_sec": index * 5, "end_sec": (index + 1) * 5} for index, text in enumerate(sentences or [str(brief["script_text"]).strip()])]
+        assets = self.list_assets(project_id=project_id)
+        broll = [{"asset_id": item["asset_id"], "rank": index + 1, "label": item["metadata"].get("title") or f"장면 영상 {index + 1}", "segment_id": segments[min(index, len(segments) - 1)]["segment_id"], "target_range": {"start_sec": index * 5, "end_sec": min((index + 1) * 5, len(segments) * 5)}, "media_type": "broll_video", "selection": item["asset_id"], "skipped": False} for index, item in enumerate(item for item in assets if item["asset_type"] == AssetType.BROLL_VIDEO.value)]
+        def choice(asset_type: AssetType, label: str) -> dict[str, Any]:
+            item = next((asset for asset in assets if asset["asset_type"] == asset_type.value), None)
+            return {"selection": item["asset_id"], "reason": "프로젝트 자산에서 골랐어요."} if item else {"selection": None, "reason": f"프로젝트에 사용할 {label}이 없어요."}
+        gaps = [] if broll else [{"gap_slot_id": "gap-broll-1", "reason": "장면을 보여 줄 영상이 없어요.", "target_range": {"start_sec": 0, "end_sec": min(5, len(segments) * 5)}, "media_type": "broll_video"}]
+        return {"script_segments": segments, "caption_texts": [item["text"] for item in segments], "narration": narration,
+                "broll_candidates": broll, "bgm": choice(AssetType.BGM, "배경음"), "sfx": choice(AssetType.SFX, "효과음"), "gap_slots": gaps}
+
+    def start_draft_readiness(self, *, project_id: str, brief_id: str, narration_choice: dict[str, Any], idempotency_key: str, expected_brief_revision: int, capability: dict[str, Any] | None = None, defer: bool = True) -> dict[str, Any]:
+        brief = self.get_creation_brief(project_id=project_id, brief_id=brief_id)
+        if brief["status"] != "approved": raise ValueError("draft_readiness_brief_not_approved")
+        if brief["revision"] != expected_brief_revision: raise ValueError("draft_readiness_brief_revision_conflict")
+        kind = str(narration_choice.get("kind") or "")
+        if kind not in {"silent", "existing", "source_video"}: raise ValueError("draft_readiness_narration_invalid")
+        if kind in {"existing", "source_video"}:
+            asset = self.get_asset(project_id=project_id, asset_id=str(narration_choice.get("asset_id") or ""))
+            if asset["asset_type"] == AssetType.VOICE_SAMPLE_AUDIO.value: raise ValueError("draft_readiness_narration_voice_sample_invalid")
+            required = AssetType.NARRATION_AUDIO.value if kind == "existing" else AssetType.RAW_VIDEO.value
+            if asset["asset_type"] != required: raise ValueError("draft_readiness_narration_asset_invalid")
+        fingerprint = hashlib.sha256(f"{brief_id}:{brief['revision']}:{brief['script_asset_id']}".encode()).hexdigest()
+        # Asset reads use their own store connection; snapshot them before the
+        # readiness write transaction so SQLite never nests writers.
+        prepared_result = None if defer else self._draft_readiness_plan(project_id=project_id, brief=brief, narration=narration_choice)
+        connection = self._connection(project_id); now = self._now_iso()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            existing = connection.execute("SELECT * FROM draft_readiness WHERE project_id = ? AND idempotency_key = ?", (project_id, idempotency_key)).fetchone()
+            if existing is not None:
+                connection.commit(); return self._draft_readiness_payload(existing)
+            readiness_id = f"readiness_{uuid.uuid4().hex[:12]}"
+            result = prepared_result
+            status = "asset_check" if defer else ("needs_assets" if result["gap_slots"] else "ready")
+            connection.execute("INSERT INTO draft_readiness (readiness_id, project_id, brief_id, approved_brief_revision, input_fingerprint, narration_json, capability_json, idempotency_key, status, revision, result_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)", (readiness_id, project_id, brief_id, brief["revision"], fingerprint, json.dumps(narration_choice, ensure_ascii=False), json.dumps(capability or {}, ensure_ascii=False), idempotency_key, status, json.dumps(result, ensure_ascii=False) if result else None, now, now))
+            row = connection.execute("SELECT * FROM draft_readiness WHERE readiness_id = ?", (readiness_id,)).fetchone(); connection.commit(); return self._draft_readiness_payload(row)
+        except Exception:
+            if connection.in_transaction: connection.rollback()
+            raise
+        finally: connection.close()
+
+    def get_draft_readiness(self, *, project_id: str, readiness_id: str) -> dict[str, Any]:
+        row = self._fetchone(project_id, "SELECT * FROM draft_readiness WHERE project_id = ? AND readiness_id = ?", (project_id, readiness_id))
+        if row is None: raise KeyError(f"Draft readiness not found: {readiness_id}")
+        return self._draft_readiness_payload(row)
+
+    def list_draft_readiness(self, *, project_id: str) -> list[dict[str, Any]]:
+        connection = self._connection(project_id)
+        try: return [self._draft_readiness_payload(row) for row in connection.execute("SELECT * FROM draft_readiness WHERE project_id = ? ORDER BY created_at DESC", (project_id,)).fetchall()]
+        finally: connection.close()
+
+    def list_editing_sessions(self, *, project_id: str) -> list[dict[str, Any]]:
+        connection = self._connection(project_id)
+        try: return [dict(row) for row in connection.execute("SELECT * FROM editing_sessions WHERE project_id = ?", (project_id,)).fetchall()]
+        finally: connection.close()
+
+    def cancel_draft_readiness(self, *, project_id: str, readiness_id: str, expected_revision: int) -> dict[str, Any]:
+        connection = self._connection(project_id)
+        try:
+            connection.execute("BEGIN IMMEDIATE"); row = connection.execute("SELECT * FROM draft_readiness WHERE project_id = ? AND readiness_id = ?", (project_id, readiness_id)).fetchone()
+            if row is None: raise KeyError(f"Draft readiness not found: {readiness_id}")
+            if int(row["revision"]) != expected_revision: raise ValueError("draft_readiness_revision_conflict")
+            if row["status"] in {"ready", "needs_assets", "cancelled"}: raise ValueError("draft_readiness_not_cancellable")
+            connection.execute("UPDATE draft_readiness SET status = 'cancelled', cancel_requested = 1, revision = revision + 1, updated_at = ? WHERE readiness_id = ?", (self._now_iso(), readiness_id)); row = connection.execute("SELECT * FROM draft_readiness WHERE readiness_id = ?", (readiness_id,)).fetchone(); connection.commit(); return self._draft_readiness_payload(row)
+        except Exception:
+            if connection.in_transaction: connection.rollback()
+            raise
+        finally: connection.close()
+
+    def begin_draft_readiness_planning(self, *, project_id: str, readiness_id: str, expected_revision: int) -> dict[str, Any]:
+        connection = self._connection(project_id)
+        try:
+            connection.execute("BEGIN IMMEDIATE"); row = connection.execute("SELECT * FROM draft_readiness WHERE project_id = ? AND readiness_id = ?", (project_id, readiness_id)).fetchone()
+            if row is None: raise KeyError(f"Draft readiness not found: {readiness_id}")
+            if int(row["revision"]) != expected_revision: raise ValueError("draft_readiness_revision_conflict")
+            if row["status"] not in {"asset_check", "cancelled", "failed", "needs_assets"}: raise ValueError("draft_readiness_not_plannable")
+            connection.execute("UPDATE draft_readiness SET status = 'planning', cancel_requested = 0, error_code = NULL, revision = revision + 1, updated_at = ? WHERE readiness_id = ?", (self._now_iso(), readiness_id))
+            row = connection.execute("SELECT * FROM draft_readiness WHERE readiness_id = ?", (readiness_id,)).fetchone(); connection.commit(); return self._draft_readiness_payload(row)
+        except Exception:
+            if connection.in_transaction: connection.rollback()
+            raise
+        finally: connection.close()
+
+    def complete_draft_readiness(self, *, project_id: str, readiness_id: str, expected_revision: int) -> dict[str, Any]:
+        row = self.get_draft_readiness(project_id=project_id, readiness_id=readiness_id)
+        if row["status"] == "cancelled": raise ValueError("draft_readiness_cancelled")
+        if row["revision"] != expected_revision: raise ValueError("draft_readiness_revision_conflict")
+        if row["status"] != "planning": raise ValueError("draft_readiness_not_planning")
+        try:
+            brief = self.get_creation_brief(project_id=project_id, brief_id=row["brief_id"]); result = self._draft_readiness_plan(project_id=project_id, brief=brief, narration=row["narration"])
+        except Exception:
+            self._execute(project_id, "UPDATE draft_readiness SET status = 'failed', error_code = 'draft_readiness_planning_failed', revision = revision + 1, updated_at = ? WHERE readiness_id = ? AND revision = ?", (self._now_iso(), readiness_id, expected_revision))
+            raise
+        self._execute(project_id, "UPDATE draft_readiness SET status = ?, result_json = ?, revision = revision + 1, updated_at = ? WHERE readiness_id = ? AND revision = ?", ("needs_assets" if result["gap_slots"] else "ready", json.dumps(result, ensure_ascii=False), self._now_iso(), readiness_id, expected_revision))
+        return self.get_draft_readiness(project_id=project_id, readiness_id=readiness_id)
+
+    def update_draft_readiness_candidate(self, *, project_id: str, readiness_id: str, asset_id: str, skipped: bool, expected_revision: int) -> dict[str, Any]:
+        row = self.get_draft_readiness(project_id=project_id, readiness_id=readiness_id)
+        if row["revision"] != expected_revision: raise ValueError("draft_readiness_revision_conflict")
+        if row["status"] not in {"ready", "needs_assets"} or not row["result"]: raise ValueError("draft_readiness_candidate_not_editable")
+        result = row["result"]
+        candidates = result.get("broll_candidates", [])
+        candidate = next((item for item in candidates if item.get("asset_id") == asset_id), None)
+        if candidate is None: raise KeyError(f"Draft readiness candidate not found: {asset_id}")
+        candidate["skipped"] = bool(skipped)
+        connection = self._connection(project_id)
+        try:
+            cursor = connection.execute("UPDATE draft_readiness SET result_json = ?, revision = revision + 1, updated_at = ? WHERE readiness_id = ? AND revision = ?", (json.dumps(result, ensure_ascii=False), self._now_iso(), readiness_id, expected_revision))
+            connection.commit()
+            if cursor.rowcount != 1: raise ValueError("draft_readiness_revision_conflict")
+        finally:
+            connection.close()
+        return self.get_draft_readiness(project_id=project_id, readiness_id=readiness_id)
+
+    def update_draft_readiness_candidate_range(self, *, project_id: str, readiness_id: str, asset_id: str, start_sec: float, end_sec: float, expected_revision: int) -> dict[str, Any]:
+        if not math.isfinite(start_sec) or not math.isfinite(end_sec) or start_sec < 0 or end_sec <= start_sec: raise ValueError("draft_readiness_candidate_range_invalid")
+        row = self.get_draft_readiness(project_id=project_id, readiness_id=readiness_id)
+        if row["revision"] != expected_revision: raise ValueError("draft_readiness_revision_conflict")
+        if not row["result"]: raise ValueError("draft_readiness_candidate_not_editable")
+        candidate = next((item for item in row["result"].get("broll_candidates", []) if item.get("asset_id") == asset_id), None)
+        if candidate is None: raise KeyError(f"Draft readiness candidate not found: {asset_id}")
+        candidate["target_range"] = {"start_sec": start_sec, "end_sec": end_sec}
+        result = row["result"]
+        connection = self._connection(project_id)
+        try:
+            cursor = connection.execute("UPDATE draft_readiness SET result_json = ?, revision = revision + 1, updated_at = ? WHERE readiness_id = ? AND revision = ?", (json.dumps(result, ensure_ascii=False), self._now_iso(), readiness_id, expected_revision)); connection.commit()
+            if cursor.rowcount != 1: raise ValueError("draft_readiness_revision_conflict")
+        finally: connection.close()
+        return self.get_draft_readiness(project_id=project_id, readiness_id=readiness_id)
+
     def register_asset(
         self,
         *,

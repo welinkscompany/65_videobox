@@ -1,6 +1,13 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 259. 2026-07-18 OSS Slice 2 Task 7 closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 260. 2026-07-18 OSS Slice 2 Task 8 closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+
+## 260. 2026-07-18 OSS Slice 2 Task 8 closeout
+
+- 승인된 유진 기획에서 나레이션과 자산을 확인하는 저장형 초안 준비 단계를 완료했다. 원본 영상 소리, 준비한 나레이션, 브라우저 녹음·파일 업로드, 무음 storyboard를 고를 수 있으며 음성 샘플은 완성 나레이션으로 고를 수 없다.
+- 준비 기록은 단계·실패·재시도·취소·후보 선택/구간·자산 부족을 프로젝트별로 저장한다. 장면 후보를 미리보고 구간을 고치거나 건너뛸 수 있으며, 부족한 장면은 자산 화면에서 안전하게 업로드한 뒤 기획으로 돌아와 다시 준비한다. 이 단계는 editing session을 만들거나 바꾸지 않는다.
+- 검증: Task 8/creation focused backend `34 passed`, frontend full `28 files / 278 tests passed`, loopback-only Playwright `11 passed`, production build, provenance/UI-system verifier와 provenance pytest `14 passed`, `git diff --check` 통과. 독립 코드리뷰·계획 gap·source→runtime 검증에서 확인된 P1을 모두 TDD로 보완했다. external/Gemini call 0, Hermes/container·OpenCut runtime·SaaS auth/billing 미도입을 유지했다.
+- OSS dashboard/editor 누적은 8/22 (36.4%), 잔여 63.6%다. 다음은 Task 9: 한 번의 승인으로 실제 editing session과 timeline bundle을 원자적으로 만들고 실제 output까지 검증한다.
 
 ## 259. 2026-07-18 OSS Slice 2 Task 7 closeout
 

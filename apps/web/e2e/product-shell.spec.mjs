@@ -80,6 +80,28 @@ test("Home empty-state actions and settings tabs follow their visible routes", a
   await expect(page).toHaveURL(/\/settings\/appearance$/);
 });
 
+test("approved brief prepares a local draft without an editing-session mutation", async ({ page }) => {
+  const editingMutations = [];
+  page.on("request", (request) => { if (request.url().includes("/editing-sessions") && request.method() !== "GET") editingMutations.push(request.url()); });
+  await page.addInitScript(() => { localStorage.setItem("videobox.creation-brief.local-draft", "brief-e2e"); localStorage.setItem("videobox.draft-readiness.local-draft", "readiness_e2e"); });
+  await page.goto("/projects/local-draft/create");
+  await expect(page.getByRole("heading", { name: "추가 자산이 필요해요" })).toBeVisible();
+  const addAssets = page.getByRole("link", { name: "자산 추가" });
+  await expect(addAssets).toHaveAttribute("href", /return_to=/);
+  await addAssets.click();
+  await expect(page.getByRole("heading", { name: "장면 영상 추가" })).toBeVisible();
+  await page.locator("#gap-broll-file").setInputFiles({ name: "beach.mp4", mimeType: "video/mp4", buffer: Buffer.from("local-video") });
+  await page.getByRole("button", { name: "영상 추가" }).click();
+  await expect(page.getByText("영상 추가를 확인했어요. 기획으로 돌아가 다시 준비해 주세요.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "기획으로 돌아가기" })).toBeVisible();
+  await page.getByRole("button", { name: "기획으로 돌아가기" }).click();
+  await expect(page.getByRole("button", { name: "다시 준비" })).toBeVisible();
+  await page.getByRole("button", { name: "다시 준비" }).click();
+  await expect(page.getByRole("heading", { name: "초안이 준비됐어요" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /해변 장면 미리보기/ })).toBeVisible();
+  expect(editingMutations).toEqual([]);
+});
+
 for (const [width, height] of snapshots) {
   test(`captures deterministic local shell at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height });

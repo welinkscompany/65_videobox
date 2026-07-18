@@ -12,6 +12,7 @@ import {
 import { api, type Project } from "../api";
 import { ProjectOnboarding } from "../ProjectOnboarding";
 import { CreationInterview } from "../features/creation/CreationInterview";
+import { DraftGapMedia } from "../features/media/DraftGapMedia";
 import { LegacyWorkspacePage } from "./LegacyWorkspacePage";
 import { HomePage, opensLastProjectOnStart, ProductEmptyPage, ProductShell, SettingsPage } from "./ProductShell";
 import { ProjectWorkspaceProvider, resolveLastValidProjectId } from "./ProjectWorkspaceProvider";
@@ -142,8 +143,11 @@ function WorkspacePage() {
   }
   if (section === "media" || section === "outputs") {
     const isMedia = section === "media";
+    const requestedReturn = isMedia ? new URLSearchParams(window.location.search).get("return_to") : null;
+    const safeReturn = requestedReturn && requestedReturn.startsWith(`/projects/${projectId}/create`) ? requestedReturn : null;
+    if (isMedia && safeReturn) return <ProductShell projectId={projectId} projects={projects} section={section} onNavigate={navigateTo} onOpenSettings={() => void navigate({ to: "/settings/general" })}><DraftGapMedia projectId={projectId} returnTo={safeReturn} /></ProductShell>;
     return <ProductShell projectId={projectId} projects={projects} section={section} onNavigate={navigateTo} onOpenSettings={() => void navigate({ to: "/settings/general" })}>
-      <ProductEmptyPage title={isMedia ? "자산을 준비해 주세요" : "아직 완성본이 없어요"} description={isMedia ? "영상에 넣을 사진, 영상, 소리를 추가하면 여기에서 고를 수 있어요." : "편집을 마치면 이곳에서 완성본을 확인할 수 있어요."} action={isMedia ? "새 영상 만들기" : "편집 열기"} onClick={() => navigateTo(projectId, isMedia ? "create" : "editing")} />
+      <ProductEmptyPage title={isMedia ? "자산을 준비해 주세요" : "아직 완성본이 없어요"} description={isMedia ? "영상에 넣을 사진, 영상, 소리를 추가하면 여기에서 고를 수 있어요." : "편집을 마치면 이곳에서 완성본을 확인할 수 있어요."} action={safeReturn ? "기획으로 돌아가기" : isMedia ? "새 영상 만들기" : "편집 열기"} onClick={() => safeReturn ? window.location.assign(safeReturn) : navigateTo(projectId, isMedia ? "create" : "editing")} />
     </ProductShell>;
   }
   return (

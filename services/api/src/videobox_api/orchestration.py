@@ -224,6 +224,11 @@ class ApiOrchestrator:
     def create_creation_brief(self, **kwargs: Any) -> dict[str, Any]:
         return self.pipeline.create_creation_brief(runtime=self.creation_interview_runtime, **kwargs)
 
+    def start_draft_readiness(self, **kwargs: Any) -> dict[str, Any]:
+        # Readiness is deterministic local storage planning only; it never
+        # constructs a provider transport or editing-session mutation path.
+        return self.store.start_draft_readiness(**kwargs)
+
     def register_narration_audio(self, *, project_id: str, source_path: Path) -> RegisteredAsset:
         asset = self.pipeline.register_narration_asset(
             project_id=project_id,

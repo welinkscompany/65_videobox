@@ -24,7 +24,7 @@ export function AssetPreviewPlayer({ proposalId: _proposalId, candidates, previe
       const audio = candidate.mediaType === "bgm" || candidate.mediaType === "music" || candidate.mediaType === "sfx";
       const inSec = Number(candidate.controls.in_sec ?? 0); const outSec = Number(candidate.controls.out_sec ?? 0);
       const onTimeUpdate = (event: React.SyntheticEvent<HTMLMediaElement>) => { const node = event.currentTarget; if (!audio && outSec > inSec && node.currentTime >= outSec) node.currentTime = inSec; };
-      const label = mediaReferenceLabel(candidate.referenceCode, "proposal");
+      const label = /[가-힣\s]/.test(candidate.referenceCode) ? candidate.referenceCode : mediaReferenceLabel(candidate.referenceCode, "proposal");
       return <div key={candidate.candidateId}><button type="button" onClick={() => activate(candidate, true)}>{label} {audio ? "미리듣기" : "미리보기"}</button>
         {audio ? <audio ref={(node) => { media.current[candidate.candidateId] = node; }} data-testid="director-audio-preview" controls src={previewUrl(candidate.candidateId)} onPlay={() => activate(candidate, false)} /> : <video ref={(node) => { media.current[candidate.candidateId] = node; }} controls src={previewUrl(candidate.candidateId)} onPlay={() => activate(candidate, false)} onTimeUpdate={onTimeUpdate} />}
       </div>;
