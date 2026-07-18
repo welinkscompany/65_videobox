@@ -25,6 +25,7 @@ build/
 .ruff_cache/
 .vite/
 .superpowers/
+.worktrees/
 
 # App runtime artifacts
 artifacts/
