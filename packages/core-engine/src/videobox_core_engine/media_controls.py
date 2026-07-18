@@ -36,6 +36,7 @@ def normalize_media_controls(
             "loop": bool(payload.get("loop", True)),
             "pad": bool(payload.get("pad", False)),
             "trim_start_sec": trim_start_sec,
+            "preserve_source_audio": bool(payload.get("preserve_source_audio", False)),
         }
         # Source-window controls come from a selected local asset.  They are
         # distinct from timeline trim and must survive Director apply so both

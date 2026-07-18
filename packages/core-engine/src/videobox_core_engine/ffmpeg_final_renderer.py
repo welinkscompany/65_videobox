@@ -142,7 +142,6 @@ class FfmpegFinalRenderer:
             if needs_padding:
                 video_filter += f",tpad=stop_mode=add:stop_duration={float(output_duration_sec) - available_duration_sec}"
             command += [
-                "-an",
                 "-vf",
                 video_filter,
                 "-r",
@@ -154,6 +153,10 @@ class FfmpegFinalRenderer:
                 "-crf",
                 "20",
             ]
+            if controls["preserve_source_audio"]:
+                command += ["-map", "0:v:0", "-map", "0:a:0?", "-c:a", "aac", "-ar", "48000", "-ac", "2"]
+            else:
+                command += ["-an"]
         else:
             command += ["-vn"]
             if output_duration_sec is not None:
@@ -320,6 +323,14 @@ class FfmpegFinalRenderer:
             report_progress(25)
 
             broll_segment_paths = []
+            preserve_broll_source_audio = all(
+                normalize_media_controls(
+                    clip.get("media_controls"),
+                    media_kind="broll",
+                    duration_sec=max(float(clip.get("end_sec", 0.0)) - float(clip.get("start_sec", 0.0)), 0.001),
+                )["preserve_source_audio"]
+                for clip in broll_clips
+            )
             for index, clip in enumerate(broll_clips, start=1):
                 source = self._resolve_broll_clip_source(project_id=project_id, clip=clip)
                 segment_path = work_dir / f"broll_{index:03d}.mp4"
@@ -336,6 +347,31 @@ class FfmpegFinalRenderer:
             report_progress(60)
 
             audio_path = narration_path
+            if preserve_broll_source_audio:
+                mixed_path = work_dir / "audio_with_broll_source.wav"
+                command = [
+                    self.ffmpeg_binary,
+                    "-y",
+                    "-i",
+                    str(narration_path),
+                    "-i",
+                    str(video_path),
+                    "-filter_complex",
+                    "[0:a][1:a]amix=inputs=2:duration=first[aout]",
+                    "-map",
+                    "[aout]",
+                    "-ar",
+                    "48000",
+                    "-ac",
+                    "2",
+                    "-c:a",
+                    "pcm_s16le",
+                    str(mixed_path),
+                ]
+                result = self._run(command)
+                if result.returncode != 0:
+                    raise FinalRenderError(f"ffmpeg failed mixing B-roll source audio: {result.stderr[-800:]}")
+                audio_path = mixed_path
             if bgm_clips:
                 bgm_source = self._resolve_generic_asset_uri(
                     project_id=project_id, asset_uri=str(bgm_clips[0].get("asset_uri") or "")

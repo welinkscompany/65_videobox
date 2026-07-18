@@ -66,6 +66,32 @@ def test_broll_extract_maps_trim_crop_loop_and_pad_into_one_ffmpeg_command(
     assert "tpad=stop_mode=add:stop_duration=3.0" in filter_value
 
 
+@pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg/ffprobe not installed on this machine")
+def test_final_render_preserves_opted_in_broll_source_audio(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="B-roll source audio")
+    narration_file = tmp_path / "silence.wav"
+    _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-t", "1", "-c:a", "pcm_s16le", str(narration_file)])
+    broll_file = tmp_path / "child-source.mp4"
+    _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=blue:s=320x240:r=15:d=1", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=1", "-shortest", "-c:v", "libx264", "-c:a", "aac", str(broll_file)])
+    narration = store.register_asset(project_id=project.project_id, asset_type=AssetType.NARRATION_AUDIO, source_path=narration_file)
+    broll = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=broll_file)
+    output = tmp_path / "with-source-audio.mp4"
+
+    FfmpegFinalRenderer(store=store, video_width=320, video_height=240, video_fps=15).render_timeline_to_mp4(
+        project_id=project.project_id,
+        output_path=output,
+        timeline={"narration_source_uri": narration.storage_uri, "tracks": [
+            {"track_type": "narration", "clips": [{"asset_uri": narration.storage_uri, "start_sec": 0.0, "end_sec": 1.0}]},
+            {"track_type": "broll", "clips": [{"asset_uri": broll.storage_uri, "start_sec": 0.0, "end_sec": 1.0, "media_controls": {"preserve_source_audio": True}}]},
+        ]},
+    )
+
+    audio = subprocess.run(["ffmpeg", "-v", "error", "-i", str(output), "-map", "0:a:0", "-t", "1", "-f", "s16le", "pipe:1"], capture_output=True, timeout=30)
+    assert audio.returncode == 0
+    assert any(sample != 0 for sample in audio.stdout)
+
+
 def test_export_overlay_blocks_a_missing_font_before_starting_ffmpeg(tmp_path: Path) -> None:
     store = LocalProjectStore(tmp_path)
     renderer = FfmpegFinalRenderer(store=store, overlay_font_file=str(tmp_path / "missing-font.ttf"))
