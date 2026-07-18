@@ -11,6 +11,7 @@
 - PostgreSQL store는 새 project 생성·목록, snapshot import, 실제 playback path를 통합 검증했다. 전 편집 mutation/복구/concurrency PostgreSQL parity는 Hermes보다 먼저 끝낼 후속 hardening slice로 남긴다.
 - external/Gemini provider call은 0이다. Hermes, GPT OAuth, mem0, OpenCut, host bridge, SaaS auth/billing은 아직 구현하지 않았다. mem0는 이후에도 Hermes 보조기억이며 VideoBox SSOT가 아니다.
 - Task 9은 기존 사람/환경 acceptance 기록을 그대로 유지한다. 누적은 Task 9과 무관하게 기존 **9/22 (40.9%)**, 잔여 **59.1%**다.
+- 검증은 container/PostgreSQL focused suite, renderer/playback suite, web production build, Docker runtime verifier까지 통과했다. Python full suite 첫 실행은 `1129 passed, 7 skipped, 4 failed`; source-audio expectation 2건은 바로 수정·focused green으로 재확인했고, 남은 editor UI source-provenance hash drift 2건은 이번 container diff와 무관한 기존 registry mismatch다. 전면 rerun 전에는 full green이라고 주장하지 않는다.
 
 > 현재 authoritative 상태/next slice 판단은 `## 263. 2026-07-18 OSS Slice 2/3 commit and creator-flow recovery handoff`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
 

@@ -22,6 +22,12 @@
 3. `b-roll-smoke-test`의 `final_render_job_009/content`가 프록시를 통해 `200`, `video/mp4`, `841742` bytes로 전달됐다.
 4. `scripts/verify_container_stack.ps1`은 snapshot hash 49개, 프로젝트 2개, source preserved, API/PostgreSQL host-port 미공개를 확인했다.
 
+## 검증 상태
+
+- 통과: container config/migration/compose tests `10 passed`, PostgreSQL store/import integration `4 passed`, source-audio media controls `6 passed`, FFmpeg final renderer + playback delivery `18 passed`, web production build, Docker image build, runtime verifier.
+- 전체 Python suite 첫 실행: `1129 passed, 7 skipped, 4 failed` (10분 13초). 2건은 `preserve_source_audio=False` 기본 계약이 이미 main에 추가됐지만 기대값이 갱신되지 않은 테스트였고 이번 커밋에 수정했다. 나머지 2건은 이번 diff가 건드리지 않은 editor UI source-provenance registry의 기존 normalized hash drift다. 전면 rerun은 아직 하지 않았으므로 full green으로 주장하지 않는다.
+- `npm audit`은 moderate 1, high 1, critical 1을 보고했다. 이번 전환 범위 밖의 기존 dependency 상태여서 자동 업그레이드는 하지 않았다.
+
 ## 재현 명령
 
 `.env.container.example`을 `.env.container`로 복사하고 전용 빈 data root와 PostgreSQL 비밀번호를 설정한다. 원본을 직접 mount하지 않는다.
