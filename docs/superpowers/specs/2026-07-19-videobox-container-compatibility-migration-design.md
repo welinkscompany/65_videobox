@@ -8,7 +8,7 @@
 
 현재 호스트에서 직접 실행하는 VideoBox web/API/FFmpeg 경로를 먼저 Compose로 옮긴다. 기존 프로젝트 데이터는 새 host-managed data root로 **복사**하고, 원본 데이터는 삭제하거나 이동하지 않는다.
 
-이 단계는 Hermes, GPT OAuth, mem0, host bridge, egress proxy, 별도 render worker를 구현하지 않는다. 이들은 컨테이너화된 VideoBox 호환 경로가 검증된 뒤 별도 단계로 도입한다.
+이 단계는 Hermes, GPT OAuth, mem0, host bridge, egress proxy, 별도 render worker를 구현하지 않는다. 이들은 컨테이너화된 VideoBox 호환 경로가 검증된 뒤 별도 단계로 도입한다. mem0는 이후에도 Hermes 에이전트의 보조기억일 뿐이며 VideoBox의 프로젝트·편집·자산·대화 SSOT를 대체하지 않는다.
 
 ## 2. Architecture
 
@@ -65,4 +65,4 @@ The implementation must prove:
 
 ## 7. Later Stages
 
-After this stage is verified, a second design/plan will split the render worker. Only then does the Hermes stage add `videobox-hermes-agent`, its isolated state volume, and user-initiated GPT OAuth device/PKCE login.
+After this stage is verified, a second design/plan will split the render worker. Only then does the Hermes stage add `videobox-hermes-agent`, its isolated state volume, user-initiated GPT OAuth device/PKCE login, and an isolated mem0 auxiliary-memory store. VideoBox's project/editing/asset/conversation databases remain authoritative.
