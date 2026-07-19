@@ -1,6 +1,15 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 267. 2026-07-19 offline provider evidence ledger closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 268. 2026-07-19 offline synthetic evidence intake closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+
+## 268. 2026-07-19 offline synthetic evidence intake closeout
+
+- `[x] 완료 (done)`: 실제 provider call 없이 fixture-only owner-grant/intake preflight contract를 만들었다. grant는 opaque reference, fixed corpus SHA, exact synthetic provider/runtime, literal offline scope, UTC expiry 및 capture/token/latency budget을 묶는다. 이것은 real identity authentication·consent issuance·provider authorization이 아니며, 채팅의 긍정 문구도 grant가 아니다.
+- `[x] 완료 (done)`: preflight는 capture/grant/expiry/budget/replay를 side effect `0`로 확인한다. accept는 prepared transaction journal과 crash-released OS advisory lock 아래에서 evidence append와 audit을 one-to-one으로 복구한다. ledger 또는 audit write 중단 뒤 fresh gateway retry는 prepared 시점의 grant validity와 original UTC audit time을 사용하며, 만료 뒤 새 승인으로 바꾸지 않는다.
+- `[x] 완료 (done)`: 정상 writable path의 accepted와 denied는 redacted tamper-evident audit event를 남긴다. denied event는 evidence/budget을 소비하지 않으며, malformed raw capture/grant는 audit payload에 직렬화하지 않는다. lock/audit I/O 불가는 audit event를 억지로 만들지 않고 stable non-authorizing fail-closed로 끝난다. grant/owner는 unkeyed SHA-256 correlation hash만 기록하므로 confidentiality 보장이 아니며 sensitive ref를 이 offline fixture surface에 넣지 않는다. accepted-intake evidence sink와 accepted audit은 정확히 one-to-one으로 검증되고, marked sink mutation은 gateway private in-process writer capability에만 묶인다. 이 경계는 hostile code 보안이 아닌 application-contract bypass 방지이며, 일반 parent ledger는 pre-gate/offline test evidence라 intake sink를 우회하거나 막지 않는다.
+- 검증: intake/evidence/harness focused `106 passed`, independent spec/quality/final review P0/P1/blocking P2 0, Windows에서 malformed concurrent deny 64개를 5회 반복해 audit 64/64 보존, `compileall`, `git diff --check`, production build와 `--network none --read-only` image import 통과. 기존 Starlette multipart PendingDeprecationWarning 1건은 비차단이다. full Python suite는 `1246 tests collected`까지 확인했지만 실행이 124초 timeout 및 종료 중 pytest stdout `OSError`로 끝나 full-pass로 기록하지 않는다.
+- Gemini/GPT/Qwen provider call, Hermes bridge/container, OAuth, DB/API route/router activation, UI, mem0, Docker/Compose 변경은 시작하지 않았다. Gemini provider call은 0이다.
+- 다음은 실제 provider 연결이 아니라, 유진의 versioned prompt/profile과 read-only 업무영역을 fixture replay와 injection-negative test로 고정하는 작업이다. 실제 OAuth/provider gateway는 그 별도 gate 뒤에만 판단한다.
 
 ## 267. 2026-07-19 offline provider evidence ledger closeout
 

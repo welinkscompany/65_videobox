@@ -39,6 +39,23 @@ CAPTURE_VERSION = "videobox-provider-capture-v1"
 LEDGER_VERSION = "videobox-provider-evidence-ledger-v1"
 RECORD_VERSION = "videobox-provider-evidence-record-v1"
 AUDIT_ARTIFACT_VERSION = "videobox-provider-qualification-audit-v1"
+_INTAKE_SINK_MARKER_NAME = ".videobox-intake-sink-v1"
+
+
+@dataclass(frozen=True, slots=True)
+class _IntakeSinkWriterCapability:
+    """Private in-process capability, not a boundary against hostile code."""
+
+    root: Path
+
+
+def _create_intake_sink_writer(root: Path) -> _IntakeSinkWriterCapability:
+    """Create the app-contract marker and private writer for an intake-only sink."""
+    root.mkdir(parents=True, exist_ok=True)
+    marker = root / _INTAKE_SINK_MARKER_NAME
+    if not marker.exists():
+        marker.write_text("videobox-intake-sink-v1", encoding="utf-8")
+    return _IntakeSinkWriterCapability(root.resolve())
 
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _AUDIT_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
@@ -217,13 +234,21 @@ def import_synthetic_provider_capture(
 class ProviderQualificationEvidenceLedger:
     """Filesystem-backed append-only evidence ledger with a verified hash chain."""
 
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, *, _intake_writer: _IntakeSinkWriterCapability | None = None) -> None:
         if not isinstance(root, Path):
             raise ValueError("ledger root must be a Path")
         self.root = root
         self.root.mkdir(parents=True, exist_ok=True)
         if not self.root.is_dir():
             raise ValueError("ledger root must be a directory")
+        marker = self.root / _INTAKE_SINK_MARKER_NAME
+        self._intake_sink = marker.exists()
+        self._intake_writer = _intake_writer
+        if self._intake_sink and (
+            not isinstance(_intake_writer, _IntakeSinkWriterCapability)
+            or _intake_writer.root != self.root.resolve()
+        ):
+            self._intake_writer = None
 
     @property
     def records_path(self) -> Path:
@@ -234,6 +259,8 @@ class ProviderQualificationEvidenceLedger:
         return self.root / "provider_qualification_reports"
 
     def append(self, capture: ProviderEvidenceCapture) -> PersistedProviderEvidence:
+        if self._intake_sink and self._intake_writer is None:
+            raise ValueError("intake sink accepts mutations only through its private gateway writer")
         if not isinstance(capture, ProviderEvidenceCapture):
             raise ValueError("ledger append requires a validated provider evidence capture")
         with self._write_lock():
@@ -303,6 +330,8 @@ class ProviderQualificationEvidenceLedger:
         baseline_provider: str,
         candidate_provider: str,
     ) -> PersistedQualificationAudit:
+        if self._intake_sink and self._intake_writer is None:
+            raise ValueError("intake sink accepts mutations only through its private gateway writer")
         if not isinstance(audit_id, str) or _AUDIT_ID.fullmatch(audit_id) is None:
             raise ValueError("audit_id must use only letters, digits, dot, underscore, or hyphen")
         with self._write_lock():
