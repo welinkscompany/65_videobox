@@ -9014,6 +9014,14 @@ focused 검증 메모:
 - dead helper, 임시 메모, 역할이 끝난 중복 파일 중 삭제보다 역할 명시가 맞는지 먼저 판단한다
 - 최종 closeout 직전 broad 재검증이 정말 필요한지 마지막으로 판단한다
 
+## 2026-07-19 유진 provider qualification 기반 closeout
+
+- `[x] 완료 (done)`: LM Studio의 이전 `0.0.0.0:1234` listener를 중지하고 exact `127.0.0.1:1234`로 다시 bind했다. 이 확인은 direct LAN exposure closure일 뿐이며 Hermes host bridge 또는 Qwen qualification이 아니다.
+- `[x] 완료 (done)`: `agent_quality_harness`는 GPT/Qwen 공통 frozen case를 JSON-compatible deep immutable fixture, strict object/schema allowlist, grounded claim, sensitive field/path/tool/approval rejection으로 판정한다. provider 호출·routing mutation 없이 통과 결과도 `shadow_only`에만 머문다.
+- `[x] 완료 (done)`: 품질 리뷰는 보완 뒤 P0/P1 0이다. container production build와 `--network none --read-only` image reverse run에서 `shadow_only` 결과와 fixture identity 전달을 확인했다.
+- `[ ] 미완료 (pending)`: actual authenticated pinned Hermes host bridge, Qwen task qualification corpus/metrics·사람 점수, Hermes OAuth/GPT 외부 호출은 시작하지 않았다. Gemini provider call은 계속 0이다.
+- 검증: harness `7 passed`; LM Studio evidence/local media provider 관련 focused `47 passed`; 전체 suite는 `1188 tests collected`까지 통과했지만 실미디어/E2E 장기 실행이 종료 시간 안에 완료하지 않아 full-pass로 기록하지 않는다.
+
 ## 247. 2026-07-16 Local Media Director Slice 3 Task 15 closeout
 
 - Director workspace는 대화 응답만으로 편집 session을 변경하지 않으며, immutable preflight와 명시적 `변경 적용`만 batch atomic apply를 호출한다.
