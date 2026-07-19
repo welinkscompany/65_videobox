@@ -446,6 +446,44 @@ class LocalProjectStore:
             raise KeyError(f"Project not found: {project_id}")
         return dict(row)
 
+    def consume_hermes_capability(self, *, project_id: str, jti: str, expires_at: int) -> str:
+        """Atomically consume one project-scoped capability across API restarts."""
+        connection = self._connection(project_id)
+        try:
+            existing = connection.execute(
+                "SELECT state FROM hermes_capability_ledger WHERE project_id = ? AND jti = ?",
+                (project_id, jti),
+            ).fetchone()
+            if existing is not None:
+                return str(existing["state"])
+            try:
+                connection.execute(
+                    "INSERT INTO hermes_capability_ledger (project_id, jti, state, expires_at, recorded_at) VALUES (?, ?, 'consumed', ?, ?)",
+                    (project_id, jti, expires_at, self._now_iso()),
+                )
+                connection.commit()
+                return "accepted"
+            except sqlite3.IntegrityError:
+                connection.rollback()
+                row = connection.execute(
+                    "SELECT state FROM hermes_capability_ledger WHERE project_id = ? AND jti = ?",
+                    (project_id, jti),
+                ).fetchone()
+                return str(row["state"]) if row is not None else "unavailable"
+        finally:
+            connection.close()
+
+    def revoke_hermes_capability(self, *, project_id: str, jti: str, expires_at: int) -> None:
+        connection = self._connection(project_id)
+        try:
+            connection.execute(
+                "INSERT OR REPLACE INTO hermes_capability_ledger (project_id, jti, state, expires_at, recorded_at) VALUES (?, ?, 'revoked', ?, ?)",
+                (project_id, jti, expires_at, self._now_iso()),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
     def create_creation_brief(
         self,
         *,

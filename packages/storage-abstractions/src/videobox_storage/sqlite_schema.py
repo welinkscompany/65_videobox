@@ -392,4 +392,14 @@ PROJECT_SCHEMA_STATEMENTS = (
         updated_at TEXT NOT NULL
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS hermes_capability_ledger (
+        project_id TEXT NOT NULL,
+        jti TEXT NOT NULL,
+        state TEXT NOT NULL,
+        expires_at INTEGER NOT NULL,
+        recorded_at TEXT NOT NULL,
+        PRIMARY KEY (project_id, jti)
+    )
+    """,
 )

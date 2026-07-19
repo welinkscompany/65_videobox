@@ -109,3 +109,22 @@ def test_hermes_status_rejects_expired_wrong_project_and_wrong_operation(tmp_pat
         f"/internal/hermes/projects/{first['project_id']}/status",
         headers={"Authorization": f"Bearer {wrong_operation}"},
     ).json()["detail"] == "hermes_capability_operation_forbidden"
+
+
+def test_hermes_status_replay_stays_rejected_after_app_restart(tmp_path: Path) -> None:
+    now = datetime(2026, 7, 19, tzinfo=UTC)
+    first_client, signer = _client(tmp_path, now=now)
+    project = first_client.post("/api/projects", json={"name": "재시작"}).json()
+    token = _token(signer, project_id=project["project_id"], now=now, jti="capability-jti-restart")
+    assert first_client.get(
+        f"/internal/hermes/projects/{project['project_id']}/status",
+        headers={"Authorization": f"Bearer {token}"},
+    ).status_code == 200
+
+    restarted_client, _ = _client(tmp_path, now=now)
+    replay = restarted_client.get(
+        f"/internal/hermes/projects/{project['project_id']}/status",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert replay.status_code == 401
+    assert replay.json()["detail"] == "hermes_capability_replayed"

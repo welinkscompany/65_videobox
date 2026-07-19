@@ -314,6 +314,12 @@ def create_app(
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
+    if hermes_capability_verifier is not None:
+        hermes_capability_verifier.bind_durable_ledger(
+            lambda project_id, jti, expires_at: store.consume_hermes_capability(
+                project_id=project_id, jti=jti, expires_at=expires_at
+            )
+        )
     app.include_router(build_projects_router(store))
     if hermes_capability_verifier is not None:
         app.include_router(build_hermes_internal_router(store, hermes_capability_verifier))

@@ -80,6 +80,7 @@ class HermesCapabilityVerifier:
         *,
         keys: Mapping[str, bytes],
         revoked_jtis: set[str] | None = None,
+        consume_jti: Callable[[str, str, int], str] | None = None,
         now: Callable[[], datetime] | None = None,
     ) -> None:
         if not keys or any(not key_id or not isinstance(key, bytes) or len(key) < 32 for key_id, key in keys.items()):
@@ -88,7 +89,11 @@ class HermesCapabilityVerifier:
         self._revoked_jtis = set(revoked_jtis or ())
         self._now = now or (lambda: datetime.now(UTC))
         self._consumed_jtis: dict[str, int] = {}
+        self._consume_jti = consume_jti
         self._lock = Lock()
+
+    def bind_durable_ledger(self, consume_jti: Callable[[str, str, int], str]) -> None:
+        self._consume_jti = consume_jti
 
     def verify_for_project_status(self, token: str, *, project_id: str) -> HermesCapability:
         header, claims, signature, signing_input = self._parse(token)
@@ -119,17 +124,27 @@ class HermesCapabilityVerifier:
         if claims["iat"] > now or claims["exp"] - claims["iat"] > 300:
             raise HermesCapabilityError("hermes_capability_lifetime_invalid")
         jti = claims["jti"]
+        if self._consume_jti is not None:
+            state = self._consume_jti(project_id, jti, claims["exp"])
+            if state == "revoked":
+                raise HermesCapabilityError("hermes_capability_revoked")
+            if state != "accepted":
+                raise HermesCapabilityError("hermes_capability_replayed")
+        else:
+            self._consume_in_memory(jti=jti, expires_at=claims["exp"], now=now)
+        return HermesCapability(
+            principal=claims["sub"], operation=claims["op"], project_id=claims["project_id"],
+            expires_at=claims["exp"], jti=jti,
+        )
+
+    def _consume_in_memory(self, *, jti: str, expires_at: int, now: int) -> None:
         with self._lock:
             self._consumed_jtis = {known: expiry for known, expiry in self._consumed_jtis.items() if expiry > now}
             if jti in self._revoked_jtis:
                 raise HermesCapabilityError("hermes_capability_revoked")
             if jti in self._consumed_jtis:
                 raise HermesCapabilityError("hermes_capability_replayed")
-            self._consumed_jtis[jti] = claims["exp"]
-        return HermesCapability(
-            principal=claims["sub"], operation=claims["op"], project_id=claims["project_id"],
-            expires_at=claims["exp"], jti=jti,
-        )
+            self._consumed_jtis[jti] = expires_at
 
     def _parse(self, token: str) -> tuple[dict[str, Any], dict[str, Any], bytes, bytes]:
         parts = token.split(".")
