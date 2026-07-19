@@ -1226,6 +1226,8 @@ prompt는 system/developer/task/user context 우선순위, template version·man
 
 Agent Gateway는 run ownership, context filtering, tool allowlist, idempotency, event/audit를 맡고 창작 판단을 실행으로 확정하지 않는다. deterministic handler는 revision·rights·availability 검사와 정책 실행만 하며 자유 텍스트 지시를 해석하지 않는다. 각 ToolSpec은 `name`, request/result schema, action family, backend-derived project scope, revision precondition, redaction, result byte cap, timeout, idempotency, audit event, allowed run phase를 versioned registry에 가진다. 모델이 반환한 tool name·ID·scope는 권한 근거가 아니며 Gateway가 registry와 capability로 다시 선택·검증한다.
 
+- `[x] 완료 (done, 2026-07-20)`: 첫 static ToolSpec/Gateway contract는 `get_project_status` 하나만 literal manifest SHA-256으로 고정했다. empty strict request, selected-project status 결과 allowlist·redaction, selected-project status revision precondition, 1,024 byte/1,000 ms cap, `read_only_research` phase만 허용한다. model proposal은 exact JSON scalar와 empty object로 정규화한 뒤에도 backend-attested context/request와 대조해야 하며, static acceptance는 항상 `executor_authorized=false`다. backend attestation marker는 hostile in-process code 방어가 아닌 ordinary application-contract boundary이며 실제 signer/API/agent runtime은 계속 미완료다.
+
 ### 23.3A [~] 진행 중 (in progress) — GPT-5.4 mini profile·로컬 Qwen qualification·안전한 성장
 
 유진의 주 대화/창작 route와 로컬 보조 route는 같은 agent로 위장하거나 자동 fallback하지 않는다. profile·모델·prompt·skill·route 결정은 모두 run ledger에 남기고, provider 변경은 별도 gate로 처리한다.

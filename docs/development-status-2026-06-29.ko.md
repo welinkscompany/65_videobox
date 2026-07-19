@@ -1,6 +1,13 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 269. 2026-07-20 Yujin versioned profile contract closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 270. 2026-07-20 static ToolSpec/Gateway contract closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+
+## 270. 2026-07-20 static ToolSpec/Gateway contract closeout
+
+- `[x] 완료 (done)`: `get_project_status` 하나의 pinned `tool-spec-v1`/`gateway-registry-v1` static contract를 추가했다. strict empty request/result schema, selected-project status redaction, context revision precondition, result 1,024 byte/1,000 ms cap, `read_only_research` phase를 manifest에 함께 묶었다.
+- model tool/name/version/project/revision은 untrusted data다. exact scalar·empty-object 검증 뒤에도 backend-attested context/request와 대조하며, cross-project, revision mismatch, phase/byte/time 위반, direct public objects, hostile string comparison은 fail-closed다. `static_contract_accepted`도 실행 권한이 아니며 항상 `executor_authorized=false`다.
+- private backend-adapter marker는 ordinary in-process application-contract guard이며 hostile in-process code security나 real capability signer가 아니다. provider/API route/tool executor/network/DB/UI/OAuth/mem0/mutation은 추가하지 않았고 Gemini call은 0이다. Task 9 누적은 계속 **9/22 (40.9%)**다.
+- 검증: focused gateway/profile/evidence/harness/local-provider `150 passed`, independent spec/quality review P0/P1/P2 0, compileall/diff check, production image와 network-none/read-only reverse verification을 closeout 전에 실행한다.
 
 ## 269. 2026-07-20 Yujin versioned profile contract closeout
 
