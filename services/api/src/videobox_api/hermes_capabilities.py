@@ -15,6 +15,10 @@ class HermesCapabilityError(ValueError):
     """A fail-closed error suitable for the internal Hermes boundary."""
 
 
+class HermesCapabilityUnavailableError(RuntimeError):
+    """The durable replay ledger cannot make a safe authorization decision."""
+
+
 def _b64url_encode(value: bytes) -> str:
     return base64.urlsafe_b64encode(value).rstrip(b"=").decode("ascii")
 
@@ -125,7 +129,12 @@ class HermesCapabilityVerifier:
             raise HermesCapabilityError("hermes_capability_lifetime_invalid")
         jti = claims["jti"]
         if self._consume_jti is not None:
-            state = self._consume_jti(project_id, jti, claims["exp"])
+            try:
+                state = self._consume_jti(project_id, jti, claims["exp"])
+            except Exception as exc:
+                raise HermesCapabilityUnavailableError("hermes_capability_unavailable") from exc
+            if state == "unavailable":
+                raise HermesCapabilityUnavailableError("hermes_capability_unavailable")
             if state == "revoked":
                 raise HermesCapabilityError("hermes_capability_revoked")
             if state != "accepted":

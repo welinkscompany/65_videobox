@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+import sqlite3
 
 from fastapi.testclient import TestClient
 import pytest
@@ -19,6 +20,7 @@ def _client(tmp_path: Path, *, now: datetime) -> tuple[TestClient, HermesCapabil
         now=lambda: now,
     )
     app = create_app(projects_root=tmp_path, hermes_capability_verifier=verifier)
+    app.state.store._clock = lambda: now
     return TestClient(app), HermesCapabilitySigner(key_id="test-2026-07", key=CAPABILITY_KEY, now=lambda: now)
 
 
@@ -128,3 +130,43 @@ def test_hermes_status_replay_stays_rejected_after_app_restart(tmp_path: Path) -
     )
     assert replay.status_code == 401
     assert replay.json()["detail"] == "hermes_capability_replayed"
+
+
+def test_hermes_status_rejects_a_durably_revoked_capability(tmp_path: Path) -> None:
+    now = datetime(2026, 7, 19, tzinfo=UTC)
+    client, signer = _client(tmp_path, now=now)
+    project = client.post("/api/projects", json={"name": "철회"}).json()
+    token = _token(signer, project_id=project["project_id"], now=now, jti="capability-jti-revoked")
+
+    client.app.state.store.revoke_hermes_capability(
+        project_id=project["project_id"],
+        jti="capability-jti-revoked",
+        expires_at=int((now + timedelta(minutes=2)).timestamp()),
+    )
+
+    response = client.get(
+        f"/internal/hermes/projects/{project['project_id']}/status",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 401
+    assert response.json()["detail"] == "hermes_capability_revoked"
+
+
+def test_hermes_status_fails_closed_when_the_durable_ledger_is_unavailable(tmp_path: Path, monkeypatch) -> None:
+    now = datetime(2026, 7, 19, tzinfo=UTC)
+    client, signer = _client(tmp_path, now=now)
+    project = client.post("/api/projects", json={"name": "저장소 장애"}).json()
+    token = _token(signer, project_id=project["project_id"], now=now, jti="capability-jti-unavailable")
+
+    def unavailable(**_kwargs):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(client.app.state.store, "consume_hermes_capability", unavailable)
+    response = client.get(
+        f"/internal/hermes/projects/{project['project_id']}/status",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "hermes_capability_unavailable"}
+    assert "locked" not in response.text

@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Header, HTTPException, status
 
-from videobox_api.hermes_capabilities import HermesCapabilityError, HermesCapabilityVerifier
+from videobox_api.hermes_capabilities import (
+    HermesCapabilityError,
+    HermesCapabilityUnavailableError,
+    HermesCapabilityVerifier,
+)
 from videobox_api.models import HermesProjectStatusResponse
 from videobox_storage.local_project_store import LocalProjectStore
 
@@ -15,6 +19,11 @@ def build_hermes_internal_router(store: LocalProjectStore, verifier: HermesCapab
         try:
             token = _bearer_token(authorization)
             verifier.verify_for_project_status(token, project_id=project_id)
+        except HermesCapabilityUnavailableError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="hermes_capability_unavailable",
+            ) from exc
         except HermesCapabilityError as exc:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,

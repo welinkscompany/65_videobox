@@ -23,6 +23,17 @@ def test_translate_sql_converts_known_sqlite_replace_into_postgres_upsert() -> N
     )
 
 
+def test_translate_sql_preserves_portable_hermes_ledger_revoke_upsert() -> None:
+    statement = (
+        "INSERT INTO hermes_capability_ledger (project_id, jti, state, expires_at, recorded_at) "
+        "VALUES (?, ?, 'revoked', ?, ?) "
+        "ON CONFLICT (project_id, jti) DO UPDATE SET "
+        "state = EXCLUDED.state, expires_at = EXCLUDED.expires_at, recorded_at = EXCLUDED.recorded_at"
+    )
+
+    assert translate_sql(statement) == statement.replace("?", "%s")
+
+
 def test_translate_sql_qualifies_revision_increment_for_known_operational_index_tables() -> None:
     for table in ("director_proposal_revisions", "director_asset_index_revisions"):
         statement = (

@@ -4,6 +4,7 @@ import json
 import os
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
 from threading import Barrier
 from unittest.mock import patch
 from hashlib import sha256
@@ -18,6 +19,7 @@ from videobox_api.main import create_app
 from videobox_domain_models.assets import AssetType
 from videobox_domain_models.jobs import JobStatus, JobType
 from videobox_storage.postgres_project_store import PostgresProjectStore, _PostgresConnection
+from videobox_storage.local_project_store import LocalProjectStore
 
 
 def _approve_postgres_brief(store: PostgresProjectStore, project_id: str) -> dict:
@@ -84,6 +86,113 @@ def test_postgres_store_bootstraps_and_lists_a_project(tmp_path: Path, postgres_
         "created_at": project.created_at.isoformat(),
         "updated_at": project.updated_at.isoformat(),
     }
+
+
+def test_postgres_store_durably_consumes_and_revokes_hermes_capabilities(
+    tmp_path: Path, postgres_url: str
+) -> None:
+    store = PostgresProjectStore(tmp_path, database_url=postgres_url)
+    project = store.bootstrap_project(f"Hermes ledger {uuid4().hex}")
+
+    assert store.consume_hermes_capability(
+        project_id=project.project_id, jti="consumed-jti", expires_at=1_900_000_000
+    ) == "accepted"
+    assert store.consume_hermes_capability(
+        project_id=project.project_id, jti="consumed-jti", expires_at=1_900_000_000
+    ) == "consumed"
+
+    store.revoke_hermes_capability(
+        project_id=project.project_id, jti="revoked-jti", expires_at=1_900_000_000
+    )
+    assert store.consume_hermes_capability(
+        project_id=project.project_id, jti="revoked-jti", expires_at=1_900_000_000
+    ) == "revoked"
+    store.revoke_hermes_capability(project_id=project.project_id, jti="expired-jti", expires_at=1)
+    assert store.consume_hermes_capability(
+        project_id=project.project_id, jti="fresh-jti", expires_at=1_900_000_000
+    ) == "accepted"
+    connection = store._connection(project.project_id)
+    try:
+        assert connection.execute(
+            "SELECT jti FROM hermes_capability_ledger WHERE project_id = ? AND jti = ?",
+            (project.project_id, "expired-jti"),
+        ).fetchone() is None
+    finally:
+        connection.close()
+
+
+def test_sqlite_store_purges_expired_hermes_capability_ledger_rows(tmp_path: Path) -> None:
+    instant = datetime(2026, 7, 19, tzinfo=UTC)
+    store = LocalProjectStore(tmp_path, now=lambda: instant)
+    project = store.bootstrap_project("Hermes expiry cleanup")
+
+    store.revoke_hermes_capability(project_id=project.project_id, jti="expired-jti", expires_at=1)
+    assert store.consume_hermes_capability(
+        project_id=project.project_id,
+        jti="fresh-jti",
+        expires_at=int(instant.timestamp()) + 120,
+    ) == "accepted"
+
+    with sqlite3.connect(store.database_path(project.project_id)) as connection:
+        rows = connection.execute("SELECT jti FROM hermes_capability_ledger ORDER BY jti").fetchall()
+    assert rows == [("fresh-jti",)]
+
+
+def test_sqlite_concurrent_hermes_capability_consumption_has_one_winner(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project("Hermes concurrent SQLite ledger")
+    barrier = Barrier(2)
+    original_connection = store._connection
+
+    class GateConnection:
+        def __init__(self, connection) -> None:
+            self._connection = connection
+
+        def execute(self, statement: str, parameters=None):
+            if "INSERT INTO hermes_capability_ledger" in statement:
+                barrier.wait(timeout=10)
+            return self._connection.execute(statement, parameters or ())
+
+        def __getattr__(self, name: str):
+            return getattr(self._connection, name)
+
+    def gated_connection(project_id: str):
+        return GateConnection(original_connection(project_id))
+
+    with patch.object(store, "_connection", side_effect=gated_connection):
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            results = list(
+                executor.map(
+                    lambda _: store.consume_hermes_capability(
+                        project_id=project.project_id,
+                        jti="concurrent-jti",
+                        expires_at=1_900_000_000,
+                    ),
+                    range(2),
+                )
+            )
+
+    assert sorted(results) == ["accepted", "consumed"]
+
+
+def test_postgres_concurrent_hermes_capability_consumption_has_one_winner(
+    tmp_path: Path, postgres_url: str
+) -> None:
+    store = PostgresProjectStore(tmp_path, database_url=postgres_url)
+    project = store.bootstrap_project(f"Hermes concurrent ledger {uuid4().hex}")
+
+    results = _run_two_requests_at_same_insert(
+        statement_marker="INSERT INTO hermes_capability_ledger",
+        request=lambda: {
+            "state": store.consume_hermes_capability(
+                project_id=project.project_id,
+                jti="concurrent-jti",
+                expires_at=1_784_000_000,
+            )
+        },
+    )
+
+    assert sorted(item["state"] for item in results) == ["accepted", "consumed"]
 
 
 def test_postgres_concurrent_creation_brief_reuses_one_idempotency_winner(

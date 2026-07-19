@@ -402,4 +402,8 @@ PROJECT_SCHEMA_STATEMENTS = (
         PRIMARY KEY (project_id, jti)
     )
     """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_hermes_capability_ledger_expiry
+    ON hermes_capability_ledger (project_id, expires_at)
+    """,
 )

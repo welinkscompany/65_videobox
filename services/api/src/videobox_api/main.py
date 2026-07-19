@@ -315,10 +315,16 @@ def create_app(
         return {"status": "ok"}
 
     if hermes_capability_verifier is not None:
+        def consume_hermes_capability(project_id: str, jti: str, expires_at: int) -> str:
+            try:
+                return store.consume_hermes_capability(
+                    project_id=project_id, jti=jti, expires_at=expires_at
+                )
+            except Exception:
+                return "unavailable"
+
         hermes_capability_verifier.bind_durable_ledger(
-            lambda project_id, jti, expires_at: store.consume_hermes_capability(
-                project_id=project_id, jti=jti, expires_at=expires_at
-            )
+            consume_hermes_capability
         )
     app.include_router(build_projects_router(store))
     if hermes_capability_verifier is not None:

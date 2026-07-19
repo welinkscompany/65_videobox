@@ -455,30 +455,53 @@ class LocalProjectStore:
                 (project_id, jti),
             ).fetchone()
             if existing is not None:
-                return str(existing["state"])
-            try:
-                connection.execute(
-                    "INSERT INTO hermes_capability_ledger (project_id, jti, state, expires_at, recorded_at) VALUES (?, ?, 'consumed', ?, ?)",
-                    (project_id, jti, expires_at, self._now_iso()),
-                )
-                connection.commit()
-                return "accepted"
-            except sqlite3.IntegrityError:
-                connection.rollback()
-                row = connection.execute(
-                    "SELECT state FROM hermes_capability_ledger WHERE project_id = ? AND jti = ?",
-                    (project_id, jti),
-                ).fetchone()
-                return str(row["state"]) if row is not None else "unavailable"
+                result = str(existing["state"])
+            else:
+                try:
+                    connection.execute(
+                        "INSERT INTO hermes_capability_ledger (project_id, jti, state, expires_at, recorded_at) VALUES (?, ?, 'consumed', ?, ?)",
+                        (project_id, jti, expires_at, self._now_iso()),
+                    )
+                    connection.commit()
+                    result = "accepted"
+                except sqlite3.IntegrityError:
+                    connection.rollback()
+                    row = connection.execute(
+                        "SELECT state FROM hermes_capability_ledger WHERE project_id = ? AND jti = ?",
+                        (project_id, jti),
+                    ).fetchone()
+                    result = str(row["state"]) if row is not None else "unavailable"
         finally:
             connection.close()
+        self._purge_expired_hermes_capabilities(project_id=project_id)
+        return result
 
     def revoke_hermes_capability(self, *, project_id: str, jti: str, expires_at: int) -> None:
         connection = self._connection(project_id)
         try:
             connection.execute(
-                "INSERT OR REPLACE INTO hermes_capability_ledger (project_id, jti, state, expires_at, recorded_at) VALUES (?, ?, 'revoked', ?, ?)",
+                """
+                INSERT INTO hermes_capability_ledger (project_id, jti, state, expires_at, recorded_at)
+                VALUES (?, ?, 'revoked', ?, ?)
+                ON CONFLICT (project_id, jti) DO UPDATE SET
+                    state = EXCLUDED.state,
+                    expires_at = EXCLUDED.expires_at,
+                    recorded_at = EXCLUDED.recorded_at
+                """,
                 (project_id, jti, expires_at, self._now_iso()),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+        self._purge_expired_hermes_capabilities(project_id=project_id)
+
+    def _purge_expired_hermes_capabilities(self, *, project_id: str) -> None:
+        """Bound the short-lived capability ledger after its decision is committed."""
+        connection = self._connection(project_id)
+        try:
+            connection.execute(
+                "DELETE FROM hermes_capability_ledger WHERE project_id = ? AND expires_at <= ?",
+                (project_id, int(self._clock().timestamp())),
             )
             connection.commit()
         finally:
