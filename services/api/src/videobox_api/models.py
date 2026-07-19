@@ -77,6 +77,15 @@ class ProjectListResponse(BaseModel):
     projects: list[ProjectResponse]
 
 
+class HermesProjectStatusResponse(BaseModel):
+    project_id: str
+    name: str
+    status: str
+    updated_at: str
+    has_editing_session: bool
+    latest_session_revision: int | None = None
+
+
 class DirectorConversationCreateRequest(BaseModel):
     session_id: str = Field(min_length=1)
 

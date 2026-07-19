@@ -31,6 +31,7 @@ from videobox_api.routers.jobs import build_jobs_router
 from videobox_api.routers.media_library import build_media_library_router
 from videobox_api.routers.media_analysis import build_media_analysis_router
 from videobox_api.routers.outputs import build_outputs_router
+from videobox_api.routers.hermes_internal import build_hermes_internal_router
 from videobox_api.routers.projects import build_projects_router
 from videobox_api.routers.review import build_review_router
 from videobox_api.routers.timeline import build_timeline_router
@@ -62,6 +63,7 @@ from videobox_storage.local_project_store import LocalProjectStore, sha256_file
 from videobox_storage.media_library_store import MediaLibraryStore
 from videobox_storage.postgres_project_store import PostgresProjectStore
 from videobox_storage.user_library_store import UserLibraryStore
+from videobox_api.hermes_capabilities import HermesCapabilityVerifier
 
 # Re-exported for backward compatibility: tests/test_api.py and a few other
 # test modules import these names directly from videobox_api.main rather
@@ -181,6 +183,7 @@ def create_app(
     media_analysis_http_client=None,
     allow_test_media_analysis_providers: bool = False,
     creation_interview_runtime: CreationInterviewRuntime | None = None,
+    hermes_capability_verifier: HermesCapabilityVerifier | None = None,
 ) -> FastAPI:
     app = FastAPI(title="VideoBox API", version="0.1.0", lifespan=_media_analysis_lifespan)
     resolved_projects_root = projects_root or resolve_projects_root()
@@ -312,6 +315,8 @@ def create_app(
         return {"status": "ok"}
 
     app.include_router(build_projects_router(store))
+    if hermes_capability_verifier is not None:
+        app.include_router(build_hermes_internal_router(store, hermes_capability_verifier))
     app.include_router(build_creation_briefs_router(orchestrator))
     app.include_router(build_draft_readiness_router(orchestrator))
     app.include_router(build_atomic_draft_bundles_router(orchestrator))

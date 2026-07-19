@@ -1189,6 +1189,8 @@ production-readiness blocker slice 1의 9개 Task는 구현·회귀·600초 smok
 1. `videobox-hermes-agent`는 internal-only 별도 service로 둔다. VideoBox PostgreSQL, `snapshot/`, `runtime/` media directory, renderer, CapCut/host bridge를 직접 mount·읽기·실행하지 않는다.
 2. internal network만으로 권한을 인정하지 않는다. Hermes는 audience=`videobox-api`, operation·project allowlist, expiry·rotation·revocation·replay 방지를 포함한 짧은 수명 service capability로만 VideoBox API를 호출한다.
 3. 모든 handler는 최종 `(principal, project_id, operation)`을 검사한다. 초기 `get_project_status`는 명시적으로 선택한 한 project의 allowlisted read model만 반환하며 project list, global job, raw script/caption/media path/voice/transcript/PII를 반환하지 않는다. 단일 local owner MVP만 범위에 넣고 multi-user SaaS auth는 별도 slice다.
+4. `[x] 완료 (done)`: `GET /internal/hermes/projects/{project_id}/status`의 conditional **single-process contract**를 구현했다. default VideoBox에는 route가 없고, 명시적으로 주입한 verifier가 있을 때만 strict `HS256` key-id, issuer/principal/audience/operation/project/5분 TTL/JTI를 검사하며 같은 process 안의 replay와 injected revoked JTI를 거부한다. 반환 field는 `project_id`, `name`, `status`, `updated_at`, `has_editing_session`, `latest_session_revision`뿐이며 `root_storage_uri`, media/script/caption/voice/transcript, project list와 job은 없다.
+5. `[ ] 미완료 (pending)`: signer는 아직 어떤 VideoBox API route나 Hermes container에도 배포하지 않는다. 전용 Agent Gateway가 capability를 발급하고 OAuth/egress runtime과 분리된 secret delivery·rotation·**durable atomic replay/revoke ledger**를 소유하는 후속 gate가 남았다. API restart/multi-worker replay와 ledger unavailable는 fail-closed해야 하며, Hermes network는 ordinary unauthenticated `/api/*` listener에 닿지 않는 gateway-only route/network split을 먼저 가져야 한다. Hermes가 self-mint하거나 shared signing key를 받는 설계는 금지한다.
 
 ### 23.3 [ ] 미완료 (pending) — 유진 profile, prompt와 업무 영역
 
