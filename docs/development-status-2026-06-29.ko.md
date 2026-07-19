@@ -1,6 +1,15 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 266. 2026-07-19 container snapshot/runtime and PostgreSQL recovery hardening`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 267. 2026-07-19 offline provider evidence ledger closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+
+## 267. 2026-07-19 offline provider evidence ledger closeout
+
+- `[x] 완료 (done)`: 실제 provider 호출 없이 synthetic capture import contract를 구현했다. capture는 external SHA-256로 고정한 checked-in Korean corpus와 exact case identity, provider/runtime/model, canonical candidate payload digest, opaque reviewer attestation(점수·수정 시간·UTC)을 함께 묶는다. raw media/path, credential, tool, approval 데이터와 corpus/case/attestation/capture replay는 import 또는 append에서 fail-closed한다.
+- `[x] 완료 (done)`: filesystem ledger는 application-contract 수준의 append-only hash chain과 write lock/atomic write로 record content·순서·중복 replay를 검증한다. write-once audit artifact는 당시 ordered record snapshot과 canonical report payload를 묶으며, 이후 정상 capture append가 과거 audit을 무효화하지 않는다. 서명 키·외부 앵커는 아직 없으므로 OS/adversary-proof immutable이라고 주장하지 않는다.
+- `[x] 완료 (done)`: report decode는 scalar JSON type/finite/range를 strict하게 확인하고, 재생성 report와 persisted JSON을 canonical representation으로 비교한다. 따라서 rehashed라도 `1`과 `1.0`을 바꾼 type-spoof audit은 통과하지 않는다. 모든 report는 `needs_human_review`만 유지하며 route/권한을 활성화하지 않는다.
+- 검증: evidence focused `28 passed`, harness/LM Studio/local provider 포함 focused `84 passed`, independent spec review와 quality review P0/P1/P2 0, `git diff --check` 통과. Starlette multipart PendingDeprecationWarning 1건은 기존 비차단 경고다.
+- 실제 GPT/Qwen/Hermes/Gemini 호출, Hermes host bridge, OAuth, DB/API route, router activation은 시작하지 않았다. Gemini provider call은 0이다.
+- 다음은 이 ledger로 실제 provider를 호출하는 일이 아니라, 기존 §23 gate가 허용된 뒤에만 실제 captured output을 import할 수 있는 owner-authorized evidence intake/consent·budget·gateway contract를 좁게 설계하는 것이다.
 
 ## 266. 2026-07-19 container snapshot/runtime and PostgreSQL recovery hardening
 
