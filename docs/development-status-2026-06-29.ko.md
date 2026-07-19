@@ -9014,6 +9014,13 @@ focused 검증 메모:
 - dead helper, 임시 메모, 역할이 끝난 중복 파일 중 삭제보다 역할 명시가 맞는지 먼저 판단한다
 - 최종 closeout 직전 broad 재검증이 정말 필요한지 마지막으로 판단한다
 
+## 2026-07-19 offline provider qualification report closeout
+
+- `[x] 완료 (done)`: fixed Korean 3-case shadow corpus, external SHA-256 pin, tamper rejection, captured CandidateResult revalidation, schema/grounded/policy/human-score/correction-time/95% CI report를 구현했다.
+- `[x] 완료 (done)`: report는 perfect synthetic 20-case fixture에도 route를 승인하지 않고 항상 `needs_human_review`다. external provider, Hermes, DB/filesystem/router mutation은 0이다.
+- `[ ] 미완료 (pending)`: actual captured GPT/Qwen output 비교, immutable audit persistence, authenticated Hermes bridge, OAuth는 아직 시작하지 않았다. Gemini provider call은 계속 0이다.
+- 검증: 관련 focused `56 passed`, 전체 `1197 collected`, production image build 및 `--network none --read-only` reverse fixture load 통과. 전체 suite는 장기 E2E idle로 완료하지 않아 pass로 기록하지 않는다.
+
 ## 2026-07-19 유진 provider qualification 기반 closeout
 
 - `[x] 완료 (done)`: LM Studio의 이전 `0.0.0.0:1234` listener를 중지하고 exact `127.0.0.1:1234`로 다시 bind했다. 이 확인은 direct LAN exposure closure일 뿐이며 Hermes host bridge 또는 Qwen qualification이 아니다.

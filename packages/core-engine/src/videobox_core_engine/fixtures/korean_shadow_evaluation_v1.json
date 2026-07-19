@@ -1,0 +1,52 @@
+{
+  "canonical_sha256": "5ee10e6d85e499c8c62e2abcec7986492fd82afeef8237eace955c6dd05062e1",
+  "corpus": {
+    "corpus_id": "videobox-korean-shadow-v1",
+    "prompt_schema_version": "v1",
+    "renderer_version": "ffmpeg-fixture-v1",
+    "cases": [
+      {
+        "case_id": "title-waterplay-001",
+        "task": "title_generation",
+        "sanitized_input": {
+          "scene_summary": "아이 물놀이 장면",
+          "audio_policy": "preserve_original"
+        },
+        "response_schema": {
+          "required": ["titles", "audio_policy"],
+          "properties": {"titles": {}, "audio_policy": {}},
+          "additionalProperties": false
+        },
+        "required_claims": ["preserve_original"]
+      },
+      {
+        "case_id": "summary-playground-002",
+        "task": "conversation_compression",
+        "sanitized_input": {
+          "scene_summary": "아이 놀이터 장면",
+          "human_review_required": true
+        },
+        "response_schema": {
+          "required": ["summary"],
+          "properties": {"summary": {}},
+          "additionalProperties": false
+        },
+        "required_claims": []
+      },
+      {
+        "case_id": "title-rainyday-003",
+        "task": "title_generation",
+        "sanitized_input": {
+          "scene_summary": "비 오는 날 실내 놀이",
+          "audio_policy": "preserve_original"
+        },
+        "response_schema": {
+          "required": ["titles", "audio_policy"],
+          "properties": {"titles": {}, "audio_policy": {}},
+          "additionalProperties": false
+        },
+        "required_claims": ["preserve_original"]
+      }
+    ]
+  }
+}
