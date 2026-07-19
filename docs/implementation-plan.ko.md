@@ -1171,15 +1171,17 @@ production-readiness blocker slice 1의 9개 Task는 구현·회귀·600초 smok
 - `[!] BLOCKED`: 외부 사실·권한·승인 근거가 없어 구현을 시작하지 않는 항목이다.
 - `[x] 완료 (done)`: Hermes가 올라갈 Compose/PostgreSQL/snapshot/runtime 기준선과 실제 두 장면 current-revision MP4 재생 경로를 고정했다. Task 9 사람/환경 acceptance와 CapCut Desktop evidence의 완료 상태는 이 항목으로 바꾸지 않는다.
 - `[x] 완료 (done)`: Gemini quarantine을 마쳤다. `create_app`의 Gemini key router import/등록, web API client와 숨겨진 key CRUD UI를 제거했다. 과거 Gemini key 스키마·저장 데이터·legacy module은 migration/read compatibility 용도로만 inert 보존한다. focused API `12 passed`, web `112 passed`, production build와 OpenAPI/404 retirement contract로 public path와 provider call `0` 경계를 검증했다.
+- `[x] 완료 (done)`: 2026-07-19 Hermes Agent 공식 문서와 release를 확인했다. 공식 quickstart/configuration은 `hermes model`의 **OpenAI Codex → ChatGPT OAuth device-code login**을 지원한다고 명시한다. 첫 설치는 signed release tag `v2026.7.7.2`의 annotated tag `b7751df34688835a108e0d630f3495fc11f3df79`와 peeled commit `9de9c25f620ff7f1ce0fd5457d596052d5159596`으로 pin한다. 근거: <https://hermes-agent.nousresearch.com/docs/getting-started/quickstart/>, <https://hermes-agent.nousresearch.com/docs/user-guide/configuration/>, <https://github.com/NousResearch/hermes-agent/releases/tag/v2026.7.7.2>.
 - `[ ] 미완료 (pending)`: Hermes/Yujin은 아직 생성하지 않았다. 이 계획의 각 gate를 통과하기 전에는 서비스, OAuth credential, mem0, 편집 mutation을 추가하지 않는다.
 
 이 절은 Hermes 범위에서 `docs/llm-provider-strategy.ko.md`의 과거 `Qwen → Gemini → OpenAI` fallback보다 우선한다. provider 전략 문서는 현재 local-only 결정으로 갱신됐으며 Gemini provider, key pool, router는 **disabled·unwired** 상태다. 정적 검사와 실제 runtime 모두 external Gemini provider call `0`을 유지해야 하며, Gemini 경로를 되살리는 구현은 허용하지 않는다.
 
-### 23.1 [!] BLOCKED — GPT OAuth·egress 계약 고정
+### 23.1 [~] 진행 중 (in progress) — Hermes 소유 ChatGPT OAuth·egress 계약
 
-1. 현재 official provider 문서와 약관에서 VideoBox/Hermes에 허용되는 사용자 위임 OAuth 방식, client type, scope, redirect/verification UX, token 사용 권한의 근거가 이 저장소에 없다. 따라서 OAuth endpoint, token, credential, external egress 구현은 **BLOCKED**다. 근거가 확보되기 전에는 device authorization flow와 authorization-code + PKCE를 동시에 가정하거나 어느 하나를 구현하지 않는다.
-2. 공식 근거가 생기면 지원되는 **한 방식**만 선택해 issuer, client type, scope, redirect/verification UX, state/nonce/verifier, polling·expiry·error mapping을 versioned contract에 기록하고, 이 status를 미완료 (pending)로 되돌린 뒤 구현한다.
-3. 이후 구현 시 OAuth credential은 전용 Hermes state volume에만 저장하며 repository, 일반 `.env`, VideoBox DB, mem0, snapshot, backup, log/trace에는 기록하지 않는다. egress 기본값은 거부이고, OAuth bootstrap은 창작 요청·project data 전송 동의가 아니다.
+1. **선택한 한 방식:** VideoBox가 OpenAI OAuth endpoint를 구현하는 방식이 아니라, pinned Hermes Agent가 공식 `hermes model`의 `OpenAI Codex` 선택지로 수행하는 ChatGPT **device-code OAuth**를 쓴다. 사용자 로그인은 Hermes container의 interactive setup에서만 수행한다. VideoBox web/API는 redirect URI, client secret, auth code, refresh token을 만들거나 받거나 갱신하지 않는다.
+2. **직접 OAuth는 계속 BLOCKED:** OpenAI 일반 API에 대한 VideoBox 자체 사용자 위임 OAuth, authorization-code + PKCE, device flow 재구현, generic token endpoint 호출은 공식 VideoBox contract가 아니므로 구현하지 않는다. Hermes가 소유한 provider credential을 VideoBox DB, 일반 `.env`, mem0, snapshot, backup, log/trace 또는 API response에 복사·전달하지 않는다.
+3. OAuth credential과 Hermes config는 전용 named state volume에만 둔다. repository에는 secret이 없는 pinned image/source reference와 non-secret allowlist만 둔다. logout/revoke/expiry/reuse는 Hermes CLI의 공식 동작을 integration test로 확인하고, credential을 열람·export·backup하지 않는다.
+4. egress 기본값은 거부다. bootstrap 때만 pinned Hermes 공식 provider flow에 필요한 destination을 명시적으로 allowlist하고, VideoBox project data·media·script·caption·mem0은 그 요청에 포함하지 않는다. OAuth 성공은 창작 요청이나 project data-transfer 동의가 아니며, 향후 GPT inference는 request별 동의·budget·audit와 별도 gate를 통과해야 한다.
 
 ### 23.2 [ ] 미완료 (pending) — 서비스 identity와 VideoBox 권한중개
 
