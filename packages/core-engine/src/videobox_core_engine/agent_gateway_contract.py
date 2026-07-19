@@ -9,8 +9,10 @@ revision before a later execution slice can use this contract.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from hashlib import sha256
 from json import dumps
+import re
 from types import MappingProxyType
 from typing import Any, Literal, Mapping
 
@@ -23,6 +25,10 @@ from videobox_core_engine.yujin_profile_contract import (
 
 __all__ = (
     "BackendDerivedStatusRequest",
+    "GatewayDecisionAttempt",
+    "GatewayDecisionAuditEvent",
+    "GatewayDecisionState",
+    "GatewayDecisionTransition",
     "GatewayPreflightDecision",
     "GatewayRegistry",
     "GatewayRunContext",
@@ -32,6 +38,7 @@ __all__ = (
     "load_builtin_gateway_registry",
     "load_builtin_status_tool_spec",
     "preflight_status_read",
+    "record_status_read_decision",
     "redact_status_result",
 )
 
@@ -41,9 +48,30 @@ TOOL_VERSION = "tool-spec-v1"
 REGISTRY_VERSION = "gateway-registry-v1"
 TOOL_SPEC_MANIFEST_SHA256 = "def18d0d02fa1a30b3fb5b9f40347f76333454422506a959c8b9efa93b758333"
 RESULT_REDACTION_SUMMARY = "selected_project_status_only"
+DECISION_AUDIT_VERSION = "gateway-decision-audit-v1"
+DECISION_AUDIT_REDACTION = "hashes_and_fixed_reason_only"
+_PREFLIGHT_AUDIT_REASON_CODES = frozenset(
+    {
+        "invalid_gateway_context_or_proposal",
+        "backend_attested_context_required",
+        "backend_context_scalar_invalid",
+        "untrusted_proposal_scalar_invalid",
+        "tool_or_version_not_registered",
+        "run_phase_not_allowed",
+        "backend_derived_request_required",
+        "invalid_backend_request",
+        "backend_attested_request_required",
+        "backend_project_scope_mismatch",
+        "untrusted_project_or_revision_mismatch",
+        "strict_request_schema_rejected",
+        "static_contract_accepted",
+    }
+)
+_AUDIT_REASON_CODES = _PREFLIGHT_AUDIT_REASON_CODES | {"idempotency_key_conflict"}
 _ALLOWED_PHASES = ("read_only_research",)
 _REVISION_PRECONDITION = "selected_project_status_revision"
 _BACKEND_BINDING_ISSUER = object()
+_BACKEND_DECISION_ATTEMPT_ISSUER = object()
 _KNOWN_RUN_PHASES = frozenset(
     {
         "intake",
@@ -335,6 +363,384 @@ class GatewayPreflightDecision:
     spec_manifest_sha256: str | None
     sanitized_request: Mapping[str, Any] | None
     executor_authorized: Literal[False] = False
+
+
+_BACKEND_OPAQUE_IDENTIFIER = re.compile(
+    r"(?:corr|idem|principal)_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\Z"
+)
+_UTC_AUDIT_TIMESTAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\Z")
+_SHA256_HEX = re.compile(r"[0-9a-f]{64}\Z")
+
+
+def _is_backend_opaque_identifier(value: object, *, prefix: str) -> bool:
+    return type(value) is str and value.startswith(prefix) and _BACKEND_OPAQUE_IDENTIFIER.fullmatch(value) is not None
+
+
+def _is_utc_audit_timestamp(value: object) -> bool:
+    if type(value) is not str or _UTC_AUDIT_TIMESTAMP.fullmatch(value) is None:
+        return False
+    try:
+        datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return True
+
+
+def _text_sha256(value: str) -> str:
+    return sha256(value.encode("utf-8")).hexdigest()
+
+
+def _redacted_context_reference(context: object, *, field: Literal["project_id", "source_revision"]) -> str | None:
+    if not isinstance(context, GatewayRunContext):
+        return None
+    value: object
+    if field == "project_id":
+        value = context.yujin_context.project_id
+    else:
+        value = context.yujin_context.status.latest_session_revision
+    return _text_sha256(value) if type(value) is str else None
+
+
+@dataclass(frozen=True, slots=True)
+class GatewayDecisionAttempt:
+    """Untrusted run metadata used only for correlation and replay bookkeeping.
+
+    ``untrusted_model_claim`` is intentionally neither validated as authority nor
+    retained in state/audit. It exists to make that boundary explicit in tests
+    and future adapters.
+    """
+
+    correlation_id: str
+    idempotency_key: str
+    backend_principal_ref: str
+    occurred_at: str
+    retry_attempt: int
+    untrusted_model_claim: object = field(default=None, repr=False, compare=False)
+    _backend_binding: object | None = field(default=None, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        if not _is_backend_opaque_identifier(self.correlation_id, prefix="corr_"):
+            raise ValueError("decision correlation identifier must use the fixed high-entropy backend format")
+        if not _is_backend_opaque_identifier(self.idempotency_key, prefix="idem_"):
+            raise ValueError("decision idempotency key must use the fixed high-entropy backend format")
+        if not _is_backend_opaque_identifier(self.backend_principal_ref, prefix="principal_"):
+            raise ValueError("decision backend principal must use the fixed high-entropy backend format")
+        if not _is_utc_audit_timestamp(self.occurred_at):
+            raise ValueError("decision audit timestamp must be strict UTC seconds")
+        if type(self.retry_attempt) is not int or self.retry_attempt < 0:
+            raise ValueError("decision retry attempt must be a nonnegative integer")
+        if self._backend_binding not in (None, _BACKEND_DECISION_ATTEMPT_ISSUER):
+            raise ValueError("decision attempt has an invalid backend attestation marker")
+
+    @property
+    def is_backend_attested(self) -> bool:
+        return self._backend_binding is _BACKEND_DECISION_ATTEMPT_ISSUER
+
+
+def _build_backend_attested_decision_attempt(
+    *, correlation_id: str, idempotency_key: str, backend_principal_ref: str, occurred_at: str,
+    retry_attempt: int, untrusted_model_claim: object = None,
+) -> GatewayDecisionAttempt:
+    """Backend-adapter-only metadata binding; model-supplied identifiers have no authority."""
+    return GatewayDecisionAttempt(
+        correlation_id=correlation_id,
+        idempotency_key=idempotency_key,
+        backend_principal_ref=backend_principal_ref,
+        occurred_at=occurred_at,
+        retry_attempt=retry_attempt,
+        untrusted_model_claim=untrusted_model_claim,
+        _backend_binding=_BACKEND_DECISION_ATTEMPT_ISSUER,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class _StoredGatewayDecision:
+    fingerprint_sha256: str
+    decision_sha256: str
+    static_contract_accepted: bool
+    reason: str
+    spec_manifest_sha256: str | None
+
+    def __post_init__(self) -> None:
+        if (
+            _SHA256_HEX.fullmatch(self.fingerprint_sha256) is None
+            or _SHA256_HEX.fullmatch(self.decision_sha256) is None
+            or type(self.static_contract_accepted) is not bool
+            or type(self.reason) is not str
+            or self.reason not in _PREFLIGHT_AUDIT_REASON_CODES
+            or (self.spec_manifest_sha256 is not None and _SHA256_HEX.fullmatch(self.spec_manifest_sha256) is None)
+        ):
+            raise ValueError("stored gateway decision has an invalid static shape")
+
+
+@dataclass(frozen=True, slots=True)
+class GatewayDecisionState:
+    """Immutable local replay state contract; it is not persistent storage."""
+
+    records: Mapping[str, _StoredGatewayDecision]
+    storage_scope: Literal["in_memory_nonpersistent"] = "in_memory_nonpersistent"
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.records, Mapping) or self.storage_scope != "in_memory_nonpersistent":
+            raise ValueError("gateway decision state requires an immutable mapping")
+        records: dict[str, _StoredGatewayDecision] = {}
+        for key, value in self.records.items():
+            if type(key) is not str or _SHA256_HEX.fullmatch(key) is None or type(value) is not _StoredGatewayDecision:
+                raise ValueError("gateway decision state contains an invalid record")
+            records[key] = value
+        object.__setattr__(self, "records", MappingProxyType(records))
+
+    @classmethod
+    def empty(cls) -> "GatewayDecisionState":
+        return cls(records={})
+
+
+@dataclass(frozen=True, slots=True)
+class GatewayDecisionAuditEvent:
+    """Redacted deterministic audit record. It never contains a model claim or raw content."""
+
+    event_id: str
+    correlation_id_sha256: str
+    idempotency_key_sha256: str
+    retry_attempt: int
+    retry_disposition: Literal["initial_nonexecuting", "replayed_nonexecuting", "idempotency_conflict_nonexecuting"]
+    decision_sha256: str
+    outcome: Literal["accepted", "denied"]
+    reason: str
+    static_contract_accepted: bool
+    executor_authorized: Literal[False]
+    spec_manifest_sha256: str | None
+    profile_manifest_sha256: str
+    tool_name: Literal["get_project_status"]
+    tool_version: Literal["tool-spec-v1"]
+    sanitized_request_sha256: str
+    static_result_sha256: None
+    principal_sha256: str
+    occurred_at: str
+    state_scope: Literal["in_memory_nonpersistent"]
+    project_id_sha256: str | None
+    source_revision_sha256: str | None
+    redaction_summary: Literal["hashes_and_fixed_reason_only"]
+    event_sha256: str
+
+    def __post_init__(self) -> None:
+        hashes = (
+            self.correlation_id_sha256, self.idempotency_key_sha256, self.decision_sha256, self.event_sha256,
+            self.profile_manifest_sha256, self.sanitized_request_sha256, self.principal_sha256,
+        )
+        optional_hashes = (self.spec_manifest_sha256, self.project_id_sha256, self.source_revision_sha256)
+        if (
+            type(self.event_id) is not str
+            or _SHA256_HEX.fullmatch(self.event_id) is None
+            or any(_SHA256_HEX.fullmatch(value) is None for value in hashes)
+            or any(value is not None and _SHA256_HEX.fullmatch(value) is None for value in optional_hashes)
+            or type(self.retry_attempt) is not int
+            or self.retry_attempt < 0
+            or self.retry_disposition not in {"initial_nonexecuting", "replayed_nonexecuting", "idempotency_conflict_nonexecuting"}
+            or self.outcome not in {"accepted", "denied"}
+            or type(self.reason) is not str
+            or self.reason not in _AUDIT_REASON_CODES
+            or type(self.static_contract_accepted) is not bool
+            or self.executor_authorized is not False
+            or self.redaction_summary != DECISION_AUDIT_REDACTION
+            or self.tool_name != TOOL_NAME
+            or self.tool_version != TOOL_VERSION
+            or self.sanitized_request_sha256 != _digest({})
+            or self.static_result_sha256 is not None
+            or not _is_utc_audit_timestamp(self.occurred_at)
+            or self.state_scope != "in_memory_nonpersistent"
+        ):
+            raise ValueError("gateway decision audit event has an invalid redacted shape")
+        if self.retry_disposition == "idempotency_conflict_nonexecuting":
+            if self.reason != "idempotency_key_conflict" or self.static_contract_accepted or self.outcome != "denied":
+                raise ValueError("gateway decision audit conflict must remain non-authorizing")
+        elif (
+            self.reason == "idempotency_key_conflict"
+            or self.static_contract_accepted != (self.reason == "static_contract_accepted")
+            or self.outcome != ("accepted" if self.static_contract_accepted else "denied")
+        ):
+            raise ValueError("gateway decision audit reason must match the fixed static outcome")
+        payload = self._payload_without_hash()
+        if _digest(payload) != self.event_sha256 or self.event_id != self.event_sha256:
+            raise ValueError("gateway decision audit event hash does not match")
+
+    def _payload_without_hash(self) -> Mapping[str, Any]:
+        return {
+            "audit_version": DECISION_AUDIT_VERSION,
+            "correlation_id_sha256": self.correlation_id_sha256,
+            "idempotency_key_sha256": self.idempotency_key_sha256,
+            "retry_attempt": self.retry_attempt,
+            "retry_disposition": self.retry_disposition,
+            "decision_sha256": self.decision_sha256,
+            "outcome": self.outcome,
+            "reason": self.reason,
+            "static_contract_accepted": self.static_contract_accepted,
+            "executor_authorized": False,
+            "spec_manifest_sha256": self.spec_manifest_sha256,
+            "profile_manifest_sha256": self.profile_manifest_sha256,
+            "tool_name": TOOL_NAME,
+            "tool_version": TOOL_VERSION,
+            "sanitized_request_sha256": _digest({}),
+            "static_result_sha256": None,
+            "principal_sha256": self.principal_sha256,
+            "occurred_at": self.occurred_at,
+            "state_scope": "in_memory_nonpersistent",
+            "project_id_sha256": self.project_id_sha256,
+            "source_revision_sha256": self.source_revision_sha256,
+            "redaction_summary": DECISION_AUDIT_REDACTION,
+        }
+
+    def as_dict(self) -> Mapping[str, Any]:
+        return MappingProxyType({**self._payload_without_hash(), "event_id": self.event_id, "event_sha256": self.event_sha256})
+
+
+@dataclass(frozen=True, slots=True)
+class GatewayDecisionTransition:
+    audit_event: GatewayDecisionAuditEvent
+    state: GatewayDecisionState
+
+
+def _proposal_audit_shape(context: object, proposal: object, backend_request: object) -> Mapping[str, Any]:
+    """Describe comparison outcomes, never proposal values or request payload content."""
+    selected_project = context.yujin_context.project_id if isinstance(context, GatewayRunContext) else None
+    selected_revision = context.yujin_context.status.latest_session_revision if isinstance(context, GatewayRunContext) else None
+    if not isinstance(proposal, ToolCallProposal):
+        proposal_shape: Mapping[str, str] = MappingProxyType({"kind": "invalid"})
+    else:
+        proposal_shape = MappingProxyType(
+            {
+                "kind": "tool_proposal",
+                "tool": "registered" if type(proposal.tool_name) is str and proposal.tool_name == TOOL_NAME else "unregistered_or_invalid",
+                "version": "pinned" if type(proposal.tool_version) is str and proposal.tool_version == TOOL_VERSION else "unknown_or_invalid",
+                "project": "selected" if type(proposal.project_id) is str and proposal.project_id == selected_project else "other_or_invalid",
+                "revision": "selected" if proposal.source_revision == selected_revision else "other_or_invalid",
+                "request": "empty" if _is_exact_empty_object(proposal.request_payload) else "nonempty_or_invalid",
+            }
+        )
+    if backend_request is None:
+        backend_shape: Mapping[str, str] = MappingProxyType({"kind": "missing"})
+    elif not isinstance(backend_request, BackendDerivedStatusRequest):
+        backend_shape = MappingProxyType({"kind": "invalid"})
+    else:
+        backend_shape = MappingProxyType(
+            {
+                "kind": "attested" if backend_request.is_backend_attested else "unattested",
+                "project": "selected" if backend_request.project_id == selected_project else "other",
+                "revision": "selected" if backend_request.source_revision == selected_revision else "other",
+                "request": "empty" if _is_canonical_empty_backend_request(backend_request.request_payload) else "nonempty_or_invalid",
+            }
+        )
+    return MappingProxyType({"proposal": proposal_shape, "backend": backend_shape})
+
+
+def _decision_fingerprint(
+    *, context: object, proposal: object, backend_request: object, attempt: GatewayDecisionAttempt,
+    decision: GatewayPreflightDecision,
+) -> str:
+    context_sha256 = (
+        context.yujin_context.context_sha256
+        if isinstance(context, GatewayRunContext) and type(context.yujin_context.context_sha256) is str
+        else None
+    )
+    run_phase = context.run_phase if isinstance(context, GatewayRunContext) and type(context.run_phase) is str else "invalid"
+    return _digest(
+        {
+            "audit_version": DECISION_AUDIT_VERSION,
+            "correlation_id_sha256": _text_sha256(attempt.correlation_id),
+            "principal_sha256": _text_sha256(attempt.backend_principal_ref),
+            "context_sha256": context_sha256,
+            "run_phase": run_phase,
+            "input_shape": _thaw(_proposal_audit_shape(context, proposal, backend_request)),
+            "static_contract_accepted": decision.static_contract_accepted,
+            "reason": decision.reason,
+            "spec_manifest_sha256": decision.spec_manifest_sha256,
+            "executor_authorized": False,
+        }
+    )
+
+
+def _make_decision_audit_event(
+    *, context: object, attempt: GatewayDecisionAttempt, stored: _StoredGatewayDecision,
+    retry_disposition: Literal["initial_nonexecuting", "replayed_nonexecuting", "idempotency_conflict_nonexecuting"],
+) -> GatewayDecisionAuditEvent:
+    static_contract_accepted = stored.static_contract_accepted and retry_disposition != "idempotency_conflict_nonexecuting"
+    reason = stored.reason if retry_disposition != "idempotency_conflict_nonexecuting" else "idempotency_key_conflict"
+    payload = {
+        "audit_version": DECISION_AUDIT_VERSION,
+        "correlation_id_sha256": _text_sha256(attempt.correlation_id),
+        "idempotency_key_sha256": _text_sha256(attempt.idempotency_key),
+        "retry_attempt": attempt.retry_attempt,
+        "retry_disposition": retry_disposition,
+        "decision_sha256": stored.decision_sha256,
+        "outcome": "accepted" if static_contract_accepted else "denied",
+        "reason": reason,
+        "static_contract_accepted": static_contract_accepted,
+        "executor_authorized": False,
+        "spec_manifest_sha256": stored.spec_manifest_sha256,
+        "profile_manifest_sha256": context.profile.prompt_manifest_sha256,
+        "tool_name": TOOL_NAME,
+        "tool_version": TOOL_VERSION,
+        "sanitized_request_sha256": _digest({}),
+        "static_result_sha256": None,
+        "principal_sha256": _text_sha256(attempt.backend_principal_ref),
+        "occurred_at": attempt.occurred_at,
+        "state_scope": "in_memory_nonpersistent",
+        "project_id_sha256": _redacted_context_reference(context, field="project_id"),
+        "source_revision_sha256": _redacted_context_reference(context, field="source_revision"),
+        "redaction_summary": DECISION_AUDIT_REDACTION,
+    }
+    event_sha256 = _digest(payload)
+    event_fields = {key: value for key, value in payload.items() if key != "audit_version"}
+    return GatewayDecisionAuditEvent(**event_fields, event_id=event_sha256, event_sha256=event_sha256)
+
+
+def record_status_read_decision(
+    *, state: GatewayDecisionState, context: GatewayRunContext, proposal: ToolCallProposal,
+    backend_request: BackendDerivedStatusRequest | None, attempt: GatewayDecisionAttempt,
+) -> GatewayDecisionTransition:
+    """Audit a static preflight and maintain only redacted, non-executing replay state."""
+    if not isinstance(state, GatewayDecisionState) or not isinstance(attempt, GatewayDecisionAttempt):
+        raise ValueError("gateway decision recording requires static state and a bounded attempt")
+    if not attempt.is_backend_attested:
+        raise ValueError("gateway decision recording requires a backend-attested decision attempt")
+    decision = preflight_status_read(context=context, proposal=proposal, backend_request=backend_request)
+    fingerprint_sha256 = _decision_fingerprint(
+        context=context, proposal=proposal, backend_request=backend_request, attempt=attempt, decision=decision
+    )
+    idempotency_key_sha256 = _text_sha256(attempt.idempotency_key)
+    stored = state.records.get(idempotency_key_sha256)
+    if stored is None:
+        stored = _StoredGatewayDecision(
+            fingerprint_sha256=fingerprint_sha256,
+            decision_sha256=_digest(
+                {
+                    "fingerprint_sha256": fingerprint_sha256,
+                    "static_contract_accepted": decision.static_contract_accepted,
+                    "reason": decision.reason,
+                    "spec_manifest_sha256": decision.spec_manifest_sha256,
+                    "executor_authorized": False,
+                }
+            ),
+            static_contract_accepted=decision.static_contract_accepted,
+            reason=decision.reason,
+            spec_manifest_sha256=decision.spec_manifest_sha256,
+        )
+        records = dict(state.records)
+        records[idempotency_key_sha256] = stored
+        next_state = GatewayDecisionState(records=records)
+        disposition: Literal["initial_nonexecuting", "replayed_nonexecuting", "idempotency_conflict_nonexecuting"] = "initial_nonexecuting"
+    elif stored.fingerprint_sha256 == fingerprint_sha256:
+        next_state = state
+        disposition = "replayed_nonexecuting"
+    else:
+        next_state = state
+        disposition = "idempotency_conflict_nonexecuting"
+    return GatewayDecisionTransition(
+        audit_event=_make_decision_audit_event(
+            context=context, attempt=attempt, stored=stored, retry_disposition=disposition
+        ),
+        state=next_state,
+    )
 
 
 def _denied(reason: str, spec: ToolSpec | None = None) -> GatewayPreflightDecision:

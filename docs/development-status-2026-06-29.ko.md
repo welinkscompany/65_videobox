@@ -1,6 +1,11 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 270. 2026-07-20 static ToolSpec/Gateway contract closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 271. 2026-07-20 static gateway decision audit closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+
+## 271. 2026-07-20 static gateway decision audit closeout
+
+- `[x] 완료 (done)`: static decision audit/retry contract를 추가했다. backend-attested UUIDv4 correlation/idempotency/principal, fixed reason, profile/tool/request digest/no-result/principal hash/UTC time만 hash-bound event에 남기며 scope는 `in_memory_nonpersistent`다. raw prompt/media/credential/model claim은 기록하지 않는다.
+- retry는 같은 principal·동일 input만 `replayed_nonexecuting`; 다른 input 또는 principal은 idempotency conflict로 끝나며 항상 executor 권한 0이다. 이는 durable ledger, signer, API route, provider runtime이 아니다. Gemini call은 0, Task 9은 9/22 (40.9%) 유지다.
 
 ## 270. 2026-07-20 static ToolSpec/Gateway contract closeout
 
