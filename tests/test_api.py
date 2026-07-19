@@ -4309,6 +4309,23 @@ def _local_only_service_factory(
     return factory
 
 
+def _seed_legacy_gemini_provider_key(
+    store: LocalProjectStore,
+    *,
+    project_id: str,
+    payload: dict[str, str],
+) -> dict[str, object]:
+    """Seed historical data without restoring the retired public CRUD route."""
+    return store.save_gemini_provider_key(
+        project_id=project_id,
+        label=payload["label"],
+        api_key_secret=payload["api_key"],
+        primary_model=payload["primary_model"],
+        cheap_model=payload["cheap_model"],
+        high_quality_model=payload["high_quality_model"],
+    )
+
+
 def _create_broll_recommendation_project(
     client: TestClient,
     tmp_path: Path,
@@ -4340,11 +4357,11 @@ def _create_broll_recommendation_project(
         },
     )
     if gemini_key_payload is not None:
-        key_response = client.post(
-            f"/api/projects/{project_id}/providers/gemini/keys",
-            json=gemini_key_payload,
+        _seed_legacy_gemini_provider_key(
+            client.app.state.store,
+            project_id=project_id,
+            payload=gemini_key_payload,
         )
-        assert key_response.status_code == 201
     transcription_job_id = client.post(
         f"/api/projects/{project_id}/jobs/transcription",
         json={"narration_asset_id": narration_asset_id},
@@ -4563,11 +4580,11 @@ def _create_music_recommendation_project(
         json={"source_path": str(source_script)},
     ).json()["asset_id"]
     if gemini_key_payload is not None:
-        key_response = client.post(
-            f"/api/projects/{project_id}/providers/gemini/keys",
-            json=gemini_key_payload,
+        _seed_legacy_gemini_provider_key(
+            client.app.state.store,
+            project_id=project_id,
+            payload=gemini_key_payload,
         )
-        assert key_response.status_code == 201
     transcription_job_id = client.post(
         f"/api/projects/{project_id}/jobs/transcription",
         json={"narration_asset_id": narration_asset_id},
@@ -4615,11 +4632,11 @@ def _create_timeline_review_project(
         },
     )
     if gemini_key_payload is not None:
-        key_response = client.post(
-            f"/api/projects/{project_id}/providers/gemini/keys",
-            json=gemini_key_payload,
+        _seed_legacy_gemini_provider_key(
+            client.app.state.store,
+            project_id=project_id,
+            payload=gemini_key_payload,
         )
-        assert key_response.status_code == 201
     transcription_job_id = client.post(
         f"/api/projects/{project_id}/jobs/transcription",
         json={"narration_asset_id": narration_asset_id},
@@ -4665,6 +4682,15 @@ def test_health_endpoint_reports_ok() -> None:
 
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
+
+
+def test_create_app_does_not_publish_legacy_gemini_key_management_routes(tmp_path: Path) -> None:
+    """Persisted Gemini keys remain readable for migration, but are never a public API."""
+    app = create_app(projects_root=tmp_path)
+
+    published_paths = set(app.openapi()["paths"])
+
+    assert not any("/providers/gemini/keys" in path for path in published_paths)
 
 
 def test_create_app_exposes_local_runtime_builder_on_app_state(tmp_path: Path) -> None:
@@ -4898,17 +4924,14 @@ def test_segment_analysis_endpoint_does_not_call_gemini_when_local_fails(
     )
     client = TestClient(app)
     project_id, script_asset_id, transcription_job_id = _create_segment_analysis_project(client, tmp_path)
-    key_response = client.post(
-        f"/api/projects/{project_id}/providers/gemini/keys",
-        json={
-            "label": "Fallback Gemini",
-            "api_key": "AIza-segment-fallback",
-            "primary_model": "gemini-2.5-flash",
-            "cheap_model": "gemini-2.5-flash-lite",
-            "high_quality_model": "gemini-2.5-pro",
-        },
+    app.state.store.save_gemini_provider_key(
+        project_id=project_id,
+        label="Legacy Gemini key",
+        api_key_secret="AIza-segment-fallback",
+        primary_model="gemini-2.5-flash",
+        cheap_model="gemini-2.5-flash-lite",
+        high_quality_model="gemini-2.5-pro",
     )
-    assert key_response.status_code == 201
 
     response = client.post(
         f"/api/projects/{project_id}/jobs/segment-analysis",
@@ -4952,17 +4975,14 @@ def test_segment_analysis_endpoint_does_not_call_gemini_when_local_is_disabled(
     )
     client = TestClient(app)
     project_id, script_asset_id, transcription_job_id = _create_segment_analysis_project(client, tmp_path)
-    key_response = client.post(
-        f"/api/projects/{project_id}/providers/gemini/keys",
-        json={
-            "label": "Disabled Local Gemini",
-            "api_key": "AIza-segment-disabled",
-            "primary_model": "gemini-2.5-flash",
-            "cheap_model": "gemini-2.5-flash-lite",
-            "high_quality_model": "gemini-2.5-pro",
-        },
+    app.state.store.save_gemini_provider_key(
+        project_id=project_id,
+        label="Legacy Gemini key",
+        api_key_secret="AIza-segment-disabled",
+        primary_model="gemini-2.5-flash",
+        cheap_model="gemini-2.5-flash-lite",
+        high_quality_model="gemini-2.5-pro",
     )
-    assert key_response.status_code == 201
 
     response = client.post(
         f"/api/projects/{project_id}/jobs/segment-analysis",
@@ -5983,9 +6003,7 @@ def test_music_recommendation_endpoint_falls_back_to_gemini_when_local_fails(
     assert recommendation["provider_trace"]["final_provider"] == "rule_based_fallback"
     assert len(local_provider.calls) == 2
     assert gemini_provider.calls == []
-    keys_response = client.get(f"/api/projects/{project_id}/providers/gemini/keys")
-    assert keys_response.status_code == 200
-    key_state = keys_response.json()["keys"][0]
+    key_state = app.state.store.list_gemini_provider_keys(project_id=project_id)[0]
     assert key_state["consecutive_failures"] == 0
     assert key_state["last_error"] is None
     assert key_state["last_used_at"] is None
@@ -7512,9 +7530,7 @@ def test_review_snapshot_falls_back_to_gemini_when_local_fails(
     assert payload["operator_guidance"]["provider_trace"]["final_provider"] == "heuristic_fallback"
     assert len(local_provider.calls) == 4
     assert gemini_provider.calls == []
-    keys_response = client.get(f"/api/projects/{project_id}/providers/gemini/keys")
-    assert keys_response.status_code == 200
-    key_state = keys_response.json()["keys"][0]
+    key_state = app.state.store.list_gemini_provider_keys(project_id=project_id)[0]
     assert key_state["consecutive_failures"] == 0
     assert key_state["last_error"] is None
     assert key_state["last_used_at"] is None
@@ -8024,9 +8040,7 @@ def test_preview_and_export_fall_back_to_gemini_operator_copy_when_local_fails(
     assert export_result.json()["export"]["provider_trace"]["final_provider"] == "static_fallback"
     assert len(local_provider.calls) == 5
     assert gemini_provider.calls == []
-    keys_response = client.get(f"/api/projects/{project_id}/providers/gemini/keys")
-    assert keys_response.status_code == 200
-    key_state = keys_response.json()["keys"][0]
+    key_state = app.state.store.list_gemini_provider_keys(project_id=project_id)[0]
     assert key_state["consecutive_failures"] == 0
     assert key_state["last_error"] is None
     assert key_state["last_used_at"] is None
@@ -23842,89 +23856,23 @@ def test_auto_cut_api_rejects_invalid_segment_sample_metrics(tmp_path: Path) -> 
     assert plan_response.status_code == 422
 
 
-def test_gemini_key_management_api_masks_secrets_and_supports_state_changes(tmp_path: Path) -> None:
+def test_legacy_gemini_key_management_routes_are_retired(tmp_path: Path) -> None:
     app = create_app(projects_root=tmp_path)
     client = TestClient(app)
     project_id = client.post("/api/projects", json={"name": "Gemini API Project"}).json()["project_id"]
 
-    create_response = client.post(
+    assert client.get(f"/api/projects/{project_id}/providers/gemini/keys").status_code == 404
+    assert client.post(
         f"/api/projects/{project_id}/providers/gemini/keys",
-        json={
-            "label": "Primary Gemini",
-            "api_key": "AIza-sample-secret-1234",
-            "primary_model": "gemini-2.5-flash",
-            "cheap_model": "gemini-2.5-flash-lite",
-            "high_quality_model": "gemini-2.5-pro",
-        },
-    )
-    assert create_response.status_code == 201
-    created = create_response.json()
-    assert created["label"] == "Primary Gemini"
-    assert created["status"] == "active"
-    assert created["masked_api_key"].startswith("AIza")
-    assert "secret" not in json.dumps(created).lower()
-
-    list_response = client.get(f"/api/projects/{project_id}/providers/gemini/keys")
-    assert list_response.status_code == 200
-    listed = list_response.json()["keys"]
-    assert len(listed) == 1
-    assert listed[0]["key_id"] == created["key_id"]
-    assert "api_key" not in listed[0]
-    assert "api_key_secret" not in listed[0]
-
-    update_response = client.patch(
-        f"/api/projects/{project_id}/providers/gemini/keys/{created['key_id']}",
-        json={
-            "label": "Primary Gemini Updated",
-            "cheap_model": "gemini-2.5-flash",
-        },
-    )
-    assert update_response.status_code == 200
-    assert update_response.json()["label"] == "Primary Gemini Updated"
-    assert update_response.json()["cheap_model"] == "gemini-2.5-flash"
-
-    disable_response = client.post(
-        f"/api/projects/{project_id}/providers/gemini/keys/{created['key_id']}/disable"
-    )
-    enable_response = client.post(
-        f"/api/projects/{project_id}/providers/gemini/keys/{created['key_id']}/enable"
-    )
-    assert disable_response.status_code == 200
-    assert disable_response.json()["status"] == "disabled"
-    assert enable_response.status_code == 200
-    assert enable_response.json()["status"] == "active"
-
-
-def test_gemini_key_api_enforces_max_ten_keys(tmp_path: Path) -> None:
-    app = create_app(projects_root=tmp_path)
-    client = TestClient(app)
-    project_id = client.post("/api/projects", json={"name": "Gemini Limit Project"}).json()["project_id"]
-
-    for index in range(10):
-        response = client.post(
-            f"/api/projects/{project_id}/providers/gemini/keys",
-            json={
-                "label": f"Gemini {index}",
-                "api_key": f"AIza-sample-secret-{index}",
-                "primary_model": "gemini-2.5-flash",
-                "cheap_model": "gemini-2.5-flash-lite",
-                "high_quality_model": "gemini-2.5-pro",
-            },
-        )
-        assert response.status_code == 201
-
-    overflow = client.post(
-        f"/api/projects/{project_id}/providers/gemini/keys",
-        json={
-            "label": "Gemini overflow",
-            "api_key": "AIza-over-limit",
-            "primary_model": "gemini-2.5-flash",
-            "cheap_model": "gemini-2.5-flash-lite",
-            "high_quality_model": "gemini-2.5-pro",
-        },
-    )
-    assert overflow.status_code == 400
-    assert "10" in overflow.json()["detail"]
+        json={"label": "retired"},
+    ).status_code == 404
+    assert client.patch(
+        f"/api/projects/{project_id}/providers/gemini/keys/gemini_key_001",
+        json={"label": "retired"},
+    ).status_code == 404
+    assert client.post(
+        f"/api/projects/{project_id}/providers/gemini/keys/gemini_key_001/disable"
+    ).status_code == 404
 
 
 def test_provider_trace_audit_endpoint_summarizes_project_fallback_usage(

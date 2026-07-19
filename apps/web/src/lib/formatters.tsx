@@ -153,28 +153,6 @@ export function canResumeCandidate(
   );
 }
 
-export type GeminiKeyFormState = {
-  label: string;
-  apiKey: string;
-  primaryModel: string;
-  cheapModel: string;
-  highQualityModel: string;
-};
-
-export function createEmptyGeminiKeyForm(): GeminiKeyFormState {
-  return {
-    label: "",
-    apiKey: "",
-    primaryModel: "",
-    cheapModel: "",
-    highQualityModel: "",
-  };
-}
-
-export function formatNullableValue(value: string | null) {
-  return value ? formatDisplayText(value) : "없음";
-}
-
 export function formatDisplayText(value: string | null | undefined) {
   if (!value) {
     return "";

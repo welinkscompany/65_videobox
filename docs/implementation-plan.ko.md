@@ -1168,16 +1168,18 @@ production-readiness blocker slice 1의 9개 Task는 구현·회귀·600초 smok
 - `[x] 완료 (done)`: 구현·범위에 맞는 검증·커밋이 끝난 항목이다.
 - `[~] 진행 중 (in progress)`: 구현 또는 검증 중이며 완료 주장으로 쓰지 않는다.
 - `[ ] 미완료 (pending)`: 아직 시작하지 않았거나, 명시적 gate가 남은 항목이다.
+- `[!] BLOCKED`: 외부 사실·권한·승인 근거가 없어 구현을 시작하지 않는 항목이다.
 - `[x] 완료 (done)`: Hermes가 올라갈 Compose/PostgreSQL/snapshot/runtime 기준선과 실제 두 장면 current-revision MP4 재생 경로를 고정했다. Task 9 사람/환경 acceptance와 CapCut Desktop evidence의 완료 상태는 이 항목으로 바꾸지 않는다.
+- `[x] 완료 (done)`: Gemini quarantine을 마쳤다. `create_app`의 Gemini key router import/등록, web API client와 숨겨진 key CRUD UI를 제거했다. 과거 Gemini key 스키마·저장 데이터·legacy module은 migration/read compatibility 용도로만 inert 보존한다. focused API `12 passed`, web `112 passed`, production build와 OpenAPI/404 retirement contract로 public path와 provider call `0` 경계를 검증했다.
 - `[ ] 미완료 (pending)`: Hermes/Yujin은 아직 생성하지 않았다. 이 계획의 각 gate를 통과하기 전에는 서비스, OAuth credential, mem0, 편집 mutation을 추가하지 않는다.
 
-이 절은 Hermes 범위에서 `docs/llm-provider-strategy.ko.md`의 과거 `Qwen → Gemini → OpenAI` fallback보다 우선한다. 첫 구현 작업에서 해당 문서를 현재 결정으로 갱신하기 전까지 Gemini provider, key pool, router는 **disabled·unwired** 상태를 유지한다. 정적 검사와 실제 runtime 모두 external Gemini provider call `0`을 증명해야 하며, Gemini 경로를 되살리는 구현은 허용하지 않는다.
+이 절은 Hermes 범위에서 `docs/llm-provider-strategy.ko.md`의 과거 `Qwen → Gemini → OpenAI` fallback보다 우선한다. provider 전략 문서는 현재 local-only 결정으로 갱신됐으며 Gemini provider, key pool, router는 **disabled·unwired** 상태다. 정적 검사와 실제 runtime 모두 external Gemini provider call `0`을 유지해야 하며, Gemini 경로를 되살리는 구현은 허용하지 않는다.
 
-### 23.1 [ ] 미완료 (pending) — GPT OAuth·egress 계약 고정
+### 23.1 [!] BLOCKED — GPT OAuth·egress 계약 고정
 
-1. 구현 전에 provider의 공식 문서와 현재 약관으로 OAuth 지원 여부를 증명한다. device authorization flow와 authorization-code + PKCE는 서로 다른 방식이므로 동시에 가정하지 않고, 지원되는 **한 방식**만 선택해 issuer, client type, scope, redirect/verification UX, state/nonce/verifier, polling·expiry·error mapping을 versioned contract에 기록한다. 공식 지원 근거가 없으면 이 slice는 OAuth 구현 없이 blocked로 기록한다.
-2. OAuth credential은 전용 Hermes state volume에만 저장한다. refresh/access token 암호화 키는 별도 host secret/keychain에 두며 repository, 일반 `.env`, VideoBox DB, mem0, snapshot, backup, log/trace에는 기록하지 않는다. 최소 scope, expiry/rotation, logout의 local 삭제와 provider revoke best-effort, device loss/re-auth를 테스트한다.
-3. egress는 기본 거부다. OAuth issuer/token endpoint와 사용자가 별도로 data-transfer 동의한 GPT endpoint만 egress proxy allowlist로 허용하고, DNS/IP 우회도 차단한다. OAuth bootstrap은 모델 호출 동의가 아니며, 창작 요청·project data 전송은 request별 동의와 endpoint pinning·audit을 거친다. 유료 entitlement가 불명확하면 자동 유료 호출은 꺼 둔다.
+1. 현재 official provider 문서와 약관에서 VideoBox/Hermes에 허용되는 사용자 위임 OAuth 방식, client type, scope, redirect/verification UX, token 사용 권한의 근거가 이 저장소에 없다. 따라서 OAuth endpoint, token, credential, external egress 구현은 **BLOCKED**다. 근거가 확보되기 전에는 device authorization flow와 authorization-code + PKCE를 동시에 가정하거나 어느 하나를 구현하지 않는다.
+2. 공식 근거가 생기면 지원되는 **한 방식**만 선택해 issuer, client type, scope, redirect/verification UX, state/nonce/verifier, polling·expiry·error mapping을 versioned contract에 기록하고, 이 status를 미완료 (pending)로 되돌린 뒤 구현한다.
+3. 이후 구현 시 OAuth credential은 전용 Hermes state volume에만 저장하며 repository, 일반 `.env`, VideoBox DB, mem0, snapshot, backup, log/trace에는 기록하지 않는다. egress 기본값은 거부이고, OAuth bootstrap은 창작 요청·project data 전송 동의가 아니다.
 
 ### 23.2 [ ] 미완료 (pending) — 서비스 identity와 VideoBox 권한중개
 

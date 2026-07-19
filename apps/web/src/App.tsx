@@ -14,7 +14,6 @@ import {
   type EditingSessionSegment,
   type ExportJob,
   type FinalRenderJob,
-  type GeminiProviderKey,
   type JobRecord,
   type PartialRegenerationPreflight,
   type PartialRegenerationRun,
@@ -40,7 +39,6 @@ import {
   buildDefaultRegenerationFields,
   buildEditingDrafts,
   canResumeCandidate,
-  createEmptyGeminiKeyForm,
   type EditingMutationFeedback,
   type EditingSegmentDraft,
   findLatestSucceededJob,
@@ -50,7 +48,6 @@ import {
   formatDisplayText,
   formatEditingMutationFeedbackLabel,
   formatFieldLabel,
-  formatNullableValue,
   formatOperatorNote,
   formatPredictedReviewStatusDescription,
   formatPredictedReviewStatusLabel,
@@ -61,7 +58,6 @@ import {
   formatStatusLabel,
   formatTrackLabel,
   formatWorkflowStep,
-  type GeminiKeyFormState,
   haveSameMembers,
   type LoadState,
   mapRecommendationTypeToEditingField,
@@ -239,8 +235,6 @@ export function App({
   const [brollImportError, setBrollImportError] = useState<string | null>(null);
   const [brollImportMessage, setBrollImportMessage] = useState<string | null>(null);
   const [isImportingBroll, setIsImportingBroll] = useState(false);
-  const [geminiKeys, setGeminiKeys] = useState<GeminiProviderKey[]>([]);
-  const [geminiLoadError, setGeminiLoadError] = useState<string | null>(null);
   const [editingSessionRestoreError, setEditingSessionRestoreError] = useState<string | null>(null);
   const [partialRegenerationRestoreWarning, setPartialRegenerationRestoreWarning] = useState<
     string | null
@@ -299,11 +293,6 @@ export function App({
   const [isRequestingRegenerationPreflight, setIsRequestingRegenerationPreflight] =
     useState(false);
   const [isRunningPartialRegeneration, setIsRunningPartialRegeneration] = useState(false);
-  const [isGeminiFormOpen, setIsGeminiFormOpen] = useState(false);
-  const [editingGeminiKeyId, setEditingGeminiKeyId] = useState<string | null>(null);
-  const [geminiForm, setGeminiForm] = useState<GeminiKeyFormState>(createEmptyGeminiKeyForm);
-  const [isSavingGeminiKey, setIsSavingGeminiKey] = useState(false);
-  const [togglingGeminiKeyId, setTogglingGeminiKeyId] = useState<string | null>(null);
 
   async function refreshCapcutHandoffDiagnostics() {
     setIsLoadingCapcutHandoffDiagnostics(true);
@@ -471,11 +460,6 @@ export function App({
       setBrollAssetLoadError(null);
       setBrollImportError(null);
       setBrollImportMessage(null);
-      setGeminiKeys([]);
-      setGeminiLoadError(null);
-      setIsGeminiFormOpen(false);
-      setEditingGeminiKeyId(null);
-      setGeminiForm(createEmptyGeminiKeyForm());
       return;
     }
 
@@ -488,7 +472,6 @@ export function App({
       setBrollAssetLoadError(null);
       setBrollImportError(null);
       setBrollImportMessage(null);
-      setGeminiLoadError(null);
       setEditingSessionRestoreError(null);
       setRoutedEditorView(null);
       setRoutedEditorViewMessage(null);
@@ -770,9 +753,6 @@ export function App({
         );
         setBrollAssets(archivedBrollAssets);
         setLoadState("ready");
-        // Legacy Gemini CRUD remains available through its isolated API for
-        // existing stored data, but the default product bootstrap must not
-        // request it.  Local Media Director uses LM Studio only.
       } catch (error) {
         if (cancelled) {
           return;
@@ -1601,12 +1581,6 @@ export function App({
     }
   }
 
-  async function refreshGeminiKeys(projectId: string) {
-    const providerKeys = await api.listGeminiProviderKeys(projectId);
-    setGeminiKeys(providerKeys);
-    setGeminiLoadError(null);
-  }
-
   async function refreshBrollAssets(projectId: string) {
     const assets = await api.listBrollAssets(projectId);
     setBrollAssets(assets);
@@ -1654,82 +1628,6 @@ export function App({
       setBrollImportMessage(null);
     } finally {
       setIsImportingBroll(false);
-    }
-  }
-
-  function openCreateGeminiForm() {
-    setEditingGeminiKeyId(null);
-    setGeminiForm(createEmptyGeminiKeyForm());
-    setIsGeminiFormOpen(true);
-  }
-
-  function openEditGeminiForm(key: GeminiProviderKey) {
-    setEditingGeminiKeyId(key.key_id);
-    setGeminiForm({
-      label: key.label,
-      apiKey: "",
-      primaryModel: key.primary_model,
-      cheapModel: key.cheap_model,
-      highQualityModel: key.high_quality_model,
-    });
-    setIsGeminiFormOpen(true);
-  }
-
-  function closeGeminiForm() {
-    setIsGeminiFormOpen(false);
-    setEditingGeminiKeyId(null);
-    setGeminiForm(createEmptyGeminiKeyForm());
-  }
-
-  async function handleSaveGeminiKey() {
-    if (!selectedProjectId) {
-      return;
-    }
-    setIsSavingGeminiKey(true);
-    setErrorMessage(null);
-    try {
-      if (editingGeminiKeyId) {
-        await api.updateGeminiProviderKey(selectedProjectId, editingGeminiKeyId, {
-          label: geminiForm.label,
-          primary_model: geminiForm.primaryModel,
-          cheap_model: geminiForm.cheapModel,
-          high_quality_model: geminiForm.highQualityModel,
-        });
-      } else {
-        await api.createGeminiProviderKey(selectedProjectId, {
-          label: geminiForm.label,
-          api_key: geminiForm.apiKey,
-          primary_model: geminiForm.primaryModel,
-          cheap_model: geminiForm.cheapModel,
-          high_quality_model: geminiForm.highQualityModel,
-        });
-      }
-      await refreshGeminiKeys(selectedProjectId);
-      closeGeminiForm();
-    } catch (error) {
-      setErrorMessage("요청을 완료하지 못했어요. 다시 시도해 주세요.");
-    } finally {
-      setIsSavingGeminiKey(false);
-    }
-  }
-
-  async function handleToggleGeminiKey(key: GeminiProviderKey) {
-    if (!selectedProjectId) {
-      return;
-    }
-    setTogglingGeminiKeyId(key.key_id);
-    setErrorMessage(null);
-    try {
-      if (key.status === "disabled") {
-        await api.enableGeminiProviderKey(selectedProjectId, key.key_id);
-      } else {
-        await api.disableGeminiProviderKey(selectedProjectId, key.key_id);
-      }
-      await refreshGeminiKeys(selectedProjectId);
-    } catch (error) {
-      setErrorMessage("요청을 완료하지 못했어요. 다시 시도해 주세요.");
-    } finally {
-      setTogglingGeminiKeyId(null);
     }
   }
 
@@ -2607,164 +2505,6 @@ export function App({
               </p>
             </article>
 
-            {false ? <>
-              {isGeminiFormOpen ? (
-                <div className="provider-form">
-                  <label className="field">
-                    <span>이름</span>
-                    <input
-                      onChange={(event) =>
-                        setGeminiForm((current) => ({
-                          ...current,
-                          label: event.target.value,
-                        }))
-                      }
-                      value={geminiForm.label}
-                    />
-                  </label>
-                  {!editingGeminiKeyId ? (
-                    <label className="field">
-                      <span>API 키</span>
-                      <input
-                        onChange={(event) =>
-                          setGeminiForm((current) => ({
-                            ...current,
-                            apiKey: event.target.value,
-                          }))
-                        }
-                        type="password"
-                        value={geminiForm.apiKey}
-                      />
-                    </label>
-                  ) : null}
-                  <label className="field">
-                    <span>기본 모델</span>
-                    <input
-                      onChange={(event) =>
-                        setGeminiForm((current) => ({
-                          ...current,
-                          primaryModel: event.target.value,
-                        }))
-                      }
-                      value={geminiForm.primaryModel}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>저가 모델</span>
-                    <input
-                      onChange={(event) =>
-                        setGeminiForm((current) => ({
-                          ...current,
-                          cheapModel: event.target.value,
-                        }))
-                      }
-                      value={geminiForm.cheapModel}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>고품질 모델</span>
-                    <input
-                      onChange={(event) =>
-                        setGeminiForm((current) => ({
-                          ...current,
-                          highQualityModel: event.target.value,
-                        }))
-                      }
-                      value={geminiForm.highQualityModel}
-                    />
-                  </label>
-                  <div className="action-row">
-                    <button
-                      className="action-button primary"
-                      hidden={Boolean(routeEditingSessionId)}
-                      disabled={
-                        isSavingGeminiKey ||
-                        !geminiForm.label ||
-                        !geminiForm.primaryModel ||
-                        !geminiForm.cheapModel ||
-                        !geminiForm.highQualityModel ||
-                        (!editingGeminiKeyId && !geminiForm.apiKey)
-                      }
-                      onClick={() => void handleSaveGeminiKey()}
-                      type="button"
-                    >
-                      {editingGeminiKeyId ? "변경 저장" : "키 저장"}
-                    </button>
-                    <button className="action-button" onClick={closeGeminiForm} type="button">
-                      취소
-                    </button>
-                  </div>
-                </div>
-              ) : null}
-              {geminiLoadError ? <p className="empty-state">{geminiLoadError}</p> : null}
-              <div className="provider-key-list">
-                {geminiKeys.map((key) => (
-                  <article className="provider-key-card" key={key.key_id}>
-                    <div className="provider-key-header">
-                      <div>
-                        <h3>{formatDisplayText(key.label)}</h3>
-                        <p className="meta-copy">{key.masked_api_key}</p>
-                      </div>
-                      <span className={`pill provider-status status-${key.status}`}>
-                        {formatStatusLabel(key.status)}
-                      </span>
-                    </div>
-                    <dl className="provider-key-details">
-                      <div>
-                        <dt>기본 모델</dt>
-                        <dd>{key.primary_model}</dd>
-                      </div>
-                      <div>
-                        <dt>저가 모델</dt>
-                        <dd>{key.cheap_model}</dd>
-                      </div>
-                      <div>
-                        <dt>고품질 모델</dt>
-                        <dd>{key.high_quality_model}</dd>
-                      </div>
-                      <div>
-                        <dt>연속 실패</dt>
-                        <dd>{key.consecutive_failures}</dd>
-                      </div>
-                      <div>
-                        <dt>대기 종료</dt>
-                        <dd>{formatNullableValue(key.cooldown_until)}</dd>
-                      </div>
-                      <div>
-                        <dt>최근 사용</dt>
-                        <dd>{formatNullableValue(key.last_used_at)}</dd>
-                      </div>
-                      <div>
-                        <dt>최근 오류</dt>
-                        <dd>{formatNullableValue(key.last_error)}</dd>
-                      </div>
-                    </dl>
-                    <div className="action-row">
-                      <button
-                        aria-label={`${formatDisplayText(key.label)} 수정`}
-                        className="action-button"
-                        onClick={() => openEditGeminiForm(key)}
-                        type="button"
-                      >
-                        수정
-                      </button>
-                      <button
-                        aria-label={`${formatDisplayText(key.label)} ${key.status === "disabled" ? "사용" : "중지"}`}
-                        className="action-button"
-                        disabled={togglingGeminiKeyId === key.key_id}
-                        onClick={() => void handleToggleGeminiKey(key)}
-                        type="button"
-                      >
-                        {key.status === "disabled" ? "사용" : "중지"}
-                      </button>
-                    </div>
-                  </article>
-                ))}
-                {geminiKeys.length === 0 && !geminiLoadError ? (
-                  <p className="empty-state">제미나이 키 없음</p>
-                ) : null}
-              </div>
-            </> : null}
           </section>
         ) : null}
 

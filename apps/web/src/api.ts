@@ -514,38 +514,6 @@ export type ReviewApproval = {
   updated_at: string;
 };
 
-export type GeminiProviderKey = {
-  key_id: string;
-  project_id: string;
-  label: string;
-  masked_api_key: string;
-  primary_model: string;
-  cheap_model: string;
-  high_quality_model: string;
-  status: string;
-  cooldown_until: string | null;
-  consecutive_failures: number;
-  last_error: string | null;
-  last_used_at: string | null;
-  created_at: string;
-  updated_at: string;
-};
-
-export type GeminiProviderKeyCreateRequest = {
-  label: string;
-  api_key: string;
-  primary_model: string;
-  cheap_model: string;
-  high_quality_model: string;
-};
-
-export type GeminiProviderKeyUpdateRequest = {
-  label?: string;
-  primary_model?: string;
-  cheap_model?: string;
-  high_quality_model?: string;
-};
-
 export type AssetResponse = {
   asset_id: string;
   asset_type: string;
@@ -1296,49 +1264,6 @@ export const api = {
     request<PreviewJob>(`/api/projects/${projectId}/previews/${jobId}`),
   getExport: (projectId: string, jobId: string) =>
     request<ExportJob>(`/api/projects/${projectId}/exports/${jobId}`),
-  listGeminiProviderKeys: async (projectId: string): Promise<GeminiProviderKey[]> => {
-    const payload = await request<{ keys: GeminiProviderKey[] }>(
-      `/api/projects/${projectId}/providers/gemini/keys`,
-    );
-    return payload.keys;
-  },
-  createGeminiProviderKey: (
-    projectId: string,
-    payload: GeminiProviderKeyCreateRequest,
-  ) =>
-    request<GeminiProviderKey>(`/api/projects/${projectId}/providers/gemini/keys`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-    }),
-  updateGeminiProviderKey: (
-    projectId: string,
-    keyId: string,
-    payload: GeminiProviderKeyUpdateRequest,
-  ) =>
-    request<GeminiProviderKey>(`/api/projects/${projectId}/providers/gemini/keys/${keyId}`, {
-      method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-    }),
-  disableGeminiProviderKey: (projectId: string, keyId: string) =>
-    request<GeminiProviderKey>(
-      `/api/projects/${projectId}/providers/gemini/keys/${keyId}/disable`,
-      {
-        method: "POST",
-      },
-    ),
-  enableGeminiProviderKey: (projectId: string, keyId: string) =>
-    request<GeminiProviderKey>(
-      `/api/projects/${projectId}/providers/gemini/keys/${keyId}/enable`,
-      {
-        method: "POST",
-      },
-    ),
   registerVoiceSample: (projectId: string, payload: AssetRegistrationRequest) =>
     request<AssetResponse>(`/api/projects/${projectId}/assets/voice-sample`, {
       method: "POST",
