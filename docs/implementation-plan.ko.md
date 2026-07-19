@@ -1205,6 +1205,8 @@ production-readiness blocker slice 1의 9개 Task는 구현·회귀·600초 smok
 
 첫 slice의 에이전트는 **유진 (Yujin), `yujin-video-director`** 하나로 고정한다. 유진은 대화 요약, 사용자가 명시적으로 선택한 한 project의 상태 설명, action 없는 approval request 제안만 한다. 영상·자막·소리·전환의 근거 없는 품질 주장, DB/SQL, filesystem, shell, renderer, CapCut, raw HTTP, credential, 직접 편집·render·export는 금지한다. 화면 문구는 유진의 짧고 행동 중심적인 안내를 유지한다.
 
+- `[x] 완료 (done, 2026-07-20)`: 실제 provider·tool 실행 없이 `yujin-video-director`의 단일 versioned profile/policy/template/strict four-way response manifest를 literal SHA-256으로 고정했다. immutable registry와 prompt envelope은 `system → developer → task → user` 순서를 고정하고, user text와 선택 project의 allowlisted status는 instruction이 아닌 별도 immutable untrusted data/digest로 보관한다. status/revision의 raw path·sensitive data·instruction·다른 project 식별자를 거부한다. 1,500 ms structured-response timeout 또는 invalid response는 executor 없이 bounded `blocked` fallback으로 끝난다. 응답의 `declared_read_capability`는 실행 요청이 아닌 선언이고 `action=null`, `needs_human_review`, `non_authorizing=true`만 허용한다. 한국어·영어 injection, approval/render/export/CapCut/memory/credential, 다른 project 요청은 blocked이며, 현재 선택 project ID를 말하는 상태 문의는 허용한다. 이는 profile contract/fixture replay일 뿐 Hermes, OAuth, GPT/Qwen/Gemini call, DB/API route, mem0, 편집·render·export를 추가하거나 활성화하지 않는다.
+
 | 역할 | 허용 입력·도구 | 거부 범위 | 사람 gate | 결과 |
 |---|---|---|---|---|
 | 유진 Project Copilot (첫 slice) | 선택 project ID, allowlisted status read model, 사용자가 입력한 대화 | project list, 원본 미디어·대본·자막, DB/filesystem/shell/renderer/CapCut, mutation | OAuth 연결, 외부 전송 동의 | 구조화된 상태 설명 또는 action 없는 proposal |

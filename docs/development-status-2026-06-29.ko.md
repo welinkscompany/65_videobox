@@ -1,6 +1,15 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 268. 2026-07-19 offline synthetic evidence intake closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 269. 2026-07-20 Yujin versioned profile contract closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+
+## 269. 2026-07-20 Yujin versioned profile contract closeout
+
+- `[x] 완료 (done)`: `yujin-video-director`의 첫 offline read-only profile contract를 추가했다. profile ID/version/policy/template/developer policy/context template/strict response schema/1,500 ms timeout은 literal manifest SHA-256과 exact built-in artifacts로 pin되어 self-consistent custom profile도 fail-closed로 거부한다. immutable registry와 prompt envelope은 `system → developer → task → user` 역할 순서를 고정한다.
+- `[x] 완료 (done)`: context는 선택한 한 project의 allowlisted status 6개 field만 immutable digest와 함께 user data와 분리된 untrusted context data로 유지한다. 공개 envelope 생성도 key set·project binding·canonical digest를 재검증한다. raw path·secret·instruction·다른 project ID와 unsafe revision을 status model 단계에서 막는다. response는 4-way strict union, `action=null`, `needs_human_review`, `non_authorizing=true`만 허용하고 status-read capability는 선언일 뿐 실행하지 않는다. timeout·invalid structured response는 executor 없는 bounded `blocked` fallback이다. 사용자 입력의 한국어·영어 injection, approval/render/export/CapCut/memory/credential 및 cross-project 요청은 blocked지만 선택한 project ID의 정상 상태 언급은 허용한다.
+- 독립 명세 재리뷰과 품질 재리뷰 모두 P0/P1/P2 0으로 닫았다. 리뷰에서 발견한 manifest self-consistency 우회, 한국어 injection/status reflection, schema union/revision-none/pattern mismatch, revision 안의 cross-project ID leakage, selected-project overblocking, 4-role registry/timeout gap, envelope context binding gap을 RED-first 회귀로 보완했다.
+- 검증: profile/evidence/harness/local-provider focused `134 passed`, `compileall`, `git diff --check`, production workspace image build, `--network none --read-only` image import·`system → developer → task → user` envelope·선택 project context/status·cross-project blocked·timeout fallback 역방향 검증을 통과했다. 전체 Python suite는 `1275 tests collected`를 확인하고 최신 코드에서 다시 실행했지만 63초 timeout 뒤 pytest stdout `OSError`로 끝나 full-pass로 기록하지 않는다. Starlette multipart PendingDeprecationWarning 1건은 기존 비차단 경고다.
+- 이 closeout은 provider/OAuth/Hermes bridge/tool executor/DB·API route/UI/mem0/편집·render·export를 시작하거나 활성화하지 않는다. Gemini provider call은 계속 0이다. Task 9 사람/환경 acceptance는 별도이며 누적은 계속 **9/22 (40.9%)**, 잔여 **59.1%**다.
+- 다음은 profile을 실제 provider에 연결하는 일이 아니라, existing §23의 versioned ToolSpec/Gateway registry와 context filtering을 static·fail-closed contract로 좁게 고정하는 작업이다. capability signer, Hermes network, OAuth, real provider request는 해당 별도 gate 전까지 시작하지 않는다.
 
 ## 268. 2026-07-19 offline synthetic evidence intake closeout
 
