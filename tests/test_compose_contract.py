@@ -24,3 +24,27 @@ def test_api_mounts_only_writable_runtime_and_read_only_verified_snapshot() -> N
         "${VIDEOBOX_CONTAINER_DATA_ROOT:?set VIDEOBOX_CONTAINER_DATA_ROOT in .env.container}/runtime:/videobox-data",
         "${VIDEOBOX_CONTAINER_DATA_ROOT:?set VIDEOBOX_CONTAINER_DATA_ROOT in .env.container}/snapshot:/videobox-snapshot:ro",
     ]
+
+
+def test_hermes_preauth_service_is_pinned_isolated_and_has_no_videobox_data_mount() -> None:
+    compose = yaml.safe_load(Path("compose.yaml").read_text(encoding="utf-8"))
+    hermes = compose["services"]["videobox-hermes-agent"]
+
+    assert hermes["profiles"] == ["hermes-preauth"]
+    assert hermes["image"] == (
+        "nousresearch/hermes-agent@"
+        "sha256:3db34ce19adfa080736a2a3feb0316dbcccc588faa9afe7fd8ae1c03b4f1a53a"
+    )
+    assert "ports" not in hermes
+    assert hermes["network_mode"] == "none"
+    assert hermes["volumes"] == ["videobox_hermes_preauth_state:/opt/data"]
+    assert hermes["read_only"] is True
+    assert hermes["cap_drop"] == ["ALL"]
+    assert hermes["cap_add"] == ["CHOWN", "DAC_OVERRIDE", "SETGID", "SETUID"]
+    assert hermes["security_opt"] == ["no-new-privileges:true"]
+    assert hermes["logging"] == {
+        "driver": "local",
+        "options": {"max-size": "10m", "max-file": "3"},
+    }
+    assert "videobox_hermes_preauth_state" in compose["volumes"]
+    assert "videobox_hermes_oauth_state" not in compose["volumes"]

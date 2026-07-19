@@ -174,6 +174,7 @@ Run focused migration/config/compose tests, current renderer tests, relevant API
 - [x] **완료 (done)** Task 4: Compose 프로젝트 이름 `65_videobox`, internal PostgreSQL/API, loopback-only web edge, non-root/read-only runtime을 구현했다.
 - [x] **완료 (done)** Task 5 (runtime): 실제 데이터 snapshot 2개 프로젝트를 PostgreSQL에 import하고, `/api/projects`와 current-revision MP4 delivery를 `127.0.0.1:5173`에서 확인했다.
 - [x] **완료 (done)** Recovery hardening: legacy flat copy를 `snapshot/` + `runtime/` layout으로 올릴 때, verified staging/backup crash state만 재개하고 불명확한 recovery artifact는 보존한 채 fail-closed한다. Compose contract은 runtime writable / snapshot read-only 두 bind mount로 고정한다.
+- [x] **완료 (done)** Hermes pre-auth foundation: pinned official Hermes `v2026.7.7.2` amd64 digest의 `videobox-hermes-agent`를 별도 `hermes-preauth` profile로 기동했다. network 없음, host port 없음, VideoBox DB/media/snapshot mount 없음, OAuth와 분리된 Hermes scratch state volume만 허용하고 auth file이 없는 상태와 `hermes --version`을 확인했다. OAuth login은 egress allowlist gateway가 생길 때까지 intentionally unavailable이다.
 - [ ] **미완료 (pending)** PostgreSQL store의 모든 편집 mutation/복구 경로에 대한 전면 parity suite는 Hermes 도입 전 별도 hardening slice로 계속 검증한다. 이번 단계에서 검증한 것은 실제 데이터 import, project listing, proxied playback 및 새 project 생성 API다.
 
 Task 9 사람/환경 acceptance 상태는 이 컨테이너 이전으로 변경하지 않는다.

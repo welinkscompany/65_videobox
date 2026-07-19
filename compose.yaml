@@ -55,6 +55,38 @@ services:
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
 
+  # Hermes is intentionally pre-auth only.  It starts without any network,
+  # VideoBox data, DB, API, or host bridge access.  A later egress-gateway
+  # slice must be complete before an interactive `hermes model` OAuth login.
+  videobox-hermes-agent:
+    image: nousresearch/hermes-agent@sha256:3db34ce19adfa080736a2a3feb0316dbcccc588faa9afe7fd8ae1c03b4f1a53a
+    profiles: [hermes-preauth]
+    command: ["sleep", "infinity"]
+    network_mode: none
+    volumes:
+      # This scratch state is deliberately not the later OAuth state volume.
+      - videobox_hermes_preauth_state:/opt/data
+    read_only: true
+    tmpfs:
+      - /tmp:uid=10000,gid=10000,mode=1777
+      # s6-overlay places its supervised init binary under /run, so this
+      # one tmpfs must remain executable while the root filesystem stays RO.
+      - /run:rw,exec,nosuid,nodev,mode=0755
+    cap_drop: [ALL]
+    # The official s6 entrypoint needs these setup capabilities to own
+    # /opt/data and supervise its hermes-owned run subtree.  The agent command
+    # itself must run as the unprivileged hermes user with zero effective caps.
+    cap_add: [CHOWN, DAC_OVERRIDE, SETGID, SETUID]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    mem_limit: 2g
+    cpus: 2.0
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 networks:
   videobox-edge:
   videobox-internal:
@@ -62,3 +94,4 @@ networks:
 
 volumes:
   videobox_postgres_data:
+  videobox_hermes_preauth_state:
