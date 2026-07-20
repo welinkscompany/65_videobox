@@ -45,7 +45,11 @@ async function installEditorRoutes(page, state) {
     state.current = state.afterRetry ?? state.current;
     await route.fulfill({ contentType: "application/json", status: 202, body: JSON.stringify({ status: "pending", generation_id: "generation-8", timeline_start_sec: 2, timeline_end_sec: 8, artifact_revision: state.current.session_revision, fingerprint: "e2e" }) });
   });
-  await page.route("**/content", fulfillLocalMp4WithRanges);
+  await page.route("**/content", async (route) => {
+    const range = await route.request().headerValue("range");
+    if (range) (state.rangeRequests ??= []).push(range);
+    await fulfillLocalMp4WithRanges(route);
+  });
 }
 
 async function openEditor(page, state) {
@@ -54,8 +58,8 @@ async function openEditor(page, state) {
   await expect(page.getByRole("region", { name: "편집 작업판" })).toBeVisible();
 }
 
-test("current exact proxy loads a valid local MP4 and maps a native seek to the timeline", async ({ page }) => {
-  const state = { current: manifest(), retryBodies: [] };
+test("current exact proxy plays a valid local MP4, requests bytes, and maps a native seek to the timeline", async ({ page }) => {
+  const state = { current: manifest(), retryBodies: [], rangeRequests: [] };
   await openEditor(page, state);
 
   const video = page.getByLabel("편집본 미리보기");
@@ -64,7 +68,16 @@ test("current exact proxy loads a valid local MP4 and maps a native seek to the 
   await expect(video).not.toHaveAttribute("autoplay");
   await expect(video).toHaveJSProperty("autoplay", false);
   await expect.poll(() => video.evaluate((node) => node.readyState >= HTMLMediaElement.HAVE_METADATA)).toBe(true);
+  await expect.poll(() => video.evaluate((node) => node.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA)).toBe(true);
   await expect.poll(() => video.evaluate((node) => node.duration)).toBeGreaterThan(1);
+  // A real user gesture calls the component's native HTMLMediaElement.play()
+  // path, avoiding an autoplay-policy bypass in the test harness.
+  await page.getByRole("button", { name: "재생 또는 일시정지" }).click();
+  await expect.poll(() => video.evaluate((node) => !node.paused && node.currentTime > 0.05)).toBe(true);
+  await page.getByRole("button", { name: "재생 또는 일시정지" }).click();
+  await expect.poll(() => video.evaluate((node) => node.paused)).toBe(true);
+  await expect.poll(() => state.rangeRequests.length).toBeGreaterThan(0);
+  expect(state.rangeRequests).toContainEqual(expect.stringMatching(/^bytes=\d+-/));
   await video.evaluate((node) => { node.currentTime = 1.5; });
   await expect.poll(() => video.evaluate((node) => node.currentTime)).toBeCloseTo(1.5, 1);
   await expect(page.locator("output")).toHaveText("타임라인 3.5초");

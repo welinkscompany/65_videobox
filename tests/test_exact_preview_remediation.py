@@ -59,6 +59,106 @@ def test_current_session_remove_cut_removes_all_segment_media_and_caption() -> N
     assert materialized["tracks"] == []
 
 
+def test_current_session_bounds_shift_source_time_and_removed_export_overlay_is_absent() -> None:
+    base = {
+        "tracks": [{"track_type": "broll", "clips": [{
+            "clip_id": "b", "segment_id": "keep", "asset_uri": "local://b",
+            "start_sec": 0, "end_sec": 4, "source_in_sec": 3, "source_out_sec": 7,
+        }]}],
+        "export_overlays": [
+            {"segment_id": "remove", "title": "removed", "start_sec": 4, "end_sec": 5},
+            {"segment_id": "keep", "title": "kept", "start_sec": 0, "end_sec": 4},
+        ],
+    }
+    session = {"segments": [
+        {"segment_id": "keep", "start_sec": 1, "end_sec": 3, "cut_action": "keep", "visual_overlays": []},
+        {"segment_id": "remove", "start_sec": 4, "end_sec": 5, "cut_action": "remove", "visual_overlays": []},
+    ]}
+
+    plan = CompositionPlan.from_timeline(timeline=materialize_editing_session_timeline(timeline=base, editing_session=session))
+
+    broll = plan.items[0]
+    assert (broll.start_sec, broll.end_sec, broll.source_in_sec, broll.source_out_sec) == (1.0, 3.0, 4.0, 6.0)
+    assert [overlay["title"] for overlay in plan.export_overlays] == ["kept"]
+
+
+def test_broll_controls_fail_before_render_when_window_is_invalid_or_insufficient_without_pad_or_loop() -> None:
+    invalid = {"tracks": [{"track_type": "broll", "clips": [{
+        "asset_uri": "local://b", "start_sec": 0, "end_sec": 1,
+        "media_controls": {"trim_start_sec": 1, "in_sec": 1, "out_sec": 1.5},
+    }]}]}
+    short_without_fallback = {"tracks": [{"track_type": "broll", "clips": [{
+        "asset_uri": "local://b", "start_sec": 0, "end_sec": 1,
+        "media_controls": {"in_sec": 0, "out_sec": 0.25, "loop": False, "pad": False},
+    }]}]}
+
+    with pytest.raises(ValueError, match="composition_plan_invalid_source_bounds"):
+        CompositionPlan.from_timeline(timeline=invalid)
+    with pytest.raises(ValueError, match="composition_plan_insufficient_broll_source"):
+        CompositionPlan.from_timeline(timeline=short_without_fallback)
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg fixture required")
+def test_session_bounds_and_removed_overlay_render_correct_source_for_exact_and_final_full_and_range(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="session bounds exact final")
+    source = tmp_path / "source.mp4"
+    subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=red:s=320x240:d=1", "-f", "lavfi", "-i", "color=c=blue:s=320x240:d=1", "-f", "lavfi", "-i", "color=c=green:s=320x240:d=1", "-filter_complex", "[0:v][1:v][2:v]concat=n=3:v=1:a=0", "-pix_fmt", "yuv420p", str(source)], check=True, capture_output=True)
+    asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=source)
+    uri = f"local://projects/{project.project_id}/assets/{asset.asset_id}"
+    timeline = {"output": {"width": 320, "height": 240}, "tracks": [{"track_type": "broll", "clips": [{"clip_id": "b", "segment_id": "s", "asset_id": asset.asset_id, "asset_uri": uri, "start_sec": 0, "end_sec": 3, "source_in_sec": 0, "source_out_sec": 3}]}], "export_overlays": [{"segment_id": "removed", "title": "do not render", "start_sec": 3, "end_sec": 4}]}
+    session = {"segments": [
+        {"segment_id": "s", "start_sec": 1, "end_sec": 2, "cut_action": "keep", "visual_overlays": []},
+        {"segment_id": "removed", "start_sec": 3, "end_sec": 4, "cut_action": "remove", "visual_overlays": []},
+    ]}
+    materialized = materialize_editing_session_timeline(timeline=timeline, editing_session=session, project_id=project.project_id)
+    plan = CompositionPlan.from_timeline(timeline=materialized)
+    renderer = FfmpegFinalRenderer(store=store, video_width=320, video_height=240)
+    full_proxy, full_final, range_proxy, range_final = (tmp_path / name for name in ("full-proxy.mp4", "full-final.mp4", "range-proxy.mp4", "range-final.mp4"))
+    renderer.render_exact_preview_to_mp4(project_id=project.project_id, composition_plan=plan, timeline_context=materialized, output_path=full_proxy, subtitle_ass_path=None)
+    renderer.render_timeline_to_mp4(project_id=project.project_id, timeline=materialized, composition_plan=plan, output_path=full_final)
+    ranged = plan.for_range(start_sec=1, end_sec=2)
+    renderer.render_exact_preview_to_mp4(project_id=project.project_id, composition_plan=ranged, timeline_context=materialized, output_path=range_proxy, subtitle_ass_path=None)
+    renderer.render_timeline_to_mp4(project_id=project.project_id, timeline=materialized, composition_plan=ranged, output_path=range_final)
+
+    def pixel(path: Path, seconds: float) -> tuple[int, int, int]:
+        frame = subprocess.run(["ffmpeg", "-v", "error", "-ss", str(seconds), "-i", str(path), "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"], check=True, capture_output=True).stdout
+        return tuple(frame[:3])
+
+    for output in (full_proxy, full_final):
+        assert pixel(output, 0.5) == (0, 0, 0)
+        assert pixel(output, 1.5)[2] > 200 and pixel(output, 1.5)[0] < 30
+    for output in (range_proxy, range_final):
+        assert pixel(output, 0.5)[2] > 200 and pixel(output, 0.5)[0] < 30
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg fixture required")
+def test_short_broll_source_window_loops_or_black_pads_only_when_its_control_allows_it(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="short broll control behavior")
+    source = tmp_path / "blue.mp4"
+    subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=blue:s=320x240:d=1", "-pix_fmt", "yuv420p", str(source)], check=True, capture_output=True)
+    asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=source)
+    uri = f"local://projects/{project.project_id}/assets/{asset.asset_id}"
+    renderer = FfmpegFinalRenderer(store=store, video_width=320, video_height=240)
+
+    def render(name: str, controls: dict[str, object]) -> Path:
+        timeline = {"output": {"width": 320, "height": 240}, "tracks": [{"track_type": "broll", "clips": [{"clip_id": name, "asset_id": asset.asset_id, "asset_uri": uri, "start_sec": 0, "end_sec": 1, "media_controls": controls}]}]}
+        output = tmp_path / f"{name}.mp4"
+        renderer.render_exact_preview_to_mp4(project_id=project.project_id, composition_plan=CompositionPlan.from_timeline(timeline=timeline), timeline_context=timeline, output_path=output, subtitle_ass_path=None)
+        return output
+
+    looped = render("looped", {"in_sec": 0, "out_sec": 0.25, "loop": True, "pad": False})
+    padded = render("padded", {"in_sec": 0, "out_sec": 0.25, "loop": False, "pad": True})
+
+    def pixel(path: Path) -> tuple[int, int, int]:
+        frame = subprocess.run(["ffmpeg", "-v", "error", "-ss", "0.75", "-i", str(path), "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"], check=True, capture_output=True).stdout
+        return tuple(frame[:3])
+
+    assert pixel(looped)[2] > 200
+    assert pixel(padded) == (0, 0, 0)
+
+
 def test_recent_running_claim_from_a_dead_process_is_reclaimed_without_late_publish(tmp_path: Path) -> None:
     store = LocalProjectStore(tmp_path)
     project = store.bootstrap_project(name="recent restart recovery")

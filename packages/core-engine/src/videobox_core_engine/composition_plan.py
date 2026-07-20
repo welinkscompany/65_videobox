@@ -50,14 +50,30 @@ def materialize_editing_session_timeline(
                 start, end = _number(segment.get("start_sec")), _number(segment.get("end_sec"))
                 if end <= start:
                     continue
+                original_start = _number(clip.get("start_sec"))
+                original_end = _number(clip.get("end_sec"))
+                original_source_in = _number(clip.get("source_in_sec", clip.get("in_sec", 0.0)))
+                original_source_out = _number(
+                    clip.get("source_out_sec", clip.get("out_sec", original_source_in + (original_end - original_start)))
+                )
+                source_in = original_source_in + (start - original_start)
+                source_out = min(original_source_out, source_in + (end - start))
                 clip["start_sec"], clip["end_sec"] = start, end
+                clip["source_in_sec"], clip["source_out_sec"] = source_in, source_out
                 override_field = {"broll": "broll_override", "bgm": "music_override", "sfx": "sfx_override"}.get(track_type)
                 if override_field and isinstance(segment.get(override_field), dict):
                     continue
             clips.append(clip)
         if clips:
             tracks[track_type] = clips
-    export_overlays = [deepcopy(item) for item in timeline.get("export_overlays", []) if isinstance(item, dict)]
+    removed_segment_ids = {
+        segment_id for segment_id, segment in segments.items()
+        if str(segment.get("cut_action") or "keep") == "remove"
+    }
+    export_overlays = [
+        deepcopy(item) for item in timeline.get("export_overlays", [])
+        if isinstance(item, dict) and str(item.get("segment_id") or "") not in removed_segment_ids
+    ]
     for segment_id, segment in segments.items():
         if str(segment.get("cut_action") or "keep") == "remove":
             continue
@@ -208,6 +224,10 @@ class CompositionPlan:
                     )
                     source_out = min(natural_source_out, float(normalized.get("out_sec", natural_source_out)))
                     controls = normalized
+                    if source_out <= source_in:
+                        raise ValueError("composition_plan_invalid_source_bounds")
+                    if source_out - source_in < end - start and not controls["loop"] and not controls["pad"]:
+                        raise ValueError("composition_plan_insufficient_broll_source")
                 raw_items.append(CompositionItem(
                     clip_id=str(raw.get("clip_id") or f"{track_type}-{index}"), track_type=track_type,
                     asset_uri=str(raw["asset_uri"]) if raw.get("asset_uri") is not None else None,

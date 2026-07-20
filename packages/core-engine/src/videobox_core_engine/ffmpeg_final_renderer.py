@@ -6,6 +6,7 @@ import os
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, replace
+from math import ceil
 from pathlib import Path
 from typing import Any
 
@@ -100,11 +101,22 @@ class FfmpegFinalRenderer:
                 transform = f"scale={self.video_width}:{self.video_height}:force_original_aspect_ratio=increase,crop={self.video_width}:{self.video_height}"
             else:
                 transform = f"scale={self.video_width}:{self.video_height}:force_original_aspect_ratio=decrease,pad={self.video_width}:{self.video_height}:(ow-iw)/2:(oh-ih)/2"
+            source_window_sec = item.source_out_sec - item.source_in_sec
             if controls["pad"] and not controls["loop"]:
-                transform += f",tpad=stop_mode=add:stop_duration={duration_sec}"
+                transform += f",tpad=stop_mode=add:stop_duration={max(0.0, duration_sec - source_window_sec)}"
+            source_filter = (
+                f"[{index}:v]trim=start={item.source_in_sec}:end={item.source_out_sec},setpts=PTS-STARTPTS"
+            )
+            if controls["loop"] and source_window_sec < duration_sec:
+                numerator, separator, denominator = str(self.video_fps).partition("/")
+                frames_per_second = float(numerator) / float(denominator) if separator else float(numerator)
+                loop_frames = max(1, ceil(source_window_sec * frames_per_second))
+                source_filter += (
+                    f",fps={self.video_fps},loop=loop=-1:size={loop_frames}:start=0,"
+                    f"trim=duration={duration_sec},setpts=PTS-STARTPTS"
+                )
             filters.append(
-                f"[{index}:v]trim=start={item.source_in_sec}:end={item.source_out_sec},setpts=PTS-STARTPTS,"
-                f"{transform},setsar={sar},setpts=PTS+{item.start_sec}/TB[{label}]"
+                f"{source_filter},{transform},setsar={sar},setpts=PTS+{item.start_sec}/TB[{label}]"
             )
             next_canvas = f"canvas{ordinal}"
             filters.append(f"[{canvas}][{label}]overlay=eof_action=pass:repeatlast=0[{next_canvas}]")
@@ -329,6 +341,11 @@ class FfmpegFinalRenderer:
             elif item.track_type == "broll":
                 source = self._resolve_generic_asset_uri(project_id=project_id, asset_uri=str(item.asset_uri or ""))
                 controls = normalize_media_controls(item.media_controls, media_kind="broll", duration_sec=max(item.end_sec - item.start_sec, 0.001))
+                available_source_window = min(self._probe_media_duration(source), item.source_out_sec) - item.source_in_sec
+                if available_source_window <= 0:
+                    raise FinalRenderError("B-roll source bounds are outside the available media. Adjust trim or source controls.")
+                if available_source_window < item.end_sec - item.start_sec and not controls["loop"] and not controls["pad"]:
+                    raise FinalRenderError("B-roll source is shorter than its timeline window. Enable loop or pad to preserve timeline duration.")
                 if controls["preserve_source_audio"]:
                     audio_items.append(item)
                 should_loop = controls["loop"]
