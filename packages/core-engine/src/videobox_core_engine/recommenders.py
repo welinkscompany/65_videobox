@@ -84,10 +84,10 @@ class KeywordBrollRecommender(RecommendationProvider):
 
 
 @dataclass(slots=True)
-class LocalFirstKeywordBrollRecommender(RecommendationProvider):
+class LocalOnlyKeywordBrollRecommender(RecommendationProvider):
     runtime_service: StructuredRecommendationRuntime
     fallback_recommender: RecommendationProvider = field(default_factory=KeywordBrollRecommender)
-    provider_name: str = "local-first-keyword-broll"
+    provider_name: str = "local-only-keyword-broll"
 
     def recommend(self, request: RecommendationRequest) -> list[RecommendationCandidate]:
         enriched_segments = [
@@ -205,10 +205,10 @@ class RuleBasedMusicRecommender(RecommendationProvider):
 
 
 @dataclass(slots=True)
-class LocalFirstMusicRecommender(RecommendationProvider):
+class LocalOnlyMusicRecommender(RecommendationProvider):
     runtime_service: StructuredRecommendationRuntime
     fallback_recommender: RecommendationProvider = field(default_factory=RuleBasedMusicRecommender)
-    provider_name: str = "local-first-music"
+    provider_name: str = "local-only-music"
 
     def recommend(self, request: RecommendationRequest) -> list[RecommendationCandidate]:
         fallback_candidates = self.fallback_recommender.recommend(request)

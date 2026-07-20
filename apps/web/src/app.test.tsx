@@ -516,7 +516,7 @@ const reviewRequiredSnapshotResponse: ReviewSnapshot = {
       reason: "Narration replacement still requires operator confirmation.",
       auto_apply_allowed: false,
       review_required: true,
-      payload: { provider: "gemini_fallback" },
+      payload: { provider: "local_qwen" },
       created_at: "2026-06-28T00:00:15Z",
     },
   ],
@@ -580,43 +580,6 @@ const blockedReviewSnapshotResponse: ReviewSnapshot = {
   ],
 };
 
-const geminiKeysResponse = {
-  keys: [
-    {
-      key_id: "gemini_key_001",
-      project_id: "project_001",
-      label: "Primary routing key",
-      masked_api_key: "AIza...1234",
-      primary_model: "gemini-2.5-pro",
-      cheap_model: "gemini-2.5-flash-lite",
-      high_quality_model: "gemini-2.5-pro",
-      status: "active",
-      cooldown_until: null,
-      consecutive_failures: 0,
-      last_error: null,
-      last_used_at: "2026-06-28T00:00:20Z",
-      created_at: "2026-06-28T00:00:15Z",
-      updated_at: "2026-06-28T00:00:20Z",
-    },
-    {
-      key_id: "gemini_key_002",
-      project_id: "project_001",
-      label: "Fallback cooldown key",
-      masked_api_key: "AIza...5678",
-      primary_model: "gemini-2.5-flash",
-      cheap_model: "gemini-2.5-flash-lite",
-      high_quality_model: "gemini-2.5-pro",
-      status: "cooldown",
-      cooldown_until: "2026-06-28T00:05:00Z",
-      consecutive_failures: 3,
-      last_error: "429 quota exceeded",
-      last_used_at: "2026-06-28T00:00:18Z",
-      created_at: "2026-06-28T00:00:16Z",
-      updated_at: "2026-06-28T00:00:21Z",
-    },
-  ],
-};
-
 const brollAssetsResponse = {
   assets: [
     {
@@ -643,7 +606,6 @@ const brollAssetsResponse = {
 };
 
 function createFetchMock({
-  geminiKeys = geminiKeysResponse,
   brollAssets = brollAssetsResponse,
   brollBatchImportStatus,
   timeline = timelineResponse,
@@ -677,7 +639,6 @@ function createFetchMock({
   mediaLibraryAssets = [],
   mediaLibraryUnavailable = false,
 }: {
-  geminiKeys?: { keys: Array<Record<string, unknown>> };
   brollAssets?: { assets: BrollAsset[] };
   brollBatchImportStatus?: number;
   timeline?: TimelineJob;
@@ -714,7 +675,6 @@ function createFetchMock({
   const state: {
     timeline: TimelinePayload;
     editingSession: EditingSession;
-    geminiKeys: { keys: Array<Record<string, unknown>> };
     brollAssets: { assets: BrollAsset[] };
     voiceSamples: { assets: Array<Record<string, unknown>> };
     reviewSnapshot: ReviewSnapshot;
@@ -729,7 +689,6 @@ function createFetchMock({
   } = {
     timeline: structuredClone(timeline.timeline),
     editingSession: structuredClone(editingSession) as EditingSession,
-    geminiKeys: structuredClone(geminiKeys),
     brollAssets: structuredClone(brollAssets),
     voiceSamples: structuredClone(voiceSamples),
     reviewSnapshot: structuredClone(reviewSnapshot),
@@ -1535,89 +1494,6 @@ function createFetchMock({
         }),
       );
     }
-    if (url.endsWith("/api/projects/project_001/providers/gemini/keys")) {
-      if (init?.method === "POST") {
-        const payload = JSON.parse(String(init.body)) as {
-          label: string;
-          primary_model: string;
-          cheap_model: string;
-          high_quality_model: string;
-        };
-        state.geminiKeys.keys = [
-          ...state.geminiKeys.keys,
-          {
-            key_id: "gemini_key_003",
-            project_id: "project_001",
-            label: payload.label,
-            masked_api_key: "AIza...9999",
-            primary_model: payload.primary_model,
-            cheap_model: payload.cheap_model,
-            high_quality_model: payload.high_quality_model,
-            status: "active",
-            cooldown_until: null,
-            consecutive_failures: 0,
-            last_error: null,
-            last_used_at: null,
-            created_at: "2026-06-28T00:00:30Z",
-            updated_at: "2026-06-28T00:00:30Z",
-          },
-        ];
-        return new Response(JSON.stringify(state.geminiKeys.keys[state.geminiKeys.keys.length - 1]));
-      }
-      return new Response(JSON.stringify(state.geminiKeys));
-    }
-    if (
-      url.endsWith("/api/projects/project_001/providers/gemini/keys/gemini_key_001") &&
-      init?.method === "PATCH"
-    ) {
-      const payload = JSON.parse(String(init.body)) as Record<string, string>;
-      state.geminiKeys.keys = state.geminiKeys.keys.map((item) =>
-        item.key_id === "gemini_key_001"
-          ? {
-              ...item,
-              ...payload,
-              updated_at: "2026-06-28T00:01:00Z",
-            }
-          : item,
-      );
-      return new Response(
-        JSON.stringify(state.geminiKeys.keys.find((item) => item.key_id === "gemini_key_001")),
-      );
-    }
-    if (
-      url.endsWith("/api/projects/project_001/providers/gemini/keys/gemini_key_001/disable") &&
-      init?.method === "POST"
-    ) {
-      state.geminiKeys.keys = state.geminiKeys.keys.map((item) =>
-        item.key_id === "gemini_key_001"
-          ? {
-              ...item,
-              status: "disabled",
-              updated_at: "2026-06-28T00:01:10Z",
-            }
-          : item,
-      );
-      return new Response(
-        JSON.stringify(state.geminiKeys.keys.find((item) => item.key_id === "gemini_key_001")),
-      );
-    }
-    if (
-      url.endsWith("/api/projects/project_001/providers/gemini/keys/gemini_key_001/enable") &&
-      init?.method === "POST"
-    ) {
-      state.geminiKeys.keys = state.geminiKeys.keys.map((item) =>
-        item.key_id === "gemini_key_001"
-          ? {
-              ...item,
-              status: "active",
-              updated_at: "2026-06-28T00:01:20Z",
-            }
-          : item,
-      );
-      return new Response(
-        JSON.stringify(state.geminiKeys.keys.find((item) => item.key_id === "gemini_key_001")),
-      );
-    }
     return Promise.reject(new Error(`Unhandled fetch: ${url}`));
   });
 }
@@ -1914,11 +1790,10 @@ describe("App", () => {
     expect(screen.getByRole("button", { name: /^편집$/i })).toBeInTheDocument();
   });
 
-  it("Director integration: default bootstrap requests neither Gemini keys nor Gemini mutations", async () => {
+  it("Director integration: default bootstrap requests no provider key or mutation route", async () => {
     const fetchMock = createFetchMock(); vi.stubGlobal("fetch", fetchMock); render(<App />);
     expect(await screen.findByText(/작업자 검수 데모/i)).toBeInTheDocument();
-    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/providers/gemini/keys"))).toBe(false);
-    expect(fetchMock.mock.calls.some(([input, init]) => String(input).includes("/providers/gemini") && init?.method !== "GET")).toBe(false);
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/providers/"))).toBe(false);
   });
 
   it("Director integration: exactly-one apply invalidates output freshness", async () => {
@@ -2886,9 +2761,6 @@ describe("App", () => {
       if (url.endsWith("/api/projects/project_001/review-snapshots/timeline_build_job_005")) {
         return Promise.resolve(new Response(JSON.stringify(blockedReviewSnapshotResponse)));
       }
-      if (url.endsWith("/api/projects/project_001/providers/gemini/keys")) {
-        return Promise.resolve(new Response(JSON.stringify(geminiKeysResponse)));
-      }
       return Promise.reject(new Error(`Unhandled fetch: ${url}`));
     });
 
@@ -2951,9 +2823,6 @@ describe("App", () => {
       }
       if (url.endsWith("/api/projects/project_001/review-snapshots/timeline_build_job_005")) {
         return Promise.resolve(new Response(JSON.stringify(draftReviewSnapshotResponse)));
-      }
-      if (url.endsWith("/api/projects/project_001/providers/gemini/keys")) {
-        return Promise.resolve(new Response(JSON.stringify(geminiKeysResponse)));
       }
       return Promise.reject(new Error(`Unhandled fetch: ${url}`));
     });
@@ -3030,9 +2899,6 @@ describe("App", () => {
       if (url.endsWith("/api/projects/project_001/review-snapshots/timeline_build_job_005")) {
         return Promise.resolve(new Response(JSON.stringify(reviewSnapshotResponse)));
       }
-      if (url.endsWith("/api/projects/project_001/providers/gemini/keys")) {
-        return Promise.resolve(new Response(JSON.stringify(geminiKeysResponse)));
-      }
       return Promise.reject(new Error(`Unhandled fetch: ${url}`));
     });
 
@@ -3056,7 +2922,7 @@ describe("App", () => {
     expect(screen.getAllByText(/미시작/i).length).toBeGreaterThan(0);
   });
 
-  it("does not request Gemini keys from the default settings", async () => {
+  it("does not request provider keys from the default settings", async () => {
     const fetchMock = vi.fn((input: RequestInfo | URL) => {
       const url = String(input);
       if (url.endsWith("/api/projects")) {
@@ -3083,9 +2949,6 @@ describe("App", () => {
       if (url.endsWith("/api/projects/project_001/exports/capcut_export_job_007")) {
         return Promise.resolve(new Response(JSON.stringify(exportResponse)));
       }
-      if (url.endsWith("/api/projects/project_001/providers/gemini/keys")) {
-        return Promise.resolve(new Response("provider unavailable", { status: 503 }));
-      }
       return Promise.reject(new Error(`Unhandled fetch: ${url}`));
     });
 
@@ -3097,8 +2960,8 @@ describe("App", () => {
     expect(await screen.findByText(/timeline_001/i)).toBeInTheDocument();
     fireEvent.click(await screen.findByRole("button", { name: /^설정$/i }));
     expect(await screen.findByRole("heading", { name: "내 목소리" })).toBeInTheDocument();
-    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/providers/gemini/keys"))).toBe(false);
-    expect(screen.queryByText(/제미나이/i)).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/providers/"))).toBe(false);
+    expect(screen.queryByText(/외부 서비스/i)).not.toBeInTheDocument();
   });
 
   it("keeps the default settings surface in creator language", async () => {
@@ -3117,7 +2980,7 @@ describe("App", () => {
     expect(screen.queryByLabelText(/API 키/i)).not.toBeInTheDocument();
   });
 
-  it("keeps legacy Gemini CRUD isolated from the default local-only UI", async () => {
+  it("keeps legacy retired provider CRUD isolated from the default local-only UI", async () => {
     const fetchMock = createFetchMock();
     vi.stubGlobal("fetch", fetchMock);
 
@@ -3125,12 +2988,12 @@ describe("App", () => {
     fireEvent.click(await screen.findByRole("button", { name: /^설정$/i }));
 
     expect(await screen.findByRole("heading", { name: "내 목소리" })).toBeInTheDocument();
-    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/providers/gemini/keys"))).toBe(false);
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/providers/"))).toBe(false);
     expect(screen.queryByText(/AIzaSyDANGER_SECRET/i)).not.toBeInTheDocument();
     expect(screen.queryByDisplayValue(/AIzaSyDANGER_SECRET/i)).not.toBeInTheDocument();
   });
 
-  it("does not expose legacy Gemini mutations from the default settings", async () => {
+  it("does not expose legacy retired provider mutations from the default settings", async () => {
     const fetchMock = createFetchMock();
     vi.stubGlobal("fetch", fetchMock);
 
@@ -3140,7 +3003,7 @@ describe("App", () => {
     expect(await screen.findByRole("heading", { name: "내 목소리" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /키 추가/i })).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/API 키/i)).not.toBeInTheDocument();
-    expect(fetchMock.mock.calls.some(([input, init]) => String(input).includes("/providers/gemini") && init?.method !== "GET")).toBe(false);
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/providers/"))).toBe(false);
   });
 
   it("supports the thin editing flow with session load, regeneration preflight, and partial regeneration delta visibility", async () => {

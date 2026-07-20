@@ -26,7 +26,7 @@ def test_builtin_yujin_agent_package_binds_the_pinned_profile_tool_and_workflow_
     package = load_builtin_yujin_agent_package()
 
     assert package.package_id == "yujin-agent-package"
-    assert package.package_version == "yujin-agent-package-v1"
+    assert package.package_version == "yujin-agent-package-v3"
     assert package.soul.profile_id == "yujin-video-director"
     assert package.soul.prompt_manifest_sha256 == BUILTIN_PROMPT_MANIFEST_SHA256
     assert package.prompt_manifest_sha256 == BUILTIN_PROMPT_MANIFEST_SHA256
@@ -36,26 +36,40 @@ def test_builtin_yujin_agent_package_binds_the_pinned_profile_tool_and_workflow_
     assert package.package_manifest_sha256 == BUILTIN_YUJIN_AGENT_PACKAGE_MANIFEST_SHA256
     assert tuple(skill.skill_id for skill in package.skills_manifest.skills) == (
         "describe_project_status",
-        "interview_video_goal",
-        "propose_without_action",
+        "clarify_editing_goal",
+        "propose_broll_inbox_organization",
+        "propose_asset_metadata_classification",
+        "propose_project_organization",
+        "propose_edit_guidance",
     )
     assert all(skill.executor_authorized is False for skill in package.skills_manifest.skills)
 
 
-def test_user_preference_and_memory_consent_schema_is_immutable_and_fails_closed_without_opt_in() -> None:
+def test_static_profile_explicitly_has_no_authority_over_hermes_runtime_memory() -> None:
+    package = load_builtin_yujin_agent_package()
+    preferences = package.user_preferences_schema
+
+    assert package.soul.role == "video_editing_operations_assistant"
+    assert preferences.project_data_ssot == "videobox_project_editor_asset_db"
+    assert preferences.memory_runtime_authority == "hermes_runtime_owned"
+    assert preferences.runtime_io == "static_profile_no_runtime_memory_authority"
+    assert not hasattr(preferences, "memory_opt_in")
+    assert not hasattr(preferences, "memory_retention_days")
+
+
+def test_static_profile_preferences_are_immutable_without_a_memory_consent_or_retention_gate() -> None:
     preferences = UserPreferenceConsent(
         language="ko",
         copy_style="short_action_oriented",
-        memory_opt_in=False,
-        memory_scope="none",
-        memory_retention_days=0,
+        project_data_ssot="videobox_project_editor_asset_db",
+        memory_runtime_authority="hermes_runtime_owned",
+        runtime_io="static_profile_no_runtime_memory_authority",
     )
 
-    assert preferences.memory_opt_in is False
-    assert preferences.memory_scope == "none"
-    assert preferences.memory_retention_days == 0
-    with pytest.raises(ValueError, match="memory|opt-in|scope"):
-        replace(preferences, memory_opt_in=True, memory_scope="yujin_assist", memory_retention_days=30)
+    assert preferences.memory_runtime_authority == "hermes_runtime_owned"
+    assert preferences.runtime_io == "static_profile_no_runtime_memory_authority"
+    with pytest.raises(ValueError, match="runtime|authority"):
+        replace(preferences, memory_runtime_authority="static_contract")
     with pytest.raises((AttributeError, TypeError)):
         preferences.language = "en"  # type: ignore[misc]
 
@@ -117,8 +131,11 @@ def test_hostile_string_subclasses_cannot_smuggle_a_skill_or_preference_value() 
 
     with pytest.raises(ValueError, match="skill|built-in"):
         YujinSkillSpec(HostileString("render_video"), "status_summary", "get_project_status")
-    with pytest.raises(ValueError, match="memory|opt-in|scope"):
-        UserPreferenceConsent(HostileString("ko"), "short_action_oriented", False, "none", 0)
+    with pytest.raises(ValueError, match="runtime|authority"):
+        UserPreferenceConsent(
+            HostileString("ko"), "short_action_oriented", "videobox_project_editor_asset_db",
+            "hermes_runtime_owned", "static_profile_no_runtime_memory_authority",
+        )
 
 
 def test_nested_skills_manifest_and_package_reject_hostile_string_hash_bypass() -> None:
@@ -186,10 +203,10 @@ def test_package_rejects_hostile_nested_preference_schema_version() -> None:
     forged_preferences = object.__new__(UserPreferenceConsent)
     object.__setattr__(forged_preferences, "language", "ko")
     object.__setattr__(forged_preferences, "copy_style", "short_action_oriented")
-    object.__setattr__(forged_preferences, "memory_opt_in", False)
-    object.__setattr__(forged_preferences, "memory_scope", "none")
-    object.__setattr__(forged_preferences, "memory_retention_days", 0)
-    object.__setattr__(forged_preferences, "schema_version", HostileString("yujin-user-preferences-v1"))
+    object.__setattr__(forged_preferences, "project_data_ssot", "videobox_project_editor_asset_db")
+    object.__setattr__(forged_preferences, "memory_runtime_authority", "hermes_runtime_owned")
+    object.__setattr__(forged_preferences, "runtime_io", "static_profile_no_runtime_memory_authority")
+    object.__setattr__(forged_preferences, "schema_version", HostileString("yujin-static-profile-preferences-v3"))
 
     with pytest.raises(ValueError, match="soul|user preference|schema"):
         replace(package, user_preferences_schema=forged_preferences)
@@ -200,10 +217,10 @@ def test_package_rejects_forged_nested_preferences_even_when_schema_version_is_v
     forged_preferences = object.__new__(UserPreferenceConsent)
     object.__setattr__(forged_preferences, "language", "ko")
     object.__setattr__(forged_preferences, "copy_style", "short_action_oriented")
-    object.__setattr__(forged_preferences, "memory_opt_in", True)
-    object.__setattr__(forged_preferences, "memory_scope", "none")
-    object.__setattr__(forged_preferences, "memory_retention_days", 30)
-    object.__setattr__(forged_preferences, "schema_version", "yujin-user-preferences-v1")
+    object.__setattr__(forged_preferences, "project_data_ssot", "videobox_project_editor_asset_db")
+    object.__setattr__(forged_preferences, "memory_runtime_authority", "static_contract")
+    object.__setattr__(forged_preferences, "runtime_io", "static_profile_no_runtime_memory_authority")
+    object.__setattr__(forged_preferences, "schema_version", "yujin-static-profile-preferences-v3")
 
     with pytest.raises(ValueError, match="user preference|memory|schema"):
         replace(package, user_preferences_schema=forged_preferences)
@@ -212,10 +229,10 @@ def test_package_rejects_forged_nested_preferences_even_when_schema_version_is_v
 def test_package_rejects_constructor_bypassed_soul_or_mcp_policy() -> None:
     package = load_builtin_yujin_agent_package()
     forged_soul = object.__new__(YujinSoul)
-    object.__setattr__(forged_soul, "soul_version", "yujin-soul-v1")
+    object.__setattr__(forged_soul, "soul_version", "yujin-soul-v2")
     object.__setattr__(forged_soul, "profile_id", "yujin-video-director")
     object.__setattr__(forged_soul, "prompt_manifest_sha256", BUILTIN_PROMPT_MANIFEST_SHA256)
-    object.__setattr__(forged_soul, "role", "video_director_read_only")
+    object.__setattr__(forged_soul, "role", "video_editing_operations_assistant")
     object.__setattr__(forged_soul, "copy_style", "short_action_oriented_korean")
     object.__setattr__(forged_soul, "authority", "authorizing")
     with pytest.raises(ValueError, match="soul|built-in|profile"):

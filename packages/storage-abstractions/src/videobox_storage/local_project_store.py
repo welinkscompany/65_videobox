@@ -5479,7 +5479,7 @@ class LocalProjectStore:
         return build_provider_trace(
             final_provider=final_provider,
             fallback_reasons=fallback_reasons,
-            routing_mode=str(traces[0].get("routing_mode") or "local_first"),
+            routing_mode=str(traces[0].get("routing_mode") or "local_only"),
         )
 
     def _provider_trace_entry(

@@ -6,7 +6,8 @@ from typing import Any
 __all__ = [
     "DEFAULT_PROJECTS_ROOT",
     "KeywordBrollRecommender",
-    "LocalFirstMusicRecommender",
+    "LocalOnlyKeywordBrollRecommender",
+    "LocalOnlyMusicRecommender",
     "LocalPipelineRunner",
     "RuleBasedMusicRecommender",
     "TimelineBuilder",
@@ -18,9 +19,13 @@ _LAZY_EXPORTS = {
         "videobox_core_engine.recommenders",
         "KeywordBrollRecommender",
     ),
-    "LocalFirstMusicRecommender": (
+    "LocalOnlyKeywordBrollRecommender": (
         "videobox_core_engine.recommenders",
-        "LocalFirstMusicRecommender",
+        "LocalOnlyKeywordBrollRecommender",
+    ),
+    "LocalOnlyMusicRecommender": (
+        "videobox_core_engine.recommenders",
+        "LocalOnlyMusicRecommender",
     ),
     "LocalPipelineRunner": ("videobox_core_engine.local_pipeline", "LocalPipelineRunner"),
     "RuleBasedMusicRecommender": (
@@ -32,7 +37,10 @@ _LAZY_EXPORTS = {
 
 
 def __getattr__(name: str) -> Any:
-    module_name, attr_name = _LAZY_EXPORTS[name]
+    try:
+        module_name, attr_name = _LAZY_EXPORTS[name]
+    except KeyError:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from None
     module = import_module(module_name)
     value = getattr(module, attr_name)
     globals()[name] = value

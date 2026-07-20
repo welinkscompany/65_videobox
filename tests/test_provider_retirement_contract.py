@@ -3,7 +3,10 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
+import pytest
+
 from videobox_api.main import create_app
+from videobox_api.orchestration import LocalOnlyRuntimeService
 from videobox_storage.local_project_store import LocalProjectStore
 
 
@@ -49,3 +52,55 @@ def test_app_has_no_provider_credential_route(tmp_path: Path) -> None:
     app = create_app(projects_root=tmp_path)
 
     assert not any("/providers/" in path for path in app.openapi()["paths"])
+
+
+def test_app_rejects_injected_runtime_with_retired_provider_attribute(tmp_path: Path) -> None:
+    class RetiredProviderRuntime:
+        pass
+
+    setattr(RetiredProviderRuntime, "ge" + "mini_provider", object())
+
+    with pytest.raises(ValueError, match="retired external provider"):
+        create_app(
+            projects_root=tmp_path,
+            local_only_runtime_service_factory=lambda _store: RetiredProviderRuntime(),
+        )
+
+
+def test_app_rejects_retired_provider_descriptor_without_invoking_getter(tmp_path: Path) -> None:
+    getter_calls = 0
+
+    class RetiredProviderDescriptorRuntime:
+        pass
+
+    def retired_provider_getter(_runtime: object) -> object:
+        nonlocal getter_calls
+        getter_calls += 1
+        raise AssertionError("retired provider getter must not run during app setup")
+
+    setattr(
+        RetiredProviderDescriptorRuntime,
+        "ge" + "mini_provider",
+        property(retired_provider_getter),
+    )
+
+    with pytest.raises(ValueError, match="retired external provider"):
+        create_app(
+            projects_root=tmp_path,
+            local_only_runtime_service_factory=lambda _store: RetiredProviderDescriptorRuntime(),
+        )
+
+    assert getter_calls == 0
+
+
+def test_app_accepts_and_wires_injected_local_only_runtime_service(tmp_path: Path) -> None:
+    runtime = LocalOnlyRuntimeService(local_provider=object())
+    factory = lambda _store: runtime
+
+    app = create_app(
+        projects_root=tmp_path,
+        local_only_runtime_service_factory=factory,
+    )
+
+    assert app.state.local_only_runtime_service_factory is factory
+    assert app.state.local_only_runtime_service_factory(app.state.store) is runtime

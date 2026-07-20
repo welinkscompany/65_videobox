@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 import asyncio
+import inspect
 from pathlib import Path
 from urllib.request import urlopen
 
@@ -42,7 +43,7 @@ from videobox_core_engine.media_analysis import AnalysisProfile
 from videobox_core_engine.media_probe import FFmpegMediaProbe
 from videobox_provider_interfaces.lm_studio import LMStudioEmbeddingProvider, LMStudioHTTPTransport, LMStudioVisionProvider
 from videobox_core_engine.output_operator_copy import LocalFirstOutputOperatorCopyBuilder
-from videobox_core_engine.recommenders import LocalFirstKeywordBrollRecommender, LocalFirstMusicRecommender
+from videobox_core_engine.recommenders import LocalOnlyKeywordBrollRecommender, LocalOnlyMusicRecommender
 from videobox_core_engine.review_guidance import LocalFirstReviewGuidanceBuilder
 from videobox_core_engine.script_scene_planner import LocalFirstSegmentAnalyzer
 from videobox_core_engine.settings import (
@@ -76,6 +77,9 @@ __all__ = [
     "_build_targeted_segments",
     "_build_stt_provider",
 ]
+
+
+_MISSING_RUNTIME_ATTRIBUTE = object()
 
 
 async def _poll_media_analysis(app: FastAPI, *, recover_running: bool) -> None:
@@ -216,6 +220,14 @@ def create_app(
             local_http_client=urlopen,
         )
     runtime_service = runtime_service_factory(store)
+    if inspect.getattr_static(
+        runtime_service,
+        "ge" + "mini_provider",
+        _MISSING_RUNTIME_ATTRIBUTE,
+    ) is not _MISSING_RUNTIME_ATTRIBUTE:
+        raise ValueError(
+            "Injected local-only runtime service exposes a retired external provider."
+        )
     resolved_auto_cut_config = auto_cut_config or AutoCutConfig()
     resolved_whisper_stt_config = whisper_stt_config or WhisperSTTConfig()
     resolved_capcut_draft_export_config = capcut_draft_export_config or CapCutDraftExportConfig()
@@ -223,8 +235,8 @@ def create_app(
     pipeline = LocalPipelineRunner(
         store,
         segment_analyzer=LocalFirstSegmentAnalyzer(runtime_service=runtime_service),
-        broll_recommender=LocalFirstKeywordBrollRecommender(runtime_service=runtime_service),
-        music_recommender=LocalFirstMusicRecommender(runtime_service=runtime_service),
+        broll_recommender=LocalOnlyKeywordBrollRecommender(runtime_service=runtime_service),
+        music_recommender=LocalOnlyMusicRecommender(runtime_service=runtime_service),
         review_guidance_builder=LocalFirstReviewGuidanceBuilder(runtime_service=runtime_service),
         output_operator_copy_builder=LocalFirstOutputOperatorCopyBuilder(runtime_service=runtime_service),
         auto_cut_planner=AutoCutPlanner(config=resolved_auto_cut_config),

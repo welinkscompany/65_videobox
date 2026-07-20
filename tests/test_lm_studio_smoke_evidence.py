@@ -28,7 +28,7 @@ def test_live_media_smoke_success_evidence_is_durable_and_local_only(tmp_path) -
             "loopback_request_count": 3,
             "external_provider_calls": 0,
             "provider_trace": {
-                "routing_mode": "local_first",
+                "routing_mode": "local_only",
                 "final_provider": "lm_studio",
                 "fallback_reasons": [],
             },
@@ -57,7 +57,7 @@ def test_live_media_smoke_success_evidence_rejects_incomplete_profile_or_sample_
         "requested_endpoints": ["http://127.0.0.1:1234/v1/models"],
         "loopback_request_count": 1,
         "external_provider_calls": 0,
-        "provider_trace": {"routing_mode": "local_first", "final_provider": "lm_studio", "fallback_reasons": []},
+        "provider_trace": {"routing_mode": "local_only", "final_provider": "lm_studio", "fallback_reasons": []},
         "timestamp": "2026-07-15T00:00:00+00:00",
     }
 
@@ -82,7 +82,7 @@ def test_live_media_smoke_success_evidence_rejects_nonexact_loopback_endpoint(tm
         "requested_endpoints": [endpoint],
         "loopback_request_count": 1,
         "external_provider_calls": 0,
-        "provider_trace": {"routing_mode": "local_first", "final_provider": "lm_studio", "fallback_reasons": []},
+        "provider_trace": {"routing_mode": "local_only", "final_provider": "lm_studio", "fallback_reasons": []},
         "timestamp": "2026-07-15T00:00:00+00:00",
     }
 

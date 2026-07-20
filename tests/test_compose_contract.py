@@ -56,7 +56,7 @@ def test_hermes_preauth_service_is_pinned_isolated_and_has_no_videobox_data_moun
     assert hermes["profiles"] == ["hermes-preauth"]
     assert hermes["image"] == (
         "nousresearch/hermes-agent@"
-        "sha256:3db34ce19adfa080736a2a3feb0316dbcccc588faa9afe7fd8ae1c03b4f1a53a"
+        "sha256:ad79951c26b7707c8c651f30780338d4f9bb17ddca19f6ea78eb27cbf83a3787"
     )
     assert "ports" not in hermes
     assert hermes["network_mode"] == "none"
@@ -70,7 +70,82 @@ def test_hermes_preauth_service_is_pinned_isolated_and_has_no_videobox_data_moun
         "options": {"max-size": "10m", "max-file": "3"},
     }
     assert "videobox_hermes_preauth_state" in compose["volumes"]
-    assert "videobox_hermes_oauth_state" not in compose["volumes"]
+    assert "videobox_hermes_oauth_state" not in hermes["volumes"]
+
+
+def test_hermes_oauth_bootstrap_is_isolated_from_preauth_and_videobox_data() -> None:
+    compose = yaml.safe_load(Path("compose.yaml").read_text(encoding="utf-8"))
+    bootstrap = compose["services"]["videobox-hermes-oauth-bootstrap"]
+
+    assert bootstrap["profiles"] == ["hermes-oauth-bootstrap"]
+    assert bootstrap["image"] == (
+        "nousresearch/hermes-agent@"
+        "sha256:ad79951c26b7707c8c651f30780338d4f9bb17ddca19f6ea78eb27cbf83a3787"
+    )
+    assert bootstrap["command"] == ["sleep", "infinity"]
+    assert bootstrap["volumes"] == ["videobox_hermes_oauth_state:/opt/data"]
+    assert bootstrap["networks"] == ["videobox-hermes-egress"]
+    assert "ports" not in bootstrap
+    assert "network_mode" not in bootstrap
+    assert "videobox_hermes_preauth_state" not in str(bootstrap)
+    assert "videobox-data" not in str(bootstrap)
+    assert bootstrap["read_only"] is True
+    assert bootstrap["tmpfs"] == [
+        "/tmp:uid=10000,gid=10000,mode=1777",
+        "/run:rw,exec,nosuid,nodev,mode=0755",
+    ]
+    assert bootstrap["cap_drop"] == ["ALL"]
+    assert bootstrap["cap_add"] == ["CHOWN", "DAC_OVERRIDE", "SETGID", "SETUID"]
+    assert bootstrap["security_opt"] == ["no-new-privileges:true"]
+    assert bootstrap["pids_limit"] == 128
+    assert bootstrap["mem_limit"] == "2g"
+    assert bootstrap["cpus"] == 2.0
+    assert bootstrap["logging"] == {
+        "driver": "local",
+        "options": {"max-size": "10m", "max-file": "3"},
+    }
+    assert compose["networks"]["videobox-hermes-egress"] == {}
+    assert "videobox_hermes_oauth_state" in compose["volumes"]
+
+
+def test_hermes_dashboard_is_loopback_only_and_uses_only_the_isolated_oauth_state() -> None:
+    compose = yaml.safe_load(Path("compose.yaml").read_text(encoding="utf-8"))
+    dashboard = compose["services"]["videobox-hermes-dashboard"]
+
+    assert dashboard["profiles"] == ["hermes-dashboard"]
+    assert dashboard["image"] == (
+        "nousresearch/hermes-agent@sha256:ad79951c26b7707c8c651f30780338d4f9bb17ddca19f6ea78eb27cbf83a3787"
+    )
+    assert "build" not in dashboard
+    assert dashboard["command"] == [
+        "dashboard", "--host", "0.0.0.0", "--port", "9119", "--insecure", "--no-open",
+    ]
+    assert dashboard["ports"] == ["127.0.0.1:9119:9119"]
+    assert dashboard["volumes"] == ["videobox_hermes_oauth_state:/opt/data"]
+    # Mem0 Platform is configured in the official dashboard; it does not need
+    # the retired local Ollama/Mem0 sidecar network.
+    assert dashboard["networks"] == ["videobox-hermes-provider-egress"]
+    assert "depends_on" not in dashboard
+    assert "network_mode" not in dashboard
+    assert "videobox_hermes_preauth_state" not in str(dashboard)
+    assert "videobox-data" not in str(dashboard)
+    assert "videobox-internal" not in str(dashboard)
+    assert "videobox-postgres" not in str(dashboard)
+    assert dashboard["read_only"] is True
+    assert dashboard["tmpfs"] == [
+        "/tmp:uid=10000,gid=10000,mode=1777",
+        "/run:rw,exec,nosuid,nodev,mode=0755",
+    ]
+    assert dashboard["cap_drop"] == ["ALL"]
+    assert dashboard["cap_add"] == ["CHOWN", "DAC_OVERRIDE", "SETGID", "SETUID"]
+    assert dashboard["security_opt"] == ["no-new-privileges:true"]
+    assert dashboard["pids_limit"] == 128
+    assert dashboard["mem_limit"] == "2g"
+    assert dashboard["cpus"] == 2.0
+    assert dashboard["logging"] == {
+        "driver": "local",
+        "options": {"max-size": "10m", "max-file": "3"},
+    }
 
 
 def test_workspace_image_runs_api_and_web_proxy_together() -> None:

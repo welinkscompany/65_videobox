@@ -107,7 +107,7 @@ def test_lm_studio_local_media_runtime_smoke() -> None:
 
     trace = response_provider_trace(vision_response)
     assert trace == {
-        "routing_mode": "local_first",
+        "routing_mode": "local_only",
         "final_provider": "lm_studio",
         "fallback_reasons": [],
     }

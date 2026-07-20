@@ -1,6 +1,22 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 277. 2026-07-20 Task 9 manual acceptance preflight`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 279. 2026-07-20 Hermes dashboard Platform Mem0 handoff`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+
+## 279. 2026-07-20 Hermes dashboard Platform Mem0 handoff
+
+- `[~] 로컬 대시보드 기동`: `videobox-hermes-dashboard`는 공식 Hermes 최신 이미지 digest `sha256:ad79951c26b7707c8c651f30780338d4f9bb17ddca19f6ea78eb27cbf83a3787`로 `127.0.0.1:9119`에만 공개된다. 2026-07-20에 HTTP `200`과 `HERMES_DASHBOARD_READY` 로그를 확인했다.
+- 대시보드는 VideoBox data/media/DB/API/internal/edge network와 분리되어 있고, `videobox-hermes-provider-egress`만 사용한다. local Ollama health·memory network `depends_on`은 없다. 실제 Docker Ollama container·volume·image는 제거했다.
+- Hermes Dashboard의 `Memory Provider → mem0 → Platform` 경로만 사용한다. Mem0 Platform API key 입력 및 provider 연결 성공은 사용자가 대시보드에서 수행할 다음 수동 단계이며, 아직 API key·memory write·GPT 요청 성공으로 주장하지 않는다.
+- focused Compose/Hermes contract는 프로젝트 `.venv`에서 `14 passed`(기존 multipart PendingDeprecationWarning 1)였고, dummy environment Compose config, live local dashboard HTTP `200`, `git diff --check`를 확인했다. 전체 Python regression은 사용자 요청으로 종료해 **미검증**이다.
+- source에 남은 custom local-runtime/Ollama bootstrap 초안은 실행 서비스에 연결되지 않았지만, 사용자의 Platform-only 결정에 맞춰 다음 세션에서 별도 정리·삭제 여부를 판단한다. 현재는 이 handoff가 그 미정리 범위를 명시한다.
+- Task 9 사람/환경 acceptance는 계속 별도이며 누적은 **9/22 (40.9%)**, 잔여 **59.1%**다. Gemini provider call은 0을 유지한다.
+
+## 278. 2026-07-20 VideoBox Hermes local runtime foundation
+
+- `[~] 구현 중 (runtime 실행 전)`: VideoBox 전용 Hermes image/profile에는 hash-verified Yujin `SOUL.md`/`AGENTS.md`, 첫 실행에만 seed되는 `memories/USER.md`, local Mem0 OSS(`qwen3:4b`, `nomic-embed-text`, `/opt/data/mem0-qdrant`) 계약을 둔다. Hermes가 runtime auxiliary-memory 판단을 소유하며, 과거 static profile의 opt-in/scope/retention 표현은 runtime authority가 아닌 historical static artifact로 대체한다.
+- runtime/dashboard는 VideoBox data/media/DB/edge/internal mount·network가 없고, local Ollama health를 의존한다. `videobox-hermes-provider-egress`의 직접 egress는 owner-operated OAuth를 위한 local-MVP 한계이며 production gateway allowlist가 아니다. model seed만 model-download egress를 가진다.
+- owner OAuth bootstrap/verify와 runtime source-to-image verifier는 credential·device code·account identity·memory contents를 출력하지 않는 별도 PowerShell 경로다. 이 상태 기록은 실제 Docker build, local model seed, OAuth completion, GPT request, Hermes dashboard conversation, memory write의 성공 증거가 아니다.
+- Task 9 사람/환경 acceptance는 별도이며 누적은 계속 **9/22 (40.9%)**, 잔여 **59.1%**다. Gemini provider call은 0을 유지한다.
 
 ## 277. 2026-07-20 Task 9 manual acceptance preflight
 

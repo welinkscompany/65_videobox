@@ -1,10 +1,9 @@
 """Pinned, non-executing Yujin Agent Package v1.
 
 This is configuration-as-contract, not a Hermes profile, MCP client, memory
-store, provider adapter, or executor.  It tells a later separately authorised
-runtime which fixed policy artifacts it must bind before it can even consider
-opening a narrow route.  Every declaration in this module has zero side
-effects and fails closed by default.
+store, provider adapter, or executor.  It has no authority to grant, deny,
+retain, revoke, or store Hermes runtime memory.  Every declaration in this
+module has zero side effects and fails closed by default.
 """
 
 from __future__ import annotations
@@ -39,17 +38,20 @@ __all__ = (
 
 
 PACKAGE_ID = "yujin-agent-package"
-PACKAGE_VERSION = "yujin-agent-package-v1"
-SOUL_VERSION = "yujin-soul-v1"
-USER_PREFERENCES_VERSION = "yujin-user-preferences-v1"
-SKILLS_MANIFEST_VERSION = "yujin-skills-v1"
+PACKAGE_VERSION = "yujin-agent-package-v3"
+SOUL_VERSION = "yujin-soul-v2"
+USER_PREFERENCES_VERSION = "yujin-static-profile-preferences-v3"
+SKILLS_MANIFEST_VERSION = "yujin-skills-v2"
 MCP_POLICY_VERSION = "yujin-mcp-policy-v1"
 MCP_DEFAULT_DECISION = "deny"
 _SHA256 = r"[0-9a-f]{64}"
 _ALLOWED_SKILLS = (
     ("describe_project_status", "status_summary", "get_project_status"),
-    ("interview_video_goal", "clarification_question", None),
-    ("propose_without_action", "actionless_proposal", None),
+    ("clarify_editing_goal", "clarification_question", None),
+    ("propose_broll_inbox_organization", "actionless_proposal", None),
+    ("propose_asset_metadata_classification", "actionless_proposal", None),
+    ("propose_project_organization", "actionless_proposal", None),
+    ("propose_edit_guidance", "actionless_proposal", None),
 )
 def _canonical_json(value: object) -> str:
     return dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True, allow_nan=False)
@@ -68,10 +70,10 @@ def _require_sha(value: str, *, field_name: str) -> None:
 class YujinSoul:
     """The fixed role and tone; no tool or model instruction is executable."""
 
-    soul_version: Literal["yujin-soul-v1"]
+    soul_version: Literal["yujin-soul-v2"]
     profile_id: Literal["yujin-video-director"]
     prompt_manifest_sha256: str
-    role: Literal["video_director_read_only"]
+    role: Literal["video_editing_operations_assistant"]
     copy_style: Literal["short_action_oriented_korean"]
     authority: Literal["non_authorizing"]
 
@@ -83,7 +85,7 @@ class YujinSoul:
             or
             self.soul_version != SOUL_VERSION or self.profile_id != PROFILE_ID
             or self.prompt_manifest_sha256 != BUILTIN_PROMPT_MANIFEST_SHA256
-            or self.role != "video_director_read_only" or self.copy_style != "short_action_oriented_korean"
+            or self.role != "video_editing_operations_assistant" or self.copy_style != "short_action_oriented_korean"
             or self.authority != "non_authorizing"
         ):
             raise ValueError("Yujin soul must use the fixed built-in profile policy")
@@ -91,26 +93,33 @@ class YujinSoul:
 
 @dataclass(frozen=True, slots=True)
 class UserPreferenceConsent:
-    """Schema only: v1 retains no user file and never opts into long-term memory."""
+    """Deprecated compatibility name for static preferences, never a runtime consent gate.
+
+    Hermes owns its built-in and configured Mem0 auxiliary-memory decisions at
+    runtime.  This offline profile names neither a memory scope nor retention
+    rule and cannot perform memory I/O.
+    """
 
     language: Literal["ko"]
     copy_style: Literal["short_action_oriented"]
-    memory_opt_in: Literal[False]
-    memory_scope: Literal["none"]
-    memory_retention_days: Literal[0]
-    schema_version: Literal["yujin-user-preferences-v1"] = USER_PREFERENCES_VERSION
+    project_data_ssot: Literal["videobox_project_editor_asset_db"]
+    memory_runtime_authority: Literal["hermes_runtime_owned"]
+    runtime_io: Literal["static_profile_no_runtime_memory_authority"]
+    schema_version: Literal["yujin-static-profile-preferences-v3"] = USER_PREFERENCES_VERSION
 
     def __post_init__(self) -> None:
         if (
             type(self.language) is not str or type(self.copy_style) is not str
-            or type(self.memory_opt_in) is not bool or type(self.memory_scope) is not str or type(self.schema_version) is not str
+            or type(self.project_data_ssot) is not str or type(self.memory_runtime_authority) is not str
+            or type(self.runtime_io) is not str or type(self.schema_version) is not str
             or
             self.language != "ko" or self.copy_style != "short_action_oriented"
-            or self.memory_opt_in is not False or self.memory_scope != "none"
-            or type(self.memory_retention_days) is not int or self.memory_retention_days != 0
+            or self.project_data_ssot != "videobox_project_editor_asset_db"
+            or self.memory_runtime_authority != "hermes_runtime_owned"
+            or self.runtime_io != "static_profile_no_runtime_memory_authority"
             or self.schema_version != USER_PREFERENCES_VERSION
         ):
-            raise ValueError("memory requires a separate opt-in scope and retention gate")
+            raise ValueError("static profile preferences require the Hermes runtime memory authority boundary")
 
 
 def _is_builtin_user_preferences(value: object) -> bool:
@@ -119,15 +128,15 @@ def _is_builtin_user_preferences(value: object) -> bool:
         type(value) is UserPreferenceConsent
         and type(value.language) is str
         and type(value.copy_style) is str
-        and type(value.memory_opt_in) is bool
-        and type(value.memory_scope) is str
-        and type(value.memory_retention_days) is int
+        and type(value.project_data_ssot) is str
+        and type(value.memory_runtime_authority) is str
+        and type(value.runtime_io) is str
         and type(value.schema_version) is str
         and value.language == "ko"
         and value.copy_style == "short_action_oriented"
-        and value.memory_opt_in is False
-        and value.memory_scope == "none"
-        and value.memory_retention_days == 0
+        and value.project_data_ssot == "videobox_project_editor_asset_db"
+        and value.memory_runtime_authority == "hermes_runtime_owned"
+        and value.runtime_io == "static_profile_no_runtime_memory_authority"
         and value.schema_version == USER_PREFERENCES_VERSION
     )
 
@@ -154,8 +163,11 @@ class YujinSkillSpec:
 
 _BUILTIN_SKILLS = (
     YujinSkillSpec("describe_project_status", "status_summary", "get_project_status"),
-    YujinSkillSpec("interview_video_goal", "clarification_question", None),
-    YujinSkillSpec("propose_without_action", "actionless_proposal", None),
+    YujinSkillSpec("clarify_editing_goal", "clarification_question", None),
+    YujinSkillSpec("propose_broll_inbox_organization", "actionless_proposal", None),
+    YujinSkillSpec("propose_asset_metadata_classification", "actionless_proposal", None),
+    YujinSkillSpec("propose_project_organization", "actionless_proposal", None),
+    YujinSkillSpec("propose_edit_guidance", "actionless_proposal", None),
 )
 _SKILLS_PAYLOAD = {
     "version": SKILLS_MANIFEST_VERSION,
@@ -165,12 +177,12 @@ _SKILLS_PAYLOAD = {
         for skill in _BUILTIN_SKILLS
     ],
 }
-BUILTIN_YUJIN_SKILLS_MANIFEST_SHA256 = "d757dd5a7e4dcfd44379bc272b3a898ee9bc2d0c01d4ef3c22a14268b5eb343e"
+BUILTIN_YUJIN_SKILLS_MANIFEST_SHA256 = "a9b475aa0ae8eb1ea78e31a267c26d96035dae57dfb7cb28a94e8ecf1175ceb8"
 
 
 @dataclass(frozen=True, slots=True)
 class YujinSkillsManifest:
-    manifest_version: Literal["yujin-skills-v1"]
+    manifest_version: Literal["yujin-skills-v2"]
     skills: tuple[YujinSkillSpec, ...]
     manifest_sha256: str
 
@@ -250,7 +262,7 @@ def _is_builtin_soul(value: object) -> bool:
         and value.soul_version == SOUL_VERSION
         and value.profile_id == PROFILE_ID
         and value.prompt_manifest_sha256 == BUILTIN_PROMPT_MANIFEST_SHA256
-        and value.role == "video_director_read_only"
+        and value.role == "video_editing_operations_assistant"
         and value.copy_style == "short_action_oriented_korean"
         and value.authority == "non_authorizing"
     )
@@ -302,7 +314,7 @@ class McpDeclarationDecision:
 @dataclass(frozen=True, slots=True)
 class YujinAgentPackage:
     package_id: Literal["yujin-agent-package"]
-    package_version: Literal["yujin-agent-package-v1"]
+    package_version: Literal["yujin-agent-package-v3"]
     soul: YujinSoul
     user_preferences_schema: UserPreferenceConsent
     skills_manifest: YujinSkillsManifest
@@ -352,7 +364,14 @@ def _package_payload(package: YujinAgentPackage) -> dict[str, object]:
         "package_version": package.package_version,
         "soul_version": package.soul.soul_version,
         "prompt_manifest_sha256": package.prompt_manifest_sha256,
-        "user_preferences_schema_version": package.user_preferences_schema.schema_version,
+        "user_preferences": {
+            "schema_version": package.user_preferences_schema.schema_version,
+            "language": package.user_preferences_schema.language,
+            "copy_style": package.user_preferences_schema.copy_style,
+            "project_data_ssot": package.user_preferences_schema.project_data_ssot,
+            "memory_runtime_authority": package.user_preferences_schema.memory_runtime_authority,
+            "runtime_io": package.user_preferences_schema.runtime_io,
+        },
         "skills_manifest_sha256": package.skill_manifest_sha256,
         "mcp_policy_version": package.mcp_policy.policy_version,
         "tool_spec_manifest_sha256": package.tool_spec_manifest_sha256,
@@ -361,11 +380,11 @@ def _package_payload(package: YujinAgentPackage) -> dict[str, object]:
     }
 
 
-BUILTIN_YUJIN_AGENT_PACKAGE_MANIFEST_SHA256 = "2a5daadaab4223d02004d2b7b2cd5e0c4e9f5595088bbd48d0c5e659e82949dd"
+BUILTIN_YUJIN_AGENT_PACKAGE_MANIFEST_SHA256 = "d39efd47c4fa6459e59de09a3501509fc621c194fce3f7be9f777dadcb9c9ad6"
 
 
 def load_builtin_yujin_agent_package() -> YujinAgentPackage:
-    """Load the only static package. No provider, runtime, memory, or MCP is opened."""
+    """Load the v3 static package; Hermes memory runtime remains outside its authority."""
     return YujinAgentPackage(
         package_id=PACKAGE_ID,
         package_version=PACKAGE_VERSION,
@@ -373,12 +392,15 @@ def load_builtin_yujin_agent_package() -> YujinAgentPackage:
             soul_version=SOUL_VERSION,
             profile_id=PROFILE_ID,
             prompt_manifest_sha256=BUILTIN_PROMPT_MANIFEST_SHA256,
-            role="video_director_read_only",
+            role="video_editing_operations_assistant",
             copy_style="short_action_oriented_korean",
             authority="non_authorizing",
         ),
         user_preferences_schema=UserPreferenceConsent(
-            language="ko", copy_style="short_action_oriented", memory_opt_in=False, memory_scope="none", memory_retention_days=0,
+            language="ko", copy_style="short_action_oriented",
+            project_data_ssot="videobox_project_editor_asset_db",
+            memory_runtime_authority="hermes_runtime_owned",
+            runtime_io="static_profile_no_runtime_memory_authority",
         ),
         skills_manifest=YujinSkillsManifest(
             manifest_version=SKILLS_MANIFEST_VERSION,

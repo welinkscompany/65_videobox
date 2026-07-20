@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import importlib
 import json
 import sqlite3
 from pathlib import Path
+
+import pytest
 
 from videobox_domain_models.assets import AssetType
 from videobox_domain_models.recommendations import RecommendationType
@@ -108,3 +111,21 @@ def test_rule_based_music_recommender_ignores_string_false_segment_review_requir
 
     assert candidates[0].reason == "Suggested music mood for this segment: focused corporate."
     assert candidates[0].score == 0.66
+
+
+def test_local_only_recommenders_are_exposed_without_local_first_aliases() -> None:
+    from videobox_core_engine import LocalOnlyKeywordBrollRecommender, LocalOnlyMusicRecommender
+
+    assert LocalOnlyKeywordBrollRecommender.__name__ == "LocalOnlyKeywordBrollRecommender"
+    assert LocalOnlyMusicRecommender.__name__ == "LocalOnlyMusicRecommender"
+
+
+@pytest.mark.parametrize(
+    "legacy_name",
+    ("LocalFirstKeywordBrollRecommender", "LocalFirstMusicRecommender"),
+)
+def test_legacy_local_first_recommender_exports_are_rejected_without_alias(legacy_name: str) -> None:
+    core_engine = importlib.import_module("videobox_core_engine")
+
+    with pytest.raises(AttributeError, match=rf"^module 'videobox_core_engine' has no attribute '{legacy_name}'$"):
+        getattr(core_engine, legacy_name)

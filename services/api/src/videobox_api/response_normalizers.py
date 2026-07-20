@@ -233,7 +233,7 @@ def _normalize_provider_trace_response(value: object) -> dict[str, object]:
         final_provider = str(value.get("final_provider") or "").strip()
         fallback_reasons = value.get("fallback_reasons")
         return {
-            "routing_mode": routing_mode or "local_first",
+            "routing_mode": routing_mode or "local_only",
             "final_provider": final_provider or "rule_based_fallback",
             "fallback_reasons": [
                 str(reason)
