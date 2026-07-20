@@ -342,8 +342,6 @@ class FfmpegFinalRenderer:
                 raise FinalRenderError(f"Exact preview source is missing: '{source}'. Restore or re-import it and retry.")
             source_indices[item.clip_id] = len(source_paths)
             source_paths.append((source, False, should_loop))
-        if not any(item.track_type == "broll" for item in composition_plan.items):
-            raise FinalRenderError("Timeline has no B-roll clips to render.")
         export_overlay_indices: dict[int, int] = {}
         for overlay_index, overlay in enumerate(composition_plan.export_overlays):
             asset_uri = str(overlay.get("asset_uri") or "")

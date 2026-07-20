@@ -37,7 +37,7 @@ from videobox_core_engine.auto_cut import AutoCutPlanner
 from videobox_core_engine.capcut_handoff import CapCutHandoffError, CapCutHandoffService
 from videobox_core_engine.ffmpeg_auto_cut_executor import FfmpegAutoCutExecutor
 from videobox_core_engine.ffmpeg_final_renderer import FinalRenderError, FfmpegFinalRenderer
-from videobox_core_engine.composition_plan import CompositionPlan
+from videobox_core_engine.composition_plan import CompositionPlan, materialize_editing_session_timeline
 from videobox_core_engine.exact_preview import ExactPreviewRequest, fingerprint_exact_preview
 from videobox_storage.timeline_clip_source_resolution import TimelineClipSourceError, resolve_generic_asset_uri
 from videobox_core_engine.output_source_verifier import OutputSourceStaleError, verify_output_freshness
@@ -154,7 +154,8 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         self.transcript_aligner = transcript_aligner or HeuristicTranscriptAligner()
 
     def build_composition_plan(
-        self, *, timeline: dict[str, Any], editing_session: dict[str, Any] | None = None
+        self, *, timeline: dict[str, Any], editing_session: dict[str, Any] | None = None,
+        project_id: str | None = None,
     ) -> CompositionPlan:
         """Extract the one pure plan/caption input for output consumers.
 
@@ -162,21 +163,31 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         returned plan plus the same session captions to build both final and
         proxy ffmpeg commands.
         """
-        captions = list(editing_session.get("segments", [])) if isinstance(editing_session, dict) else []
+        materialized_timeline = materialize_editing_session_timeline(
+            timeline=timeline, editing_session=editing_session,
+            project_id=project_id or str(timeline.get("project_id") or "") or None,
+        )
+        captions = [
+            segment for segment in (editing_session.get("segments", []) if isinstance(editing_session, dict) else [])
+            if isinstance(segment, dict) and str(segment.get("cut_action") or "keep") != "remove"
+        ]
         extractor = getattr(self.final_renderer, "extract_composition_plan", None)
         # Existing callers intentionally inject small recording renderers.  A
         # missing optional extraction hook is a compatibility case, whereas an
         # exception from a real hook remains authoritative and must propagate.
         if callable(extractor):
-            return extractor(timeline=timeline, captions=captions)
-        return CompositionPlan.from_timeline(timeline=timeline, captions=captions)
+            return extractor(timeline=materialized_timeline, captions=captions)
+        return CompositionPlan.from_timeline(timeline=materialized_timeline, captions=captions)
 
     def _exact_preview_inputs(
         self, *, project_id: str, session_id: str, start_sec: float | None = None, end_sec: float | None = None
     ) -> tuple[dict[str, Any], dict[str, Any], CompositionPlan, str]:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
-        timeline = self.store.get_timeline_run(project_id=project_id, timeline_id=str(session["timeline_id"]))
-        plan = self.build_composition_plan(timeline=timeline, editing_session=session)
+        source_timeline = self.store.get_timeline_run(project_id=project_id, timeline_id=str(session["timeline_id"]))
+        timeline = materialize_editing_session_timeline(
+            timeline=source_timeline, editing_session=session, project_id=project_id,
+        )
+        plan = self.build_composition_plan(timeline=source_timeline, editing_session=session, project_id=project_id)
         if start_sec is not None or end_sec is not None:
             if start_sec is None or end_sec is None:
                 raise ValueError("exact_preview_invalid_range")
@@ -230,6 +241,9 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         # from a worker that died.  Recover only claims older than the store's
         # bounded threshold before cache coalescing, so live owners retain
         # their generation/owner fence and late completion still cannot win.
+        self.store.recover_inherited_exact_preview_claims(
+            project_id=project_id, process_epoch=str(self.store.exact_preview_process_epoch),
+        )
         self.store.recover_stale_exact_preview_claims(project_id=project_id)
         self._best_effort_cleanup_exact_previews(project_id=project_id)
         session, _timeline, plan, fingerprint = self._exact_preview_inputs(
@@ -246,7 +260,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
 
     def run_exact_preview(self, *, project_id: str, generation_id: str) -> None:
         record = self.store.get_exact_preview(project_id=project_id, generation_id=generation_id)
-        owner_token = f"exact-preview-worker:{uuid.uuid4().hex}"
+        owner_token = f"exact-preview-worker:{self.store.exact_preview_process_epoch}:{uuid.uuid4().hex}"
         if not self.store.claim_exact_preview(project_id=project_id, generation_id=generation_id, owner_token=owner_token):
             return
         try:
@@ -277,6 +291,21 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                     project_id=project_id, composition_plan=plan, timeline_context=timeline,
                     output_path=output_path, subtitle_ass_path=ass_path,
                 )
+                # Rendering can take long enough for media bytes or session
+                # materialization to change.  Rebuild immediately before the
+                # durable publish and never publish a mismatched proxy.
+                current_session, _current_timeline, _current_plan, current_fingerprint = self._exact_preview_inputs(
+                    project_id=project_id, session_id=str(record["session_id"]),
+                    start_sec=record.get("start_sec"), end_sec=record.get("end_sec"),
+                )
+                if (
+                    int(current_session["session_revision"]) != int(record["expected_revision"])
+                    or current_fingerprint != str(record["fingerprint"])
+                ):
+                    self.store.mark_exact_preview_stale(
+                        project_id=project_id, generation_id=generation_id, reason="publish_revalidation_failed",
+                    )
+                    return
                 if not self.store.finish_exact_preview(
                     project_id=project_id, generation_id=generation_id, fingerprint=fingerprint,
                     artifact_path=output_path, owner_token=owner_token,
@@ -1493,7 +1522,9 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
             # Establish the same immutable timeline/caption input that the
             # exact-preview worker will consume in Task 2.  Rendering remains
             # on the existing final path in this Task 1 extraction slice.
-            composition_plan = self.build_composition_plan(timeline=timeline, editing_session=editing_session)
+            composition_plan = self.build_composition_plan(
+                timeline=timeline, editing_session=editing_session, project_id=project_id,
+            )
             with tempfile.TemporaryDirectory(prefix="videobox_final_render_") as raw_render_dir:
                 render_output_path = Path(raw_render_dir) / "output.mp4"
                 subtitle_ass_path = None

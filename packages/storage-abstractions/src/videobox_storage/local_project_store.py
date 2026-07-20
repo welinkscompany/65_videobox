@@ -218,6 +218,10 @@ class LocalProjectStore:
     ) -> None:
         self.projects_root = Path(projects_root)
         self._clock = now or (lambda: datetime.now(UTC))
+        # A new store instance is a new local API process.  Exact-preview
+        # workers lease this epoch, which lets startup reclaim a recent dead
+        # process without weakening the generation/owner publish fence.
+        self.exact_preview_process_epoch = uuid.uuid4().hex
         # Deliberately injectable only for deterministic failure-contract tests.
         # Production callers leave this unset; it is never a runtime provider hook.
         self._atomic_bundle_fault_hook = atomic_bundle_fault_hook
@@ -620,6 +624,24 @@ class LocalProjectStore:
                 """UPDATE exact_preview_renders SET state = 'failed', error_message = 'stale_running_claim',
                    updated_at = ? WHERE project_id = ? AND state = 'running' AND claimed_at < ?""",
                 (self._now_iso(), project_id, cutoff),
+            )
+            connection.commit()
+            return cursor.rowcount
+        finally:
+            connection.close()
+
+    def recover_inherited_exact_preview_claims(self, *, project_id: str, process_epoch: str) -> int:
+        """Fence off running claims owned by a previous local API process."""
+        if not process_epoch:
+            raise ValueError("exact_preview_process_epoch_required")
+        connection = self._connection(project_id)
+        try:
+            cursor = connection.execute(
+                """UPDATE exact_preview_renders SET state = 'failed', error_message = 'process_restarted',
+                   updated_at = ?
+                   WHERE project_id = ? AND state = 'running'
+                   AND (claim_token IS NULL OR claim_token NOT LIKE ?)""",
+                (self._now_iso(), project_id, f"exact-preview-worker:{process_epoch}:%"),
             )
             connection.commit()
             return cursor.rowcount
