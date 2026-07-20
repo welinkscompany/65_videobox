@@ -1,0 +1,12 @@
+.vb-editor-workbench { display: grid; min-height: 0; height: 100%; grid-template-rows: auto minmax(0, 1fr) auto; gap: 0.75rem; color: var(--foreground); }
+.vb-editor-workbench__toolbar, .vb-editor-workbench__timeline, .vb-editor-workbench__dock, .vb-editor-workbench__preview { border: 1px solid var(--border); border-radius: 0.75rem; background: var(--card); }
+.vb-editor-workbench__toolbar { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; padding: 0.75rem 1rem; }
+.vb-editor-workbench__toolbar div { display: flex; gap: 0.5rem; }
+.vb-editor-workbench__body, .vb-editor-workbench__panels { min-height: 30rem; }
+.vb-editor-workbench__dock { height: 100%; overflow: auto; padding: 0.75rem; }
+.vb-editor-workbench__summary { padding-block: 0.5rem; border-bottom: 1px solid var(--border); }
+.vb-editor-workbench__summary textarea { width: 100%; min-height: 5rem; margin-block: 0.5rem; }
+.vb-editor-workbench__preview { min-width: 0; min-height: 100%; display: grid; place-content: center; text-align: center; gap: 0.5rem; background: color-mix(in srgb, var(--muted) 80%, black); }
+.vb-editor-workbench__timeline { padding: 0.75rem 1rem; }
+.vb-editor-workbench__drawer { position: fixed; inset: 1rem; z-index: 40; padding: 1rem; overflow: auto; background: var(--background); border: 1px solid var(--border); border-radius: 0.75rem; }
+@media (max-width: 1279px) { .vb-editor-workbench__toolbar { align-items: flex-start; flex-direction: column; } .vb-editor-workbench__body { min-height: 24rem; } }

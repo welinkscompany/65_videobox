@@ -48,6 +48,18 @@ def read_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def test_task11_workbench_is_reference_only_and_has_no_runtime_imports():
+    source_map = read_json(SOURCE_MAP_PATH)
+    decisions = source_map["reference_only_decisions"]
+    decision = next(item for item in decisions if item["task"] == "Task 11 editor workbench")
+    assert decision["source_pin"] == "opencut-classic"
+    assert decision["materialized_paths"] == []
+    for relative in decision["local_paths"]:
+        content = (ROOT / relative).read_text(encoding="utf-8")
+        assert "Source-preservation header:" not in content
+        assert not any(term.lower() in content.lower() for term in decision["forbidden_import_terms"])
+
+
 def write_json(path: Path, value: dict) -> None:
     path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
 

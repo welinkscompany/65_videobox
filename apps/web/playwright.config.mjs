@@ -19,7 +19,7 @@ export default defineConfig({
     {
       command: "node ./e2e/support/fake-api-server.mjs",
       url: `http://${loopbackHost}:8000/health`,
-      reuseExistingServer: false,
+      reuseExistingServer: Boolean(process.env.PLAYWRIGHT_REUSE_EXISTING),
       timeout: 30_000,
     },
     {

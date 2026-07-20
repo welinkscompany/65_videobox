@@ -6,7 +6,7 @@ import { api } from "../api";
 import { AppRouter, createAppRouter, ProjectCatalog } from "./AppRouter";
 import { parseWorkspaceLocation, resolveWorkspaceLocation } from "./routeManifest";
 
-beforeEach(() => { vi.stubGlobal("scrollTo", vi.fn()); vi.stubGlobal("matchMedia", (query: string) => ({ matches: false, media: query, onchange: null, addEventListener: () => {}, removeEventListener: () => {}, addListener: () => {}, removeListener: () => {}, dispatchEvent: () => false })); });
+beforeEach(() => { vi.stubGlobal("scrollTo", vi.fn()); vi.stubGlobal("matchMedia", (query: string) => ({ matches: false, media: query, onchange: null, addEventListener: () => {}, removeEventListener: () => {}, addListener: () => {}, removeListener: () => {}, dispatchEvent: () => false })); vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} }); });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 describe("ProjectCatalog", () => {
@@ -117,7 +117,8 @@ describe("AppRouter URL ownership", () => {
     await waitFor(() => expect(remounted.state.location.pathname).toBe("/projects/project_a/editing"));
   });
 
-  it("loads the atomic editing session named by the canonical editor URL instead of replacing it with the latest session", async () => {
+  it("mounts the canonical editor as a dense read-only workbench without legacy media", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1920 });
     const project = { project_id: "project_a", name: "A", status: "active", root_storage_uri: "local://a" };
     const atomicSession = { session_id: "editing_session_draft_1", project_id: "project_a", timeline_id: "timeline_draft_1", session_revision: 1, history: [], undo_count: 0, redo_count: 0, segments: [{ segment_id: "segment_1", caption_text: "소개", start_sec: 0, end_sec: 2, cut_action: "keep", review_required: false, broll_override: null, visual_overlays: [], music_override: null, sfx_override: null, tts_replacement: null }] } as never;
     vi.spyOn(api, "listProjects").mockResolvedValue([project]);
@@ -154,41 +155,25 @@ describe("AppRouter URL ownership", () => {
 
     render(<AppRouter router={router} />);
 
-    await waitFor(() => expect(loadSession).toHaveBeenCalledWith("project_a", "editing_session_draft_1"));
     await waitFor(() => expect(loadManifest).toHaveBeenCalledWith("project_a", "editing_session_draft_1"));
-    await waitFor(() => expect(getTimeline).toHaveBeenCalledWith("project_a", "timeline_build_job_selected"));
-    expect(getTimeline).not.toHaveBeenCalledWith("project_a", "timeline_build_job_other");
     expect(loadLatest).not.toHaveBeenCalled();
-    expect(await screen.findByText("editing_session_draft_1")).toBeVisible();
-    expect(screen.getByLabelText("소리 미리 듣기")).toBeVisible();
-    expect(screen.getByLabelText("현재 편집본 재생")).toHaveAttribute("src", "/api/projects/project_a/final-renders/current-b/content");
-    expect(screen.queryByText("완성본이 최신 편집본과 달라 다시 만들 수 있어요.")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("완성본 재생")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "편집 시작" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "사전 확인" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "부분 재생성" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "B롤 가져오기" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "내 목소리 후보 만들기" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "컷 저장" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "설명 저장" })).not.toBeInTheDocument();
+    const workbench = await screen.findByRole("region", { name: "편집 작업판" });
+    expect(workbench).toHaveAttribute("data-editor-density", "desktop-both");
+    expect(screen.getByRole("region", { name: "미리보기 자리" })).toHaveAttribute("data-preview-min-width", "720");
+    expect(document.querySelectorAll("audio,video")).toHaveLength(0);
+    expect(screen.getByLabelText("유진에게 요청하기")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "요청 보내기" })).toBeDisabled();
+    expect(screen.getByText("추천은 다음 단계에서 준비합니다.")).toBeVisible();
+    expect(loadManifest).toHaveBeenCalledTimes(1);
+    expect(loadSession).not.toHaveBeenCalled();
+    expect(getTimeline).not.toHaveBeenCalled();
     expect(previewPartialRegeneration).not.toHaveBeenCalled();
     expect(runPartialRegeneration).not.toHaveBeenCalled();
     expect(importBrollBatch).not.toHaveBeenCalled();
     expect(generateTtsCandidate).not.toHaveBeenCalled();
     expect(listTtsCandidates).not.toHaveBeenCalled();
-    expect(screen.getByText("내 목소리 후보 비교")).not.toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "음악 저장" }));
-    await waitFor(() => expect(saveMusic).toHaveBeenCalledWith("project_a", "editing_session_draft_1", "segment_1", expect.objectContaining({
-      asset_id: "asset_music",
-      media_controls: { volume: 0.6, fade_in_sec: 0.5, fade_out_sec: 0.25 },
-      expected_revision: 1,
-    })));
-    await waitFor(() => expect(screen.queryByLabelText("현재 편집본 재생")).not.toBeInTheDocument());
-    fireEvent.click(screen.getByRole("button", { name: "분할" }));
-    await waitFor(() => expect(split).toHaveBeenCalledWith("project_a", "editing_session_draft_1", "segment_1", {
-      expected_revision: 2,
-      split_sec: 1,
-    }));
+    expect(split).not.toHaveBeenCalled();
+    expect(saveMusic).not.toHaveBeenCalled();
   });
 
   it("keeps pinned editing actions offline when its manifest cannot be loaded", async () => {

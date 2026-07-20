@@ -178,6 +178,20 @@ foreach ($dependencyField in @('dependencies', 'optionalDependencies', 'peerDepe
   $declared = $packageManifest.PSObject.Properties[$dependencyField].Value
   if ($null -ne $declared -and $null -ne $declared.PSObject.Properties['@supabase/supabase-js']) { Add-Error "reference-only Supabase declared dependency: $dependencyField" }
 }
+# Task 11 is a reference-only OpenCut classic panel-layout decision.  It must
+# never become a copied runtime surface or import a renderer/DB/editor core.
+$task11 = @($map.reference_only_decisions | Where-Object { $_.task -eq 'Task 11 editor workbench' })
+if ($task11.Count -ne 1 -or $task11[0].source_pin -ne 'opencut-classic' -or @($task11[0].materialized_paths).Count -ne 0) { Add-Error 'Task 11 reference-only provenance decision drift' }
+elseif (@($task11[0].local_paths).Count -eq 0) { Add-Error 'Task 11 workbench local path list missing' }
+else {
+  foreach ($relative in @($task11[0].local_paths)) {
+    $path = Join-Path $root $relative
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { Add-Error "Task 11 path absent: $relative"; continue }
+    $content = Get-Content -Raw -LiteralPath $path
+    if ($content -match 'Source-preservation header:') { Add-Error "Task 11 copied-source header forbidden: $relative" }
+    if ($content -match '(?i)EditorCore|next/|database|renderer') { Add-Error "Task 11 forbidden runtime import term: $relative" }
+  }
+}
 if ($null -ne $packageLock -and $null -ne $packageLock.PSObject.Properties['packages'] -and $null -ne $packageLock.packages.PSObject.Properties['node_modules/@supabase/supabase-js']) { Add-Error 'reference-only Supabase package-lock dependency' }
 
 if ($errors.Count -gt 0) { throw ("Editor UI provenance verification failed:`n - " + ($errors -join "`n - ")) }

@@ -15,6 +15,7 @@ import { ProjectOnboarding } from "../ProjectOnboarding";
 import { CreationInterview } from "../features/creation/CreationInterview";
 import { DraftGapMedia } from "../features/media/DraftGapMedia";
 import { LegacyWorkspacePage } from "./LegacyWorkspacePage";
+import { EditorWorkbenchRoute } from "../features/editor/workbench/EditorWorkbenchRoute";
 import { HomePage, opensLastProjectOnStart, ProductEmptyPage, ProductShell, SettingsPage } from "./ProductShell";
 import { ProjectWorkspaceProvider, resolveLastValidProjectId } from "./ProjectWorkspaceProvider";
 import { isWorkspaceSection, resolveWorkspaceLocation, type WorkspaceSection } from "./routeManifest";
@@ -157,6 +158,11 @@ function WorkspacePage() {
   }
   if (section === "editor" && !requestedEditingSessionId) {
     return <CanonicalEditorEntry projectId={projectId} />;
+  }
+  if (section === "editor") {
+    return <ProductShell projectId={projectId} projects={projects} section="editing" onNavigate={navigateTo} onOpenSettings={() => void navigate({ to: "/settings/general" })} forceCollapsed>
+      <EditorWorkbenchRoute projectId={projectId} sessionId={requestedEditingSessionId} />
+    </ProductShell>;
   }
   return (
     <ProjectWorkspaceProvider value={{ projectId, section, projects }}>

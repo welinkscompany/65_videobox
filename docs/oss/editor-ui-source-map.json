@@ -99,7 +99,7 @@
       "upstream_path": "src/components/layout/authenticated-layout.tsx",
       "upstream_sha256": "e3ab0837b3bd3e39153aad8b7b3c07c8fe6768f23bb0dc362ab4a41a5ee6e1ff",
       "path": "apps/web/src/app/ProductShell.tsx",
-      "normalized_sha256": "9a2a3b5e8845de56cea5a9b5fb8046d6f6dead50aa81664621668446b624f6cd",
+      "normalized_sha256": "f97bffd9c8f05536bcd0cf18b9b8ff1db530ddc50470bba3f67bf0b4b0d65732",
       "test_path": "apps/web/src/app/ProductShell.test.tsx"
     },
     {
@@ -107,7 +107,7 @@
       "upstream_path": "src/components/layout/app-sidebar.tsx",
       "upstream_sha256": "cd363c86fe2e6ad838c013075c51f2c5e7cb61e08082020351c48896c882bc87",
       "path": "apps/web/src/app/ProductShell.tsx",
-      "normalized_sha256": "9a2a3b5e8845de56cea5a9b5fb8046d6f6dead50aa81664621668446b624f6cd",
+      "normalized_sha256": "f97bffd9c8f05536bcd0cf18b9b8ff1db530ddc50470bba3f67bf0b4b0d65732",
       "test_path": "apps/web/src/app/ProductShell.test.tsx"
     }
   ],
@@ -273,5 +273,20 @@
       "test_path": "apps/web/src/ui-system.test.tsx"
     }
   ],
-  "apache_adaptations": []
+  "apache_adaptations": [],
+  "reference_only_decisions": [
+    {
+      "task": "Task 11 editor workbench",
+      "source_pin": "opencut-classic",
+      "reference": "classic panel-layout only",
+      "materialized_paths": [],
+      "local_paths": [
+        "apps/web/src/features/editor/workbench/editorWorkbenchLayout.ts",
+        "apps/web/src/features/editor/workbench/editorWorkbenchReadOnlyAdapters.tsx",
+        "apps/web/src/features/editor/workbench/EditorWorkbench.tsx",
+        "apps/web/src/features/editor/workbench/EditorWorkbenchRoute.tsx"
+      ],
+      "forbidden_import_terms": ["EditorCore", "next/", "database", "renderer"]
+    }
+  ]
 }

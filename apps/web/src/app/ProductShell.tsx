@@ -24,12 +24,13 @@ function readSettings(): SettingsState { try { const stored = JSON.parse(window.
 function saveSettings(next: SettingsState) { window.localStorage.setItem(settingsKey, JSON.stringify(next)); }
 export function opensLastProjectOnStart() { return readSettings().openLastProject; }
 
-export function ProductShell({ projectId, projects, section, onNavigate, onOpenSettings, children }: { projectId: string; projects: Project[]; section: ShellSection; onNavigate: (projectId: string, section: WorkspaceSection) => void; onOpenSettings: () => void; children: ReactNode }) {
-  const [collapsed, setCollapsed] = useState(false);
+export function ProductShell({ projectId, projects, section, onNavigate, onOpenSettings, children, forceCollapsed = false }: { projectId: string; projects: Project[]; section: ShellSection; onNavigate: (projectId: string, section: WorkspaceSection) => void; onOpenSettings: () => void; children: ReactNode; forceCollapsed?: boolean }) {
+  const [collapsed, setCollapsed] = useState(forceCollapsed);
   const mobileTriggerRef = useRef<HTMLButtonElement>(null);
   const current = projects.find((project) => project.project_id === projectId) ?? projects[0];
   const nav = [["홈", "home"], ["새 영상 만들기", "create"], ["편집", "editing"], ["자산", "media"], ["출력", "outputs"]] as const;
   const go = (next: string) => { if (window.innerWidth < 768) document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); onNavigate(projectId, next as WorkspaceSection); };
+  useEffect(() => { if (forceCollapsed) setCollapsed(true); }, [forceCollapsed]);
   useEffect(() => { const restoreMobileTrigger = (event: KeyboardEvent) => { if (event.key === "Escape" && window.innerWidth < 768) queueMicrotask(() => mobileTriggerRef.current?.focus()); }; document.addEventListener("keydown", restoreMobileTrigger); return () => document.removeEventListener("keydown", restoreMobileTrigger); }, []);
   return <SidebarProvider open={!collapsed} onOpenChange={(open) => setCollapsed(!open)}>
     <div className="vb-product-shell">
