@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
-import { EditorWorkbench } from "./EditorWorkbench";
+import { EditorWorkbench, persistedPanelPixels } from "./EditorWorkbench";
 
 beforeEach(() => { vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} }); vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({ width: 1000 } as DOMRect); Object.defineProperty(window, "innerWidth", { configurable: true, value: 1920 }); });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); window.localStorage.clear(); });
@@ -25,5 +25,22 @@ describe("EditorWorkbench", () => {
     fireEvent.keyDown(dialog, { key: "Escape" });
     expect(screen.queryByRole("dialog")).toBeNull();
     await waitFor(() => expect(trigger).toHaveFocus());
+  });
+
+  it("keeps the disabled Eugene draft in browser-local UI state without enabling any request", () => {
+    window.localStorage.setItem("videobox.editor-workbench.eugene-draft", "다음에 확인할 추천 초안");
+    window.localStorage.setItem("videobox.editor-workbench.ui", JSON.stringify({ leftOpen: false, rightOpen: true, activeDrawer: null, leftSize: 280, rightSize: 320 }));
+    const rendered = render(<EditorWorkbench view={view} />);
+    const composer = screen.getByLabelText("유진에게 요청하기");
+    expect(composer).toHaveValue("다음에 확인할 추천 초안");
+    expect(composer).toBeDisabled();
+    rendered.unmount();
+    render(<EditorWorkbench view={view} />);
+    expect(screen.getByLabelText("유진에게 요청하기")).toHaveValue("다음에 확인할 추천 초안");
+  });
+
+  it("persists finite panel pixel values and rejects invalid resize values", () => {
+    expect(persistedPanelPixels({ asPercentage: 30, inPixels: 401.2 }, 260, 320)).toBe(401);
+    expect(persistedPanelPixels({ asPercentage: 30, inPixels: Number.NaN }, 260, 320)).toBe(320);
   });
 });

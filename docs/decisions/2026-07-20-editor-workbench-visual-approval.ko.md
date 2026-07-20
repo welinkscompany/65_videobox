@@ -1,5 +1,7 @@
 # Task 11 편집 작업판 시각 승인 기록
 
+<!-- editor-workbench-approval: {"manifest_sha256":"641c7b3cb02b7840016ec4d720cd8386457e9fdbdbed84fa20ab3998e04ff023","status":"pending"} -->
+
 - 상태: `approval_required`
 - 결정: 다섯 viewport의 정적, 읽기 전용 workbench 시안을 생성했다. 사용자의 두 번째 명시적 시각 승인이 전까지 Task 11은 완료 처리하지 않는다.
 - 범위 제외: Task 12 정확 미리보기, Task 13 재생·audition, Task 14 geometry mutation, Task 20 실제 유진 추천.

@@ -126,9 +126,10 @@ function WorkspacePage() {
   const projects = rootRoute.useLoaderData() as Project[];
   const navigate = useNavigate();
   const router = useRouter();
-  const requestedEditingSessionId = typeof router.state.location.search.session_id === "string"
+  const rawEditingSessionId = typeof router.state.location.search.session_id === "string"
     ? router.state.location.search.session_id
     : null;
+  const requestedEditingSessionId = rawEditingSessionId?.trim() || null;
   const normalizedSection = section === "editor" ? "editing" : section;
   if (!isWorkspaceSection(normalizedSection) || !projects.some((project) => project.project_id === projectId)) {
     return <RecoveryPage />;
@@ -154,6 +155,11 @@ function WorkspacePage() {
     if (isMedia && safeReturn) return <ProductShell projectId={projectId} projects={projects} section={section} onNavigate={navigateTo} onOpenSettings={() => void navigate({ to: "/settings/general" })}><DraftGapMedia projectId={projectId} returnTo={safeReturn} /></ProductShell>;
     return <ProductShell projectId={projectId} projects={projects} section={normalizedSection} onNavigate={navigateTo} onOpenSettings={() => void navigate({ to: "/settings/general" })}>
       <ProductEmptyPage title={isMedia ? "자산을 준비해 주세요" : "아직 완성본이 없어요"} description={isMedia ? "영상에 넣을 사진, 영상, 소리를 추가하면 여기에서 고를 수 있어요." : "편집을 마치면 이곳에서 완성본을 확인할 수 있어요."} action={safeReturn ? "기획으로 돌아가기" : isMedia ? "새 영상 만들기" : "편집 열기"} onClick={() => safeReturn ? window.location.assign(safeReturn) : navigateTo(projectId, isMedia ? "create" : "editing")} />
+    </ProductShell>;
+  }
+  if (section === "editor" && rawEditingSessionId !== null && !requestedEditingSessionId) {
+    return <ProductShell projectId={projectId} projects={projects} section="editing" onNavigate={navigateTo} onOpenSettings={() => void navigate({ to: "/settings/general" })} forceCollapsed>
+      <EditorWorkbenchRoute projectId={projectId} sessionId={null} />
     </ProductShell>;
   }
   if (section === "editor" && !requestedEditingSessionId) {

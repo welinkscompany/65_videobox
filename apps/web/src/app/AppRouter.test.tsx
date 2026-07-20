@@ -63,6 +63,19 @@ describe("AppRouter URL ownership", () => {
     await waitFor(() => expect(router.state.location.href).toBe("/projects/project_a/editor?session_id=editing_session_latest"));
   });
 
+  it("fails closed for a blank canonical editor session instead of resolving the latest session", async () => {
+    vi.spyOn(api, "listProjects").mockResolvedValue([{ project_id: "project_a", name: "A", status: "active", root_storage_uri: "local://a" }]);
+    const latest = vi.spyOn(api, "getLatestEditingSession");
+    const manifest = vi.spyOn(api, "getEditorPlaybackManifest");
+    const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects/project_a/editor?session_id=%20"] }));
+
+    render(<AppRouter router={router} />);
+
+    expect(await screen.findByText("편집 세션을 찾을 수 없어요. 다시 열어 주세요.")).toBeVisible();
+    expect(latest).not.toHaveBeenCalled();
+    expect(manifest).not.toHaveBeenCalled();
+  });
+
   it("redirects / to the catalog-validated last project with only one catalog request", async () => {
     window.localStorage.setItem("videobox.last-valid-project", "project_b");
     const listProjects = vi.spyOn(api, "listProjects").mockResolvedValue([

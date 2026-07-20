@@ -21,7 +21,7 @@ for (const [width, height] of snapshots) test(`editor workbench snapshot ${width
   await page.screenshot({ path: `e2e/snapshots/editor-workbench-${width}x${height}.png`, animations: "disabled", caret: "hide" });
 });
 
-test("desktop dock choice persists and keyboard resize changes its rendered width", async ({ page }) => {
+test("desktop pointer drag persists the actual dock width across reload", async ({ page }) => {
   await page.route("**/api/projects", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ projects: [{ project_id: "local-draft", name: "편집 작업판", status: "active", root_storage_uri: "local://editor-workbench" }] }) }));
   await page.route("**/playback-manifest", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(manifest) }));
   await page.setViewportSize({ width: 1920, height: 1080 });
@@ -31,12 +31,35 @@ test("desktop dock choice persists and keyboard resize changes its rendered widt
   const workbench = page.getByRole("region", { name: "편집 작업판" });
   const rightDock = page.getByRole("complementary", { name: "유진과 Inspector" });
   const before = await rightDock.boundingBox();
-  await page.getByLabel("오른쪽 패널 크기 조절").press("ArrowRight");
+  const handle = await page.getByLabel("오른쪽 패널 크기 조절").boundingBox();
+  if (!handle) throw new Error("right resize handle is missing");
+  await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(handle.x - 80, handle.y + handle.height / 2, { steps: 6 });
+  await page.mouse.up();
   await expect.poll(async () => (await rightDock.boundingBox())?.width ?? 0).toBeGreaterThan((before?.width ?? 0));
+  const resizedWidth = (await rightDock.boundingBox())?.width ?? 0;
+  await page.reload();
+  await expect(workbench).toHaveAttribute("data-editor-density", "desktop-both");
+  await expect.poll(async () => (await page.getByRole("complementary", { name: "유진과 Inspector" }).boundingBox())?.width ?? 0).toBeCloseTo(resizedWidth, 0);
   await page.getByRole("button", { name: "유진과 Inspector" }).click();
   await expect(workbench).toHaveAttribute("data-editor-density", "desktop-single");
-  await page.reload();
+});
+
+test("constrains real workbench body geometry and keeps the single preview at least half-width", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("videobox.editor-workbench.ui", JSON.stringify({ leftOpen: true, rightOpen: false, activeDrawer: null, leftSize: 280, rightSize: 320 })));
+  await page.route("**/api/projects", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ projects: [{ project_id: "local-draft", name: "편집 작업판", status: "active", root_storage_uri: "local://editor-workbench" }] }) }));
+  await page.route("**/playback-manifest", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(manifest) }));
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/projects/local-draft/editor?session_id=editor-workbench-e2e");
+  const workbench = page.getByRole("region", { name: "편집 작업판" });
+  const body = page.locator(".vb-editor-workbench__body");
+  const preview = page.getByRole("region", { name: "미리보기 자리" });
   await expect(workbench).toHaveAttribute("data-editor-density", "desktop-single");
+  const bodyBox = await body.boundingBox();
+  const previewBox = await preview.boundingBox();
+  expect(Number(await workbench.getAttribute("data-available-workbench-width"))).toBeCloseTo(bodyBox?.width ?? 0, 0);
+  expect(previewBox?.width ?? 0).toBeGreaterThanOrEqual(Math.max(640, (bodyBox?.width ?? 0) / 2));
 });
 
 test("narrow drawer traps focus and returns it to its trigger", async ({ page }) => {

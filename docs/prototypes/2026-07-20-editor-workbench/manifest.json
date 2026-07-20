@@ -1,6 +1,8 @@
 {
   "task": "Task 11 source-derived responsive editor workbench",
-  "approval": { "status": "pending", "required": "second explicit user visual approval" },
+  "approval": { "status": "pending", "required": "second explicit user visual approval", "record": "docs/decisions/2026-07-20-editor-workbench-visual-approval.ko.md" },
+  "required_korean_labels": ["읽기 전용 편집 작업판", "자산과 대본", "유진과 Inspector", "미리보기 자리", "타임라인"],
+  "manifest_sha256": "641c7b3cb02b7840016ec4d720cd8386457e9fdbdbed84fa20ab3998e04ff023",
   "viewports": [
     { "file": "editor-workbench-1920x1080.png", "width": 1920, "height": 1080, "sha256": "ffaefed6424c8335133faddd7accab0699ff17ca7453ccd24086fce10032f5ec" },
     { "file": "editor-workbench-1440x900.png", "width": 1440, "height": 900, "sha256": "7298eba51fea155a78ae72a60a0ab389050a375e50ae4f198aaaeddc151dceb0" },

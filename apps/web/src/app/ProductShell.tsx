@@ -26,11 +26,15 @@ export function opensLastProjectOnStart() { return readSettings().openLastProjec
 
 export function ProductShell({ projectId, projects, section, onNavigate, onOpenSettings, children, forceCollapsed = false }: { projectId: string; projects: Project[]; section: ShellSection; onNavigate: (projectId: string, section: WorkspaceSection) => void; onOpenSettings: () => void; children: ReactNode; forceCollapsed?: boolean }) {
   const [collapsed, setCollapsed] = useState(forceCollapsed);
+  const previousForceCollapsed = useRef(forceCollapsed);
   const mobileTriggerRef = useRef<HTMLButtonElement>(null);
+  if (forceCollapsed && !previousForceCollapsed.current) {
+    previousForceCollapsed.current = true;
+    if (!collapsed) setCollapsed(true);
+  } else if (!forceCollapsed) previousForceCollapsed.current = false;
   const current = projects.find((project) => project.project_id === projectId) ?? projects[0];
   const nav = [["홈", "home"], ["새 영상 만들기", "create"], ["편집", "editing"], ["자산", "media"], ["출력", "outputs"]] as const;
   const go = (next: string) => { if (window.innerWidth < 768) document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); onNavigate(projectId, next as WorkspaceSection); };
-  useEffect(() => { if (forceCollapsed) setCollapsed(true); }, [forceCollapsed]);
   useEffect(() => { const restoreMobileTrigger = (event: KeyboardEvent) => { if (event.key === "Escape" && window.innerWidth < 768) queueMicrotask(() => mobileTriggerRef.current?.focus()); }; document.addEventListener("keydown", restoreMobileTrigger); return () => document.removeEventListener("keydown", restoreMobileTrigger); }, []);
   return <SidebarProvider open={!collapsed} onOpenChange={(open) => setCollapsed(!open)}>
     <div className="vb-product-shell">

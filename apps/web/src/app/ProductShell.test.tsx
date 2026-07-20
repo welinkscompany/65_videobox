@@ -24,6 +24,12 @@ describe("product shell", () => {
     expect(sidebar).toHaveAttribute("data-state", "collapsed");
     fireEvent.click(screen.getByRole("button", { name: "사이드바 접기" }));
     expect(sidebar).toHaveAttribute("data-state", "expanded");
+
+    await router.navigate({ to: "/projects/first/home" });
+    await screen.findByTestId("product-home");
+    await router.navigate({ to: "/projects/first/editor", search: { session_id: "session-a" } });
+    await screen.findByRole("region", { name: "편집 작업판" });
+    expect(document.querySelector('[data-slot="sidebar"]')).toHaveAttribute("data-state", "collapsed");
   });
 
   it("shows creator navigation, a project switcher, and an action-only home", async () => {
