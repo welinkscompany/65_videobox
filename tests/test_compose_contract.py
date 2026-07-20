@@ -1,6 +1,10 @@
 from pathlib import Path
+import re
 
 import yaml
+
+
+ROOT = Path(__file__).parents[1]
 
 
 def test_compose_uses_exact_project_name_and_workspace_only_web_loopback_port() -> None:
@@ -106,6 +110,15 @@ def test_hermes_oauth_bootstrap_is_isolated_from_preauth_and_videobox_data() -> 
     }
     assert compose["networks"]["videobox-hermes-egress"] == {}
     assert "videobox_hermes_oauth_state" in compose["volumes"]
+
+
+def test_hermes_oauth_bootstrap_verifier_requires_the_compose_pinned_image() -> None:
+    compose = yaml.safe_load((ROOT / "compose.yaml").read_text(encoding="utf-8"))
+    verifier = (ROOT / "scripts" / "verify-hermes-oauth-bootstrap.ps1").read_text(encoding="utf-8")
+    expected_image = re.search(r"\$image\s+-ne\s+'([^']+)'", verifier)
+
+    assert expected_image is not None
+    assert expected_image.group(1) == compose["services"]["videobox-hermes-oauth-bootstrap"]["image"]
 
 
 def test_hermes_dashboard_is_loopback_only_and_uses_only_the_isolated_oauth_state() -> None:

@@ -2,10 +2,11 @@
 
 ## Goal
 
-Enable a VideoBox-owned Hermes Agent to complete official `openai-codex`
-ChatGPT subscription OAuth and select `gpt-5.5`, without copying, mounting,
-or reading credentials owned by AK-System, the host Hermes installation, or
-any other project.
+Preserve an isolated VideoBox-owned bootstrap boundary for official
+`openai-codex` ChatGPT subscription OAuth without copying, mounting, or
+reading credentials owned by AK-System, the host Hermes installation, or any
+other project. The pending profile is `provider=openai-codex` and
+`model=gpt-5.4-mini`; this design performs neither OAuth nor model selection.
 
 This design creates an OAuth bootstrap boundary only. It does not authorize a
 GPT inference request, project-data transfer, editing mutation, rendering,
@@ -29,18 +30,22 @@ interactive login.
   VideoBox internal services or host mounts. This is deliberately a
   local-MVP speed tradeoff, not an allowlisted production egress guarantee;
   the later egress-gateway slice replaces this direct bootstrap egress.
-- The interactive operator runs Hermes' official `openai-codex` OAuth command
-  inside the bootstrap container and chooses `gpt-5.5`. Credentials stay in
-  the dedicated named volume; they are never printed, exported, copied into
-  a repository file, `.env`, database, snapshot, audit record, or memory.
-- The local-MVP runtime may consume this volume for the owner's Hermes
-  dashboard/CLI after the dedicated runtime profile is bootstrapped. It has no
-  VideoBox project/media/DB/API mount or route. Direct provider egress is a
-  temporary local-MVP limitation, not a production allowlisted gateway.
-- Hermes built-in memory and local Mem0 OSS are auxiliary context under Hermes
-  runtime control. They do not change VideoBox project/editor/asset SSOT and
-  do not authorize project-data transfer, mutation, render/export, CapCut, or
-  an ordinary VideoBox API route.
+- An interactive operator may run Hermes' official `openai-codex` OAuth
+  command inside the bootstrap container only after the separate gate is
+  authorized. The pending provider/model pair is `openai-codex` and
+  `gpt-5.4-mini`. Credentials stay in the dedicated named volume; they are
+  never printed, exported, copied into a repository file, `.env`, database,
+  snapshot, audit record, or memory.
+- The official Hermes Dashboard consumes the isolated OAuth state volume and
+  binds only `127.0.0.1:9119`. There is no dedicated custom runtime profile.
+  It has no VideoBox project/media/DB/API mount or route. Direct bootstrap
+  egress remains a temporary limitation, not a production allowlisted gateway.
+- Memory configuration is Dashboard-only: the user directly enters any key in
+  `Memory Provider -> mem0 -> Platform`. No source config stores that key or
+  memory content, and this design does not claim a successful GPT request.
+  Memory configuration does not change VideoBox project/editor/asset SSOT or
+  authorize project-data transfer, mutation, render/export, CapCut, or an
+  ordinary VideoBox API route.
 
 ## Rejected designs
 
@@ -61,8 +66,10 @@ interactive login.
   logs, inspect output, configuration, or repository artifacts.
 - Bootstrap requests include no project text, media, transcript, caption, or
   prompt. The later egress gateway also has no access to VideoBox data.
-- The bootstrap command is interactive and user-operated. A successful login
-  records only a redacted outcome and pinned Hermes image/model identifier.
+- The bootstrap command is interactive and user-operated. This document does
+  not claim a successful login, model selection, Dashboard key entry, memory
+  configuration, or GPT request. A future redacted outcome may record only
+  the pinned Hermes image and pending provider/model identifier.
 - Any gateway, volume, or credential error fails closed. It cannot fall back to
   host credentials, a generic OpenAI API key, another provider, or an
   unrestricted network. The local-MVP direct egress is deliberately recorded
@@ -80,9 +87,10 @@ interactive login.
    `.env`, logs, database, snapshots, or ordinary `/api/*` responses.
 5. `logout`, revoke, expiry, and restart leave inference disabled and do not
    alter VideoBox project truth.
-6. `gpt-5.5` is the configured bootstrap default only after the operator sees
-   it in the account's official Hermes picker; an unavailable model blocks the
-   bootstrap rather than silently substituting another model.
+6. `provider=openai-codex` and `model=gpt-5.4-mini` remain pending until the
+   operator sees the exact identifiers in the official Hermes picker. An
+   unavailable provider or model blocks the bootstrap rather than silently
+   substituting another one.
 
 ## Out of scope
 

@@ -17,7 +17,7 @@ try {
     $networks = (& docker inspect --format '{{range $name, $_ := .NetworkSettings.Networks}}{{$name}} {{end}}' $containerId).Trim()
     $ports = (& docker inspect --format '{{json .NetworkSettings.Ports}}' $containerId).Trim()
 
-    if ($image -ne 'nousresearch/hermes-agent@sha256:3db34ce19adfa080736a2a3feb0316dbcccc588faa9afe7fd8ae1c03b4f1a53a') {
+    if ($image -ne 'nousresearch/hermes-agent@sha256:ad79951c26b7707c8c651f30780338d4f9bb17ddca19f6ea78eb27cbf83a3787') {
         throw "Unexpected VideoBox OAuth bootstrap image."
     }
     if ($mounts -ne '/opt/data') {
