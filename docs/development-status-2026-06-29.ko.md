@@ -1,6 +1,14 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 280. 2026-07-20 Platform-only Hermes source cleanup closeout`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 281. 2026-07-20 Task 11 read-only editor workbench technical closeout`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+
+## 281. 2026-07-20 Task 11 read-only editor workbench technical closeout
+
+- `[~] 기술 구현 완료, 사용자 시각 승인 대기`: `2096043e2`, `67e1efd8`, `a170b834`, `ffbd77be`가 canonical editor route를 manifest 단일 read → immutable `EditorViewModel`으로 연결하고, metadata-only dock·preview slot·timeline·responsive drawer를 추가했다. 실제 preview/audio/video, editor mutation, Director/media stateful adapter, renderer, provider/Hermes 호출은 추가하지 않았다.
+- 실제 workbench 폭으로 density를 계산한다. 1600+는 preview 720px 이상일 때만 양쪽 dock, 1280–1599는 preview `max(640px, available width의 50%)` 이상인 한 dock, 그 미만은 focus-managed drawer다. route/session 변경의 이전 view 노출, blank session, drag resize persistence, sidebar 재진입 첫 paint, disabled Eugene local draft도 fail-closed 또는 browser-local state로 고정했다.
+- 검증: TDD RED 후 frontend full `34 files / 315 tests passed`, production build, 8000 fake API와 분리된 `npm --prefix apps/web run test:e2e:editor-workbench` `8 passed`, artifact/provenance pytest `16 passed`(기존 multipart PendingDeprecationWarning 1), PowerShell provenance verifier, `git diff --check`를 통과했다. 독립 사양·품질 재리뷰은 Critical 0 / Important 0이며 후속 minor도 닫았다. build의 500 kB chunk 안내와 기존 React `act(...)` stderr는 비차단 기존 경고다.
+- 다섯 deterministic screenshot과 manifest/승인 문서는 생성했지만 `approval.status=pending`/`approval_required`다. 사용자 두 번째 명시적 시각 승인 전에는 Task 11 checkbox와 누적을 바꾸지 않는다. Task 9 사람/환경 acceptance도 별도 gate로 **9/22 (40.9%)**, 잔여 **59.1%**를 유지한다.
+- 다음 작업: Hermes Dashboard/provider 설정은 사용자가 요청할 때까지 보류한다. 사용자가 1920/1440/1280/768/390 작업판 시안을 명시 승인 또는 수정 요청한 뒤, 승인 기록만 갱신한다. 그 뒤 공식 Task 12 revision-bound exact FFmpeg proxy preview를 별도 TDD slice로 시작한다.
 
 ## 280. 2026-07-20 Platform-only Hermes source cleanup closeout
 

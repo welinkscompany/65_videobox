@@ -272,6 +272,8 @@ Commit: `feat: expose an authoritative editor view model`
 
 - [ ] **Task 11 완료**
 
+> 2026-07-20 기술 구현 기록: `2096043e2`→`ffbd77be`에서 canonical read-only workbench, responsive physical-width/drawer contract, deterministic five viewport artifact, source provenance 및 full frontend/build/isolated E2E 검증을 완료했다. 다만 두 번째 사용자 시각 승인이 `pending`이므로 checkbox와 누적 진행률은 **9/22 (40.9%)**로 유지한다. exact preview/renderer/mutation/provider는 이 Task에 포함하지 않았다.
+
 **Files:** create toolbar/workbench/left/right/timeline dock components/tests; update route manifest, source map, notices.
 
 - [ ] **RED:** left 자산/대본/자막, center PreviewStage slot, persistent Eugene composer plus inline recommendation area and Inspector, bottom timeline, keyboard resizers, focus, UI-only panel persistence, and viewport density rules.
