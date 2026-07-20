@@ -1,6 +1,14 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 273. 2026-07-20 Yujin Agent Package v1 closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 274. 2026-07-20 agent foundation handoff`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+
+## 274. 2026-07-20 agent foundation handoff
+
+- 브랜치 `codex/videobox-container-compatibility`의 HEAD와 `origin/codex/videobox-container-compatibility`는 동일한 `019a9a6c98ba037ed38070da0b33a8ef6645abbc`이며 worktree는 clean이다.
+- 이번 정적 Agent Foundation closeout에는 versioned Yujin profile/prompt (`1cc3d10`), static ToolSpec/Gateway (`e384ec4`), static redacted decision audit/retry (`eda1411`), static approval workflow (`ce341de`), Yujin Agent Package v1 (`019a9a6`)이 포함된다. Soul·user preference/consent·response-only skills·MCP default-deny는 manifest로 고정됐지만 실제 Hermes MCP transport, provider, OAuth, DB/API route, memory storage, render/mutation은 아직 없다.
+- 최신 package-focused 검증은 `158 passed`, production workspace build와 `--network none --read-only` image import를 통과했다. Python 전체 suite는 반복해서 64초 timeout 뒤 pytest stdout `OSError`가 발생했으므로 full-pass로 주장하지 않는다.
+- 다음 구현 단위는 actual OAuth/provider 연결이 아니다. 먼저 §23.2의 durable capability issuer/revocation source와 gateway-only route/network split을 별도 승인 범위로 재점검하고, static fail-closed contract부터 TDD로 준비한다. Hermes network, device-code OAuth, GPT/Qwen/Gemini call은 egress·text-only consent·request budget/audit gate 전까지 실행하지 않는다.
+- Task 9 사람/환경 acceptance는 Agent Foundation closeout과 독립이다. 누적은 계속 **9/22 (40.9%)**, 잔여 **59.1%**다.
 
 ## 273. 2026-07-20 Yujin Agent Package v1 closeout
 
