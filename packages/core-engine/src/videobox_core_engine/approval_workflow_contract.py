@@ -22,6 +22,8 @@ __all__ = (
     "ApprovalPreflightResult",
     "ExplicitApprovalSignal",
     "NO_SKILL_MANIFEST_SHA256",
+    "APPROVAL_WORKFLOW_CONTRACT_VERSION",
+    "BUILTIN_APPROVAL_WORKFLOW_MANIFEST_SHA256",
     "StaticProposalArtifact",
     "StaticWorkflowTransition",
     "advance_static_workflow",
@@ -33,6 +35,10 @@ __all__ = (
 
 _BACKEND_APPROVAL_ISSUER = object()
 NO_SKILL_MANIFEST_SHA256 = "e75fd2c43ff2770839405a3c5f4049cf62f200ba6aef8a3d6e824836a8d2a905"
+APPROVAL_WORKFLOW_CONTRACT_VERSION = "approval-workflow-contract-v1"
+# This binds the static, non-executing workflow contract itself, not a future
+# approval capability or action.  Keep the literal pinned for package lookup.
+BUILTIN_APPROVAL_WORKFLOW_MANIFEST_SHA256 = "90b45aa967be7e7eb1989e9c6a847b978ce5b41c4d7b62051cb0c87e1e1807b9"
 _OPAQUE_ID = re.compile(r"[a-z][a-z0-9-]{2,127}\Z")
 _REVISION_ID = re.compile(r"revision-[a-z0-9-]{1,120}\Z")
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
@@ -66,6 +72,16 @@ def _canonical_json(value: object) -> str:
 
 def _digest(value: object) -> str:
     return sha256(_canonical_json(value).encode("utf-8")).hexdigest()
+
+
+if BUILTIN_APPROVAL_WORKFLOW_MANIFEST_SHA256 != _digest(
+    {
+        "contract_version": APPROVAL_WORKFLOW_CONTRACT_VERSION,
+        "mode": "static_nonexecuting",
+        "no_skill_manifest_sha256": NO_SKILL_MANIFEST_SHA256,
+    }
+):
+    raise RuntimeError("built-in approval workflow manifest is not pinned to its static contract")
 
 
 def _require_id(value: str, *, field_name: str) -> None:

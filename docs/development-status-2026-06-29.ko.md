@@ -1,6 +1,11 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 272. 2026-07-20 static approval workflow closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 273. 2026-07-20 Yujin Agent Package v1 closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+
+## 273. 2026-07-20 Yujin Agent Package v1 closeout
+
+- `[x] 완료 (done)`: versioned Soul, user preference/consent, response-only skills, MCP default-deny manifest를 정적 package로 pin했다. memory opt-in은 false/scope none/retention 0이며 MCP는 declaration-only status read 하나 외 전부 deny다.
+- package 경계는 Soul·user preference·skills·MCP policy의 canonical value와 exact type을 재검증해 constructor-bypass forged artifact를 거부한다. provider/Hermes/MCP transport/DB/API/UI/memory storage/mutation은 시작하지 않았고 Gemini call 0, Task 9은 9/22 (40.9%) 유지다.
 
 ## 272. 2026-07-20 static approval workflow closeout
 
