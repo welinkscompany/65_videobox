@@ -289,6 +289,8 @@ Commit: `feat: compose the VideoBox editor workbench`
 
 - [ ] **Task 12 완료**
 
+> **2026-07-21 기술 구현·검증 기록 (공식 checkbox/누적 동결):** `c6890becd`→`82f11e106`에서 current editing-session revision에 fenced 된 full/selected-range FFmpeg proxy와 API Range delivery를 구현했다. 실제 10초 1280×720 local acceptance fixture는 cold `472.5ms`(20초 이내), warm cache lookup `84.3ms`(500ms 이내)였고, focused/affected backend·API·real FFmpeg suite `102 passed`, `apps/web/e2e/exact-preview.spec.mjs` `5 passed`를 확인했다. preview는 output approval/CapCut 상태를 바꾸지 않는다. Task 9의 사람/환경 acceptance와 Task 11의 사용자 시각 승인은 여전히 pending이므로, 사용자 지시에 따라 이 checkbox와 공식 누적 **9/22 (40.9%)**는 바꾸지 않는다. 이번 closeout에는 전체 Python regression을 다시 실행하지 않았으므로 해당 full-pass는 **미검증**이다.
+
 **Files:** create exact-preview artifact domain/core/API modules/tests; modify FFmpeg renderer adapter, SQLite schema/store, job domain/store/recovery, local pipeline/orchestration/models/main.
 
 - [ ] **RED:** revision+range+source SHA+render profile cache key, `timelineStartSec/timelineEndSec/artifactRevision/generationId`, B-roll visibility, exactly-once burned captions/overlays, narration/BGM/SFX scheduling, gain/fade/ducking, crop/loop/in/out, output canvas/fps, PTS normalized to zero for a selected range, stale artifact rejection, obsolete-job supersession/late-completion fencing, failure rollback, restart reuse, project isolation/stale path/path traversal, HTTP Range `206`/`Accept-Ranges`/`Content-Range`/invalid range/MIME, H.264/AAC `faststart` browser profile, bounded retention.
@@ -304,6 +306,8 @@ Commit: `feat: render exact revision previews`
 ### Task 13: Implement PreviewStage and one global preview coordinator
 
 - [ ] **Task 13 완료**
+
+> **2026-07-21 기술 구현·검증 기록 (공식 checkbox/누적 동결):** `dd570bbea`는 workbench slot을 immutable exact-preview state와 하나의 player shell로 교체했다. 현재 artifact만 mount하고, pending/failed/stale은 재생을 막고 refresh만 제공한다. source audition은 exact player를 교체하며 autoplay하지 않고, seek은 `timelineStartSec + media.currentTime`로 표시한다. focused E2E는 current/pending/stale/retry/audition 분리를 `5 passed`로 확인했고, 기존 responsive workbench E2E도 새 stage region/slot geometry에 맞춰 `8 passed`로 갱신했다. full frontend는 `37 files / 335 tests passed`, production build와 OSS provenance verifier는 통과했다. 기존 React `act(...)`/JSDOM stderr와 build 500 kB chunk 안내는 이번 변경에서 새로 발생한 실패가 아닌 비차단 경고다. Task 9·Task 11 상태와 공식 누적 **9/22 (40.9%)**는 사용자 승인 전 그대로다.
 
 **Files:** create PreviewStage, PreviewCoordinator/context, preview coordinate modules/tests; modify workbench and existing `ManualMediaLibrary`/`AssetPreviewPlayer` adapters; update source map/notices.
 

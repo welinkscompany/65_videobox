@@ -1,6 +1,15 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 281. 2026-07-20 Task 11 read-only editor workbench technical closeout`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 282. 2026-07-21 Task 12·13 exact preview technical verification closeout`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+
+## 282. 2026-07-21 Task 12·13 exact preview technical verification closeout
+
+- `[~] 기술 구현·자동 검증 완료, 공식 checkbox/사람 gate 동결`: `c6890becd`→`82f11e106`은 canonical composition plan과 durable generation fence를 통해 full/selected-range exact MP4를 만들고, source/revision/fingerprint 변화에는 stale 처리·Range delivery 거부·late completion fence를 적용한다. `dd570bbea`는 그 manifest 상태를 읽어 current artifact 한 개만 player로 mount하고, pending/failed/stale에는 재생 대신 refresh recovery를 제공한다. source audition은 합성 편집본이라고 주장하지 않고 같은 player shell을 교체하며 autoplay하지 않는다.
+- 실제 local acceptance fixture(10초, 1280×720, LocalPipelineRunner)는 cold `472.5ms`(기준 ≤20초), warm cache lookup `84.3ms`(기준 ≤500ms)로 두 성능 gate를 통과했다. temporary local store/asset fixture만 사용했으며 provider/Hermes, output approval, CapCut 또는 editing mutation은 실행하지 않았다.
+- 검증: `.venv\Scripts\python.exe -m pytest -q tests/test_exact_preview_artifact.py tests/test_api_exact_preview.py tests/test_local_pipeline_final_render.py tests/test_ffmpeg_final_renderer.py tests/test_editing_session.py`는 `102 passed`(기존 multipart PendingDeprecationWarning 1)였다. real ffprobe fixture는 H.264/AAC/faststart, burned ASS, Range, PTS zero, gap/overlap·overlay/audio control과 stale fence를 포함한다. `npm --prefix apps/web run test`는 `37 files / 335 tests passed`, production build, provenance verifier, exact PreviewStage E2E `5 passed`, isolated responsive workbench E2E `8 passed`, `git diff --check`를 통과했다. build 500 kB 안내와 기존 React `act(...)`/JSDOM stderr는 비차단 기존 경고다.
+- 전체 Python regression은 이번 slice에서 실행하지 않았다. 사용자가 앞서 중단한 full regression은 이 closeout에서도 **미검증**이며, focused `102 passed`를 full-pass로 확대 해석하지 않는다.
+- Task 9 사람/환경 acceptance는 실제 두 번째 scene MP4, current-revision 합성 MP4에 대한 사용자 승인, 같은 revision의 실제 CapCut Desktop 등록·열기·import 증빙 전까지 열려 있다. Task 11의 두 번째 사용자 시각 승인도 `approval_required`다. 사용자 지시에 따라 공식 Task checkbox와 누적은 **9/22 (40.9%)**, 잔여 **59.1%**로 유지한다.
+- 다음 작업: 먼저 사용자가 Task 11 다섯 viewport 시안을 승인 또는 수정 요청한다. 그 승인 기록 뒤에만 Task 14의 read-only timeline geometry/navigation으로 진행한다. Hermes Dashboard/provider 설정은 별도 사용자 요청 전까지 보류한다.
 
 ## 281. 2026-07-20 Task 11 read-only editor workbench technical closeout
 
