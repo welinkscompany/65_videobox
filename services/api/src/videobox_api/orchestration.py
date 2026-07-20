@@ -465,20 +465,7 @@ class ApiOrchestrator:
 
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
         timeline = self.store.get_timeline_run(project_id=project_id, timeline_id=str(session["timeline_id"]))
-        exact_preview = {"status": "unavailable", "url": None, "source_session_revision": None}
-        for job in reversed(self.store.list_jobs(project_id=project_id)):
-            if job.get("job_type") != JobType.FINAL_RENDER.value or job.get("status") != JobStatus.SUCCEEDED.value or not job.get("output_ref"):
-                continue
-            export = self.store.get_final_render_export(project_id=project_id, export_id=str(job["output_ref"]))
-            if str(export.get("timeline_id")) != str(timeline["timeline_id"]):
-                continue
-            exact_preview = {
-                "status": "current" if bool(export.get("is_current")) and export.get("source_session_id") == session.get("session_id") and export.get("source_session_revision") == session.get("session_revision") else "stale",
-                "url": f"/api/projects/{project_id}/final-renders/{job['job_id']}/content",
-                "source_session_id": export.get("source_session_id"),
-                "source_session_revision": export.get("source_session_revision"),
-            }
-            break
+        exact_preview = self.get_latest_exact_preview_for_session(project_id=project_id, session_id=session_id)
         return build_editor_playback_manifest(
             project_id=project_id,
             session=session,
@@ -486,6 +473,70 @@ class ApiOrchestrator:
             asset_content_url_prefix=f"/api/projects/{project_id}/assets",
             exact_preview=exact_preview,
         )
+
+    def _exact_preview_response(self, *, project_id: str, record: dict[str, Any]) -> dict[str, Any]:
+        state = str(record.get("state") or "unavailable")
+        status = "stale" if state == "obsolete" else state
+        if status not in {"pending", "running", "succeeded", "failed", "stale"}:
+            status = "unavailable"
+        start = float(record.get("start_sec") if record.get("start_sec") is not None else 0.0)
+        end = float(record.get("end_sec") if record.get("end_sec") is not None else record.get("duration_sec") or 0.0)
+        payload = {
+            "status": status,
+            "generation_id": str(record["generation_id"]),
+            "timeline_start_sec": start,
+            "timeline_end_sec": end,
+            "artifact_revision": int(record["expected_revision"]),
+            "fingerprint": str(record["fingerprint"]),
+            "content_url": None,
+            "error_message": record.get("error_message"),
+        }
+        if status == "succeeded" and record.get("artifact_uri"):
+            payload["content_url"] = f"/api/projects/{project_id}/exact-previews/{record['generation_id']}/content"
+        return payload
+
+    def start_exact_preview(
+        self, *, project_id: str, session_id: str, expected_revision: int, start_sec: float | None = None, end_sec: float | None = None
+    ) -> dict[str, Any]:
+        return self._exact_preview_response(
+            project_id=project_id,
+            record=self.pipeline.start_exact_preview(
+                project_id=project_id, session_id=session_id, expected_revision=expected_revision,
+                start_sec=start_sec, end_sec=end_sec,
+            ),
+        )
+
+    def run_exact_preview(self, *, project_id: str, generation_id: str) -> None:
+        self.pipeline.run_exact_preview(project_id=project_id, generation_id=generation_id)
+
+    def get_exact_preview_status(self, *, project_id: str, generation_id: str) -> dict[str, Any]:
+        return self._exact_preview_response(
+            project_id=project_id,
+            record=self.pipeline.get_exact_preview_status(project_id=project_id, generation_id=generation_id),
+        )
+
+    def get_exact_preview_content_path(self, *, project_id: str, generation_id: str) -> Path:
+        status = self.get_exact_preview_status(project_id=project_id, generation_id=generation_id)
+        if status["status"] != "succeeded":
+            raise KeyError("exact_preview_not_current")
+        record = self.store.get_exact_preview(project_id=project_id, generation_id=generation_id)
+        path = self.store.resolve_storage_uri(project_id=project_id, storage_uri=str(record["artifact_uri"]))
+        if not path.is_file():
+            raise KeyError("exact_preview_content_missing")
+        return path
+
+    def get_latest_exact_preview_for_session(self, *, project_id: str, session_id: str) -> dict[str, Any]:
+        record = self.store.get_latest_exact_preview(project_id=project_id, session_id=session_id)
+        if record is None:
+            return {"status": "unavailable"}
+        payload = self.get_exact_preview_status(project_id=project_id, generation_id=str(record["generation_id"]))
+        return {
+            "status": payload["status"], "url": payload["content_url"],
+            "source_session_id": session_id, "source_session_revision": payload["artifact_revision"],
+            "generation_id": payload["generation_id"], "timeline_start_sec": payload["timeline_start_sec"],
+            "timeline_end_sec": payload["timeline_end_sec"], "artifact_revision": payload["artifact_revision"],
+            "fingerprint": payload["fingerprint"],
+        }
 
     def preview_editing_session_selected_range(self, *, project_id: str, session_id: str, start_sec: float, end_sec: float) -> dict[str, Any]:
         return self.pipeline.preview_editing_session_selected_range(project_id=project_id, session_id=session_id, start_sec=start_sec, end_sec=end_sec)

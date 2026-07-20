@@ -85,7 +85,12 @@ class CompositionPlan:
 
     @property
     def duration_sec(self) -> float:
-        return max([item.end_sec for item in self.items] + [cue.end_sec for cue in self.captions] + [0.0])
+        return max(
+            [item.end_sec for item in self.items]
+            + [cue.end_sec for cue in self.captions]
+            + [_number(overlay.get("end_sec")) for overlay in self.export_overlays]
+            + [0.0]
+        )
 
     @classmethod
     def from_timeline(cls, *, timeline: dict[str, Any], captions: Iterable[dict[str, Any] | CaptionCue] = ()) -> "CompositionPlan":

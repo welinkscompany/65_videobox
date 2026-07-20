@@ -88,7 +88,7 @@ def test_manifest_marks_old_timeline_source_stale_and_separates_stale_final(tmp_
     assert response.json()["source_status"] == {"status": "stale", "source_session_id": session_id, "source_session_revision": 1}
 
 
-def test_manifest_exposes_only_current_or_explicitly_stale_final_preview(tmp_path) -> None:
+def test_manifest_never_labels_a_legacy_final_render_as_an_exact_preview(tmp_path) -> None:
     client = TestClient(create_app(projects_root=tmp_path))
     project_id, _, session_id = _manifest_fixture(client, tmp_path)
     store = LocalProjectStore(tmp_path)
@@ -100,15 +100,10 @@ def test_manifest_exposes_only_current_or_explicitly_stale_final_preview(tmp_pat
     store.update_job(project_id=project_id, job_id=job["job_id"], status=JobStatus.SUCCEEDED, output_ref=export["export_id"])
 
     current = client.get(f"/api/projects/{project_id}/editing-sessions/{session_id}/playback-manifest").json()
-    assert current["exact_preview"] == {"status": "current", "url": f"/api/projects/{project_id}/final-renders/{job['job_id']}/content", "source_session_id": session_id, "source_session_revision": 1}
-
-    store.update_editing_session(project_id=project_id, session_id=session_id, session_payload=session, expected_revision=1)
-    stale = client.get(f"/api/projects/{project_id}/editing-sessions/{session_id}/playback-manifest").json()
-    assert stale["exact_preview"]["status"] == "stale"
-    assert stale["exact_preview"]["url"] == f"/api/projects/{project_id}/final-renders/{job['job_id']}/content"
+    assert current["exact_preview"] == {"status": "unavailable"}
 
 
-def test_same_revision_from_another_session_never_makes_its_final_preview_current(tmp_path) -> None:
+def test_same_revision_from_another_session_never_makes_its_final_render_an_exact_preview(tmp_path) -> None:
     client = TestClient(create_app(projects_root=tmp_path))
     project_id, _, session_a = _manifest_fixture(client, tmp_path)
     store = LocalProjectStore(tmp_path)
@@ -123,7 +118,7 @@ def test_same_revision_from_another_session_never_makes_its_final_preview_curren
 
     assert session_b["session_revision"] == 1
     assert manifest["source_status"]["status"] == "current"
-    assert manifest["exact_preview"] == {"status": "stale", "url": f"/api/projects/{project_id}/final-renders/{job['job_id']}/content", "source_session_id": session_a, "source_session_revision": 1}
+    assert manifest["exact_preview"] == {"status": "unavailable"}
 
 
 def test_final_export_fallback_uses_its_source_session_id_not_latest_timeline_session(tmp_path) -> None:

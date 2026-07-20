@@ -2,13 +2,18 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import json
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
 
 from videobox_core_engine.composition_plan import CompositionPlan
 from videobox_core_engine.exact_preview import ExactPreviewRequest, fingerprint_exact_preview
+from videobox_core_engine.ffmpeg_final_renderer import FinalRenderError, FfmpegFinalRenderer
 from videobox_storage.local_project_store import LocalProjectStore
+from videobox_domain_models.assets import AssetType
 
 
 def _timeline() -> dict[str, object]:
@@ -60,6 +65,246 @@ def test_composition_plan_clips_crossing_sources_and_zero_bases_range_once() -> 
     assert fingerprint_exact_preview(plan=ranged, session_captions=[], used_asset_sha256={}, overlay_inputs=False, settings=0) != fingerprint_exact_preview(plan=ranged, session_captions=[], used_asset_sha256={}, overlay_inputs=None, settings=None)
     with pytest.raises(ValueError, match="composition_plan_invalid_number"):
         CompositionPlan.from_timeline(timeline={"tracks": [{"track_type": "broll", "clips": [{"start_sec": float("inf"), "end_sec": 2}]}]})
+
+
+def test_exact_proxy_and_final_commands_share_the_same_composition_plan_and_caption_input(tmp_path: Path) -> None:
+    """A proxy must not silently rebuild a different composition authority."""
+    plan = CompositionPlan.from_timeline(
+        timeline=_timeline(),
+        captions=[{"segment_id": "caption-1", "start_sec": 0, "end_sec": 2, "caption_text": "canonical"}],
+    )
+    renderer = FfmpegFinalRenderer(store=LocalProjectStore(tmp_path))
+
+    final = renderer.build_final_render_inputs(composition_plan=plan)
+    proxy = renderer.build_exact_preview_inputs(composition_plan=plan.for_range(start_sec=0, end_sec=2))
+
+    assert final.composition_plan is plan
+    assert final.captions is plan.captions
+    assert proxy.captions[0].text == "canonical"
+    assert proxy.composition_plan.captions is proxy.captions
+
+
+def test_exact_proxy_uses_timeline_context_only_for_source_resolution_after_plan_extraction(tmp_path: Path) -> None:
+    plan = CompositionPlan.from_timeline(timeline=_timeline(), captions=[{"start_sec": 0, "end_sec": 2, "caption_text": "canonical"}])
+    renderer = FfmpegFinalRenderer(store=LocalProjectStore(tmp_path))
+    mutated_context = _timeline()
+    mutated_context["tracks"] = [{"track_type": "broll", "clips": [{"clip_id": "late", "asset_uri": "local://late", "start_sec": 0, "end_sec": 99}]}]
+    hydrated = renderer._timeline_from_plan(composition_plan=plan.for_range(start_sec=0, end_sec=2), timeline_context=mutated_context)
+
+    assert [clip["clip_id"] for track in hydrated["tracks"] for clip in track["clips"]] == ["n1"]
+    assert hydrated["tracks"][0]["clips"][0]["end_sec"] == 2.0
+
+
+def test_plan_renderer_explicitly_preserves_gaps_and_later_broll_wins_overlap(tmp_path: Path) -> None:
+    plan = CompositionPlan.from_timeline(timeline={
+        "output": {"width": 1280, "height": 720},
+        "tracks": [{"track_type": "broll", "clips": [
+            {"clip_id": "first", "asset_uri": "local://first", "start_sec": 2, "end_sec": 5},
+            {"clip_id": "later", "asset_uri": "local://later", "start_sec": 3, "end_sec": 4},
+        ]}],
+    })
+    renderer = FfmpegFinalRenderer(store=LocalProjectStore(tmp_path))
+
+    graph = renderer.build_plan_filter_graph(composition_plan=plan, source_indices={"first": 1, "later": 2})
+
+    assert "color=c=black:s=1280x720" in graph and ":d=5.0" in graph
+    assert "setpts=PTS+2.0/TB" in graph
+    assert "setpts=PTS+3.0/TB" in graph
+    assert graph.index("[v_first]") < graph.index("[v_later]")
+    assert "OVERLAP_POLICY_LATER_BROLL_WINS" not in graph
+
+
+def test_plan_renderer_places_resolved_export_overlay_from_the_same_plan(tmp_path: Path) -> None:
+    plan = CompositionPlan.from_timeline(timeline={
+        "output": {"width": 1280, "height": 720},
+        "tracks": [],
+        "export_overlays": [{"overlay_type": "image_overlay", "asset_uri": "local://overlay", "start_sec": 1, "end_sec": 2}],
+    })
+    renderer = FfmpegFinalRenderer(store=LocalProjectStore(tmp_path))
+
+    graph = renderer.build_plan_filter_graph(composition_plan=plan, source_indices={}, export_overlay_indices={0: 3})
+
+    assert "[3:v]trim=duration=1.0" in graph
+    assert "setpts=PTS+1.0/TB" in graph
+
+
+def test_plan_renderer_draws_assetless_export_text_overlay_from_canonical_plan(tmp_path: Path) -> None:
+    plan = CompositionPlan.from_timeline(timeline={
+        "output": {"width": 1280, "height": 720}, "tracks": [],
+        "export_overlays": [{"title": "O'Brien: safe", "start_sec": 1, "end_sec": 2}],
+    })
+    renderer = FfmpegFinalRenderer(store=LocalProjectStore(tmp_path))
+
+    graph = renderer.build_plan_filter_graph(composition_plan=plan, source_indices={})
+
+    assert "drawtext=" in graph
+    assert "O\\'Brien\\: safe" in graph
+    assert "between(t,1.0,2.0)" in graph
+
+
+def test_plan_renderer_fails_closed_when_track_overlay_source_cannot_be_resolved(tmp_path: Path) -> None:
+    plan = CompositionPlan.from_timeline(timeline={
+        "output": {"duration_sec": 1},
+        "tracks": [{"track_type": "overlay", "clips": [{"clip_id": "overlay-1", "asset_uri": "local://overlay", "start_sec": 0, "end_sec": 1}]}],
+    })
+    renderer = FfmpegFinalRenderer(store=LocalProjectStore(tmp_path))
+
+    with pytest.raises(FinalRenderError, match="(?i)resolve media asset"):
+        renderer.render_exact_preview_to_mp4(project_id="missing", composition_plan=plan, timeline_context={}, output_path=tmp_path / "out.mp4", subtitle_ass_path=None)
+
+
+def test_plan_audio_graph_preserves_broll_and_music_controls(tmp_path: Path) -> None:
+    plan = CompositionPlan.from_timeline(timeline={
+        "output": {"width": 320, "height": 240},
+        "tracks": [
+            {"track_type": "broll", "clips": [{"clip_id": "b", "asset_uri": "local://b", "start_sec": 0, "end_sec": 2, "media_controls": {"loop": False, "pad": True, "preserve_source_audio": True}}]},
+            {"track_type": "bgm", "clips": [{"clip_id": "m", "asset_uri": "local://m", "start_sec": 0, "end_sec": 2, "media_controls": {"gain_db": -9, "fade_in_sec": 0.2, "fade_out_sec": 0.3, "ducking": True}}]},
+            {"track_type": "sfx", "clips": [{"clip_id": "s", "asset_uri": "local://s", "start_sec": 1, "end_sec": 2, "media_controls": {"gain_db": 3, "fade_in_sec": 0.1, "fade_out_sec": 0.2}}]},
+        ],
+    })
+    renderer = FfmpegFinalRenderer(store=LocalProjectStore(tmp_path))
+
+    graph = renderer.build_plan_audio_filter_graph(composition_plan=plan, source_indices={"b": 0, "m": 1, "s": 2})
+
+    assert "volume=-9.0dB" in graph and "afade=t=in:st=0:d=0.2" in graph
+    assert "sidechaincompress" in graph
+    assert "volume=3.0dB" in graph and "adelay=1000|1000" in graph
+
+
+def test_plan_audio_ducks_bgm_against_the_mixed_full_narration_track(tmp_path: Path) -> None:
+    plan = CompositionPlan.from_timeline(timeline={"tracks": [
+        {"track_type": "narration", "clips": [{"clip_id": "n1", "asset_uri": "local://n1", "start_sec": 0, "end_sec": 1}, {"clip_id": "n2", "asset_uri": "local://n2", "start_sec": 1, "end_sec": 2}]},
+        {"track_type": "bgm", "clips": [{"clip_id": "bgm", "asset_uri": "local://bgm", "start_sec": 0, "end_sec": 2, "media_controls": {"ducking": True}}]},
+    ]})
+    graph = FfmpegFinalRenderer(store=LocalProjectStore(tmp_path)).build_plan_audio_filter_graph(composition_plan=plan, source_indices={"n1": 0, "n2": 1, "bgm": 2})
+
+    assert "[a_n1][a_n2]amix=inputs=2:duration=longest[narration_sidechain]" in graph
+    assert "[a_bgm][narration_sidechain]sidechaincompress" in graph
+
+
+def test_plan_broll_pad_uses_legacy_black_tpad_not_frame_clone(tmp_path: Path) -> None:
+    plan = CompositionPlan.from_timeline(timeline={"tracks": [{"track_type": "broll", "clips": [{"clip_id": "b", "asset_uri": "local://b", "start_sec": 0, "end_sec": 2, "media_controls": {"loop": False, "pad": True}}]}]})
+    graph = FfmpegFinalRenderer(store=LocalProjectStore(tmp_path)).build_plan_filter_graph(composition_plan=plan, source_indices={"b": 0})
+
+    assert "tpad=stop_mode=add" in graph
+    assert "stop_mode=clone" not in graph
+
+
+def test_plan_renderer_never_silently_drops_legacy_subtitle_file_without_ass(tmp_path: Path) -> None:
+    plan = CompositionPlan.from_timeline(timeline={"tracks": [{"track_type": "broll", "clips": [{"clip_id": "b", "asset_uri": "local://b", "start_sec": 0, "end_sec": 1}]}]})
+    renderer = FfmpegFinalRenderer(store=LocalProjectStore(tmp_path))
+    subtitle = tmp_path / "legacy.srt"; subtitle.write_text("1\n00:00:00,000 --> 00:00:01,000\ncaption\n", encoding="utf-8")
+
+    ass = renderer.convert_legacy_subtitle_to_ass(subtitle_file_path=subtitle, output_dir=tmp_path)
+    assert ass.suffix == ".ass" and "Dialogue:" in ass.read_text(encoding="utf-8")
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg fixture required")
+def test_legacy_generated_ass_is_removed_when_canonical_render_fails(tmp_path: Path) -> None:
+    class _FailAfterConversion(FfmpegFinalRenderer):
+        def _run(self, command):  # type: ignore[no-untyped-def]
+            if "-f" in command and command[command.index("-f") + 1] == "ass":
+                return super()._run(command)
+            raise FinalRenderError("forced final render failure")
+
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="legacy subtitle cleanup")
+    source = tmp_path / "source.mp4"
+    subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=black:s=64x64:d=1", "-pix_fmt", "yuv420p", str(source)], check=True, capture_output=True)
+    asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=source)
+    plan = CompositionPlan.from_timeline(timeline={"tracks": [{"track_type": "broll", "clips": [{"clip_id": "b", "asset_id": asset.asset_id, "asset_uri": f"local://projects/{project.project_id}/assets/{asset.asset_id}", "start_sec": 0, "end_sec": 1}]}]})
+    srt = tmp_path / "legacy.srt"; srt.write_text("1\n00:00:00,000 --> 00:00:01,000\ncaption\n", encoding="utf-8")
+
+    with pytest.raises(FinalRenderError, match="forced"):
+        _FailAfterConversion(store=store).render_timeline_to_mp4(project_id=project.project_id, timeline={}, output_path=tmp_path / "out.mp4", subtitle_file_path=srt, composition_plan=plan)
+    assert not list(tmp_path.glob(".legacy_subtitle_*.ass"))
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg fixture required")
+def test_plan_renderer_real_fixture_preserves_leading_gap_and_later_overlap(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="plan placement")
+    red, blue, audio = tmp_path / "red.mp4", tmp_path / "blue.mp4", tmp_path / "audio.wav"
+    for color, target in (("red", red), ("blue", blue)):
+        subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", f"color=c={color}:s=320x240:d=3", "-pix_fmt", "yuv420p", str(target)], check=True, capture_output=True)
+    subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo:d=5", str(audio)], check=True, capture_output=True)
+    red_asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=red)
+    blue_asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=blue)
+    audio_asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.NARRATION_AUDIO, source_path=audio)
+    timeline = {"output": {"width": 320, "height": 240}, "tracks": [
+        {"track_type": "narration", "clips": [{"clip_id": "n", "asset_id": audio_asset.asset_id, "asset_uri": f"local://projects/{project.project_id}/assets/{audio_asset.asset_id}", "start_sec": 0, "end_sec": 5}]},
+        {"track_type": "broll", "clips": [
+            {"clip_id": "red", "asset_id": red_asset.asset_id, "asset_uri": f"local://projects/{project.project_id}/assets/{red_asset.asset_id}", "start_sec": 2, "end_sec": 5},
+            {"clip_id": "blue", "asset_id": blue_asset.asset_id, "asset_uri": f"local://projects/{project.project_id}/assets/{blue_asset.asset_id}", "start_sec": 3, "end_sec": 4},
+        ]},
+    ]}
+    plan = CompositionPlan.from_timeline(timeline=timeline)
+    output = tmp_path / "placement.mp4"
+    FfmpegFinalRenderer(store=store, video_width=320, video_height=240).render_exact_preview_to_mp4(project_id=project.project_id, composition_plan=plan, timeline_context=timeline, output_path=output, subtitle_ass_path=None)
+
+    def pixel_at(seconds: float) -> tuple[int, int, int]:
+        frame = subprocess.run(["ffmpeg", "-v", "error", "-ss", str(seconds), "-i", str(output), "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"], check=True, capture_output=True).stdout
+        return tuple(frame[:3])
+
+    assert pixel_at(0.5) == (0, 0, 0)
+    assert pixel_at(2.5)[0] > 200 and pixel_at(2.5)[2] < 30
+    assert pixel_at(3.5)[2] > 200 and pixel_at(3.5)[0] < 30
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg fixture required")
+def test_plan_renderer_composites_track_overlay_only_in_window_and_shifts_selected_range(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="track overlay plan")
+    base, overlay, audio = tmp_path / "base.mp4", tmp_path / "overlay.png", tmp_path / "audio.wav"
+    subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=blue:s=320x240:d=2", "-pix_fmt", "yuv420p", str(base)], check=True, capture_output=True)
+    subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=red:s=320x240:d=1", "-frames:v", "1", str(overlay)], check=True, capture_output=True)
+    subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo:d=2", str(audio)], check=True, capture_output=True)
+    base_asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=base)
+    overlay_asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=overlay)
+    audio_asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.NARRATION_AUDIO, source_path=audio)
+    timeline = {"output": {"width": 320, "height": 240}, "tracks": [
+        {"track_type": "narration", "clips": [{"clip_id": "n", "asset_id": audio_asset.asset_id, "asset_uri": f"local://projects/{project.project_id}/assets/{audio_asset.asset_id}", "start_sec": 0, "end_sec": 2}]},
+        {"track_type": "broll", "clips": [{"clip_id": "b", "asset_id": base_asset.asset_id, "asset_uri": f"local://projects/{project.project_id}/assets/{base_asset.asset_id}", "start_sec": 0, "end_sec": 2}]},
+        {"track_type": "overlay", "clips": [{"clip_id": "o", "asset_id": overlay_asset.asset_id, "asset_uri": f"local://projects/{project.project_id}/assets/{overlay_asset.asset_id}", "start_sec": 0.5, "end_sec": 1.5}]},
+    ]}
+    plan = CompositionPlan.from_timeline(timeline=timeline)
+    renderer = FfmpegFinalRenderer(store=store, video_width=320, video_height=240)
+    full, selected = tmp_path / "overlay-full.mp4", tmp_path / "overlay-selected.mp4"
+    renderer.render_exact_preview_to_mp4(project_id=project.project_id, composition_plan=plan, timeline_context=timeline, output_path=full, subtitle_ass_path=None)
+    renderer.render_exact_preview_to_mp4(project_id=project.project_id, composition_plan=plan.for_range(start_sec=0.5, end_sec=1.5), timeline_context=timeline, output_path=selected, subtitle_ass_path=None)
+
+    def pixel(path: Path, seconds: float) -> tuple[int, int, int]:
+        frame = subprocess.run(["ffmpeg", "-v", "error", "-ss", str(seconds), "-i", str(path), "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"], check=True, capture_output=True).stdout
+        return tuple(frame[:3])
+
+    assert pixel(full, 0.25)[2] > 200
+    assert pixel(full, 1.0)[0] > 200
+    assert pixel(full, 1.75)[2] > 200
+    assert pixel(selected, 0.25)[0] > 200
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None, reason="ffmpeg fixture required")
+def test_plan_renderer_composites_local_video_track_overlay(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="video track overlay")
+    base, overlay = tmp_path / "base.mp4", tmp_path / "overlay.mp4"
+    subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=blue:s=320x240:d=2", "-pix_fmt", "yuv420p", str(base)], check=True, capture_output=True)
+    subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=red:s=320x240:d=1", "-pix_fmt", "yuv420p", str(overlay)], check=True, capture_output=True)
+    base_asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=base)
+    overlay_asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=overlay)
+    timeline = {"output": {"width": 320, "height": 240}, "tracks": [
+        {"track_type": "broll", "clips": [{"clip_id": "b", "asset_id": base_asset.asset_id, "asset_uri": f"local://projects/{project.project_id}/assets/{base_asset.asset_id}", "start_sec": 0, "end_sec": 2}]},
+        {"track_type": "overlay", "clips": [{"clip_id": "o", "asset_id": overlay_asset.asset_id, "asset_uri": f"local://projects/{project.project_id}/assets/{overlay_asset.asset_id}", "start_sec": 0.5, "end_sec": 1.5}]},
+    ]}
+    output = tmp_path / "video-overlay.mp4"
+
+    FfmpegFinalRenderer(store=store, video_width=320, video_height=240).render_exact_preview_to_mp4(
+        project_id=project.project_id, composition_plan=CompositionPlan.from_timeline(timeline=timeline),
+        timeline_context=timeline, output_path=output, subtitle_ass_path=None,
+    )
+
+    frame = subprocess.run(["ffmpeg", "-v", "error", "-ss", "1", "-i", str(output), "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"], check=True, capture_output=True).stdout
+    assert frame[0] > 200 and frame[2] < 30
 
 
 def test_exact_preview_late_generation_cannot_publish_over_current(tmp_path: Path) -> None:
@@ -128,6 +373,197 @@ def test_exact_preview_retry_creates_a_new_generation_after_failure(tmp_path: Pa
     retried = store.retry_exact_preview(project_id=project.project_id, generation_id=first["generation_id"])
     assert retried["generation_id"] != first["generation_id"]
     assert retried["state"] == "pending"
+
+
+def test_fresh_pipeline_request_recovers_bounded_stale_running_claim_before_cache_hit(tmp_path: Path) -> None:
+    from videobox_core_engine.local_pipeline import LocalPipelineRunner
+
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="preview restart recovery")
+    timeline = store.save_timeline_run(project_id=project.project_id, output_mode="review", source_session_revision=1, timeline_payload={"output": {"duration_sec": 1}, "tracks": []})
+    session = store.save_editing_session(project_id=project.project_id, timeline_id=timeline["timeline_id"], session_payload={"segments": [{"segment_id": "s", "caption_text": "caption", "start_sec": 0, "end_sec": 1}]})
+    first_runner = LocalPipelineRunner(store)
+    first = first_runner.start_exact_preview(project_id=project.project_id, session_id=session["session_id"], expected_revision=1)
+    assert store.claim_exact_preview(project_id=project.project_id, generation_id=first["generation_id"], owner_token="crashed-worker")
+    connection = sqlite3.connect(store.database_path(project.project_id))
+    try:
+        connection.execute("UPDATE exact_preview_renders SET claimed_at = '2000-01-01T00:00:00+00:00' WHERE generation_id = ?", (first["generation_id"],))
+        connection.commit()
+    finally:
+        connection.close()
+
+    restarted = LocalPipelineRunner(store).start_exact_preview(project_id=project.project_id, session_id=session["session_id"], expected_revision=1)
+
+    assert restarted["generation_id"] != first["generation_id"]
+    assert restarted["state"] == "pending"
+    assert store.get_exact_preview(project_id=project.project_id, generation_id=first["generation_id"])["state"] == "failed"
+
+
+def test_pipeline_start_prunes_bounded_stale_and_orphan_previews_without_deleting_current_generation(tmp_path: Path) -> None:
+    from videobox_core_engine.local_pipeline import LocalPipelineRunner
+
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="preview lifecycle cleanup")
+    timeline = store.save_timeline_run(project_id=project.project_id, output_mode="review", source_session_revision=1, timeline_payload={"output": {"duration_sec": 1}, "tracks": []})
+    session = store.save_editing_session(project_id=project.project_id, timeline_id=timeline["timeline_id"], session_payload={"segments": []})
+    request = ExactPreviewRequest(session_id=str(session["session_id"]), expected_revision=1)
+    stale_generations: list[str] = []
+    for ordinal in range(6):
+        stale = store.begin_exact_preview(project_id=project.project_id, request=request, fingerprint=f"sha256:stale-{ordinal}")
+        assert store.claim_exact_preview(project_id=project.project_id, generation_id=stale["generation_id"], owner_token=f"stale-{ordinal}")
+        assert store.fail_exact_preview(project_id=project.project_id, generation_id=stale["generation_id"], owner_token=f"stale-{ordinal}", error_message="stale")
+        stale_generations.append(str(stale["generation_id"]))
+    preview_root = store.project_root(project.project_id) / "derived" / "exact_previews"
+    preview_root.mkdir(parents=True)
+    orphan = preview_root / "exact_preview_crashed.mp4"
+    orphan.write_bytes(b"orphan")
+    os.utime(orphan, (0, 0))
+
+    runner = LocalPipelineRunner(store)
+    current = runner.start_exact_preview(project_id=project.project_id, session_id=session["session_id"], expected_revision=1)
+
+    assert current["state"] == "pending"
+    assert not orphan.exists()
+    assert sum(
+        1
+        for generation_id in stale_generations
+        if _exact_preview_exists(store, project.project_id, generation_id)
+    ) == 5
+    current_publish_window = preview_root / f"{current['generation_id']}.mp4"
+    current_publish_window.write_bytes(b"active")
+    os.utime(current_publish_window, (0, 0))
+
+    assert runner.start_exact_preview(project_id=project.project_id, session_id=session["session_id"], expected_revision=1)["generation_id"] == current["generation_id"]
+    assert current_publish_window.exists()
+
+
+def test_pipeline_start_ignores_best_effort_cleanup_failure_after_invoking_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from videobox_core_engine.local_pipeline import LocalPipelineRunner
+
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="preview cleanup failure")
+    timeline = store.save_timeline_run(project_id=project.project_id, output_mode="review", source_session_revision=1, timeline_payload={"output": {"duration_sec": 1}, "tracks": []})
+    session = store.save_editing_session(project_id=project.project_id, timeline_id=timeline["timeline_id"], session_payload={"segments": []})
+    calls = 0
+
+    def _raise_cleanup(*, project_id: str, **_ignored: object) -> int:
+        nonlocal calls
+        calls += 1
+        raise OSError("cleanup transient failure")
+
+    monkeypatch.setattr(store, "cleanup_exact_preview_artifacts", _raise_cleanup)
+
+    record = LocalPipelineRunner(store).start_exact_preview(project_id=project.project_id, session_id=session["session_id"], expected_revision=1)
+
+    assert calls == 1
+    assert record["state"] == "pending"
+
+
+def _exact_preview_exists(store: LocalProjectStore, project_id: str, generation_id: str) -> bool:
+    try:
+        store.get_exact_preview(project_id=project_id, generation_id=generation_id)
+    except KeyError:
+        return False
+    return True
+
+
+def test_exact_preview_worker_failure_is_durably_recorded(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="preview worker failure")
+    session = _session(store, project.project_id)
+    record = store.begin_exact_preview(
+        project_id=project.project_id,
+        request=ExactPreviewRequest(session_id=str(session["session_id"]), expected_revision=1),
+        fingerprint="sha256:failed",
+    )
+    assert store.claim_exact_preview(project_id=project.project_id, generation_id=record["generation_id"], owner_token="worker")
+    assert store.fail_exact_preview(
+        project_id=project.project_id, generation_id=record["generation_id"], owner_token="worker", error_message="missing source"
+    )
+    assert store.get_exact_preview(project_id=project.project_id, generation_id=record["generation_id"])["state"] == "failed"
+
+
+def test_exact_preview_missing_source_becomes_a_recoverable_failed_generation(tmp_path: Path) -> None:
+    from videobox_core_engine.local_pipeline import LocalPipelineRunner
+
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="preview missing source")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        source_session_revision=1,
+        timeline_payload={"output": {"duration_sec": 2}, "tracks": [
+            {"track_type": "narration", "clips": [{"clip_id": "missing-narration", "asset_id": "missing-asset", "asset_uri": f"local://projects/{project.project_id}/assets/missing-asset", "start_sec": 0, "end_sec": 2}]},
+            {"track_type": "broll", "clips": [{"clip_id": "missing", "asset_id": "missing-asset", "asset_uri": f"local://projects/{project.project_id}/assets/missing-asset", "start_sec": 0, "end_sec": 2}]},
+        ]},
+    )
+    session = store.save_editing_session(project_id=project.project_id, timeline_id=timeline["timeline_id"], session_payload={"segments": []})
+    pipeline = LocalPipelineRunner(store)
+
+    record = pipeline.start_exact_preview(project_id=project.project_id, session_id=session["session_id"], expected_revision=1)
+    pipeline.run_exact_preview(project_id=project.project_id, generation_id=record["generation_id"])
+
+    failed = store.get_exact_preview(project_id=project.project_id, generation_id=record["generation_id"])
+    assert failed["state"] == "failed"
+    assert "missing" in str(failed["error_message"]).lower()
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None, reason="ffmpeg fixture required")
+def test_exact_proxy_full_and_selected_range_are_h264_aac_faststart_with_burned_ass_only(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="exact preview ffmpeg")
+    video_source, audio_source = tmp_path / "source.mp4", tmp_path / "source.wav"
+    subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=navy:s=1280x720:d=2", "-pix_fmt", "yuv420p", str(video_source)], check=True, capture_output=True)
+    subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=2", "-c:a", "pcm_s16le", str(audio_source)], check=True, capture_output=True)
+    video = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=video_source)
+    audio = store.register_asset(project_id=project.project_id, asset_type=AssetType.NARRATION_AUDIO, source_path=audio_source)
+    timeline = {
+        "output": {"width": 1280, "height": 720, "fps_num": 30000, "fps_den": 1001, "sample_aspect_ratio": "4:3", "rotation": 0},
+        "tracks": [
+            {"track_type": "narration", "clips": [{"clip_id": "n", "asset_id": audio.asset_id, "asset_uri": f"local://projects/{project.project_id}/assets/{audio.asset_id}", "start_sec": 0, "end_sec": 2}]},
+            {"track_type": "broll", "clips": [{"clip_id": "b", "asset_id": video.asset_id, "asset_uri": f"local://projects/{project.project_id}/assets/{video.asset_id}", "start_sec": 0, "end_sec": 2, "media_controls": {"fit": "fit"}}]},
+        ],
+        "export_overlays": [{"title": "Exact preview", "start_sec": 0.2, "end_sec": 1.8}],
+    }
+    plan = CompositionPlan.from_timeline(timeline=timeline, captions=[{"start_sec": 0, "end_sec": 2, "caption_text": "burned"}])
+    ass = tmp_path / "captions.ass"
+    ass.write_text("[Script Info]\nScriptType: v4.00+\nPlayResX: 1280\nPlayResY: 720\n\n[V4+ Styles]\nFormat: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding\nStyle: Default,Arial,48,&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,0,0,0,0,100,100,0,0,1,2,0,2,0,0,64,1\n\n[Events]\nFormat: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text\nDialogue: 0,0:00:00.20,0:00:01.80,Default,,0,0,0,,BURNED CAPTION\n", encoding="utf-8")
+    renderer = FfmpegFinalRenderer(store=store)
+    full, selected, baseline, selected_baseline = tmp_path / "full.mp4", tmp_path / "selected.mp4", tmp_path / "baseline.mp4", tmp_path / "selected-baseline.mp4"
+    renderer.render_exact_preview_to_mp4(project_id=project.project_id, composition_plan=plan, timeline_context=timeline, output_path=full, subtitle_ass_path=ass)
+    selected_ass = tmp_path / "selected-captions.ass"
+    selected_ass.write_text(ass.read_text(encoding="utf-8").replace("0:00:00.20,0:00:01.80", "0:00:00.00,0:00:01.00"), encoding="utf-8")
+    renderer.render_exact_preview_to_mp4(project_id=project.project_id, composition_plan=plan.for_range(start_sec=0.5, end_sec=1.5), timeline_context=timeline, output_path=selected, subtitle_ass_path=selected_ass)
+    renderer.render_exact_preview_to_mp4(project_id=project.project_id, composition_plan=plan.for_range(start_sec=0.5, end_sec=1.5), timeline_context=timeline, output_path=selected_baseline, subtitle_ass_path=None)
+    renderer.render_exact_preview_to_mp4(project_id=project.project_id, composition_plan=plan, timeline_context=timeline, output_path=baseline, subtitle_ass_path=None)
+    legacy_srt = tmp_path / "legacy.srt"
+    legacy_srt.write_text("1\n00:00:00,200 --> 00:00:01,800\nLEGACY CAPTION\n", encoding="utf-8")
+    sessionless = tmp_path / "sessionless-final.mp4"
+    renderer.render_timeline_to_mp4(project_id=project.project_id, timeline=timeline, output_path=sessionless, subtitle_file_path=legacy_srt, composition_plan=plan)
+
+    for output, expected_duration in ((full, 2.0), (selected, 1.0)):
+        probe = subprocess.run(["ffprobe", "-v", "error", "-show_streams", "-show_format", "-of", "json", str(output)], check=True, capture_output=True, text=True)
+        body = json.loads(probe.stdout)
+        assert {stream["codec_type"] for stream in body["streams"]} == {"video", "audio"}
+        assert next(stream for stream in body["streams"] if stream["codec_type"] == "video")["codec_name"] == "h264"
+        assert next(stream for stream in body["streams"] if stream["codec_type"] == "video")["sample_aspect_ratio"] == "4:3"
+        assert next(stream for stream in body["streams"] if stream["codec_type"] == "video")["avg_frame_rate"] == "30000/1001"
+        assert next(stream for stream in body["streams"] if stream["codec_type"] == "audio")["codec_name"] == "aac"
+        assert abs(float(body["format"]["duration"]) - expected_duration) < 0.15
+        assert abs(float(body["format"].get("start_time") or 0.0)) < 0.001
+        packets = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_packets", "-of", "json", str(output)], check=True, capture_output=True, text=True)
+        assert abs(float(json.loads(packets.stdout)["packets"][0]["pts_time"])) < 0.001
+        data = output.read_bytes()
+        assert data.index(b"moov") < data.index(b"mdat")
+
+    def frame_at(path: Path, seconds: float) -> bytes:
+        return subprocess.run(["ffmpeg", "-v", "error", "-ss", str(seconds), "-i", str(path), "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"], check=True, capture_output=True).stdout
+
+    assert frame_at(full, 1.0) != frame_at(baseline, 1.0)
+    assert frame_at(selected, 0.05) != frame_at(selected_baseline, 0.05)
+    sessionless_streams = json.loads(subprocess.run(["ffprobe", "-v", "error", "-show_streams", "-of", "json", str(sessionless)], check=True, capture_output=True, text=True).stdout)["streams"]
+    assert {stream["codec_type"] for stream in sessionless_streams} == {"video", "audio"}
+    assert frame_at(sessionless, 1.0) != frame_at(baseline, 1.0)
 
 
 def test_exact_preview_cleanup_removes_crash_orphans_only_inside_exact_preview_root(tmp_path: Path) -> None:

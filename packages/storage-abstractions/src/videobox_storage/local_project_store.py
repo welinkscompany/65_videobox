@@ -574,6 +574,44 @@ class LocalProjectStore:
             raise KeyError(f"Exact preview not found: {generation_id}")
         return self._exact_preview_row(dict(row))
 
+    def get_latest_exact_preview(self, *, project_id: str, session_id: str) -> dict[str, Any] | None:
+        row = self._fetchone(
+            project_id,
+            """SELECT * FROM exact_preview_renders WHERE project_id = ? AND session_id = ?
+               ORDER BY created_at DESC LIMIT 1""",
+            (project_id, session_id),
+        )
+        return self._exact_preview_row(dict(row)) if row is not None else None
+
+    def mark_exact_preview_stale(self, *, project_id: str, generation_id: str, reason: str) -> bool:
+        """Invalidate a durable preview after read-time source/revision validation."""
+        connection = self._connection(project_id)
+        try:
+            cursor = connection.execute(
+                """UPDATE exact_preview_renders SET state = 'obsolete', invalidated_at = ?,
+                   invalidated_reason = ?, updated_at = ?
+                   WHERE project_id = ? AND generation_id = ?
+                   AND state IN ('pending', 'running', 'succeeded')""",
+                (self._now_iso(), reason, self._now_iso(), project_id, generation_id),
+            )
+            connection.commit()
+            return cursor.rowcount == 1
+        finally:
+            connection.close()
+
+    def fail_exact_preview(self, *, project_id: str, generation_id: str, owner_token: str, error_message: str) -> bool:
+        connection = self._connection(project_id)
+        try:
+            cursor = connection.execute(
+                """UPDATE exact_preview_renders SET state = 'failed', error_message = ?, updated_at = ?
+                   WHERE project_id = ? AND generation_id = ? AND state = 'running' AND claim_token = ?""",
+                (error_message[:1000], self._now_iso(), project_id, generation_id, owner_token),
+            )
+            connection.commit()
+            return cursor.rowcount == 1
+        finally:
+            connection.close()
+
     def recover_stale_exact_preview_claims(self, *, project_id: str, older_than_seconds: float = 900) -> int:
         cutoff = (self._clock() - timedelta(seconds=older_than_seconds)).isoformat()
         connection = self._connection(project_id)

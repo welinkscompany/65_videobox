@@ -24,6 +24,7 @@ class _FakeFinalRenderer:
         output_path: Path,
         subtitle_file_path: Path | None = None,
         subtitle_ass_path: Path | None = None,
+        composition_plan: Any = None,
         on_progress: Any = None,
     ) -> Path:
         self.received_calls.append(
@@ -34,6 +35,7 @@ class _FakeFinalRenderer:
                 "subtitle_file_path": subtitle_file_path,
                 "subtitle_ass_path": subtitle_ass_path,
                 "subtitle_ass_text": subtitle_ass_path.read_text(encoding="utf-8") if subtitle_ass_path else None,
+                "composition_plan": composition_plan,
             }
         )
         if on_progress is not None:
@@ -134,6 +136,7 @@ def test_start_final_render_persists_export_and_updates_job(tmp_path: Path) -> N
     assert len(fake_renderer.received_calls) == 1
     assert fake_renderer.received_calls[0]["project_id"] == project.project_id
     assert fake_renderer.received_calls[0]["subtitle_file_path"] is None
+    assert fake_renderer.received_calls[0]["composition_plan"] is not None
 
     fetched = runner.get_final_render_result(project_id=project.project_id, job_id=result["job_id"])
     assert fetched["status"] == "succeeded"

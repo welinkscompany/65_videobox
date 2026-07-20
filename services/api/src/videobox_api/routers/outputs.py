@@ -17,6 +17,8 @@ from videobox_api.models import (
     FinalRenderArtifactResponse,
     FinalRenderJobResponse,
     OutputJobRequest,
+    ExactPreviewRequestBody,
+    ExactPreviewResponse,
     PreviewArtifactResponse,
     PreviewJobResponse,
     ProviderTraceAuditEntryResponse,
@@ -31,6 +33,41 @@ from videobox_api.orchestration import ApiOrchestrator
 
 def build_outputs_router(orchestrator: ApiOrchestrator) -> APIRouter:
     router = APIRouter()
+
+    @router.post("/api/projects/{project_id}/editing-sessions/{session_id}/exact-preview", status_code=status.HTTP_202_ACCEPTED)
+    def start_exact_preview(project_id: str, session_id: str, payload: ExactPreviewRequestBody) -> ExactPreviewResponse:
+        try:
+            result = orchestrator.start_exact_preview(
+                project_id=project_id, session_id=session_id, expected_revision=payload.expected_revision,
+                start_sec=payload.start_sec, end_sec=payload.end_sec,
+            )
+            threading.Thread(
+                target=orchestrator.run_exact_preview,
+                kwargs={"project_id": project_id, "generation_id": result["generation_id"]}, daemon=True,
+            ).start()
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return ExactPreviewResponse(**result)
+
+    @router.get("/api/projects/{project_id}/exact-previews/{generation_id}")
+    def get_exact_preview(project_id: str, generation_id: str) -> ExactPreviewResponse:
+        try:
+            return ExactPreviewResponse(**orchestrator.get_exact_preview_status(
+                project_id=project_id, generation_id=generation_id
+            ))
+        except Exception as exc:
+            raise _http_error(exc) from exc
+
+    @router.get("/api/projects/{project_id}/exact-previews/{generation_id}/content")
+    def get_exact_preview_content(project_id: str, generation_id: str, request: Request):
+        try:
+            return deliver_file(
+                request=request,
+                path=orchestrator.get_exact_preview_content_path(project_id=project_id, generation_id=generation_id),
+                media_type="video/mp4",
+            )
+        except Exception as exc:
+            raise _http_error(exc) from exc
 
     @router.get("/api/capcut/handoff-diagnostics")
     def get_capcut_handoff_diagnostics() -> CapCutHandoffDiagnosticsResponse:

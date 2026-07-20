@@ -3,8 +3,9 @@ from __future__ import annotations
 import subprocess
 import tempfile
 import os
+import uuid
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +28,14 @@ class FinalRenderError(RuntimeError):
     pass
 
 
+@dataclass(frozen=True, slots=True)
+class CompositionRenderInputs:
+    """The one immutable composition/caption input accepted by every renderer."""
+
+    composition_plan: CompositionPlan
+    captions: tuple[Any, ...]
+
+
 @dataclass(slots=True)
 class FfmpegFinalRenderer:
     store: LocalProjectStore
@@ -34,7 +43,8 @@ class FfmpegFinalRenderer:
     render_timeout_seconds: int = 1800
     video_width: int = 1280
     video_height: int = 720
-    video_fps: int = 30
+    video_fps: int | str = 30
+    video_sar: str = "1:1"
     bgm_volume: float = 0.25
     overlay_font_file: str = os.environ.get("VIDEBOX_OVERLAY_FONT", r"C:\Windows\Fonts\malgun.ttf")
     ffprobe_binary: str = "ffprobe"
@@ -50,6 +60,352 @@ class FfmpegFinalRenderer:
         """
         return CompositionPlan.from_timeline(timeline=timeline, captions=captions or [])
 
+    def build_final_render_inputs(self, *, composition_plan: CompositionPlan) -> CompositionRenderInputs:
+        return CompositionRenderInputs(composition_plan=composition_plan, captions=composition_plan.captions)
+
+    def build_exact_preview_inputs(self, *, composition_plan: CompositionPlan) -> CompositionRenderInputs:
+        # This is intentionally the same value object as final output.  A
+        # proxy is a different profile, never a different composition.
+        return CompositionRenderInputs(composition_plan=composition_plan, captions=composition_plan.captions)
+
+    def build_plan_filter_graph(
+        self, *, composition_plan: CompositionPlan, source_indices: dict[str, int],
+        export_overlay_indices: dict[int, int] | None = None,
+        track_overlay_indices: dict[str, int] | None = None,
+    ) -> str:
+        """Build the shared timeline placement graph.
+
+        Video policy is intentionally deterministic: an all-black canvas
+        starts at PTS zero, each B-roll source is placed at its canonical
+        timeline PTS, and later `(start_sec, clip_id)` overlays win where
+        intervals overlap.  That preserves leading/internal gaps instead of
+        concatenating unrelated source segments.
+        """
+        duration = max(composition_plan.duration_sec, 0.001)
+        sar = composition_plan.sample_aspect_ratio.replace(":", "/")
+        filters = [
+            f"color=c=black:s={self.video_width}x{self.video_height}:r={self.video_fps}:d={duration}[canvas0]"
+        ]
+        canvas = "canvas0"
+        broll = sorted(
+            (item for item in composition_plan.items if item.track_type == "broll"),
+            key=lambda item: (item.start_sec, item.clip_id),
+        )
+        for ordinal, item in enumerate(broll, start=1):
+            index = source_indices[item.clip_id]
+            label = f"v_{item.clip_id}"
+            duration_sec = item.end_sec - item.start_sec
+            controls = normalize_media_controls(item.media_controls, media_kind="broll", duration_sec=max(duration_sec, 0.001))
+            if controls["fit"] == "crop":
+                transform = f"scale={self.video_width}:{self.video_height}:force_original_aspect_ratio=increase,crop={self.video_width}:{self.video_height}"
+            else:
+                transform = f"scale={self.video_width}:{self.video_height}:force_original_aspect_ratio=decrease,pad={self.video_width}:{self.video_height}:(ow-iw)/2:(oh-ih)/2"
+            if controls["pad"] and not controls["loop"]:
+                transform += f",tpad=stop_mode=add:stop_duration={duration_sec}"
+            filters.append(
+                f"[{index}:v]trim=start={item.source_in_sec}:end={item.source_out_sec},setpts=PTS-STARTPTS,"
+                f"{transform},setsar={sar},setpts=PTS+{item.start_sec}/TB[{label}]"
+            )
+            next_canvas = f"canvas{ordinal}"
+            filters.append(f"[{canvas}][{label}]overlay=eof_action=pass:repeatlast=0[{next_canvas}]")
+            canvas = next_canvas
+        track_overlays = sorted(
+            (item for item in composition_plan.items if item.track_type == "overlay"),
+            key=lambda item: (item.start_sec, item.clip_id),
+        )
+        for ordinal, item in enumerate(track_overlays, start=1):
+            if track_overlay_indices is None or item.clip_id not in track_overlay_indices:
+                raise FinalRenderError(
+                    "Exact preview overlay source is unavailable. Restore a local image or video source and retry."
+                )
+            index = track_overlay_indices[item.clip_id]
+            label = f"track_overlay_{ordinal}"
+            next_canvas = f"canvas_track_overlay_{ordinal}"
+            filters.append(
+                f"[{index}:v]trim=start={item.source_in_sec}:end={item.source_out_sec},setpts=PTS-STARTPTS,"
+                f"scale={self.video_width}:{self.video_height}:force_original_aspect_ratio=decrease,"
+                f"setsar={sar},setpts=PTS+{item.start_sec}/TB[{label}]"
+            )
+            filters.append(
+                f"[{canvas}][{label}]overlay=(W-w)/2:(H-h)/2:eof_action=pass:repeatlast=0[{next_canvas}]"
+            )
+            canvas = next_canvas
+        for overlay_index, overlay in enumerate(composition_plan.export_overlays):
+            if export_overlay_indices is None or overlay_index not in export_overlay_indices:
+                continue
+            start_sec, end_sec = float(overlay.get("start_sec") or 0.0), float(overlay.get("end_sec") or 0.0)
+            if end_sec <= start_sec:
+                continue
+            source_index = export_overlay_indices[overlay_index]
+            label = f"export_overlay_{overlay_index}"
+            next_canvas = f"canvas_export_{overlay_index}"
+            filters.append(
+                f"[{source_index}:v]trim=duration={end_sec - start_sec},setpts=PTS-STARTPTS,"
+                f"scale={self.video_width}:{self.video_height}:force_original_aspect_ratio=decrease,"
+                f"setpts=PTS+{start_sec}/TB[{label}]"
+            )
+            filters.append(f"[{canvas}][{label}]overlay=(W-w)/2:(H-h)/2:eof_action=pass:repeatlast=0[{next_canvas}]")
+            canvas = next_canvas
+        for overlay_index, overlay in enumerate(composition_plan.export_overlays):
+            if overlay.get("asset_uri") or overlay.get("asset_id"):
+                continue
+            text = str(overlay.get("text") or overlay.get("title") or overlay.get("body") or "").strip()
+            if not text:
+                continue
+            start_sec, end_sec = float(overlay.get("start_sec") or 0.0), float(overlay.get("end_sec") or 0.0)
+            if end_sec <= start_sec:
+                continue
+            if not Path(self.overlay_font_file).is_file():
+                raise FinalRenderError("Overlay font is missing; set VIDEOBOX_OVERLAY_FONT before rendering text overlays.")
+            escaped = text.replace("\\", "\\\\").replace("'", "\\'").replace(":", "\\:")
+            font = self.overlay_font_file.replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
+            next_canvas = f"canvas_text_{overlay_index}"
+            filters.append(
+                f"[{canvas}]drawtext=fontfile='{font}':text='{escaped}':x=(w-text_w)/2:y=h-(text_h*3):"
+                f"fontsize=36:fontcolor=white:box=1:boxcolor=black@0.65:boxborderw=12:"
+                f"enable='between(t,{start_sec},{end_sec})'[{next_canvas}]"
+            )
+            canvas = next_canvas
+        filters.append(f"[{canvas}]null[vout]")
+        return ";".join(filters)
+
+    def build_plan_audio_filter_graph(
+        self, *, composition_plan: CompositionPlan, source_indices: dict[str, int]
+    ) -> str:
+        """Shared audio placement/control graph for final and proxy output."""
+        duration = max(composition_plan.duration_sec, 0.001)
+        narration = [item for item in composition_plan.items if item.track_type == "narration"]
+        filters: list[str] = []
+        labels: list[str] = []
+        for item in narration:
+            label = f"a_{item.clip_id}"
+            delay = max(0, round(item.start_sec * 1000))
+            filters.append(f"[{source_indices[item.clip_id]}:a]atrim=start={item.source_in_sec}:end={item.source_out_sec},asetpts=PTS-STARTPTS,adelay={delay}|{delay}[{label}]")
+            labels.append(f"[{label}]")
+        if not labels:
+            filters.append(f"anullsrc=r=48000:cl=stereo,atrim=duration={duration}[a_base]")
+            labels.append("[a_base]")
+        narration_sidechain = labels[0]
+        if len(narration) > 1:
+            filters.append(f"{''.join(labels)}amix=inputs={len(labels)}:duration=longest[narration_sidechain]")
+            narration_sidechain = "[narration_sidechain]"
+        for item in composition_plan.items:
+            if item.track_type == "broll":
+                controls = normalize_media_controls(item.media_controls, media_kind="broll", duration_sec=max(item.end_sec - item.start_sec, 0.001))
+                if not controls["preserve_source_audio"]:
+                    continue
+                label = f"a_{item.clip_id}"
+                delay = max(0, round(item.start_sec * 1000))
+                filters.append(f"[{source_indices[item.clip_id]}:a]atrim=start={item.source_in_sec}:end={item.source_out_sec},asetpts=PTS-STARTPTS,adelay={delay}|{delay}[{label}]")
+                labels.append(f"[{label}]")
+            elif item.track_type in {"bgm", "sfx"}:
+                controls = normalize_media_controls(item.media_controls, media_kind="audio", duration_sec=max(item.end_sec - item.start_sec, 0.001))
+                label = f"a_{item.clip_id}"
+                delay = max(0, round(item.start_sec * 1000))
+                effect = f"volume={controls['gain_db']}dB"
+                if controls["fade_in_sec"]:
+                    effect += f",afade=t=in:st=0:d={controls['fade_in_sec']}"
+                if controls["fade_out_sec"]:
+                    effect += f",afade=t=out:st={max(0.0, item.end_sec - item.start_sec - controls['fade_out_sec'])}:d={controls['fade_out_sec']}"
+                filters.append(f"[{source_indices[item.clip_id]}:a]atrim=start={item.source_in_sec}:end={item.source_out_sec},{effect},asetpts=PTS-STARTPTS,adelay={delay}|{delay}[{label}]")
+                if item.track_type == "bgm" and controls["ducking"]:
+                    ducked = f"duck_{item.clip_id}"
+                    filters.append(f"[{label}]{narration_sidechain}sidechaincompress=threshold=0.05:ratio=8[{ducked}]")
+                    labels.append(f"[{ducked}]")
+                else:
+                    labels.append(f"[{label}]")
+        filters.append(f"{''.join(labels)}amix=inputs={len(labels)}:duration=longest,atrim=duration={duration},asetpts=PTS-STARTPTS[aout]")
+        return ";".join(filters)
+
+    @staticmethod
+    def _timeline_from_plan(*, composition_plan: CompositionPlan, timeline_context: dict[str, Any]) -> dict[str, Any]:
+        """Rehydrate only the source-resolution shape from the authoritative plan."""
+        tracks: dict[str, list[dict[str, Any]]] = {}
+        for item in composition_plan.items:
+            controls = dict(item.media_controls)
+            # Range normalization has already shifted source time exactly once.
+            # Put that resolved source in on the source-reading contract; do
+            # not consult the mutable timeline again for placement/trim.
+            if item.track_type == "broll":
+                controls["in_sec"] = item.source_in_sec
+            tracks.setdefault(item.track_type, []).append({
+                "clip_id": item.clip_id,
+                "asset_id": item.asset_id,
+                "asset_uri": item.asset_uri,
+                "start_sec": item.start_sec,
+                "end_sec": item.end_sec,
+                "source_in_sec": item.source_in_sec,
+                "source_out_sec": item.source_out_sec,
+                "media_controls": controls,
+                "overlay_type": item.overlay_type,
+                "overlay_payload": dict(item.overlay_payload),
+            })
+        return {
+            "output": {
+                "width": composition_plan.width, "height": composition_plan.height,
+                "fps_num": composition_plan.fps_num, "fps_den": composition_plan.fps_den,
+                "sample_aspect_ratio": composition_plan.sample_aspect_ratio,
+                "rotation": composition_plan.rotation,
+            },
+            "narration_source_uri": timeline_context.get("narration_source_uri"),
+            "tracks": [{"track_type": kind, "clips": clips} for kind, clips in tracks.items()],
+            "export_overlays": [dict(item) for item in composition_plan.export_overlays],
+        }
+
+    def render_exact_preview_to_mp4(
+        self,
+        *,
+        project_id: str,
+        composition_plan: CompositionPlan,
+        timeline_context: dict[str, Any],
+        output_path: Path,
+        subtitle_ass_path: Path | None,
+    ) -> Path:
+        """Render a 720-long-edge, current-plan proxy with burned ASS captions."""
+        inputs = self.build_exact_preview_inputs(composition_plan=composition_plan)
+        if not inputs.composition_plan.items:
+            raise FinalRenderError("Exact preview has no composable clips. Restore missing source media and retry.")
+        if composition_plan.width >= composition_plan.height:
+            width, height = 720, max(2, round((composition_plan.height * 720 / composition_plan.width) / 2) * 2)
+        else:
+            width, height = max(2, round((composition_plan.width * 720 / composition_plan.height) / 2) * 2), 720
+        proxy_renderer = replace(
+            self, video_width=width, video_height=height,
+            video_fps=f"{composition_plan.fps_num}/{composition_plan.fps_den}",
+            video_sar=composition_plan.sample_aspect_ratio,
+        )
+        return proxy_renderer.render_timeline_to_mp4(
+            project_id=project_id,
+            timeline=proxy_renderer._timeline_from_plan(composition_plan=inputs.composition_plan, timeline_context=timeline_context),
+            output_path=output_path,
+            subtitle_ass_path=subtitle_ass_path,
+            composition_plan=inputs.composition_plan,
+            proxy_profile=True,
+        )
+
+    def _render_composition_plan_to_mp4(
+        self,
+        *,
+        project_id: str,
+        composition_plan: CompositionPlan,
+        timeline_context: dict[str, Any],
+        output_path: Path,
+        subtitle_file_path: Path | None,
+        subtitle_ass_path: Path | None,
+        proxy_profile: bool,
+    ) -> Path:
+        """Render the canonical plan directly; never sequentially concatenate it."""
+        if not composition_plan.items:
+            raise FinalRenderError("Timeline has no composable clips to render.")
+        generated_ass: Path | None = None
+        verify_output_sources(store=self.store, project_id=project_id, timeline=timeline_context)
+        source_paths: list[tuple[Path, bool, bool]] = []
+        source_indices: dict[str, int] = {}
+        track_overlay_indices: dict[str, int] = {}
+        audio_items = []
+        for item in composition_plan.items:
+            if item.track_type == "overlay":
+                # Overlay items are represented in the canonical plan but need
+                # a visual source.  Fail closed rather than silently omit one.
+                if not item.asset_uri:
+                    raise FinalRenderError("Exact preview overlay source is missing. Restore it and retry.")
+                source = self._resolve_generic_asset_uri(project_id=project_id, asset_uri=item.asset_uri)
+                if not source.is_file():
+                    raise FinalRenderError(f"Exact preview source is missing: '{source}'. Restore or re-import it and retry.")
+                is_image = source.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
+                if not is_image and not self._has_visual_stream(source):
+                    raise FinalRenderError("Exact preview overlay source must be a local image or video. Restore it and retry.")
+                track_overlay_indices[item.clip_id] = len(source_paths)
+                source_indices[item.clip_id] = len(source_paths)
+                source_paths.append((source, is_image, False))
+                continue
+            elif item.track_type == "narration":
+                source = self._resolve_narration_clip_source(
+                    project_id=project_id, timeline=timeline_context,
+                    clip={"asset_uri": item.asset_uri, "start_sec": item.start_sec, "end_sec": item.end_sec},
+                ).path
+                audio_items.append(item)
+                should_loop = False
+            elif item.track_type == "broll":
+                source = self._resolve_generic_asset_uri(project_id=project_id, asset_uri=str(item.asset_uri or ""))
+                controls = normalize_media_controls(item.media_controls, media_kind="broll", duration_sec=max(item.end_sec - item.start_sec, 0.001))
+                if controls["preserve_source_audio"]:
+                    audio_items.append(item)
+                should_loop = controls["loop"]
+            elif item.track_type in {"bgm", "sfx"}:
+                source = self._resolve_generic_asset_uri(project_id=project_id, asset_uri=str(item.asset_uri or ""))
+                audio_items.append(item)
+                should_loop = item.track_type == "bgm"
+            else:
+                continue
+            if not source.is_file():
+                raise FinalRenderError(f"Exact preview source is missing: '{source}'. Restore or re-import it and retry.")
+            source_indices[item.clip_id] = len(source_paths)
+            source_paths.append((source, False, should_loop))
+        if not any(item.track_type == "broll" for item in composition_plan.items):
+            raise FinalRenderError("Timeline has no B-roll clips to render.")
+        export_overlay_indices: dict[int, int] = {}
+        for overlay_index, overlay in enumerate(composition_plan.export_overlays):
+            asset_uri = str(overlay.get("asset_uri") or "")
+            asset_id = str(overlay.get("asset_id") or "")
+            if not asset_uri and asset_id:
+                asset_uri = f"local://projects/{project_id}/assets/{asset_id}"
+            if not asset_uri:
+                continue
+            try:
+                source = self._resolve_generic_asset_uri(project_id=project_id, asset_uri=asset_uri)
+            except FinalRenderError:
+                raise FinalRenderError("Exact preview export overlay source is unavailable. Restore it and retry.") from None
+            if not source.is_file():
+                raise FinalRenderError("Exact preview export overlay source is missing. Restore it and retry.")
+            export_overlay_indices[overlay_index] = len(source_paths)
+            source_paths.append((source, source.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp", ".bmp"}, False))
+        graph = self.build_plan_filter_graph(
+            composition_plan=composition_plan, source_indices=source_indices,
+            export_overlay_indices=export_overlay_indices,
+            track_overlay_indices=track_overlay_indices,
+        )
+        duration = max(composition_plan.duration_sec, 0.001)
+        graph += ";" + self.build_plan_audio_filter_graph(composition_plan=composition_plan, source_indices=source_indices)
+        video_label = "vout"
+        if subtitle_file_path is not None and subtitle_ass_path is None:
+            generated_ass = self.convert_legacy_subtitle_to_ass(
+                subtitle_file_path=subtitle_file_path, output_dir=output_path.parent
+            )
+            subtitle_ass_path = generated_ass
+        if subtitle_ass_path is not None:
+            escaped = subtitle_ass_path.resolve().as_posix().replace(":", r"\:").replace("'", r"\'")
+            graph += f";[vout]subtitles=filename='{escaped}'[vburned]"
+            video_label = "vburned"
+        sar = composition_plan.sample_aspect_ratio.replace(":", "/")
+        graph += f";[{video_label}]setsar={sar},setpts=PTS-STARTPTS[vfinal]"
+        video_label = "vfinal"
+        command = [self.ffmpeg_binary, "-y"]
+        for path, is_image, should_loop in source_paths:
+            if should_loop:
+                command += ["-stream_loop", "-1"]
+            if is_image:
+                command += ["-loop", "1", "-framerate", str(self.video_fps)]
+            command += ["-i", str(path)]
+        command += [
+            "-filter_complex", graph, "-map", f"[{video_label}]", "-map", "[aout]",
+            "-r", str(self.video_fps), "-c:v", "libx264", "-bf", "0", "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-ar", "48000", "-ac", "2", "-t", str(duration),
+            "-movflags", "+faststart" if proxy_profile else "+faststart",
+            "-avoid_negative_ts", "disabled", "-muxpreload", "0", "-muxdelay", "0",
+            "-metadata:s:v:0", f"rotate={composition_plan.rotation}",
+            str(output_path),
+        ]
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            result = self._run(command)
+        finally:
+            if generated_ass is not None:
+                generated_ass.unlink(missing_ok=True)
+        if result.returncode != 0:
+            raise FinalRenderError(f"ffmpeg failed rendering canonical composition: {result.stderr[-800:]}")
+        return output_path
+
     def _run(self, command: list[str]) -> subprocess.CompletedProcess:
         try:
             return subprocess.run(
@@ -62,6 +418,43 @@ class FfmpegFinalRenderer:
             raise FinalRenderError(f"'{self.ffmpeg_binary}' binary was not found. Install ffmpeg.") from exc
         except subprocess.TimeoutExpired as exc:
             raise FinalRenderError(f"ffmpeg timed out after {self.render_timeout_seconds}s.") from exc
+
+    def convert_legacy_subtitle_to_ass(self, *, subtitle_file_path: Path, output_dir: Path) -> Path:
+        """Convert session-less SRT/WebVTT-style input to the renderer's ASS input."""
+        source = Path(subtitle_file_path)
+        if not source.is_file():
+            raise FinalRenderError("Legacy subtitle artifact is missing; regenerate subtitles before final render.")
+        output_dir.mkdir(parents=True, exist_ok=True)
+        ass_path = output_dir / f".legacy_subtitle_{uuid.uuid4().hex}.ass"
+        result = self._run([self.ffmpeg_binary, "-y", "-i", str(source), "-f", "ass", str(ass_path)])
+        if result.returncode != 0 or not ass_path.is_file():
+            ass_path.unlink(missing_ok=True)
+            raise FinalRenderError(f"Unable to convert legacy subtitle artifact to ASS: {result.stderr[-800:]}")
+        return ass_path
+
+    def _has_visual_stream(self, path: Path) -> bool:
+        """Accept non-image overlays only when ffprobe confirms a video stream."""
+        try:
+            result = subprocess.run(
+                [
+                    self.ffprobe_binary,
+                    "-v",
+                    "error",
+                    "-select_streams",
+                    "v:0",
+                    "-show_entries",
+                    "stream=codec_type",
+                    "-of",
+                    "default=noprint_wrappers=1:nokey=1",
+                    str(path),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+            raise FinalRenderError("Unable to inspect overlay media. Install/configure ffprobe.") from exc
+        return result.returncode == 0 and result.stdout.strip() == "video"
 
     def _probe_media_duration(self, path: Path) -> float:
         try:
@@ -148,9 +541,9 @@ class FfmpegFinalRenderer:
                     "B-roll source is shorter than its timeline window. Enable loop or pad to preserve timeline duration."
                 )
             if controls["fit"] == "crop":
-                video_filter = f"scale={self.video_width}:{self.video_height}:force_original_aspect_ratio=increase,crop={self.video_width}:{self.video_height},setsar=1"
+                video_filter = f"scale={self.video_width}:{self.video_height}:force_original_aspect_ratio=increase,crop={self.video_width}:{self.video_height},setsar={self.video_sar.replace(':', '/')}"
             else:
-                video_filter = f"scale={self.video_width}:{self.video_height}:force_original_aspect_ratio=decrease,pad={self.video_width}:{self.video_height}:(ow-iw)/2:(oh-ih)/2,setsar=1"
+                video_filter = f"scale={self.video_width}:{self.video_height}:force_original_aspect_ratio=decrease,pad={self.video_width}:{self.video_height}:(ow-iw)/2:(oh-ih)/2,setsar={self.video_sar.replace(':', '/')}"
             if needs_padding:
                 video_filter += f",tpad=stop_mode=add:stop_duration={float(output_duration_sec) - available_duration_sec}"
             command += [
@@ -287,12 +680,22 @@ class FfmpegFinalRenderer:
         subtitle_file_path: Path | None = None,
         subtitle_ass_path: Path | None = None,
         on_progress: Callable[[int], None] | None = None,
+        composition_plan: CompositionPlan | None = None,
+        proxy_profile: bool = False,
     ) -> Path:
+        if composition_plan is not None:
+            return self._render_composition_plan_to_mp4(
+                project_id=project_id, composition_plan=composition_plan, timeline_context=timeline,
+                output_path=output_path, subtitle_file_path=subtitle_file_path,
+                subtitle_ass_path=subtitle_ass_path, proxy_profile=proxy_profile,
+            )
         verify_output_sources(store=self.store, project_id=project_id, timeline=timeline)
         # Keep extraction on the final-render path now so source/timeline
         # shapes are validated by its existing regression suite.  The proxy
         # renderer is deliberately not introduced in this task.
-        self.extract_composition_plan(timeline=timeline)
+        inputs = self.build_final_render_inputs(
+            composition_plan=composition_plan or self.extract_composition_plan(timeline=timeline)
+        )
         def report_progress(percent: int) -> None:
             if on_progress is not None:
                 on_progress(percent)
@@ -331,6 +734,13 @@ class FfmpegFinalRenderer:
             narration_segment_paths = []
             for index, clip in enumerate(narration_clips, start=1):
                 source = self._resolve_narration_clip_source(project_id=project_id, timeline=timeline, clip=clip)
+                if composition_plan is not None and str(clip.get("asset_uri") or "").startswith("local://projects/"):
+                    source = ResolvedClipSource(
+                        path=source.path,
+                        trim_start_sec=float(clip.get("source_in_sec") or 0.0),
+                        trim_duration_sec=float(clip.get("end_sec", 0.0)) - float(clip.get("start_sec", 0.0)),
+                        target_duration_sec=float(clip.get("end_sec", 0.0)) - float(clip.get("start_sec", 0.0)),
+                    )
                 segment_path = work_dir / f"narration_{index:03d}.wav"
                 self._extract_segment(source=source, output_path=segment_path, video=False)
                 narration_segment_paths.append(segment_path)
@@ -470,11 +880,12 @@ class FfmpegFinalRenderer:
                 "0:v",
                 "-map",
                 "1:a",
-                "-c:v",
-                "libx264" if subtitle_ass_path is not None else "copy",
+                "-c:v", "libx264" if (subtitle_ass_path is not None or proxy_profile) else "copy",
                 "-c:a",
                 "aac",
             ]
+            if proxy_profile:
+                command += ["-pix_fmt", "yuv420p", "-movflags", "+faststart", "-metadata:s:v:0", f"rotate={inputs.composition_plan.rotation}"]
             for note in output_warning_notes(timeline):
                 command += ["-metadata", f"comment={note}"]
             command += [

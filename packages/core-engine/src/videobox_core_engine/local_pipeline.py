@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 import json
 import tempfile
+import uuid
 import warnings
 
 from videobox_core_engine.canonical_boolish import (
@@ -35,8 +36,10 @@ from videobox_capcut_export import CapCutExportAdapter
 from videobox_core_engine.auto_cut import AutoCutPlanner
 from videobox_core_engine.capcut_handoff import CapCutHandoffError, CapCutHandoffService
 from videobox_core_engine.ffmpeg_auto_cut_executor import FfmpegAutoCutExecutor
-from videobox_core_engine.ffmpeg_final_renderer import FfmpegFinalRenderer
+from videobox_core_engine.ffmpeg_final_renderer import FinalRenderError, FfmpegFinalRenderer
 from videobox_core_engine.composition_plan import CompositionPlan
+from videobox_core_engine.exact_preview import ExactPreviewRequest, fingerprint_exact_preview
+from videobox_storage.timeline_clip_source_resolution import TimelineClipSourceError, resolve_generic_asset_uri
 from videobox_core_engine.output_source_verifier import OutputSourceStaleError, verify_output_freshness
 from videobox_core_engine.ass_subtitles import render_editing_session_ass
 from videobox_core_engine.thumbnail_generator import ThumbnailGenerationError, generate_video_thumbnail
@@ -88,7 +91,7 @@ from videobox_domain_models.recommendations import RecommendationType
 from videobox_provider_interfaces.recommenders import RecommendationProvider, RecommendationRequest
 from videobox_provider_interfaces.stt import MockSTTProvider, STTProvider, STTRequest
 from videobox_provider_interfaces.tts import TTSRequest
-from videobox_storage.local_project_store import EditingSessionRevisionConflict, LocalProjectStore
+from videobox_storage.local_project_store import EditingSessionRevisionConflict, LocalProjectStore, sha256_file
 from videobox_core_engine._pipeline_shared_helpers import (
     _build_review_guidance_reuse_key,
     _canonical_runtime_pending_recommendation_reason,
@@ -167,6 +170,155 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         if callable(extractor):
             return extractor(timeline=timeline, captions=captions)
         return CompositionPlan.from_timeline(timeline=timeline, captions=captions)
+
+    def _exact_preview_inputs(
+        self, *, project_id: str, session_id: str, start_sec: float | None = None, end_sec: float | None = None
+    ) -> tuple[dict[str, Any], dict[str, Any], CompositionPlan, str]:
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        timeline = self.store.get_timeline_run(project_id=project_id, timeline_id=str(session["timeline_id"]))
+        plan = self.build_composition_plan(timeline=timeline, editing_session=session)
+        if start_sec is not None or end_sec is not None:
+            if start_sec is None or end_sec is None:
+                raise ValueError("exact_preview_invalid_range")
+            plan = plan.for_range(start_sec=float(start_sec), end_sec=float(end_sec))
+        used_asset_sha256: dict[str, str] = {}
+        for item in plan.items:
+            identity = item.asset_id or f"{item.track_type}:{item.clip_id}"
+            try:
+                if item.track_type == "narration":
+                    source = self.final_renderer._resolve_narration_clip_source(
+                        project_id=project_id, timeline=timeline,
+                        clip={"asset_uri": item.asset_uri, "start_sec": item.start_sec, "end_sec": item.end_sec},
+                    ).path
+                else:
+                    source = resolve_generic_asset_uri(
+                        store=self.store, project_id=project_id, asset_uri=str(item.asset_uri or "")
+                    )
+                used_asset_sha256[identity] = sha256_file(source) if source.is_file() else f"missing:{identity}"
+            except (KeyError, OSError, ValueError, TimelineClipSourceError, FinalRenderError):
+                # A request still gets a durable, fenced generation so the
+                # worker can report an explicit recoverable failed state.
+                used_asset_sha256[identity] = f"missing:{identity}"
+        resolved_overlays: list[dict[str, Any]] = []
+        for index, overlay in enumerate(plan.export_overlays):
+            normalized = dict(overlay)
+            asset_uri = str(normalized.get("asset_uri") or "")
+            asset_id = str(normalized.get("asset_id") or "")
+            if not asset_uri and asset_id:
+                asset_uri = f"local://projects/{project_id}/assets/{asset_id}"
+            if asset_uri:
+                identity = f"export_overlay:{asset_id or index}"
+                try:
+                    source = resolve_generic_asset_uri(store=self.store, project_id=project_id, asset_uri=asset_uri)
+                    used_asset_sha256[identity] = sha256_file(source) if source.is_file() else f"missing:{identity}"
+                except (KeyError, OSError, ValueError, TimelineClipSourceError):
+                    used_asset_sha256[identity] = f"missing:{identity}"
+            resolved_overlays.append(normalized)
+        fingerprint = fingerprint_exact_preview(
+            plan=plan,
+            session_captions=plan.captions,
+            used_asset_sha256=used_asset_sha256,
+            overlay_inputs=resolved_overlays,
+            settings={"canvas": plan.canonical_dict()["canvas"]},
+        )
+        return session, timeline, plan, fingerprint
+
+    def start_exact_preview(
+        self, *, project_id: str, session_id: str, expected_revision: int, start_sec: float | None = None, end_sec: float | None = None
+    ) -> dict[str, Any]:
+        # A fresh API/pipeline process may inherit a durable ``running`` claim
+        # from a worker that died.  Recover only claims older than the store's
+        # bounded threshold before cache coalescing, so live owners retain
+        # their generation/owner fence and late completion still cannot win.
+        self.store.recover_stale_exact_preview_claims(project_id=project_id)
+        self._best_effort_cleanup_exact_previews(project_id=project_id)
+        session, _timeline, plan, fingerprint = self._exact_preview_inputs(
+            project_id=project_id, session_id=session_id, start_sec=start_sec, end_sec=end_sec
+        )
+        if int(session["session_revision"]) != expected_revision:
+            raise EditingSessionConflict(session)
+        request = ExactPreviewRequest(
+            session_id=session_id, expected_revision=expected_revision, start_sec=start_sec, end_sec=end_sec
+        )
+        return self.store.begin_exact_preview(
+            project_id=project_id, request=request, fingerprint=fingerprint, duration_sec=plan.duration_sec
+        )
+
+    def run_exact_preview(self, *, project_id: str, generation_id: str) -> None:
+        record = self.store.get_exact_preview(project_id=project_id, generation_id=generation_id)
+        owner_token = f"exact-preview-worker:{uuid.uuid4().hex}"
+        if not self.store.claim_exact_preview(project_id=project_id, generation_id=generation_id, owner_token=owner_token):
+            return
+        try:
+            session, timeline, plan, fingerprint = self._exact_preview_inputs(
+                project_id=project_id,
+                session_id=str(record["session_id"]),
+                start_sec=record.get("start_sec"), end_sec=record.get("end_sec"),
+            )
+            if int(session["session_revision"]) != int(record["expected_revision"]) or fingerprint != str(record["fingerprint"]):
+                self.store.mark_exact_preview_stale(project_id=project_id, generation_id=generation_id, reason="source_fingerprint_changed")
+                return
+            with tempfile.TemporaryDirectory(prefix="videobox_exact_preview_") as raw_dir:
+                raw = Path(raw_dir)
+                ass_path = raw / "captions.ass"
+                ass_path.write_text(
+                    render_editing_session_ass(
+                        {"caption_style": session.get("caption_style") or {}, "segments": [
+                            {"caption_text": cue.text, "start_sec": cue.start_sec, "end_sec": cue.end_sec}
+                            for cue in plan.captions
+                        ]},
+                        video_width=plan.width,
+                        video_height=plan.height,
+                    ),
+                    encoding="utf-8",
+                )
+                output_path = raw / "exact-preview.mp4"
+                self.final_renderer.render_exact_preview_to_mp4(
+                    project_id=project_id, composition_plan=plan, timeline_context=timeline,
+                    output_path=output_path, subtitle_ass_path=ass_path,
+                )
+                if not self.store.finish_exact_preview(
+                    project_id=project_id, generation_id=generation_id, fingerprint=fingerprint,
+                    artifact_path=output_path, owner_token=owner_token,
+                ):
+                    return
+        except Exception as exc:
+            self.store.fail_exact_preview(
+                project_id=project_id, generation_id=generation_id, owner_token=owner_token, error_message=str(exc)
+            )
+        finally:
+            self._best_effort_cleanup_exact_previews(project_id=project_id)
+
+    def _best_effort_cleanup_exact_previews(self, *, project_id: str) -> None:
+        """Bound preview retention without allowing cleanup faults to reject work."""
+        try:
+            self.store.cleanup_exact_preview_artifacts(
+                project_id=project_id,
+                keep_last=5,
+                orphan_older_than_seconds=300,
+            )
+        except Exception:
+            # Generation records and their owner fences are authoritative.
+            # Cleanup is deliberately non-authoritative maintenance only.
+            return
+
+    def get_exact_preview_status(self, *, project_id: str, generation_id: str) -> dict[str, Any]:
+        record = self.store.get_exact_preview(project_id=project_id, generation_id=generation_id)
+        # Every read is a fence: source replacement or session edits make a
+        # previously-successful MP4 unavailable before its URL can be exposed.
+        if record["state"] in {"pending", "running", "succeeded"}:
+            try:
+                session, _timeline, _plan, fingerprint = self._exact_preview_inputs(
+                    project_id=project_id, session_id=str(record["session_id"]),
+                    start_sec=record.get("start_sec"), end_sec=record.get("end_sec"),
+                )
+                if int(session["session_revision"]) != int(record["expected_revision"]) or fingerprint != str(record["fingerprint"]):
+                    self.store.mark_exact_preview_stale(project_id=project_id, generation_id=generation_id, reason="read_revalidation_failed")
+                    record = self.store.get_exact_preview(project_id=project_id, generation_id=generation_id)
+            except Exception:
+                self.store.mark_exact_preview_stale(project_id=project_id, generation_id=generation_id, reason="source_unavailable")
+                record = self.store.get_exact_preview(project_id=project_id, generation_id=generation_id)
+        return record
 
     def register_narration_asset(self, *, project_id: str, source_path: Path) -> dict[str, Any]:
         asset = self.store.register_asset(
@@ -1341,7 +1493,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
             # Establish the same immutable timeline/caption input that the
             # exact-preview worker will consume in Task 2.  Rendering remains
             # on the existing final path in this Task 1 extraction slice.
-            self.build_composition_plan(timeline=timeline, editing_session=editing_session)
+            composition_plan = self.build_composition_plan(timeline=timeline, editing_session=editing_session)
             with tempfile.TemporaryDirectory(prefix="videobox_final_render_") as raw_render_dir:
                 render_output_path = Path(raw_render_dir) / "output.mp4"
                 subtitle_ass_path = None
@@ -1349,9 +1501,15 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                     subtitle_ass_path = Path(raw_render_dir) / "captions.ass"
                     subtitle_ass_path.write_text(
                         render_editing_session_ass(
-                            editing_session,
-                            video_width=self.final_renderer.video_width,
-                            video_height=self.final_renderer.video_height,
+                            {
+                                "caption_style": editing_session.get("caption_style") or {},
+                                "segments": [
+                                    {"caption_text": cue.text, "start_sec": cue.start_sec, "end_sec": cue.end_sec}
+                                    for cue in composition_plan.captions
+                                ],
+                            },
+                            video_width=composition_plan.width,
+                            video_height=composition_plan.height,
                         ),
                         encoding="utf-8",
                     )
@@ -1361,6 +1519,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                     output_path=render_output_path,
                     subtitle_file_path=subtitle_file_path,
                     subtitle_ass_path=subtitle_ass_path,
+                    composition_plan=composition_plan,
                     on_progress=lambda percent: self.store.update_job_progress(
                         project_id=project_id, job_id=job["job_id"], progress_percent=percent
                     ),

@@ -737,10 +737,40 @@ class EditorAuditionResponse(BaseModel):
 
 
 class EditorExactPreviewResponse(BaseModel):
-    status: Literal["current", "stale", "unavailable"]
+    status: Literal["pending", "running", "succeeded", "failed", "stale", "unavailable"]
     url: str | None = None
     source_session_id: str | None = None
     source_session_revision: int | None = None
+    generation_id: str | None = None
+    timeline_start_sec: float | None = None
+    timeline_end_sec: float | None = None
+    artifact_revision: int | None = None
+    fingerprint: str | None = None
+
+
+class ExactPreviewRequestBody(BaseModel):
+    expected_revision: int = Field(ge=1)
+    start_sec: float | None = Field(default=None, ge=0)
+    end_sec: float | None = Field(default=None, gt=0)
+
+    @model_validator(mode="after")
+    def _paired_range(self) -> "ExactPreviewRequestBody":
+        if (self.start_sec is None) != (self.end_sec is None) or (
+            self.start_sec is not None and self.end_sec is not None and self.end_sec <= self.start_sec
+        ):
+            raise ValueError("exact_preview_invalid_range")
+        return self
+
+
+class ExactPreviewResponse(BaseModel):
+    status: Literal["pending", "running", "succeeded", "failed", "stale", "unavailable"]
+    generation_id: str
+    timeline_start_sec: float = Field(ge=0)
+    timeline_end_sec: float = Field(gt=0)
+    artifact_revision: int = Field(ge=1)
+    fingerprint: str
+    content_url: str | None = None
+    error_message: str | None = None
 
 
 class EditorPlaybackManifestResponse(BaseModel):
