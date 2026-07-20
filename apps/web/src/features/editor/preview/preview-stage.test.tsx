@@ -6,7 +6,7 @@ import { PreviewStage } from "./preview-stage";
 beforeEach(() => { vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => undefined); });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
-const current = { expectedRevision: 4, exactPreview: { status: "succeeded" as const, url: "/api/exact.mp4", artifactRevision: 4, timelineStartSec: 0, timelineEndSec: 12 }, sources: [{ id: "clip-a", label: "B-roll A", url: "/api/assets/a/content", mediaKind: "video" as const, timelineRange: { startSec: 3, endSec: 8 } }] };
+const current = { expectedRevision: 4, exactPreview: { status: "succeeded" as const, url: "/api/exact.mp4", artifactRevision: 4, timelineStartSec: 0, timelineEndSec: 12 }, captions: [{ text: "첫 번째 안내 자막", startSec: 0, endSec: 3 }, { text: "두 번째 안내 자막", startSec: 3, endSec: 8 }], sources: [{ id: "clip-a", label: "B-roll A", url: "/api/assets/a/content", mediaKind: "video" as const, timelineRange: { startSec: 3, endSec: 8 } }] };
 
 describe("PreviewStage", () => {
   it("mounts a single exact video with burned-caption guidance and no duplicate visual caption", () => {
@@ -16,6 +16,17 @@ describe("PreviewStage", () => {
     expect(container.querySelectorAll("video, audio")).toHaveLength(1);
     expect(screen.getByText("자막은 영상에 포함되어 재생됩니다.")).toBeInTheDocument();
     expect(container.querySelector(".vb-preview-stage__caption-overlay")).toBeNull();
+  });
+
+  it("announces the active burned caption from the actual player time without rendering a second visual caption", () => {
+    const { container } = render(<PreviewStage {...current} />);
+    const media = screen.getByLabelText("편집본 미리보기") as HTMLVideoElement;
+    expect(screen.getByRole("status", { name: "현재 자막" })).toHaveTextContent("첫 번째 안내 자막");
+    Object.defineProperty(media, "currentTime", { configurable: true, writable: true, value: 3.5 });
+    fireEvent.timeUpdate(media);
+    expect(screen.getByRole("status", { name: "현재 자막" })).toHaveTextContent("두 번째 안내 자막");
+    expect(container.querySelector(".vb-preview-stage__caption-overlay")).toBeNull();
+    expect(container.querySelector(".vb-preview-stage__caption-transcript")).toHaveClass("vb-preview-stage__visually-hidden");
   });
 
   it("starts an exact selected-range preview at its immutable timeline offset", () => {

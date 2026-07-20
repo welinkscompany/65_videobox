@@ -60,7 +60,7 @@ export function EditorWorkbench({ view, onPreviewRefresh }: { view: EditorViewMo
     const mediaKind = auditionMediaKind(track.role, clip.overlayType);
     return mediaKind ? [{ id: clip.clipId, label: `${track.role === "broll" ? "B-roll" : track.role.toUpperCase()} · ${clip.segmentId}`, url, mediaKind, timelineRange: { startSec: clip.startSec, endSec: clip.endSec } }] : [];
   }));
-  const stage = <PreviewStage expectedRevision={view.expectedRevision} exactPreview={view.playback.exactPreview} sources={sources} onRefresh={onPreviewRefresh} />;
+  const stage = <PreviewStage expectedRevision={view.expectedRevision} exactPreview={view.playback.exactPreview} captions={view.captions} sources={sources} onRefresh={onPreviewRefresh} />;
   return <section className="vb-editor-workbench" aria-label="편집 작업판" data-project-id={view.projectId} data-session-id={view.sessionId} data-editor-density={layout.mode} data-available-workbench-width={Math.round(availableWorkbenchWidth)}>
     <header className="vb-editor-workbench__toolbar"><strong>읽기 전용 편집 작업판</strong><span>{view.timelineId} · revision {view.expectedRevision}</span><div><button ref={leftTriggerRef} type="button" onClick={() => layout.mode === "drawer" ? openDrawer("left") : setUi((current) => ({ ...current, leftOpen: !current.leftOpen }))}>자산과 대본</button><button ref={rightTriggerRef} type="button" onClick={() => layout.mode === "drawer" ? openDrawer("right") : setUi((current) => ({ ...current, rightOpen: !current.rightOpen }))}>유진과 Inspector</button></div></header>
     <div ref={bodyRef} className="vb-editor-workbench__body">

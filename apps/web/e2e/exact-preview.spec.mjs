@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { fulfillLocalMp4WithRanges } from "./support/valid-local-mp4-fixture.mjs";
 
 const project = {
   project_id: "local-draft",
@@ -44,7 +45,7 @@ async function installEditorRoutes(page, state) {
     state.current = state.afterRetry ?? state.current;
     await route.fulfill({ contentType: "application/json", status: 202, body: JSON.stringify({ status: "pending", generation_id: "generation-8", timeline_start_sec: 2, timeline_end_sec: 8, artifact_revision: state.current.session_revision, fingerprint: "e2e" }) });
   });
-  await page.route("**/content", (route) => route.fulfill({ status: 204 }));
+  await page.route("**/content", fulfillLocalMp4WithRanges);
 }
 
 async function openEditor(page, state) {
@@ -53,7 +54,7 @@ async function openEditor(page, state) {
   await expect(page.getByRole("region", { name: "편집 작업판" })).toBeVisible();
 }
 
-test("current exact proxy mounts one player and maps seek time to the timeline", async ({ page }) => {
+test("current exact proxy loads a valid local MP4 and maps a native seek to the timeline", async ({ page }) => {
   const state = { current: manifest(), retryBodies: [] };
   await openEditor(page, state);
 
@@ -62,12 +63,10 @@ test("current exact proxy mounts one player and maps seek time to the timeline",
   await expect(video).toHaveAttribute("src", /exact-previews\/generation-7\/content$/);
   await expect(video).not.toHaveAttribute("autoplay");
   await expect(video).toHaveJSProperty("autoplay", false);
-  await page.evaluate(() => {
-    const node = document.querySelector("video");
-    if (!node) throw new Error("exact preview video is missing");
-    Object.defineProperty(node, "currentTime", { configurable: true, value: 1.5 });
-    node.dispatchEvent(new Event("timeupdate"));
-  });
+  await expect.poll(() => video.evaluate((node) => node.readyState >= HTMLMediaElement.HAVE_METADATA)).toBe(true);
+  await expect.poll(() => video.evaluate((node) => node.duration)).toBeGreaterThan(1);
+  await video.evaluate((node) => { node.currentTime = 1.5; });
+  await expect.poll(() => video.evaluate((node) => node.currentTime)).toBeCloseTo(1.5, 1);
   await expect(page.locator("output")).toHaveText("타임라인 3.5초");
   await expect(page.locator("audio, video")).toHaveCount(1);
 });

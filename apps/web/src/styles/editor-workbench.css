@@ -21,6 +21,7 @@
 .vb-preview-stage__empty strong { display: block; color: var(--foreground); }
 .vb-preview-stage__playback { color: var(--muted-foreground); font-size: 0.9rem; }
 .vb-preview-stage__burned-caption, .vb-preview-stage__status, .vb-preview-stage__sources > p { margin: 0; color: var(--muted-foreground); font-size: 0.85rem; }
+.vb-preview-stage__visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .vb-preview-stage__sources { display: grid; gap: 0.4rem; padding-top: 0.7rem; border-top: 1px solid var(--border); }
 .vb-preview-stage__sources > div { justify-content: flex-start; flex-wrap: wrap; }
 @media (max-width: 1279px) { .vb-editor-workbench__toolbar { align-items: flex-start; flex-direction: column; } .vb-editor-workbench__body { min-height: 24rem; } }
