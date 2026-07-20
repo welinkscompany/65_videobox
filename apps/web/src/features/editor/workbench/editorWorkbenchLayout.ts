@@ -33,7 +33,7 @@ export function resolveEditorWorkbenchLayout({ viewportWidth, availableWorkbench
   const available = Math.max(0, availableWorkbenchWidth);
   const { leftMinPx, rightMinPx, gutterPx, bothPreviewMinPx, singlePreviewMinPx } = editorWorkbenchPanelConstants;
   const bothPreview = available - leftMinPx - rightMinPx - gutterPx * 2;
-  if (viewportWidth >= 1600 && bothPreview >= bothPreviewMinPx) return { ...state, mode: "desktop-both", leftOpen: true, rightOpen: true, activeDrawer: null, previewMinPx: bothPreviewMinPx };
+  if (viewportWidth >= 1600 && state.leftOpen && state.rightOpen && bothPreview >= bothPreviewMinPx) return { ...state, mode: "desktop-both", activeDrawer: null, previewMinPx: bothPreviewMinPx };
 
   const requestedLeft = state.leftOpen || !state.rightOpen;
   const dockMin = requestedLeft ? leftMinPx : rightMinPx;

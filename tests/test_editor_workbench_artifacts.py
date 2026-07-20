@@ -1,11 +1,18 @@
 import hashlib
 import json
+import struct
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "docs/prototypes/2026-07-20-editor-workbench/manifest.json"
 APPROVAL = ROOT / "docs/decisions/2026-07-20-editor-workbench-visual-approval.ko.md"
 SNAPSHOTS = ROOT / "apps/web/e2e/snapshots"
+
+def png_dimensions(path: Path) -> tuple[int, int]:
+    header = path.read_bytes()[:24]
+    assert header[:8] == b"\x89PNG\r\n\x1a\n"
+    assert header[12:16] == b"IHDR"
+    return struct.unpack(">II", header[16:24])
 
 def test_editor_workbench_artifacts_are_deterministic_and_pending_approval():
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
@@ -18,4 +25,5 @@ def test_editor_workbench_artifacts_are_deterministic_and_pending_approval():
         path = SNAPSHOTS / item["file"]
         assert path.is_file()
         assert len(path.read_bytes()) > 100
+        assert png_dimensions(path) == (item["width"], item["height"])
         assert item["sha256"] == hashlib.sha256(path.read_bytes()).hexdigest()

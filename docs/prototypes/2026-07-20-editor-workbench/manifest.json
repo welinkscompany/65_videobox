@@ -2,10 +2,10 @@
   "task": "Task 11 source-derived responsive editor workbench",
   "approval": { "status": "pending", "required": "second explicit user visual approval" },
   "viewports": [
-    { "file": "editor-workbench-1920x1080.png", "width": 1920, "height": 1080, "sha256": "5fd47b207a7b16608cb6d3f738463c1bc4269cfac4fa4c2d7a775507d97050de" },
-    { "file": "editor-workbench-1440x900.png", "width": 1440, "height": 900, "sha256": "08bce7d815e8709faffd2b1902a3fcf745197aea459f77d8db92411bcb24f2ac" },
-    { "file": "editor-workbench-1280x800.png", "width": 1280, "height": 800, "sha256": "25135232f17e3921f854f3d99055d07aa29b191bfb9187362666bf4166254ad3" },
-    { "file": "editor-workbench-768x1024.png", "width": 768, "height": 1024, "sha256": "93b1b566b36ac20c1e278a9696d862a15de930473b9f848089c5a80bc386f439" },
-    { "file": "editor-workbench-390x844.png", "width": 390, "height": 844, "sha256": "b4df08f58b1832aa32d0eca00e8b6d2bb2c30733dd4102b54290fdcb80c9d3d5" }
+    { "file": "editor-workbench-1920x1080.png", "width": 1920, "height": 1080, "sha256": "ffaefed6424c8335133faddd7accab0699ff17ca7453ccd24086fce10032f5ec" },
+    { "file": "editor-workbench-1440x900.png", "width": 1440, "height": 900, "sha256": "7298eba51fea155a78ae72a60a0ab389050a375e50ae4f198aaaeddc151dceb0" },
+    { "file": "editor-workbench-1280x800.png", "width": 1280, "height": 800, "sha256": "726c4802d62ade4d64f4e873cc788b27583b8961ea14dd759e82c831f2a9d042" },
+    { "file": "editor-workbench-768x1024.png", "width": 768, "height": 1024, "sha256": "6be155bfe61b0eaf9aa1b2ffd1f4a4e610f1d7e90f4d002c36e680f8861df586" },
+    { "file": "editor-workbench-390x844.png", "width": 390, "height": 844, "sha256": "57ed98f88d58c43aa2e6db44c4a9d3727c6c95ff5c5773e412aed136ac3929bf" }
   ]
 }
