@@ -9,6 +9,13 @@ describe("caption style API conflicts", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/projects/project%2F1/editing-sessions/session%2F1/playback-manifest", undefined);
     vi.unstubAllGlobals();
   });
+  it("starts a fenced exact preview only through the local project/session route", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ status: "pending", generation_id: "g-1", timeline_start_sec: 0, timeline_end_sec: 1, artifact_revision: 4, fingerprint: "sha256:test" }), { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await api.startExactPreview("project/1", "session/1", { expected_revision: 4 });
+    expect(fetchMock).toHaveBeenCalledWith("/api/projects/project%2F1/editing-sessions/session%2F1/exact-preview", expect.objectContaining({ method: "POST", body: JSON.stringify({ expected_revision: 4 }) }));
+    vi.unstubAllGlobals();
+  });
   it("uses project-scoped persisted creation brief routes and preserves creator answers", async () => {
     const created = {
       brief_id: "brief_1", project_id: "project_001", idempotency_key: "stable-key", script_filename: "intro.txt", script_text: "소개 영상",

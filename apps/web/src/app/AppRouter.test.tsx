@@ -162,7 +162,7 @@ describe("AppRouter URL ownership", () => {
       project_id: "project_a", session_id: "editing_session_draft_1", timeline_id: "timeline_draft_1", session_revision: 1, timeline_version: "v1",
       timebase: "seconds", fps: { num: 30, den: 1 }, output: { width: 1080, height: 1920, sample_aspect_ratio: "1:1", rotation: 0, duration_sec: 2 }, tracks: [{ track_id: "narration", track_type: "narration", clips: [{ clip_id: "clip_1", segment_id: "segment_1", clip_type: "narration", asset_id: null, asset_uri: null, start_sec: 0, end_sec: 2, media_controls: {} }] }, { track_id: "music", track_type: "bgm", clips: [{ clip_id: "music_1", segment_id: "segment_1", clip_type: "bgm", asset_id: "asset_music", asset_uri: null, start_sec: 0, end_sec: 2, media_controls: { volume: 0.6, fade_in_sec: 0.5, fade_out_sec: 0.25 } }] }], captions: [{ segment_id: "segment_1", text: "소개", start_sec: 0, end_sec: 2, style: { font_family: "Pretendard", font_size_px: 20, text_color: "#fff", outline_color: "#000", outline_width_px: 1, background_color: "#00000000", position_x_percent: 50, position_y_percent: 90, horizontal_align: "center", safe_area_enabled: true, shadow_blur_px: 0 } }], gap_slots: [],
       source_status: { status: "current", source_session_id: "editing_session_draft_1", source_session_revision: 1 }, audition: { asset_urls: { narration: "/api/projects/project_a/assets/narration/content" } },
-      exact_preview: { status: "current", url: "/api/projects/project_a/final-renders/current-b/content", source_session_id: "editing_session_draft_1", source_session_revision: 1 },
+      exact_preview: { status: "succeeded", url: "/api/projects/project_a/exact-previews/generation-1/content", source_session_id: "editing_session_draft_1", source_session_revision: 1, artifact_revision: 1, timeline_start_sec: 0, timeline_end_sec: 2 },
     });
     const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects/project_a/editor?session_id=editing_session_draft_1"] }));
 
@@ -172,8 +172,9 @@ describe("AppRouter URL ownership", () => {
     expect(loadLatest).not.toHaveBeenCalled();
     const workbench = await screen.findByRole("region", { name: "편집 작업판" });
     expect(workbench).toHaveAttribute("data-editor-density", "desktop-both");
-    expect(screen.getByRole("region", { name: "미리보기 자리" })).toHaveAttribute("data-preview-min-width", "720");
-    expect(document.querySelectorAll("audio,video")).toHaveLength(0);
+    expect(screen.getByRole("region", { name: "미리보기" }).parentElement).toHaveAttribute("data-preview-min-width", "720");
+    expect(screen.getByLabelText("편집본 미리보기")).toHaveAttribute("src", "/api/projects/project_a/exact-previews/generation-1/content");
+    expect(document.querySelectorAll("audio,video")).toHaveLength(1);
     expect(screen.getByLabelText("유진에게 요청하기")).toBeDisabled();
     expect(screen.getByRole("button", { name: "요청 보내기" })).toBeDisabled();
     expect(screen.getByText("추천은 다음 단계에서 준비합니다.")).toBeVisible();

@@ -3,6 +3,7 @@ import { type KeyboardEvent, useEffect, useLayoutEffect, useRef, useState } from
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "../../../components/ui/resizable";
 import type { PanelImperativeHandle, PanelSize } from "react-resizable-panels";
 import type { EditorViewModel } from "../editorViewModel";
+import { PreviewStage, type AuditionSource } from "../preview/preview-stage";
 import { EditorWorkbenchReadOnlyAdapters } from "./editorWorkbenchReadOnlyAdapters";
 import { resolveEditorWorkbenchLayout, type EditorWorkbenchPersistedState } from "./editorWorkbenchLayout";
 
@@ -16,7 +17,7 @@ export function persistedPanelPixels(size: PanelSize, minPx: number, fallback: n
   return Number.isFinite(pixels) ? Math.max(minPx, Math.round(pixels)) : fallback;
 }
 
-export function EditorWorkbench({ view }: { view: EditorViewModel }) {
+export function EditorWorkbench({ view, onPreviewRefresh }: { view: EditorViewModel; onPreviewRefresh?: () => void | Promise<void> }) {
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
   const [availableWorkbenchWidth, setAvailableWorkbenchWidth] = useState(() => window.innerWidth);
   const [ui, setUi] = useState<EditorWorkbenchPersistedState>(readUi);
@@ -52,15 +53,29 @@ export function EditorWorkbench({ view }: { view: EditorViewModel }) {
   const drawer = layout.activeDrawer && <div ref={drawerRef} role="dialog" aria-modal="true" aria-label={layout.activeDrawer === "left" ? "자산과 대본" : "유진과 Inspector"} className="vb-editor-workbench__drawer" onKeyDown={trapDrawerFocus} tabIndex={-1}>{dock(layout.activeDrawer)}<button type="button" onClick={closeAndRestore}>닫기</button></div>;
   const leftVisible = layout.mode === "desktop-both" || (layout.mode === "desktop-single" && layout.leftOpen);
   const rightVisible = layout.mode === "desktop-both" || (layout.mode === "desktop-single" && layout.rightOpen);
+  const sources: AuditionSource[] = view.tracks.flatMap((track) => track.clips.flatMap((clip) => {
+    if (!clip.assetId) return [];
+    const url = view.playback.auditionUrls[clip.assetId];
+    if (!url) return [];
+    const mediaKind = auditionMediaKind(track.role, clip.overlayType);
+    return mediaKind ? [{ id: clip.clipId, label: `${track.role === "broll" ? "B-roll" : track.role.toUpperCase()} · ${clip.segmentId}`, url, mediaKind, timelineRange: { startSec: clip.startSec, endSec: clip.endSec } }] : [];
+  }));
+  const stage = <PreviewStage expectedRevision={view.expectedRevision} exactPreview={view.playback.exactPreview} sources={sources} onRefresh={onPreviewRefresh} />;
   return <section className="vb-editor-workbench" aria-label="편집 작업판" data-project-id={view.projectId} data-session-id={view.sessionId} data-editor-density={layout.mode} data-available-workbench-width={Math.round(availableWorkbenchWidth)}>
     <header className="vb-editor-workbench__toolbar"><strong>읽기 전용 편집 작업판</strong><span>{view.timelineId} · revision {view.expectedRevision}</span><div><button ref={leftTriggerRef} type="button" onClick={() => layout.mode === "drawer" ? openDrawer("left") : setUi((current) => ({ ...current, leftOpen: !current.leftOpen }))}>자산과 대본</button><button ref={rightTriggerRef} type="button" onClick={() => layout.mode === "drawer" ? openDrawer("right") : setUi((current) => ({ ...current, rightOpen: !current.rightOpen }))}>유진과 Inspector</button></div></header>
     <div ref={bodyRef} className="vb-editor-workbench__body">
       {layout.mode !== "drawer" ? <ResizablePanelGroup orientation="horizontal" className="vb-editor-workbench__panels">
         {leftVisible && <><ResizablePanel panelRef={leftPanelRef} defaultSize={`${ui.leftSize}px`} minSize="220px" onResize={(size) => setUi((current) => ({ ...current, leftSize: persistedPanelPixels(size, 220, current.leftSize) }))}>{dock("left")}</ResizablePanel><ResizableHandle aria-label="왼쪽 패널 크기 조절" onKeyDown={(event) => handleKey(event, "left")} /></>}
-        <ResizablePanel minSize={layout.previewMinPx} className="vb-editor-workbench__stage-panel"><section aria-label="미리보기 자리" className="vb-editor-workbench__preview" data-preview-min-width={layout.previewMinPx}><p>미리보기 자리</p><span>{view.output.width} × {view.output.height} · {view.output.durationSec.toFixed(1)}초</span><small>정확한 미리보기와 재생은 다음 단계에서 준비합니다.</small></section></ResizablePanel>
+        <ResizablePanel minSize={layout.previewMinPx} className="vb-editor-workbench__stage-panel"><div className="vb-editor-workbench__preview" data-preview-min-width={layout.previewMinPx}>{stage}</div></ResizablePanel>
         {rightVisible && <><ResizableHandle aria-label="오른쪽 패널 크기 조절" onKeyDown={(event) => handleKey(event, "right")} /><ResizablePanel panelRef={rightPanelRef} defaultSize={`${ui.rightSize}px`} minSize="260px" onResize={(size) => setUi((current) => ({ ...current, rightSize: persistedPanelPixels(size, 260, current.rightSize) }))}>{dock("right")}</ResizablePanel></>}
-      </ResizablePanelGroup> : <><section aria-label="미리보기 자리" className="vb-editor-workbench__preview" data-preview-min-width="0"><p>미리보기 자리</p><span>{view.output.width} × {view.output.height}</span></section>{drawer}</>}
+      </ResizablePanelGroup> : <><div className="vb-editor-workbench__preview" data-preview-min-width="0">{stage}</div>{drawer}</>}
     </div>
     <section aria-label="타임라인" className="vb-editor-workbench__timeline"><h2>타임라인</h2><p>{view.tracks.length}개 트랙 · {view.captions.length}개 자막 · {view.gaps.length}개 자산 공백 · {view.source.status}</p></section>
   </section>;
+}
+
+function auditionMediaKind(role: EditorViewModel["tracks"][number]["role"], overlayType: EditorViewModel["tracks"][number]["clips"][number]["overlayType"]): AuditionSource["mediaKind"] | null {
+  if (role === "narration" || role === "bgm" || role === "sfx") return "audio";
+  if (role === "broll") return "video";
+  return overlayType === "image_overlay" ? null : "video";
 }

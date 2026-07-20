@@ -330,7 +330,17 @@ export type EditorPlaybackManifest = {
   gap_slots: Array<{ gap_id: string; segment_id: string; start_sec: number; end_sec: number; reason: string }>;
   source_status: { status: "current" | "stale"; source_session_id?: string | null; source_session_revision?: number | null };
   audition: { asset_urls: Record<string, string> };
-  exact_preview: { status: "current" | "stale" | "unavailable"; url?: string | null; source_session_id?: string | null; source_session_revision?: number | null };
+  exact_preview: { status: "current" | "succeeded" | "pending" | "running" | "failed" | "stale" | "unavailable"; url?: string | null; source_session_id?: string | null; source_session_revision?: number | null; generation_id?: string | null; timeline_start_sec?: number | null; timeline_end_sec?: number | null; artifact_revision?: number | null };
+};
+export type ExactPreviewResponse = {
+  status: "pending" | "running" | "succeeded" | "failed" | "stale" | "unavailable";
+  generation_id: string;
+  timeline_start_sec: number;
+  timeline_end_sec: number;
+  artifact_revision: number;
+  fingerprint: string;
+  content_url?: string | null;
+  error_message?: string | null;
 };
 
 type RevisionedEditingSessionMutation = {
@@ -956,6 +966,10 @@ export const api = {
     request<FixedTimeline>(`/api/projects/${projectId}/editing-sessions/${sessionId}/fixed-timeline`),
   getEditorPlaybackManifest: (projectId: string, sessionId: string) =>
     request<EditorPlaybackManifest>(`/api/projects/${encodeURIComponent(projectId)}/editing-sessions/${encodeURIComponent(sessionId)}/playback-manifest`),
+  startExactPreview: (projectId: string, sessionId: string, payload: { expected_revision: number; start_sec?: number; end_sec?: number }) =>
+    request<ExactPreviewResponse>(`/api/projects/${encodeURIComponent(projectId)}/editing-sessions/${encodeURIComponent(sessionId)}/exact-preview`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+    }),
   previewEditingSessionSelectedRange: (projectId: string, sessionId: string, payload: { start_sec: number; end_sec: number }) =>
     request<SelectedRangePreview>(`/api/projects/${projectId}/editing-sessions/${sessionId}/selected-range-preview`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),

@@ -20,7 +20,7 @@ export type EditorViewModel = Readonly<{
   captions: ReadonlyArray<Readonly<{ segmentId: string; text: string; startSec: number; endSec: number; style: EditorCaptionStyle }>>;
   gaps: ReadonlyArray<Readonly<{ gapId: string; segmentId: string; startSec: number; endSec: number; reason: string }>>;
   source: Readonly<{ status: "current" | "stale"; sourceSessionId?: string | null; sourceSessionRevision?: number | null }>;
-  playback: Readonly<{ auditionUrls: Readonly<Record<string, string>>; exactPreview: Readonly<{ status: "current" | "stale" | "unavailable"; url?: string | null; sourceSessionId?: string | null; sourceSessionRevision?: number | null }> }>;
+  playback: Readonly<{ auditionUrls: Readonly<Record<string, string>>; exactPreview: Readonly<{ status: "current" | "succeeded" | "pending" | "running" | "failed" | "stale" | "unavailable"; url?: string | null; sourceSessionId?: string | null; sourceSessionRevision?: number | null; generationId?: string | null; timelineStartSec?: number | null; timelineEndSec?: number | null; artifactRevision?: number | null }> }>;
   local: Readonly<{ selectedSegmentId: string | null; seekSec: number }>;
 }>;
 
@@ -46,7 +46,7 @@ export class VideoBoxEditorAdapter {
       captions: manifest.captions.map((caption) => ({ segmentId: caption.segment_id, text: caption.text, startSec: caption.start_sec, endSec: caption.end_sec, style: { fontFamily: caption.style.font_family, fontSizePx: caption.style.font_size_px, textColor: caption.style.text_color, outlineColor: caption.style.outline_color, outlineWidthPx: caption.style.outline_width_px, backgroundColor: caption.style.background_color, positionXPercent: caption.style.position_x_percent, positionYPercent: caption.style.position_y_percent, horizontalAlign: caption.style.horizontal_align, safeAreaEnabled: caption.style.safe_area_enabled, shadowBlurPx: caption.style.shadow_blur_px } })),
       gaps: manifest.gap_slots.map((gap) => ({ gapId: gap.gap_id, segmentId: gap.segment_id, startSec: gap.start_sec, endSec: gap.end_sec, reason: gap.reason })),
       source: { status: manifest.source_status.status, sourceSessionId: manifest.source_status.source_session_id, sourceSessionRevision: manifest.source_status.source_session_revision },
-      playback: { auditionUrls: manifest.audition.asset_urls, exactPreview: { status: manifest.exact_preview.status, url: manifest.exact_preview.url, sourceSessionId: manifest.exact_preview.source_session_id, sourceSessionRevision: manifest.exact_preview.source_session_revision } },
+      playback: { auditionUrls: manifest.audition.asset_urls, exactPreview: { status: manifest.exact_preview.status, url: manifest.exact_preview.url, sourceSessionId: manifest.exact_preview.source_session_id, sourceSessionRevision: manifest.exact_preview.source_session_revision, generationId: manifest.exact_preview.generation_id, timelineStartSec: manifest.exact_preview.timeline_start_sec, timelineEndSec: manifest.exact_preview.timeline_end_sec, artifactRevision: manifest.exact_preview.artifact_revision } },
       local: { selectedSegmentId: this.selectedSegmentId, seekSec: this.seekSec },
     };
   }
