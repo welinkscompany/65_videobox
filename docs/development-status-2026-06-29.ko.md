@@ -1,6 +1,11 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 271. 2026-07-20 static gateway decision audit closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 272. 2026-07-20 static approval workflow closeout`을 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+
+## 272. 2026-07-20 static approval workflow closeout
+
+- `[x] 완료 (done)`: immutable static proposal/approval-card/workflow preflight 계약을 추가했다. `네`는 approval이 아니고, card는 pinned prompt/no-skill manifests, project/conversation/run/proposal scope, revision, summary, rights blocker, expiry를 묶는다.
+- reject·expire·stale·authority 부족과 기록된 approval 모두 executor 권한 0·side effect 0이며 applied transition은 이 slice에서 거부한다. provider/DB/API/mutation 없음, Gemini call 0, Task 9은 9/22 (40.9%) 유지다.
 
 ## 271. 2026-07-20 static gateway decision audit closeout
 
