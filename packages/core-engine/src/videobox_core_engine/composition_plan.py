@@ -18,6 +18,33 @@ COMPOSITION_VERSION = "videobox_composition_v1"
 _SUPPORTED_TRACKS = frozenset({"narration", "broll", "bgm", "sfx", "overlay"})
 
 
+def _legacy_segment_source_offset(*, editing_session: dict[str, Any], segment: dict[str, Any], original_start: float) -> float:
+    """Migrate old sessions without a durable source offset from their audit log."""
+    if "source_offset_sec" in segment:
+        return _number(segment.get("source_offset_sec"))
+    segment_id = str(segment.get("segment_id") or "")
+    history = editing_session.get("history")
+    if isinstance(history, list):
+        offset = 0.0
+        saw_bounds_mutation = False
+        for event in history:
+            if not isinstance(event, dict) or event.get("mutation_type") != "segment_bounds_update":
+                continue
+            before = event.get("inverse_payload", {}).get("segments", []) if isinstance(event.get("inverse_payload"), dict) else []
+            after = event.get("forward_payload", {}).get("segments", []) if isinstance(event.get("forward_payload"), dict) else []
+            before_segment = next((item for item in before if isinstance(item, dict) and str(item.get("segment_id") or "") == segment_id), None)
+            after_segment = next((item for item in after if isinstance(item, dict) and str(item.get("segment_id") or "") == segment_id), None)
+            if before_segment is not None and after_segment is not None:
+                offset += _number(after_segment.get("start_sec")) - _number(before_segment.get("start_sec"))
+                saw_bounds_mutation = True
+        if saw_bounds_mutation or history:
+            return offset
+    # Hand-authored legacy fixtures predate transaction audit data.  Retain
+    # their former trim interpretation while new/reordered sessions use the
+    # durable marker above.
+    return _number(segment.get("start_sec")) - original_start
+
+
 def materialize_editing_session_timeline(
     *, timeline: dict[str, Any], editing_session: dict[str, Any] | None, project_id: str | None = None,
 ) -> dict[str, Any]:
@@ -56,7 +83,9 @@ def materialize_editing_session_timeline(
                 original_source_out = _number(
                     clip.get("source_out_sec", clip.get("out_sec", original_source_in + (original_end - original_start)))
                 )
-                source_in = original_source_in + (start - original_start)
+                source_in = original_source_in + _legacy_segment_source_offset(
+                    editing_session=editing_session, segment=segment, original_start=original_start,
+                )
                 source_out = min(original_source_out, source_in + (end - start))
                 clip["start_sec"], clip["end_sec"] = start, end
                 clip["source_in_sec"], clip["source_out_sec"] = source_in, source_out

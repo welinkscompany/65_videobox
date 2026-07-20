@@ -65,6 +65,10 @@ def build_editing_session(
                 "caption_text": segment["text"],
                 "start_sec": segment["start_sec"],
                 "end_sec": segment["end_sec"],
+                # Placement can later be reordered independently from a
+                # deliberate source trim.  This durable offset is consumed
+                # by the canonical composition materializer.
+                "source_offset_sec": 0.0,
                 "cut_action": segment.get("cleanup_decision", "keep"),
                 "review_required": _normalize_boolish(segment.get("review_required", False)),
                 "broll_override": None,
@@ -104,6 +108,24 @@ def _validate_segment_bounds(*, segments: list[dict[str, Any]]) -> None:
     for previous, current in zip(ordered, ordered[1:]):
         if previous[1] > current[0]:
             raise ValueError(f"Segment bounds overlap: {previous[2]} and {current[2]}.")
+
+
+def _source_offset_before_bounds_mutation(*, session: dict[str, Any], segment: dict[str, Any]) -> float:
+    """Recover a pre-migration trim offset before persisting the durable form."""
+    if "source_offset_sec" in segment:
+        return float(segment["source_offset_sec"])
+    segment_id = str(segment.get("segment_id") or "")
+    offset = 0.0
+    for event in session.get("history", []):
+        if not isinstance(event, dict) or event.get("mutation_type") != "segment_bounds_update":
+            continue
+        before = event.get("inverse_payload", {}).get("segments", []) if isinstance(event.get("inverse_payload"), dict) else []
+        after = event.get("forward_payload", {}).get("segments", []) if isinstance(event.get("forward_payload"), dict) else []
+        before_segment = next((item for item in before if isinstance(item, dict) and str(item.get("segment_id") or "") == segment_id), None)
+        after_segment = next((item for item in after if isinstance(item, dict) and str(item.get("segment_id") or "") == segment_id), None)
+        if before_segment is not None and after_segment is not None:
+            offset += float(after_segment.get("start_sec", 0.0)) - float(before_segment.get("start_sec", 0.0))
+    return offset
 
 
 def _event_snapshot(session: dict[str, Any]) -> dict[str, Any]:
@@ -209,8 +231,13 @@ def merge_adjacent_segments(*, session: dict[str, Any], left_segment_id: str, ri
 def set_segment_bounds(*, session: dict[str, Any], segment_id: str, start_sec: float, end_sec: float) -> dict[str, Any]:
     updated = deepcopy(session)
     index = _segment_index(session=updated, segment_id=segment_id)
+    previous_start = float(updated["segments"][index]["start_sec"])
+    prior_offset = _source_offset_before_bounds_mutation(session=session, segment=updated["segments"][index])
     updated["segments"][index]["start_sec"] = float(start_sec)
     updated["segments"][index]["end_sec"] = float(end_sec)
+    # Only a bounds edit changes which source moment is used.  A reorder
+    # relayout deliberately leaves this value untouched.
+    updated["segments"][index]["source_offset_sec"] = prior_offset + float(start_sec) - previous_start
     _validate_segment_bounds(segments=updated["segments"])
     return _record_undoable_mutation(before=session, updated=updated, mutation_type="segment_bounds_update", segment_id=segment_id)
 

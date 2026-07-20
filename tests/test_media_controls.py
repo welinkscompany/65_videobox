@@ -31,6 +31,22 @@ def test_normalized_media_controls_validate_audio_and_broll_contracts() -> None:
         normalize_media_controls({"fit": "stretch"}, media_kind="broll", duration_sec=4.0)
 
 
+@pytest.mark.parametrize(
+    ("media_kind", "controls"),
+    [
+        ("broll", {"trim_start_sec": float("nan")}),
+        ("broll", {"in_sec": float("inf"), "out_sec": float("inf")}),
+        ("audio", {"gain_db": float("nan")}),
+        ("audio", {"fade_in_sec": float("inf")}),
+    ],
+)
+def test_media_controls_reject_nonfinite_numbers_with_a_stable_error(media_kind: str, controls: dict[str, object]) -> None:
+    from videobox_core_engine.media_controls import normalize_media_controls
+
+    with pytest.raises(ValueError, match="media_controls_invalid_number"):
+        normalize_media_controls(controls, media_kind=media_kind, duration_sec=4.0)
+
+
 def test_timeline_builder_carries_manual_media_controls_to_renderable_clips() -> None:
     from videobox_core_engine.timeline_builder import TimelineBuilder
 

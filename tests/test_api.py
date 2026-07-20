@@ -14290,6 +14290,23 @@ def test_editing_session_api_can_fetch_cut_and_broll_updates(tmp_path: Path) -> 
     assert payload["history"][-1]["mutation_type"] == "broll_override_update"
 
 
+def test_editing_session_broll_api_rejects_nonfinite_media_control_before_persisting(tmp_path: Path) -> None:
+    client = TestClient(create_app(projects_root=tmp_path))
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+    asset = _get_timeline_review_broll_asset(client, project_id)
+    session = client.post(f"/api/projects/{project_id}/editing-sessions", json={"timeline_job_id": timeline_job_id}).json()
+
+    response = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session['session_id']}/segments/seg_001/broll",
+        content=json.dumps({"asset_id": asset["asset_id"], "expected_revision": session["session_revision"], "media_controls": {"trim_start_sec": float("nan")}}),
+        headers={"content-type": "application/json"},
+    )
+
+    assert response.status_code in {400, 422}
+    assert "media_controls_invalid_number" in str(response.json())
+    assert client.get(f"/api/projects/{project_id}/editing-sessions/{session['session_id']}").json()["session_revision"] == session["session_revision"]
+
+
 def test_editing_session_api_can_clear_broll_override(tmp_path: Path) -> None:
     app = create_app(projects_root=tmp_path)
     client = TestClient(app)

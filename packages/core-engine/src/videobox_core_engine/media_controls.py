@@ -1,6 +1,17 @@
 from __future__ import annotations
 
+from math import isfinite
 from typing import Any
+
+
+def _finite_control_number(value: object) -> float:
+    try:
+        parsed = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError) as exc:
+        raise ValueError("media_controls_invalid_number") from exc
+    if not isfinite(parsed):
+        raise ValueError("media_controls_invalid_number")
+    return parsed
 
 
 def normalize_media_controls(
@@ -13,9 +24,9 @@ def normalize_media_controls(
     if duration_sec <= 0:
         raise ValueError("Media control duration must be positive.")
     if media_kind == "audio":
-        gain_db = float(payload.get("gain_db", 0.0))
-        fade_in_sec = float(payload.get("fade_in_sec", 0.0))
-        fade_out_sec = float(payload.get("fade_out_sec", 0.0))
+        gain_db = _finite_control_number(payload.get("gain_db", 0.0))
+        fade_in_sec = _finite_control_number(payload.get("fade_in_sec", 0.0))
+        fade_out_sec = _finite_control_number(payload.get("fade_out_sec", 0.0))
         if fade_in_sec < 0 or fade_out_sec < 0 or fade_in_sec + fade_out_sec > duration_sec:
             raise ValueError("Audio fade durations must fit within the clip duration.")
         return {
@@ -28,7 +39,7 @@ def normalize_media_controls(
         fit = str(payload.get("fit", "fit")).strip().lower()
         if fit not in {"fit", "crop"}:
             raise ValueError("B-roll fit must be either 'fit' or 'crop'.")
-        trim_start_sec = float(payload.get("trim_start_sec", 0.0))
+        trim_start_sec = _finite_control_number(payload.get("trim_start_sec", 0.0))
         if trim_start_sec < 0:
             raise ValueError("B-roll trim_start_sec must not be negative.")
         normalized = {
@@ -42,12 +53,12 @@ def normalize_media_controls(
         # distinct from timeline trim and must survive Director apply so both
         # FFmpeg and CapCut read the same original bytes.
         if "in_sec" in payload:
-            in_sec = float(payload["in_sec"])
+            in_sec = _finite_control_number(payload["in_sec"])
             if in_sec < 0:
                 raise ValueError("B-roll in_sec must not be negative.")
             normalized["in_sec"] = in_sec
         if "out_sec" in payload:
-            out_sec = float(payload["out_sec"])
+            out_sec = _finite_control_number(payload["out_sec"])
             if out_sec <= float(normalized.get("in_sec", 0.0)):
                 raise ValueError("B-roll out_sec must be after in_sec.")
             normalized["out_sec"] = out_sec

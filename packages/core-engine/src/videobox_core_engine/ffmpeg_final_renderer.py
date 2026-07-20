@@ -208,7 +208,17 @@ class FfmpegFinalRenderer:
                     continue
                 label = f"a_{item.clip_id}"
                 delay = max(0, round(item.start_sec * 1000))
-                filters.append(f"[{source_indices[item.clip_id]}:a]atrim=start={item.source_in_sec}:end={item.source_out_sec},asetpts=PTS-STARTPTS,adelay={delay}|{delay}[{label}]")
+                source_window_sec = item.source_out_sec - item.source_in_sec
+                timeline_duration_sec = item.end_sec - item.start_sec
+                source_filter = f"[{source_indices[item.clip_id]}:a]atrim=start={item.source_in_sec}:end={item.source_out_sec}"
+                if controls["loop"] and source_window_sec < timeline_duration_sec:
+                    # Normalize before aloop so its sample count exactly spans
+                    # the selected source window, not an input-dependent rate.
+                    source_filter += (
+                        f",aresample=48000,aloop=loop=-1:size={max(1, ceil(source_window_sec * 48000))}:start=0,"
+                        f"atrim=duration={timeline_duration_sec}"
+                    )
+                filters.append(f"{source_filter},asetpts=PTS-STARTPTS,adelay={delay}|{delay}[{label}]")
                 labels.append(f"[{label}]")
             elif item.track_type in {"bgm", "sfx"}:
                 controls = normalize_media_controls(item.media_controls, media_kind="audio", duration_sec=max(item.end_sec - item.start_sec, 0.001))

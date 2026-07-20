@@ -82,6 +82,49 @@ def test_current_session_bounds_shift_source_time_and_removed_export_overlay_is_
     assert [overlay["title"] for overlay in plan.export_overlays] == ["kept"]
 
 
+def test_session_source_offsets_distinguish_trim_from_reorder_and_migrate_legacy_sessions() -> None:
+    """A relayout moves placement only; a bounds edit deliberately trims source."""
+    from videobox_core_engine.editing_session import reorder_segments, set_segment_bounds
+
+    timeline = {"tracks": [{"track_type": "broll", "clips": [
+        {"clip_id": "red", "segment_id": "red", "asset_uri": "local://red", "start_sec": 0, "end_sec": 2, "source_in_sec": 0, "source_out_sec": 2},
+        {"clip_id": "blue", "segment_id": "blue", "asset_uri": "local://blue", "start_sec": 2, "end_sec": 4, "source_in_sec": 0, "source_out_sec": 2},
+    ]}]}
+    # Old persisted sessions have no source_offset_sec.  Their mutation
+    # history must distinguish a timeline-only reorder from a trim.
+    legacy = {"segments": [
+        {"segment_id": "red", "start_sec": 0, "end_sec": 2, "cut_action": "keep", "visual_overlays": []},
+        {"segment_id": "blue", "start_sec": 2, "end_sec": 4, "cut_action": "keep", "visual_overlays": []},
+    ], "history": [], "undo_stack": [], "redo_stack": [], "session_revision": 1}
+    reordered = reorder_segments(
+        session=legacy, segment_ids=["blue", "red"],
+        bounds_by_id={"blue": {"start_sec": 0, "end_sec": 2}, "red": {"start_sec": 2, "end_sec": 4}},
+    )
+    reordered_plan = CompositionPlan.from_timeline(timeline=materialize_editing_session_timeline(timeline=timeline, editing_session=reordered))
+    assert [(item.clip_id, item.start_sec, item.source_in_sec, item.source_out_sec) for item in reordered_plan.items] == [
+        ("blue", 0.0, 0.0, 2.0), ("red", 2.0, 0.0, 2.0),
+    ]
+
+    current = {**legacy, "segments": [{**segment, "source_offset_sec": 0.0} for segment in legacy["segments"]]}
+    trimmed = set_segment_bounds(session=current, segment_id="red", start_sec=1, end_sec=2)
+    assert trimmed["segments"][0]["source_offset_sec"] == 1.0
+    combined = reorder_segments(
+        session=trimmed, segment_ids=["blue", "red"],
+        bounds_by_id={"blue": {"start_sec": 0, "end_sec": 2}, "red": {"start_sec": 2, "end_sec": 3}},
+    )
+    combined_plan = CompositionPlan.from_timeline(timeline=materialize_editing_session_timeline(timeline=timeline, editing_session=combined))
+    red = next(item for item in combined_plan.items if item.clip_id == "red")
+    assert (red.start_sec, red.end_sec, red.source_in_sec, red.source_out_sec) == (2.0, 3.0, 1.0, 2.0)
+
+    # A session saved before this migration may carry an earlier bounds event
+    # but not the new durable field yet.  Its next trim must continue from
+    # the historical source position instead of resetting to zero.
+    old_trimmed = set_segment_bounds(session=legacy, segment_id="red", start_sec=1, end_sec=2)
+    del old_trimmed["segments"][0]["source_offset_sec"]
+    continued = set_segment_bounds(session=old_trimmed, segment_id="red", start_sec=1.5, end_sec=2)
+    assert continued["segments"][0]["source_offset_sec"] == 1.5
+
+
 def test_broll_controls_fail_before_render_when_window_is_invalid_or_insufficient_without_pad_or_loop() -> None:
     invalid = {"tracks": [{"track_type": "broll", "clips": [{
         "asset_uri": "local://b", "start_sec": 0, "end_sec": 1,
@@ -157,6 +200,75 @@ def test_short_broll_source_window_loops_or_black_pads_only_when_its_control_all
 
     assert pixel(looped)[2] > 200
     assert pixel(padded) == (0, 0, 0)
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg fixture required")
+def test_reorder_and_trim_keep_source_content_for_proxy_and_final(tmp_path: Path) -> None:
+    """The same segment keeps its source through relayout; only trim advances it."""
+    from videobox_core_engine.editing_session import reorder_segments, set_segment_bounds
+
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="reorder source contract")
+    red_green, blue = tmp_path / "red-green.mp4", tmp_path / "blue.mp4"
+    subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=red:s=320x240:d=1", "-f", "lavfi", "-i", "color=c=green:s=320x240:d=1", "-filter_complex", "[0:v][1:v]concat=n=2:v=1:a=0", "-pix_fmt", "yuv420p", str(red_green)], check=True, capture_output=True)
+    subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=blue:s=320x240:d=2", "-pix_fmt", "yuv420p", str(blue)], check=True, capture_output=True)
+    red_asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=red_green)
+    blue_asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=blue)
+    uri = lambda asset: f"local://projects/{project.project_id}/assets/{asset.asset_id}"
+    timeline = {"output": {"width": 320, "height": 240}, "tracks": [{"track_type": "broll", "clips": [
+        {"clip_id": "red", "segment_id": "red", "asset_id": red_asset.asset_id, "asset_uri": uri(red_asset), "start_sec": 0, "end_sec": 2, "source_in_sec": 0, "source_out_sec": 2},
+        {"clip_id": "blue", "segment_id": "blue", "asset_id": blue_asset.asset_id, "asset_uri": uri(blue_asset), "start_sec": 2, "end_sec": 4, "source_in_sec": 0, "source_out_sec": 2},
+    ]}]}
+    session = {"segments": [
+        {"segment_id": "red", "start_sec": 0, "end_sec": 2, "source_offset_sec": 0, "cut_action": "keep", "visual_overlays": []},
+        {"segment_id": "blue", "start_sec": 2, "end_sec": 4, "source_offset_sec": 0, "cut_action": "keep", "visual_overlays": []},
+    ], "history": [], "undo_stack": [], "redo_stack": [], "session_revision": 1}
+    renderer = FfmpegFinalRenderer(store=store, video_width=320, video_height=240)
+
+    def render_pair(prefix: str, editing_session: dict[str, object]) -> tuple[Path, Path]:
+        materialized = materialize_editing_session_timeline(timeline=timeline, editing_session=editing_session, project_id=project.project_id)
+        plan = CompositionPlan.from_timeline(timeline=materialized)
+        proxy, final = tmp_path / f"{prefix}-proxy.mp4", tmp_path / f"{prefix}-final.mp4"
+        renderer.render_exact_preview_to_mp4(project_id=project.project_id, composition_plan=plan, timeline_context=materialized, output_path=proxy, subtitle_ass_path=None)
+        renderer.render_timeline_to_mp4(project_id=project.project_id, timeline=materialized, composition_plan=plan, output_path=final)
+        return proxy, final
+
+    def pixel(path: Path, second: float) -> tuple[int, int, int]:
+        frame = subprocess.run(["ffmpeg", "-v", "error", "-ss", str(second), "-i", str(path), "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"], check=True, capture_output=True).stdout
+        return tuple(frame[:3])
+
+    reordered = reorder_segments(session=session, segment_ids=["blue", "red"], bounds_by_id={"blue": {"start_sec": 0, "end_sec": 2}, "red": {"start_sec": 2, "end_sec": 4}})
+    for output in render_pair("reorder", reordered):
+        assert pixel(output, 0.5)[2] > 200
+        assert pixel(output, 2.5)[0] > 200
+
+    trimmed = set_segment_bounds(session=session, segment_id="red", start_sec=1, end_sec=2)
+    combined = reorder_segments(session=trimmed, segment_ids=["blue", "red"], bounds_by_id={"blue": {"start_sec": 0, "end_sec": 2}, "red": {"start_sec": 2, "end_sec": 3}})
+    for output in render_pair("combined", combined):
+        assert pixel(output, 0.5)[2] > 200
+        assert pixel(output, 2.5)[1] > 100 and pixel(output, 2.5)[0] < 30
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg fixture required")
+def test_looping_broll_preserves_source_audio_for_the_full_timeline_window(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="looped broll source audio")
+    source = tmp_path / "tone.mp4"
+    subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=blue:s=320x240:d=1", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=1", "-shortest", "-pix_fmt", "yuv420p", str(source)], check=True, capture_output=True)
+    asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=source)
+    uri = f"local://projects/{project.project_id}/assets/{asset.asset_id}"
+    timeline = {"output": {"width": 320, "height": 240}, "tracks": [{"track_type": "broll", "clips": [{"clip_id": "loop", "asset_id": asset.asset_id, "asset_uri": uri, "start_sec": 0, "end_sec": 2, "source_in_sec": 0, "source_out_sec": 1, "media_controls": {"loop": True, "pad": False, "preserve_source_audio": True}}]}]}
+    plan = CompositionPlan.from_timeline(timeline=timeline)
+    renderer = FfmpegFinalRenderer(store=store, video_width=320, video_height=240)
+    proxy, final = tmp_path / "loop-proxy.mp4", tmp_path / "loop-final.mp4"
+    for output, method in ((proxy, renderer.render_exact_preview_to_mp4), (final, renderer.render_timeline_to_mp4)):
+        kwargs = {"project_id": project.project_id, "composition_plan": plan, "timeline_context": timeline, "output_path": output}
+        if method == renderer.render_exact_preview_to_mp4:
+            method(**kwargs, subtitle_ass_path=None)
+        else:
+            method(project_id=project.project_id, timeline=timeline, composition_plan=plan, output_path=output)
+        samples = subprocess.run(["ffmpeg", "-v", "error", "-ss", "1.5", "-t", "0.1", "-i", str(output), "-f", "s16le", "-ac", "1", "-ar", "48000", "pipe:1"], check=True, capture_output=True).stdout
+        assert max(abs(sample[0]) for sample in struct.iter_unpack("<h", samples)) > 500
 
 
 def test_recent_running_claim_from_a_dead_process_is_reclaimed_without_late_publish(tmp_path: Path) -> None:
