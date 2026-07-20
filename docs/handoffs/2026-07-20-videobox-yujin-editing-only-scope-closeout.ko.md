@@ -1,5 +1,7 @@
 # VideoBox 유진 편집 전용 범위 closeout
 
+> 이 문서는 v2 historical closeout이다. 현재 authoritative 설정은 `2026-07-20-videobox-yujin-v3-audit-closeout.ko.md`를 따른다.
+
 **날짜:** 2026-07-20
 **브랜치:** `codex/videobox-container-compatibility`
 **범위:** static/offline contract only

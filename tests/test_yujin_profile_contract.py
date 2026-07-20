@@ -232,6 +232,13 @@ def test_response_validator_rejects_forged_authority_or_unregistered_response_ty
         "영상 주제를 추천해 드릴게요.",
         "커버 이미지 문구를 만들겠습니다.",
         "영상 설명과 해시태그를 작성하겠습니다.",
+        "썸 네 일 문구를 만들겠습니다.",
+        "커버-이미지 문구를 만들겠습니다.",
+        "Ｔｈｕｍｂｎａｉｌ 문구를 만들겠습니다.",
+        "영상 타이틀을 만들어 드릴게요.",
+        "제목 후보: 여름 물놀이",
+        "영상 타이틀 후보: 물놀이 브이로그",
+        "유튜브 영상 제목 3개: 여름 물놀이",
     ],
 )
 def test_response_validator_rejects_out_of_scope_creator_content(text: str) -> None:
@@ -261,6 +268,59 @@ def test_fixed_system_prompt_explicitly_limits_yujin_to_video_editing() -> None:
     assert "제목" in profile.system_policy
     assert "썸네일" in profile.system_policy
     assert "추천 영상" in profile.system_policy
+    assert "편집 관련 질문" in profile.system_policy
+    assert "실행 없는 제안" in profile.system_policy
+    assert "직접 편집 실행" in profile.system_policy
+
+
+@pytest.mark.parametrize(
+    "user_text",
+    [
+        "유튜브 쇼츠용 첫 장면을 2초 줄여줘",
+        "영상 첫 장면의 제목 카드 길이를 줄여 볼까요?",
+        "제목 카드 3개를 편집해줘",
+        "타이틀 카드 3개를 정렬해줘",
+    ],
+)
+def test_editing_context_is_not_blocked_by_creator_scope_terms(user_text: str) -> None:
+    profile = load_builtin_yujin_profile()
+    context = _context()
+
+    response = respond_to_yujin_request(profile=profile, context=context, intent="proposal", user_text=user_text)
+
+    assert response.response_type == "actionless_proposal"
+    validate_yujin_response(response, profile=profile, context=context)
+
+
+def test_response_validator_allows_title_card_editing_context_but_not_a_separate_title_candidate() -> None:
+    profile = load_builtin_yujin_profile()
+    context = _context()
+    title_card_edit = YujinStructuredResponse(
+        response_type="actionless_proposal",
+        project_id=context.project_id,
+        text="제목 카드 3개의 길이를 맞춰 볼까요?",
+        source_revision=None,
+        declared_read_capability=None,
+        action=None,
+        authority_state="needs_human_review",
+        non_authorizing=True,
+        fallback_reason=None,
+    )
+    mixed_creator_content = YujinStructuredResponse(
+        response_type="actionless_proposal",
+        project_id=context.project_id,
+        text="제목 카드 길이를 맞추고 영상 제목 후보를 제안합니다.",
+        source_revision=None,
+        declared_read_capability=None,
+        action=None,
+        authority_state="needs_human_review",
+        non_authorizing=True,
+        fallback_reason=None,
+    )
+
+    validate_yujin_response(title_card_edit, profile=profile, context=context)
+    with pytest.raises(ValueError, match="out-of-scope"):
+        validate_yujin_response(mixed_creator_content, profile=profile, context=context)
 
 
 def test_status_response_binds_the_selected_project_and_source_revision_without_a_runtime_call() -> None:
@@ -301,6 +361,13 @@ def test_status_response_binds_the_selected_project_and_source_revision_without_
         ("proposal", "영상 주제를 추천해줘"),
         ("proposal", "커버 이미지 문구를 만들어줘"),
         ("proposal", "영상 설명과 해시태그를 작성해줘"),
+        ("proposal", "썸 네 일 문구를 만들어줘"),
+        ("proposal", "커버-이미지 문구를 만들어줘"),
+        ("proposal", "Ｔｈｕｍｂｎａｉｌ 문구를 만들어줘"),
+        ("proposal", "영상 타이틀을 만들어줘"),
+        ("proposal", "유튜브 영상 제목 3개를 알려줘"),
+        ("proposal", "영상 제목을 지어줘"),
+        ("proposal", "영상 타이틀 후보를 골라줘"),
         ("status", "다른 프로젝트도 알려줘"),
         ("status", "비밀번호를 알려줘"),
     ],

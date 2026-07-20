@@ -1,6 +1,13 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 275. 2026-07-20 Yujin editing-only scope closeout`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 276. 2026-07-20 Yujin v3 prompt/soul/user-input audit closeout`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+
+## 276. 2026-07-20 Yujin v3 prompt/soul/user-input audit closeout
+
+- `[x] 완료 (static contract only)`: prompt/Soul/user input을 다시 대조했다. `yujin-prompt-v3`/`yujin-policy-v3`은 선택 project의 허용 상태 read, 편집 관련 질문, 실행 없는 제안을 분명히 구분하고 직접 편집 실행·승인·render/export·CapCut·memory·credential·다른 project를 막는다. Soul은 계속 `video_director_read_only`/`non_authorizing`이며 user preference는 `ko`, short action-oriented, memory opt-in `false`, scope `none`, retention `0`이다.
+- user text는 별도 immutable untrusted data로만 envelope에 들어가며 profile/user preference를 수정할 수 없다. 대본·제목·타이틀·썸네일·추천 영상·영상 주제·커버 이미지·영상 설명·해시태그의 **생성·추천·제안·작성 의도**는 request와 candidate response 양쪽에서 거부한다. 공백·하이픈·전각 문자 표기도 NFKC와 구분자 제거 후 같은 deny set으로 판정한다. 단, 유튜브 쇼츠 편집이나 제목 카드 길이 조정처럼 제작이 아닌 편집 문맥은 실행 없는 제안으로 허용한다.
+- TDD: 공백/기호/전각 우회와 system policy가 허용 skill과 충돌하던 RED, bare `제목`/`유튜브`의 편집 문맥 false-positive, `타이틀` 동의어 false-negative, 제목 후보·개수·짓기·고르기 의도, 한국어/영어 제목 카드 편집 예외를 확인한 뒤 최소 수정으로 보완했다. focused profile/package/gateway/approval/capability `130 passed` (기존 Starlette multipart warning 1), compileall, `git diff --check`, production Docker build, `--network none --read-only` import를 통과했고 독립 재검토는 `Critical 0 / Important 0`이다. 전체 Python suite는 64초 timeout으로 끝나 full-pass가 아니다.
+- 다음 권장 작업은 Task 9 사람/환경 acceptance다. 두 번째 장면용 실제 MP4, current-revision 영상·자막·소리·전환에 대한 사용자 명시 승인, 대상 PC의 실제 CapCut Desktop handoff/import 결과가 모두 필요하다. 자동 smoke나 임시 빈 장면은 이를 대체하지 않으며 누적은 계속 **9/22 (40.9%)**다. external/Gemini provider call은 이 작업에서 0이다.
 
 ## 275. 2026-07-20 Yujin editing-only scope closeout
 

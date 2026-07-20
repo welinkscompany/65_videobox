@@ -361,7 +361,7 @@ def _package_payload(package: YujinAgentPackage) -> dict[str, object]:
     }
 
 
-BUILTIN_YUJIN_AGENT_PACKAGE_MANIFEST_SHA256 = "9e6817286b1634870c9e157ad13ffd4b7803c96664d7ebe9b48b6fbf6c486b3a"
+BUILTIN_YUJIN_AGENT_PACKAGE_MANIFEST_SHA256 = "2a5daadaab4223d02004d2b7b2cd5e0c4e9f5595088bbd48d0c5e659e82949dd"
 
 
 def load_builtin_yujin_agent_package() -> YujinAgentPackage:
