@@ -122,8 +122,7 @@ def test_hermes_dashboard_is_loopback_only_and_uses_only_the_isolated_oauth_stat
     ]
     assert dashboard["ports"] == ["127.0.0.1:9119:9119"]
     assert dashboard["volumes"] == ["videobox_hermes_oauth_state:/opt/data"]
-    # Mem0 Platform is configured in the official dashboard; it does not need
-    # the retired local Ollama/Mem0 sidecar network.
+    # Platform-only configuration keeps the dashboard on provider egress only.
     assert dashboard["networks"] == ["videobox-hermes-provider-egress"]
     assert "depends_on" not in dashboard
     assert "network_mode" not in dashboard
