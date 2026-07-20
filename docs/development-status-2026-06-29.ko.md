@@ -1,6 +1,14 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 279. 2026-07-20 Hermes dashboard Platform Mem0 handoff`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 280. 2026-07-20 Platform-only Hermes source cleanup closeout`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+
+## 280. 2026-07-20 Platform-only Hermes source cleanup closeout
+
+- `[x] 완료 (source/Compose contract)`: `a5f8fd2`에서 custom Hermes runtime·seed Compose 서비스 3개, 전용 network 2개와 model volume, 전용 Docker/assets, bootstrap/verifier source를 삭제했다. 공식 `videobox-hermes-dashboard`의 pinned image, loopback `127.0.0.1:9119`, OAuth state mount와 `videobox-hermes-provider-egress` 단일 network는 유지한다. 과거 종료 컨테이너는 사용자 소유 runtime artefact이므로 이 source cleanup에서 삭제하지 않았다.
+- `[x] 완료 (review remediation)`: `b776820`은 OAuth bootstrap Compose image와 retained verifier의 digest를 일치시키고, 해당 불일치를 잡는 RED-first contract를 추가했다. OAuth bootstrap 설계는 Dashboard의 `Memory Provider → mem0 → Platform`과 사용자 직접 key 입력만 설명하도록 갱신했다. API key, memory 내용, OAuth/GPT 요청 또는 memory write 성공은 기록·주장하지 않았다.
+- 검증: `.venv` focused Compose/Platform contract `8 passed`(기존 multipart PendingDeprecationWarning 1건), dummy process environment Compose config, 실제 Dashboard image/mount/network 경계와 HTTP `200`, 전체 Python `1324 passed, 20 skipped`, frontend production build가 통과했다. build의 500 kB chunk 안내는 기존 비차단 경고다. 독립 spec·quality review는 모두 Critical 0 / Important 0으로 재승인했다.
+- Task 9 사람/환경 acceptance는 이 cleanup과 무관하다. 실제 두 번째 scene MP4, current-revision 합성 MP4의 영상·자막·소리·전환에 대한 사람 승인, 같은 revision의 실제 CapCut Desktop 등록·열기·import 증빙 전까지 누적은 **9/22 (40.9%)**, 잔여 **59.1%**를 유지한다.
+- 다음 작업: 사용자가 Dashboard UI에서 key를 직접 입력한 뒤 provider 연결 상태만 확인한다. 그 뒤에도 공식 편집기 다음 goal은 Task 9 수동 acceptance이며, asset/사람 gate를 자동화나 placeholder로 대체하지 않는다.
 
 ## 279. 2026-07-20 Hermes dashboard Platform Mem0 handoff
 
