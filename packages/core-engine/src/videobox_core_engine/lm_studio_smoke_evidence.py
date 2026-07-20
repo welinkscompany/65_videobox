@@ -17,7 +17,6 @@ _REQUIRED_EVIDENCE_FIELDS = frozenset(
         "requested_endpoints",
         "loopback_request_count",
         "external_provider_calls",
-        "gemini_calls",
         "provider_trace",
         "timestamp",
     }
@@ -44,8 +43,8 @@ def write_live_media_smoke_evidence(*, artifact_root: Path, evidence: dict[str, 
     missing = _REQUIRED_EVIDENCE_FIELDS - set(evidence)
     if missing:
         raise ValueError(f"live smoke evidence is missing fields: {', '.join(sorted(missing))}")
-    if evidence["external_provider_calls"] != 0 or evidence["gemini_calls"] != 0:
-        raise ValueError("successful local smoke evidence must report zero external and Gemini calls")
+    if evidence["external_provider_calls"] != 0:
+        raise ValueError("successful local smoke evidence must report zero external provider calls")
     endpoints = evidence["requested_endpoints"]
     if (
         not isinstance(endpoints, list)

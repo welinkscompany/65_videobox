@@ -538,7 +538,7 @@ def test_postgres_store_scopes_assets_collections_and_jobs_to_their_projects(
     assert [item["job_id"] for item in store.list_jobs(project_id=first_project.project_id)] == [first_job["job_id"]]
 
 
-def test_postgres_store_scopes_tts_candidates_and_gemini_key_persistence_to_their_projects(
+def test_postgres_store_scopes_tts_candidates_to_their_projects(
     tmp_path: Path, postgres_url: str
 ) -> None:
     store = PostgresProjectStore(tmp_path, database_url=postgres_url)
@@ -557,14 +557,3 @@ def test_postgres_store_scopes_tts_candidates_and_gemini_key_persistence_to_thei
     )
     assert store.get_tts_candidate(project_id=second_project.project_id, candidate_id=second_candidate["candidate_id"])["operator_review_status"] == "pending"
     assert [item["candidate_id"] for item in store.list_tts_candidates(project_id=first_project.project_id, segment_id="segment_001")] == ["tts_candidate_001"]
-
-    first_key = store.save_gemini_provider_key(
-        project_id=first_project.project_id, label="First", api_key_secret="first-secret", primary_model="primary", cheap_model="cheap", high_quality_model="quality"
-    )
-    second_key = store.save_gemini_provider_key(
-        project_id=second_project.project_id, label="Second", api_key_secret="second-secret", primary_model="primary", cheap_model="cheap", high_quality_model="quality"
-    )
-    assert first_key["key_id"] == second_key["key_id"] == "gemini_key_001"
-    store.set_gemini_provider_key_status(project_id=first_project.project_id, key_id=first_key["key_id"], status="disabled")
-    assert store.get_gemini_provider_key(project_id=second_project.project_id, key_id=second_key["key_id"])["status"] == "active"
-    assert [item["key_id"] for item in store.list_gemini_provider_keys(project_id=first_project.project_id)] == ["gemini_key_001"]

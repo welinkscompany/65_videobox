@@ -15,8 +15,7 @@ from videobox_api.main import (
     _normalize_recommendations_for_response,
     create_app,
 )
-from videobox_api.orchestration import LocalFirstRuntimeService, LocalOnlyRuntimeService
-from videobox_core_engine.local_first_runtime import LocalFirstStructuredGenerationError
+from videobox_api.orchestration import LocalOnlyRuntimeService
 from videobox_core_engine.local_pipeline import LocalPipelineRunner
 from videobox_core_engine.local_pipeline import _build_review_guidance_reuse_key
 from videobox_core_engine.output_operator_copy import LocalFirstOutputOperatorCopyBuilder
@@ -33,7 +32,6 @@ from videobox_domain_models.jobs import JobStatus, JobType
 from videobox_domain_models.assets import AssetType
 from videobox_domain_models.recommendations import RecommendationType
 from videobox_provider_interfaces.llm import (
-    LLMProviderConfig,
     LLMProviderError,
     LLMTaskType,
     StructuredLLMRequest,
@@ -115,28 +113,11 @@ class FailingSegmentAnalyzer:
         script_text: str | None,
     ) -> list[dict[str, object]]:
         del project_id, transcript_segments, script_text
-        raise LocalFirstStructuredGenerationError(
+        raise LLMProviderError(
+            provider_name="local_qwen",
             message="segment provider failed",
+            retryable=False,
             error_code="SEGMENT_PROVIDER_FAILED",
-            provider_name="local_first_router",
-            provider_trace=build_provider_trace(
-                final_provider="local_qwen",
-                fallback_reasons=["local_provider_error"],
-            ),
-        )
-
-
-class FailingBrollRecommender:
-    def recommend(self, request):  # noqa: ANN001
-        del request
-        raise LocalFirstStructuredGenerationError(
-            message="broll Gemini fallback failed",
-            error_code="BROLL_PROVIDER_FAILED",
-            provider_name="local_first_router",
-            provider_trace=build_provider_trace(
-                final_provider="gemini",
-                fallback_reasons=["local_provider_error", "gemini_unavailable"],
-            ),
         )
 
 
@@ -156,14 +137,11 @@ class FailingOutputOperatorCopyBuilder:
         subtitle_file_uri: str | None = None,
     ) -> dict[str, object]:
         del project_id, timeline, subtitle_file_uri
-        raise LocalFirstStructuredGenerationError(
+        raise LLMProviderError(
+            provider_name="local_qwen",
             message=f"{output_target} provider failed",
+            retryable=False,
             error_code="OUTPUT_PROVIDER_FAILED",
-            provider_name="local_first_router",
-            provider_trace=build_provider_trace(
-                final_provider="gemini",
-                fallback_reasons=["local_provider_error", "gemini_unavailable"],
-            ),
         )
 
 
@@ -4264,37 +4242,13 @@ def _create_segment_analysis_project(client: TestClient, tmp_path: Path) -> tupl
     return project_id, script_asset_id, transcription_job_id
 
 
-def _local_first_service_factory(
-    *,
-    local_provider: FakeStructuredProvider,
-    gemini_provider: FakeStructuredProvider,
-    local_enabled: bool = True,
-):
-    def factory(store: LocalProjectStore) -> LocalFirstRuntimeService:
-        return LocalFirstRuntimeService(
-            store=store,
-            local_provider=local_provider,
-            gemini_provider=gemini_provider,
-            local_config=LLMProviderConfig(provider_name="local_qwen", enabled=local_enabled),
-            gemini_config=LLMProviderConfig(provider_name="gemini", enabled=True),
-            local_runtime_config=LocalOpenAICompatibleRuntimeConfig(
-                enabled=local_enabled,
-                base_url="http://127.0.0.1:1234/v1",
-                model_name="Qwen3-32B",
-                timeout_seconds=42,
-            ),
-        )
-
-    return factory
-
-
 def _local_only_service_factory(
     *,
     local_provider: FakeStructuredProvider,
-    gemini_provider: FakeStructuredProvider | None = None,
     local_enabled: bool = True,
+    **ignored: object,
 ):
-    del gemini_provider
+    del ignored
     def factory(_: LocalProjectStore) -> LocalOnlyRuntimeService:
         return LocalOnlyRuntimeService(
             local_provider=local_provider,
@@ -4309,28 +4263,9 @@ def _local_only_service_factory(
     return factory
 
 
-def _seed_legacy_gemini_provider_key(
-    store: LocalProjectStore,
-    *,
-    project_id: str,
-    payload: dict[str, str],
-) -> dict[str, object]:
-    """Seed historical data without restoring the retired public CRUD route."""
-    return store.save_gemini_provider_key(
-        project_id=project_id,
-        label=payload["label"],
-        api_key_secret=payload["api_key"],
-        primary_model=payload["primary_model"],
-        cheap_model=payload["cheap_model"],
-        high_quality_model=payload["high_quality_model"],
-    )
-
-
 def _create_broll_recommendation_project(
     client: TestClient,
     tmp_path: Path,
-    *,
-    gemini_key_payload: dict[str, str] | None = None,
 ) -> tuple[str, str]:
     source_audio = tmp_path / "broll-runtime.wav"
     source_script = tmp_path / "broll-runtime.txt"
@@ -4356,12 +4291,6 @@ def _create_broll_recommendation_project(
             "tags": ["office", "skyline"],
         },
     )
-    if gemini_key_payload is not None:
-        _seed_legacy_gemini_provider_key(
-            client.app.state.store,
-            project_id=project_id,
-            payload=gemini_key_payload,
-        )
     transcription_job_id = client.post(
         f"/api/projects/{project_id}/jobs/transcription",
         json={"narration_asset_id": narration_asset_id},
@@ -4562,8 +4491,6 @@ def test_broll_batch_import_expands_directory_and_preserves_valid_assets_on_inva
 def _create_music_recommendation_project(
     client: TestClient,
     tmp_path: Path,
-    *,
-    gemini_key_payload: dict[str, str] | None = None,
 ) -> tuple[str, str]:
     source_audio = tmp_path / "music-runtime.wav"
     source_script = tmp_path / "music-runtime.txt"
@@ -4579,12 +4506,6 @@ def _create_music_recommendation_project(
         f"/api/projects/{project_id}/assets/script-document",
         json={"source_path": str(source_script)},
     ).json()["asset_id"]
-    if gemini_key_payload is not None:
-        _seed_legacy_gemini_provider_key(
-            client.app.state.store,
-            project_id=project_id,
-            payload=gemini_key_payload,
-        )
     transcription_job_id = client.post(
         f"/api/projects/{project_id}/jobs/transcription",
         json={"narration_asset_id": narration_asset_id},
@@ -4604,8 +4525,6 @@ def _create_music_recommendation_project(
 def _create_timeline_review_project(
     client: TestClient,
     tmp_path: Path,
-    *,
-    gemini_key_payload: dict[str, str] | None = None,
 ) -> tuple[str, str]:
     source_audio = tmp_path / "review-runtime.wav"
     source_script = tmp_path / "review-runtime.txt"
@@ -4631,12 +4550,6 @@ def _create_timeline_review_project(
             "tags": ["office", "skyline"],
         },
     )
-    if gemini_key_payload is not None:
-        _seed_legacy_gemini_provider_key(
-            client.app.state.store,
-            project_id=project_id,
-            payload=gemini_key_payload,
-        )
     transcription_job_id = client.post(
         f"/api/projects/{project_id}/jobs/transcription",
         json={"narration_asset_id": narration_asset_id},
@@ -4684,13 +4597,12 @@ def test_health_endpoint_reports_ok() -> None:
     assert response.json()["status"] == "ok"
 
 
-def test_create_app_does_not_publish_legacy_gemini_key_management_routes(tmp_path: Path) -> None:
-    """Persisted Gemini keys remain readable for migration, but are never a public API."""
+def test_create_app_has_no_provider_credential_management_routes(tmp_path: Path) -> None:
     app = create_app(projects_root=tmp_path)
 
     published_paths = set(app.openapi()["paths"])
 
-    assert not any("/providers/gemini/keys" in path for path in published_paths)
+    assert not any("/providers/" in path for path in published_paths)
 
 
 def test_create_app_exposes_local_runtime_builder_on_app_state(tmp_path: Path) -> None:
@@ -4832,7 +4744,7 @@ def test_ingest_and_analysis_flow_persists_files_and_records(tmp_path: Path) -> 
     assert persisted_segments["script_asset_id"] == script_asset_id
 
 
-def test_segment_analysis_endpoint_uses_local_first_runtime_before_gemini(
+def test_segment_analysis_endpoint_uses_local_runtime(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -4851,12 +4763,10 @@ def test_segment_analysis_endpoint_uses_local_first_runtime_before_gemini(
             )
         ]
     )
-    gemini_provider = FakeStructuredProvider()
     app = create_app(
         projects_root=tmp_path,
         local_only_runtime_service_factory=_local_only_service_factory(
             local_provider=local_provider,
-            gemini_provider=gemini_provider,
             local_enabled=True,
         ),
     )
@@ -4883,121 +4793,7 @@ def test_segment_analysis_endpoint_uses_local_first_runtime_before_gemini(
         "fallback_reasons": [],
     }
     assert len(local_provider.calls) == 1
-    assert gemini_provider.calls == []
-
-
-def test_segment_analysis_endpoint_does_not_call_gemini_when_local_fails(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    monkeypatch.setattr(
-        "videobox_provider_interfaces.stt.MockSTTProvider.transcribe",
-        _single_segment_transcribe,
-    )
-    local_provider = FakeStructuredProvider(
-        errors=[
-            LLMProviderError(
-                provider_name="local_qwen",
-                message="local unavailable",
-                retryable=True,
-                error_code="LOCAL_UNAVAILABLE",
-            )
-        ]
-    )
-    gemini_provider = FakeStructuredProvider(
-        responses=[
-            StructuredLLMResponse(
-                provider_name="gemini",
-                model_name="gemini-2.5-flash",
-                output_data={"review_required": True, "cleanup_decision": "review"},
-                raw_text='{"review_required":true,"cleanup_decision":"review"}',
-                metadata={},
-            )
-        ]
-    )
-    app = create_app(
-        projects_root=tmp_path,
-        local_only_runtime_service_factory=_local_only_service_factory(
-            local_provider=local_provider,
-            local_enabled=True,
-        ),
-    )
-    client = TestClient(app)
-    project_id, script_asset_id, transcription_job_id = _create_segment_analysis_project(client, tmp_path)
-    app.state.store.save_gemini_provider_key(
-        project_id=project_id,
-        label="Legacy Gemini key",
-        api_key_secret="AIza-segment-fallback",
-        primary_model="gemini-2.5-flash",
-        cheap_model="gemini-2.5-flash-lite",
-        high_quality_model="gemini-2.5-pro",
-    )
-
-    response = client.post(
-        f"/api/projects/{project_id}/jobs/segment-analysis",
-        json={
-            "transcription_job_id": transcription_job_id,
-            "script_asset_id": script_asset_id,
-        },
-    )
-
-    assert response.status_code == 202
-    assert len(local_provider.calls) == 1
-    assert gemini_provider.calls == []
-
-
-def test_segment_analysis_endpoint_does_not_call_gemini_when_local_is_disabled(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    monkeypatch.setattr(
-        "videobox_provider_interfaces.stt.MockSTTProvider.transcribe",
-        _single_segment_transcribe,
-    )
-    local_provider = FakeStructuredProvider()
-    gemini_provider = FakeStructuredProvider(
-        responses=[
-            StructuredLLMResponse(
-                provider_name="gemini",
-                model_name="gemini-2.5-flash",
-                output_data={"review_required": False, "cleanup_decision": "keep"},
-                raw_text='{"review_required":false,"cleanup_decision":"keep"}',
-                metadata={},
-            )
-        ]
-    )
-    app = create_app(
-        projects_root=tmp_path,
-        local_only_runtime_service_factory=_local_only_service_factory(
-            local_provider=local_provider,
-            local_enabled=False,
-        ),
-    )
-    client = TestClient(app)
-    project_id, script_asset_id, transcription_job_id = _create_segment_analysis_project(client, tmp_path)
-    app.state.store.save_gemini_provider_key(
-        project_id=project_id,
-        label="Legacy Gemini key",
-        api_key_secret="AIza-segment-disabled",
-        primary_model="gemini-2.5-flash",
-        cheap_model="gemini-2.5-flash-lite",
-        high_quality_model="gemini-2.5-pro",
-    )
-
-    response = client.post(
-        f"/api/projects/{project_id}/jobs/segment-analysis",
-        json={
-            "transcription_job_id": transcription_job_id,
-            "script_asset_id": script_asset_id,
-        },
-    )
-
-    assert response.status_code == 202
-    assert local_provider.calls == []
-    assert gemini_provider.calls == []
-
-
-def test_segment_analysis_endpoint_preserves_heuristic_fallback_when_local_disabled_without_gemini_key(
+def test_segment_analysis_endpoint_preserves_heuristic_fallback_when_local_is_unavailable(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -5019,7 +4815,6 @@ def test_segment_analysis_endpoint_preserves_heuristic_fallback_when_local_disab
                     for _ in range(8)
                 ]
             ),
-            gemini_provider=FakeStructuredProvider(),
             local_enabled=True,
         ),
     )

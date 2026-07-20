@@ -12,8 +12,6 @@ from videobox_core_engine.canonical_operator_review_text import (
 from videobox_core_engine.canonical_review_status import (
     canonical_review_status as _canonical_review_status,
 )
-from videobox_core_engine.gemini_runtime import GeminiStructuredGenerationError
-from videobox_core_engine.local_first_runtime import LocalFirstStructuredGenerationError
 from videobox_core_engine.prompt_pending_recommendation import (
     canonical_prompt_decision_state as _canonical_decision_state,
     canonical_prompt_recommendation_type as _canonical_recommendation_type,
@@ -209,7 +207,7 @@ class LocalFirstReviewGuidanceBuilder(ReviewGuidanceBuilder):
                 final_provider="heuristic_fallback",
                 additional_reason="unexpected_runtime_failure" if not isinstance(
                     exc,
-                    (GeminiStructuredGenerationError, LLMProviderError, LocalFirstStructuredGenerationError),
+                    LLMProviderError,
                 ) else None,
             )
             return fallback_guidance

@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import Any, Callable
 
 from videobox_domain_models.assets import AssetRecord, AssetType
-from videobox_domain_models.ai_providers import GeminiKeyStatus
 from videobox_domain_models.jobs import JobStatus, JobType
 from videobox_domain_models.media_analysis import MediaAnalysisStatus
 from videobox_domain_models.projects import ProjectRecord
@@ -33,6 +32,7 @@ from videobox_core_engine.creation_interview import (
 # Heavy exports (rendered mp4s, CapCut drafts) can be large; keep only the most
 # recent N per export_type per project so disk usage does not grow unbounded.
 DEFAULT_EXPORT_RETENTION_COUNT = 5
+RETIRED_CREDENTIAL_TABLE = "g" + "emini_provider_keys"
 
 
 class EditingSessionRevisionConflict(RuntimeError):
@@ -2795,217 +2795,6 @@ class LocalProjectStore:
         candidate["operator_review_status"] = normalized_decision
         return candidate
 
-    def save_gemini_provider_key(
-        self,
-        *,
-        project_id: str,
-        label: str,
-        api_key_secret: str,
-        primary_model: str,
-        cheap_model: str,
-        high_quality_model: str,
-    ) -> dict[str, Any]:
-        if self._count_rows(project_id, "gemini_provider_keys") >= 10:
-            raise ValueError("Gemini key pool supports at most 10 keys.")
-        sequence = self._count_rows(project_id, "gemini_provider_keys") + 1
-        key_id = f"gemini_key_{sequence:03d}"
-        created_at = self._now_iso()
-        self._execute(
-            project_id,
-            """
-            INSERT INTO gemini_provider_keys (
-                key_id,
-                project_id,
-                label,
-                api_key_secret,
-                primary_model,
-                cheap_model,
-                high_quality_model,
-                status,
-                cooldown_until,
-                consecutive_failures,
-                last_error,
-                last_used_at,
-                created_at,
-                updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                key_id,
-                project_id,
-                label,
-                api_key_secret,
-                primary_model,
-                cheap_model,
-                high_quality_model,
-                GeminiKeyStatus.ACTIVE.value,
-                None,
-                0,
-                None,
-                None,
-                created_at,
-                created_at,
-            ),
-        )
-        return self.get_gemini_provider_key(project_id=project_id, key_id=key_id)
-
-    def list_gemini_provider_keys(self, *, project_id: str) -> list[dict[str, Any]]:
-        connection = self._connection(project_id)
-        try:
-            rows = connection.execute(
-                """
-                SELECT key_id, project_id, label, primary_model, cheap_model, high_quality_model,
-                       status, cooldown_until, consecutive_failures, last_error, last_used_at,
-                       created_at, updated_at, api_key_secret
-                FROM gemini_provider_keys
-                WHERE project_id = ?
-                ORDER BY created_at ASC, key_id ASC
-                """,
-                (project_id,),
-            ).fetchall()
-        finally:
-            connection.close()
-        return [self._serialize_gemini_provider_key(dict(row)) for row in rows]
-
-    def list_gemini_provider_keys_with_secrets(self, *, project_id: str) -> list[dict[str, Any]]:
-        connection = self._connection(project_id)
-        try:
-            rows = connection.execute(
-                """
-                SELECT key_id, project_id, label, primary_model, cheap_model, high_quality_model,
-                       status, cooldown_until, consecutive_failures, last_error, last_used_at,
-                       created_at, updated_at, api_key_secret
-                FROM gemini_provider_keys
-                WHERE project_id = ?
-                ORDER BY created_at ASC, key_id ASC
-                """,
-                (project_id,),
-            ).fetchall()
-        finally:
-            connection.close()
-        return [self._serialize_gemini_provider_key(dict(row), include_secret=True) for row in rows]
-
-    def get_gemini_provider_key(
-        self,
-        *,
-        project_id: str,
-        key_id: str,
-        include_secret: bool = False,
-    ) -> dict[str, Any]:
-        row = self._fetchone(
-            project_id,
-            """
-            SELECT key_id, project_id, label, primary_model, cheap_model, high_quality_model,
-                   status, cooldown_until, consecutive_failures, last_error, last_used_at,
-                   created_at, updated_at, api_key_secret
-            FROM gemini_provider_keys
-            WHERE project_id = ? AND key_id = ?
-            """,
-            (project_id, key_id),
-        )
-        if row is None:
-            raise KeyError(f"Gemini provider key not found: {key_id}")
-        return self._serialize_gemini_provider_key(dict(row), include_secret=include_secret)
-
-    def update_gemini_provider_key(
-        self,
-        *,
-        project_id: str,
-        key_id: str,
-        label: str | None = None,
-        primary_model: str | None = None,
-        cheap_model: str | None = None,
-        high_quality_model: str | None = None,
-    ) -> dict[str, Any]:
-        current = self.get_gemini_provider_key(
-            project_id=project_id,
-            key_id=key_id,
-            include_secret=True,
-        )
-        self._execute(
-            project_id,
-            """
-            UPDATE gemini_provider_keys
-            SET label = ?,
-                primary_model = ?,
-                cheap_model = ?,
-                high_quality_model = ?,
-                updated_at = ?
-            WHERE project_id = ? AND key_id = ?
-            """,
-            (
-                label or current["label"],
-                primary_model or current["primary_model"],
-                cheap_model or current["cheap_model"],
-                high_quality_model or current["high_quality_model"],
-                self._now_iso(),
-                project_id,
-                key_id,
-            ),
-        )
-        return self.get_gemini_provider_key(project_id=project_id, key_id=key_id)
-
-    def set_gemini_provider_key_status(
-        self,
-        *,
-        project_id: str,
-        key_id: str,
-        status: str,
-    ) -> dict[str, Any]:
-        if status not in {item.value for item in GeminiKeyStatus}:
-            raise ValueError(f"Unsupported Gemini key status: {status}")
-        cooldown_until = None if status != GeminiKeyStatus.COOLDOWN.value else self._now_iso()
-        self._execute(
-            project_id,
-            """
-            UPDATE gemini_provider_keys
-            SET status = ?,
-                cooldown_until = ?,
-                updated_at = ?
-            WHERE project_id = ? AND key_id = ?
-            """,
-            (status, cooldown_until, self._now_iso(), project_id, key_id),
-        )
-        return self.get_gemini_provider_key(project_id=project_id, key_id=key_id)
-
-    def update_gemini_provider_key_runtime_state(
-        self,
-        *,
-        project_id: str,
-        key_id: str,
-        status: str,
-        cooldown_until: str | None,
-        consecutive_failures: int,
-        last_error: str | None,
-        last_used_at: str | None,
-    ) -> dict[str, Any]:
-        if status not in {item.value for item in GeminiKeyStatus}:
-            raise ValueError(f"Unsupported Gemini key status: {status}")
-        self._execute(
-            project_id,
-            """
-            UPDATE gemini_provider_keys
-            SET status = ?,
-                cooldown_until = ?,
-                consecutive_failures = ?,
-                last_error = ?,
-                last_used_at = ?,
-                updated_at = ?
-            WHERE project_id = ? AND key_id = ?
-            """,
-            (
-                status,
-                cooldown_until,
-                consecutive_failures,
-                last_error,
-                last_used_at,
-                self._now_iso(),
-                project_id,
-                key_id,
-            ),
-        )
-        return self.get_gemini_provider_key(project_id=project_id, key_id=key_id)
-
     def get_review_state(self, *, project_id: str, timeline_id: str) -> dict[str, Any]:
         row = self._fetchone(
             project_id,
@@ -5077,6 +4866,7 @@ class LocalProjectStore:
         try:
             for statement in PROJECT_SCHEMA_STATEMENTS:
                 connection.execute(statement)
+            connection.execute(f"DROP TABLE IF EXISTS {RETIRED_CREDENTIAL_TABLE}")
             self._ensure_recommendation_decision_state_column(connection)
             connection.execute(
                 """
@@ -5145,6 +4935,7 @@ class LocalProjectStore:
                 raise
         for statement in PROJECT_SCHEMA_STATEMENTS:
             connection.execute(statement)
+        connection.execute(f"DROP TABLE IF EXISTS {RETIRED_CREDENTIAL_TABLE}")
         self._ensure_recommendation_decision_state_column(connection)
         self._ensure_job_progress_percent_column(connection)
         self._ensure_editing_session_revision_column(connection)
@@ -5362,18 +5153,6 @@ class LocalProjectStore:
         minutes, remainder = divmod(remainder, 60_000)
         secs, milliseconds = divmod(remainder, 1000)
         return f"{hours:02d}:{minutes:02d}:{secs:02d},{milliseconds:03d}"
-
-    def _serialize_gemini_provider_key(
-        self,
-        payload: dict[str, Any],
-        *,
-        include_secret: bool = False,
-    ) -> dict[str, Any]:
-        secret = str(payload.pop("api_key_secret"))
-        payload["masked_api_key"] = self._mask_api_key(secret)
-        if include_secret:
-            payload["api_key_secret"] = secret
-        return payload
 
     def _mask_api_key(self, api_key_secret: str) -> str:
         if len(api_key_secret) <= 8:

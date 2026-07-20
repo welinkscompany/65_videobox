@@ -4,7 +4,6 @@ from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 from typing import Any, Protocol
 
-from videobox_core_engine.local_first_runtime import LocalFirstStructuredGenerationError
 from videobox_core_engine.provider_trace import build_provider_trace, response_provider_trace, with_final_provider
 from videobox_core_engine.transcript_alignment import split_script_units
 from videobox_provider_interfaces.llm import LLMProviderError, LLMTaskType
@@ -147,7 +146,7 @@ class LocalFirstSegmentAnalyzer(SegmentAnalyzer):
                         },
                     },
                 )
-            except (LLMProviderError, LocalFirstStructuredGenerationError) as exc:
+            except LLMProviderError as exc:
                 analyzed_segments.append(
                     {
                         **fallback_segment,

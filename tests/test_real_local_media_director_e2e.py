@@ -37,7 +37,6 @@ FFMPEG_AVAILABLE = shutil.which("ffmpeg") is not None and shutil.which("ffprobe"
 
 class _DeterministicLocalDirectorRuntime:
     external_calls = 0
-    gemini_calls = 0
     local_task_calls: list[LLMTaskType] = []
 
     def generate_structured(
@@ -76,9 +75,8 @@ class _DeterministicLocalDirectorRuntime:
 
 
 def test_offline_director_runtime_serves_deterministic_local_responses_for_pipeline_tasks() -> None:
-    """The release fixture must exercise every legacy LocalFirst helper without a provider call."""
+    """The release fixture must exercise every local-only helper without a provider call."""
     _DeterministicLocalDirectorRuntime.external_calls = 0
-    _DeterministicLocalDirectorRuntime.gemini_calls = 0
     _DeterministicLocalDirectorRuntime.local_task_calls = []
     runtime = _DeterministicLocalDirectorRuntime()
 
@@ -106,7 +104,6 @@ def test_offline_director_runtime_serves_deterministic_local_responses_for_pipel
     assert outputs[LLMTaskType.OPERATOR_COPY]["action_items"] == ["Continue local review."]
     assert _DeterministicLocalDirectorRuntime.local_task_calls == list(outputs)
     assert _DeterministicLocalDirectorRuntime.external_calls == 0
-    assert _DeterministicLocalDirectorRuntime.gemini_calls == 0
 
 
 class _KoreanSTT:
@@ -169,7 +166,7 @@ def _ffprobe_comment(path: Path) -> str:
 @pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg/ffprobe not installed")
 def test_real_local_director_drives_broll_bgm_sfx_to_final_and_draft(tmp_path: Path) -> None:
     """Own the full deterministic B-roll/BGM/SFX flow; do not delegate to another test."""
-    _DeterministicLocalDirectorRuntime.external_calls = _DeterministicLocalDirectorRuntime.gemini_calls = 0
+    _DeterministicLocalDirectorRuntime.external_calls = 0
     _DeterministicLocalDirectorRuntime.local_task_calls = []
     assert REAL_PACK_ROOT.is_dir(), f"Build the audited Starter Pack first: {REAL_PACK_ROOT}"
     library = MediaLibraryStore(tmp_path / "library")
@@ -341,4 +338,4 @@ def test_real_local_director_drives_broll_bgm_sfx_to_final_and_draft(tmp_path: P
         failed_draft = _poll(lambda: client.get(f"/api/projects/{project_id}/capcut-draft-exports/{failed_draft_job}").json())
         assert failed_draft["status"] == "failed"
         assert "stale_output_asset" in str(store.get_job(project_id=project_id, job_id=failed_draft_job).get("error_message"))
-        assert _DeterministicLocalDirectorRuntime.external_calls == 0 and _DeterministicLocalDirectorRuntime.gemini_calls == 0
+        assert _DeterministicLocalDirectorRuntime.external_calls == 0

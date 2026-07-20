@@ -21,14 +21,6 @@ test.beforeEach(async ({ page }) => {
   await blockExternalNetwork(page);
 });
 
-test("fake API retires the Gemini key-management route", async ({ page }) => {
-  const response = await page.request.get(
-    "http://127.0.0.1:8000/api/projects/local-draft/providers/gemini/keys",
-  );
-
-  expect(response.status()).toBe(404);
-});
-
 test("local catalog renders the creator shell without an external request", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto("/projects/local-draft/home");

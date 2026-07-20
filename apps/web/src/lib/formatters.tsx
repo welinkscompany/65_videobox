@@ -162,8 +162,7 @@ export function formatDisplayText(value: string | null | undefined) {
     normalized.includes("://") ||
     /^\d{4}-\d{2}-\d{2}T/.test(normalized) ||
     /\b[a-z]+_[a-z0-9_]+_\d+\b/i.test(normalized) ||
-    /\b(asset|clip|job|rec|seg|timeline|editing_session)_[a-z0-9_]+\b/i.test(normalized) ||
-    /^gemini-[a-z0-9.-]+$/i.test(normalized)
+    /\b(asset|clip|job|rec|seg|timeline|editing_session)_[a-z0-9_]+\b/i.test(normalized)
   ) {
     return normalized;
   }

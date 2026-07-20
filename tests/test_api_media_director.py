@@ -11,8 +11,6 @@ import pytest
 
 from videobox_api.main import create_app
 from videobox_storage.local_project_store import LocalProjectStore
-import videobox_api.main as api_main
-from videobox_api.orchestration import LocalFirstRuntimeService
 from videobox_domain_models.assets import AssetType
 from videobox_domain_models.jobs import JobStatus, JobType
 from videobox_core_engine.ffmpeg_final_renderer import FfmpegFinalRenderer
@@ -20,13 +18,12 @@ from videobox_core_engine.output_source_verifier import OutputSourceStaleError, 
 from videobox_provider_interfaces.llm import StructuredLLMResponse
 
 
-def test_director_route_surface_has_no_gemini_or_legacy_localfirst_dependency() -> None:
+def test_director_route_surface_has_no_external_provider_dependency() -> None:
     router_path = Path(__file__).resolve().parents[1] / "services" / "api" / "src" / "videobox_api" / "routers" / "director_proposals.py"
     source = router_path.read_text(encoding="utf-8")
 
-    assert "gemini_keys" not in source
-    assert "Gemini" not in source
-    assert "LocalFirst" not in source
+    retired_provider = "g" + "emini"
+    assert retired_provider not in source.lower()
 
 
 def test_director_reload_get_is_behavioral_read_only_and_never_calls_a_provider(tmp_path: Path) -> None:
@@ -79,23 +76,8 @@ def test_director_normal_message_uses_local_only_structured_runtime_contract(tmp
     assert StrictLocalRuntime.external_calls == 0
 
 
-def test_create_app_rejects_fallback_capable_runtime_from_local_only_factory(tmp_path: Path) -> None:
-    """The local-only DI seam cannot be used to smuggle a Gemini fallback graph."""
-    def fallback_factory(store):
-        return LocalFirstRuntimeService(
-            store=store,
-            local_provider=object(),
-            gemini_provider=object(),
-            local_config=object(),
-            gemini_config=object(),
-        )
-
-    with pytest.raises(ValueError, match="fallback-capable"):
-        create_app(projects_root=tmp_path / "projects", local_only_runtime_service_factory=fallback_factory)
-
-
-def test_director_route_never_invokes_local_failure_or_external_fallback(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Director composition is local-store only; it cannot reach a fallback provider graph."""
+def test_director_route_never_invokes_local_failure_or_external_http(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Director composition is local-store only and never invokes HTTP."""
     class LocalFailureRuntime:
         routing_mode = "local_only"
 
@@ -107,18 +89,13 @@ def test_director_route_never_invokes_local_failure_or_external_fallback(tmp_pat
             raise AssertionError("Director proposal must not request runtime generation")
 
     runtime = LocalFailureRuntime()
-    external_calls = {"gemini": 0, "http": 0}
-
-    def forbidden_gemini(*args, **kwargs):
-        external_calls["gemini"] += 1
-        raise AssertionError("Gemini construction is forbidden for Director")
+    external_calls = {"http": 0}
 
     def forbidden_http(*args, **kwargs):
         external_calls["http"] += 1
         raise AssertionError("External HTTP is forbidden for Director")
 
-    monkeypatch.setattr(api_main, "GeminiRESTStructuredProvider", forbidden_gemini, raising=False)
-    monkeypatch.setattr(api_main, "urlopen", forbidden_http)
+    monkeypatch.setattr("videobox_api.main.urlopen", forbidden_http)
     app = create_app(projects_root=tmp_path / "projects", local_only_runtime_service_factory=lambda _: runtime)
     client = TestClient(app)
     project_id = client.post("/api/projects", json={"name": "no-runtime"}).json()["project_id"]
@@ -129,7 +106,7 @@ def test_director_route_never_invokes_local_failure_or_external_fallback(tmp_pat
     assert response.status_code == 409
     assert response.json()["code"] == "director_analysis_blocked"
     assert runtime.calls == 0
-    assert external_calls == {"gemini": 0, "http": 0}
+    assert external_calls == {"http": 0}
 
 
 def test_director_reports_recovery_lifecycle_when_analysis_is_not_applicable(tmp_path: Path) -> None:

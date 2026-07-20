@@ -488,7 +488,6 @@ def test_local_only_runtime_raises_without_external_fallback_on_local_failure() 
     )
     forbidden_external_provider = ForbiddenExternalProvider()
     runtime = LocalOnlyStructuredRuntime(local_provider=local_provider)
-    assert not hasattr(runtime, "gemini_provider")
 
     with pytest.raises(LocalOnlyStructuredGenerationError, match="local model unavailable"):
         runtime.generate(
@@ -606,21 +605,11 @@ def test_create_app_default_wiring_constructs_only_local_service(
     forbidden_external_provider = ForbiddenExternalProvider()
     builder_calls: list[Path] = []
 
-    def forbidden_gemini_constructor(*args: object, **kwargs: object) -> object:
-        forbidden_external_provider.calls.append((args, kwargs))
-        raise AssertionError("create_app must not construct a Gemini provider.")
-
     def build_fake_local_service(**kwargs: object) -> LocalOnlyRuntimeService:
         builder_calls.append(kwargs["store"].projects_root)
         return LocalOnlyRuntimeService(local_provider=local_provider)
 
     monkeypatch.setattr(api_main, "build_local_only_runtime_service", build_fake_local_service)
-    monkeypatch.setattr(
-        api_main,
-        "GeminiRESTStructuredProvider",
-        forbidden_gemini_constructor,
-        raising=False,
-    )
     create_app(projects_root=tmp_path)
 
     assert builder_calls == [tmp_path]

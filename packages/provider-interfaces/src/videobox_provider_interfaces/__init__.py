@@ -9,7 +9,6 @@ from videobox_provider_interfaces.llm import (
     StructuredLLMRequest,
     StructuredLLMResponse,
 )
-from videobox_provider_interfaces.gemini import GeminiHTTPTransport, GeminiRESTStructuredProvider
 from videobox_provider_interfaces.local_qwen import LocalQwenHTTPTransport, LocalQwenStructuredProvider
 from videobox_provider_interfaces.recommenders import (
     RecommendationCandidate,
@@ -58,8 +57,6 @@ __all__ = [
     "StructuredLLMRequest",
     "StructuredLLMResponse",
     "FasterWhisperSTTProvider",
-    "GeminiHTTPTransport",
-    "GeminiRESTStructuredProvider",
     "LocalQwenHTTPTransport",
     "LocalQwenStructuredProvider",
     "MockSTTProvider",

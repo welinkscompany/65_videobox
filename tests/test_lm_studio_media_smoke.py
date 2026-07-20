@@ -111,7 +111,6 @@ def test_lm_studio_local_media_runtime_smoke() -> None:
         "final_provider": "lm_studio",
         "fallback_reasons": [],
     }
-    assert "gemini" not in str(trace).lower()
     assert "http://127.0.0.1:1234/v1" == transport.base_url
 
     if profile.embedding_model_name is None:
@@ -175,7 +174,6 @@ def test_lm_studio_local_media_runtime_smoke() -> None:
     assert endpoints and all(
         endpoint == _NATIVE_MODELS_ENDPOINT or endpoint.startswith(_OPENAI_LOOPBACK_PREFIX) for endpoint in endpoints
     )
-    assert all("gemini" not in endpoint.lower() for endpoint in endpoints)
     evidence = {
         "git_head": _git_head(),
         "command": "VIDEOBOX_RUN_LM_STUDIO_MEDIA_SMOKE=1 pytest -q -m live_lmstudio tests/test_lm_studio_media_smoke.py",
@@ -189,7 +187,6 @@ def test_lm_studio_local_media_runtime_smoke() -> None:
         "requested_endpoints": endpoints,
         "loopback_request_count": len(endpoints),
         "external_provider_calls": 0,
-        "gemini_calls": 0,
         "provider_trace": trace,
         "timestamp": datetime.now(UTC).isoformat(),
     }

@@ -10,15 +10,14 @@ VideoBox의 자동 LLM runtime은 **로컬 Qwen만** 사용한다.
 
 이 결정은 `docs/implementation-plan.ko.md` §23과 함께 적용한다. core-engine은 provider interface를 유지하지만, 배포된 VideoBox가 외부 provider를 선택하거나 호출하는 근거가 되지 않는다.
 
-## 2. Gemini 격리 (완료)
+## 2. 외부 모델 provider 완전 퇴역 (완료)
 
-Gemini는 VideoBox에서 사용하지 않는다.
+VideoBox는 외부 생성 모델 provider를 사용하지 않는다.
 
-- Gemini provider call은 static/runtime 모두 `0`이어야 한다.
-- Gemini key pool, key-management API router, dashboard key-management UI는 **disabled·unwired**다.
-- 과거에 저장된 Gemini key 레코드와 스키마, router/storage/core module은 삭제하지 않는다. migration/read compatibility를 위해 inert 상태로 보존한다.
-- legacy router는 `create_app`에 import·등록하지 않으며, web API client와 화면은 Gemini key CRUD를 노출하지 않는다.
-- 새 key 입력, key rotation, provider fallback, Gemini 모델 선택을 다시 추가하지 않는다.
+- 외부 provider call은 static/runtime 모두 `0`이어야 한다.
+- credential key pool, key-management API router, dashboard key-management UI와 provider implementation은 제거한다.
+- 기존 프로젝트를 다시 열 때 퇴역 credential table은 삭제하며, credential·schema·module의 read compatibility를 제공하지 않는다.
+- 새 key 입력, key rotation, provider fallback, 외부 모델 선택을 다시 추가하지 않는다.
 
 ## 3. 로컬 Qwen 경계
 
@@ -50,12 +49,12 @@ Hermes Agent 공식 문서는 `hermes model`에서 OpenAI Codex를 선택하면 
 
 변경 후 최소한 다음을 확인한다.
 
-1. OpenAPI/public route에 Gemini key-management path가 없다.
-2. web API client와 화면에 Gemini key CRUD가 없다.
-3. local-only runtime guard가 Gemini/fallback-capable service를 거부한다.
-4. focused/runtime 검증에서 external Gemini provider call은 `0`이다.
-5. legacy persisted Gemini data를 삭제하거나 migration compatibility를 깨지 않는다.
+1. OpenAPI/public route에 provider credential-management path가 없다.
+2. web API client와 화면에 provider credential CRUD가 없다.
+3. 신규·기존 project database에 퇴역 credential table이 없다.
+4. focused/runtime 검증에서 external provider call은 `0`이다.
+5. local-only runtime의 실패는 deterministic fallback 또는 사람 검수로 끝난다.
 
 ## 7. 최종 결론
 
-`현재 VideoBox는 로컬 Qwen만 자동 runtime으로 사용한다. Gemini는 보존된 과거 데이터와 코드만 inert 상태로 남기며 호출하지 않는다. Hermes의 공식 ChatGPT OAuth는 전용 container state에서만 후속 검증할 수 있고, VideoBox의 direct OAuth와 GPT 호출은 아직 없다.`
+`현재 VideoBox는 로컬 Qwen만 자동 runtime으로 사용한다. 외부 생성 모델 provider의 credential·코드·경로는 제거했으며 호출하지 않는다. Hermes의 공식 ChatGPT OAuth는 전용 container state에서만 후속 검증할 수 있고, VideoBox의 direct OAuth와 GPT 호출은 아직 없다.`

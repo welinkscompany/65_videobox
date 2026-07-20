@@ -6,21 +6,21 @@ import pytest
 from fastapi.testclient import TestClient
 
 from videobox_api.main import create_app
-from videobox_core_engine.local_first_runtime import LocalFirstStructuredGenerationError
 from videobox_core_engine.local_pipeline import LocalPipelineRunner
 from videobox_core_engine.provider_trace import build_provider_trace
 from videobox_domain_models.jobs import JobStatus, JobType
+from videobox_provider_interfaces.llm import LLMProviderError
 from videobox_storage.local_project_store import LocalProjectStore
 
 
 class FailingBrollRecommender:
     def recommend(self, request):  # noqa: ANN001
         del request
-        raise LocalFirstStructuredGenerationError(
-            message="broll Gemini fallback failed",
+        raise LLMProviderError(
+            message="broll provider failed",
             error_code="BROLL_PROVIDER_FAILED",
-            provider_name="local_first_router",
-            provider_trace=build_provider_trace(final_provider="gemini"),
+            provider_name="local_qwen",
+            retryable=False,
         )
 
 
@@ -57,7 +57,7 @@ def test_retry_job_reruns_a_failed_broll_recommendation(tmp_path: Path) -> None:
         output_ref="segment_analysis_001",
     )
     failing_runner = LocalPipelineRunner(store, broll_recommender=FailingBrollRecommender())
-    with pytest.raises(LocalFirstStructuredGenerationError):
+    with pytest.raises(LLMProviderError):
         failing_runner.start_broll_recommendation(
             project_id=project.project_id,
             segment_analysis_job_id=segment_job["job_id"],

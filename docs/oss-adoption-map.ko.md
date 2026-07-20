@@ -68,8 +68,8 @@ VideoBox의 기본 반입 방식은 이 방식이다.
 |---|---|---|---|---|---|---|
 | `brollbox-master` | `execution/export_capcut.py` | `packages/capcut-export/src/videobox_capcut_export/adapter.py` + 추후 helper 분리 | `partial port` | 트랙 구성 방식, SRT 생성 사고방식, hook/BGM track 설계는 유효하지만 pycapcut, Google Drive 다운로드, BrollBox 상수 구조에 결합돼 있다 | 내부 소스라 라이선스 이슈는 낮지만, `pycapcut` 의존 여부는 별도 점검 필요 | CapCut 포맷 변경, pycapcut 결합, Google Drive 전제 제거 필요 |
 | `brollbox-master` | `execution/auto_cut.py` | `packages/core-engine/src/videobox_core_engine/auto_cut.py` | `partial port` | scene detect, black detect, max length split, dark/static filter 기준은 재사용 가치가 높다 | FFmpeg/ffprobe 직접 호출 유지 가능 | threshold 하드코딩을 VideoBox settings로 이동해야 함 |
-| `brollbox-master` | `execution/transcribe_audio.py` | `packages/provider-interfaces/src/videobox_provider_interfaces/stt.py` + `packages/core-engine/src/videobox_core_engine/transcript_alignment.py` | `rewrite` | WhisperX + forced alignment + script sync 문제 정의는 매우 좋지만 Gemini 직접 호출, singleton 전역, constants 결합이 강하다 | WhisperX는 외부 dependency로 채택, 소스 복사는 권장하지 않음 | alignment 모델 라이선스와 fallback 정책을 별도로 관리해야 함 |
-| `brollbox-master` | `execution/match_script.py` | `packages/core-engine/src/videobox_core_engine/script_scene_planner.py` + `packages/core-engine/src/videobox_core_engine/broll_matcher.py` | `rewrite` | 장면 분리와 장면별 키워드 추출 흐름은 유효하지만 Gemini/Sheets/search 결합이 너무 강하다 | external LLM dependency는 provider 뒤에 숨겨야 함 | 장면 분리 품질을 LLM 하나에 과의존하면 비용/재현성 문제 발생 |
+| `brollbox-master` | `execution/transcribe_audio.py` | `packages/provider-interfaces/src/videobox_provider_interfaces/stt.py` + `packages/core-engine/src/videobox_core_engine/transcript_alignment.py` | `rewrite` | WhisperX + forced alignment + script sync 문제 정의는 매우 좋지만 외부 생성 모델 직접 호출, singleton 전역, constants 결합이 강하다 | WhisperX는 외부 dependency로 채택, 소스 복사는 권장하지 않음 | alignment 모델 라이선스와 fallback 정책을 별도로 관리해야 함 |
+| `brollbox-master` | `execution/match_script.py` | `packages/core-engine/src/videobox_core_engine/script_scene_planner.py` + `packages/core-engine/src/videobox_core_engine/broll_matcher.py` | `rewrite` | 장면 분리와 장면별 키워드 추출 흐름은 유효하지만 외부 모델/Sheets/search 결합이 너무 강하다 | external LLM dependency는 provider 뒤에 숨겨야 함 | 장면 분리 품질을 LLM 하나에 과의존하면 비용/재현성 문제 발생 |
 | `brollbox-master` | `execution/search_broll.py` | `packages/core-engine/src/videobox_core_engine/broll_matcher.py` | `rewrite` | 태그 기반 검색, 필터링, 점수화 사고방식은 유지 가치가 있다 | DataFrame/Sheets 구조는 제거 필요 | 개인 B-roll 메타데이터 스키마가 먼저 안정화되어야 함 |
 | `brollbox-master` | `execution/shorts_clip.py` | `packages/core-engine/src/videobox_core_engine/shortform_candidates.py` | `rewrite` | SRT 파싱과 구간 추출 흐름은 좋지만 현재 Phase 8의 첫 반입 대상은 아님 | FFmpeg 활용 가능, provider 결합은 제거 필요 | shortform은 현재 MVP 주경로가 아니라 후순위 |
 | `brollbox-master` | `execution/tts_engine.py` | `packages/provider-interfaces/src/videobox_provider_interfaces/tts.py` + 추후 `packages/core-engine/src/videobox_core_engine/tts_replacement_planner.py` | `rewrite` | TTS 엔진 계층은 참고 가치가 있으나 VideoBox는 `tts_replacement recommendation` 중심 구조가 필요하다 | Voicebox 또는 다른 로컬 엔진과의 연결은 provider로 추상화 | 자동 전면 대체 금지 원칙을 어기지 않도록 강제 필요 |
@@ -127,7 +127,7 @@ VideoBox의 기본 반입 방식은 이 방식이다.
 
 1. BrollBox `ui/` 전체를 VideoBox `apps/web/`에 복사하는 것
 2. BrollBox의 Google Sheets/Drive 접근 코드를 VideoBox storage layer에 직접 이식하는 것
-3. Gemini 직접 호출 코드를 `core-engine` 안에 박아 넣는 것
+3. 외부 생성 모델 직접 호출 코드를 `core-engine` 안에 박아 넣는 것
 4. Voicebox 소스를 통째로 vendoring 하는 것
 5. open_clip 체크포인트 라이선스를 확인하지 않고 바로 추천 경로에 넣는 것
 6. Remotion을 preview 기본 경로로 교체하는 것

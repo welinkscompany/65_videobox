@@ -6,9 +6,7 @@ from typing import Any
 __all__ = [
     "DEFAULT_PROJECTS_ROOT",
     "KeywordBrollRecommender",
-    "LLMTaskRouter",
     "LocalFirstMusicRecommender",
-    "LocalFirstStructuredRuntime",
     "LocalPipelineRunner",
     "RuleBasedMusicRecommender",
     "TimelineBuilder",
@@ -20,14 +18,9 @@ _LAZY_EXPORTS = {
         "videobox_core_engine.recommenders",
         "KeywordBrollRecommender",
     ),
-    "LLMTaskRouter": ("videobox_core_engine.ai_routing", "LLMTaskRouter"),
     "LocalFirstMusicRecommender": (
         "videobox_core_engine.recommenders",
         "LocalFirstMusicRecommender",
-    ),
-    "LocalFirstStructuredRuntime": (
-        "videobox_core_engine.local_first_runtime",
-        "LocalFirstStructuredRuntime",
     ),
     "LocalPipelineRunner": ("videobox_core_engine.local_pipeline", "LocalPipelineRunner"),
     "RuleBasedMusicRecommender": (

@@ -1170,12 +1170,12 @@ production-readiness blocker slice 1의 9개 Task는 구현·회귀·600초 smok
 - `[ ] 미완료 (pending)`: 아직 시작하지 않았거나, 명시적 gate가 남은 항목이다.
 - `[!] BLOCKED`: 외부 사실·권한·승인 근거가 없어 구현을 시작하지 않는 항목이다.
 - `[x] 완료 (done)`: Hermes가 올라갈 Compose/PostgreSQL/snapshot/runtime 기준선과 실제 두 장면 current-revision MP4 재생 경로를 고정했다. Task 9 사람/환경 acceptance와 CapCut Desktop evidence의 완료 상태는 이 항목으로 바꾸지 않는다.
-- `[x] 완료 (done)`: Gemini quarantine을 마쳤다. `create_app`의 Gemini key router import/등록, web API client와 숨겨진 key CRUD UI를 제거했다. 과거 Gemini key 스키마·저장 데이터·legacy module은 migration/read compatibility 용도로만 inert 보존한다. focused API `12 passed`, web `112 passed`, production build와 OpenAPI/404 retirement contract로 public path와 provider call `0` 경계를 검증했다.
+- `[~] 진행 중 (in progress, 2026-07-20)`: 외부 생성 모델 provider를 퇴역 중이다. key router·web credential CRUD UI·provider/domain/core module을 삭제하고, 새 project와 다시 여는 기존 SQLite project 모두에서 퇴역 credential table을 제거한다. public provider credential path와 provider transport는 없으며, local-only 실패는 deterministic fallback 또는 사람 검수로 끝난다. 단, 통합 API 파일의 과거 fallback 전용 테스트 삭제와 full backend 재검증은 아직 남아 있다.
 - `[x] 완료 (done)`: 2026-07-19 Hermes Agent 공식 문서와 release를 확인했다. 공식 quickstart/configuration은 `hermes model`의 **OpenAI Codex → ChatGPT OAuth device-code login**을 지원한다고 명시한다. 첫 설치는 signed release tag `v2026.7.7.2`의 annotated tag `b7751df34688835a108e0d630f3495fc11f3df79`와 peeled commit `9de9c25f620ff7f1ce0fd5457d596052d5159596`으로 pin한다. 근거: <https://hermes-agent.nousresearch.com/docs/getting-started/quickstart/>, <https://hermes-agent.nousresearch.com/docs/user-guide/configuration/>, <https://github.com/NousResearch/hermes-agent/releases/tag/v2026.7.7.2>.
 - `[x] 완료 (done)`: `videobox-hermes-agent` pre-auth container를 official amd64 digest `sha256:3db34ce19adfa080736a2a3feb0316dbcccc588faa9afe7fd8ae1c03b4f1a53a`로 기동했다. Compose profile은 `hermes-preauth`이며, `network_mode: none`, host port 없음, VideoBox DB/media/snapshot mount 없음, 전용 scratch `videobox_hermes_preauth_state:/opt/data`, read-only root, `cap_drop: ALL`, `no-new-privileges`, bounded `local` log를 확인했다. 이 scratch volume은 훗날 OAuth state volume과 절대 재사용하지 않는다. official s6 supervisor의 state ownership·supervise lock을 위한 최소 예외로 `CHOWN`, `DAC_OVERRIDE`, `SETGID`, `SETUID`만 다시 더한다. 이 네 capability는 PID 1 supervisor에만 남고 실제 CMD는 UID `10000`/`hermes`, `CapEff=0`으로 실행됨을 runtime에서 확인했다. `hermes --version`은 `v0.18.2 (2026.7.7.2) · upstream 9de9c25f`를 반환했고 scratch state에는 `auth.json`과 `.env`가 없다.
 - `[ ] 미완료 (pending)`: 유진 profile, Hermes→VideoBox API 권한중개, egress allowlist gateway, OAuth login, mem0, 편집 mutation은 아직 만들지 않았다. 이 계획의 각 gate를 통과하기 전에는 이 범위를 추가하지 않는다.
 
-이 절은 Hermes 범위에서 `docs/llm-provider-strategy.ko.md`의 과거 `Qwen → Gemini → OpenAI` fallback보다 우선한다. provider 전략 문서는 현재 local-only 결정으로 갱신됐으며 Gemini provider, key pool, router는 **disabled·unwired** 상태다. 정적 검사와 실제 runtime 모두 external Gemini provider call `0`을 유지해야 하며, Gemini 경로를 되살리는 구현은 허용하지 않는다.
+이 절은 Hermes 범위에서 `docs/llm-provider-strategy.ko.md`의 과거 외부 fallback보다 우선한다. provider 전략 문서는 현재 local-only 결정으로 갱신됐으며 외부 생성 모델 provider의 credential·key pool·router는 제거했다. 정적 검사와 실제 runtime 모두 external provider call `0`을 유지해야 하며, 외부 fallback 경로를 되살리는 구현은 허용하지 않는다.
 
 ### 23.1 [~] 진행 중 (in progress) — Hermes 소유 ChatGPT OAuth·egress 계약
 
@@ -1271,7 +1271,7 @@ VideoBox typed audit handler는 actor/principal, project, correlation ID, prompt
 2. Compose inspect에서 Hermes에 DB/media/snapshot mount가 없고, approved network와 egress allowlist 외 연결이 없다.
 3. API integration에서 unauthenticated, expired capability, cross-project, allowlist 밖 tool, injected instruction, poisoned mem0, rate/cost limit 요청이 fail-closed한다.
 4. 프로젝트 status read model field allowlist, prompt-injection, structured-output size/timeout, audit redaction·complete correlation, restart/idempotent duplicate/recovery를 focused와 runtime으로 검증한다.
-5. Gemini provider/key pool/router가 static·runtime 모두 `0 call`이며, OAuth/GPT endpoint도 user consent·budget·audit 없이 호출되지 않는다.
+5. 외부 생성 모델 provider credential·key pool·router·transport가 static·runtime 모두 없고, OAuth/GPT endpoint도 user consent·budget·audit 없이 호출되지 않는다.
 6. 코드리뷰, 계획 gap 검증, source→runtime 역방향 검증, focused/full relevant tests, production build를 다시 수행하고 논리적으로 닫힌 단위만 commit/push한다.
 
 승인 기반 editing mutation, CapCut/host bridge, multi-agent fan-out, SaaS auth/billing, 대규모 UI framework는 위 gate 뒤 별도 slice다. 다중 에이전트가 필요해도 Gateway가 child scope·allowed tools·budget·deadline·audit correlation을 소유하며, child는 독립 DB/media/OAuth/mem0 권한을 받지 않는다.

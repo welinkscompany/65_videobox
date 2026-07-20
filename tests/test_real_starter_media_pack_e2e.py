@@ -36,7 +36,6 @@ FFMPEG_AVAILABLE = shutil.which("ffmpeg") is not None and shutil.which("ffprobe"
 
 class _DeterministicOfflineRuntime:
     external_provider_calls = 0
-    gemini_calls = 0
 
     def generate_structured(
         self,
@@ -65,7 +64,6 @@ class _DeterministicOfflineRuntime:
 
 def test_offline_runtime_returns_local_structured_responses_without_external_calls() -> None:
     _DeterministicOfflineRuntime.external_provider_calls = 0
-    _DeterministicOfflineRuntime.gemini_calls = 0
     runtime = _DeterministicOfflineRuntime()
 
     outputs = {
@@ -88,7 +86,6 @@ def test_offline_runtime_returns_local_structured_responses_without_external_cal
     assert outputs[LLMTaskType.MUSIC_RECOMMENDATION]["music_mood"] == "calm local bed"
     assert outputs[LLMTaskType.OPERATOR_COPY]["summary"] == "Local starter-pack guidance."
     assert _DeterministicOfflineRuntime.external_provider_calls == 0
-    assert _DeterministicOfflineRuntime.gemini_calls == 0
 
 
 class _DeterministicSTT:
@@ -163,7 +160,6 @@ def _poll(get_result, *, timeout_seconds: float = 60.0):  # noqa: ANN001
 @pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg/ffprobe not installed")
 def test_real_starter_media_pack_flows_to_final_mp4_and_real_capcut_draft(tmp_path: Path) -> None:
     _DeterministicOfflineRuntime.external_provider_calls = 0
-    _DeterministicOfflineRuntime.gemini_calls = 0
     """Use real release bytes end-to-end; source archives must never become media."""
     assert REAL_PACK_ROOT.is_dir(), f"Build the real pack first: {REAL_PACK_ROOT}"
     library = MediaLibraryStore(tmp_path / "library")
@@ -458,4 +454,3 @@ def test_real_starter_media_pack_flows_to_final_mp4_and_real_capcut_draft(tmp_pa
         # This release gate is offline by construction. Any provider invocation
         # would be both a policy violation and a deterministic test failure.
         assert _DeterministicOfflineRuntime.external_provider_calls == 0
-        assert _DeterministicOfflineRuntime.gemini_calls == 0

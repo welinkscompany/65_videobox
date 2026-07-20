@@ -292,14 +292,6 @@ def test_explicit_local_profile_preflights_exact_loopback_and_wires_real_provide
     assert any(url.endswith("/chat/completions") for url in http_client.urls)
 
 
-def test_legacy_local_first_factory_is_rejected_before_an_untrusted_provider_can_run(tmp_path: Path) -> None:
-    class Legacy:
-        local_provider = object()
-        local_runtime_config = object()
-    with pytest.raises(ValueError, match="local_first_runtime_service_factory is no longer supported"):
-        create_app(projects_root=tmp_path / "projects", local_first_runtime_service_factory=lambda _: Legacy())
-
-
 def test_arbitrary_injected_media_provider_is_rejected_without_test_only_opt_in(tmp_path: Path) -> None:
     external = FakeVision()
     with pytest.raises(ValueError, match="allow_test_media_analysis_providers"):

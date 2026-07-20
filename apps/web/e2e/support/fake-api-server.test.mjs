@@ -33,22 +33,3 @@ async function stop(child) {
   child.kill();
   await new Promise((resolve) => child.once("exit", resolve));
 }
-
-test("fake API retires the Gemini key-management route on its isolated port", async () => {
-  const port = await findAvailableLoopbackPort();
-  const child = spawn(process.execPath, [fakeServerPath], {
-    env: { ...process.env, VIDEOBOX_E2E_FAKE_API_PORT: String(port) },
-    stdio: "ignore",
-  });
-
-  try {
-    await waitForHealth(port);
-    const response = await fetch(
-      `http://127.0.0.1:${port}/api/projects/local-draft/providers/gemini/keys`,
-    );
-
-    assert.equal(response.status, 404);
-  } finally {
-    await stop(child);
-  }
-});

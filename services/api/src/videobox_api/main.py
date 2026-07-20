@@ -9,7 +9,6 @@ from fastapi import FastAPI
 
 from videobox_api.orchestration import (
     ApiOrchestrator,
-    LocalFirstRuntimeService,
     LocalOnlyRuntimeService,
     build_local_only_runtime_service,
 )
@@ -166,7 +165,6 @@ def create_app(
     tts_engine_config: TTSEngineConfig | None = None,
     capcut_handoff_service=None,
     local_only_runtime_service_factory=None,
-    local_first_runtime_service_factory=None,
     stt_provider=None,
     tts_provider=None,
     final_renderer=None,
@@ -211,11 +209,6 @@ def create_app(
     resolved_local_runtime_config = local_runtime_config or LocalOpenAICompatibleRuntimeConfig()
     if local_only_runtime_service_factory is not None:
         runtime_service_factory = local_only_runtime_service_factory
-    elif local_first_runtime_service_factory is not None:
-        # A LocalFirst instance carries a fallback-capable provider graph and
-        # cannot be safely reduced by duck typing. Callers must migrate to the
-        # explicitly named local_only factory (or deterministic test runtime).
-        raise ValueError("local_first_runtime_service_factory is no longer supported; use local_only_runtime_service_factory.")
     else:
         runtime_service_factory = lambda project_store: build_local_only_runtime_service(
             store=project_store,
@@ -223,8 +216,6 @@ def create_app(
             local_http_client=urlopen,
         )
     runtime_service = runtime_service_factory(store)
-    if isinstance(runtime_service, LocalFirstRuntimeService) or hasattr(runtime_service, "gemini_provider"):
-        raise ValueError("local_only_runtime_service_factory must not return a fallback-capable runtime")
     resolved_auto_cut_config = auto_cut_config or AutoCutConfig()
     resolved_whisper_stt_config = whisper_stt_config or WhisperSTTConfig()
     resolved_capcut_draft_export_config = capcut_draft_export_config or CapCutDraftExportConfig()

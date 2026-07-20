@@ -1027,40 +1027,4 @@ class SubtitleJobResponse(StartJobResponse):
     subtitle: SubtitleArtifactResponse
 
 
-class GeminiProviderKeyCreateRequest(BaseModel):
-    label: str = Field(min_length=1)
-    api_key: str = Field(min_length=1)
-    primary_model: str = Field(min_length=1)
-    cheap_model: str = Field(min_length=1)
-    high_quality_model: str = Field(min_length=1)
-
-
-class GeminiProviderKeyUpdateRequest(BaseModel):
-    label: str | None = None
-    primary_model: str | None = None
-    cheap_model: str | None = None
-    high_quality_model: str | None = None
-
-
-class GeminiProviderKeyResponse(BaseModel):
-    key_id: str
-    project_id: str
-    label: str
-    masked_api_key: str
-    primary_model: str
-    cheap_model: str
-    high_quality_model: str
-    status: str
-    cooldown_until: str | None = None
-    consecutive_failures: int
-    last_error: str | None = None
-    last_used_at: str | None = None
-    created_at: str
-    updated_at: str
-
-
-class GeminiProviderKeyListResponse(BaseModel):
-    keys: list[GeminiProviderKeyResponse]
-
-
 PartialRegenerationJobResponse.model_rebuild()

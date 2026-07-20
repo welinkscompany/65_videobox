@@ -1,13 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 from urllib.request import urlopen
 
-from videobox_core_engine.gemini_runtime import GeminiStructuredRuntime
-from videobox_core_engine.local_first_runtime import LocalFirstStructuredRuntime
 from videobox_core_engine.local_only_runtime import (
     LocalOnlyStructuredGenerationError,
     LocalOnlyStructuredRuntime,
@@ -15,7 +12,6 @@ from videobox_core_engine.local_only_runtime import (
 from videobox_core_engine.settings import LocalOpenAICompatibleRuntimeConfig
 from videobox_provider_interfaces.local_qwen import LocalQwenHTTPTransport, LocalQwenStructuredProvider
 from videobox_provider_interfaces.llm import (
-    LLMProviderConfig,
     LLMProviderError,
     LLMTaskType,
     StructuredLLMProvider,
@@ -35,76 +31,6 @@ class RegisteredAsset:
     asset_id: str
     asset_type: str
     storage_uri: str
-
-
-@dataclass(slots=True)
-class GeminiRuntimeService:
-    store: LocalProjectStore
-    provider: StructuredLLMProvider
-    provider_config: LLMProviderConfig
-    cooldown_seconds: int = 180
-
-    def generate_structured(
-        self,
-        *,
-        project_id: str,
-        task_type: LLMTaskType,
-        prompt: str,
-        response_schema: dict[str, Any],
-        now: datetime | None = None,
-    ) -> StructuredLLMResponse:
-        runtime = GeminiStructuredRuntime(
-            store=self.store,
-            provider=self.provider,
-            provider_config=self.provider_config,
-            cooldown_seconds=self.cooldown_seconds,
-        )
-        return runtime.generate(
-            project_id=project_id,
-            task_type=task_type,
-            prompt=prompt,
-            response_schema=response_schema,
-            now=now,
-        )
-
-
-@dataclass(slots=True)
-class LocalFirstRuntimeService:
-    store: LocalProjectStore
-    local_provider: StructuredLLMProvider
-    gemini_provider: StructuredLLMProvider
-    local_config: LLMProviderConfig
-    gemini_config: LLMProviderConfig
-    local_runtime_config: LocalOpenAICompatibleRuntimeConfig = field(
-        default_factory=LocalOpenAICompatibleRuntimeConfig
-    )
-    cooldown_seconds: int = 180
-
-    def generate_structured(
-        self,
-        *,
-        project_id: str,
-        task_type: LLMTaskType,
-        prompt: str,
-        response_schema: dict[str, Any],
-        now: datetime | None = None,
-    ) -> StructuredLLMResponse:
-        runtime = LocalFirstStructuredRuntime(
-            store=self.store,
-            local_provider=self.local_provider,
-            gemini_provider=self.gemini_provider,
-            local_config=self.local_config,
-            gemini_config=self.gemini_config,
-            local_runtime_config=self.local_runtime_config,
-            cooldown_seconds=self.cooldown_seconds,
-        )
-        return runtime.generate(
-            project_id=project_id,
-            task_type=task_type,
-            prompt=prompt,
-            response_schema=response_schema,
-            now=now,
-        )
 
 
 @dataclass(slots=True)
@@ -160,39 +86,6 @@ def build_local_qwen_structured_provider(
         http_client=local_http_client,
     )
     return LocalQwenStructuredProvider(transport=transport)
-
-
-def build_local_first_runtime_service(
-    *,
-    store: LocalProjectStore,
-    gemini_provider: StructuredLLMProvider,
-    gemini_config: LLMProviderConfig,
-    local_runtime_config: LocalOpenAICompatibleRuntimeConfig,
-    local_http_client: Callable[..., Any] = urlopen,
-    local_config: LLMProviderConfig | None = None,
-    cooldown_seconds: int = 180,
-) -> LocalFirstRuntimeService:
-    resolved_local_config = local_config or LLMProviderConfig(
-        provider_name="local_qwen",
-        enabled=local_runtime_config.enabled,
-        timeout_seconds=local_runtime_config.timeout_seconds,
-    )
-    if resolved_local_config.enabled != local_runtime_config.enabled:
-        raise ValueError("local_config.enabled must match local_runtime_config.enabled.")
-    if resolved_local_config.timeout_seconds != local_runtime_config.timeout_seconds:
-        raise ValueError("local_config.timeout_seconds must match local_runtime_config.timeout_seconds.")
-    return LocalFirstRuntimeService(
-        store=store,
-        local_provider=build_local_qwen_structured_provider(
-            local_runtime_config=local_runtime_config,
-            local_http_client=local_http_client,
-        ),
-        gemini_provider=gemini_provider,
-        local_config=resolved_local_config,
-        gemini_config=gemini_config,
-        local_runtime_config=local_runtime_config,
-        cooldown_seconds=cooldown_seconds,
-    )
 
 
 def build_local_only_runtime_service(
@@ -1056,60 +949,6 @@ class ApiOrchestrator:
             artifact_type=artifact_type,
             final_provider=final_provider,
             fallback_reason=fallback_reason,
-        )
-
-    def list_gemini_provider_keys(self, *, project_id: str) -> list[dict[str, Any]]:
-        return self.pipeline.store.list_gemini_provider_keys(project_id=project_id)
-
-    def save_gemini_provider_key(
-        self,
-        *,
-        project_id: str,
-        label: str,
-        api_key_secret: str,
-        primary_model: str,
-        cheap_model: str,
-        high_quality_model: str,
-    ) -> dict[str, Any]:
-        return self.pipeline.store.save_gemini_provider_key(
-            project_id=project_id,
-            label=label,
-            api_key_secret=api_key_secret,
-            primary_model=primary_model,
-            cheap_model=cheap_model,
-            high_quality_model=high_quality_model,
-        )
-
-    def update_gemini_provider_key(
-        self,
-        *,
-        project_id: str,
-        key_id: str,
-        label: str | None = None,
-        primary_model: str | None = None,
-        cheap_model: str | None = None,
-        high_quality_model: str | None = None,
-    ) -> dict[str, Any]:
-        return self.pipeline.store.update_gemini_provider_key(
-            project_id=project_id,
-            key_id=key_id,
-            label=label,
-            primary_model=primary_model,
-            cheap_model=cheap_model,
-            high_quality_model=high_quality_model,
-        )
-
-    def set_gemini_provider_key_status(
-        self,
-        *,
-        project_id: str,
-        key_id: str,
-        status: str,
-    ) -> dict[str, Any]:
-        return self.pipeline.store.set_gemini_provider_key_status(
-            project_id=project_id,
-            key_id=key_id,
-            status=status,
         )
 
     # Job types whose start_* call takes exactly one input_ref-shaped kwarg,

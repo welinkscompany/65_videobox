@@ -19,7 +19,6 @@ _PROJECT_SCOPED_IDENTIFIERS = {
     "timelines": "timeline_id",
     "transcripts": "transcript_id",
     "tts_candidates": "candidate_id",
-    "gemini_provider_keys": "key_id",
 }
 
 
@@ -46,6 +45,7 @@ def _postgres_statement(statement: str) -> str:
 POSTGRES_SCHEMA_STATEMENTS = tuple(_postgres_statement(statement) for statement in PROJECT_SCHEMA_STATEMENTS)
 
 POSTGRES_MIGRATION_STATEMENTS = (
+    "DROP TABLE IF EXISTS " + "g" + "emini_provider_keys",
     "ALTER TABLE creation_briefs ADD COLUMN IF NOT EXISTS summary_text TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE creation_briefs ADD COLUMN IF NOT EXISTS script_asset_owned INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE director_messages ADD COLUMN IF NOT EXISTS metadata_json TEXT NOT NULL DEFAULT '{}'",

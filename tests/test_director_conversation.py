@@ -95,7 +95,6 @@ def test_store_rejects_unknown_conversation_without_auto_creating_it(tmp_path: P
 def test_conversation_api_is_idempotent_and_local_failure_never_edits_session(tmp_path: Path, monkeypatch) -> None:
     from fastapi.testclient import TestClient
     from videobox_api.main import create_app
-    import videobox_api.main as api_main
 
     class FailingLocalRuntime:
         routing_mode = "local_only"
@@ -105,15 +104,11 @@ def test_conversation_api_is_idempotent_and_local_failure_never_edits_session(tm
             raise RuntimeError("LM Studio unavailable")
 
     runtime = FailingLocalRuntime()
-    external_calls = {"gemini": 0, "http": 0}
-    def forbidden_gemini(*_: object, **__: object) -> object:
-        external_calls["gemini"] += 1
-        raise AssertionError("Gemini is forbidden")
+    external_calls = {"http": 0}
     def forbidden_http(*_: object, **__: object) -> object:
         external_calls["http"] += 1
         raise AssertionError("external HTTP is forbidden")
-    monkeypatch.setattr(api_main, "GeminiRESTStructuredProvider", forbidden_gemini, raising=False)
-    monkeypatch.setattr(api_main, "urlopen", forbidden_http)
+    monkeypatch.setattr("videobox_api.main.urlopen", forbidden_http)
     app = create_app(projects_root=tmp_path / "projects", local_only_runtime_service_factory=lambda _: runtime)
     client = TestClient(app)
     project_id = client.post("/api/projects", json={"name": "chat"}).json()["project_id"]
@@ -126,7 +121,7 @@ def test_conversation_api_is_idempotent_and_local_failure_never_edits_session(tm
     assert first.status_code == second.status_code == 200
     assert second.json() == first.json()
     assert runtime.calls == 1
-    assert external_calls == {"gemini": 0, "http": 0}
+    assert external_calls == {"http": 0}
     assert "local_only_blocked" in first.json()["assistant_message"]["text"]
     assert first.json()["assistant_message"]["metadata"]["status"] == "blocked"
     assert first.json()["assistant_message"]["metadata"]["error_code"] == "local_runtime_error"

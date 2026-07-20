@@ -10,8 +10,6 @@ from videobox_core_engine.canonical_track import (
     canonical_track_type as _canonical_track_type,
     VALID_CANONICAL_TRACK_TYPES as VALID_PROMPT_TRACK_TYPES,
 )
-from videobox_core_engine.gemini_runtime import GeminiStructuredGenerationError
-from videobox_core_engine.local_first_runtime import LocalFirstStructuredGenerationError
 from videobox_core_engine.prompt_pending_recommendation import (
     canonical_prompt_decision_state as _canonical_decision_state,
     canonical_prompt_recommendation_type as _canonical_recommendation_type,
@@ -184,7 +182,7 @@ class LocalFirstOutputOperatorCopyBuilder(OutputOperatorCopyBuilder):
                 final_provider="static_fallback",
                 additional_reason="unexpected_runtime_failure" if not isinstance(
                     exc,
-                    (GeminiStructuredGenerationError, LLMProviderError, LocalFirstStructuredGenerationError),
+                    LLMProviderError,
                 ) else None,
             )
             return fallback_payload
