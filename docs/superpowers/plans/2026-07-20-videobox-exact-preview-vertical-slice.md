@@ -39,11 +39,11 @@ Run: `.venv\Scripts\python.exe -m pytest -q tests/test_exact_preview_artifact.py
 
 Expected: FAIL because no exact-preview request/record or generation fence exists.
 
-- [ ] **Step 3: Implement the smallest common contract.** LocalPipelineRunner obtains the current editing session's canonical ASS/caption input, then extracts a pure `CompositionPlan` from the current final renderer before changing output behavior. It must cover every intersecting clip's source in/out, canonical timeline offset, B-roll/overlay visibility, narration/BGM/SFX controls, canvas/fps/SAR/rotation and clipped ASS cues. `for_range(start,end)` shifts every retained item once and yields output PTS zero. Final and proxy renderers consume the same plan/caption input; full output behavior remains regression-tested.
+- [ ] **Step 3: Implement the smallest common contract.** LocalPipelineRunner obtains the current editing session's canonical ASS/caption input, then adds an explicit, pure `CompositionPlan` extraction hook beside the current final renderer before changing its long sequential render path. It must cover every intersecting clip's source in/out, canonical timeline offset, B-roll/overlay visibility, narration/BGM/SFX controls, canvas/fps/SAR/rotation and clipped ASS cues. `for_range(start,end)` shifts every retained item once and yields output PTS zero. Preserve existing final output behavior with regression tests in this task; Task 2's first RED/GREEN must wire both final and proxy output through this same plan/caption input before claiming parity.
 
 - [ ] **Step 4: Implement durable identity/lifecycle.** Define `ExactPreviewRequest` validation (`0 <= start < end <= duration`), `proxy_720p_h264_aac_v1`, fingerprint SHA-256 over canonical plan/session caption/used asset SHA/overlay/settings/composition version/profile, and SQLite migration/CRUD for pending/running/succeeded/failed/obsolete records. `begin_exact_preview` coalesces a current key or supersedes it; it claims ownership atomically. `finish_exact_preview` rechecks generation, revision and fingerprint before pointer update. Session/source invalidation includes `exact_preview_renders` in the same SQLite transaction. Restart recovery reclaims stale running claims, retry creates a new generation, temporary output is atomically published then fenced in DB, and retention/orphan cleanup is bounded.
 
-- [ ] **Step 5: Run GREEN** with crossing clips, one-time offsets, final/proxy same-plan/same-caption-input parity, coalescing, supersession, restart recovery, source/revision/fingerprint invalidation, project isolation, failed-write rollback, orphan cleanup and retention cases.
+- [ ] **Step 5: Run GREEN** with crossing clips, one-time offsets, extraction determinism, coalescing, supersession, restart recovery, source/revision/fingerprint invalidation, project isolation, failed-write rollback, orphan cleanup and retention cases. Do not claim final/proxy render parity until Task 2 wires the hook.
 
 - [ ] **Step 6: Commit** `feat: add exact preview composition fence`.
 
@@ -59,7 +59,7 @@ Expected: FAIL because no exact-preview request/record or generation fence exist
 - Test: `tests/test_exact_preview_artifact.py`
 - Test: `tests/test_api_exact_preview.py`
 
-- [ ] **Step 1: Write RED tests** proving a selected 2–12 second range and full session render a real H.264/AAC faststart MP4, expose `timeline_start_sec`, `timeline_end_sec`, `artifact_revision`, `generation_id`, and reject stale/foreign/missing/unsafe content. Add a Range request assertion:
+- [ ] **Step 1: Write RED tests** proving final and proxy both consume the same Task 1 CompositionPlan/caption input, then prove a selected 2–12 second range and full session render a real H.264/AAC faststart MP4, expose `timeline_start_sec`, `timeline_end_sec`, `artifact_revision`, `generation_id`, and reject stale/foreign/missing/unsafe content. Add a Range request assertion:
 
 ```python
 response = client.get(content_url, headers={"Range": "bytes=2-5"})
