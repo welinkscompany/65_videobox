@@ -69,6 +69,7 @@ def build_editing_session(
                 # deliberate source trim.  This durable offset is consumed
                 # by the canonical composition materializer.
                 "source_offset_sec": 0.0,
+                "source_slices": [{"segment_id": segment["segment_id"], "source_offset_sec": 0.0, "duration_sec": float(segment["end_sec"]) - float(segment["start_sec"])}],
                 "cut_action": segment.get("cleanup_decision", "keep"),
                 "review_required": _normalize_boolish(segment.get("review_required", False)),
                 "broll_override": None,
@@ -160,6 +161,38 @@ def _lineage_for_split(segment: dict[str, Any], *, parent_segment_id: str) -> di
     }
 
 
+def _source_slices(segment: dict[str, Any], *, fallback_offset: float | None = None) -> list[dict[str, float | str]]:
+    raw = segment.get("source_slices")
+    if isinstance(raw, list):
+        normalized = [
+            {"segment_id": str(item.get("segment_id") or ""), "source_offset_sec": float(item.get("source_offset_sec", 0.0)), "duration_sec": float(item.get("duration_sec", 0.0))}
+            for item in raw if isinstance(item, dict) and str(item.get("segment_id") or "") and float(item.get("duration_sec", 0.0)) > 0
+        ]
+        if normalized:
+            return normalized
+    return [{"segment_id": str(segment.get("segment_id") or ""), "source_offset_sec": float(segment.get("source_offset_sec", fallback_offset or 0.0)), "duration_sec": float(segment.get("end_sec", 0.0)) - float(segment.get("start_sec", 0.0))}]
+
+
+def _slice_source_window(*, slices: list[dict[str, float | str]], leading_trim_sec: float, duration_sec: float) -> list[dict[str, float | str]]:
+    remaining_trim, remaining_duration = max(0.0, leading_trim_sec), max(0.0, duration_sec)
+    output: list[dict[str, float | str]] = []
+    for source_slice in slices:
+        available = float(source_slice["duration_sec"])
+        if remaining_trim >= available:
+            remaining_trim -= available
+            continue
+        offset = float(source_slice["source_offset_sec"]) + remaining_trim
+        available -= remaining_trim
+        remaining_trim = 0.0
+        take = min(available, remaining_duration)
+        if take > 0:
+            output.append({"segment_id": str(source_slice["segment_id"]), "source_offset_sec": offset, "duration_sec": take})
+            remaining_duration -= take
+        if remaining_duration <= 0:
+            break
+    return output
+
+
 def _asset_ids(segment: dict[str, Any], *, field: str) -> list[str]:
     output: list[str] = []
     existing = segment.get("media_lineage")
@@ -194,6 +227,10 @@ def split_segment(*, session: dict[str, Any], segment_id: str, split_sec: float)
     left["end_sec"] = split_sec
     right["segment_id"] = split_id
     right["start_sec"] = split_sec
+    source_slices = _source_slices(original)
+    left["source_slices"] = _slice_source_window(slices=source_slices, leading_trim_sec=0.0, duration_sec=split_sec - start_sec)
+    right["source_slices"] = _slice_source_window(slices=source_slices, leading_trim_sec=split_sec - start_sec, duration_sec=end_sec - split_sec)
+    right["source_offset_sec"] = float(right["source_slices"][0]["source_offset_sec"]) if right["source_slices"] else float(original.get("source_offset_sec", 0.0))
     left["lineage"] = _lineage_for_split(original, parent_segment_id=segment_id)
     right["lineage"] = _lineage_for_split(original, parent_segment_id=segment_id)
     left["caption_needs_review"] = True
@@ -222,6 +259,8 @@ def merge_adjacent_segments(*, session: dict[str, Any], left_segment_id: str, ri
         "source_segment_ids": list(dict.fromkeys(list(left_lineage.get("source_segment_ids") or [left_segment_id]) + list(right_lineage.get("source_segment_ids") or [right_segment_id]))),
     }
     merged["media_lineage"] = _media_lineage(left, right)
+    merged["source_slices"] = _source_slices(left) + _source_slices(right)
+    merged["source_offset_sec"] = float(merged["source_slices"][0]["source_offset_sec"]) if merged["source_slices"] else 0.0
     merged["caption_needs_review"] = bool(left.get("caption_needs_review") or right.get("caption_needs_review"))
     updated["segments"][left_index : right_index + 1] = [merged]
     _validate_segment_bounds(segments=updated["segments"])
@@ -233,12 +272,25 @@ def set_segment_bounds(*, session: dict[str, Any], segment_id: str, start_sec: f
     index = _segment_index(session=updated, segment_id=segment_id)
     previous_start = float(updated["segments"][index]["start_sec"])
     prior_offset = _source_offset_before_bounds_mutation(session=session, segment=updated["segments"][index])
+    source_slices = _source_slices(updated["segments"][index], fallback_offset=prior_offset)
     updated["segments"][index]["start_sec"] = float(start_sec)
     updated["segments"][index]["end_sec"] = float(end_sec)
+    _validate_segment_bounds(segments=updated["segments"])
     # Only a bounds edit changes which source moment is used.  A reorder
     # relayout deliberately leaves this value untouched.
     updated["segments"][index]["source_offset_sec"] = prior_offset + float(start_sec) - previous_start
-    _validate_segment_bounds(segments=updated["segments"])
+    leading_delta = float(start_sec) - previous_start
+    if leading_delta < 0 and source_slices:
+        source_slices = deepcopy(source_slices)
+        first = source_slices[0]
+        restored = -leading_delta
+        first["source_offset_sec"] = float(first["source_offset_sec"]) - restored
+        if float(first["source_offset_sec"]) < 0:
+            raise ValueError("segment_source_expansion_outside_slice")
+        first["duration_sec"] = float(first["duration_sec"]) + restored
+    updated["segments"][index]["source_slices"] = _slice_source_window(
+        slices=source_slices, leading_trim_sec=max(0.0, leading_delta), duration_sec=float(end_sec) - float(start_sec),
+    )
     return _record_undoable_mutation(before=session, updated=updated, mutation_type="segment_bounds_update", segment_id=segment_id)
 
 

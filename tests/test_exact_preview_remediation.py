@@ -108,6 +108,8 @@ def test_session_source_offsets_distinguish_trim_from_reorder_and_migrate_legacy
     current = {**legacy, "segments": [{**segment, "source_offset_sec": 0.0} for segment in legacy["segments"]]}
     trimmed = set_segment_bounds(session=current, segment_id="red", start_sec=1, end_sec=2)
     assert trimmed["segments"][0]["source_offset_sec"] == 1.0
+    expanded = set_segment_bounds(session=trimmed, segment_id="red", start_sec=0, end_sec=2)
+    assert expanded["segments"][0]["source_slices"] == [{"segment_id": "red", "source_offset_sec": 0.0, "duration_sec": 2.0}]
     combined = reorder_segments(
         session=trimmed, segment_ids=["blue", "red"],
         bounds_by_id={"blue": {"start_sec": 0, "end_sec": 2}, "red": {"start_sec": 2, "end_sec": 3}},
@@ -123,6 +125,72 @@ def test_session_source_offsets_distinguish_trim_from_reorder_and_migrate_legacy
     del old_trimmed["segments"][0]["source_offset_sec"]
     continued = set_segment_bounds(session=old_trimmed, segment_id="red", start_sec=1.5, end_sec=2)
     assert continued["segments"][0]["source_offset_sec"] == 1.5
+
+
+def test_session_split_and_merge_materialize_source_slices_without_losing_media() -> None:
+    from videobox_core_engine.editing_session import merge_adjacent_segments, split_segment
+    from videobox_core_engine.exact_preview import fingerprint_exact_preview
+
+    timeline = {"tracks": [{"track_type": "broll", "clips": [
+        {"clip_id": "source", "segment_id": "source", "asset_uri": "local://source", "start_sec": 0, "end_sec": 4, "source_in_sec": 3, "source_out_sec": 7},
+    ]}]}
+    session = {"segments": [{"segment_id": "source", "start_sec": 0, "end_sec": 4, "source_offset_sec": 0, "source_slices": [{"segment_id": "source", "source_offset_sec": 0, "duration_sec": 4}], "caption_text": "", "cut_action": "keep", "visual_overlays": []}], "history": [], "undo_stack": [], "redo_stack": [], "session_revision": 1}
+
+    split = split_segment(session=session, segment_id="source", split_sec=2)
+    split_plan = CompositionPlan.from_timeline(timeline=materialize_editing_session_timeline(timeline=timeline, editing_session=split))
+    assert [(item.start_sec, item.end_sec, item.source_in_sec, item.source_out_sec) for item in split_plan.items] == [
+        (0.0, 2.0, 3.0, 5.0), (2.0, 4.0, 5.0, 7.0),
+    ]
+    base_plan = CompositionPlan.from_timeline(timeline=timeline)
+    assert fingerprint_exact_preview(plan=split_plan, session_captions=(), used_asset_sha256={}) != fingerprint_exact_preview(plan=base_plan, session_captions=(), used_asset_sha256={})
+
+    merged = merge_adjacent_segments(session=split, left_segment_id="source", right_segment_id="source__split_2")
+    merged_plan = CompositionPlan.from_timeline(timeline=materialize_editing_session_timeline(timeline=timeline, editing_session=merged))
+    assert [(item.start_sec, item.end_sec, item.source_in_sec, item.source_out_sec) for item in merged_plan.items] == [
+        (0.0, 2.0, 3.0, 5.0), (2.0, 4.0, 5.0, 7.0),
+    ]
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg fixture required")
+def test_split_merge_and_reorder_render_all_source_slices_for_proxy_and_final(tmp_path: Path) -> None:
+    from videobox_core_engine.editing_session import merge_adjacent_segments, reorder_segments, split_segment
+
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="split merge exact source")
+    source = tmp_path / "source.mp4"
+    subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=red:s=320x240:d=2", "-f", "lavfi", "-i", "color=c=blue:s=320x240:d=2", "-filter_complex", "[0:v][1:v]concat=n=2:v=1:a=0", "-pix_fmt", "yuv420p", str(source)], check=True, capture_output=True)
+    asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=source)
+    uri = f"local://projects/{project.project_id}/assets/{asset.asset_id}"
+    timeline = {"output": {"width": 320, "height": 240}, "tracks": [{"track_type": "broll", "clips": [{"clip_id": "source", "segment_id": "source", "asset_id": asset.asset_id, "asset_uri": uri, "start_sec": 0, "end_sec": 4, "source_in_sec": 0, "source_out_sec": 4}]}]}
+    session = {"segments": [{"segment_id": "source", "start_sec": 0, "end_sec": 4, "source_offset_sec": 0, "source_slices": [{"segment_id": "source", "source_offset_sec": 0, "duration_sec": 4}], "caption_text": "", "cut_action": "keep", "visual_overlays": []}], "history": [], "undo_stack": [], "redo_stack": [], "session_revision": 1}
+    renderer = FfmpegFinalRenderer(store=store, video_width=320, video_height=240)
+
+    def render_pair(label: str, editing_session: dict[str, object]) -> tuple[Path, Path]:
+        materialized = materialize_editing_session_timeline(timeline=timeline, editing_session=editing_session, project_id=project.project_id)
+        plan = CompositionPlan.from_timeline(timeline=materialized)
+        proxy, final = tmp_path / f"{label}-proxy.mp4", tmp_path / f"{label}-final.mp4"
+        renderer.render_exact_preview_to_mp4(project_id=project.project_id, composition_plan=plan, timeline_context=materialized, output_path=proxy, subtitle_ass_path=None)
+        renderer.render_timeline_to_mp4(project_id=project.project_id, timeline=materialized, composition_plan=plan, output_path=final)
+        return proxy, final
+
+    def pixel(path: Path, second: float) -> tuple[int, int, int]:
+        frame = subprocess.run(["ffmpeg", "-v", "error", "-ss", str(second), "-i", str(path), "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"], check=True, capture_output=True).stdout
+        return tuple(frame[:3])
+
+    split = split_segment(session=session, segment_id="source", split_sec=2)
+    for output in render_pair("split", split):
+        assert pixel(output, 0.5)[0] > 200
+        assert pixel(output, 2.5)[2] > 200
+
+    reordered = reorder_segments(session=split, segment_ids=["source__split_2", "source"], bounds_by_id={"source__split_2": {"start_sec": 0, "end_sec": 2}, "source": {"start_sec": 2, "end_sec": 4}})
+    for output in render_pair("reordered", reordered):
+        assert pixel(output, 0.5)[2] > 200
+        assert pixel(output, 2.5)[0] > 200
+
+    merged = merge_adjacent_segments(session=split, left_segment_id="source", right_segment_id="source__split_2")
+    for output in render_pair("merged", merged):
+        assert pixel(output, 0.5)[0] > 200
+        assert pixel(output, 2.5)[2] > 200
 
 
 def test_broll_controls_fail_before_render_when_window_is_invalid_or_insufficient_without_pad_or_loop() -> None:

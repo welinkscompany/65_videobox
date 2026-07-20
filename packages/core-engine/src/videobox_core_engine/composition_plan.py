@@ -38,11 +38,52 @@ def _legacy_segment_source_offset(*, editing_session: dict[str, Any], segment: d
                 offset += _number(after_segment.get("start_sec")) - _number(before_segment.get("start_sec"))
                 saw_bounds_mutation = True
         if saw_bounds_mutation or history:
+            for event in history:
+                if not isinstance(event, dict) or event.get("mutation_type") != "segment_split":
+                    continue
+                before = event.get("inverse_payload", {}).get("segments", []) if isinstance(event.get("inverse_payload"), dict) else []
+                after = event.get("forward_payload", {}).get("segments", []) if isinstance(event.get("forward_payload"), dict) else []
+                current = next((item for item in after if isinstance(item, dict) and str(item.get("segment_id") or "") == segment_id), None)
+                lineage = current.get("lineage") if isinstance(current, dict) and isinstance(current.get("lineage"), dict) else {}
+                parent_id = str(lineage.get("parent_segment_id") or "")
+                parent = next((item for item in before if isinstance(item, dict) and str(item.get("segment_id") or "") == parent_id), None)
+                if current is not None and parent is not None and segment_id != parent_id:
+                    offset += _number(current.get("start_sec")) - _number(parent.get("start_sec"))
             return offset
     # Hand-authored legacy fixtures predate transaction audit data.  Retain
     # their former trim interpretation while new/reordered sessions use the
     # durable marker above.
     return _number(segment.get("start_sec")) - original_start
+
+
+def _session_source_slices(*, editing_session: dict[str, Any], segment: dict[str, Any], source_durations: dict[str, float]) -> list[dict[str, Any]]:
+    raw = segment.get("source_slices")
+    if isinstance(raw, list):
+        slices = [
+            {"segment_id": str(item.get("segment_id") or ""), "source_offset_sec": _number(item.get("source_offset_sec")), "duration_sec": _number(item.get("duration_sec"))}
+            for item in raw if isinstance(item, dict) and str(item.get("segment_id") or "") and _number(item.get("duration_sec")) > 0
+        ]
+        if slices:
+            return slices
+    lineage = segment.get("lineage") if isinstance(segment.get("lineage"), dict) else {}
+    source_ids = [str(value) for value in lineage.get("source_segment_ids", []) if str(value)] or [str(segment.get("segment_id") or "")]
+    duration = max(0.0, _number(segment.get("end_sec")) - _number(segment.get("start_sec")))
+    if len(source_ids) == 1:
+        if "source_offset_sec" in segment or isinstance(editing_session.get("history"), list) and editing_session.get("history"):
+            return [{"segment_id": source_ids[0], "source_offset_sec": _legacy_segment_source_offset(editing_session=editing_session, segment=segment, original_start=0.0), "duration_sec": duration}]
+        # Pre-audit hand-authored sessions used timeline coordinates to signal
+        # a trim.  Carry that marker until the raw clip supplies its base.
+        return [{"segment_id": source_ids[0], "source_offset_sec": _number(segment.get("start_sec")), "duration_sec": duration, "legacy_timeline_anchor": True}]
+    legacy = [{"segment_id": source_id, "source_offset_sec": 0.0, "duration_sec": source_durations.get(source_id, 0.0)} for source_id in source_ids]
+    remaining, output = duration, []
+    for source_slice in legacy:
+        take = min(float(source_slice["duration_sec"]), remaining)
+        if take > 0:
+            output.append({**source_slice, "duration_sec": take})
+            remaining -= take
+        if remaining <= 0:
+            break
+    return output
 
 
 def materialize_editing_session_timeline(
@@ -58,6 +99,29 @@ def materialize_editing_session_timeline(
         for segment in editing_session.get("segments", [])
         if isinstance(segment, dict) and str(segment.get("segment_id") or "").strip()
     }
+    source_durations: dict[str, float] = {}
+    for track in timeline.get("tracks", []):
+        if not isinstance(track, dict):
+            continue
+        for clip in track.get("clips", []) if isinstance(track.get("clips"), list) else []:
+            if isinstance(clip, dict) and str(clip.get("segment_id") or ""):
+                source_id = str(clip["segment_id"])
+                source_durations[source_id] = max(source_durations.get(source_id, 0.0), _number(clip.get("end_sec")) - _number(clip.get("start_sec")))
+    source_targets: dict[str, list[tuple[dict[str, Any], dict[str, Any], float]]] = {}
+    removed_source_ids: set[str] = set()
+    for segment in segments.values():
+        if str(segment.get("cut_action") or "keep") == "remove":
+            removed_source_ids.update(
+                str(source_slice["segment_id"])
+                for source_slice in _session_source_slices(editing_session=editing_session, segment=segment, source_durations=source_durations)
+            )
+            continue
+        placement = _number(segment.get("start_sec"))
+        # original_start is only a compatibility fallback; persisted slices
+        # are independent of placement and survive reorder.
+        for source_slice in _session_source_slices(editing_session=editing_session, segment=segment, source_durations=source_durations):
+            source_targets.setdefault(str(source_slice["segment_id"]), []).append((segment, source_slice, placement))
+            placement += float(source_slice["duration_sec"])
     tracks: dict[str, list[dict[str, Any]]] = {}
     for track in timeline.get("tracks", []):
         if not isinstance(track, dict):
@@ -69,30 +133,31 @@ def materialize_editing_session_timeline(
         for raw in track.get("clips", []) if isinstance(track.get("clips"), list) else []:
             if not isinstance(raw, dict):
                 continue
-            clip = deepcopy(raw)
-            segment = segments.get(str(clip.get("segment_id") or ""))
-            if segment is not None:
-                if str(segment.get("cut_action") or "keep") == "remove":
+            source_id = str(raw.get("segment_id") or "")
+            targets = source_targets.get(source_id)
+            if targets is None:
+                if source_id in removed_source_ids:
                     continue
-                start, end = _number(segment.get("start_sec")), _number(segment.get("end_sec"))
-                if end <= start:
+                clips.append(deepcopy(raw))
+                continue
+            original_start, original_end = _number(raw.get("start_sec")), _number(raw.get("end_sec"))
+            original_source_in = _number(raw.get("source_in_sec", raw.get("in_sec", 0.0)))
+            original_source_out = _number(raw.get("source_out_sec", raw.get("out_sec", original_source_in + (original_end - original_start))))
+            for segment, source_slice, placement in targets:
+                duration = float(source_slice["duration_sec"])
+                if duration <= 0:
                     continue
-                original_start = _number(clip.get("start_sec"))
-                original_end = _number(clip.get("end_sec"))
-                original_source_in = _number(clip.get("source_in_sec", clip.get("in_sec", 0.0)))
-                original_source_out = _number(
-                    clip.get("source_out_sec", clip.get("out_sec", original_source_in + (original_end - original_start)))
-                )
-                source_in = original_source_in + _legacy_segment_source_offset(
-                    editing_session=editing_session, segment=segment, original_start=original_start,
-                )
-                source_out = min(original_source_out, source_in + (end - start))
-                clip["start_sec"], clip["end_sec"] = start, end
-                clip["source_in_sec"], clip["source_out_sec"] = source_in, source_out
                 override_field = {"broll": "broll_override", "bgm": "music_override", "sfx": "sfx_override"}.get(track_type)
                 if override_field and isinstance(segment.get(override_field), dict):
                     continue
-            clips.append(clip)
+                clip = deepcopy(raw)
+                offset = float(source_slice["source_offset_sec"])
+                if source_slice.get("legacy_timeline_anchor"):
+                    offset -= original_start
+                source_in = original_source_in + offset
+                clip["start_sec"], clip["end_sec"] = placement, placement + duration
+                clip["source_in_sec"], clip["source_out_sec"] = source_in, min(original_source_out, source_in + duration)
+                clips.append(clip)
         if clips:
             tracks[track_type] = clips
     removed_segment_ids = {
