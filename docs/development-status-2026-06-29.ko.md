@@ -1,6 +1,14 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 274. 2026-07-20 agent foundation handoff`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 275. 2026-07-20 Yujin editing-only scope closeout`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+
+## 275. 2026-07-20 Yujin editing-only scope closeout
+
+- `[x] 완료 (static contract only)`: 사용자 결정에 따라 VideoBox는 영상 편집·검수·CapCut 인계에 집중한다. 유진은 `yujin-prompt-v2`/`yujin-policy-v2`의 pinned profile과 갱신된 Agent Package manifest를 사용하며, 대본·제목·썸네일·추천 영상·영상 주제·커버 이미지·영상 설명·해시태그의 생성 또는 제안을 요청과 후보 응답 양쪽에서 `blocked`/fail-closed로 처리한다.
+- 유진의 Soul은 계속 `video_director_read_only`/`non_authorizing`이고, user preference는 `ko`, short action-oriented, memory opt-in `false`, scope `none`, retention `0`이다. response-only skill 세 개와 declaration-only `get_project_status` 한 개만 남고, MCP 기본값은 deny다. provider, OAuth, Hermes MCP transport, DB/API route, memory storage, mutation/render/export, CapCut/host bridge는 이번 변경으로 시작하지 않았다.
+- TDD: 정확한 제목·썸네일·추천 영상 표현의 RED 뒤, 독립 품질 리뷰가 발견한 영상 추천·주제·커버 이미지·설명·해시태그 우회 표현과 fixed system prompt 범위 누락을 다시 RED로 재현했다. 요청·응답 양방향 회귀와 versioned prompt/package manifest 재고정으로 보완했다.
+- 검증: 관련 profile/package/gateway/approval/capability focused `111 passed` (기존 Starlette multipart PendingDeprecationWarning 1), compileall, `git diff --check`, 현재 worktree production Docker build, `--network none --read-only` container import 통과. 독립 재검토는 `Critical 0 / Important 0`이다. 전체 Python suite는 64초 timeout으로 끝나 full-pass/unverified가 아니다.
+- Task 9 사람/환경 acceptance는 별도이며 누적은 계속 **9/22 (40.9%)**, 잔여 **59.1%**다. external/Gemini provider call은 이 작업에서 0이다.
 
 ## 274. 2026-07-20 agent foundation handoff
 

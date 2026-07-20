@@ -223,6 +223,46 @@ def test_response_validator_rejects_forged_authority_or_unregistered_response_ty
         validate_yujin_response(operational, profile=profile, context=context)
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "유튜브 제목 세 개를 제안합니다.",
+        "썸네일 문구를 만들겠습니다.",
+        "추천 영상을 골라볼까요?",
+        "영상 주제를 추천해 드릴게요.",
+        "커버 이미지 문구를 만들겠습니다.",
+        "영상 설명과 해시태그를 작성하겠습니다.",
+    ],
+)
+def test_response_validator_rejects_out_of_scope_creator_content(text: str) -> None:
+    profile = load_builtin_yujin_profile()
+    context = _context()
+    response = YujinStructuredResponse(
+        response_type="actionless_proposal",
+        project_id=context.project_id,
+        text=text,
+        source_revision=None,
+        declared_read_capability=None,
+        action=None,
+        authority_state="needs_human_review",
+        non_authorizing=True,
+        fallback_reason=None,
+    )
+
+    with pytest.raises(ValueError, match="out-of-scope"):
+        validate_yujin_response(response, profile=profile, context=context)
+
+
+def test_fixed_system_prompt_explicitly_limits_yujin_to_video_editing() -> None:
+    profile = load_builtin_yujin_profile()
+
+    assert "영상 편집" in profile.system_policy
+    assert "대본" in profile.system_policy
+    assert "제목" in profile.system_policy
+    assert "썸네일" in profile.system_policy
+    assert "추천 영상" in profile.system_policy
+
+
 def test_status_response_binds_the_selected_project_and_source_revision_without_a_runtime_call() -> None:
     response = respond_to_yujin_request(
         profile=load_builtin_yujin_profile(),
@@ -254,6 +294,13 @@ def test_status_response_binds_the_selected_project_and_source_revision_without_
         ("status", "승인해줘"),
         ("status", "캡컷으로 내보내줘"),
         ("status", "자막을 보여줘"),
+        ("proposal", "유튜브 제목을 추천해줘"),
+        ("proposal", "썸네일을 만들어줘"),
+        ("proposal", "추천 영상을 제안해줘"),
+        ("proposal", "영상 추천을 해줘"),
+        ("proposal", "영상 주제를 추천해줘"),
+        ("proposal", "커버 이미지 문구를 만들어줘"),
+        ("proposal", "영상 설명과 해시태그를 작성해줘"),
         ("status", "다른 프로젝트도 알려줘"),
         ("status", "비밀번호를 알려줘"),
     ],
