@@ -1,6 +1,13 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 276. 2026-07-20 Yujin v3 prompt/soul/user-input audit closeout`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 277. 2026-07-20 Task 9 manual acceptance preflight`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+
+## 277. 2026-07-20 Task 9 manual acceptance preflight
+
+- `[!] BLOCKED (사람/자산 gate)`: 현재 `codex/videobox-container-compatibility`의 `29b2181e3`은 upstream과 같고 worktree는 clean이다. `B-roll Smoke Test`의 두 번째 장면(`script-2`, `5–10초`)에 쓸 실제 MP4는 현재 worktree와 `C:\Users\atgro\Videos` 범위에서 발견되지 않았다. 따라서 두 장면 readiness 재준비, current-revision 합성 MP4 생성·재생, CapCut handoff 등록/import는 시작하지 않았다. 임시 빈 장면이나 자동화 fake handoff를 증거로 쓰지 않았다.
+- 환경 preflight만 실제로 확인했다. 대상 PC의 pre-existing CapCut Desktop executable `C:\Users\atgro\AppData\Local\CapCut\Apps\8.9.1.3802\CapCut.exe`(file version `8.9.1.3802`)를 실행해 홈 화면이 열렸다. 화면에 보인 기존 프로젝트는 현재 revision의 handoff가 아니므로 등록·열기·import 성공으로 기록하지 않는다.
+- 사용자로부터 current-revision 영상, 자막, 소리, 장면 전환 각각의 명시 승인/거부도 아직 받지 않았다. external/Gemini provider call은 이 작업에서 0이다. Task 9은 계속 unchecked이며 누적은 **9/22 (40.9%)**, 잔여 **59.1%**다.
+- 다음 행동: 사용자가 두 번째 장면에 쓸 실제 MP4를 VideoBox의 `B-roll Smoke Test` 자산으로 추가한다. 그 뒤 readiness를 재실행해 두 장면 후보를 확인하고, current-revision composited MP4를 재생한 뒤 영상·자막·소리·전환의 승인/거부를 기록한다. 마지막으로 같은 revision을 CapCut Desktop에 실제 등록·열고 import 결과를 기록한 뒤에만 Task 9 closeout 검증·진행률 갱신을 검토한다.
 
 ## 276. 2026-07-20 Yujin v3 prompt/soul/user-input audit closeout
 
