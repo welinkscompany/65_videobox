@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "test": "vitest run",
     "test:focused": "vitest run --run src/app.test.tsx",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:e2e:editor-workbench": "node ./e2e/run-editor-workbench-isolated.mjs"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.2.2",

@@ -36,6 +36,9 @@ def test_editor_workbench_artifacts_are_deterministic_and_pending_approval():
     expected = {(1920, 1080), (1440, 900), (1280, 800), (768, 1024), (390, 844)}
     actual = {(item["width"], item["height"]) for item in manifest["viewports"]}
     assert actual == expected
+    manifest_files = {item["file"] for item in manifest["viewports"]}
+    snapshot_files = {path.name for path in SNAPSHOTS.glob("editor-workbench-*.png")}
+    assert snapshot_files == manifest_files
     for item in manifest["viewports"]:
         path = SNAPSHOTS / item["file"]
         assert path.is_file()
