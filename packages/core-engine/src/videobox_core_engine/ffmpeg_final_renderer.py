@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from videobox_core_engine.canonical_track import canonical_track_type
+from videobox_core_engine.composition_plan import CompositionPlan
 from videobox_core_engine.media_controls import normalize_media_controls
 from videobox_core_engine.output_source_verifier import OutputSourceStaleError, verify_output_sources
 from videobox_core_engine.output_warning_provenance import output_warning_notes
@@ -37,6 +38,17 @@ class FfmpegFinalRenderer:
     bgm_volume: float = 0.25
     overlay_font_file: str = os.environ.get("VIDEBOX_OVERLAY_FONT", r"C:\Windows\Fonts\malgun.ttf")
     ffprobe_binary: str = "ffprobe"
+
+    def extract_composition_plan(
+        self, *, timeline: dict[str, Any], captions: list[dict[str, Any]] | None = None
+    ) -> CompositionPlan:
+        """Return the pure composition authority shared with exact preview.
+
+        Task 1 intentionally leaves the established ffmpeg command path
+        untouched.  Task 2 will pass this exact object into both final/proxy
+        command construction before claiming command-level parity.
+        """
+        return CompositionPlan.from_timeline(timeline=timeline, captions=captions or [])
 
     def _run(self, command: list[str]) -> subprocess.CompletedProcess:
         try:
@@ -277,6 +289,10 @@ class FfmpegFinalRenderer:
         on_progress: Callable[[int], None] | None = None,
     ) -> Path:
         verify_output_sources(store=self.store, project_id=project_id, timeline=timeline)
+        # Keep extraction on the final-render path now so source/timeline
+        # shapes are validated by its existing regression suite.  The proxy
+        # renderer is deliberately not introduced in this task.
+        self.extract_composition_plan(timeline=timeline)
         def report_progress(percent: int) -> None:
             if on_progress is not None:
                 on_progress(percent)

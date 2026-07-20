@@ -385,6 +385,33 @@ PROJECT_SCHEMA_STATEMENTS = (
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS exact_preview_renders (
+        generation_id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        expected_revision INTEGER NOT NULL,
+        cache_key TEXT NOT NULL,
+        fingerprint TEXT NOT NULL,
+        start_sec REAL,
+        end_sec REAL,
+        duration_sec REAL,
+        profile TEXT NOT NULL,
+        state TEXT NOT NULL,
+        artifact_uri TEXT,
+        claim_token TEXT,
+        claimed_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        invalidated_at TEXT,
+        invalidated_reason TEXT,
+        error_message TEXT
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_exact_preview_current
+    ON exact_preview_renders (project_id, session_id, cache_key, state, updated_at)
+    """,
+    """
     CREATE INDEX IF NOT EXISTS idx_hermes_capability_ledger_expiry
     ON hermes_capability_ledger (project_id, expires_at)
     """,

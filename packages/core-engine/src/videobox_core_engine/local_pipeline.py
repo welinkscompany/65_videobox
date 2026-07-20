@@ -36,6 +36,7 @@ from videobox_core_engine.auto_cut import AutoCutPlanner
 from videobox_core_engine.capcut_handoff import CapCutHandoffError, CapCutHandoffService
 from videobox_core_engine.ffmpeg_auto_cut_executor import FfmpegAutoCutExecutor
 from videobox_core_engine.ffmpeg_final_renderer import FfmpegFinalRenderer
+from videobox_core_engine.composition_plan import CompositionPlan
 from videobox_core_engine.output_source_verifier import OutputSourceStaleError, verify_output_freshness
 from videobox_core_engine.ass_subtitles import render_editing_session_ass
 from videobox_core_engine.thumbnail_generator import ThumbnailGenerationError, generate_video_thumbnail
@@ -148,6 +149,24 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         # should run implicitly for callers/tests that don't opt in.
         self.tts_provider = tts_provider
         self.transcript_aligner = transcript_aligner or HeuristicTranscriptAligner()
+
+    def build_composition_plan(
+        self, *, timeline: dict[str, Any], editing_session: dict[str, Any] | None = None
+    ) -> CompositionPlan:
+        """Extract the one pure plan/caption input for output consumers.
+
+        It has no job, provider, or mutation side effect.  Task 2 will use the
+        returned plan plus the same session captions to build both final and
+        proxy ffmpeg commands.
+        """
+        captions = list(editing_session.get("segments", [])) if isinstance(editing_session, dict) else []
+        extractor = getattr(self.final_renderer, "extract_composition_plan", None)
+        # Existing callers intentionally inject small recording renderers.  A
+        # missing optional extraction hook is a compatibility case, whereas an
+        # exception from a real hook remains authoritative and must propagate.
+        if callable(extractor):
+            return extractor(timeline=timeline, captions=captions)
+        return CompositionPlan.from_timeline(timeline=timeline, captions=captions)
 
     def register_narration_asset(self, *, project_id: str, source_path: Path) -> dict[str, Any]:
         asset = self.store.register_asset(
@@ -1319,6 +1338,10 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 else None
             )
             editing_session = self._editing_session_for_output_timeline(project_id=project_id, timeline=timeline)
+            # Establish the same immutable timeline/caption input that the
+            # exact-preview worker will consume in Task 2.  Rendering remains
+            # on the existing final path in this Task 1 extraction slice.
+            self.build_composition_plan(timeline=timeline, editing_session=editing_session)
             with tempfile.TemporaryDirectory(prefix="videobox_final_render_") as raw_render_dir:
                 render_output_path = Path(raw_render_dir) / "output.mp4"
                 subtitle_ass_path = None

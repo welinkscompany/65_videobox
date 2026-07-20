@@ -20,6 +20,7 @@ from videobox_domain_models.projects import ProjectRecord
 from videobox_domain_models.recommendations import RecommendationRecord, RecommendationType
 from videobox_domain_models.transcripts import TranscriptRecord
 from videobox_core_engine.provider_trace import build_provider_trace
+from videobox_core_engine.exact_preview import ExactPreviewRequest
 from videobox_storage.sqlite_schema import PROJECT_SCHEMA_STATEMENTS
 from videobox_domain_models.director_proposals import DirectorProposal
 from videobox_core_engine.director_proposals import proposal_from_payload, proposal_to_payload
@@ -425,6 +426,268 @@ class LocalProjectStore:
 
     def database_path(self, project_id: str) -> Path:
         return self.project_root(project_id) / "db" / "project.sqlite"
+
+    def begin_exact_preview(
+        self, *, project_id: str, request: Any, fingerprint: str, duration_sec: float | None = None
+    ) -> dict[str, Any]:
+        """Create or coalesce a durable exact-preview generation.
+
+        This is deliberately storage-only: ffmpeg workers claim and publish a
+        generation separately, so a late worker cannot turn an obsolete record
+        back into the current artifact.
+        """
+        session_id = str(request.session_id)
+        expected_revision = int(request.expected_revision)
+        profile = str(request.profile)
+        cache_key = str(request.cache_key(source_fingerprint=fingerprint))
+        if request.end_sec is not None and duration_sec is None:
+            raise ValueError("exact_preview_duration_required")
+        if duration_sec is not None:
+            request.validate_duration(float(duration_sec))
+        now = self._now_iso()
+        connection = self._connection(project_id)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            session = connection.execute(
+                "SELECT session_revision FROM editing_sessions WHERE project_id = ? AND session_id = ?",
+                (project_id, session_id),
+            ).fetchone()
+            if session is None:
+                raise KeyError(f"Editing session not found: {session_id}")
+            if int(session["session_revision"]) != expected_revision:
+                raise EditingSessionRevisionConflict("exact preview session revision is stale")
+            existing = connection.execute(
+                """SELECT * FROM exact_preview_renders WHERE project_id = ? AND session_id = ?
+                   AND cache_key = ? AND state IN ('pending', 'running', 'succeeded')
+                   ORDER BY created_at DESC LIMIT 1""",
+                (project_id, session_id, cache_key),
+            ).fetchone()
+            if existing is not None:
+                connection.commit()
+                return self._exact_preview_row(dict(existing))
+            connection.execute(
+                """UPDATE exact_preview_renders SET state = 'obsolete', invalidated_at = ?,
+                   invalidated_reason = 'superseded', updated_at = ?
+                   WHERE project_id = ? AND session_id = ? AND state IN ('pending', 'running', 'succeeded')""",
+                (now, now, project_id, session_id),
+            )
+            generation_id = f"exact_preview_{uuid.uuid4().hex}"
+            connection.execute(
+                """INSERT INTO exact_preview_renders (
+                    generation_id, project_id, session_id, expected_revision, cache_key, fingerprint,
+                    start_sec, end_sec, duration_sec, profile, state, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)""",
+                (generation_id, project_id, session_id, expected_revision, cache_key, fingerprint,
+                 request.start_sec, request.end_sec, duration_sec, profile, now, now),
+            )
+            row = connection.execute("SELECT * FROM exact_preview_renders WHERE generation_id = ?", (generation_id,)).fetchone()
+            connection.commit()
+            return self._exact_preview_row(dict(row))
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def claim_exact_preview(self, *, project_id: str, generation_id: str, owner_token: str) -> bool:
+        if not owner_token:
+            raise ValueError("exact_preview_claim_token_required")
+        connection = self._connection(project_id)
+        try:
+            now = self._now_iso()
+            cursor = connection.execute(
+                """UPDATE exact_preview_renders SET state = 'running', claim_token = ?, claimed_at = ?, updated_at = ?
+                   WHERE project_id = ? AND generation_id = ? AND state = 'pending'""",
+                (owner_token, now, now, project_id, generation_id),
+            )
+            connection.commit()
+            return cursor.rowcount == 1
+        finally:
+            connection.close()
+
+    def finish_exact_preview(
+        self, *, project_id: str, generation_id: str, fingerprint: str, artifact_path: Path, owner_token: str
+    ) -> bool:
+        """Atomically copy/rename then publish only a still-current generation."""
+        artifact_path = Path(artifact_path)
+        if not owner_token:
+            raise ValueError("exact_preview_claim_token_required")
+        if not artifact_path.is_file():
+            raise FileNotFoundError(artifact_path)
+        connection = self._connection(project_id)
+        temporary: Path | None = None
+        published: Path | None = None
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute("SELECT * FROM exact_preview_renders WHERE project_id = ? AND generation_id = ?", (project_id, generation_id)).fetchone()
+            if (
+                row is None
+                or str(row["fingerprint"]) != fingerprint
+                or str(row["state"]) != "running"
+                or str(row["claim_token"] or "") != owner_token
+            ):
+                connection.rollback()
+                return False
+            current = connection.execute(
+                "SELECT session_revision FROM editing_sessions WHERE project_id = ? AND session_id = ?",
+                (project_id, str(row["session_id"])),
+            ).fetchone()
+            if current is None or int(current["session_revision"]) != int(row["expected_revision"]):
+                connection.execute("UPDATE exact_preview_renders SET state = 'obsolete', invalidated_at = ?, invalidated_reason = 'session_revision_changed', updated_at = ? WHERE generation_id = ?", (self._now_iso(), self._now_iso(), generation_id))
+                connection.commit()
+                return False
+            destination_dir = self.project_root(project_id) / "derived" / "exact_previews"
+            destination_dir.mkdir(parents=True, exist_ok=True)
+            published = destination_dir / f"{generation_id}.mp4"
+            temporary = destination_dir / f".{generation_id}.{uuid.uuid4().hex}.tmp"
+            shutil.copyfile(artifact_path, temporary)
+            temporary.replace(published)
+            uri = self._path_to_uri(project_id, published)
+            # Fence again after the filesystem publication but before the DB pointer.
+            cursor = connection.execute(
+                """UPDATE exact_preview_renders SET state = 'succeeded', artifact_uri = ?, updated_at = ?
+                   WHERE project_id = ? AND generation_id = ? AND fingerprint = ?
+                   AND state = 'running' AND claim_token = ?""",
+                (uri, self._now_iso(), project_id, generation_id, fingerprint, owner_token),
+            )
+            if cursor.rowcount != 1:
+                connection.rollback()
+                published.unlink(missing_ok=True)
+                return False
+            connection.commit()
+            return True
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            if published is not None:
+                published.unlink(missing_ok=True)
+            raise
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+            connection.close()
+
+    def get_exact_preview(self, *, project_id: str, generation_id: str) -> dict[str, Any]:
+        row = self._fetchone(project_id, "SELECT * FROM exact_preview_renders WHERE project_id = ? AND generation_id = ?", (project_id, generation_id))
+        if row is None:
+            raise KeyError(f"Exact preview not found: {generation_id}")
+        return self._exact_preview_row(dict(row))
+
+    def recover_stale_exact_preview_claims(self, *, project_id: str, older_than_seconds: float = 900) -> int:
+        cutoff = (self._clock() - timedelta(seconds=older_than_seconds)).isoformat()
+        connection = self._connection(project_id)
+        try:
+            cursor = connection.execute(
+                """UPDATE exact_preview_renders SET state = 'failed', error_message = 'stale_running_claim',
+                   updated_at = ? WHERE project_id = ? AND state = 'running' AND claimed_at < ?""",
+                (self._now_iso(), project_id, cutoff),
+            )
+            connection.commit()
+            return cursor.rowcount
+        finally:
+            connection.close()
+
+    def retry_exact_preview(self, *, project_id: str, generation_id: str) -> dict[str, Any]:
+        row = self.get_exact_preview(project_id=project_id, generation_id=generation_id)
+        if str(row["state"]) != "failed":
+            raise ValueError("exact_preview_retry_not_failed")
+        request = ExactPreviewRequest(
+            session_id=str(row["session_id"]), expected_revision=int(row["expected_revision"]),
+            start_sec=row["start_sec"], end_sec=row["end_sec"], profile=str(row["profile"]),
+        )
+        duration_sec = row.get("duration_sec")
+        if request.end_sec is not None and duration_sec is None:
+            raise ValueError("exact_preview_duration_required")
+        if duration_sec is not None:
+            request.validate_duration(float(duration_sec))
+        # Failed rows must not coalesce with a retry; a distinct cache identity
+        # makes generation ownership explicit while preserving the source fence.
+        connection = self._connection(project_id)
+        try:
+            cursor = connection.execute(
+                """UPDATE exact_preview_renders SET state = 'obsolete', invalidated_at = ?,
+                   invalidated_reason = 'retry', updated_at = ?
+                   WHERE project_id = ? AND generation_id = ? AND state = 'failed'""",
+                (self._now_iso(), self._now_iso(), project_id, generation_id),
+            )
+            if cursor.rowcount != 1:
+                connection.rollback()
+                raise ValueError("exact_preview_retry_not_failed")
+            connection.commit()
+        finally:
+            connection.close()
+        return self.begin_exact_preview(
+            project_id=project_id, request=request, fingerprint=str(row["fingerprint"]), duration_sec=duration_sec
+        )
+
+    def cleanup_exact_preview_artifacts(
+        self, *, project_id: str, keep_last: int = 5, orphan_older_than_seconds: float = 300
+    ) -> int:
+        """Prune retained stale rows and crash-orphaned files inside this project only."""
+        rows = self._fetchall(project_id, "SELECT generation_id, artifact_uri FROM exact_preview_renders WHERE project_id = ? AND state IN ('obsolete', 'failed') ORDER BY updated_at DESC", (project_id,))
+        removed = 0
+        for row in rows[max(keep_last, 0):]:
+            uri = row["artifact_uri"]
+            if uri:
+                self.resolve_storage_uri(project_id=project_id, storage_uri=str(uri)).unlink(missing_ok=True)
+            self._execute(project_id, "DELETE FROM exact_preview_renders WHERE project_id = ? AND generation_id = ?", (project_id, str(row["generation_id"])))
+            removed += 1
+        preview_root = self.project_root(project_id) / "derived" / "exact_previews"
+        if not preview_root.is_dir():
+            return removed
+        referenced = {
+            self.resolve_storage_uri(project_id=project_id, storage_uri=str(row["artifact_uri"])).resolve()
+            for row in self._fetchall(
+                project_id,
+                "SELECT artifact_uri FROM exact_preview_renders WHERE project_id = ? AND artifact_uri IS NOT NULL",
+                (project_id,),
+            )
+        }
+        active_generation_ids = {
+            str(row["generation_id"])
+            for row in self._fetchall(
+                project_id,
+                "SELECT generation_id FROM exact_preview_renders WHERE project_id = ? AND state IN ('pending', 'running')",
+                (project_id,),
+            )
+        }
+        root = preview_root.resolve()
+        cutoff = self._clock().timestamp() - orphan_older_than_seconds
+        for candidate in preview_root.iterdir():
+            try:
+                resolved = candidate.resolve()
+                if not _is_relative_to(resolved, root) or resolved in referenced or not candidate.is_file():
+                    continue
+                # Only this renderer's published names and atomic temporary
+                # names are eligible; unrelated derived files are untouched.
+                if not (candidate.name.startswith("exact_preview_") and candidate.suffix == ".mp4") and not candidate.name.startswith(".exact_preview_"):
+                    continue
+                # finish_exact_preview publishes `.<generation>.<nonce>.tmp`
+                # then `<generation>.mp4` before its fenced DB pointer update.
+                # Those files are deliberately unreferenced during that small
+                # window, so an active claim is an ownership fence for cleanup.
+                if any(
+                    candidate.name == f"{generation_id}.mp4"
+                    or candidate.name.startswith(f".{generation_id}.")
+                    for generation_id in active_generation_ids
+                ):
+                    continue
+                if candidate.stat().st_mtime > cutoff:
+                    continue
+                candidate.unlink()
+                removed += 1
+            except OSError:
+                continue
+        return removed
+
+    @staticmethod
+    def _exact_preview_row(row: dict[str, Any]) -> dict[str, Any]:
+        row["start_sec"] = float(row["start_sec"]) if row.get("start_sec") is not None else None
+        row["end_sec"] = float(row["end_sec"]) if row.get("end_sec") is not None else None
+        row["duration_sec"] = float(row["duration_sec"]) if row.get("duration_sec") is not None else None
+        row["expected_revision"] = int(row["expected_revision"])
+        return row
 
     def thumbnail_storage_path(self, *, project_id: str, asset_id: str) -> Path:
         return self.project_root(project_id) / "derived" / "thumbnails" / f"{asset_id}.jpg"
@@ -4945,6 +5208,7 @@ class LocalProjectStore:
         self._ensure_director_message_metadata_column(connection)
         self._ensure_director_claim_columns(connection)
         self._ensure_creation_brief_columns(connection)
+        self._ensure_exact_preview_columns(connection)
         self._ensure_artifact_freshness_triggers(connection)
         connection.commit()
         connection.row_factory = sqlite3.Row
@@ -4956,6 +5220,11 @@ class LocalProjectStore:
             connection.execute("ALTER TABLE creation_briefs ADD COLUMN summary_text TEXT NOT NULL DEFAULT ''")
         if columns and "script_asset_owned" not in columns:
             connection.execute("ALTER TABLE creation_briefs ADD COLUMN script_asset_owned INTEGER NOT NULL DEFAULT 0")
+
+    def _ensure_exact_preview_columns(self, connection: sqlite3.Connection) -> None:
+        columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(exact_preview_renders)").fetchall()}
+        if columns and "duration_sec" not in columns:
+            connection.execute("ALTER TABLE exact_preview_renders ADD COLUMN duration_sec REAL")
 
     def _ensure_director_message_metadata_column(self, connection: sqlite3.Connection) -> None:
         columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(director_messages)").fetchall()}
@@ -5272,7 +5541,7 @@ class LocalProjectStore:
                 if invalidate_output_freshness:
                     self._invalidate_output_freshness_with_connection(
                         connection, project_id=project_id, timeline_id=timeline_id,
-                        source_session_revision=payload["session_revision"], reason="editing_session_mutation",
+                        source_session_id=session_id, source_session_revision=payload["session_revision"], reason="editing_session_mutation",
                     )
                 connection.commit()
                 try:
@@ -5294,7 +5563,7 @@ class LocalProjectStore:
 
     def _invalidate_output_freshness_with_connection(
         self, connection: sqlite3.Connection, *, project_id: str, timeline_id: str,
-        source_session_revision: int, reason: str,
+        source_session_id: str, source_session_revision: int, reason: str,
     ) -> None:
         now = self._now_iso()
         for table in ("review_approvals", "subtitle_renders", "preview_renders", "exports"):
@@ -5303,6 +5572,13 @@ class LocalProjectStore:
                 f"WHERE project_id = ? AND timeline_id = ? AND COALESCE(is_current, 1) = 1",
                 (now, reason, project_id, timeline_id),
             )
+        connection.execute(
+            """UPDATE exact_preview_renders SET state = 'obsolete', invalidated_at = ?,
+               invalidated_reason = ?, updated_at = ?
+               WHERE project_id = ? AND session_id = ? AND expected_revision < ?
+               AND state IN ('pending', 'running', 'succeeded')""",
+            (now, reason, now, project_id, source_session_id, source_session_revision),
+        )
 
     def _timeline_file_path(self, *, project_id: str, timeline_id: str) -> Path:
         row = self._fetchone(
