@@ -4,10 +4,12 @@
 
 ## 274. 2026-07-20 agent foundation handoff
 
-- 브랜치 `codex/videobox-container-compatibility`의 HEAD와 `origin/codex/videobox-container-compatibility`는 동일한 `019a9a6c98ba037ed38070da0b33a8ef6645abbc`이며 worktree는 clean이다.
+- 이번 시작 기준 브랜치 `codex/videobox-container-compatibility`의 HEAD와 `origin/codex/videobox-container-compatibility`는 동일한 `902e54a2e9bf4c8d878c08dcb77ed0a7771741bb`이며 worktree는 clean이었다.
 - 이번 정적 Agent Foundation closeout에는 versioned Yujin profile/prompt (`1cc3d10`), static ToolSpec/Gateway (`e384ec4`), static redacted decision audit/retry (`eda1411`), static approval workflow (`ce341de`), Yujin Agent Package v1 (`019a9a6`)이 포함된다. Soul·user preference/consent·response-only skills·MCP default-deny는 manifest로 고정됐지만 실제 Hermes MCP transport, provider, OAuth, DB/API route, memory storage, render/mutation은 아직 없다.
 - 최신 package-focused 검증은 `158 passed`, production workspace build와 `--network none --read-only` image import를 통과했다. Python 전체 suite는 반복해서 64초 timeout 뒤 pytest stdout `OSError`가 발생했으므로 full-pass로 주장하지 않는다.
-- 다음 구현 단위는 actual OAuth/provider 연결이 아니다. 먼저 §23.2의 durable capability issuer/revocation source와 gateway-only route/network split을 별도 승인 범위로 재점검하고, static fail-closed contract부터 TDD로 준비한다. Hermes network, device-code OAuth, GPT/Qwen/Gemini call은 egress·text-only consent·request budget/audit gate 전까지 실행하지 않는다.
+- `[x] 완료 (static contract only, 2026-07-20)`: §23.2 issuer/revocation과 gateway-only split의 canonical static fail-closed contract를 추가했다. Compose declaration은 Python frozen contract와 field-by-field 일치해야 하며, issuance `false`, secret delivery/ordinary `/api/*` `forbidden`, named future gateway service/network absent, Hermes pre-auth `network_mode: none`을 확인한다. existing conditional status route의 durable consume/replay와 비교해 `LocalProjectStore.revoke_hermes_capability`는 storage primitive로만 기록하고 owner-authorized revoke writer는 `not_deployed`로 고정했다. default app의 capability/revoke/issue route 부재와 direct internal Hermes attachment 거부도 focused test로 확인했다.
+- 검증: TDD RED 후 authority/status/Compose/profile/gateway focused `72 passed` (기존 multipart warning 1), dummy environment Compose config, production workspace build, `--network none --read-only` image import가 통과했다. Python full suite는 64초 timeout으로 끝나 full-pass로 주장하지 않는다. 독립 명세·품질 재검토는 P0/P1/P2 0이다.
+- 계획 gap: owner-authorized revoke writer, signing secret delivery·rotation·key lifecycle, gateway audit, actual gateway service/route/network와 OAuth/provider 실행은 아직 없다. Hermes network, device-code OAuth, GPT/Qwen/Gemini call은 egress·text-only consent·request budget/audit gate 전까지 실행하지 않는다.
 - Task 9 사람/환경 acceptance는 Agent Foundation closeout과 독립이다. 누적은 계속 **9/22 (40.9%)**, 잔여 **59.1%**다.
 
 ## 273. 2026-07-20 Yujin Agent Package v1 closeout

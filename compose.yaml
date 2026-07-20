@@ -1,5 +1,23 @@
 name: 65_videobox
 
+# Compose ignores extension fields.  This is a declaration-only gate for the
+# future gateway, not an issuer, route, credential delivery, or network link.
+x-videobox-hermes-capability-authority:
+  schema_version: v1
+  issuer: videobox-agent-gateway
+  issuer_owner: gateway-only
+  issuance_enabled: false
+  signing_secret_delivery: forbidden
+  durable_revocation_storage_primitive: LocalProjectStore.revoke_hermes_capability
+  owner_authorized_revocation_writer_status: not_deployed
+  durable_consume_replay_boundary: ProjectStore.consume_hermes_capability
+  gateway_route_status: not_deployed
+  ordinary_api_paths: forbidden
+  hermes_network_status: preauth-network-none
+  gateway_service: videobox-agent-gateway
+  gateway_network: videobox-agent-gateway-network
+  gateway_route_mode: gateway-only
+
 services:
   videobox-postgres:
     image: postgres:16-alpine
