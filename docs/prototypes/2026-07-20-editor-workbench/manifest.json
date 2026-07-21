@@ -1,13 +1,13 @@
 {
   "task": "Task 11 source-derived responsive editor workbench",
-  "approval": { "status": "pending", "required": "second explicit user visual approval", "record": "docs/decisions/2026-07-20-editor-workbench-visual-approval.ko.md" },
-  "required_korean_labels": ["읽기 전용 편집 작업판", "자산과 대본", "유진과 Inspector", "미리보기 자리", "타임라인"],
-  "manifest_sha256": "641c7b3cb02b7840016ec4d720cd8386457e9fdbdbed84fa20ab3998e04ff023",
+  "approval": { "status": "approved", "required": "second explicit user visual approval", "record": "docs/decisions/2026-07-20-editor-workbench-visual-approval.ko.md" },
+  "required_korean_labels": ["읽기 전용 편집 작업판", "자산과 대본", "유진과 Inspector", "편집본 미리보기", "타임라인"],
+  "manifest_sha256": "5b6f51149308822b231700342bc1fd120a6667f0f170e1c4ca928cf09089baa6",
   "viewports": [
-    { "file": "editor-workbench-1920x1080.png", "width": 1920, "height": 1080, "sha256": "ffaefed6424c8335133faddd7accab0699ff17ca7453ccd24086fce10032f5ec" },
-    { "file": "editor-workbench-1440x900.png", "width": 1440, "height": 900, "sha256": "7298eba51fea155a78ae72a60a0ab389050a375e50ae4f198aaaeddc151dceb0" },
-    { "file": "editor-workbench-1280x800.png", "width": 1280, "height": 800, "sha256": "726c4802d62ade4d64f4e873cc788b27583b8961ea14dd759e82c831f2a9d042" },
-    { "file": "editor-workbench-768x1024.png", "width": 768, "height": 1024, "sha256": "6be155bfe61b0eaf9aa1b2ffd1f4a4e610f1d7e90f4d002c36e680f8861df586" },
-    { "file": "editor-workbench-390x844.png", "width": 390, "height": 844, "sha256": "57ed98f88d58c43aa2e6db44c4a9d3727c6c95ff5c5773e412aed136ac3929bf" }
+    { "file": "editor-workbench-1920x1080.png", "width": 1920, "height": 1080, "sha256": "966940e165aaccbe5ceefa880970e137903c0da940161f254130bd0463b1f926" },
+    { "file": "editor-workbench-1440x900.png", "width": 1440, "height": 900, "sha256": "1dabd2dae754e7b0e776e16ef6edfb74f51b5417e3dc72bbfcd6a71aa0187c1e" },
+    { "file": "editor-workbench-1280x800.png", "width": 1280, "height": 800, "sha256": "a1ae498f4a3d105046080426adec7264d08f80ed546b58f74e04e75e9bfa5b4a" },
+    { "file": "editor-workbench-768x1024.png", "width": 768, "height": 1024, "sha256": "a2ce461400a2d508d6ddd7a94f68bc2c18b666a49e1a083f79cb899f30b83e95" },
+    { "file": "editor-workbench-390x844.png", "width": 390, "height": 844, "sha256": "c087be76a4da7e8f411026c3f05b292c17682f9c6b603cd2b8e4000c416247b6" }
   ]
 }

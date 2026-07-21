@@ -270,9 +270,9 @@ Commit: `feat: expose an authoritative editor view model`
 
 ### Task 11: Build and approve the source-derived responsive editor workbench
 
-- [ ] **Task 11 완료**
+- [x] **Task 11 완료**
 
-> 2026-07-20 기술 구현 기록: `2096043e2`→`ffbd77be`에서 canonical read-only workbench, responsive physical-width/drawer contract, deterministic five viewport artifact, source provenance 및 full frontend/build/isolated E2E 검증을 완료했다. 다만 두 번째 사용자 시각 승인이 `pending`이므로 checkbox와 누적 진행률은 **9/22 (40.9%)**로 유지한다. exact preview/renderer/mutation/provider는 이 Task에 포함하지 않았다.
+> 2026-07-20 기술 구현 기록: `2096043e2`→`ffbd77be`에서 canonical read-only workbench, responsive physical-width/drawer contract, deterministic five viewport artifact, source provenance 및 full frontend/build/isolated E2E 검증을 완료했다. 2026-07-22 사용자가 두 번째 시각 승인을 명시했고, manifest/승인 기록도 `approved`로 동기화했다. exact preview/renderer/mutation/provider는 이 Task에 포함하지 않았다.
 
 **Files:** create toolbar/workbench/left/right/timeline dock components/tests; update route manifest, source map, notices.
 
@@ -280,7 +280,7 @@ Commit: `feat: expose an authoritative editor view model`
 - [ ] Port OpenCut classic panel composition only through shadcn Resizable. No EditorCore, DB, renderer, or Next code.
 - [ ] Editor route auto-collapses sidebar. At 1600+ both docks may open only with preview ≥720px; 1280–1599 opens one dock and keeps preview ≥640px/50%; below 1280 docks become focus-managed drawers.
 - [ ] Existing Director/media panels enter through adapters in read-only mode; no duplicate editing truth.
-- [ ] Commit deterministic 1920/1440/1280/768/390 populated-workbench snapshots, including the 1920px both-docks state, and obtain the second explicit user visual approval before Task 14 interaction work.
+- [x] Commit deterministic 1920/1440/1280/768/390 populated-workbench snapshots, including the 1920px both-docks state, and obtain the second explicit user visual approval before Task 14 interaction work.
 - [ ] **GREEN:** component/full frontend/build/browser density/a11y smoke, provenance/UI/network verifiers; common closeout.
 
 Commit: `feat: compose the VideoBox editor workbench`
@@ -470,7 +470,7 @@ Commit: `feat: release the VideoBox creator workspace`
 | 5. Assets/Eugene | 19–20 | previewable assets and inline recommendations apply explicitly |
 | 6. Release | 21–22 | responsive/a11y/visual/perf/parity/provenance gates and full release audit |
 
-Initial production progress was **0/22 Tasks (0%)**. Research/design/plan creation does not count as production implementation. Current verified cumulative implementation progress is **9/22 Tasks (40.9%)**, with **59.1%** remaining: Tasks 1–8 and Task 10 are complete; Task 9 remains open for its human/environment acceptance gate.
+Initial production progress was **0/22 Tasks (0%)**. Research/design/plan creation does not count as production implementation. Task 11의 별도 시각 승인은 완료로 기록하되, 사용자가 고정한 Task 9 사람/환경 acceptance 기준에 따라 공식 누적은 계속 **9/22 Tasks (40.9%)**, 잔여 **59.1%**다. Task 9는 실제 MP4·사람 승인·CapCut 증빙 전까지 열려 있다.
 
 ## 4. Explicitly deferred work
 

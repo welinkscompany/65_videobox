@@ -49,8 +49,14 @@ Hermes Dashboard에서 다음만 수행한다.
 - full SHA 재검증과 completed MP4 copy/staging은 writer lock 전에 한 번만 수행한다. durable publish는 precomputed revalidation·session CAS·size/mtime quick check·atomic rename·DB pointer만 하므로, controlled slow rehash/copy 중 concurrent editing-session mutation이 완료되고 old preview가 obsolete 되는 회귀를 보장한다.
 - fresh affected runtime `172 passed`(기존 multipart warning 1), 10초·1280×720 local fixture cold `387.5ms`(≤20초), warm `83.2ms`(≤500ms). 이번 최종 verification에서는 frontend production build와 exact-preview E2E `5 passed`를 다시 실행했지만, 전체 Python regression은 **미검증**이다. Task 9은 실제 MP4/사람 승인/CapCut Desktop 증빙 전까지, Task 11은 두 번째 사용자 시각 승인 전까지 계속 열려 있으며 누적은 **9/22 (40.9%)**다.
 
+## 2026-07-22 Task 11 사용자 승인 기록
+
+- 사용자가 Task 11 편집기 UI를 명시 승인했다. 다섯 deterministic screenshot의 manifest와 연결 승인 기록은 `approved` 상태로 동기화된다.
+- Task 11은 완료로 기록하며, 독립 Task 9 사람/환경 acceptance는 그대로 열려 있다. 사용자가 고정한 공식 누적은 **9/22 (40.9%)**, 잔여 **59.1%**를 유지한다.
+- Task 14는 UI mutation이나 provider 설정 없이 pure timeline geometry/frame-safe scaling 계약만 TDD로 시작한다.
+
 ## 다음 세션 첫 작업
 
 1. Hermes Dashboard/provider 설정은 보류한다. 사용자가 명시적으로 재개할 때만 `docker compose -p 65_videobox ps -a`와 `http://127.0.0.1:9119`를 다시 확인한다.
-2. 사용자가 다섯 Task 11 시안을 명시 승인 또는 수정 요청한다. 승인 전에는 `docs/prototypes/2026-07-20-editor-workbench/manifest.json`의 pending 상태를 바꾸지 않는다.
-3. 승인 기록 뒤 공식 Task 14 read-only timeline geometry/navigation으로 진행한다. Task 9 수동 acceptance는 실제 장면 MP4와 사람 승인 증빙 전까지 **9/22 (40.9%)**를 유지한다.
+2. Task 14의 pure time-scale/geometry/snapping/hit-test 설계를 사용자 승인받은 뒤 TDD로 구현한다. UI interaction/navigation/mutation은 Task 15·16 범위로 남긴다.
+3. Task 9 수동 acceptance는 실제 장면 MP4와 사람 승인 증빙 전까지 계속 별도 gate다.

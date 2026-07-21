@@ -1,6 +1,12 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 283. 2026-07-21 exact preview publish fence remediation closeout`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 284. 2026-07-22 Task 11 visual approval and Task 14 design start`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+
+## 284. 2026-07-22 Task 11 visual approval and Task 14 design start
+
+- `[x] 사용자 승인 완료`: 사용자가 Task 11의 1920/1440/1280/768/390 편집 작업판 시안을 명시 승인했다. `docs/prototypes/2026-07-20-editor-workbench/manifest.json`과 연결 승인 기록은 같은 digest의 `approved` 상태이며, deterministic artifact 검증으로 다시 확인한다.
+- Task 11은 완료로 기록한다. 독립적인 Task 9 사람/환경 acceptance(실제 두 번째 scene MP4, current-revision 사람 승인, 같은 revision의 실제 CapCut Desktop 등록·열기·import)는 여전히 열려 있고 이를 이 승인으로 대체하지 않는다. 사용자가 고정한 공식 누적은 **9/22 (40.9%)**, 잔여 **59.1%**를 유지한다.
+- 다음 작업: Task 14는 UI mutation/navigation을 연결하지 않고, seconds API 경계와 rational FPS·프레임 양자화·순수 geometry/snap/hit-test 계약만 TDD로 구현한다. Hermes Dashboard/provider 설정은 계속 보류한다.
 
 ## 283. 2026-07-21 exact preview publish fence remediation closeout
 
