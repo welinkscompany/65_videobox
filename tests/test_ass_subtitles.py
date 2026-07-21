@@ -37,3 +37,25 @@ def test_ass_keeps_editing_session_caption_text_timing_and_style() -> None:
     assert "Style: Default,Arial,32" in ass
     assert "Style: Default,Arial,32,&H000000FF" in ass
     assert "Dialogue: 0,0:00:01.25,0:00:03.50,Default,,0,0,0,,스타일 보존" in ass
+
+
+def test_ass_preserves_per_caption_window_style() -> None:
+    ass = render_editing_session_ass(
+        {
+            "caption_style": {"text_color": "#FFFFFFFF"},
+            "segments": [
+                {"caption_text": "left", "start_sec": 0.0, "end_sec": 1.0},
+                {
+                    "caption_text": "right", "start_sec": 1.0, "end_sec": 2.0,
+                    "caption_style": {"text_color": "#FF0000FF"},
+                },
+            ],
+        },
+        video_width=320,
+        video_height=180,
+    )
+
+    assert "Style: Default,Arial,9,&H00FFFFFF" in ass
+    assert "Style: Segment1,Arial,9,&H000000FF" in ass
+    assert "Dialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,left" in ass
+    assert "Dialogue: 0,0:00:01.00,0:00:02.00,Segment1,,0,0,0,,right" in ass

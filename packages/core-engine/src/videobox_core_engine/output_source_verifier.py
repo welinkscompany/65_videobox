@@ -7,9 +7,10 @@ CapCut draft by accident.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 import re
 
 
@@ -25,8 +26,18 @@ class OutputSourceStaleError(ValueError):
 _ASSET_URI = re.compile(r"^local://projects/[^/]+/assets/(?P<asset_id>[^/]+)$")
 
 
-def verify_output_sources(*, store: Any, project_id: str, timeline: dict[str, Any]) -> None:
-    """Verify all materialized timeline sources before output work begins.
+@dataclass(frozen=True)
+class OutputSourceSnapshot:
+    """A verified project-local source that can be rechecked without SQLite."""
+
+    path: Path
+    expected_content_sha256: str | None
+    asset_id: str | None
+    expected_media_revision: str | None
+
+
+def capture_output_source_snapshots(*, store: Any, project_id: str, timeline: dict[str, Any]) -> tuple[OutputSourceSnapshot, ...]:
+    """Validate source identity and capture immutable byte expectations.
 
     Only clips carrying an immutable expectation are constrained.  Legacy
     timelines remain readable, while every Task-11 materialized candidate is
@@ -34,6 +45,7 @@ def verify_output_sources(*, store: Any, project_id: str, timeline: dict[str, An
     """
     root = store.project_root(project_id).resolve()
     digests_by_path: dict[Path, str] = {}
+    snapshots: dict[Path, OutputSourceSnapshot] = {}
     for track in timeline.get("tracks", []):
         if not isinstance(track, dict):
             continue
@@ -72,6 +84,41 @@ def verify_output_sources(*, store: Any, project_id: str, timeline: dict[str, An
                 raise OutputSourceStaleError("content SHA-256 changed")
             if expected_revision and str(asset.get("created_at") or "") != expected_revision:
                 raise OutputSourceStaleError("media revision changed")
+            if expected or expected_revision:
+                snapshots[path] = OutputSourceSnapshot(
+                    path=path,
+                    expected_content_sha256=expected or None,
+                    asset_id=asset_id if expected_revision else None,
+                    expected_media_revision=expected_revision or None,
+                )
+    return tuple(snapshots.values())
+
+
+def verify_output_source_snapshots(
+    snapshots: tuple[OutputSourceSnapshot, ...],
+    *,
+    media_revision_lookup: Callable[[str], str | None] | None = None,
+) -> None:
+    """Recheck captured source expectations without opening another store connection."""
+    digests_by_path: dict[Path, str] = {}
+    for snapshot in snapshots:
+        if not snapshot.path.is_file():
+            raise OutputSourceStaleError("materialized source is missing")
+        if (
+            snapshot.expected_content_sha256 is not None
+            and _sha256_streaming(snapshot.path, digests_by_path) != snapshot.expected_content_sha256
+        ):
+            raise OutputSourceStaleError("content SHA-256 changed")
+        if snapshot.expected_media_revision is not None and media_revision_lookup is not None:
+            if media_revision_lookup(str(snapshot.asset_id or "")) != snapshot.expected_media_revision:
+                raise OutputSourceStaleError("media revision changed")
+
+
+def verify_output_sources(*, store: Any, project_id: str, timeline: dict[str, Any]) -> None:
+    """Verify all materialized timeline sources before output work begins."""
+    verify_output_source_snapshots(capture_output_source_snapshots(
+        store=store, project_id=project_id, timeline=timeline,
+    ))
 
 
 def _sha256_streaming(path: Path, digests_by_path: dict[Path, str]) -> str:
@@ -107,4 +154,11 @@ def verify_output_freshness(*, editing_session: dict[str, Any] | None, timeline:
                     raise OutputSourceStaleError(f"{name} session revision changed")
 
 
-__all__ = ["OutputSourceStaleError", "verify_output_freshness", "verify_output_sources"]
+__all__ = [
+    "OutputSourceSnapshot",
+    "OutputSourceStaleError",
+    "capture_output_source_snapshots",
+    "verify_output_freshness",
+    "verify_output_source_snapshots",
+    "verify_output_sources",
+]

@@ -40,7 +40,12 @@ from videobox_core_engine.ffmpeg_final_renderer import FinalRenderError, FfmpegF
 from videobox_core_engine.composition_plan import CompositionPlan, materialize_editing_session_timeline
 from videobox_core_engine.exact_preview import ExactPreviewRequest, fingerprint_exact_preview
 from videobox_storage.timeline_clip_source_resolution import TimelineClipSourceError, resolve_generic_asset_uri
-from videobox_core_engine.output_source_verifier import OutputSourceStaleError, verify_output_freshness, verify_output_sources
+from videobox_core_engine.output_source_verifier import (
+    OutputSourceStaleError,
+    capture_output_source_snapshots,
+    verify_output_freshness,
+    verify_output_source_snapshots,
+)
 from videobox_core_engine.ass_subtitles import render_editing_session_ass
 from videobox_core_engine.thumbnail_generator import ThumbnailGenerationError, generate_video_thumbnail
 from videobox_core_engine.tts_acceptance import assess_tts_audio
@@ -167,7 +172,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
             timeline=timeline, editing_session=editing_session,
             project_id=project_id or str(timeline.get("project_id") or "") or None,
         )
-        captions = [
+        captions = materialized_timeline.get("session_captions") if isinstance(materialized_timeline.get("session_captions"), list) else [
             segment for segment in (editing_session.get("segments", []) if isinstance(editing_session, dict) else [])
             if isinstance(segment, dict) and str(segment.get("cut_action") or "keep") != "remove"
         ]
@@ -286,7 +291,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 ass_path.write_text(
                     render_editing_session_ass(
                         {"caption_style": session.get("caption_style") or {}, "segments": [
-                            {"caption_text": cue.text, "start_sec": cue.start_sec, "end_sec": cue.end_sec}
+                            {"caption_text": cue.text, "caption_style": cue.style, "start_sec": cue.start_sec, "end_sec": cue.end_sec}
                             for cue in plan.captions
                         ]},
                         video_width=plan.width,
@@ -1552,7 +1557,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                             {
                                 "caption_style": editing_session.get("caption_style") or {},
                                 "segments": [
-                                    {"caption_text": cue.text, "start_sec": cue.start_sec, "end_sec": cue.end_sec}
+                                    {"caption_text": cue.text, "caption_style": cue.style, "start_sec": cue.start_sec, "end_sec": cue.end_sec}
                                     for cue in composition_plan.captions
                                 ],
                             },
@@ -1576,15 +1581,39 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 # session/review contract and the *materialized* override inputs
                 # before an output file becomes a final-render export.
                 self._ensure_output_dependencies_fresh(project_id=project_id, timeline=timeline)
-                verify_output_sources(
+                source_snapshots = capture_output_source_snapshots(
                     store=self.store, project_id=project_id, timeline=materialized_timeline,
                 )
+
+                def final_source_fence(connection: Any) -> bool:
+                    # save_final_render executes this after staging the MP4 but
+                    # before it inserts the durable export pointer.  Keeping
+                    # this check at the storage publish boundary closes the
+                    # post-render source TOCTOU window.
+                    # The session revision is checked by save_final_render's
+                    # transaction.  This deliberately has no store/database
+                    # reads: the storage writer lock is already held here.
+                    def current_media_revision(asset_id: str) -> str | None:
+                        row = connection.execute(
+                            """SELECT created_at FROM assets
+                               WHERE project_id = ? AND asset_id = ?""",
+                            (project_id, asset_id),
+                        ).fetchone()
+                        return str(row["created_at"]) if row is not None else None
+
+                    verify_output_source_snapshots(
+                        source_snapshots,
+                        media_revision_lookup=current_media_revision,
+                    )
+                    return True
+
                 persisted = self.store.save_final_render(
                     project_id=project_id,
                     timeline_id=str(timeline["timeline_id"]),
                     source_output_path=render_output_path,
                     source_session_id=str(editing_session["session_id"]) if editing_session is not None else None,
                     source_session_revision=int(editing_session["session_revision"]) if editing_session is not None else None,
+                    source_fence=final_source_fence,
                 )
         except Exception as exc:
             failed_job = self.store.update_job(

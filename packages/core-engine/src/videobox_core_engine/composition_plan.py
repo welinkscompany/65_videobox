@@ -128,6 +128,17 @@ def _uncovered_intervals(*, start: float, end: float, covered: Iterable[tuple[fl
     return output
 
 
+def _segment_content_windows(segment: dict[str, Any]) -> list[dict[str, Any]]:
+    raw = segment.get("content_windows")
+    if isinstance(raw, list) and raw:
+        return [item for item in raw if isinstance(item, dict)]
+    return [{
+        "start_offset_sec": 0.0, "duration_sec": _number(segment.get("end_sec")) - _number(segment.get("start_sec")),
+        "source_segment_id": str(segment.get("segment_id") or ""),
+        **{key: deepcopy(segment.get(key)) for key in ("caption_text", "caption_style", "review_required", "visual_overlays", "tts_replacement")},
+    }]
+
+
 def materialize_editing_session_timeline(
     *, timeline: dict[str, Any], editing_session: dict[str, Any] | None, project_id: str | None = None,
 ) -> dict[str, Any]:
@@ -142,6 +153,7 @@ def materialize_editing_session_timeline(
         if isinstance(segment, dict) and str(segment.get("segment_id") or "").strip()
     }
     source_durations: dict[str, float] = {}
+    source_bounds: dict[str, tuple[float, float]] = {}
     for track in timeline.get("tracks", []):
         if not isinstance(track, dict):
             continue
@@ -149,6 +161,9 @@ def materialize_editing_session_timeline(
             if isinstance(clip, dict) and str(clip.get("segment_id") or ""):
                 source_id = str(clip["segment_id"])
                 source_durations[source_id] = max(source_durations.get(source_id, 0.0), _number(clip.get("end_sec")) - _number(clip.get("start_sec")))
+                start, end = _number(clip.get("start_sec")), _number(clip.get("end_sec"))
+                previous = source_bounds.get(source_id)
+                source_bounds[source_id] = (start, end) if previous is None else (min(previous[0], start), max(previous[1], end))
     source_targets: dict[str, list[tuple[dict[str, Any], dict[str, Any], float]]] = {}
     removed_source_ids: set[str] = set()
     for segment in segments.values():
@@ -207,10 +222,26 @@ def materialize_editing_session_timeline(
         segment_id for segment_id, segment in segments.items()
         if str(segment.get("cut_action") or "keep") == "remove"
     }
-    export_overlays = [
-        deepcopy(item) for item in timeline.get("export_overlays", [])
-        if isinstance(item, dict) and str(item.get("segment_id") or "") not in removed_segment_ids
-    ]
+    export_overlays: list[dict[str, Any]] = []
+    for raw_overlay in timeline.get("export_overlays", []):
+        if not isinstance(raw_overlay, dict):
+            continue
+        source_id = str(raw_overlay.get("segment_id") or "")
+        if source_id in removed_segment_ids:
+            continue
+        targets = source_targets.get(source_id)
+        original_bounds = source_bounds.get(source_id)
+        if not targets or original_bounds is None:
+            export_overlays.append(deepcopy(raw_overlay))
+            continue
+        for _segment, source_slice, placement in targets:
+            window_end = placement + float(source_slice["duration_sec"])
+            relative_start = _number(raw_overlay.get("start_sec")) - original_bounds[0] - float(source_slice["source_offset_sec"])
+            relative_end = _number(raw_overlay.get("end_sec")) - original_bounds[0] - float(source_slice["source_offset_sec"])
+            start, end = max(placement, placement + relative_start), min(window_end, placement + relative_end)
+            if end > start:
+                export_overlays.append({**deepcopy(raw_overlay), "segment_id": source_id, "start_sec": start, "end_sec": end})
+    session_captions: list[dict[str, Any]] = []
     for segment_id, segment in segments.items():
         if str(segment.get("cut_action") or "keep") == "remove":
             continue
@@ -246,20 +277,32 @@ def materialize_editing_session_timeline(
                     if override.get(key):
                         clip[key] = override[key]
                 tracks.setdefault(track_type, []).append(clip)
-        for ordinal, overlay in enumerate(segment.get("visual_overlays", []) if isinstance(segment.get("visual_overlays"), list) else []):
-            if not isinstance(overlay, dict):
+        for window_index, window in enumerate(_segment_content_windows(segment)):
+            window_start = start + _number(window.get("start_offset_sec"))
+            window_end = min(end, window_start + _number(window.get("duration_sec")))
+            if window_end <= window_start:
                 continue
-            payload = deepcopy(overlay)
-            asset_id = str(payload.get("asset_id") or "").strip() or None
-            asset_uri = str(payload.get("asset_uri") or "").strip()
-            if not asset_uri and asset_id and project:
-                asset_uri = f"local://projects/{project}/assets/{asset_id}"
-            if asset_uri:
-                tracks.setdefault("overlay", []).append({"clip_id": f"session-overlay-{segment_id}-{ordinal}", "segment_id": segment_id, "asset_id": asset_id, "asset_uri": asset_uri, "start_sec": start, "end_sec": end, "overlay_type": str(payload.get("overlay_type") or "visual_overlay"), "overlay_payload": payload})
-            else:
-                export_overlays.append({**payload, "segment_id": segment_id, "start_sec": start, "end_sec": end})
+            content_segment_id = str(window.get("source_segment_id") or segment_id)
+            session_captions.append({"segment_id": content_segment_id, "caption_text": str(window.get("caption_text") or ""), "caption_style": deepcopy(window.get("caption_style") or segment.get("caption_style") or editing_session.get("caption_style") or {}), "start_sec": window_start, "end_sec": window_end, "review_required": window.get("review_required"), "tts_replacement": deepcopy(window.get("tts_replacement"))})
+            for ordinal, overlay in enumerate(window.get("visual_overlays", []) if isinstance(window.get("visual_overlays"), list) else []):
+                if not isinstance(overlay, dict):
+                    continue
+                payload = deepcopy(overlay)
+                asset_id = str(payload.get("asset_id") or "").strip() or None
+                asset_uri = str(payload.get("asset_uri") or "").strip()
+                if not asset_uri and asset_id and project:
+                    asset_uri = f"local://projects/{project}/assets/{asset_id}"
+                if asset_uri:
+                    clip = {"clip_id": f"session-overlay-{segment_id}-{window_index}-{ordinal}", "segment_id": content_segment_id, "asset_id": asset_id, "asset_uri": asset_uri, "start_sec": window_start, "end_sec": window_end, "overlay_type": str(payload.get("overlay_type") or "visual_overlay"), "overlay_payload": payload}
+                    for key in ("expected_content_sha256", "media_revision"):
+                        if payload.get(key):
+                            clip[key] = payload[key]
+                    tracks.setdefault("overlay", []).append(clip)
+                else:
+                    export_overlays.append({**payload, "segment_id": content_segment_id, "start_sec": window_start, "end_sec": window_end})
     materialized["tracks"] = [{"track_type": kind, "clips": clips} for kind, clips in tracks.items() if clips]
     materialized["export_overlays"] = export_overlays
+    materialized["session_captions"] = session_captions
     return materialized
 
 
@@ -284,6 +327,8 @@ class CompositionItem:
     source_in_sec: float
     source_out_sec: float
     media_controls: dict[str, Any] = field(default_factory=dict)
+    expected_content_sha256: str | None = None
+    media_revision: str | None = None
     overlay_type: str | None = None
     overlay_payload: dict[str, Any] = field(default_factory=dict)
 
@@ -298,7 +343,8 @@ class CompositionItem:
             clip_id=self.clip_id, track_type=self.track_type, asset_uri=self.asset_uri, asset_id=self.asset_id,
             start_sec=left - start_sec, end_sec=right - start_sec,
             source_in_sec=source_start, source_out_sec=source_start + (right - left),
-            media_controls=dict(self.media_controls), overlay_type=self.overlay_type,
+            media_controls=dict(self.media_controls), expected_content_sha256=self.expected_content_sha256,
+            media_revision=self.media_revision, overlay_type=self.overlay_type,
             overlay_payload=dict(self.overlay_payload),
         )
 
@@ -387,6 +433,8 @@ class CompositionPlan:
                     asset_id=str(raw["asset_id"]) if raw.get("asset_id") is not None else None,
                     start_sec=start, end_sec=end, source_in_sec=source_in, source_out_sec=source_out,
                     media_controls=controls,
+                    expected_content_sha256=str(raw.get("expected_content_sha256") or "").strip() or None,
+                    media_revision=str(raw.get("media_revision") or "").strip() or None,
                     overlay_type=str(raw.get("overlay_type")) if raw.get("overlay_type") is not None else None,
                     overlay_payload=dict(raw.get("overlay_payload") or {}) if isinstance(raw.get("overlay_payload"), dict) else {},
                 ))
@@ -397,7 +445,8 @@ class CompositionPlan:
             elif isinstance(raw, dict):
                 start, end = _number(raw.get("start_sec")), _number(raw.get("end_sec"))
                 if end > start:
-                    cues.append(CaptionCue(start, end, str(raw.get("text") or raw.get("caption_text") or ""), dict(raw.get("style") or {}) if isinstance(raw.get("style"), dict) else {}, str(raw["segment_id"]) if raw.get("segment_id") else None))
+                    raw_style = raw.get("style") if isinstance(raw.get("style"), dict) else raw.get("caption_style")
+                    cues.append(CaptionCue(start, end, str(raw.get("text") or raw.get("caption_text") or ""), dict(raw_style) if isinstance(raw_style, dict) else {}, str(raw["segment_id"]) if raw.get("segment_id") else None))
         overlays = tuple(
             dict(overlay)
             for overlay in timeline.get("export_overlays", [])

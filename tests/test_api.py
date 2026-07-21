@@ -22212,7 +22212,14 @@ def test_editing_session_api_can_fetch_visual_overlay_and_music_updates(tmp_path
     assert payload["segments"][0]["visual_overlays"] == [
         {"overlay_type": "image_card", "asset_id": "asset_image_001"}
     ]
-    assert payload["segments"][0]["music_override"] == {"asset_id": music_asset.asset_id, "asset_uri": music_asset.storage_uri}
+    assert payload["segments"][0]["music_override"] == {
+        "asset_id": music_asset.asset_id,
+        "asset_uri": music_asset.storage_uri,
+        "expected_content_sha256": __import__("hashlib").sha256(b"music").hexdigest(),
+        "media_revision": LocalProjectStore(tmp_path).get_asset(
+            project_id=project_id, asset_id=music_asset.asset_id,
+        )["created_at"],
+    }
     assert payload["history"][-2]["mutation_type"] == "visual_overlay_update"
     assert payload["history"][-1]["mutation_type"] == "music_override_update"
 

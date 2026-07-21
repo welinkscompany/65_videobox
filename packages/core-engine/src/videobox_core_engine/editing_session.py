@@ -401,6 +401,31 @@ def _clear_windowed_media_override(*, segment: dict[str, Any], field: str) -> No
                     window.pop(field, None)
 
 
+def _content_windows(segment: dict[str, Any]) -> list[dict[str, Any]]:
+    """Preserve per-source editorial meaning when a visible segment is merged."""
+    raw = segment.get("content_windows")
+    if isinstance(raw, list) and raw:
+        return [deepcopy(item) for item in raw if isinstance(item, dict)]
+    return [{
+        "start_offset_sec": 0.0,
+        "duration_sec": float(segment.get("end_sec", 0.0)) - float(segment.get("start_sec", 0.0)),
+        "source_segment_id": str(segment.get("segment_id") or ""),
+        **{key: deepcopy(segment.get(key)) for key in ("caption_text", "caption_style", "review_required", "visual_overlays", "tts_replacement")},
+    }]
+
+
+def _slice_content_windows(*, segment: dict[str, Any], start_sec: float, end_sec: float) -> list[dict[str, Any]]:
+    origin = float(segment.get("start_sec", 0.0))
+    result: list[dict[str, Any]] = []
+    for window in _content_windows(segment):
+        window_start = origin + float(window.get("start_offset_sec", 0.0))
+        window_end = window_start + float(window.get("duration_sec", 0.0))
+        clipped_start, clipped_end = max(start_sec, window_start), min(end_sec, window_end)
+        if clipped_end > clipped_start:
+            result.append({**window, "start_offset_sec": clipped_start - start_sec, "duration_sec": clipped_end - clipped_start})
+    return result
+
+
 def split_segment(*, session: dict[str, Any], segment_id: str, split_sec: float) -> dict[str, Any]:
     updated = deepcopy(session)
     index = _segment_index(session=updated, segment_id=segment_id)
@@ -432,6 +457,8 @@ def split_segment(*, session: dict[str, Any], segment_id: str, split_sec: float)
     right["source_slice_window_start_sec"] = 0.0
     left["media_windows"] = _slice_media_windows(segment=original, start_sec=start_sec, end_sec=split_sec)
     right["media_windows"] = _slice_media_windows(segment=original, start_sec=split_sec, end_sec=end_sec)
+    left["content_windows"] = _slice_content_windows(segment=original, start_sec=start_sec, end_sec=split_sec)
+    right["content_windows"] = _slice_content_windows(segment=original, start_sec=split_sec, end_sec=end_sec)
     left["media_window_basis"] = deepcopy(left["media_windows"])
     right["media_window_basis"] = deepcopy(right["media_windows"])
     left["media_window_basis_offset_sec"] = 0.0
@@ -476,11 +503,18 @@ def merge_adjacent_segments(*, session: dict[str, Any], left_segment_id: str, ri
     ]
     merged["media_window_basis"] = deepcopy(merged["media_windows"])
     merged["media_window_basis_offset_sec"] = 0.0
+    merged["content_windows"] = _content_windows(left) + [
+        {**window, "start_offset_sec": left_duration + float(window.get("start_offset_sec", 0.0))}
+        for window in _content_windows(right)
+    ]
     # A merged segment no longer has one uniform override.  The materializer
     # consumes its durable windows so neither adjacent selection is stretched
     # across the other source slice.
     for field in ("broll_override", "music_override", "sfx_override"):
         merged[field] = None
+    merged["visual_overlays"] = []
+    merged["tts_replacement"] = None
+    merged["review_required"] = _normalize_boolish(left.get("review_required")) or _normalize_boolish(right.get("review_required"))
     merged["source_slices"] = _source_slices(left) + _source_slices(right)
     merged["source_slice_basis"] = deepcopy(merged["source_slices"])
     merged["source_slice_basis_is_proven"] = True
@@ -548,6 +582,7 @@ def set_segment_bounds(*, session: dict[str, Any], segment_id: str, start_sec: f
     )
     updated["segments"][index]["media_window_basis"] = deepcopy(media_basis)
     updated["segments"][index]["media_window_basis_offset_sec"] = next_media_offset
+    updated["segments"][index]["content_windows"] = _slice_content_windows(segment=segment, start_sec=start_sec, end_sec=end_sec)
     return _record_undoable_mutation(before=session, updated=updated, mutation_type="segment_bounds_update", segment_id=segment_id)
 
 

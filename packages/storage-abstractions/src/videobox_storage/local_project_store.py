@@ -3304,6 +3304,18 @@ class LocalProjectStore:
                 highest = max(highest, int(match.group(1)))
         return highest + 1
 
+    def _next_export_sequence_in_connection(self, *, project_id: str, connection: sqlite3.Connection) -> int:
+        """Allocate the next shared export sequence under the caller's writer lock."""
+        rows = connection.execute(
+            "SELECT export_id FROM exports WHERE project_id = ?", (project_id,),
+        ).fetchall()
+        highest = 0
+        for row in rows:
+            match = re.search(r"(\d+)$", str(row["export_id"]))
+            if match:
+                highest = max(highest, int(match.group(1)))
+        return highest + 1
+
     def _prune_old_exports(
         self,
         *,
@@ -3417,18 +3429,69 @@ class LocalProjectStore:
         source_output_path: Path,
         source_session_id: str | None = None,
         source_session_revision: int | None = None,
+        source_fence: Callable[[sqlite3.Connection], bool] | None = None,
     ) -> dict[str, Any]:
-        sequence = self._next_export_sequence(project_id)
-        export_id = f"export_{sequence:03d}"
-        export_directory = self.project_root(project_id) / "exports" / "final_render" / export_id
-        export_directory.mkdir(parents=True, exist_ok=True)
-        destination_path = export_directory / f"output{source_output_path.suffix or '.mp4'}"
-        shutil.copy2(source_output_path, destination_path)
-        file_uri = self._path_to_uri(project_id, destination_path)
-        created_at = self._now_iso()
+        """Publish a final MP4 only while its durable source lineage is current.
+
+        Rendering and its first freshness check happen outside this method and
+        can take minutes.  Stage the completed MP4 privately, then hold the
+        project writer lock while checking the session CAS, rechecking the
+        caller's materialized-source fence, moving the artifact, and inserting
+        the observable export pointer.  A concurrent editing-session mutation
+        therefore either wins before this transaction (and prevents the
+        pointer), or waits and invalidates the just-published export as part of
+        its own mutation transaction.
+        """
+        source_output_path = Path(source_output_path)
+        if not source_output_path.is_file():
+            raise FileNotFoundError(source_output_path)
+        export_root = self.project_root(project_id) / "exports" / "final_render"
+        export_directory: Path | None = None
+        staging_directory = export_root / f".{uuid.uuid4().hex}.staging"
         try:
-            self._execute(
-                project_id,
+            staging_directory.mkdir(parents=True, exist_ok=False)
+            staged_path = staging_directory / f"output{source_output_path.suffix or '.mp4'}"
+            shutil.copy2(source_output_path, staged_path)
+        except Exception:
+            shutil.rmtree(staging_directory, ignore_errors=True)
+            raise
+        created_at = self._now_iso()
+        connection = self._connection(project_id)
+        published = False
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            sequence = self._next_export_sequence_in_connection(project_id=project_id, connection=connection)
+            export_id = f"export_{sequence:03d}"
+            export_directory = export_root / export_id
+            if source_session_id is not None:
+                session = connection.execute(
+                    """SELECT timeline_id, session_revision FROM editing_sessions
+                       WHERE project_id = ? AND session_id = ?""",
+                    (project_id, source_session_id),
+                ).fetchone()
+                if (
+                    session is None
+                    or str(session["timeline_id"]) != timeline_id
+                ):
+                    raise EditingSessionRevisionConflict("final_render_session_revision_changed")
+                if source_session_revision is None:
+                    # Legacy storage callers did not carry the revision that
+                    # existed before rendering.  Preserve their public API by
+                    # recording the revision observed under this writer lock;
+                    # new pipeline callers provide a revision and use the CAS
+                    # branch below to fence render-to-publish races.
+                    source_session_revision = int(session["session_revision"])
+                elif int(session["session_revision"]) != int(source_session_revision):
+                    raise EditingSessionRevisionConflict("final_render_session_revision_changed")
+            elif source_session_revision is not None:
+                raise EditingSessionRevisionConflict("final_render_session_lineage_required")
+            if source_fence is not None and not bool(source_fence(connection)):
+                raise EditingSessionRevisionConflict("final_render_source_fence_failed")
+            export_directory.mkdir(parents=False, exist_ok=False)
+            destination_path = export_directory / staged_path.name
+            staged_path.replace(destination_path)
+            file_uri = self._path_to_uri(project_id, destination_path)
+            connection.execute(
                 """
                 INSERT INTO exports (
                     export_id,
@@ -3455,11 +3518,21 @@ class LocalProjectStore:
                     source_session_revision,
                 ),
             )
+            connection.commit()
+            published = True
         except Exception:
-            shutil.rmtree(export_directory, ignore_errors=True)
+            if connection.in_transaction:
+                connection.rollback()
+            if export_directory is not None:
+                shutil.rmtree(export_directory, ignore_errors=True)
             raise
-        self._prune_old_exports(project_id=project_id, export_type="final_render")
-        return {"export_id": export_id, "file_uri": file_uri, "created_at": created_at}
+        finally:
+            connection.close()
+            shutil.rmtree(staging_directory, ignore_errors=True)
+        if published:
+            self._prune_old_exports(project_id=project_id, export_type="final_render")
+            return {"export_id": export_id, "file_uri": file_uri, "created_at": created_at}
+        raise RuntimeError("final_render_publish_failed")
 
     def get_final_render_export(self, *, project_id: str, export_id: str) -> dict[str, Any]:
         row = self._fetchone(

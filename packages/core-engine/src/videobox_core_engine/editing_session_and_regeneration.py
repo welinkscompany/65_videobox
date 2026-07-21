@@ -113,18 +113,63 @@ class EditingSessionConflict(RuntimeError):
 
 
 class EditingSessionRegenerationMixin:
-    def _resolve_project_audio_override(self, *, project_id: str, asset_id: str, expected_type: AssetType) -> str:
+    def _resolve_project_asset_identity(
+        self, *, project_id: str, asset_id: str, expected_type: AssetType | None = None,
+    ) -> dict[str, str]:
+        """Return the project-local immutable identity captured at selection.
+
+        A session override is an output authority, not merely a browser UI
+        choice.  Preserve the selected file's digest and registration revision
+        next to its URI so both final render and the exact-preview proxy can
+        reject a replacement before handing bytes to ffmpeg.
+        """
         try:
             asset = self.store.get_asset(project_id=project_id, asset_id=asset_id)
-            if asset.get("asset_type") != expected_type.value:
+            if expected_type is not None and asset.get("asset_type") != expected_type.value:
                 raise ValueError("asset_missing")
             storage_uri = str(asset.get("storage_uri") or "")
             resolved_path = self.store.resolve_storage_uri(project_id=project_id, storage_uri=storage_uri)
             if not resolved_path.is_file():
                 raise ValueError("asset_missing")
-            return storage_uri
+            return {
+                "asset_uri": storage_uri,
+                "expected_content_sha256": sha256_file(resolved_path),
+                "media_revision": str(asset.get("created_at") or ""),
+            }
         except (KeyError, ValueError):
             raise ValueError("asset_missing") from None
+
+    def _resolve_project_audio_override(self, *, project_id: str, asset_id: str, expected_type: AssetType) -> str:
+        return self._resolve_project_asset_identity(
+            project_id=project_id, asset_id=asset_id, expected_type=expected_type,
+        )["asset_uri"]
+
+    @staticmethod
+    def _persist_override_identity(
+        *, updated_session: dict[str, Any], segment_id: str, field: str, identity: dict[str, str],
+    ) -> None:
+        for segment in updated_session.get("segments", []):
+            if str(segment.get("segment_id") or "") == segment_id and isinstance(segment.get(field), dict):
+                segment[field].update(identity)
+                return
+        raise KeyError(f"Segment not found in editing session: {segment_id}")
+
+    @staticmethod
+    def _persist_image_overlay_identity(
+        *, updated_session: dict[str, Any], segment_id: str, asset_id: str, identity: dict[str, str],
+    ) -> None:
+        for segment in updated_session.get("segments", []):
+            if str(segment.get("segment_id") or "") != segment_id:
+                continue
+            overlays = segment.get("visual_overlays")
+            if not isinstance(overlays, list):
+                break
+            for overlay in reversed(overlays):
+                if isinstance(overlay, dict) and str(overlay.get("asset_id") or "") == asset_id:
+                    overlay.update(identity)
+                    return
+            break
+        raise KeyError(f"Image overlay not found in editing session: {segment_id}")
 
     def _save_editing_session_with_revision(
         self,
@@ -562,6 +607,17 @@ class EditingSessionRegenerationMixin:
             asset_id=asset_id,
             text=text,
         )
+        # Existing legacy sessions can still contain assetless cards.  A real
+        # project asset, however, becomes a renderable source and must carry a
+        # durable identity from the moment the user selects it.
+        try:
+            identity = self._resolve_project_asset_identity(project_id=project_id, asset_id=asset_id)
+        except ValueError:
+            identity = None
+        if identity is not None:
+            self._persist_image_overlay_identity(
+                updated_session=updated_session, segment_id=segment_id, asset_id=asset_id, identity=identity,
+            )
         return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=updated_session, expected_revision=expected_revision)
 
     def update_editing_session_segment_table_overlay(
@@ -626,15 +682,18 @@ class EditingSessionRegenerationMixin:
         expected_revision: int,
     ) -> dict[str, Any]:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
-        asset_uri = self._resolve_project_audio_override(
+        identity = self._resolve_project_asset_identity(
             project_id=project_id, asset_id=asset_id, expected_type=AssetType.BGM,
         )
         updated_session = update_segment_music_override(
             session=session,
             segment_id=segment_id,
             asset_id=asset_id,
-            asset_uri=asset_uri,
+            asset_uri=identity["asset_uri"],
             media_controls=media_controls,
+        )
+        self._persist_override_identity(
+            updated_session=updated_session, segment_id=segment_id, field="music_override", identity=identity,
         )
         return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=updated_session, expected_revision=expected_revision)
 
@@ -655,10 +714,17 @@ class EditingSessionRegenerationMixin:
 
     def update_editing_session_segment_sfx_override(self, *, project_id: str, session_id: str, segment_id: str, asset_id: str, media_controls: dict[str, Any] | None = None, expected_revision: int) -> dict[str, Any]:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
-        asset_uri = self._resolve_project_audio_override(
+        identity = self._resolve_project_asset_identity(
             project_id=project_id, asset_id=asset_id, expected_type=AssetType.SFX,
         )
-        return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=update_segment_sfx_override(session=session, segment_id=segment_id, asset_id=asset_id, asset_uri=asset_uri, media_controls=media_controls), expected_revision=expected_revision)
+        updated_session = update_segment_sfx_override(
+            session=session, segment_id=segment_id, asset_id=asset_id,
+            asset_uri=identity["asset_uri"], media_controls=media_controls,
+        )
+        self._persist_override_identity(
+            updated_session=updated_session, segment_id=segment_id, field="sfx_override", identity=identity,
+        )
+        return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=updated_session, expected_revision=expected_revision)
 
     def clear_editing_session_segment_sfx_override(self, *, project_id: str, session_id: str, segment_id: str, expected_revision: int) -> dict[str, Any]:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)

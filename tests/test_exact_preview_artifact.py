@@ -12,6 +12,8 @@ import pytest
 from videobox_core_engine.composition_plan import CompositionPlan
 from videobox_core_engine.exact_preview import ExactPreviewRequest, fingerprint_exact_preview
 from videobox_core_engine.ffmpeg_final_renderer import FinalRenderError, FfmpegFinalRenderer
+from videobox_core_engine.local_pipeline import LocalPipelineRunner
+from videobox_core_engine.output_source_verifier import OutputSourceStaleError
 from videobox_storage.local_project_store import LocalProjectStore
 from videobox_domain_models.assets import AssetType
 
@@ -93,6 +95,60 @@ def test_exact_proxy_uses_timeline_context_only_for_source_resolution_after_plan
 
     assert [clip["clip_id"] for track in hydrated["tracks"] for clip in track["clips"]] == ["n1"]
     assert hydrated["tracks"][0]["clips"][0]["end_sec"] == 2.0
+
+
+@pytest.mark.parametrize("mutated_source", ("music", "sfx", "image"))
+def test_session_selected_audio_and_image_assets_keep_immutable_identity_for_final_and_proxy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutated_source: str,
+) -> None:
+    """A changed manual BGM/SFX/image must stop both composition consumers."""
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="session media identity")
+    music, sfx, image = tmp_path / "music.wav", tmp_path / "impact.wav", tmp_path / "overlay.png"
+    music.write_bytes(b"selected music")
+    sfx.write_bytes(b"selected effect")
+    image.write_bytes(b"selected image")
+    music_asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.BGM, source_path=music)
+    sfx_asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.SFX, source_path=sfx)
+    image_asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.IMAGE, source_path=image)
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id="timeline-media-identity",
+        session_payload={"segments": [{"segment_id": "seg_001", "start_sec": 0.0, "end_sec": 1.0}], "history": []},
+    )
+    runner = LocalPipelineRunner(store)
+    session = runner.update_editing_session_segment_music_override(
+        project_id=project.project_id, session_id=session["session_id"], segment_id="seg_001",
+        asset_id=music_asset.asset_id, expected_revision=session["session_revision"],
+    )
+    session = runner.update_editing_session_segment_sfx_override(
+        project_id=project.project_id, session_id=session["session_id"], segment_id="seg_001",
+        asset_id=sfx_asset.asset_id, expected_revision=session["session_revision"],
+    )
+    session = runner.update_editing_session_segment_image_overlay(
+        project_id=project.project_id, session_id=session["session_id"], segment_id="seg_001",
+        asset_id=image_asset.asset_id, text="selected image", expected_revision=session["session_revision"],
+    )
+    segment = session["segments"][0]
+    assert segment["music_override"]["expected_content_sha256"]
+    assert segment["sfx_override"]["expected_content_sha256"]
+    assert segment["visual_overlays"][0]["expected_content_sha256"]
+
+    materialized = __import__("videobox_core_engine.composition_plan", fromlist=["materialize_editing_session_timeline"]).materialize_editing_session_timeline(
+        timeline={"project_id": project.project_id, "tracks": []}, editing_session=session, project_id=project.project_id,
+    )
+    plan = CompositionPlan.from_timeline(timeline=materialized)
+    selected_assets = {"music": music_asset, "sfx": sfx_asset, "image": image_asset}
+    store.resolve_storage_uri(
+        project_id=project.project_id, storage_uri=selected_assets[mutated_source].storage_uri,
+    ).write_bytes(f"mutated {mutated_source}".encode())
+    monkeypatch.setattr(FfmpegFinalRenderer, "_run", lambda _self, _command: pytest.fail("ffmpeg must not start for stale media"))
+    renderer = FfmpegFinalRenderer(store=store)
+
+    with pytest.raises(OutputSourceStaleError, match="stale_output_asset: content SHA-256 changed"):
+        renderer.render_timeline_to_mp4(project_id=project.project_id, timeline=materialized, output_path=tmp_path / "final.mp4", composition_plan=plan)
+    with pytest.raises(OutputSourceStaleError, match="stale_output_asset: content SHA-256 changed"):
+        renderer.render_exact_preview_to_mp4(project_id=project.project_id, composition_plan=plan, timeline_context=materialized, output_path=tmp_path / "proxy.mp4", subtitle_ass_path=None)
 
 
 def test_plan_renderer_explicitly_preserves_gaps_and_later_broll_wins_overlap(tmp_path: Path) -> None:

@@ -259,6 +259,8 @@ class FfmpegFinalRenderer:
                 "source_in_sec": item.source_in_sec,
                 "source_out_sec": item.source_out_sec,
                 "media_controls": controls,
+                "expected_content_sha256": item.expected_content_sha256,
+                "media_revision": item.media_revision,
                 "overlay_type": item.overlay_type,
                 "overlay_payload": dict(item.overlay_payload),
             })

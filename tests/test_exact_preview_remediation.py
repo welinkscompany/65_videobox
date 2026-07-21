@@ -477,6 +477,63 @@ def test_incomplete_legacy_bounds_history_refuses_unproven_right_expansion() -> 
         set_segment_bounds(session=session, segment_id="s", start_sec=2, end_sec=7)
 
 
+def test_merge_keeps_right_semantics_windowed_and_reanchors_legacy_export_overlay() -> None:
+    from videobox_core_engine.editing_session import merge_adjacent_segments
+
+    session = {"segments": [
+        {"segment_id": "left", "start_sec": 0, "end_sec": 1, "cut_action": "keep", "caption_text": "left", "caption_style": {"color": "white"}, "review_required": False, "visual_overlays": [], "tts_replacement": None},
+        {"segment_id": "right", "start_sec": 1, "end_sec": 2, "cut_action": "keep", "caption_text": "right", "caption_style": {"color": "yellow"}, "review_required": True, "visual_overlays": [{"overlay_type": "text_card", "text": "right overlay"}], "tts_replacement": {"asset_id": "tts-right", "recommendation_id": "rec-right"}},
+    ], "history": [], "undo_stack": [], "redo_stack": [], "session_revision": 1}
+    timeline = {"tracks": [{"track_type": "broll", "clips": [
+        {"clip_id": "left-media", "segment_id": "left", "asset_uri": "local://left", "start_sec": 0, "end_sec": 1},
+        {"clip_id": "right-media", "segment_id": "right", "asset_uri": "local://right", "start_sec": 1, "end_sec": 2},
+    ]}], "export_overlays": [{"segment_id": "right", "title": "legacy right", "start_sec": 1.25, "end_sec": 1.75}]}
+
+    merged = merge_adjacent_segments(session=session, left_segment_id="left", right_segment_id="right")
+    materialized = materialize_editing_session_timeline(timeline=timeline, editing_session=merged)
+
+    window = merged["segments"][0]["content_windows"][1]
+    assert window["caption_text"] == "right" and window["caption_style"] == {"color": "yellow"}
+    assert window["review_required"] is True and window["tts_replacement"]["asset_id"] == "tts-right"
+    assert [(item["segment_id"], item["caption_text"], item["caption_style"], item["start_sec"], item["end_sec"]) for item in materialized["session_captions"]] == [
+        ("left", "left", {"color": "white"}, 0.0, 1.0),
+        ("right", "right", {"color": "yellow"}, 1.0, 2.0),
+    ]
+    plan = CompositionPlan.from_timeline(timeline=materialized, captions=materialized["session_captions"])
+    assert [(cue.text, cue.style, cue.start_sec, cue.end_sec) for cue in plan.captions] == [
+        ("left", {"color": "white"}, 0.0, 1.0),
+        ("right", {"color": "yellow"}, 1.0, 2.0),
+    ]
+    ranged = plan.for_range(start_sec=1.0, end_sec=2.0)
+    assert [(cue.text, cue.style, cue.start_sec, cue.end_sec) for cue in ranged.captions] == [
+        ("right", {"color": "yellow"}, 0.0, 1.0),
+    ]
+    assert any(item.get("text") == "right overlay" and item["start_sec"] == 1.0 and item["end_sec"] == 2.0 for item in materialized["export_overlays"])
+    legacy = next(item for item in materialized["export_overlays"] if item.get("title") == "legacy right")
+    assert (legacy["start_sec"], legacy["end_sec"]) == (1.25, 1.75)
+
+
+def test_legacy_export_overlay_reanchors_for_reorder_and_source_trim() -> None:
+    from videobox_core_engine.editing_session import reorder_segments, set_segment_bounds
+
+    timeline = {"tracks": [{"track_type": "broll", "clips": [
+        {"clip_id": "left", "segment_id": "left", "asset_uri": "local://left", "start_sec": 0, "end_sec": 2},
+        {"clip_id": "right", "segment_id": "right", "asset_uri": "local://right", "start_sec": 2, "end_sec": 4},
+    ]}], "export_overlays": [{"segment_id": "right", "title": "legacy", "start_sec": 2.5, "end_sec": 3.5}]}
+    session = {"segments": [
+        {"segment_id": "left", "start_sec": 0, "end_sec": 2, "cut_action": "keep", "source_slices": [{"segment_id": "left", "source_offset_sec": 0, "duration_sec": 2}]},
+        {"segment_id": "right", "start_sec": 2, "end_sec": 4, "cut_action": "keep", "source_slices": [{"segment_id": "right", "source_offset_sec": 0, "duration_sec": 2}]},
+    ], "history": [], "undo_stack": [], "redo_stack": [], "session_revision": 1}
+
+    reordered = reorder_segments(session=session, segment_ids=["right", "left"], bounds_by_id={"right": {"start_sec": 0, "end_sec": 2}, "left": {"start_sec": 2, "end_sec": 4}})
+    reordered_overlay = materialize_editing_session_timeline(timeline=timeline, editing_session=reordered)["export_overlays"][0]
+    assert (reordered_overlay["start_sec"], reordered_overlay["end_sec"]) == (0.5, 1.5)
+
+    trimmed = set_segment_bounds(session=session, segment_id="right", start_sec=2.75, end_sec=4)
+    trimmed_overlay = materialize_editing_session_timeline(timeline=timeline, editing_session=trimmed)["export_overlays"][0]
+    assert (trimmed_overlay["start_sec"], trimmed_overlay["end_sec"]) == (2.75, 3.5)
+
+
 @pytest.mark.parametrize("operation", ["set", "reorder", "split"])
 def test_editing_session_operations_reject_nonfinite_segment_bounds(operation: str) -> None:
     from videobox_core_engine.editing_session import reorder_segments, set_segment_bounds, split_segment
