@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from math import isfinite
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
@@ -425,7 +426,7 @@ class BrollOverrideRequest(BaseModel):
 
 class SegmentSplitRequest(BaseModel):
     expected_revision: int = Field(ge=1)
-    split_sec: float = Field(ge=0)
+    split_sec: float = Field(ge=0, allow_inf_nan=False)
 
 
 class SegmentMergeRequest(BaseModel):
@@ -436,14 +437,21 @@ class SegmentMergeRequest(BaseModel):
 
 class SegmentBoundsRequest(BaseModel):
     expected_revision: int = Field(ge=1)
-    start_sec: float = Field(ge=0)
-    end_sec: float = Field(gt=0)
+    start_sec: float = Field(ge=0, allow_inf_nan=False)
+    end_sec: float = Field(gt=0, allow_inf_nan=False)
 
 
 class SegmentOrderRequest(BaseModel):
     expected_revision: int = Field(ge=1)
     segment_ids: list[str] = Field(min_length=1)
     bounds_by_id: dict[str, dict[str, float]] | None = None
+
+    @model_validator(mode="after")
+    def validate_finite_bounds(self) -> "SegmentOrderRequest":
+        for bounds in (self.bounds_by_id or {}).values():
+            if not isinstance(bounds, dict) or not isfinite(float(bounds.get("start_sec", float("nan")))) or not isfinite(float(bounds.get("end_sec", float("nan")))):
+                raise ValueError("segment_bounds_must_be_finite")
+        return self
 
 
 class EditingSessionRevisionRequest(BaseModel):

@@ -432,7 +432,8 @@ class LocalProjectStore:
         return self.project_root(project_id) / "db" / "project.sqlite"
 
     def begin_exact_preview(
-        self, *, project_id: str, request: Any, fingerprint: str, duration_sec: float | None = None
+        self, *, project_id: str, request: Any, fingerprint: str, duration_sec: float | None = None,
+        source_duration_sec: float | None = None,
     ) -> dict[str, Any]:
         """Create or coalesce a durable exact-preview generation.
 
@@ -446,7 +447,9 @@ class LocalProjectStore:
         cache_key = str(request.cache_key(source_fingerprint=fingerprint))
         if request.end_sec is not None and duration_sec is None:
             raise ValueError("exact_preview_duration_required")
-        if duration_sec is not None:
+        if source_duration_sec is not None:
+            request.validate_duration(float(source_duration_sec))
+        elif duration_sec is not None:
             request.validate_duration(float(duration_sec))
         now = self._now_iso()
         connection = self._connection(project_id)
@@ -511,7 +514,8 @@ class LocalProjectStore:
             connection.close()
 
     def finish_exact_preview(
-        self, *, project_id: str, generation_id: str, fingerprint: str, artifact_path: Path, owner_token: str
+        self, *, project_id: str, generation_id: str, fingerprint: str, artifact_path: Path, owner_token: str,
+        source_fence: Callable[[], bool] | None = None,
     ) -> bool:
         """Atomically copy/rename then publish only a still-current generation."""
         artifact_path = Path(artifact_path)
@@ -547,6 +551,24 @@ class LocalProjectStore:
             temporary = destination_dir / f".{generation_id}.{uuid.uuid4().hex}.tmp"
             shutil.copyfile(artifact_path, temporary)
             temporary.replace(published)
+            # Revalidate inside the same durable claim transaction after the
+            # artifact is staged.  This closes the render->publish handoff:
+            # a source changed after the pipeline's first check can never gain
+            # an observable succeeded pointer.
+            try:
+                source_is_current = source_fence is None or bool(source_fence())
+            except Exception:
+                source_is_current = False
+            if not source_is_current:
+                published.unlink(missing_ok=True)
+                connection.execute(
+                    """UPDATE exact_preview_renders SET state = 'obsolete', invalidated_at = ?,
+                       invalidated_reason = 'publish_source_fence_failed', updated_at = ?
+                       WHERE project_id = ? AND generation_id = ? AND state = 'running' AND claim_token = ?""",
+                    (self._now_iso(), self._now_iso(), project_id, generation_id, owner_token),
+                )
+                connection.commit()
+                return False
             uri = self._path_to_uri(project_id, published)
             # Fence again after the filesystem publication but before the DB pointer.
             cursor = connection.execute(

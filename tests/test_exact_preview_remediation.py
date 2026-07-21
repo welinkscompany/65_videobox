@@ -6,7 +6,9 @@ import struct
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 
+from videobox_api.main import create_app
 from videobox_core_engine.composition_plan import CompositionPlan, materialize_editing_session_timeline
 from videobox_core_engine.ffmpeg_final_renderer import FfmpegFinalRenderer
 from videobox_core_engine.local_pipeline import LocalPipelineRunner
@@ -379,6 +381,279 @@ def test_source_mutation_between_render_and_publish_is_never_succeeded(tmp_path:
     pipeline.run_exact_preview(project_id=project.project_id, generation_id=record["generation_id"])
 
     assert store.get_exact_preview(project_id=project.project_id, generation_id=record["generation_id"])["state"] == "obsolete"
+
+
+def test_selected_exact_preview_range_is_validated_against_full_session_and_keeps_range_metadata(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="absolute selected preview range")
+    timeline = store.save_timeline_run(
+        project_id=project.project_id, output_mode="review", source_session_revision=1,
+        timeline_payload={"output": {"duration_sec": 20}, "tracks": [
+            {"track_type": "broll", "clips": [{"clip_id": "b", "segment_id": "s", "asset_uri": "", "start_sec": 0, "end_sec": 20}]}
+        ]},
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id, timeline_id=timeline["timeline_id"],
+        session_payload={"segments": [{"segment_id": "s", "start_sec": 0, "end_sec": 20, "cut_action": "keep"}]},
+    )
+
+    record = LocalPipelineRunner(store).start_exact_preview(
+        project_id=project.project_id, session_id=session["session_id"], expected_revision=1, start_sec=2, end_sec=12,
+    )
+
+    assert record["start_sec"] == 2
+    assert record["end_sec"] == 12
+    assert record["duration_sec"] == 10
+
+
+def test_bounds_can_shrink_then_expand_back_to_immutable_source_basis() -> None:
+    from videobox_core_engine.editing_session import set_segment_bounds
+
+    session = {"segments": [{
+        "segment_id": "s", "start_sec": 0, "end_sec": 4, "source_offset_sec": 0,
+        "source_slices": [{"segment_id": "s", "source_offset_sec": 0, "duration_sec": 4}],
+    }], "history": [], "undo_stack": [], "redo_stack": [], "session_revision": 1}
+
+    shrunk = set_segment_bounds(session=session, segment_id="s", start_sec=1, end_sec=3)
+    expanded = set_segment_bounds(session=shrunk, segment_id="s", start_sec=0, end_sec=4)
+
+    segment = expanded["segments"][0]
+    assert segment["source_slices"] == [{"segment_id": "s", "source_offset_sec": 0.0, "duration_sec": 4.0}]
+
+
+def test_legacy_bounds_history_recovers_oldest_source_basis_for_expand() -> None:
+    """Pre-basis sessions may expand through their retained bounds snapshots."""
+    from videobox_core_engine.editing_session import set_segment_bounds
+
+    def snapshot(start_sec: float, end_sec: float, *, source_offset_sec: float | None = None) -> dict[str, object]:
+        segment: dict[str, object] = {"segment_id": "s", "start_sec": start_sec, "end_sec": end_sec}
+        if source_offset_sec is not None:
+            segment["source_slices"] = [{"segment_id": "s", "source_offset_sec": source_offset_sec, "duration_sec": end_sec - start_sec}]
+        return {"segments": [segment]}
+
+    # These were saved before source_slice_basis/source_slice_window_start_sec
+    # existed.  The current slice still proves that the source begins at +2.
+    session = {
+        "segments": [{
+            "segment_id": "s", "start_sec": 2, "end_sec": 4,
+            "source_slices": [{"segment_id": "s", "source_offset_sec": 2, "duration_sec": 2}],
+        }],
+        "history": [
+            {"mutation_type": "segment_bounds_update", "inverse_payload": snapshot(0, 4), "forward_payload": snapshot(1, 4)},
+            {"mutation_type": "segment_bounds_update", "inverse_payload": snapshot(1, 4), "forward_payload": snapshot(2, 4)},
+        ],
+        "undo_stack": [], "redo_stack": [], "session_revision": 3,
+    }
+
+    expanded = set_segment_bounds(session=session, segment_id="s", start_sec=0, end_sec=4)
+
+    assert expanded["segments"][0]["source_slices"] == [
+        {"segment_id": "s", "source_offset_sec": 0.0, "duration_sec": 4.0},
+    ]
+
+
+def test_incomplete_legacy_bounds_history_refuses_unproven_right_expansion() -> None:
+    """A broken pre-basis history cannot authorize synthesized source tail."""
+    from videobox_core_engine.editing_session import set_segment_bounds
+
+    def snapshot(start_sec: float, end_sec: float) -> dict[str, object]:
+        return {"segments": [{"segment_id": "s", "start_sec": start_sec, "end_sec": end_sec}]}
+
+    session = {
+        "segments": [{
+            "segment_id": "s", "start_sec": 2, "end_sec": 4,
+            "source_slices": [{"segment_id": "s", "source_offset_sec": 2, "duration_sec": 2}],
+        }],
+        # Both snapshots are legacy but do not form a contiguous chain to the
+        # current window, so no immutable source basis can be recovered.
+        "history": [
+            {"mutation_type": "segment_bounds_update", "inverse_payload": snapshot(0, 4), "forward_payload": snapshot(1, 4)},
+            {"mutation_type": "segment_bounds_update", "inverse_payload": snapshot(3, 4), "forward_payload": snapshot(4, 4)},
+        ],
+        "undo_stack": [], "redo_stack": [], "session_revision": 3,
+    }
+
+    with pytest.raises(ValueError, match="segment_source_expansion_outside_slice"):
+        set_segment_bounds(session=session, segment_id="s", start_sec=2, end_sec=7)
+
+
+@pytest.mark.parametrize("operation", ["set", "reorder", "split"])
+def test_editing_session_operations_reject_nonfinite_segment_bounds(operation: str) -> None:
+    from videobox_core_engine.editing_session import reorder_segments, set_segment_bounds, split_segment
+
+    session = {"segments": [{"segment_id": "s", "start_sec": 0, "end_sec": 2}], "history": [], "undo_stack": [], "redo_stack": [], "session_revision": 1}
+    with pytest.raises(ValueError):
+        if operation == "set":
+            set_segment_bounds(session=session, segment_id="s", start_sec=float("nan"), end_sec=1)
+        elif operation == "reorder":
+            reorder_segments(session=session, segment_ids=["s"], bounds_by_id={"s": {"start_sec": 0, "end_sec": float("inf")}})
+        else:
+            split_segment(session=session, segment_id="s", split_sec=float("nan"))
+
+
+def test_segment_order_api_schema_rejects_nonfinite_nested_bounds() -> None:
+    from pydantic import ValidationError
+    from videobox_api.models import SegmentOrderRequest
+
+    with pytest.raises(ValidationError):
+        SegmentOrderRequest(expected_revision=1, segment_ids=["s"], bounds_by_id={"s": {"start_sec": 0, "end_sec": float("nan")}})
+
+
+@pytest.mark.parametrize("nonfinite", ["NaN", "Infinity", "-Infinity"])
+def test_segment_order_api_refuses_nonfinite_nested_bounds_before_mutating_session(tmp_path: Path, nonfinite: str) -> None:
+    """JSON callers must not bypass the core finite-bounds fail-closed rule."""
+    client = TestClient(create_app(projects_root=tmp_path))
+    project_id = client.post("/api/projects", json={"name": "finite segment order"}).json()["project_id"]
+    store = LocalProjectStore(tmp_path)
+    timeline = store.save_timeline_run(
+        project_id=project_id, output_mode="review", source_session_revision=1,
+        timeline_payload={"output": {"duration_sec": 2}, "tracks": []},
+    )
+    session = store.save_editing_session(
+        project_id=project_id, timeline_id=timeline["timeline_id"],
+        session_payload={"segments": [{"segment_id": "s", "start_sec": 0, "end_sec": 2, "cut_action": "keep"}]},
+    )
+
+    response = client.put(
+        f"/api/projects/{project_id}/editing-sessions/{session['session_id']}/segment-order",
+        content=(
+            '{"expected_revision":1,"segment_ids":["s"],"bounds_by_id":'
+            '{"s":{"start_sec":0,"end_sec":' + nonfinite + '}}}'
+        ),
+        headers={"content-type": "application/json"},
+    )
+
+    assert response.status_code == 422
+    assert store.get_editing_session(project_id=project_id, session_id=session["session_id"])["session_revision"] == 1
+
+
+def test_merge_preserves_distinct_media_overrides_in_their_original_windows() -> None:
+    from videobox_core_engine.editing_session import merge_adjacent_segments
+
+    session = {"segments": [
+        {"segment_id": "left", "start_sec": 0, "end_sec": 1, "cut_action": "keep", "broll_override": {"asset_id": "broll-left"}, "music_override": {"asset_id": "bgm-left"}, "sfx_override": {"asset_id": "sfx-left"}, "visual_overlays": []},
+        {"segment_id": "right", "start_sec": 1, "end_sec": 2, "cut_action": "keep", "broll_override": {"asset_id": "broll-right"}, "music_override": {"asset_id": "bgm-right"}, "sfx_override": {"asset_id": "sfx-right"}, "visual_overlays": []},
+    ], "history": [], "undo_stack": [], "redo_stack": [], "session_revision": 1}
+    timeline = {"tracks": [{"track_type": "broll", "clips": [
+        {"clip_id": "base-left", "segment_id": "left", "asset_uri": "local://left", "start_sec": 0, "end_sec": 1},
+        {"clip_id": "base-right", "segment_id": "right", "asset_uri": "local://right", "start_sec": 1, "end_sec": 2},
+    ]}]}
+
+    merged = merge_adjacent_segments(session=session, left_segment_id="left", right_segment_id="right")
+    materialized = materialize_editing_session_timeline(timeline=timeline, editing_session=merged, project_id="p")
+    by_track = {track["track_type"]: track["clips"] for track in materialized["tracks"]}
+
+    for track_type, expected in (("broll", ["broll-left", "broll-right"]), ("bgm", ["bgm-left", "bgm-right"]), ("sfx", ["sfx-left", "sfx-right"])):
+        clips = [clip for clip in by_track[track_type] if clip.get("asset_id") in expected]
+        assert [(clip["asset_id"], clip["start_sec"], clip["end_sec"]) for clip in clips] == [(expected[0], 0, 1), (expected[1], 1, 2)]
+    # Windowed overrides replace the inherited B-roll in both source slices;
+    # otherwise a merge visibly composites the old base media over the choice.
+    assert not [clip for clip in by_track["broll"] if clip["clip_id"].startswith("base-")]
+
+
+def test_bounds_after_merge_trim_and_expand_keep_media_windows_on_their_original_moments() -> None:
+    from videobox_core_engine.editing_session import merge_adjacent_segments, set_segment_bounds
+
+    session = {"segments": [
+        {"segment_id": "left", "start_sec": 0, "end_sec": 1, "cut_action": "keep", "broll_override": {"asset_id": "broll-left"}, "music_override": {"asset_id": "bgm-left"}, "sfx_override": {"asset_id": "sfx-left"}, "visual_overlays": []},
+        {"segment_id": "right", "start_sec": 1, "end_sec": 2, "cut_action": "keep", "broll_override": {"asset_id": "broll-right"}, "music_override": {"asset_id": "bgm-right"}, "sfx_override": {"asset_id": "sfx-right"}, "visual_overlays": []},
+    ], "history": [], "undo_stack": [], "redo_stack": [], "session_revision": 1}
+
+    merged = merge_adjacent_segments(session=session, left_segment_id="left", right_segment_id="right")
+    trimmed = set_segment_bounds(session=merged, segment_id="left", start_sec=0.5, end_sec=2)
+
+    def media_window_summary(value: dict[str, object]) -> list[tuple[float, float, str, str, str]]:
+        return [
+            (float(window["start_offset_sec"]), float(window["duration_sec"]),
+             str(window.get("broll_override", {}).get("asset_id")),
+             str(window.get("music_override", {}).get("asset_id")),
+             str(window.get("sfx_override", {}).get("asset_id")))
+            for window in value["segments"][0]["media_windows"]
+        ]
+
+    assert media_window_summary(trimmed) == [
+        (0.0, 0.5, "broll-left", "bgm-left", "sfx-left"),
+        (0.5, 1.0, "broll-right", "bgm-right", "sfx-right"),
+    ]
+    timeline = {"tracks": [{"track_type": "broll", "clips": [
+        {"clip_id": "base-left", "segment_id": "left", "asset_uri": "local://left", "start_sec": 0, "end_sec": 1},
+        {"clip_id": "base-right", "segment_id": "right", "asset_uri": "local://right", "start_sec": 1, "end_sec": 2},
+    ]}]}
+    materialized = materialize_editing_session_timeline(timeline=timeline, editing_session=trimmed, project_id="p")
+    by_track = {track["track_type"]: track["clips"] for track in materialized["tracks"]}
+    for track_type, expected in (("broll", ["broll-left", "broll-right"]), ("bgm", ["bgm-left", "bgm-right"]), ("sfx", ["sfx-left", "sfx-right"])):
+        assert [(clip["asset_id"], clip["start_sec"], clip["end_sec"]) for clip in by_track[track_type]] == [
+            (expected[0], 0.5, 1.0), (expected[1], 1.0, 2.0),
+        ]
+    expanded = set_segment_bounds(session=trimmed, segment_id="left", start_sec=0, end_sec=2)
+    assert media_window_summary(expanded) == [
+        (0.0, 1.0, "broll-left", "bgm-left", "sfx-left"),
+        (1.0, 1.0, "broll-right", "bgm-right", "sfx-right"),
+    ]
+
+
+def test_split_after_merge_rebases_distinct_media_windows_to_each_new_segment() -> None:
+    from videobox_core_engine.editing_session import merge_adjacent_segments, split_segment
+
+    session = {"segments": [
+        {"segment_id": "left", "start_sec": 0, "end_sec": 1, "cut_action": "keep", "broll_override": {"asset_id": "broll-left"}, "visual_overlays": []},
+        {"segment_id": "right", "start_sec": 1, "end_sec": 2, "cut_action": "keep", "broll_override": {"asset_id": "broll-right"}, "visual_overlays": []},
+    ], "history": [], "undo_stack": [], "redo_stack": [], "session_revision": 1}
+    timeline = {"tracks": [{"track_type": "broll", "clips": [
+        {"clip_id": "base-left", "segment_id": "left", "asset_uri": "local://left", "start_sec": 0, "end_sec": 1},
+        {"clip_id": "base-right", "segment_id": "right", "asset_uri": "local://right", "start_sec": 1, "end_sec": 2},
+    ]}]}
+
+    merged = merge_adjacent_segments(session=session, left_segment_id="left", right_segment_id="right")
+    split = split_segment(session=merged, segment_id="left", split_sec=1)
+    materialized = materialize_editing_session_timeline(timeline=timeline, editing_session=split, project_id="p")
+    broll = next(track["clips"] for track in materialized["tracks"] if track["track_type"] == "broll")
+
+    assert [(clip["asset_id"], clip["start_sec"], clip["end_sec"]) for clip in broll] == [
+        ("broll-left", 0, 1), ("broll-right", 1, 2),
+    ]
+
+
+def test_broll_update_after_merge_replaces_the_prior_windowed_choices() -> None:
+    from videobox_core_engine.editing_session import merge_adjacent_segments, update_segment_broll_override
+
+    session = {"segments": [
+        {"segment_id": "left", "start_sec": 0, "end_sec": 1, "cut_action": "keep", "broll_override": {"asset_id": "broll-left"}, "visual_overlays": []},
+        {"segment_id": "right", "start_sec": 1, "end_sec": 2, "cut_action": "keep", "broll_override": {"asset_id": "broll-right"}, "visual_overlays": []},
+    ], "history": [], "undo_stack": [], "redo_stack": [], "session_revision": 1}
+    timeline = {"tracks": [{"track_type": "broll", "clips": [
+        {"clip_id": "base-left", "segment_id": "left", "asset_uri": "local://left", "start_sec": 0, "end_sec": 1},
+        {"clip_id": "base-right", "segment_id": "right", "asset_uri": "local://right", "start_sec": 1, "end_sec": 2},
+    ]}]}
+
+    merged = merge_adjacent_segments(session=session, left_segment_id="left", right_segment_id="right")
+    updated = update_segment_broll_override(session=merged, segment_id="left", asset_id="broll-new")
+    materialized = materialize_editing_session_timeline(timeline=timeline, editing_session=updated, project_id="p")
+    broll = next(track["clips"] for track in materialized["tracks"] if track["track_type"] == "broll")
+
+    assert [(clip["asset_id"], clip["start_sec"], clip["end_sec"]) for clip in broll] == [("broll-new", 0, 2)]
+
+
+def test_broll_clear_after_merge_removes_the_prior_windowed_choices() -> None:
+    from videobox_core_engine.editing_session import clear_segment_broll_override, merge_adjacent_segments
+
+    session = {"segments": [
+        {"segment_id": "left", "start_sec": 0, "end_sec": 1, "cut_action": "keep", "broll_override": {"asset_id": "broll-left"}, "visual_overlays": []},
+        {"segment_id": "right", "start_sec": 1, "end_sec": 2, "cut_action": "keep", "broll_override": {"asset_id": "broll-right"}, "visual_overlays": []},
+    ], "history": [], "undo_stack": [], "redo_stack": [], "session_revision": 1}
+    timeline = {"tracks": [{"track_type": "broll", "clips": [
+        {"clip_id": "base-left", "segment_id": "left", "asset_uri": "local://left", "start_sec": 0, "end_sec": 1},
+        {"clip_id": "base-right", "segment_id": "right", "asset_uri": "local://right", "start_sec": 1, "end_sec": 2},
+    ]}]}
+
+    merged = merge_adjacent_segments(session=session, left_segment_id="left", right_segment_id="right")
+    cleared = clear_segment_broll_override(session=merged, segment_id="left")
+    materialized = materialize_editing_session_timeline(timeline=timeline, editing_session=cleared, project_id="p")
+    broll = next(track["clips"] for track in materialized["tracks"] if track["track_type"] == "broll")
+
+    assert [(clip["clip_id"], clip["start_sec"], clip["end_sec"]) for clip in broll] == [
+        ("base-left", 0, 1), ("base-right", 1, 2),
+    ]
 
 
 @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg fixture required")

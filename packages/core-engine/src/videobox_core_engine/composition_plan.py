@@ -86,6 +86,48 @@ def _session_source_slices(*, editing_session: dict[str, Any], segment: dict[str
     return output
 
 
+def _session_override_windows(*, segment: dict[str, Any], override_field: str) -> list[tuple[float, float]]:
+    """Return the placed intervals where a session override replaces base media."""
+    start, end = _number(segment.get("start_sec")), _number(segment.get("end_sec"))
+    direct_override = segment.get(override_field)
+    raw_windows = segment.get("media_windows")
+    windows = [{
+        "start_offset_sec": 0.0,
+        "duration_sec": end - start,
+        override_field: direct_override,
+    }] if isinstance(direct_override, dict) else raw_windows if isinstance(raw_windows, list) and raw_windows else [{
+        "start_offset_sec": 0.0,
+        "duration_sec": end - start,
+        override_field: None,
+    }]
+    intervals: list[tuple[float, float]] = []
+    for window in windows:
+        if not isinstance(window, dict) or not isinstance(window.get(override_field), dict):
+            continue
+        window_start = max(start, start + _number(window.get("start_offset_sec")))
+        window_end = min(end, window_start + _number(window.get("duration_sec")))
+        if window_end > window_start:
+            intervals.append((window_start, window_end))
+    return intervals
+
+
+def _uncovered_intervals(*, start: float, end: float, covered: Iterable[tuple[float, float]]) -> list[tuple[float, float]]:
+    """Subtract session replacement windows from a source clip placement."""
+    cursor, output = start, []
+    for covered_start, covered_end in sorted(covered):
+        left, right = max(start, covered_start), min(end, covered_end)
+        if right <= cursor:
+            continue
+        if left > cursor:
+            output.append((cursor, left))
+        cursor = max(cursor, right)
+        if cursor >= end:
+            break
+    if cursor < end:
+        output.append((cursor, end))
+    return output
+
+
 def materialize_editing_session_timeline(
     *, timeline: dict[str, Any], editing_session: dict[str, Any] | None, project_id: str | None = None,
 ) -> dict[str, Any]:
@@ -148,16 +190,17 @@ def materialize_editing_session_timeline(
                 if duration <= 0:
                     continue
                 override_field = {"broll": "broll_override", "bgm": "music_override", "sfx": "sfx_override"}.get(track_type)
-                if override_field and isinstance(segment.get(override_field), dict):
-                    continue
-                clip = deepcopy(raw)
                 offset = float(source_slice["source_offset_sec"])
                 if source_slice.get("legacy_timeline_anchor"):
                     offset -= original_start
                 source_in = original_source_in + offset
-                clip["start_sec"], clip["end_sec"] = placement, placement + duration
-                clip["source_in_sec"], clip["source_out_sec"] = source_in, min(original_source_out, source_in + duration)
-                clips.append(clip)
+                covered = _session_override_windows(segment=segment, override_field=override_field) if override_field else []
+                for interval_start, interval_end in _uncovered_intervals(start=placement, end=placement + duration, covered=covered):
+                    clip = deepcopy(raw)
+                    source_piece_start = source_in + interval_start - placement
+                    clip["start_sec"], clip["end_sec"] = interval_start, interval_end
+                    clip["source_in_sec"], clip["source_out_sec"] = source_piece_start, min(original_source_out, source_piece_start + interval_end - interval_start)
+                    clips.append(clip)
         if clips:
             tracks[track_type] = clips
     removed_segment_ids = {
@@ -174,19 +217,35 @@ def materialize_editing_session_timeline(
         start, end = _number(segment.get("start_sec")), _number(segment.get("end_sec"))
         if end <= start:
             continue
+        raw_windows = segment.get("media_windows")
+        windows = raw_windows if isinstance(raw_windows, list) and raw_windows else [{
+            "start_offset_sec": 0.0, "duration_sec": end - start,
+            "broll_override": segment.get("broll_override"), "music_override": segment.get("music_override"), "sfx_override": segment.get("sfx_override"),
+        }]
         for track_type, field in (("broll", "broll_override"), ("bgm", "music_override"), ("sfx", "sfx_override")):
-            override = segment.get(field)
-            if not isinstance(override, dict) or not str(override.get("asset_id") or override.get("asset_uri") or "").strip():
-                continue
-            asset_id = str(override.get("asset_id") or "").strip() or None
-            asset_uri = str(override.get("asset_uri") or "").strip()
-            if not asset_uri and asset_id and project:
-                asset_uri = f"local://projects/{project}/assets/{asset_id}"
-            clip: dict[str, Any] = {"clip_id": f"session-{track_type}-{segment_id}", "segment_id": segment_id, "asset_id": asset_id, "asset_uri": asset_uri or None, "start_sec": start, "end_sec": end, "media_controls": deepcopy(override.get("media_controls") or {})}
-            for key in ("expected_content_sha256", "media_revision"):
-                if override.get(key):
-                    clip[key] = override[key]
-            tracks.setdefault(track_type, []).append(clip)
+            direct_override = segment.get(field)
+            field_windows = [{
+                "start_offset_sec": 0.0, "duration_sec": end - start, field: direct_override,
+            }] if isinstance(direct_override, dict) else windows
+            for window_index, window in enumerate(field_windows):
+                if not isinstance(window, dict):
+                    continue
+                window_start = start + _number(window.get("start_offset_sec"))
+                window_end = min(end, window_start + _number(window.get("duration_sec")))
+                if window_end <= window_start:
+                    continue
+                override = window.get(field)
+                if not isinstance(override, dict) or not str(override.get("asset_id") or override.get("asset_uri") or "").strip():
+                    continue
+                asset_id = str(override.get("asset_id") or "").strip() or None
+                asset_uri = str(override.get("asset_uri") or "").strip()
+                if not asset_uri and asset_id and project:
+                    asset_uri = f"local://projects/{project}/assets/{asset_id}"
+                clip: dict[str, Any] = {"clip_id": f"session-{track_type}-{segment_id}-{window_index}", "segment_id": segment_id, "asset_id": asset_id, "asset_uri": asset_uri or None, "start_sec": window_start, "end_sec": window_end, "media_controls": deepcopy(override.get("media_controls") or {})}
+                for key in ("expected_content_sha256", "media_revision"):
+                    if override.get(key):
+                        clip[key] = override[key]
+                tracks.setdefault(track_type, []).append(clip)
         for ordinal, overlay in enumerate(segment.get("visual_overlays", []) if isinstance(segment.get("visual_overlays"), list) else []):
             if not isinstance(overlay, dict):
                 continue

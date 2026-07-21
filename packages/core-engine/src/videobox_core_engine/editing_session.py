@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 from datetime import UTC, datetime
+from math import isfinite
 import uuid
 
 from videobox_domain_models.caption_style import CaptionStyle
@@ -102,7 +103,7 @@ def _validate_segment_bounds(*, segments: list[dict[str, Any]]) -> None:
     for segment in segments:
         start_sec = float(segment.get("start_sec", 0.0))
         end_sec = float(segment.get("end_sec", 0.0))
-        if start_sec < 0 or end_sec - start_sec < MIN_SEGMENT_DURATION_SEC:
+        if not isfinite(start_sec) or not isfinite(end_sec) or start_sec < 0 or end_sec - start_sec < MIN_SEGMENT_DURATION_SEC:
             raise ValueError(f"Segment duration must be at least {MIN_SEGMENT_DURATION_SEC} seconds.")
         normalized.append((start_sec, end_sec, str(segment.get("segment_id") or "")))
     ordered = sorted(normalized)
@@ -173,6 +174,127 @@ def _source_slices(segment: dict[str, Any], *, fallback_offset: float | None = N
     return [{"segment_id": str(segment.get("segment_id") or ""), "source_offset_sec": float(segment.get("source_offset_sec", fallback_offset or 0.0)), "duration_sec": float(segment.get("end_sec", 0.0)) - float(segment.get("start_sec", 0.0))}]
 
 
+def _source_slice_basis(*, session: dict[str, Any], segment: dict[str, Any], fallback_offset: float | None = None) -> list[dict[str, float | str]]:
+    """Return the immutable source window from which bounds edits may trim.
+
+    Older sessions only stored the current window.  Their transaction inverse
+    payloads retain the pre-trim window, so recover that when possible rather
+    than permanently losing source material after a shrink/expand cycle.
+    """
+    raw = segment.get("source_slice_basis")
+    if isinstance(raw, list):
+        basis = _source_slices({**segment, "source_slices": raw}, fallback_offset=fallback_offset)
+        if basis:
+            return basis
+    segment_id = str(segment.get("segment_id") or "")
+    for event in reversed(session.get("history", [])):
+        if not isinstance(event, dict) or event.get("mutation_type") != "segment_bounds_update":
+            continue
+        inverse = event.get("inverse_payload") if isinstance(event.get("inverse_payload"), dict) else {}
+        candidate = next((item for item in inverse.get("segments", []) if isinstance(item, dict) and str(item.get("segment_id") or "") == segment_id), None)
+        if candidate is not None:
+            return _source_slices(candidate, fallback_offset=fallback_offset)
+    return _source_slices(segment, fallback_offset=fallback_offset)
+
+
+def _legacy_source_basis_and_window_start(
+    *, session: dict[str, Any], segment: dict[str, Any], fallback_offset: float | None = None,
+) -> tuple[list[dict[str, float | str]], float] | None:
+    """Recover a bounded source basis from a pre-basis edit history.
+
+    This migration is deliberately narrow: it only accepts a complete chain of
+    legacy bounds transactions whose oldest snapshot can be proven to contain
+    the current source slice.  Anything else remains fail-closed.
+    """
+    if "source_slice_basis" in segment or "source_slice_window_start_sec" in segment:
+        return None
+    segment_id = str(segment.get("segment_id") or "")
+    transitions: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    for event in session.get("history", []):
+        if not isinstance(event, dict) or event.get("mutation_type") != "segment_bounds_update":
+            continue
+        inverse = event.get("inverse_payload") if isinstance(event.get("inverse_payload"), dict) else {}
+        forward = event.get("forward_payload") if isinstance(event.get("forward_payload"), dict) else {}
+        before = next((item for item in inverse.get("segments", []) if isinstance(item, dict) and str(item.get("segment_id") or "") == segment_id), None)
+        after = next((item for item in forward.get("segments", []) if isinstance(item, dict) and str(item.get("segment_id") or "") == segment_id), None)
+        if before is not None and after is not None:
+            transitions.append((before, after))
+    if not transitions:
+        return None
+
+    current_slices = _source_slices(segment, fallback_offset=fallback_offset)
+    if len(current_slices) != 1 or str(current_slices[0]["segment_id"]) != segment_id:
+        return None
+    previous_after = None
+    for before, after in transitions:
+        if previous_after is not None and (
+            float(previous_after.get("start_sec", 0.0)) != float(before.get("start_sec", 0.0))
+            or float(previous_after.get("end_sec", 0.0)) != float(before.get("end_sec", 0.0))
+        ):
+            return None
+        previous_after = after
+    latest = transitions[-1][1]
+    if (
+        float(latest.get("start_sec", 0.0)) != float(segment.get("start_sec", 0.0))
+        or float(latest.get("end_sec", 0.0)) != float(segment.get("end_sec", 0.0))
+    ):
+        return None
+
+    oldest = transitions[0][0]
+    leading_trim = sum(
+        float(after.get("start_sec", 0.0)) - float(before.get("start_sec", 0.0))
+        for before, after in transitions
+    )
+    if leading_trim < 0:
+        return None
+    oldest_duration = float(oldest.get("end_sec", 0.0)) - float(oldest.get("start_sec", 0.0))
+    if oldest_duration <= 0:
+        return None
+    if isinstance(oldest.get("source_slices"), list):
+        basis = _source_slices(oldest, fallback_offset=fallback_offset)
+    else:
+        basis = [{
+            "segment_id": segment_id,
+            "source_offset_sec": float(current_slices[0]["source_offset_sec"]) - leading_trim,
+            "duration_sec": oldest_duration,
+        }]
+    if float(basis[0]["source_offset_sec"]) < 0:
+        return None
+    expected_current = _slice_source_window(
+        slices=basis, leading_trim_sec=leading_trim,
+        duration_sec=float(segment.get("end_sec", 0.0)) - float(segment.get("start_sec", 0.0)),
+    )
+    if expected_current != current_slices:
+        return None
+    return basis, leading_trim
+
+
+def _has_unrecoverable_legacy_bounds_transition(*, session: dict[str, Any], segment_id: str) -> bool:
+    """Identify pre-basis transactions that cannot safely grow source output.
+
+    A new transaction records durable basis data in its forward snapshot.  A
+    pair where both snapshots predate that data is legacy; if the complete
+    recovery helper rejects it, it must not silently authorize a synthetic
+    right-edge source extension.
+    """
+    for event in session.get("history", []):
+        if not isinstance(event, dict) or event.get("mutation_type") != "segment_bounds_update":
+            continue
+        inverse = event.get("inverse_payload") if isinstance(event.get("inverse_payload"), dict) else {}
+        forward = event.get("forward_payload") if isinstance(event.get("forward_payload"), dict) else {}
+        before = next((item for item in inverse.get("segments", []) if isinstance(item, dict) and str(item.get("segment_id") or "") == segment_id), None)
+        after = next((item for item in forward.get("segments", []) if isinstance(item, dict) and str(item.get("segment_id") or "") == segment_id), None)
+        if before is None or after is None:
+            continue
+        if all(
+            key not in snapshot
+            for snapshot in (before, after)
+            for key in ("source_slice_basis", "source_slice_window_start_sec")
+        ):
+            return True
+    return False
+
+
 def _slice_source_window(*, slices: list[dict[str, float | str]], leading_trim_sec: float, duration_sec: float) -> list[dict[str, float | str]]:
     remaining_trim, remaining_duration = max(0.0, leading_trim_sec), max(0.0, duration_sec)
     output: list[dict[str, float | str]] = []
@@ -193,6 +315,18 @@ def _slice_source_window(*, slices: list[dict[str, float | str]], leading_trim_s
     return output
 
 
+def _extend_unproven_source_basis(*, slices: list[dict[str, float | str]], required_duration_sec: float) -> list[dict[str, float | str]]:
+    """Keep the legacy right-edge extension contract without inventing left source."""
+    extended = deepcopy(slices)
+    available_duration = sum(float(item["duration_sec"]) for item in extended)
+    if required_duration_sec <= available_duration:
+        return extended
+    if not extended:
+        raise ValueError("segment_source_expansion_outside_slice")
+    extended[-1]["duration_sec"] = float(extended[-1]["duration_sec"]) + required_duration_sec - available_duration
+    return extended
+
+
 def _asset_ids(segment: dict[str, Any], *, field: str) -> list[str]:
     output: list[str] = []
     existing = segment.get("media_lineage")
@@ -209,12 +343,72 @@ def _media_lineage(*segments: dict[str, Any]) -> dict[str, list[str]]:
     return {field: list(dict.fromkeys(asset_id for segment in segments for asset_id in _asset_ids(segment, field=field))) for field in ("broll", "music", "sfx", "tts")}
 
 
+def _media_windows(segment: dict[str, Any]) -> list[dict[str, Any]]:
+    """Keep per-window media authority when adjacent segments become one."""
+    raw = segment.get("media_windows")
+    if isinstance(raw, list) and raw:
+        return [deepcopy(item) for item in raw if isinstance(item, dict)]
+    return [{
+        "start_offset_sec": 0.0,
+        "duration_sec": float(segment.get("end_sec", 0.0)) - float(segment.get("start_sec", 0.0)),
+        **{field: deepcopy(segment.get(field)) for field in ("broll_override", "music_override", "sfx_override")},
+    }]
+
+
+def _slice_media_windows(*, segment: dict[str, Any], start_sec: float, end_sec: float) -> list[dict[str, Any]]:
+    """Clip a segment's durable media choices and rebase them to a split child."""
+    original_start = float(segment.get("start_sec", 0.0))
+    return _slice_media_window_basis(
+        windows=_media_windows(segment), leading_trim_sec=0.0,
+        duration_sec=end_sec - start_sec, basis_start_sec=start_sec - original_start,
+    )
+
+
+def _media_window_basis(segment: dict[str, Any]) -> list[dict[str, Any]]:
+    raw = segment.get("media_window_basis")
+    if isinstance(raw, list):
+        return [deepcopy(item) for item in raw if isinstance(item, dict)]
+    return _media_windows(segment)
+
+
+def _slice_media_window_basis(
+    *, windows: list[dict[str, Any]], leading_trim_sec: float, duration_sec: float, basis_start_sec: float = 0.0,
+) -> list[dict[str, Any]]:
+    """Slice immutable per-track media choices and rebase them to a new segment window."""
+    selected_start = basis_start_sec + leading_trim_sec
+    selected_end = selected_start + duration_sec
+    output: list[dict[str, Any]] = []
+    for window in windows:
+        window_start = float(window.get("start_offset_sec", 0.0))
+        window_end = window_start + float(window.get("duration_sec", 0.0))
+        clipped_start, clipped_end = max(selected_start, window_start), min(selected_end, window_end)
+        if clipped_end <= clipped_start:
+            continue
+        output.append({
+            **deepcopy(window),
+            "start_offset_sec": clipped_start - selected_start,
+            "duration_sec": clipped_end - clipped_start,
+        })
+    return output
+
+
+def _clear_windowed_media_override(*, segment: dict[str, Any], field: str) -> None:
+    """A new direct choice or clear supersedes stale per-window choices only for that track."""
+    for raw in (segment.get("media_windows"), segment.get("media_window_basis")):
+        if isinstance(raw, list):
+            for window in raw:
+                if isinstance(window, dict):
+                    window.pop(field, None)
+
+
 def split_segment(*, session: dict[str, Any], segment_id: str, split_sec: float) -> dict[str, Any]:
     updated = deepcopy(session)
     index = _segment_index(session=updated, segment_id=segment_id)
     original = updated["segments"][index]
     start_sec, end_sec = float(original["start_sec"]), float(original["end_sec"])
     split_sec = float(split_sec)
+    if not isfinite(split_sec):
+        raise ValueError("segment_bounds_must_be_finite")
     if split_sec - start_sec < MIN_SEGMENT_DURATION_SEC or end_sec - split_sec < MIN_SEGMENT_DURATION_SEC:
         raise ValueError(f"Split must leave at least {MIN_SEGMENT_DURATION_SEC} seconds on both sides.")
     known_ids = {str(item.get("segment_id")) for item in updated["segments"] if isinstance(item, dict)}
@@ -230,6 +424,18 @@ def split_segment(*, session: dict[str, Any], segment_id: str, split_sec: float)
     source_slices = _source_slices(original)
     left["source_slices"] = _slice_source_window(slices=source_slices, leading_trim_sec=0.0, duration_sec=split_sec - start_sec)
     right["source_slices"] = _slice_source_window(slices=source_slices, leading_trim_sec=split_sec - start_sec, duration_sec=end_sec - split_sec)
+    left["source_slice_basis"] = deepcopy(left["source_slices"])
+    right["source_slice_basis"] = deepcopy(right["source_slices"])
+    left["source_slice_basis_is_proven"] = True
+    right["source_slice_basis_is_proven"] = True
+    left["source_slice_window_start_sec"] = 0.0
+    right["source_slice_window_start_sec"] = 0.0
+    left["media_windows"] = _slice_media_windows(segment=original, start_sec=start_sec, end_sec=split_sec)
+    right["media_windows"] = _slice_media_windows(segment=original, start_sec=split_sec, end_sec=end_sec)
+    left["media_window_basis"] = deepcopy(left["media_windows"])
+    right["media_window_basis"] = deepcopy(right["media_windows"])
+    left["media_window_basis_offset_sec"] = 0.0
+    right["media_window_basis_offset_sec"] = 0.0
     right["source_offset_sec"] = float(right["source_slices"][0]["source_offset_sec"]) if right["source_slices"] else float(original.get("source_offset_sec", 0.0))
     left["lineage"] = _lineage_for_split(original, parent_segment_id=segment_id)
     right["lineage"] = _lineage_for_split(original, parent_segment_id=segment_id)
@@ -249,6 +455,10 @@ def merge_adjacent_segments(*, session: dict[str, Any], left_segment_id: str, ri
     left, right = updated["segments"][left_index], updated["segments"][right_index]
     if abs(float(left["end_sec"]) - float(right["start_sec"])) > 0.000001:
         raise ValueError("Only adjacent touching segments can be merged.")
+    left_action = str(left.get("cut_action") or "keep")
+    right_action = str(right.get("cut_action") or "keep")
+    if left_action == "remove" or right_action == "remove" or left_action != right_action:
+        raise ValueError("Only same non-remove cut actions can be merged.")
     merged = deepcopy(left)
     merged["end_sec"] = float(right["end_sec"])
     merged["caption_text"] = f"{str(left.get('caption_text') or '').strip()}\n{str(right.get('caption_text') or '').strip()}".strip()
@@ -259,7 +469,22 @@ def merge_adjacent_segments(*, session: dict[str, Any], left_segment_id: str, ri
         "source_segment_ids": list(dict.fromkeys(list(left_lineage.get("source_segment_ids") or [left_segment_id]) + list(right_lineage.get("source_segment_ids") or [right_segment_id]))),
     }
     merged["media_lineage"] = _media_lineage(left, right)
+    left_duration = float(left["end_sec"]) - float(left["start_sec"])
+    merged["media_windows"] = _media_windows(left) + [
+        {**window, "start_offset_sec": left_duration + float(window.get("start_offset_sec", 0.0))}
+        for window in _media_windows(right)
+    ]
+    merged["media_window_basis"] = deepcopy(merged["media_windows"])
+    merged["media_window_basis_offset_sec"] = 0.0
+    # A merged segment no longer has one uniform override.  The materializer
+    # consumes its durable windows so neither adjacent selection is stretched
+    # across the other source slice.
+    for field in ("broll_override", "music_override", "sfx_override"):
+        merged[field] = None
     merged["source_slices"] = _source_slices(left) + _source_slices(right)
+    merged["source_slice_basis"] = deepcopy(merged["source_slices"])
+    merged["source_slice_basis_is_proven"] = True
+    merged["source_slice_window_start_sec"] = 0.0
     merged["source_offset_sec"] = float(merged["source_slices"][0]["source_offset_sec"]) if merged["source_slices"] else 0.0
     merged["caption_needs_review"] = bool(left.get("caption_needs_review") or right.get("caption_needs_review"))
     updated["segments"][left_index : right_index + 1] = [merged]
@@ -271,26 +496,58 @@ def set_segment_bounds(*, session: dict[str, Any], segment_id: str, start_sec: f
     updated = deepcopy(session)
     index = _segment_index(session=updated, segment_id=segment_id)
     previous_start = float(updated["segments"][index]["start_sec"])
+    start_sec, end_sec = float(start_sec), float(end_sec)
+    if not isfinite(start_sec) or not isfinite(end_sec):
+        raise ValueError("segment_bounds_must_be_finite")
     prior_offset = _source_offset_before_bounds_mutation(session=session, segment=updated["segments"][index])
-    source_slices = _source_slices(updated["segments"][index], fallback_offset=prior_offset)
-    updated["segments"][index]["start_sec"] = float(start_sec)
-    updated["segments"][index]["end_sec"] = float(end_sec)
+    segment = deepcopy(updated["segments"][index])
+    # Preserve the established public error precedence: a malformed timeline
+    # must report its structural violation before inspecting source authority.
+    updated["segments"][index]["start_sec"] = start_sec
+    updated["segments"][index]["end_sec"] = end_sec
     _validate_segment_bounds(segments=updated["segments"])
+    legacy_source = _legacy_source_basis_and_window_start(session=session, segment=segment, fallback_offset=prior_offset)
+    if legacy_source is None and _has_unrecoverable_legacy_bounds_transition(session=session, segment_id=str(segment.get("segment_id") or "")):
+        raise ValueError("segment_source_expansion_outside_slice")
+    source_basis = legacy_source[0] if legacy_source is not None else _source_slice_basis(session=session, segment=segment, fallback_offset=prior_offset)
+    previous_window_start = legacy_source[1] if legacy_source is not None else float(segment.get("source_slice_window_start_sec", 0.0))
+    next_window_start = previous_window_start + start_sec - previous_start
+    if next_window_start < 0:
+        raise ValueError("segment_source_expansion_outside_slice")
+    source_basis_is_proven = legacy_source is not None or bool(segment.get("source_slice_basis_is_proven", False))
+    if not source_basis_is_proven:
+        source_basis = _extend_unproven_source_basis(
+            slices=source_basis,
+            required_duration_sec=next_window_start + end_sec - start_sec,
+        )
     # Only a bounds edit changes which source moment is used.  A reorder
     # relayout deliberately leaves this value untouched.
-    updated["segments"][index]["source_offset_sec"] = prior_offset + float(start_sec) - previous_start
-    leading_delta = float(start_sec) - previous_start
-    if leading_delta < 0 and source_slices:
-        source_slices = deepcopy(source_slices)
-        first = source_slices[0]
-        restored = -leading_delta
-        first["source_offset_sec"] = float(first["source_offset_sec"]) - restored
-        if float(first["source_offset_sec"]) < 0:
-            raise ValueError("segment_source_expansion_outside_slice")
-        first["duration_sec"] = float(first["duration_sec"]) + restored
-    updated["segments"][index]["source_slices"] = _slice_source_window(
-        slices=source_slices, leading_trim_sec=max(0.0, leading_delta), duration_sec=float(end_sec) - float(start_sec),
+    updated["segments"][index]["source_offset_sec"] = prior_offset + start_sec - previous_start
+    slices = _slice_source_window(slices=source_basis, leading_trim_sec=next_window_start, duration_sec=end_sec - start_sec)
+    if sum(float(item["duration_sec"]) for item in slices) < end_sec - start_sec - 0.000001:
+        raise ValueError("segment_source_expansion_outside_slice")
+    updated["segments"][index]["source_slices"] = slices
+    updated["segments"][index]["source_slice_basis"] = deepcopy(source_basis)
+    updated["segments"][index]["source_slice_basis_is_proven"] = source_basis_is_proven
+    updated["segments"][index]["source_slice_window_start_sec"] = next_window_start
+    if legacy_source is not None and "media_window_basis" not in segment and "media_windows" not in segment:
+        media_basis = [{
+            "start_offset_sec": 0.0,
+            "duration_sec": sum(float(item["duration_sec"]) for item in source_basis),
+            **{field: deepcopy(segment.get(field)) for field in ("broll_override", "music_override", "sfx_override")},
+        }]
+        previous_media_offset = legacy_source[1]
+    else:
+        media_basis = _media_window_basis(segment)
+        previous_media_offset = float(segment.get("media_window_basis_offset_sec", 0.0))
+    next_media_offset = previous_media_offset + start_sec - previous_start
+    if next_media_offset < 0:
+        raise ValueError("segment_media_expansion_outside_window")
+    updated["segments"][index]["media_windows"] = _slice_media_window_basis(
+        windows=media_basis, leading_trim_sec=next_media_offset, duration_sec=end_sec - start_sec,
     )
+    updated["segments"][index]["media_window_basis"] = deepcopy(media_basis)
+    updated["segments"][index]["media_window_basis_offset_sec"] = next_media_offset
     return _record_undoable_mutation(before=session, updated=updated, mutation_type="segment_bounds_update", segment_id=segment_id)
 
 
@@ -476,6 +733,7 @@ def update_segment_broll_override(
     for segment in updated.get("segments", []):
         if str(segment.get("segment_id")) != segment_id:
             continue
+        _clear_windowed_media_override(segment=segment, field="broll_override")
         segment["broll_override"] = {"asset_id": normalized_asset_id}
         if media_controls is not None:
             # Manual project-local placement carries the immutable identity used
@@ -502,6 +760,7 @@ def clear_segment_broll_override(
     for segment in updated.get("segments", []):
         if str(segment.get("segment_id")) != segment_id:
             continue
+        _clear_windowed_media_override(segment=segment, field="broll_override")
         segment["broll_override"] = None
         return _apply_manual_mutation(before=session, updated=updated, mutation_type="broll_override_clear", segment_id=segment_id)
     raise KeyError(f"Segment not found in editing session: {segment_id}")
@@ -512,6 +771,7 @@ def update_segment_sfx_override(*, session: dict[str, Any], segment_id: str, ass
     for segment in updated.get("segments", []):
         if str(segment.get("segment_id")) != segment_id:
             continue
+        _clear_windowed_media_override(segment=segment, field="sfx_override")
         segment["sfx_override"] = {"asset_id": asset_id.strip()}
         if asset_uri:
             segment["sfx_override"]["asset_uri"] = asset_uri
@@ -526,6 +786,7 @@ def clear_segment_sfx_override(*, session: dict[str, Any], segment_id: str) -> d
     for segment in updated.get("segments", []):
         if str(segment.get("segment_id")) != segment_id:
             continue
+        _clear_windowed_media_override(segment=segment, field="sfx_override")
         segment["sfx_override"] = None
         return _apply_manual_mutation(before=session, updated=updated, mutation_type="sfx_override_clear", segment_id=segment_id)
     raise KeyError(f"Segment not found in editing session: {segment_id}")
@@ -685,6 +946,7 @@ def update_segment_music_override(
     for segment in updated.get("segments", []):
         if str(segment.get("segment_id")) != segment_id:
             continue
+        _clear_windowed_media_override(segment=segment, field="music_override")
         segment["music_override"] = {"asset_id": normalized_asset_id}
         if asset_uri:
             segment["music_override"]["asset_uri"] = asset_uri
@@ -703,6 +965,7 @@ def clear_segment_music_override(
     for segment in updated.get("segments", []):
         if str(segment.get("segment_id")) != segment_id:
             continue
+        _clear_windowed_media_override(segment=segment, field="music_override")
         segment["music_override"] = None
         return _apply_manual_mutation(before=session, updated=updated, mutation_type="music_override_clear", segment_id=segment_id)
     raise KeyError(f"Segment not found in editing session: {segment_id}")

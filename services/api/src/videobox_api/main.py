@@ -3,10 +3,14 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 import asyncio
 import inspect
+from math import isfinite
 from pathlib import Path
 from urllib.request import urlopen
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 
 from videobox_api.orchestration import (
     ApiOrchestrator,
@@ -77,6 +81,17 @@ __all__ = [
     "_build_targeted_segments",
     "_build_stt_provider",
 ]
+
+
+def _json_safe_validation_value(value):
+    """Prevent a rejected non-finite request value from breaking its 422 response."""
+    if isinstance(value, float) and not isfinite(value):
+        return "non-finite number"
+    if isinstance(value, dict):
+        return {str(key): _json_safe_validation_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe_validation_value(item) for item in value]
+    return value
 
 
 _MISSING_RUNTIME_ATTRIBUTE = object()
@@ -188,6 +203,14 @@ def create_app(
     hermes_capability_verifier: HermesCapabilityVerifier | None = None,
 ) -> FastAPI:
     app = FastAPI(title="VideoBox API", version="0.1.0", lifespan=_media_analysis_lifespan)
+
+    @app.exception_handler(RequestValidationError)
+    async def request_validation_error_handler(_request: Request, exc: RequestValidationError) -> JSONResponse:
+        return JSONResponse(
+            status_code=422,
+            content={"detail": _json_safe_validation_value(jsonable_encoder(exc.errors()))},
+        )
+
     resolved_projects_root = projects_root or resolve_projects_root()
     database_url = resolve_database_url()
     snapshot_root = resolve_container_snapshot_root()

@@ -40,7 +40,7 @@ from videobox_core_engine.ffmpeg_final_renderer import FinalRenderError, FfmpegF
 from videobox_core_engine.composition_plan import CompositionPlan, materialize_editing_session_timeline
 from videobox_core_engine.exact_preview import ExactPreviewRequest, fingerprint_exact_preview
 from videobox_storage.timeline_clip_source_resolution import TimelineClipSourceError, resolve_generic_asset_uri
-from videobox_core_engine.output_source_verifier import OutputSourceStaleError, verify_output_freshness
+from videobox_core_engine.output_source_verifier import OutputSourceStaleError, verify_output_freshness, verify_output_sources
 from videobox_core_engine.ass_subtitles import render_editing_session_ass
 from videobox_core_engine.thumbnail_generator import ThumbnailGenerationError, generate_video_thumbnail
 from videobox_core_engine.tts_acceptance import assess_tts_audio
@@ -188,9 +188,13 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
             timeline=source_timeline, editing_session=session, project_id=project_id,
         )
         plan = self.build_composition_plan(timeline=source_timeline, editing_session=session, project_id=project_id)
+        full_duration_sec = plan.duration_sec
         if start_sec is not None or end_sec is not None:
             if start_sec is None or end_sec is None:
                 raise ValueError("exact_preview_invalid_range")
+            ExactPreviewRequest(
+                session_id=session_id, expected_revision=int(session["session_revision"]), start_sec=float(start_sec), end_sec=float(end_sec),
+            ).validate_duration(full_duration_sec)
             plan = plan.for_range(start_sec=float(start_sec), end_sec=float(end_sec))
         used_asset_sha256: dict[str, str] = {}
         for item in plan.items:
@@ -255,7 +259,11 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
             session_id=session_id, expected_revision=expected_revision, start_sec=start_sec, end_sec=end_sec
         )
         return self.store.begin_exact_preview(
-            project_id=project_id, request=request, fingerprint=fingerprint, duration_sec=plan.duration_sec
+            project_id=project_id, request=request, fingerprint=fingerprint, duration_sec=plan.duration_sec,
+            source_duration_sec=self.build_composition_plan(
+                timeline=self.store.get_timeline_run(project_id=project_id, timeline_id=str(session["timeline_id"])),
+                editing_session=session, project_id=project_id,
+            ).duration_sec,
         )
 
     def run_exact_preview(self, *, project_id: str, generation_id: str) -> None:
@@ -294,21 +302,27 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 # Rendering can take long enough for media bytes or session
                 # materialization to change.  Rebuild immediately before the
                 # durable publish and never publish a mismatched proxy.
-                current_session, _current_timeline, _current_plan, current_fingerprint = self._exact_preview_inputs(
-                    project_id=project_id, session_id=str(record["session_id"]),
-                    start_sec=record.get("start_sec"), end_sec=record.get("end_sec"),
-                )
-                if (
-                    int(current_session["session_revision"]) != int(record["expected_revision"])
-                    or current_fingerprint != str(record["fingerprint"])
-                ):
+                def source_fence() -> bool:
+                    try:
+                        current_session, _current_timeline, _current_plan, current_fingerprint = self._exact_preview_inputs(
+                            project_id=project_id, session_id=str(record["session_id"]),
+                            start_sec=record.get("start_sec"), end_sec=record.get("end_sec"),
+                        )
+                    except Exception:
+                        return False
+                    return (
+                        int(current_session["session_revision"]) == int(record["expected_revision"])
+                        and current_fingerprint == str(record["fingerprint"])
+                    )
+
+                if not source_fence():
                     self.store.mark_exact_preview_stale(
                         project_id=project_id, generation_id=generation_id, reason="publish_revalidation_failed",
                     )
                     return
                 if not self.store.finish_exact_preview(
                     project_id=project_id, generation_id=generation_id, fingerprint=fingerprint,
-                    artifact_path=output_path, owner_token=owner_token,
+                    artifact_path=output_path, owner_token=owner_token, source_fence=source_fence,
                 ):
                     return
         except Exception as exc:
@@ -1519,6 +1533,9 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 else None
             )
             editing_session = self._editing_session_for_output_timeline(project_id=project_id, timeline=timeline)
+            materialized_timeline = materialize_editing_session_timeline(
+                timeline=timeline, editing_session=editing_session, project_id=project_id,
+            )
             # Establish the same immutable timeline/caption input that the
             # exact-preview worker will consume in Task 2.  Rendering remains
             # on the existing final path in this Task 1 extraction slice.
@@ -1546,7 +1563,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                     )
                 self.final_renderer.render_timeline_to_mp4(
                     project_id=project_id,
-                    timeline=timeline,
+                    timeline=materialized_timeline,
                     output_path=render_output_path,
                     subtitle_file_path=subtitle_file_path,
                     subtitle_ass_path=subtitle_ass_path,
@@ -1554,6 +1571,13 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                     on_progress=lambda percent: self.store.update_job_progress(
                         project_id=project_id, job_id=job["job_id"], progress_percent=percent
                     ),
+                )
+                # The renderer can run for minutes.  Re-check both the durable
+                # session/review contract and the *materialized* override inputs
+                # before an output file becomes a final-render export.
+                self._ensure_output_dependencies_fresh(project_id=project_id, timeline=timeline)
+                verify_output_sources(
+                    store=self.store, project_id=project_id, timeline=materialized_timeline,
                 )
                 persisted = self.store.save_final_render(
                     project_id=project_id,

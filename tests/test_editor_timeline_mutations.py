@@ -105,6 +105,18 @@ def test_merge_requires_adjacent_touching_segments_and_keeps_all_source_media_li
     assert updated["history"][-1]["mutation_type"] == "segment_merge"
 
 
+@pytest.mark.parametrize(("left_action", "right_action"), [("remove", "keep"), ("keep", "remove"), ("keep", "review")])
+def test_merge_rejects_removed_or_different_cut_actions(left_action: str, right_action: str) -> None:
+    from videobox_core_engine.editing_session import merge_adjacent_segments
+
+    session = _session()
+    session["segments"][0]["cut_action"] = left_action
+    session["segments"][1]["cut_action"] = right_action
+
+    with pytest.raises(ValueError, match="same non-remove"):
+        merge_adjacent_segments(session=session, left_segment_id="seg_001", right_segment_id="seg_002")
+
+
 def test_reorder_and_bounds_reject_overlap_but_allow_a_complete_non_overlapping_relayout() -> None:
     from videobox_core_engine.editing_session import reorder_segments, set_segment_bounds
 
@@ -212,6 +224,26 @@ def test_timeline_mutation_api_is_revisioned_and_selected_preview_returns_only_f
     assert preview.status_code == 200, preview.text
     assert [track["role"] for track in preview.json()["timeline"]["tracks"]] == ["narration", "broll", "bgm", "sfx", "overlay"]
     assert preview.json()["captions"][0]["segment_id"] == "seg_001"
+
+
+def test_merge_api_rejects_removed_child_without_mutating_session(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Removed child merge")
+    session_payload = _session()
+    session_payload["segments"][1]["cut_action"] = "remove"
+    saved = store.save_editing_session(project_id=project.project_id, timeline_id="timeline_001", session_payload=session_payload)
+    client = TestClient(create_app(projects_root=tmp_path))
+    root = f"/api/projects/{project.project_id}/editing-sessions/{saved['session_id']}"
+
+    response = client.post(
+        f"{root}/segments/merge",
+        json={"left_segment_id": "seg_001", "right_segment_id": "seg_002", "expected_revision": 1},
+    )
+
+    assert response.status_code == 422
+    reloaded = store.get_editing_session(project_id=project.project_id, session_id=saved["session_id"])
+    assert reloaded["session_revision"] == 1
+    assert [segment["segment_id"] for segment in reloaded["segments"]] == ["seg_001", "seg_002", "seg_003"]
 
 
 def test_manual_caption_api_increments_revision_and_rejects_a_stale_expected_revision(tmp_path: Path) -> None:
