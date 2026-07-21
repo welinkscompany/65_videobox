@@ -3,6 +3,8 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
+import pytest
+
 from videobox_storage.local_project_store import LocalProjectStore
 
 
@@ -55,6 +57,42 @@ def test_bootstrap_project_creates_sqlite_tables(tmp_path: Path) -> None:
         "exports",
         "voice_samples",
     }.issubset(table_names)
+
+
+def test_connection_initialization_failure_closes_the_open_sqlite_handle(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Connection Cleanup")
+    from videobox_storage import local_project_store
+
+    original_connect = local_project_store.sqlite3.connect
+
+    class _FailingSetupConnection:
+        def __init__(self, connection: sqlite3.Connection) -> None:
+            self.connection = connection
+            self.closed = False
+
+        def execute(self, statement: str, *args: object, **kwargs: object):
+            if statement == "PRAGMA busy_timeout=5000":
+                raise sqlite3.OperationalError("injected setup failure")
+            return self.connection.execute(statement, *args, **kwargs)
+
+        def close(self) -> None:
+            self.closed = True
+            self.connection.close()
+
+    wrappers: list[_FailingSetupConnection] = []
+
+    def failing_connect(*args: object, **kwargs: object) -> _FailingSetupConnection:
+        connection = original_connect(*args, **kwargs)
+        wrapper = _FailingSetupConnection(connection)
+        wrappers.append(wrapper)
+        return wrapper
+
+    monkeypatch.setattr(local_project_store.sqlite3, "connect", failing_connect)
+    with pytest.raises(sqlite3.OperationalError, match="injected setup failure"):
+        store._connection(project.project_id)
+
+    assert len(wrappers) == 1 and wrappers[0].closed is True
 
 
 def test_save_timeline_run_summary_ignores_unknown_review_flag_count(tmp_path: Path) -> None:

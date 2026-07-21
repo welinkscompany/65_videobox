@@ -198,3 +198,99 @@ def test_exact_preview_publish_rechecks_sources_inside_durable_publish_fence(tmp
     assert published["state"] == "obsolete"
     assert published["invalidated_reason"] == "publish_source_fence_failed"
     assert published["artifact_uri"] is None
+
+
+def test_exact_preview_baseline_source_completes_inside_durable_publish_fence(tmp_path: Path) -> None:
+    """The durable source fence must not self-invalidate an unchanged preview."""
+
+    class _OutputOnlyRenderer(FfmpegFinalRenderer):
+        def render_exact_preview_to_mp4(self, *, output_path: Path, **_kwargs: Any) -> Path:
+            output_path.write_bytes(b"unchanged-source-preview")
+            return output_path
+
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="exact preview baseline source fence")
+    source = tmp_path / "preview-source.mp4"
+    source.write_bytes(b"unchanged-source")
+    asset = store.register_asset(
+        project_id=project.project_id,
+        asset_type=AssetType.BROLL_VIDEO,
+        source_path=source,
+    )
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        source_session_revision=1,
+        timeline_payload={
+            "output": {"duration_sec": 1},
+            "tracks": [{"track_type": "broll", "clips": [{
+                "clip_id": "b", "asset_id": asset.asset_id,
+                "asset_uri": f"local://projects/{project.project_id}/assets/{asset.asset_id}",
+                "start_sec": 0, "end_sec": 1,
+            }]}],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={"segments": []},
+    )
+    runner = LocalPipelineRunner(store, final_renderer=_OutputOnlyRenderer(store=store))
+    record = runner.start_exact_preview(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+        expected_revision=session["session_revision"],
+    )
+
+    runner.run_exact_preview(project_id=project.project_id, generation_id=record["generation_id"])
+
+    published = store.get_exact_preview(project_id=project.project_id, generation_id=record["generation_id"])
+    assert published["state"] == "succeeded"
+    assert published["artifact_uri"] is not None
+
+
+def test_exact_preview_timeline_mutation_after_render_is_never_published(tmp_path: Path) -> None:
+    """A lock-safe fence still rejects a changed source timeline."""
+
+    class _TimelineMutatingRenderer(FfmpegFinalRenderer):
+        def render_exact_preview_to_mp4(self, *, output_path: Path, **_kwargs: Any) -> Path:
+            output_path.write_bytes(b"rendered-before-timeline-mutation")
+            latest = self.store.get_timeline_run(project_id=self.project_id, timeline_id=self.timeline_id)
+            latest["output"]["marker"] = "changed-after-render"
+            self.store.update_timeline_run(
+                project_id=self.project_id, timeline_id=self.timeline_id, timeline_payload=latest,
+            )
+            return output_path
+
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="exact preview timeline source fence")
+    source = tmp_path / "preview-source.mp4"
+    source.write_bytes(b"timeline-source")
+    asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=source)
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        source_session_revision=1,
+        timeline_payload={
+            "output": {"duration_sec": 1},
+            "tracks": [{"track_type": "broll", "clips": [{
+                "clip_id": "b", "asset_id": asset.asset_id,
+                "asset_uri": f"local://projects/{project.project_id}/assets/{asset.asset_id}",
+                "start_sec": 0, "end_sec": 1,
+            }]}],
+        },
+    )
+    session = store.save_editing_session(project_id=project.project_id, timeline_id=timeline["timeline_id"], session_payload={"segments": []})
+    renderer = _TimelineMutatingRenderer(store=store)
+    renderer.project_id, renderer.timeline_id = project.project_id, timeline["timeline_id"]
+    runner = LocalPipelineRunner(store, final_renderer=renderer)
+    record = runner.start_exact_preview(
+        project_id=project.project_id, session_id=session["session_id"], expected_revision=session["session_revision"],
+    )
+
+    runner.run_exact_preview(project_id=project.project_id, generation_id=record["generation_id"])
+
+    published = store.get_exact_preview(project_id=project.project_id, generation_id=record["generation_id"])
+    assert published["state"] == "obsolete"
+    assert published["invalidated_reason"] == "publish_revalidation_failed"
+    assert published["artifact_uri"] is None

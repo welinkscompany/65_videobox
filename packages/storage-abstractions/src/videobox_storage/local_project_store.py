@@ -515,7 +515,7 @@ class LocalProjectStore:
 
     def finish_exact_preview(
         self, *, project_id: str, generation_id: str, fingerprint: str, artifact_path: Path, owner_token: str,
-        source_fence: Callable[[], bool] | None = None,
+        source_fence: Callable[[sqlite3.Connection], bool] | None = None,
     ) -> bool:
         """Atomically copy/rename then publish only a still-current generation."""
         artifact_path = Path(artifact_path)
@@ -556,7 +556,7 @@ class LocalProjectStore:
             # a source changed after the pipeline's first check can never gain
             # an observable succeeded pointer.
             try:
-                source_is_current = source_fence is None or bool(source_fence())
+                source_is_current = source_fence is None or bool(source_fence(connection))
             except Exception:
                 source_is_current = False
             if not source_is_current:
@@ -5337,37 +5337,41 @@ class LocalProjectStore:
 
     def _connection(self, project_id: str) -> sqlite3.Connection:
         connection = sqlite3.connect(self.database_path(project_id), timeout=5.0)
-        # WAL lets readers proceed while a writer holds the lock, and
-        # busy_timeout makes any remaining contention retry instead of
-        # immediately raising "database is locked" — both matter once
-        # background job threads (see run_*_job in local_pipeline.py) write
-        # to the same per-project database concurrently with polling reads.
-        connection.execute("PRAGMA busy_timeout=5000")
-        # The database is initialized in WAL mode.  Concurrently asking SQLite
-        # to change journal mode can itself take an exclusive lock; a racing
-        # connection may safely continue with the already-established mode.
         try:
-            connection.execute("PRAGMA journal_mode=WAL")
-        except sqlite3.OperationalError as exc:
-            if "locked" not in str(exc).lower():
-                raise
-        for statement in PROJECT_SCHEMA_STATEMENTS:
-            connection.execute(statement)
-        connection.execute(f"DROP TABLE IF EXISTS {RETIRED_CREDENTIAL_TABLE}")
-        self._ensure_recommendation_decision_state_column(connection)
-        self._ensure_job_progress_percent_column(connection)
-        self._ensure_editing_session_revision_column(connection)
-        self._ensure_editing_session_json_column(connection)
-        self._ensure_tts_candidate_acceptance_columns(connection)
-        self._ensure_artifact_freshness_columns(connection)
-        self._ensure_director_message_metadata_column(connection)
-        self._ensure_director_claim_columns(connection)
-        self._ensure_creation_brief_columns(connection)
-        self._ensure_exact_preview_columns(connection)
-        self._ensure_artifact_freshness_triggers(connection)
-        connection.commit()
-        connection.row_factory = sqlite3.Row
-        return connection
+            # WAL lets readers proceed while a writer holds the lock, and
+            # busy_timeout makes any remaining contention retry instead of
+            # immediately raising "database is locked" — both matter once
+            # background job threads (see run_*_job in local_pipeline.py) write
+            # to the same per-project database concurrently with polling reads.
+            connection.execute("PRAGMA busy_timeout=5000")
+            # The database is initialized in WAL mode.  Concurrently asking SQLite
+            # to change journal mode can itself take an exclusive lock; a racing
+            # connection may safely continue with the already-established mode.
+            try:
+                connection.execute("PRAGMA journal_mode=WAL")
+            except sqlite3.OperationalError as exc:
+                if "locked" not in str(exc).lower():
+                    raise
+            for statement in PROJECT_SCHEMA_STATEMENTS:
+                connection.execute(statement)
+            connection.execute(f"DROP TABLE IF EXISTS {RETIRED_CREDENTIAL_TABLE}")
+            self._ensure_recommendation_decision_state_column(connection)
+            self._ensure_job_progress_percent_column(connection)
+            self._ensure_editing_session_revision_column(connection)
+            self._ensure_editing_session_json_column(connection)
+            self._ensure_tts_candidate_acceptance_columns(connection)
+            self._ensure_artifact_freshness_columns(connection)
+            self._ensure_director_message_metadata_column(connection)
+            self._ensure_director_claim_columns(connection)
+            self._ensure_creation_brief_columns(connection)
+            self._ensure_exact_preview_columns(connection)
+            self._ensure_artifact_freshness_triggers(connection)
+            connection.commit()
+            connection.row_factory = sqlite3.Row
+            return connection
+        except Exception:
+            connection.close()
+            raise
 
     def _ensure_creation_brief_columns(self, connection: sqlite3.Connection) -> None:
         columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(creation_briefs)").fetchall()}

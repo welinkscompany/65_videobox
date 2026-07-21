@@ -243,6 +243,59 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         )
         return session, timeline, plan, fingerprint
 
+    def _capture_exact_preview_source_fence(
+        self, *, project_id: str, session: dict[str, Any], timeline: dict[str, Any], plan: CompositionPlan,
+    ) -> Any:
+        """Capture the exact worker inputs for a lock-safe publish recheck.
+
+        ``finish_exact_preview`` owns the SQLite writer lock while publishing.
+        Its fence must therefore not rebuild the plan through store accessors:
+        those open schema-initializing SQLite connections and self-deadlock on
+        Windows.  The session revision is verified by the storage transaction;
+        this closure verifies the immutable byte inputs and source timeline
+        without reopening the store.
+        """
+        expected_by_path: dict[Path, str] = {}
+        try:
+            for item in plan.items:
+                if item.track_type == "narration":
+                    path = self.final_renderer._resolve_narration_clip_source(
+                        project_id=project_id, timeline=timeline,
+                        clip={"asset_uri": item.asset_uri, "start_sec": item.start_sec, "end_sec": item.end_sec},
+                    ).path
+                else:
+                    path = resolve_generic_asset_uri(
+                        store=self.store, project_id=project_id, asset_uri=str(item.asset_uri or ""),
+                    )
+                if not path.is_file():
+                    raise FileNotFoundError(path)
+                expected_by_path[path.resolve()] = sha256_file(path)
+            for overlay in plan.export_overlays:
+                asset_uri = str(overlay.get("asset_uri") or "")
+                asset_id = str(overlay.get("asset_id") or "")
+                if not asset_uri and asset_id:
+                    asset_uri = f"local://projects/{project_id}/assets/{asset_id}"
+                if not asset_uri:
+                    continue
+                path = resolve_generic_asset_uri(store=self.store, project_id=project_id, asset_uri=asset_uri)
+                if not path.is_file():
+                    raise FileNotFoundError(path)
+                expected_by_path[path.resolve()] = sha256_file(path)
+            timeline_path = self.store.project_root(project_id) / "timelines" / f"{session['timeline_id']}.json"
+            if not timeline_path.is_file():
+                raise FileNotFoundError(timeline_path)
+            expected_by_path[timeline_path.resolve()] = sha256_file(timeline_path)
+        except (KeyError, OSError, ValueError, TimelineClipSourceError, FinalRenderError):
+            return lambda _connection: False
+
+        def source_fence(_connection: Any) -> bool:
+            try:
+                return all(path.is_file() and sha256_file(path) == expected for path, expected in expected_by_path.items())
+            except OSError:
+                return False
+
+        return source_fence
+
     def start_exact_preview(
         self, *, project_id: str, session_id: str, expected_revision: int, start_sec: float | None = None, end_sec: float | None = None
     ) -> dict[str, Any]:
@@ -285,6 +338,9 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
             if int(session["session_revision"]) != int(record["expected_revision"]) or fingerprint != str(record["fingerprint"]):
                 self.store.mark_exact_preview_stale(project_id=project_id, generation_id=generation_id, reason="source_fingerprint_changed")
                 return
+            source_fence = self._capture_exact_preview_source_fence(
+                project_id=project_id, session=session, timeline=timeline, plan=plan,
+            )
             with tempfile.TemporaryDirectory(prefix="videobox_exact_preview_") as raw_dir:
                 raw = Path(raw_dir)
                 ass_path = raw / "captions.ass"
@@ -307,20 +363,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 # Rendering can take long enough for media bytes or session
                 # materialization to change.  Rebuild immediately before the
                 # durable publish and never publish a mismatched proxy.
-                def source_fence() -> bool:
-                    try:
-                        current_session, _current_timeline, _current_plan, current_fingerprint = self._exact_preview_inputs(
-                            project_id=project_id, session_id=str(record["session_id"]),
-                            start_sec=record.get("start_sec"), end_sec=record.get("end_sec"),
-                        )
-                    except Exception:
-                        return False
-                    return (
-                        int(current_session["session_revision"]) == int(record["expected_revision"])
-                        and current_fingerprint == str(record["fingerprint"])
-                    )
-
-                if not source_fence():
+                if not source_fence(None):
                     self.store.mark_exact_preview_stale(
                         project_id=project_id, generation_id=generation_id, reason="publish_revalidation_failed",
                     )
