@@ -1,6 +1,14 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 282. 2026-07-21 Task 12·13 exact preview technical verification closeout`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 283. 2026-07-21 exact preview publish fence remediation closeout`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+
+## 283. 2026-07-21 exact preview publish fence remediation closeout
+
+- `[~] 기술 remediation·focused 검증 완료, 공식 checkbox/사람 gate 동결`: `b781540ca`→`e27049fba`와 후속 bounded publish fence는 final render가 base/override B-roll·BGM·SFX, export overlay 및 virtual narration segment가 실제로 읽는 `narration_source_uri` project asset을 모두 SHA/revision 스냅샷한다. legacy clip에 기존 identity 필드가 없어도 현재 byte identity를 잡고, source 바이트가 바뀌면 final output/preview를 publish하지 않는다. 논리 `local://…/assets/{asset_id}` URI는 asset ID/project 경계로, direct storage URI는 등록된 project asset 역매핑으로 검증하며 둘 다 아니면 fail-closed다.
+- exact preview의 큰 source SHA 재검증과 완성 MP4 copy/staging은 SQLite `BEGIN IMMEDIATE` writer lock 밖에서 한다. publish transaction은 이미 계산된 결과, session CAS·size/mtime의 constant-time 재확인·atomic rename·DB pointer만 수행한다. 회귀는 2 MiB B-roll의 post-render SHA가 한 번임, 느린 rehash와 artifact copy 중 별도 editing-session revision write가 1초 안에 끝나 preview가 obsolete 되는 것을 함께 증명한다.
+- fresh verification: affected runtime suite `172 passed`(기존 multipart PendingDeprecationWarning 1), exact local 10초·1280×720 fixture cold `549.4ms`(≤20초), warm cache lookup `243.6ms`(≤500ms). 이 slice에서 frontend production build와 전체 Python regression은 다시 실행하지 않았다. 특히 사용자가 앞서 중단한 full Python regression은 **미검증**이며 focused pass를 full-pass로 해석하지 않는다.
+- Task 9의 실제 두 번째 scene MP4·current-revision 사람 승인·실제 CapCut Desktop 증빙과 Task 11의 두 번째 사용자 시각 승인은 계속 필요하다. 따라서 공식 checkbox/누적은 **9/22 (40.9%)**, 잔여 **59.1%**를 유지한다.
+- 다음 작업: 사람 승인 gate를 우회하지 않는다. 사용자가 Task 11 시안을 승인 또는 수정 요청하면 공식 Task 14 read-only timeline geometry/navigation을 시작한다. Hermes Dashboard/provider 설정은 별도 사용자 요청 전까지 보류한다.
 
 ## 282. 2026-07-21 Task 12·13 exact preview technical verification closeout
 

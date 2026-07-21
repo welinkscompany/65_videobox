@@ -516,6 +516,7 @@ class LocalProjectStore:
     def finish_exact_preview(
         self, *, project_id: str, generation_id: str, fingerprint: str, artifact_path: Path, owner_token: str,
         source_fence: Callable[[sqlite3.Connection], bool] | None = None,
+        source_fence_result: bool | None = None,
     ) -> bool:
         """Atomically copy/rename then publish only a still-current generation."""
         artifact_path = Path(artifact_path)
@@ -523,8 +524,23 @@ class LocalProjectStore:
             raise ValueError("exact_preview_claim_token_required")
         if not artifact_path.is_file():
             raise FileNotFoundError(artifact_path)
-        connection = self._connection(project_id)
-        temporary: Path | None = None
+        destination_dir = self.project_root(project_id) / "derived" / "exact_previews"
+        destination_dir.mkdir(parents=True, exist_ok=True)
+        # Copying a completed proxy can take much longer than a SQLite writer
+        # budget.  Stage it under the active generation before BEGIN IMMEDIATE;
+        # the transaction below still owns all authoritative CAS/fence checks
+        # and the atomic rename which makes the bytes eligible for a pointer.
+        temporary = destination_dir / f".{generation_id}.{uuid.uuid4().hex}.tmp"
+        try:
+            shutil.copyfile(artifact_path, temporary)
+        except Exception:
+            temporary.unlink(missing_ok=True)
+            raise
+        try:
+            connection = self._connection(project_id)
+        except Exception:
+            temporary.unlink(missing_ok=True)
+            raise
         published: Path | None = None
         try:
             connection.execute("BEGIN IMMEDIATE")
@@ -545,18 +561,17 @@ class LocalProjectStore:
                 connection.execute("UPDATE exact_preview_renders SET state = 'obsolete', invalidated_at = ?, invalidated_reason = 'session_revision_changed', updated_at = ? WHERE generation_id = ?", (self._now_iso(), self._now_iso(), generation_id))
                 connection.commit()
                 return False
-            destination_dir = self.project_root(project_id) / "derived" / "exact_previews"
-            destination_dir.mkdir(parents=True, exist_ok=True)
             published = destination_dir / f"{generation_id}.mp4"
-            temporary = destination_dir / f".{generation_id}.{uuid.uuid4().hex}.tmp"
-            shutil.copyfile(artifact_path, temporary)
             temporary.replace(published)
             # Revalidate inside the same durable claim transaction after the
             # artifact is staged.  This closes the render->publish handoff:
             # a source changed after the pipeline's first check can never gain
             # an observable succeeded pointer.
             try:
-                source_is_current = source_fence is None or bool(source_fence(connection))
+                source_is_current = (
+                    (source_fence_result is None or bool(source_fence_result))
+                    and (source_fence is None or bool(source_fence(connection)))
+                )
             except Exception:
                 source_is_current = False
             if not source_is_current:

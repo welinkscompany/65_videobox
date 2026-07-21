@@ -43,6 +43,12 @@ Hermes Dashboard에서 다음만 수행한다.
 - fresh verification: actual 10초 1280×720 local fixture cold `472.5ms`(≤20초), warm `84.3ms`(≤500ms); focused backend/API/real FFmpeg/edit-session `102 passed`(기존 multipart warning 1); frontend full `37 files / 335 tests passed`; production build; isolated editor workbench Playwright `8 passed`; provenance verifier와 `git diff --check` 통과. build의 500 kB chunk 안내와 기존 React `act(...)`/JSDOM stderr는 비차단 경고다.
 - 이번 slice의 전체 Python regression은 실행하지 않았다. 이전 사용자 중단 상태를 존중해 full-pass를 주장하지 않으며 **미검증**으로 남긴다. Task 9 사람/환경 acceptance와 Task 11 사용자 시각 승인은 그대로 pending이고, 공식 checkbox/누적은 **9/22 (40.9%)**를 유지한다.
 
+### 2026-07-21 final publish-fence 보강
+
+- `b781540ca`→`e27049fba`와 후속 bounded fence는 final renderer/exact preview가 base/override B-roll·BGM·SFX, export overlay와 virtual narration segment가 읽는 `narration_source_uri`의 모든 실제 project asset을 capture/revalidate하도록 확장했다. 기존 SHA/revision field가 없는 legacy clip도 현재 digest/revision을 snapshot한다. `/segments/` URI는 narration track에서만 허용하며, 논리 asset URI는 asset ID/project로, direct storage URI는 등록된 project asset 역매핑으로 검증하고 어느 쪽도 아니면 fail-closed다.
+- full SHA 재검증과 completed MP4 copy/staging은 writer lock 전에 한 번만 수행한다. durable publish는 precomputed revalidation·session CAS·size/mtime quick check·atomic rename·DB pointer만 하므로, controlled slow rehash/copy 중 concurrent editing-session mutation이 완료되고 old preview가 obsolete 되는 회귀를 보장한다.
+- fresh affected runtime `172 passed`(기존 multipart warning 1), 10초·1280×720 local fixture cold `549.4ms`(≤20초), warm `243.6ms`(≤500ms). 이 remediation의 frontend production build와 전체 Python regression은 실행하지 않아 **미검증**이다. Task 9은 실제 MP4/사람 승인/CapCut Desktop 증빙 전까지, Task 11은 두 번째 사용자 시각 승인 전까지 계속 열려 있으며 누적은 **9/22 (40.9%)**다.
+
 ## 다음 세션 첫 작업
 
 1. Hermes Dashboard/provider 설정은 보류한다. 사용자가 명시적으로 재개할 때만 `docker compose -p 65_videobox ps -a`와 `http://127.0.0.1:9119`를 다시 확인한다.

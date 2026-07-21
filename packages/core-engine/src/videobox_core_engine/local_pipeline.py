@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 import json
@@ -110,6 +111,26 @@ from videobox_core_engine._pipeline_shared_helpers import (
 )
 from videobox_core_engine.editing_session_and_regeneration import EditingSessionConflict, EditingSessionRegenerationMixin
 from videobox_core_engine._pipeline_private_helpers import _PipelinePrivateHelpersMixin
+
+
+@dataclass(frozen=True)
+class _ExactPreviewSourceRevalidation:
+    """Full-hash result plus a constant-time publish-boundary file check."""
+
+    is_current: bool
+    file_stats: tuple[tuple[Path, int, int], ...] = ()
+
+    def still_matches(self) -> bool:
+        if not self.is_current:
+            return False
+        try:
+            for path, expected_size, expected_mtime_ns in self.file_stats:
+                stat = path.stat()
+                if not path.is_file() or stat.st_size != expected_size or stat.st_mtime_ns != expected_mtime_ns:
+                    return False
+            return True
+        except OSError:
+            return False
 
 
 class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpersMixin):
@@ -243,17 +264,18 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         )
         return session, timeline, plan, fingerprint
 
-    def _capture_exact_preview_source_fence(
+    def _capture_exact_preview_source_snapshots(
         self, *, project_id: str, session: dict[str, Any], timeline: dict[str, Any], plan: CompositionPlan,
-    ) -> Any:
-        """Capture the exact worker inputs for a lock-safe publish recheck.
+    ) -> dict[Path, str] | None:
+        """Capture byte identities for the exact worker's local inputs.
 
         ``finish_exact_preview`` owns the SQLite writer lock while publishing.
         Its fence must therefore not rebuild the plan through store accessors:
         those open schema-initializing SQLite connections and self-deadlock on
         Windows.  The session revision is verified by the storage transaction;
-        this closure verifies the immutable byte inputs and source timeline
-        without reopening the store.
+        Revalidation hashes run *before* the storage writer transaction.  The
+        transaction subsequently consumes the captured boolean plus its own
+        session CAS, avoiding a multi-second writer lock on large media.
         """
         expected_by_path: dict[Path, str] = {}
         try:
@@ -286,15 +308,29 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 raise FileNotFoundError(timeline_path)
             expected_by_path[timeline_path.resolve()] = sha256_file(timeline_path)
         except (KeyError, OSError, ValueError, TimelineClipSourceError, FinalRenderError):
-            return lambda _connection: False
+            return None
+        return expected_by_path
 
-        def source_fence(_connection: Any) -> bool:
-            try:
-                return all(path.is_file() and sha256_file(path) == expected for path, expected in expected_by_path.items())
-            except OSError:
-                return False
-
-        return source_fence
+    @staticmethod
+    def _revalidate_exact_preview_source_snapshots(
+        snapshots: dict[Path, str] | None,
+    ) -> _ExactPreviewSourceRevalidation:
+        """Full-hash exact-preview inputs outside the durable writer lock."""
+        if snapshots is None:
+            return _ExactPreviewSourceRevalidation(is_current=False)
+        try:
+            file_stats: list[tuple[Path, int, int]] = []
+            for path, expected in snapshots.items():
+                before = path.stat()
+                if not path.is_file() or sha256_file(path) != expected:
+                    return _ExactPreviewSourceRevalidation(is_current=False)
+                after = path.stat()
+                if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+                    return _ExactPreviewSourceRevalidation(is_current=False)
+                file_stats.append((path, after.st_size, after.st_mtime_ns))
+            return _ExactPreviewSourceRevalidation(is_current=True, file_stats=tuple(file_stats))
+        except OSError:
+            return _ExactPreviewSourceRevalidation(is_current=False)
 
     def start_exact_preview(
         self, *, project_id: str, session_id: str, expected_revision: int, start_sec: float | None = None, end_sec: float | None = None
@@ -338,7 +374,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
             if int(session["session_revision"]) != int(record["expected_revision"]) or fingerprint != str(record["fingerprint"]):
                 self.store.mark_exact_preview_stale(project_id=project_id, generation_id=generation_id, reason="source_fingerprint_changed")
                 return
-            source_fence = self._capture_exact_preview_source_fence(
+            source_snapshots = self._capture_exact_preview_source_snapshots(
                 project_id=project_id, session=session, timeline=timeline, plan=plan,
             )
             with tempfile.TemporaryDirectory(prefix="videobox_exact_preview_") as raw_dir:
@@ -363,14 +399,17 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 # Rendering can take long enough for media bytes or session
                 # materialization to change.  Rebuild immediately before the
                 # durable publish and never publish a mismatched proxy.
-                if not source_fence(None):
+                source_revalidation = self._revalidate_exact_preview_source_snapshots(source_snapshots)
+                if not source_revalidation.is_current:
                     self.store.mark_exact_preview_stale(
                         project_id=project_id, generation_id=generation_id, reason="publish_revalidation_failed",
                     )
                     return
                 if not self.store.finish_exact_preview(
                     project_id=project_id, generation_id=generation_id, fingerprint=fingerprint,
-                    artifact_path=output_path, owner_token=owner_token, source_fence=source_fence,
+                    artifact_path=output_path, owner_token=owner_token,
+                    source_fence_result=source_revalidation.is_current,
+                    source_fence=lambda _connection: source_revalidation.still_matches(),
                 ):
                     return
         except Exception as exc:
@@ -1609,6 +1648,12 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                         ),
                         encoding="utf-8",
                     )
+                # Capture every actual materialized composition asset before
+                # FFmpeg starts.  The same snapshots are rechecked inside the
+                # durable writer fence after the potentially long render.
+                source_snapshots = capture_output_source_snapshots(
+                    store=self.store, project_id=project_id, timeline=materialized_timeline,
+                )
                 self.final_renderer.render_timeline_to_mp4(
                     project_id=project_id,
                     timeline=materialized_timeline,
@@ -1624,9 +1669,6 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 # session/review contract and the *materialized* override inputs
                 # before an output file becomes a final-render export.
                 self._ensure_output_dependencies_fresh(project_id=project_id, timeline=timeline)
-                source_snapshots = capture_output_source_snapshots(
-                    store=self.store, project_id=project_id, timeline=materialized_timeline,
-                )
 
                 def final_source_fence(connection: Any) -> bool:
                     # save_final_render executes this after staging the MP4 but
