@@ -8,6 +8,7 @@ from typing import Any
 
 
 PLACEMENT_KINDS = frozenset({"broll", "bgm", "sfx", "overlay", "caption"})
+MUTABLE_PLACEMENT_KINDS = PLACEMENT_KINDS - {"caption"}
 
 
 def placement_id(*, kind: str, base_id: str) -> str:
@@ -26,7 +27,7 @@ def collect_timeline_placements(*, timeline: dict[str, object]) -> dict[str, dic
         if not isinstance(track, dict):
             raise ValueError("timeline_placement_tracks_invalid")
         kind = str(track.get("track_type") or "")
-        if kind not in PLACEMENT_KINDS - {"caption"}:
+        if kind not in MUTABLE_PLACEMENT_KINDS:
             continue
         clips = track.get("clips")
         if not isinstance(clips, list):
@@ -35,15 +36,6 @@ def collect_timeline_placements(*, timeline: dict[str, object]) -> dict[str, dic
             if not isinstance(clip, dict):
                 raise ValueError("timeline_placement_clips_invalid")
             _add_placement(result=result, kind=kind, base_id=str(clip.get("clip_id") or ""), start=clip.get("start_sec"), end=clip.get("end_sec"))
-    captions = timeline.get("session_captions")
-    if captions is None:
-        captions = timeline.get("caption_segments", [])
-    if not isinstance(captions, list):
-        raise ValueError("timeline_placement_captions_invalid")
-    for caption in captions:
-        if not isinstance(caption, dict):
-            raise ValueError("timeline_placement_captions_invalid")
-        _add_placement(result=result, kind="caption", base_id=str(caption.get("caption_id") or ""), start=caption.get("start_sec"), end=caption.get("end_sec"))
     export_overlays = timeline.get("export_overlays", [])
     if not isinstance(export_overlays, list):
         raise ValueError("timeline_placement_export_overlays_invalid")
@@ -106,8 +98,13 @@ def apply_timeline_placement_overrides(*, timeline: dict[str, object], overrides
     if not overrides:
         return materialized
     placements = collect_timeline_placements(timeline=materialized)
+    applicable_overrides = {
+        identifier: override
+        for identifier, override in overrides.items()
+        if not identifier.startswith("caption:")
+    }
     expected = set(placements)
-    for identifier, override in overrides.items():
+    for identifier, override in applicable_overrides.items():
         if identifier not in expected or not isinstance(override, dict):
             raise ValueError("timeline_placement_unknown")
         if str(override.get("placement_id") or "") != identifier or override.get("kind") != placements[identifier]["kind"]:
@@ -116,27 +113,18 @@ def apply_timeline_placement_overrides(*, timeline: dict[str, object], overrides
         if not isinstance(track, dict):
             continue
         kind = str(track.get("track_type") or "")
-        if kind not in PLACEMENT_KINDS - {"caption"}:
+        if kind not in MUTABLE_PLACEMENT_KINDS:
             continue
         for clip in track.get("clips", []) if isinstance(track.get("clips"), list) else []:
             if not isinstance(clip, dict):
                 continue
-            override = overrides.get(placement_id(kind=kind, base_id=str(clip.get("clip_id") or "")))
+            override = applicable_overrides.get(placement_id(kind=kind, base_id=str(clip.get("clip_id") or "")))
             if override:
                 clip["start_sec"], clip["end_sec"] = override["start_sec"], override["end_sec"]
-    captions = materialized.get("session_captions")
-    if captions is None:
-        captions = materialized.get("caption_segments", [])
-    for caption in captions if isinstance(captions, list) else []:
-        if not isinstance(caption, dict):
-            continue
-        override = overrides.get(placement_id(kind="caption", base_id=str(caption.get("caption_id") or "")))
-        if override:
-            caption["start_sec"], caption["end_sec"] = override["start_sec"], override["end_sec"]
     for overlay in materialized.get("export_overlays", []) if isinstance(materialized.get("export_overlays"), list) else []:
         if not isinstance(overlay, dict):
             continue
-        override = overrides.get(placement_id(kind="overlay", base_id=str(overlay.get("clip_id") or "")))
+        override = applicable_overrides.get(placement_id(kind="overlay", base_id=str(overlay.get("clip_id") or "")))
         if override:
             overlay["start_sec"], overlay["end_sec"] = override["start_sec"], override["end_sec"]
     return materialized

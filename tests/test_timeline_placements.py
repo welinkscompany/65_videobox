@@ -5,7 +5,7 @@ from copy import deepcopy
 import pytest
 
 from videobox_core_engine.editing_session import redo, set_timeline_placement_overrides, undo
-from videobox_core_engine.timeline_placements import apply_placement_changes, apply_timeline_placement_overrides, collect_timeline_placements
+from videobox_core_engine.timeline_placements import apply_placement_changes, apply_timeline_placement_overrides, collect_timeline_placements, placement_id
 
 
 def _timeline() -> dict[str, object]:
@@ -20,10 +20,10 @@ def _timeline() -> dict[str, object]:
     }
 
 
-def test_collects_each_media_clip_and_caption_by_stable_kind_and_base_identity() -> None:
+def test_collects_each_mutable_media_clip_but_not_narration_linked_captions() -> None:
     placements = collect_timeline_placements(timeline=_timeline())
 
-    assert set(placements) == {"broll:b-1", "bgm:m-1", "sfx:s-1", "overlay:o-1", "caption:c-1"}
+    assert set(placements) == {"broll:b-1", "bgm:m-1", "sfx:s-1", "overlay:o-1"}
     assert placements["overlay:o-1"] == {
         "placement_id": "overlay:o-1", "kind": "overlay", "start_sec": 1.0, "end_sec": 2.0,
     }
@@ -34,7 +34,6 @@ def test_normalizes_frame_values_without_mutating_caller_inputs() -> None:
     frozen_placements = deepcopy(placements)
     changes = [
         {"placement_id": "broll:b-1", "kind": "broll", "start_sec": 0.01, "end_sec": 1.99},
-        {"placement_id": "caption:c-1", "kind": "caption", "start_sec": 0.99, "end_sec": 2.99},
     ]
     frozen_changes = deepcopy(changes)
 
@@ -44,7 +43,6 @@ def test_normalizes_frame_values_without_mutating_caller_inputs() -> None:
 
     assert result == {
         "broll:b-1": {"placement_id": "broll:b-1", "kind": "broll", "start_sec": 0.0, "end_sec": 2.0},
-        "caption:c-1": {"placement_id": "caption:c-1", "kind": "caption", "start_sec": 1.0, "end_sec": 3.0},
     }
     assert placements == frozen_placements
     assert changes == frozen_changes
@@ -71,19 +69,17 @@ def test_rejects_invalid_batch_without_normalizing_it(changes: list[dict[str, ob
         )
 
 
-def test_rejects_missing_or_duplicate_caption_identity() -> None:
-    missing = _timeline()
-    missing["session_captions"] = [{"start_sec": 0.0, "end_sec": 1.0}]
-    duplicate = _timeline()
-    duplicate["session_captions"] = [
-        {"caption_id": "c-1", "start_sec": 0.0, "end_sec": 1.0},
-        {"caption_id": "c-1", "start_sec": 1.0, "end_sec": 2.0},
-    ]
+def test_caption_placement_identity_remains_valid_for_editor_manifests() -> None:
+    assert placement_id(kind="caption", base_id="c-1") == "caption:c-1"
 
-    with pytest.raises(ValueError, match="timeline_placement_identity_invalid"):
-        collect_timeline_placements(timeline=missing)
-    with pytest.raises(ValueError, match="timeline_placement_duplicate"):
-        collect_timeline_placements(timeline=duplicate)
+
+def test_rejects_new_caption_placement_change_as_unknown() -> None:
+    with pytest.raises(ValueError, match="timeline_placement_unknown"):
+        apply_placement_changes(
+            placements=collect_timeline_placements(timeline=_timeline()),
+            changes=[{"placement_id": "caption:c-1", "kind": "caption", "start_sec": 1.0, "end_sec": 2.0}],
+            output_duration_sec=3, fps_num=30, fps_den=1,
+        )
 
 
 def test_placement_overrides_are_one_undoable_session_change() -> None:
@@ -99,7 +95,7 @@ def test_placement_overrides_are_one_undoable_session_change() -> None:
     assert redo(session=undo(session=updated))["timeline_placement_overrides"] == overrides
 
 
-def test_applies_overrides_to_materialized_tracks_and_captions_without_losing_payload() -> None:
+def test_legacy_caption_override_is_inert_while_broll_override_materializes() -> None:
     timeline = _timeline()
     timeline["tracks"] = list(timeline["tracks"]) + [{"track_type": "narration", "clips": [{"clip_id": "n-1", "start_sec": 0.0, "end_sec": 3.0}]}]
     timeline["session_captions"] = [{"caption_id": "c-1", "text": "자막", "start_sec": 0.0, "end_sec": 2.0, "style": {"font": "x"}}]
@@ -111,7 +107,14 @@ def test_applies_overrides_to_materialized_tracks_and_captions_without_losing_pa
 
     broll = next(track for track in result["tracks"] if track["track_type"] == "broll")["clips"][0]
     assert (broll["start_sec"], broll["end_sec"]) == (1.0, 3.0)
-    assert result["session_captions"][0] == {"caption_id": "c-1", "text": "자막", "start_sec": 1.0, "end_sec": 2.0, "style": {"font": "x"}}
+    assert result["session_captions"][0] == {"caption_id": "c-1", "text": "자막", "start_sec": 0.0, "end_sec": 2.0, "style": {"font": "x"}}
+
+
+def test_rejects_unknown_non_caption_override_during_materialization() -> None:
+    with pytest.raises(ValueError, match="timeline_placement_unknown"):
+        apply_timeline_placement_overrides(timeline=_timeline(), overrides={
+            "broll:missing": {"placement_id": "broll:missing", "kind": "broll", "start_sec": 0.0, "end_sec": 1.0},
+        })
 
 
 def test_applies_overrides_to_non_asset_export_overlays() -> None:
