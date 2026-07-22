@@ -38,6 +38,14 @@ const twoNarrationManifest = (revision: number) => ({
   }],
 });
 
+const captionManifest = (revision: number, text = "원래 자막") => ({
+  ...narrationManifest(revision),
+  captions: [{
+    segment_id: "segment-1", caption_id: "caption-1", placement_id: "caption:segment-1", text, start_sec: 0, end_sec: 5,
+    style: { font_family: "Pretendard", font_size_px: 42, text_color: "#ffffff", outline_color: "#000000", outline_width_px: 2, background_color: "#00000000", position_x_percent: 50, position_y_percent: 85, horizontal_align: "center" as const, safe_area_enabled: true, shadow_blur_px: 0 },
+  }],
+});
+
 function pointer(target: Element, type: string, clientX: number) {
   fireEvent(target, new MouseEvent(type, { bubbles: true, cancelable: true, clientX }));
 }
@@ -96,6 +104,46 @@ describe("EditorWorkbenchRoute", () => {
     resolveUpdate({});
     await waitFor(() => expect(load).toHaveBeenCalledTimes(2));
     expect(await screen.findByText("timeline-session-a · revision 2")).toBeVisible();
+  });
+
+  it("saves linked caption text through the same revision fence and refreshes the manifest", async () => {
+    const load = vi.spyOn(api, "getEditorPlaybackManifest")
+      .mockResolvedValueOnce(captionManifest(4) as never)
+      .mockResolvedValueOnce(captionManifest(5, "새 자막") as never);
+    const update = vi.spyOn(api, "updateEditingSessionCaption").mockResolvedValue({} as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    expect(await screen.findByText("timeline-session-a · revision 4")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "자산과 대본" }));
+    expect(await screen.findByRole("dialog", { name: "자산과 대본" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "원래 자막 대본 선택" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "segment-1 자막 텍스트" }), { target: { value: "새 자막" } });
+    fireEvent.click(screen.getByRole("button", { name: "자막 저장" }));
+
+    await waitFor(() => expect(update).toHaveBeenCalledWith("project-a", "session-a", "segment-1", { caption_text: "새 자막", expected_revision: 4 }));
+    expect(await screen.findByText("timeline-session-a · revision 5")).toBeVisible();
+    expect(load).toHaveBeenCalledTimes(2);
+  });
+
+  it("refreshes after a linked-caption revision conflict without retrying the caption command", async () => {
+    const load = vi.spyOn(api, "getEditorPlaybackManifest")
+      .mockResolvedValueOnce(captionManifest(4) as never)
+      .mockResolvedValueOnce(captionManifest(5, "다른 변경 자막") as never);
+    const update = vi.spyOn(api, "updateEditingSessionCaption").mockRejectedValue(
+      new ApiConflictError({}, "/api/projects/project-a/editing-sessions/session-a/segments/segment-1/caption"),
+    );
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    expect(await screen.findByText("timeline-session-a · revision 4")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "자산과 대본" }));
+    expect(await screen.findByRole("dialog", { name: "자산과 대본" })).toBeVisible();
+    fireEvent.change(screen.getByRole("textbox", { name: "segment-1 자막 텍스트" }), { target: { value: "새 자막" } });
+    fireEvent.click(screen.getByRole("button", { name: "자막 저장" }));
+
+    expect(await screen.findByText("다른 변경이 먼저 저장됐어요. 최신 내용을 확인한 뒤 다시 시도해 주세요.")).toBeVisible();
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText("timeline-session-a · revision 5")).toBeVisible();
+    expect(load).toHaveBeenCalledTimes(2);
   });
 
   it("keeps the current view, refreshes after a revision conflict, and does not retry the command", async () => {

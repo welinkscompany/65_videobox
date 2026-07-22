@@ -479,6 +479,20 @@ describe("TimelineDock", () => {
     expect(screen.getByText((_, element) => element?.textContent === "스냅: 항목 시작 (caption:segment-1:start, 0초)" )).toBeInTheDocument();
   });
 
+  it("shows a linked caption but never exposes independent caption timing controls", () => {
+    const captionPlacementView: EditorViewModel = {
+      ...view,
+      captions: [{ ...view.captions[0], placementId: "caption:segment-1" }],
+    };
+    render(<TimelineDock view={captionPlacementView} viewportWidthPx={400} />);
+
+    selectTimelineClip("caption:segment-1");
+
+    expect(screen.queryByRole("button", { name: "caption:segment-1 이동" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "caption:segment-1 시작 자르기" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "caption:segment-1 끝 자르기" })).toBeNull();
+  });
+
   it("keeps the fixed lane list free of non-listitem direct children", () => {
     render(<TimelineDock view={view} viewportWidthPx={400} />);
 
@@ -509,6 +523,14 @@ describe("TimelineDock", () => {
     input.focus();
     fireEvent.keyDown(input, { key: "ArrowRight" });
     expect(screen.getByLabelText("재생 위치")).toHaveAttribute("data-seconds", "0");
+  });
+
+  it("starts from an externally owned playback position without bouncing it back to zero", () => {
+    const onPlaybackSeek = vi.fn();
+    render(<TimelineDock onPlaybackSeek={onPlaybackSeek} playbackSec={2.5} view={view} viewportWidthPx={400} />);
+
+    expect(screen.getByLabelText("재생 위치")).toHaveAttribute("data-seconds", "2.5");
+    expect(onPlaybackSeek).toHaveBeenCalledWith(2.5);
   });
 
   it("scrolls its local viewport from horizontal wheel pixels and clamps at both bounds", () => {

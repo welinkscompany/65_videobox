@@ -1,4 +1,4 @@
-import { useMemo, useReducer, useState, type KeyboardEvent, type MouseEvent, type PointerEvent, type WheelEvent } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent, type WheelEvent } from "react";
 
 import type { EditorViewModel } from "../editorViewModel";
 import { classifyTimelineHit } from "./hit-testing";
@@ -38,6 +38,10 @@ type Props = Readonly<{
   onTrimNarration?: (input: TrimNarration) => void;
   onReorderNarration?: (input: ReorderNarration) => void;
   onUpdatePlacements?: (input: UpdatePlacements) => void;
+  onSelectSegment?: (segmentId: string) => void;
+  onPlaybackSeek?: (seconds: number) => void;
+  selectedSegmentId?: string | null;
+  playbackSec?: number;
   isSaving?: boolean;
   mutationMessage?: string;
 }>;
@@ -148,15 +152,27 @@ function navigationReducer(
   return reduceTimelineNavigation(state, action, options);
 }
 
-export function TimelineDock({ view, viewportWidthPx, onTrimNarration, onReorderNarration, onUpdatePlacements, isSaving = false, mutationMessage }: Props) {
+export function TimelineDock({ view, viewportWidthPx, onTrimNarration, onReorderNarration, onUpdatePlacements, onSelectSegment, onPlaybackSeek, selectedSegmentId = null, playbackSec, isSaving = false, mutationMessage }: Props) {
   const options = { durationSec: view.output.durationSec, viewportWidthPx, fps: view.fps };
   const [state, dispatch] = useReducer(
     (current: TimelineNavigationState, action: TimelineNavigationAction) => navigationReducer(current, action, options),
-    options,
-    (initial) => createTimelineNavigation({ durationSec: initial.durationSec, pixelsPerSecond: 100 }),
+    { ...options, playbackSec },
+    (initial) => {
+      const navigation = createTimelineNavigation({ durationSec: initial.durationSec, pixelsPerSecond: 100 });
+      return initial.playbackSec === undefined || !Number.isFinite(initial.playbackSec)
+        ? navigation
+        : reduceTimelineNavigation(navigation, { type: "seek", seconds: initial.playbackSec }, initial);
+    },
   );
   const [pointerDraft, setPointerDraft] = useState<TimelinePointerDraft | null>(null);
   const [selectedPlacementIds, setSelectedPlacementIds] = useState<readonly string[]>([]);
+  const onPlaybackSeekRef = useRef(onPlaybackSeek);
+  useEffect(() => { onPlaybackSeekRef.current = onPlaybackSeek; }, [onPlaybackSeek]);
+  useEffect(() => { onPlaybackSeekRef.current?.(state.playheadSec); }, [state.playheadSec]);
+  useEffect(() => {
+    if (playbackSec === undefined || !Number.isFinite(playbackSec) || playbackSec === state.playheadSec) return;
+    dispatch({ type: "seek", seconds: playbackSec });
+  }, [playbackSec, state.playheadSec]);
   const viewportEndSec = resolveViewportEnd(state, view.output.durationSec, viewportWidthPx);
   const rects = useMemo(() => projectVisibleTimelineClips({
     clips: clipSources(view),
@@ -210,6 +226,12 @@ export function TimelineDock({ view, viewportWidthPx, onTrimNarration, onReorder
     });
     if (hit.kind === "body") {
       dispatch({ type: "select", clipId: hit.clipId });
+      const narrationClip = narrationByClipId.get(hit.clipId);
+      const caption = captionsByPlacementId.get(hit.clipId);
+      const segmentId = narrationClip?.segmentId ?? caption?.segmentId;
+      if (segmentId) onSelectSegment?.(segmentId);
+      const segmentStartSec = narrationClip?.startSec ?? caption?.startSec;
+      if (segmentStartSec !== undefined) onPlaybackSeek?.(segmentStartSec);
       const placement = placementsByClipId.get(hit.clipId);
       if (placement) setSelectedPlacementIds((current) => additive ? (current.includes(placement.placementId) ? current.filter((id) => id !== placement.placementId) : [...current, placement.placementId]) : [placement.placementId]);
       else if (!additive) setSelectedPlacementIds([]);
@@ -223,8 +245,8 @@ export function TimelineDock({ view, viewportWidthPx, onTrimNarration, onReorder
   ), [view]);
   const placementsByClipId = useMemo(() => new Map<string, TimelinePlacement>([
     ...view.tracks.flatMap((track) => track.clips.flatMap((clip) => clip.placementId ? [[clip.placementId, { placementId: clip.placementId, kind: track.role as TimelinePlacementKind, startSec: clip.startSec, endSec: clip.endSec } as TimelinePlacement] as const] : [])),
-    ...view.captions.flatMap((caption) => caption.placementId ? [[caption.placementId, { placementId: caption.placementId, kind: "caption" as const, startSec: caption.startSec, endSec: caption.endSec } as TimelinePlacement] as const] : []),
   ]), [view]);
+  const captionsByPlacementId = useMemo(() => new Map(view.captions.flatMap((caption) => caption.placementId ? [[caption.placementId, caption] as const] : [])), [view]);
   const draftProjection = useMemo(() => {
     const boundsByClipId = new Map<string, Readonly<{ startSec: number; endSec: number }>>();
     const sources = clipSources(view).map((source) => {
@@ -489,12 +511,13 @@ export function TimelineDock({ view, viewportWidthPx, onTrimNarration, onReorder
         const narrationClip = rect.lane === "narration" ? narrationByClipId.get(rect.clipId) : undefined;
         const placement = placementsByClipId.get(rect.clipId);
         const displayBounds = draftProjection.boundsByClipId.get(rect.clipId);
+        const isTranscriptSelected = narrationClip?.segmentId === selectedSegmentId || captionsByPlacementId.get(rect.clipId)?.segmentId === selectedSegmentId;
         const isSelected = state.selectedClipId === rect.clipId;
         return <div
         aria-label={`${laneLabel[rect.lane]} 클립 ${rect.clipId}`}
         data-clip-id={rect.clipId}
         data-end-seconds={displayBounds ? formatSeconds(displayBounds.endSec) : undefined}
-        data-selected={isSelected ? "true" : "false"}
+        data-selected={isSelected || isTranscriptSelected ? "true" : "false"}
         data-start-seconds={displayBounds ? formatSeconds(displayBounds.startSec) : undefined}
         data-testid="timeline-clip"
         key={rect.clipId}
@@ -502,7 +525,7 @@ export function TimelineDock({ view, viewportWidthPx, onTrimNarration, onReorder
         style={{ left: `${rect.x}px`, overflow: "hidden", position: "absolute", top: `${rect.y}px`, width: `${rect.width}px`, height: `${rect.height}px` }}
       ><button
         aria-label={`${rect.clipId} 클립 선택`}
-        aria-pressed={isSelected}
+        aria-pressed={isSelected || isTranscriptSelected}
         onClick={(event) => { event.stopPropagation(); selectClip(rect, event.shiftKey); }}
         onKeyDown={(event) => {
           if (event.key !== "Enter" && event.key !== " ") return;

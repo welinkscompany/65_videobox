@@ -46,6 +46,37 @@ describe("EditorWorkbench", () => {
     expect(persistedPanelPixels({ asPercentage: 30, inPixels: Number.NaN }, 260, 320)).toBe(320);
   });
 
+  it("keeps transcript, playback position, and narration clip selection on one segment id", () => {
+    const transcriptView = {
+      ...view,
+      output: { ...view.output, durationSec: 2 },
+      tracks: [{ trackId: "narration", role: "narration", clips: [
+        { clipId: "n-1", segmentId: "segment-1", type: "narration", assetId: null, assetUri: null, startSec: 0, endSec: 1, controls: {} },
+        { clipId: "n-2", segmentId: "segment-2", type: "narration", assetId: null, assetUri: null, startSec: 1, endSec: 2, controls: {} },
+      ] }],
+      captions: [
+        { segmentId: "segment-1", text: "첫 자막", startSec: 0, endSec: 1, style: { fontFamily: "Pretendard", fontSizePx: 28, textColor: "#fff", outlineColor: "#000", outlineWidthPx: 1, backgroundColor: "#00000000", positionXPercent: 50, positionYPercent: 90, horizontalAlign: "center", safeAreaEnabled: true, shadowBlurPx: 0 } },
+        { segmentId: "segment-2", text: "둘째 자막", startSec: 1, endSec: 2, style: { fontFamily: "Pretendard", fontSizePx: 28, textColor: "#fff", outlineColor: "#000", outlineWidthPx: 1, backgroundColor: "#00000000", positionXPercent: 50, positionYPercent: 90, horizontalAlign: "center", safeAreaEnabled: true, shadowBlurPx: 0 } },
+      ],
+      playback: { auditionUrls: {}, exactPreview: { status: "succeeded", url: "/api/projects/project-a/exact-preview/content", artifactRevision: 1, timelineStartSec: 0, timelineEndSec: 2 } },
+    } as const;
+    const rendered = render(<EditorWorkbench view={transcriptView} />);
+    const player = screen.getByLabelText("편집본 미리보기") as HTMLVideoElement;
+    Object.defineProperty(player, "currentTime", { configurable: true, writable: true, value: 0 });
+
+    fireEvent.click(screen.getByRole("button", { name: "n-2 클립 선택" }));
+    expect(screen.getByRole("button", { name: "둘째 자막 대본 선택" })).toHaveAttribute("aria-current", "true");
+    fireEvent.click(screen.getByRole("button", { name: "첫 자막 대본 선택" }));
+    expect(screen.getByRole("button", { name: "n-1 클립 선택" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByLabelText("재생 위치")).toHaveAttribute("data-seconds", "0");
+    fireEvent.click(screen.getByRole("button", { name: "둘째 자막 대본 선택" }));
+    expect(player.currentTime).toBe(1);
+    fireEvent.click(screen.getByRole("button", { name: "첫 자막 대본 선택" }));
+    fireEvent.click(screen.getByRole("button", { name: "n-2 클립 선택" }));
+    rendered.rerender(<EditorWorkbench view={{ ...transcriptView, expectedRevision: 2, tracks: [{ ...transcriptView.tracks[0], clips: [transcriptView.tracks[0].clips[0]] }], captions: [transcriptView.captions[0]] }} />);
+    expect(screen.getByRole("button", { name: "첫 자막 대본 선택" })).not.toHaveAttribute("aria-current");
+  });
+
   it("replaces only the preview slot with the exact-preview stage while keeping read-only docks and timeline", () => {
     const currentView = {
       ...view,

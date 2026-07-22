@@ -8,12 +8,14 @@ export type AuditionSource = AuditionMedia & Readonly<{ label: string }>;
 export type PreviewCaption = Readonly<{ text: string; startSec: number; endSec: number }>;
 type MediaNode = HTMLVideoElement | HTMLAudioElement;
 
-export function PreviewStage({ expectedRevision, exactPreview, captions = [], sources, onRefresh }: {
+export function PreviewStage({ expectedRevision, exactPreview, captions = [], sources, onRefresh, playbackSec, onPlaybackTimeChange }: {
   expectedRevision: number;
   exactPreview: ExactPreviewInput;
   captions?: readonly PreviewCaption[];
   sources: readonly AuditionSource[];
   onRefresh?: () => void | Promise<void>;
+  playbackSec?: number;
+  onPlaybackTimeChange?: (seconds: number) => void;
 }) {
   const exact = toExactPreviewState(exactPreview, expectedRevision);
   const localSources = sources.filter((source) => isAllowedLocalUrl(source.url));
@@ -58,11 +60,26 @@ export function PreviewStage({ expectedRevision, exactPreview, captions = [], so
     window.addEventListener("scroll", stopForScroll, { passive: true });
     return () => { window.removeEventListener("scroll", stopForScroll); stopActiveMedia(); };
   }, []);
+  useEffect(() => {
+    if (!Number.isFinite(playbackSec) || mode.kind === "idle") return;
+    const timelineSeconds = Math.min(mode.media.timelineRange.endSec, Math.max(mode.media.timelineRange.startSec, playbackSec!));
+    setTimelineTime(timelineSeconds);
+    if (timelineSeconds !== playbackSec) onPlaybackTimeChange?.(timelineSeconds);
+    const media = mediaRef.current;
+    const mediaSeconds = timelineSeconds - mode.media.timelineRange.startSec;
+    if (media && Math.abs(media.currentTime - mediaSeconds) > 0.001) {
+      try { media.currentTime = mediaSeconds; } catch { /* the browser can reject a not-yet-seekable media element */ }
+    }
+  }, [mode, onPlaybackTimeChange, playbackSec]);
 
   const currentMedia = mode.kind === "idle" ? null : mode.media;
   const mediaLabel = mode.kind === "audition" ? `${sourceLabel(localSources, mode.media.id)} 소스 미리보기` : "편집본 미리보기";
   const activeCaption = mode.kind === "exact" ? captions.find((caption) => timelineTime >= caption.startSec && timelineTime < caption.endSec) : null;
-  const updateTimeline = (node: MediaNode) => setTimelineTime(coordinatorRef.current.timelineTime(node.currentTime));
+  const updateTimeline = (node: MediaNode) => {
+    const nextSeconds = coordinatorRef.current.timelineTime(node.currentTime);
+    setTimelineTime(nextSeconds);
+    onPlaybackTimeChange?.(nextSeconds);
+  };
   const togglePlayback = () => {
     const media = mediaRef.current;
     if (!media) return;

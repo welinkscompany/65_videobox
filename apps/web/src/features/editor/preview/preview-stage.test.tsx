@@ -34,6 +34,27 @@ describe("PreviewStage", () => {
     expect(screen.getAllByRole("status").find((node) => node.classList.contains("vb-preview-stage__status"))).toHaveTextContent("타임라인 4.0초");
   });
 
+  it("keeps the one player and external timeline position synchronized in both directions", () => {
+    const onPlaybackTimeChange = vi.fn();
+    const rendered = render(<PreviewStage {...current} playbackSec={4} onPlaybackTimeChange={onPlaybackTimeChange} />);
+    const media = screen.getByLabelText("편집본 미리보기") as HTMLVideoElement;
+    Object.defineProperty(media, "currentTime", { configurable: true, writable: true, value: 0 });
+
+    rendered.rerender(<PreviewStage {...current} playbackSec={6} onPlaybackTimeChange={onPlaybackTimeChange} />);
+    expect(media.currentTime).toBe(6);
+    Object.defineProperty(media, "currentTime", { configurable: true, writable: true, value: 7 });
+    fireEvent.timeUpdate(media);
+
+    expect(onPlaybackTimeChange).toHaveBeenCalledWith(7);
+  });
+
+  it("returns the effective selected-range position when an external seek is out of range", () => {
+    const onPlaybackTimeChange = vi.fn();
+    render(<PreviewStage {...current} exactPreview={{ status: "succeeded", url: "/api/range.mp4", artifactRevision: 4, timelineStartSec: 4, timelineEndSec: 8 }} playbackSec={20} onPlaybackTimeChange={onPlaybackTimeChange} />);
+
+    expect(onPlaybackTimeChange).toHaveBeenCalledWith(8);
+  });
+
   it("never mounts a stale artifact source and offers explicit refresh", async () => {
     const refresh = vi.fn();
     const { container } = render(<PreviewStage {...current} exactPreview={{ status: "stale", url: "/api/old.mp4", artifactRevision: 3 }} onRefresh={refresh} />);

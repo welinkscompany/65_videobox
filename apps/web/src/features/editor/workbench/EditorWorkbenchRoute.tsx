@@ -122,6 +122,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId }: { projectId: stri
     onPreviewRefresh={refreshPreview}
     onReorderNarration={(input) => commitTimelineMutation((port) => port.reorderNarration(input))}
     onTrimNarration={(input) => commitTimelineMutation((port) => port.setNarrationBounds(input))}
+    onUpdateCaption={(input) => commitTimelineMutation((port) => port.setCaptionText(input))}
     onUpdatePlacements={(input) => commitTimelineMutation((port) => port.setTimelinePlacements(input))}
     timelineMutationMessage={mutation.message}
     view={state.view}

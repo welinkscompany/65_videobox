@@ -1,6 +1,16 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 288. 2026-07-22 Task 17 multi-lane timeline editing closeout`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 289. 2026-07-22 Task 18 synchronized transcript and caption closeout`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+
+## 289. 2026-07-22 Task 18 synchronized transcript and caption closeout
+
+- `[x] 구현 완료`: 대본 행·타임라인 선택·실제 단일 preview player의 재생 위치를 같은 persisted `segment_id`로 연결했다. 구간 경계는 half-open이고, 내레이션 공백/삭제 뒤에는 선택을 비워 이전 행을 현재처럼 보이지 않게 한다. selected-range/source audition에서 범위 밖 seek는 실제 유효 범위를 상위 상태로 되돌린다.
+- `[x] 자막 권한`: 연결 자막은 narration bounds를 그대로 따르며 caption-only move/trim control과 placement mutation 대상에서 제외했다. 텍스트만 기존 revision-bound caption command로 Route의 conflict/failure refresh fence를 거쳐 저장한다. 자동 재시도·강제 저장·새 API/preview job은 없다.
+- `[x] 접근성/성능`: IME 조합 중 Arrow shortcut을 가로채지 않고, 대본 DOM은 1,000 caption에서도 최대 120행만 mount한다. CaptionLane은 연결 상태·선택 요약만 표시한다.
+- `검증`: independent spec/quality/gap/source-to-runtime reverse review Critical/Important 0, focused frontend `7 files / 70 passed`, frontend full `48 files / 463 passed`, production build 성공(기존 500 kB chunk warning), UI provenance verifier 성공, `git diff --check` 성공. 전체 Python regression은 실행하지 않았다.
+- `다음 goal`: Task 19는 별도 written spec과 사용자 승인 뒤에만 시작한다. Task 9 사람/환경 acceptance와 CapCut Desktop 실증은 계속 별도다.
+- Task 9 사람/환경 acceptance는 변함없이 별도이며, 사용자가 고정한 공식 누적은 **9/22 (40.9%)**, 잔여 **59.1%**다.
+- handoff: `docs/handoffs/2026-07-22-videobox-task18-synchronized-transcript-caption-closeout.ko.md`.
 
 ## 288. 2026-07-22 Task 17 multi-lane timeline editing closeout
 
