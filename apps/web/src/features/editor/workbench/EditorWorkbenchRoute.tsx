@@ -20,6 +20,8 @@ type DirectorState = Readonly<{
   conversationId: string | null;
   messages: readonly RightDockMessage[];
   proposal: DirectorProposal | null;
+  isSending?: boolean;
+  retryAfterSeconds?: number | null;
 }>;
 
 const assetLoadError = "일부 자산을 불러오지 못했어요. 편집은 계속할 수 있어요. 잠시 후 다시 확인해 주세요.";
@@ -39,12 +41,18 @@ export function EditorWorkbenchRoute({ projectId, sessionId }: { projectId: stri
   const pollOperationId = useRef(0);
   const directorOperationId = useRef(0);
   const stableDirectorMessageId = useRef<string | null>(null);
+  const directorMutationInFlight = useRef(false);
+  const directorMessageInFlight = useRef(false);
+  const directorRetry = useRef<Readonly<{ text: string; retry: () => Promise<{ kind: "exchange"; exchange: DirectorMessageExchange } | { kind: "in_progress"; retryAfterSeconds: number }> }> | null>(null);
   useEffect(() => {
     if (routeEpoch.current.key === requestKey) return;
     routeEpoch.current = { key: requestKey, value: routeEpoch.current.value + 1 };
     mutationOperationId.current += 1;
     directorOperationId.current += 1;
     stableDirectorMessageId.current = null;
+    directorMutationInFlight.current = false;
+    directorMessageInFlight.current = false;
+    directorRetry.current = null;
     mutationInFlight.current = false;
     setMutation({ isSaving: false });
     setDirector({ key: requestKey, state: sessionId ? "analysis_running" : "script_required", conversationId: null, messages: [], proposal: null });
@@ -195,32 +203,77 @@ export function EditorWorkbenchRoute({ projectId, sessionId }: { projectId: stri
     : [];
   const activeDirector = director.key === requestKey ? director : { key: requestKey, state: "analysis_running" as const, conversationId: null, messages: [], proposal: null };
   const isCurrentDirector = (epoch: number, operationId: number) => routeEpoch.current.value === epoch && directorOperationId.current === operationId;
-  const sendDirectorMessage = async (text: string) => {
-    if (!sessionId || !activeDirector.conversationId || !text.trim()) return;
+  const sendDirectorMessage = async (text: string, retryRequested = false) => {
+    if (!sessionId || !activeDirector.conversationId || !text.trim() || directorMessageInFlight.current) return;
     const epoch = routeEpoch.current.value;
     const operationId = directorOperationId.current + 1;
     directorOperationId.current = operationId;
-    stableDirectorMessageId.current ??= globalThis.crypto?.randomUUID?.() ?? `director-${Date.now()}`;
-    const prepared = api.prepareDirectorMessage(projectId, activeDirector.conversationId, { session_id: sessionId, client_message_id: stableDirectorMessageId.current, text: text.trim() });
+    const retry = retryRequested ? directorRetry.current : null;
+    if (retryRequested && (!retry || retry.text !== text)) return;
+    let clientMessageId: string | null = null;
+    if (!retry) {
+      clientMessageId = globalThis.crypto?.randomUUID?.() ?? `director-${Date.now()}`;
+      stableDirectorMessageId.current = clientMessageId;
+      directorRetry.current = null;
+    }
+    const prepared = retry ? null : api.prepareDirectorMessage(projectId, activeDirector.conversationId, { session_id: sessionId, client_message_id: clientMessageId!, text: text.trim() });
+    directorMessageInFlight.current = true;
+    setDirector({ ...activeDirector, isSending: true, retryAfterSeconds: null });
     try {
-      const result = await prepared.send();
+      const result = retry ? await retry.retry() : await prepared!.send();
       if (!isCurrentDirector(epoch, operationId)) return;
-      if (result.kind !== "exchange") return;
+      if (result.kind === "in_progress") {
+        directorRetry.current = { text: text.trim(), retry: prepared?.retry ?? retry!.retry };
+        setDirector({ ...activeDirector, state: "idle", isSending: false, retryAfterSeconds: result.retryAfterSeconds });
+        return;
+      }
       stableDirectorMessageId.current = null;
+      directorRetry.current = null;
       const proposalId = result.exchange.assistant_message.proposal_id ?? (typeof result.exchange.action_intent?.proposal_preflight?.proposal_id === "string" ? result.exchange.action_intent.proposal_preflight.proposal_id : null);
       const messages = [...activeDirector.messages, projectDirectorExchange(result.exchange)];
-      if (!proposalId) { setDirector({ ...activeDirector, messages }); return; }
+      if (!proposalId) { setDirector({ ...activeDirector, messages, isSending: false, retryAfterSeconds: null }); return; }
       const proposal = await api.getDirectorProposal(projectId, proposalId);
-      if (isCurrentDirector(epoch, operationId)) setDirector({ ...activeDirector, state: "proposal_ready", messages, proposal });
+      if (isCurrentDirector(epoch, operationId)) setDirector({ ...activeDirector, state: "proposal_ready", messages, proposal, isSending: false, retryAfterSeconds: null });
     } catch {
-      if (isCurrentDirector(epoch, operationId)) setDirector({ ...activeDirector, state: "blocked" });
+      stableDirectorMessageId.current = null;
+      directorRetry.current = null;
+      if (isCurrentDirector(epoch, operationId)) setDirector({ ...activeDirector, state: "blocked", isSending: false, retryAfterSeconds: null });
+    } finally {
+      if (isCurrentDirector(epoch, operationId)) directorMessageInFlight.current = false;
+    }
+  };
+  const retryDirectorMessage = async () => {
+    const retry = directorRetry.current;
+    if (retry) await sendDirectorMessage(retry.text, true);
+  };
+  const startDirector = async () => {
+    if (!sessionId || activeDirector.proposal || activeDirector.state !== "idle" || directorMutationInFlight.current) return;
+    const epoch = routeEpoch.current.value;
+    const operationId = directorOperationId.current + 1;
+    directorOperationId.current = operationId;
+    directorMutationInFlight.current = true;
+    setDirector({ ...activeDirector, state: "analysis_running" });
+    try {
+      let conversationId = activeDirector.conversationId;
+      if (!conversationId) {
+        const conversation = await api.createDirectorConversation(projectId, { session_id: sessionId });
+        if (!isCurrentDirector(epoch, operationId)) return;
+        conversationId = conversation.conversation_id;
+      }
+      const proposal = await api.createDirectorProposal(projectId, { session_id: sessionId });
+      if (isCurrentDirector(epoch, operationId)) setDirector({ ...activeDirector, state: "proposal_ready", conversationId, proposal });
+    } catch {
+      if (isCurrentDirector(epoch, operationId)) setDirector({ ...activeDirector, state: "idle" });
+    } finally {
+      if (isCurrentDirector(epoch, operationId)) directorMutationInFlight.current = false;
     }
   };
   const applyDirectorProposal = async (proposalId: string, candidateIds: readonly string[]) => {
-    if (!sessionId || !state.view || activeDirector.proposal?.proposal_id !== proposalId || !candidateIds.length) return;
+    if (!sessionId || !state.view || activeDirector.proposal?.proposal_id !== proposalId || !candidateIds.length || directorMutationInFlight.current) return;
     const epoch = routeEpoch.current.value;
     const operationId = directorOperationId.current + 1;
     directorOperationId.current = operationId;
+    directorMutationInFlight.current = true;
     const currentRevision = state.view.expectedRevision;
     setDirector({ ...activeDirector, state: "applying" });
     try {
@@ -233,17 +286,22 @@ export function EditorWorkbenchRoute({ projectId, sessionId }: { projectId: stri
       setRefreshToken((current) => current + 1);
     } catch {
       if (isCurrentDirector(epoch, operationId)) setDirector({ ...activeDirector, state: "blocked" });
+    } finally {
+      if (isCurrentDirector(epoch, operationId)) directorMutationInFlight.current = false;
     }
   };
   const rightDock: RightDockDirector = {
     state: activeDirector.state,
     messages: activeDirector.messages,
     proposal: projectDirectorProposal(activeDirector.proposal),
-    composerDisabled: !activeDirector.conversationId || activeDirector.state === "analysis_running" || activeDirector.state === "applying",
+    composerDisabled: !activeDirector.conversationId || activeDirector.isSending === true || activeDirector.state === "analysis_running" || activeDirector.state === "applying",
     onSendMessage: sendDirectorMessage,
     onApplyProposal: applyDirectorProposal,
     onManualEdit: () => setDirector((current) => current.key === requestKey ? { ...current, state: "idle" } : current),
     onPreviewCandidate: () => undefined,
+    onStart: activeDirector.state === "idle" && !activeDirector.proposal ? startDirector : undefined,
+    onRetryMessage: activeDirector.retryAfterSeconds !== null && activeDirector.retryAfterSeconds !== undefined ? retryDirectorMessage : undefined,
+    retryAfterSeconds: activeDirector.retryAfterSeconds,
   };
   return <>
     {assets.key === requestKey && assets.error ? <p role="status">{assets.error}</p> : null}

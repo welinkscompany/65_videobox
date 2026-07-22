@@ -152,6 +152,19 @@ describe("EditorWorkbench", () => {
     expect(screen.getByRole("region", { name: "타임라인" })).toHaveTextContent("1개 트랙");
   });
 
+  it("uses the Inspector registry instead of exposing an unsupported B-roll track", () => {
+    const brollOnlyView = {
+      ...view,
+      local: { selectedSegmentId: "segment-b", seekSec: 0 },
+      tracks: [{ trackId: "broll", role: "broll", clips: [{ clipId: "clip-b", segmentId: "segment-b", type: "broll", assetId: "asset-b", assetUri: null, startSec: 0, endSec: 1, controls: {} }] }],
+    } as const;
+    window.localStorage.setItem("videobox.editor-workbench.ui", JSON.stringify({ leftOpen: false, rightOpen: true, activeDrawer: null, leftSize: 280, rightSize: 320 }));
+    render(<EditorWorkbench view={brollOnlyView} />);
+    fireEvent.click(screen.getByRole("button", { name: "Inspector 열기" }));
+    expect(screen.getByRole("region", { name: "Inspector" })).not.toHaveTextContent("broll 트랙");
+    expect(screen.getByText("현재 편집 명령이 지원하는 항목만 표시됩니다.")).toBeInTheDocument();
+  });
+
   it("uses an audio element for a narration audition and never mounts a second player", () => {
     const narrationView = {
       ...view,

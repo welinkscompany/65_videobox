@@ -26,4 +26,7 @@ export type RightDockDirector = Readonly<{
   onApplyProposal: (proposalId: string, candidateIds: readonly string[]) => void | Promise<void>;
   onManualEdit: () => void;
   onPreviewCandidate: (candidate: RightDockCandidate) => void;
+  onStart?: () => void | Promise<void>;
+  onRetryMessage?: () => void | Promise<void>;
+  retryAfterSeconds?: number | null;
 }>;

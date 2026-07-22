@@ -581,4 +581,99 @@ describe("EditorWorkbenchRoute", () => {
     await waitFor(() => expect(preflight).toHaveBeenCalledWith("project-b", "proposal-session-b"));
     expect(batchApply).toHaveBeenCalledWith("project-b", "proposal-session-b", { candidate_ids: ["candidate-1"], expected_revision: 1 });
   });
+
+  it("keeps reload read-only until the creator explicitly starts Eugene, then creates one conversation and proposal", async () => {
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({ conversation: null, messages: [], proposal: null, references: [] } as never);
+    const createConversation = vi.spyOn(api, "createDirectorConversation").mockResolvedValue({ conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" } as never);
+    const createProposal = vi.spyOn(api, "createDirectorProposal").mockResolvedValue(directorProposal() as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    expect(await screen.findByText("timeline-session-a · revision 1")).toBeVisible();
+    expect(createConversation).not.toHaveBeenCalled();
+    expect(createProposal).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "유진과 Inspector" }));
+    fireEvent.click(await screen.findByRole("button", { name: "유진에게 추천받기" }));
+
+    await waitFor(() => expect(createConversation).toHaveBeenCalledWith("project-a", { session_id: "session-a" }));
+    expect(createConversation).toHaveBeenCalledTimes(1);
+    expect(createProposal).toHaveBeenCalledWith("project-a", { session_id: "session-a" });
+    expect(createProposal).toHaveBeenCalledTimes(1);
+    expect(await screen.findByRole("textbox", { name: "유진에게 요청하기" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "선택한 추천 적용" })).toBeEnabled();
+  });
+
+  it("does not repeat an explicit apply while its preflight and batch apply are in flight", async () => {
+    let resolvePreflight!: (value: { status: string }) => void;
+    let resolveBatch!: (value: unknown) => void;
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
+      conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" }, messages: [], proposal: directorProposal(), references: [],
+    } as never);
+    const preflight = vi.spyOn(api, "preflightDirectorProposal").mockImplementation(() => new Promise((resolve) => { resolvePreflight = resolve; }) as never);
+    const batchApply = vi.spyOn(api, "batchApplyDirectorProposal").mockImplementation(() => new Promise((resolve) => { resolveBatch = resolve; }) as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    expect(await screen.findByText("timeline-session-a · revision 1")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "유진과 Inspector" }));
+    const apply = await screen.findByRole("button", { name: "선택한 추천 적용" });
+    fireEvent.click(apply);
+    fireEvent.click(apply);
+    await waitFor(() => expect(preflight).toHaveBeenCalledTimes(1));
+    expect(apply).toBeDisabled();
+    expect(batchApply).not.toHaveBeenCalled();
+    await act(async () => { resolvePreflight({ status: "ready" }); });
+    await waitFor(() => expect(batchApply).toHaveBeenCalledTimes(1));
+    await act(async () => { resolveBatch({}); });
+    expect(batchApply).toHaveBeenCalledTimes(1);
+  });
+
+  it("locks the composer while Eugene is sending and reuses its client ID only for the explicit Retry-After retry", async () => {
+    let resolveSend!: (value: { kind: "in_progress"; retryAfterSeconds: number }) => void;
+    const retry = vi.fn().mockResolvedValue({ kind: "exchange", exchange: { user_message: { message_id: "user-2", text: "A 요청" }, assistant_message: { message_id: "assistant-2", proposal_id: null, text: "다시 확인했어요." } } });
+    const prepare = vi.spyOn(api, "prepareDirectorMessage").mockImplementation(() => ({ clientMessageId: "stable-a", send: () => new Promise((resolve) => { resolveSend = resolve; }), retry }) as never);
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
+      conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" }, messages: [], proposal: null, references: [],
+    } as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    expect(await screen.findByText("timeline-session-a · revision 1")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "유진과 Inspector" }));
+    const composer = await screen.findByRole("textbox", { name: "유진에게 요청하기" });
+    fireEvent.change(composer, { target: { value: "A 요청" } });
+    fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
+    expect(prepare).toHaveBeenCalledTimes(1);
+    expect(composer).toBeDisabled();
+    fireEvent.change(composer, { target: { value: "B 요청" } });
+    fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
+    expect(prepare).toHaveBeenCalledTimes(1);
+
+    await act(async () => { resolveSend({ kind: "in_progress", retryAfterSeconds: 0 }); });
+    fireEvent.click(await screen.findByRole("button", { name: "같은 요청 다시 보내기" }));
+    expect(retry).toHaveBeenCalledTimes(1);
+    expect(prepare).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores a stale Retry-After exchange after the route moves from A to B", async () => {
+    let resolveSend!: (value: { kind: "in_progress"; retryAfterSeconds: number }) => void;
+    let resolveRetry!: (value: { kind: "exchange"; exchange: { user_message: { message_id: string; text: string }; assistant_message: { message_id: string; proposal_id: null; text: string } } }) => void;
+    const retry = vi.fn().mockImplementation(() => new Promise((resolve) => { resolveRetry = resolve; }));
+    vi.spyOn(api, "prepareDirectorMessage").mockImplementation(() => ({ clientMessageId: "stable-a", send: () => new Promise((resolve) => { resolveSend = resolve; }), retry }) as never);
+    vi.spyOn(api, "getEditorPlaybackManifest").mockImplementation((projectId, sessionId) => Promise.resolve(manifest(projectId, sessionId)) as never);
+    vi.spyOn(api, "reloadDirectorSession").mockImplementation((projectId, sessionId) => Promise.resolve({
+      conversation: { conversation_id: `conversation-${sessionId}`, project_id: String(projectId), session_id: String(sessionId) }, messages: [], proposal: null, references: [],
+    }) as never);
+    const rendered = render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    expect(await screen.findByText("timeline-session-a · revision 1")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "유진과 Inspector" }));
+    fireEvent.change(await screen.findByRole("textbox", { name: "유진에게 요청하기" }), { target: { value: "A 요청" } });
+    fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
+    await act(async () => { resolveSend({ kind: "in_progress", retryAfterSeconds: 0 }); });
+    fireEvent.click(await screen.findByRole("button", { name: "같은 요청 다시 보내기" }));
+    expect(retry).toHaveBeenCalledTimes(1);
+
+    rendered.rerender(<EditorWorkbenchRoute projectId="project-b" sessionId="session-b" />);
+    expect(await screen.findByText("timeline-session-b · revision 1")).toBeVisible();
+    await act(async () => { resolveRetry({ kind: "exchange", exchange: { user_message: { message_id: "user-a", text: "A 요청" }, assistant_message: { message_id: "assistant-a", proposal_id: null, text: "stale retry" } } }); });
+    expect(screen.queryByText("stale retry")).toBeNull();
+    expect(screen.getByText("timeline-session-b · revision 1")).toBeVisible();
+  });
 });

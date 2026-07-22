@@ -3,6 +3,7 @@ import { EditorAssetBrowser } from "../assets/EditorAssetBrowser";
 import type { EditorAssetCard } from "../assets/editorAssetProjection";
 import { TranscriptPanel } from "../transcript/TranscriptPanel";
 import { projectTranscriptEntries } from "../transcript/transcriptProjection";
+import { projectInspectorTargets } from "../inspector/inspectorRegistry";
 import { RightDock } from "./RightDock";
 import type { RightDockDirector } from "./rightDockTypes";
 
@@ -21,13 +22,13 @@ export function EditorWorkbenchReadOnlyAdapters({ view, dock, director, eugeneDr
     onDraftChange={onEugeneDraftChange}
     onManualEdit={director?.onManualEdit}
     onPreviewCandidate={director?.onPreviewCandidate}
+    onRetryMessage={director?.onRetryMessage}
     onSendMessage={director?.onSendMessage}
+    onStart={director?.onStart}
     proposal={director?.proposal}
+    retryAfterSeconds={director?.retryAfterSeconds}
     state={director?.state}
     selectedSegment={selectedNarration ? { segmentId: selectedNarration.segmentId, startSec: selectedNarration.startSec, endSec: selectedNarration.endSec, draftApplied: false } : undefined}
-    inspectorTargets={[
-      ...view.tracks.flatMap((track) => track.role === "broll" || track.role === "bgm" || track.role === "sfx" || track.role === "overlay" ? [{ id: `track:${track.trackId}`, label: `${track.role} 트랙`, kind: track.role }] : []),
-      ...view.captions.map((caption) => ({ id: `caption:${caption.segmentId}`, label: `${caption.segmentId} 자막`, kind: "caption" as const })),
-    ]}
+    inspectorTargets={projectInspectorTargets({ view, selectedSegmentId })}
   />;
 }
