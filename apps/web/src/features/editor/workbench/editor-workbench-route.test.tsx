@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { startTransition, Suspense, useState } from "react";
 
@@ -46,11 +46,176 @@ const captionManifest = (revision: number, text = "원래 자막") => ({
   }],
 });
 
+const broll = {
+  asset_id: "broll-1",
+  asset_type: "broll_video",
+  storage_uri: "file:///broll-1.mp4",
+  created_at: "2026-07-23T00:00:00Z",
+  metadata: { title: "B-roll 1", duration_seconds: 5, analysis_status: "succeeded", review_required: false },
+};
+
+const music = {
+  library_asset_id: "library-bgm-1",
+  asset_id: "starter-bgm-1",
+  media_type: "music" as const,
+  duration_seconds: 12,
+  version: "v1",
+  verified: true,
+  available: true,
+  tags: [],
+  source: "Starter",
+  creator: "VideoBox",
+  official_license_url: "https://license.invalid/bgm-1",
+  attribution_required: false,
+  attribution_text: "",
+};
+
 function pointer(target: Element, type: string, clientX: number) {
   fireEvent(target, new MouseEvent(type, { bubbles: true, cancelable: true, clientX }));
 }
 
+async function openAssetBrowser() {
+  fireEvent.click(await screen.findByRole("button", { name: "자산과 대본" }));
+  return screen.findByRole("dialog", { name: "자산과 대본" });
+}
+
 describe("EditorWorkbenchRoute", () => {
+  beforeEach(() => {
+    vi.spyOn(api, "getEditorPlaybackManifest").mockResolvedValue(narrationManifest(1) as never);
+    vi.spyOn(api, "listBrollAssets").mockResolvedValue([] as never);
+    vi.spyOn(api, "listMediaLibraryAssets").mockResolvedValue({ assets: [] } as never);
+  });
+
+  it("materializes verified BGM before one current-revision music command while saving disables apply", async () => {
+    let resolveMaterialized!: (value: { asset_id: string }) => void;
+    let resolveApply!: (value: unknown) => void;
+    const materialize = vi.spyOn(api, "materializeMediaLibraryAsset")
+      .mockImplementation(() => new Promise((resolve) => { resolveMaterialized = resolve; }) as never);
+    const apply = vi.spyOn(api, "updateEditingSessionMusicOverride")
+      .mockImplementation(() => new Promise((resolve) => { resolveApply = resolve; }) as never);
+    vi.spyOn(api, "listMediaLibraryAssets").mockResolvedValue({ assets: [music] } as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await openAssetBrowser();
+    expect(await screen.findByRole("button", { name: "BGM 1 적용" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "n-1 클립 선택" }));
+    const applyButton = screen.getByRole("button", { name: "BGM 1 적용" });
+    fireEvent.click(applyButton);
+
+    await waitFor(() => expect(materialize).toHaveBeenCalledWith("library-bgm-1", "project-a"));
+    expect(apply).not.toHaveBeenCalled();
+    expect(applyButton).toBeDisabled();
+    await act(async () => { resolveMaterialized({ asset_id: "materialized-bgm" }); });
+    await waitFor(() => expect(apply).toHaveBeenCalledWith("project-a", "session-a", "segment-1", {
+      asset_id: "materialized-bgm",
+      media_controls: undefined,
+      expected_revision: 1,
+    }));
+    expect(apply).toHaveBeenCalledTimes(1);
+    await act(async () => { resolveApply({}); });
+  });
+
+  it("does not call any media endpoint when library materialization fails and refreshes safely", async () => {
+    const load = vi.spyOn(api, "getEditorPlaybackManifest")
+      .mockResolvedValueOnce(narrationManifest(1) as never)
+      .mockResolvedValueOnce(narrationManifest(1) as never);
+    vi.spyOn(api, "listMediaLibraryAssets").mockResolvedValue({ assets: [music] } as never);
+    vi.spyOn(api, "materializeMediaLibraryAsset").mockRejectedValue(new Error("disk full"));
+    const updateMusic = vi.spyOn(api, "updateEditingSessionMusicOverride");
+    const updateSfx = vi.spyOn(api, "updateEditingSessionSfxOverride");
+    const updateBroll = vi.spyOn(api, "updateEditingSessionBroll");
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await openAssetBrowser();
+    await screen.findByRole("button", { name: "BGM 1 적용" });
+    fireEvent.click(screen.getByRole("button", { name: "n-1 클립 선택" }));
+    fireEvent.click(screen.getByRole("button", { name: "BGM 1 적용" }));
+
+    expect(await screen.findByText("변경 내용을 저장하지 못했어요. 최신 내용을 확인한 뒤 다시 시도해 주세요.")).toBeVisible();
+    expect(updateMusic).not.toHaveBeenCalled();
+    expect(updateSfx).not.toHaveBeenCalled();
+    expect(updateBroll).not.toHaveBeenCalled();
+    await waitFor(() => expect(load).toHaveBeenCalledTimes(2));
+  });
+
+  it("applies B-roll through the current revision fence without materializing it", async () => {
+    vi.spyOn(api, "listBrollAssets").mockResolvedValue([broll] as never);
+    const materialize = vi.spyOn(api, "materializeMediaLibraryAsset");
+    const apply = vi.spyOn(api, "updateEditingSessionBroll").mockResolvedValue({} as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await openAssetBrowser();
+    await screen.findByRole("button", { name: "B-roll 1 적용" });
+    fireEvent.click(screen.getByRole("button", { name: "n-1 클립 선택" }));
+    fireEvent.click(screen.getByRole("button", { name: "B-roll 1 적용" }));
+
+    await waitFor(() => expect(apply).toHaveBeenCalledWith("project-a", "session-a", "segment-1", {
+      asset_id: "broll-1",
+      media_controls: undefined,
+      expected_revision: 1,
+    }));
+    expect(materialize).not.toHaveBeenCalled();
+  });
+
+  it("ignores a stale A asset load after route navigation to B", async () => {
+    let resolveA!: (value: typeof broll[]) => void;
+    vi.spyOn(api, "getEditorPlaybackManifest").mockImplementation((projectId, sessionId) => Promise.resolve(manifest(projectId, sessionId)) as never);
+    vi.spyOn(api, "listBrollAssets").mockImplementation((projectId) => projectId === "project-a"
+      ? new Promise((resolve) => { resolveA = resolve; }) as never
+      : Promise.resolve([{ ...broll, asset_id: "broll-b", metadata: { ...broll.metadata, title: "B 자산" } }] as never));
+
+    const rendered = render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    expect(await screen.findByText("timeline-session-a · revision 1")).toBeVisible();
+    rendered.rerender(<EditorWorkbenchRoute projectId="project-b" sessionId="session-b" />);
+    expect(await screen.findByText("timeline-session-b · revision 1")).toBeVisible();
+    await openAssetBrowser();
+    expect(await screen.findByRole("button", { name: "B 자산 적용" })).toBeVisible();
+
+    await act(async () => { resolveA([broll]); });
+    expect(screen.queryByRole("button", { name: "B-roll 1 적용" })).toBeNull();
+    expect(screen.getByRole("button", { name: "B 자산 적용" })).toBeVisible();
+  });
+
+  it("does not apply a materialized A library asset after navigation to B", async () => {
+    let resolveMaterialized!: (value: { asset_id: string }) => void;
+    vi.spyOn(api, "getEditorPlaybackManifest").mockImplementation((projectId, sessionId) => Promise.resolve(
+      sessionId === "session-a" ? narrationManifest(1) : manifest(projectId, sessionId),
+    ) as never);
+    vi.spyOn(api, "listMediaLibraryAssets").mockResolvedValue({ assets: [music] } as never);
+    const materialize = vi.spyOn(api, "materializeMediaLibraryAsset")
+      .mockImplementation(() => new Promise((resolve) => { resolveMaterialized = resolve; }) as never);
+    const updateMusic = vi.spyOn(api, "updateEditingSessionMusicOverride");
+    const updateSfx = vi.spyOn(api, "updateEditingSessionSfxOverride");
+    const updateBroll = vi.spyOn(api, "updateEditingSessionBroll");
+
+    const rendered = render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await openAssetBrowser();
+    await screen.findByRole("button", { name: "BGM 1 적용" });
+    fireEvent.click(screen.getByRole("button", { name: "n-1 클립 선택" }));
+    fireEvent.click(screen.getByRole("button", { name: "BGM 1 적용" }));
+    await waitFor(() => expect(materialize).toHaveBeenCalledWith("library-bgm-1", "project-a"));
+
+    rendered.rerender(<EditorWorkbenchRoute projectId="project-b" sessionId="session-b" />);
+    expect(await screen.findByText("timeline-session-b · revision 1")).toBeVisible();
+    await act(async () => { resolveMaterialized({ asset_id: "materialized-bgm" }); });
+
+    expect(updateMusic).not.toHaveBeenCalled();
+    expect(updateSfx).not.toHaveBeenCalled();
+    expect(updateBroll).not.toHaveBeenCalled();
+    expect(screen.getByText("timeline-session-b · revision 1")).toBeVisible();
+    expect(screen.queryByText("변경 내용을 저장하지 못했어요. 최신 내용을 확인한 뒤 다시 시도해 주세요.")).toBeNull();
+  });
+
+  it("keeps the manifest editor usable when an asset list fails and gives contained retry-safe guidance", async () => {
+    vi.spyOn(api, "listMediaLibraryAssets").mockRejectedValue(new Error("offline"));
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+
+    expect(await screen.findByText("timeline-session-a · revision 1")).toBeVisible();
+    expect(await screen.findByText("일부 자산을 불러오지 못했어요. 편집은 계속할 수 있어요. 잠시 후 다시 확인해 주세요.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "n-1 클립 선택" })).toBeEnabled();
+  });
+
   it("never displays the old A session while B is loading", async () => {
     let resolveB!: (value: ReturnType<typeof manifest>) => void;
     const load = vi.spyOn(api, "getEditorPlaybackManifest").mockImplementation((projectId, sessionId) => sessionId === "session-a" ? Promise.resolve(manifest(projectId, sessionId)) : new Promise((resolve) => { resolveB = resolve; }));

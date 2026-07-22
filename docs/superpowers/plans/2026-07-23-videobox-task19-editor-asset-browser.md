@@ -255,7 +255,7 @@ git commit -m "feat: preview editor assets in one stage"
 - Modify: `apps/web/src/features/editor/workbench/EditorWorkbench.tsx`
 - Test: `apps/web/src/features/editor/workbench/editor-workbench.test.tsx`
 
-- [ ] **Step 1: Write failing route integration tests.**
+- [x] **Step 1: Write failing route integration tests.**
 
 ```tsx
 it("materializes verified BGM before exactly one current-revision music command", async () => {
@@ -287,13 +287,13 @@ it("does not call an editing command when library materialization fails", async 
 });
 ```
 
-- [ ] **Step 2: Run RED.**
+- [x] **Step 2: Run RED.**
 
 Run: `npm --prefix apps/web run test -- --run src/features/editor/workbench/editor-workbench-route.test.tsx`
 
 Expected: FAIL because route asset state/callbacks are absent.
 
-- [ ] **Step 3: Implement independent load and atomic route callbacks.**
+- [x] **Step 3: Implement independent load and atomic route callbacks.**
 
 ```ts
 type AssetState = Readonly<{ key: string; brollAssets: BrollAsset[]; libraryAssets: MediaLibraryAsset[]; error: string | null }>;
@@ -307,7 +307,7 @@ const applyLibraryAsset = (card: EditorAssetCard, segmentId: string) =>
 
 Load `listBrollAssets(projectId)` and `listMediaLibraryAssets()` independently in an effect keyed by `requestKey`. Capture its route epoch and ignore stale completions. Project raw results with `projectEditorAssets`, pass only cards/error/callbacks to the workbench, and use the existing `commitTimelineMutation` for all applies. For B-roll skip materialization and call `port.applyMedia({ kind: "broll", segmentId, assetId: card.assetId })`. Never call the port if `materializeMediaLibraryAsset` rejects.
 
-- [ ] **Step 4: Run GREEN and affected regression tests.**
+- [x] **Step 4: Run GREEN and affected regression tests.**
 
 Run: `npm --prefix apps/web run test -- --run src/features/editor/assets src/features/editor/preview/preview-stage.test.tsx src/features/editor/workbench/editor-workbench.test.tsx src/features/editor/workbench/editor-workbench-route.test.tsx src/features/editor/editorCommandPort.test.ts`
 
@@ -319,6 +319,15 @@ Expected: PASS.
 git add apps/web/src/features/editor/workbench/EditorWorkbenchRoute.tsx apps/web/src/features/editor/workbench/editor-workbench-route.test.tsx apps/web/src/features/editor/workbench/EditorWorkbench.tsx apps/web/src/features/editor/workbench/editor-workbench.test.tsx
 git commit -m "feat: apply editor assets through revision fence"
 ```
+
+### Task 4 execution evidence (2026-07-23)
+
+- Initial RED: `npm --prefix apps/web run test -- --run src/features/editor/workbench/editor-workbench-route.test.tsx` failed with the five new route cases because no route-owned asset state, projected card props, materialization callback, or contained asset-load error existed.
+- GREEN: the same focused route command passed with `1 file / 16 tests`. It proves BGM materializes before one revision-1 music command and disables apply while saving; materialization failure reaches no B-roll/BGM/SFX command endpoint, refreshes the manifest, and shows the existing safe retry guidance; B-roll does not materialize; a stale A asset completion cannot replace B; and an asset-list failure leaves the manifest editor available with retry-safe asset guidance.
+- Focused Task 19 regression: `npm --prefix apps/web run test -- --run src/features/editor/assets src/features/editor/preview/preview-stage.test.tsx src/features/editor/workbench/editor-workbench.test.tsx src/features/editor/workbench/editor-workbench-route.test.tsx src/features/editor/editorCommandPort.test.ts` passed with `6 files / 61 tests`.
+- Critical follow-up RED: the focused route command failed with the deferred-materialization A-to-B test because A still called `updateEditingSessionMusicOverride` after B became current.
+- Critical follow-up GREEN: the route command passed with `1 file / 17 tests`, and the same Task 19 regression command passed with `6 files / 62 tests`. `commitTimelineMutation` now supplies its captured current-route guard to callbacks; library apply checks it immediately after materialization, before calling the command port. Direct B-roll behavior is unchanged.
+- Step 5 remains open: this delegated task explicitly forbids staging and committing. The protected `?? .tmp-final-fence-debug/` directory remains preserved.
 
 ## Task 5: Independent closeout and documentation
 
