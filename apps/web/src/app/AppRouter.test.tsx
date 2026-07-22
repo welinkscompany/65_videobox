@@ -177,7 +177,7 @@ describe("AppRouter URL ownership", () => {
     expect(document.querySelectorAll("audio,video")).toHaveLength(1);
     expect(screen.getByLabelText("유진에게 요청하기")).toBeDisabled();
     expect(screen.getByRole("button", { name: "요청 보내기" })).toBeDisabled();
-    expect(screen.getByText("추천은 다음 단계에서 준비합니다.")).toBeVisible();
+    expect(screen.getByText("아직 추천이 없어요. 직접 편집을 계속하거나 유진에게 요청할 수 있어요.")).toBeVisible();
     expect(loadManifest).toHaveBeenCalledTimes(1);
     expect(loadSession).not.toHaveBeenCalled();
     expect(getTimeline).not.toHaveBeenCalled();
