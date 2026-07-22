@@ -78,6 +78,15 @@ def build_editing_session(
                 "music_override": None,
                 "sfx_override": None,
                 "tts_replacement": None,
+                "content_windows": [{
+                    "caption_id": f"caption:{segment['segment_id']}",
+                    "start_offset_sec": 0.0,
+                    "duration_sec": float(segment["end_sec"]) - float(segment["start_sec"]),
+                    "source_segment_id": segment["segment_id"],
+                    "caption_text": segment["text"],
+                    "review_required": _normalize_boolish(segment.get("review_required", False)),
+                    "visual_overlays": [],
+                }],
             }
         )
     return {
@@ -349,6 +358,7 @@ def _media_windows(segment: dict[str, Any]) -> list[dict[str, Any]]:
     if isinstance(raw, list) and raw:
         return [deepcopy(item) for item in raw if isinstance(item, dict)]
     return [{
+        "caption_id": f"caption:{str(segment.get('segment_id') or '')}",
         "start_offset_sec": 0.0,
         "duration_sec": float(segment.get("end_sec", 0.0)) - float(segment.get("start_sec", 0.0)),
         **{field: deepcopy(segment.get(field)) for field in ("broll_override", "music_override", "sfx_override")},
@@ -606,6 +616,17 @@ def reorder_segments(*, session: dict[str, Any], segment_ids: list[str], bounds_
     return _record_undoable_mutation(before=session, updated=updated, mutation_type="segment_reorder", segment_id=",".join(segment_ids))
 
 
+def set_timeline_placement_overrides(*, session: dict[str, Any], overrides: dict[str, dict[str, object]]) -> dict[str, Any]:
+    updated = deepcopy(session)
+    updated["timeline_placement_overrides"] = deepcopy(overrides)
+    return _record_undoable_mutation(
+        before=session,
+        updated=updated,
+        mutation_type="timeline_placement_update",
+        segment_id=",".join(sorted(overrides)),
+    )
+
+
 def undo(*, session: dict[str, Any]) -> dict[str, Any]:
     undo_stack = list(deepcopy(session.get("undo_stack", [])))
     if not undo_stack:
@@ -613,6 +634,12 @@ def undo(*, session: dict[str, Any]) -> dict[str, Any]:
     event = undo_stack.pop()
     updated = deepcopy(session)
     updated["segments"] = deepcopy(event["inverse_payload"]["segments"])
+    inverse = event.get("inverse_payload") if isinstance(event.get("inverse_payload"), dict) else {}
+    if "timeline_placement_overrides" in inverse:
+        if inverse["timeline_placement_overrides"] is None:
+            updated.pop("timeline_placement_overrides", None)
+        else:
+            updated["timeline_placement_overrides"] = deepcopy(inverse["timeline_placement_overrides"])
     updated["undo_stack"] = undo_stack
     updated["redo_stack"] = list(deepcopy(session.get("redo_stack", []))) + [event]
     history = list(deepcopy(session.get("history", [])))
@@ -631,6 +658,12 @@ def redo(*, session: dict[str, Any]) -> dict[str, Any]:
     event = redo_stack.pop()
     updated = deepcopy(session)
     updated["segments"] = deepcopy(event["forward_payload"]["segments"])
+    forward = event.get("forward_payload") if isinstance(event.get("forward_payload"), dict) else {}
+    if "timeline_placement_overrides" in forward:
+        if forward["timeline_placement_overrides"] is None:
+            updated.pop("timeline_placement_overrides", None)
+        else:
+            updated["timeline_placement_overrides"] = deepcopy(forward["timeline_placement_overrides"])
     updated["redo_stack"] = redo_stack
     updated["undo_stack"] = (list(deepcopy(session.get("undo_stack", []))) + [event])[-MAX_TIMELINE_UNDO_EVENTS:]
     history = list(deepcopy(session.get("history", [])))

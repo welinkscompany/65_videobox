@@ -11,7 +11,11 @@ MAX_AUDIT_HISTORY = 100
 
 
 def _snapshot(session: dict[str, Any]) -> dict[str, Any]:
-    return {"segments": deepcopy(session.get("segments", [])), "caption_style": deepcopy(session.get("caption_style"))}
+    return {
+        "segments": deepcopy(session.get("segments", [])),
+        "caption_style": deepcopy(session.get("caption_style")),
+        "timeline_placement_overrides": deepcopy(session.get("timeline_placement_overrides")),
+    }
 
 
 def apply_user_transaction(

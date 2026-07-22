@@ -4,7 +4,8 @@ from copy import deepcopy
 
 import pytest
 
-from videobox_core_engine.timeline_placements import apply_placement_changes, collect_timeline_placements
+from videobox_core_engine.editing_session import redo, set_timeline_placement_overrides, undo
+from videobox_core_engine.timeline_placements import apply_placement_changes, apply_timeline_placement_overrides, collect_timeline_placements
 
 
 def _timeline() -> dict[str, object]:
@@ -83,3 +84,31 @@ def test_rejects_missing_or_duplicate_caption_identity() -> None:
         collect_timeline_placements(timeline=missing)
     with pytest.raises(ValueError, match="timeline_placement_duplicate"):
         collect_timeline_placements(timeline=duplicate)
+
+
+def test_placement_overrides_are_one_undoable_session_change() -> None:
+    session = {"session_revision": 1, "segments": [{"segment_id": "n-1", "start_sec": 0.0, "end_sec": 2.0}], "history": [], "undo_stack": [], "redo_stack": []}
+    overrides = {"broll:b-1": {"placement_id": "broll:b-1", "kind": "broll", "start_sec": 2.0, "end_sec": 4.0}}
+
+    updated = set_timeline_placement_overrides(session=session, overrides=overrides)
+
+    assert updated["session_revision"] == 2
+    assert updated["segments"] == session["segments"]
+    assert updated["timeline_placement_overrides"] == overrides
+    assert undo(session=updated).get("timeline_placement_overrides") is None
+    assert redo(session=undo(session=updated))["timeline_placement_overrides"] == overrides
+
+
+def test_applies_overrides_to_materialized_tracks_and_captions_without_losing_payload() -> None:
+    timeline = _timeline()
+    timeline["tracks"] = list(timeline["tracks"]) + [{"track_type": "narration", "clips": [{"clip_id": "n-1", "start_sec": 0.0, "end_sec": 3.0}]}]
+    timeline["session_captions"] = [{"caption_id": "c-1", "text": "자막", "start_sec": 0.0, "end_sec": 2.0, "style": {"font": "x"}}]
+
+    result = apply_timeline_placement_overrides(timeline=timeline, overrides={
+        "broll:b-1": {"placement_id": "broll:b-1", "kind": "broll", "start_sec": 1.0, "end_sec": 3.0},
+        "caption:c-1": {"placement_id": "caption:c-1", "kind": "caption", "start_sec": 1.0, "end_sec": 2.0},
+    })
+
+    broll = next(track for track in result["tracks"] if track["track_type"] == "broll")["clips"][0]
+    assert (broll["start_sec"], broll["end_sec"]) == (1.0, 3.0)
+    assert result["session_captions"][0] == {"caption_id": "c-1", "text": "자막", "start_sec": 1.0, "end_sec": 2.0, "style": {"font": "x"}}

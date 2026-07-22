@@ -454,6 +454,18 @@ class SegmentOrderRequest(BaseModel):
         return self
 
 
+class TimelinePlacementChangeRequest(BaseModel):
+    placement_id: str = Field(min_length=3)
+    kind: Literal["broll", "bgm", "sfx", "overlay", "caption"]
+    start_sec: float = Field(ge=0, allow_inf_nan=False)
+    end_sec: float = Field(gt=0, allow_inf_nan=False)
+
+
+class TimelinePlacementPatchRequest(BaseModel):
+    expected_revision: int = Field(ge=1)
+    changes: list[TimelinePlacementChangeRequest] = Field(min_length=1)
+
+
 class EditingSessionRevisionRequest(BaseModel):
     expected_revision: int = Field(ge=1)
 

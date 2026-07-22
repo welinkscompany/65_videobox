@@ -3,7 +3,7 @@ import type { EditorCommandApi } from "./editorCommandPort";
 import { createEditorCommandPort } from "./editorCommandPort";
 
 const api = {
-  splitEditingSessionSegment: vi.fn(), mergeEditingSessionSegments: vi.fn(), updateEditingSessionSegmentBounds: vi.fn(), reorderEditingSessionSegments: vi.fn(),
+  splitEditingSessionSegment: vi.fn(), mergeEditingSessionSegments: vi.fn(), updateEditingSessionSegmentBounds: vi.fn(), reorderEditingSessionSegments: vi.fn(), updateEditingSessionTimelinePlacements: vi.fn(),
   updateEditingSessionBroll: vi.fn(), clearEditingSessionBrollOverride: vi.fn(), updateEditingSessionMusicOverride: vi.fn(), clearEditingSessionMusicOverride: vi.fn(), updateEditingSessionSfxOverride: vi.fn(), clearEditingSessionSfxOverride: vi.fn(),
   updateEditingSessionExplanationCard: vi.fn(), removeEditingSessionExplanationCard: vi.fn(), updateEditingSessionImageOverlay: vi.fn(), removeEditingSessionImageOverlay: vi.fn(), updateEditingSessionTableOverlay: vi.fn(), removeEditingSessionTableOverlay: vi.fn(),
   updateEditingSessionCaption: vi.fn(), updateEditingSessionCaptionStyle: vi.fn(),
@@ -42,6 +42,16 @@ describe("EditorCommandPort", () => {
         seg: { start_sec: 1.5, end_sec: 3 },
       },
       expected_revision: 7,
+    });
+  });
+
+  it("sends a revisioned timeline placement batch", async () => {
+    const port = createEditorCommandPort({ projectId: "p", sessionId: "s", expectedRevision: 7 }, api);
+    await port.setTimelinePlacements({ changes: [{ placementId: "caption:c-1", kind: "caption", startSec: 1, endSec: 2 }] });
+
+    expect(api.updateEditingSessionTimelinePlacements).toHaveBeenCalledWith("p", "s", {
+      expected_revision: 7,
+      changes: [{ placement_id: "caption:c-1", kind: "caption", start_sec: 1, end_sec: 2 }],
     });
   });
 

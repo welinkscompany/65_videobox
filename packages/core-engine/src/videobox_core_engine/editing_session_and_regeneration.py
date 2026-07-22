@@ -57,6 +57,7 @@ from videobox_core_engine.editing_session import (
     remove_segment_table_overlay,
     select_segment_tts_replacement,
     set_segment_bounds,
+    set_timeline_placement_overrides,
     split_segment,
     undo,
     update_segment_explanation_card,
@@ -69,6 +70,8 @@ from videobox_core_engine.editing_session import (
     update_segment_table_overlay,
     update_segment_visual_overlay,
 )
+from videobox_core_engine.composition_plan import materialize_editing_session_timeline
+from videobox_core_engine.timeline_placements import apply_placement_changes, collect_timeline_placements
 from videobox_core_engine.output_operator_copy import (
     OutputOperatorCopyBuilder,
     StaticOutputOperatorCopyBuilder,
@@ -221,6 +224,17 @@ class EditingSessionRegenerationMixin:
     def reorder_editing_session_segments(self, *, project_id: str, session_id: str, segment_ids: list[str], bounds_by_id: dict[str, dict[str, float]] | None, expected_revision: int) -> dict[str, Any]:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
         return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=reorder_segments(session=session, segment_ids=segment_ids, bounds_by_id=bounds_by_id), expected_revision=expected_revision)
+
+    def update_editing_session_timeline_placements(self, *, project_id: str, session_id: str, changes: list[dict[str, object]], expected_revision: int) -> dict[str, Any]:
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        source_timeline = self.store.get_timeline_run(project_id=project_id, timeline_id=str(session["timeline_id"]))
+        materialized = materialize_editing_session_timeline(timeline=source_timeline, editing_session=session, project_id=project_id)
+        output = source_timeline.get("output") if isinstance(source_timeline.get("output"), dict) else {}
+        duration_sec = float(output.get("duration_sec") or max((float(item.get("end_sec") or 0.0) for track in materialized.get("tracks", []) if isinstance(track, dict) for item in track.get("clips", []) if isinstance(item, dict)), default=0.0))
+        fps_num, fps_den = int(source_timeline.get("fps_num") or 30), int(source_timeline.get("fps_den") or 1)
+        normalized = apply_placement_changes(placements=collect_timeline_placements(timeline=materialized), changes=changes, output_duration_sec=duration_sec, fps_num=fps_num, fps_den=fps_den)
+        previous = session.get("timeline_placement_overrides") if isinstance(session.get("timeline_placement_overrides"), dict) else {}
+        return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=set_timeline_placement_overrides(session=session, overrides={**previous, **normalized}), expected_revision=expected_revision)
 
     def undo_editing_session(self, *, project_id: str, session_id: str, expected_revision: int) -> dict[str, Any]:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)

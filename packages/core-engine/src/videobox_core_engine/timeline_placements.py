@@ -1,6 +1,7 @@
 """Pure contracts for independently placed non-narration timeline items."""
 from __future__ import annotations
 
+from copy import deepcopy
 from fractions import Fraction
 from math import isfinite
 from typing import Any
@@ -90,6 +91,42 @@ def apply_placement_changes(
             "end_sec": _frame_to_seconds(end_frame, fps_num=fps_num, fps_den=fps_den),
         }
     return {key: normalized[key] for key in sorted(normalized)}
+
+
+def apply_timeline_placement_overrides(*, timeline: dict[str, object], overrides: dict[str, dict[str, object]]) -> dict[str, object]:
+    """Apply already validated override times while preserving every other field."""
+    materialized = deepcopy(timeline)
+    if not overrides:
+        return materialized
+    placements = collect_timeline_placements(timeline=materialized)
+    expected = set(placements)
+    for identifier, override in overrides.items():
+        if identifier not in expected or not isinstance(override, dict):
+            raise ValueError("timeline_placement_unknown")
+        if str(override.get("placement_id") or "") != identifier or override.get("kind") != placements[identifier]["kind"]:
+            raise ValueError("timeline_placement_kind_mismatch")
+    for track in materialized["tracks"]:  # collect_timeline_placements validates the shape above
+        if not isinstance(track, dict):
+            continue
+        kind = str(track.get("track_type") or "")
+        if kind not in PLACEMENT_KINDS - {"caption"}:
+            continue
+        for clip in track.get("clips", []) if isinstance(track.get("clips"), list) else []:
+            if not isinstance(clip, dict):
+                continue
+            override = overrides.get(placement_id(kind=kind, base_id=str(clip.get("clip_id") or "")))
+            if override:
+                clip["start_sec"], clip["end_sec"] = override["start_sec"], override["end_sec"]
+    captions = materialized.get("session_captions")
+    if captions is None:
+        captions = materialized.get("caption_segments", [])
+    for caption in captions if isinstance(captions, list) else []:
+        if not isinstance(caption, dict):
+            continue
+        override = overrides.get(placement_id(kind="caption", base_id=str(caption.get("caption_id") or "")))
+        if override:
+            caption["start_sec"], caption["end_sec"] = override["start_sec"], override["end_sec"]
+    return materialized
 
 
 def _add_placement(*, result: dict[str, dict[str, object]], kind: str, base_id: str, start: object, end: object) -> None:

@@ -28,6 +28,7 @@ from videobox_api.models import (
     SelectedRangePreviewRequest,
     TableOverlayRequest,
     TimelinePayloadResponse,
+    TimelinePlacementPatchRequest,
     TTSReplacementRequest,
     VisualOverlayRequest,
 )
@@ -213,6 +214,18 @@ def build_editing_session_router(orchestrator: ApiOrchestrator, store: LocalProj
     def put_editing_session_segment_order(project_id: str, session_id: str, payload: SegmentOrderRequest) -> EditingSessionResponse:
         try:
             result = orchestrator.reorder_editing_session_segments(project_id=project_id, session_id=session_id, segment_ids=payload.segment_ids, bounds_by_id=payload.bounds_by_id, expected_revision=payload.expected_revision)
+        except EditingSessionConflict as exc:
+            return _editing_session_conflict_response(exc)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return EditingSessionResponse(**result)
+
+    @router.patch("/api/projects/{project_id}/editing-sessions/{session_id}/timeline-placements")
+    def patch_editing_session_timeline_placements(project_id: str, session_id: str, payload: TimelinePlacementPatchRequest) -> EditingSessionResponse:
+        try:
+            result = orchestrator.update_editing_session_timeline_placements(project_id=project_id, session_id=session_id, changes=[item.model_dump() for item in payload.changes], expected_revision=payload.expected_revision)
         except EditingSessionConflict as exc:
             return _editing_session_conflict_response(exc)
         except ValueError as exc:

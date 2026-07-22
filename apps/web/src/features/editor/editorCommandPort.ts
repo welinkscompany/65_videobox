@@ -12,6 +12,7 @@ type OverlayClear = Readonly<{ kind: OverlayApply["kind"]; segmentId: string }>;
 
 export type EditorCommandApi = Pick<typeof api,
   "splitEditingSessionSegment" | "mergeEditingSessionSegments" | "updateEditingSessionSegmentBounds" | "reorderEditingSessionSegments" |
+  "updateEditingSessionTimelinePlacements" |
   "updateEditingSessionBroll" | "clearEditingSessionBrollOverride" | "updateEditingSessionMusicOverride" | "clearEditingSessionMusicOverride" |
   "updateEditingSessionSfxOverride" | "clearEditingSessionSfxOverride" | "updateEditingSessionExplanationCard" | "removeEditingSessionExplanationCard" |
   "updateEditingSessionImageOverlay" | "removeEditingSessionImageOverlay" | "updateEditingSessionTableOverlay" | "removeEditingSessionTableOverlay" |
@@ -23,6 +24,7 @@ export type EditorCommandPort = Readonly<{
   mergeNarration(input: { leftSegmentId: string; rightSegmentId: string }): Promise<EditingSession>;
   setNarrationBounds(input: { segmentId: string; startSec: number; endSec: number }): Promise<EditingSession>;
   reorderNarration(input: { segmentIds: string[]; boundsById: Record<string, { startSec: number; endSec: number }> }): Promise<EditingSession>;
+  setTimelinePlacements(input: { changes: Array<{ placementId: string; kind: "broll" | "bgm" | "sfx" | "overlay" | "caption"; startSec: number; endSec: number }> }): Promise<EditingSession>;
   applyMedia(input: MediaCommand): Promise<EditingSession>;
   updateMediaControls(input: MediaCommand): Promise<EditingSession>;
   clearMedia(input: { kind: MediaKind; segmentId: string }): Promise<EditingSession>;
@@ -56,6 +58,10 @@ export function createEditorCommandPort(context: Context, commandApi: EditorComm
     reorderNarration: ({ segmentIds, boundsById }) => commandApi.reorderEditingSessionSegments(projectId, sessionId, {
       segment_ids: segmentIds,
       bounds_by_id: Object.fromEntries(Object.entries(boundsById).map(([segmentId, bounds]) => [segmentId, { start_sec: bounds.startSec, end_sec: bounds.endSec }])),
+      ...revise,
+    }),
+    setTimelinePlacements: ({ changes }) => commandApi.updateEditingSessionTimelinePlacements(projectId, sessionId, {
+      changes: changes.map((change) => ({ placement_id: change.placementId, kind: change.kind, start_sec: change.startSec, end_sec: change.endSec })),
       ...revise,
     }),
     applyMedia,

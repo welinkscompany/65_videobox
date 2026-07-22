@@ -283,7 +283,7 @@ def materialize_editing_session_timeline(
             if window_end <= window_start:
                 continue
             content_segment_id = str(window.get("source_segment_id") or segment_id)
-            session_captions.append({"segment_id": content_segment_id, "caption_text": str(window.get("caption_text") or ""), "caption_style": deepcopy(window.get("caption_style") or segment.get("caption_style") or editing_session.get("caption_style") or {}), "start_sec": window_start, "end_sec": window_end, "review_required": window.get("review_required"), "tts_replacement": deepcopy(window.get("tts_replacement"))})
+            session_captions.append({"caption_id": str(window.get("caption_id") or f"caption:{segment_id}:{window_index}"), "segment_id": content_segment_id, "caption_text": str(window.get("caption_text") or ""), "caption_style": deepcopy(window.get("caption_style") or segment.get("caption_style") or editing_session.get("caption_style") or {}), "start_sec": window_start, "end_sec": window_end, "review_required": window.get("review_required"), "tts_replacement": deepcopy(window.get("tts_replacement"))})
             for ordinal, overlay in enumerate(window.get("visual_overlays", []) if isinstance(window.get("visual_overlays"), list) else []):
                 if not isinstance(overlay, dict):
                     continue
@@ -303,7 +303,9 @@ def materialize_editing_session_timeline(
     materialized["tracks"] = [{"track_type": kind, "clips": clips} for kind, clips in tracks.items() if clips]
     materialized["export_overlays"] = export_overlays
     materialized["session_captions"] = session_captions
-    return materialized
+    from videobox_core_engine.timeline_placements import apply_timeline_placement_overrides
+    overrides = editing_session.get("timeline_placement_overrides")
+    return apply_timeline_placement_overrides(timeline=materialized, overrides=overrides if isinstance(overrides, dict) else {})
 
 
 def _number(value: object, default: float = 0.0) -> float:

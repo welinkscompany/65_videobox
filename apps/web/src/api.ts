@@ -353,6 +353,9 @@ export type SegmentOrderRequest = RevisionedEditingSessionMutation & {
   segment_ids: string[];
   bounds_by_id?: Record<string, { start_sec: number; end_sec: number }>;
 };
+export type TimelinePlacementPatchRequest = RevisionedEditingSessionMutation & {
+  changes: Array<{ placement_id: string; kind: "broll" | "bgm" | "sfx" | "overlay" | "caption"; start_sec: number; end_sec: number }>;
+};
 export type FixedTimeline = {
   tracks: Array<{ role: "narration" | "broll" | "bgm" | "sfx" | "overlay"; clips: Record<string, unknown>[] }>;
 };
@@ -989,6 +992,10 @@ export const api = {
   reorderEditingSessionSegments: (projectId: string, sessionId: string, payload: SegmentOrderRequest) =>
     request<EditingSession>(`/api/projects/${projectId}/editing-sessions/${sessionId}/segment-order`, {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+    }),
+  updateEditingSessionTimelinePlacements: (projectId: string, sessionId: string, payload: TimelinePlacementPatchRequest) =>
+    request<EditingSession>(`/api/projects/${projectId}/editing-sessions/${sessionId}/timeline-placements`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
     }),
   undoEditingSession: (projectId: string, sessionId: string, expectedRevision: number) =>
     request<EditingSession>(`/api/projects/${projectId}/editing-sessions/${sessionId}/undo`, {
