@@ -296,16 +296,15 @@ $task14PurePatterns = @(
 )
 foreach ($relative in $task14PurePaths) { Test-ForbiddenRuntimePatterns -RelativePath $relative -Boundary 'Task 14 pure timeline math' -Patterns $task14PurePatterns -AllowAbsent $true }
 
-$task15DockPatterns = @(
+$task16DockPatterns = @(
   [pscustomobject]@{ name = 'EditorCommandPort'; pattern = '(?i)\bEditorCommandPort\b' },
   [pscustomobject]@{ name = 'API request'; pattern = '(?i)\b(?:fetch\s*\(|axios\b)' },
-  [pscustomobject]@{ name = 'API or command import'; pattern = '(?i)(?:from\s*|import\s*(?:\(\s*)?|require\(\s*)["''][^"'']*(?:api|command|mutation)[^"'']*["'']' },
-  [pscustomobject]@{ name = 'session mutation'; pattern = '(?i)\b(?:mutate|mutation)\b' },
+  [pscustomobject]@{ name = 'API or command import'; pattern = '(?i)(?:from\s*|import\s*(?:\(\s*)?|require\(\s*)["''][^"'']*(?:api|command)[^"'']*["'']' },
+  [pscustomobject]@{ name = 'direct mutation'; pattern = '(?i)\bmutate\s*\(' },
   [pscustomobject]@{ name = 'preview write'; pattern = '(?i)\b(?:write|set|update)(?:Preview|Session|Revision)\b' },
-  [pscustomobject]@{ name = 'canvas'; pattern = '(?i)\bcanvas\b' },
-  [pscustomobject]@{ name = 'pointer editing'; pattern = '(?i)\b(?:onPointer\w*|PointerEvent|setPointerCapture|releasePointerCapture|pointer(?:down|move|up|cancel))\b' }
+  [pscustomobject]@{ name = 'canvas'; pattern = '(?i)\bcanvas\b' }
 )
-Test-ForbiddenRuntimePatterns -RelativePath 'apps/web/src/features/editor/timeline/TimelineDock.tsx' -Boundary 'Task 15 read-only timeline dock' -Patterns $task15DockPatterns -AllowAbsent $false
+Test-ForbiddenRuntimePatterns -RelativePath 'apps/web/src/features/editor/timeline/TimelineDock.tsx' -Boundary 'Task 16 local-draft timeline dock' -Patterns $task16DockPatterns -AllowAbsent $false
 
 foreach ($decision in $referenceOnlyDecisions) { Check-ReferenceOnlyDecision $decision }
 if ($null -ne $packageLock -and $null -ne $packageLock.PSObject.Properties['packages'] -and $null -ne $packageLock.packages.PSObject.Properties['node_modules/@supabase/supabase-js']) { Add-Error 'reference-only Supabase package-lock dependency' }

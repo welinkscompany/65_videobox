@@ -1829,8 +1829,12 @@ export function App({
       bounds_by_id[segment.segment_id] = { start_sec: cursor, end_sec: cursor + duration };
       cursor += duration;
     }
+    const boundsById = Object.fromEntries(Object.entries(bounds_by_id).map(([segmentId, bounds]) => [segmentId, {
+      startSec: bounds.start_sec,
+      endSec: bounds.end_sec,
+    }]));
     void applyEditingMutation("timeline-reorder", () => routedEditorCommandPort
-      ? routedEditorCommandPort.reorderNarration({ segmentIds: reordered.map((segment) => segment.segment_id) })
+      ? routedEditorCommandPort.reorderNarration({ segmentIds: reordered.map((segment) => segment.segment_id), boundsById })
       : api.reorderEditingSessionSegments(selectedProjectId, activeEditingSessionId, {
           expected_revision: editingSession.session_revision,
           segment_ids: reordered.map((segment) => segment.segment_id),

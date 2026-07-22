@@ -18,7 +18,28 @@ export function persistedPanelPixels(size: PanelSize, minPx: number, fallback: n
   return Number.isFinite(pixels) ? Math.max(minPx, Math.round(pixels)) : fallback;
 }
 
-export function EditorWorkbench({ view, onPreviewRefresh }: { view: EditorViewModel; onPreviewRefresh?: () => void | Promise<void> }) {
+type NarrationTrim = Readonly<{ segmentId: string; startSec: number; endSec: number }>;
+type NarrationReorder = Readonly<{
+  segmentIds: string[];
+  boundsById: Record<string, { startSec: number; endSec: number }>;
+}>;
+type EditorWorkbenchProps = Readonly<{
+  view: EditorViewModel;
+  onPreviewRefresh?: () => void | Promise<void>;
+  onTrimNarration?: (input: NarrationTrim) => void | Promise<void>;
+  onReorderNarration?: (input: NarrationReorder) => void | Promise<void>;
+  isSavingTimeline?: boolean;
+  timelineMutationMessage?: string;
+}>;
+
+export function EditorWorkbench({
+  view,
+  onPreviewRefresh,
+  onTrimNarration,
+  onReorderNarration,
+  isSavingTimeline = false,
+  timelineMutationMessage,
+}: EditorWorkbenchProps) {
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
   const [availableWorkbenchWidth, setAvailableWorkbenchWidth] = useState(() => window.innerWidth);
   const [ui, setUi] = useState<EditorWorkbenchPersistedState>(readUi);
@@ -63,7 +84,7 @@ export function EditorWorkbench({ view, onPreviewRefresh }: { view: EditorViewMo
   }));
   const stage = <PreviewStage expectedRevision={view.expectedRevision} exactPreview={view.playback.exactPreview} captions={view.captions} sources={sources} onRefresh={onPreviewRefresh} />;
   return <section className="vb-editor-workbench" aria-label="편집 작업판" data-project-id={view.projectId} data-session-id={view.sessionId} data-editor-density={layout.mode} data-available-workbench-width={Math.round(availableWorkbenchWidth)}>
-    <header className="vb-editor-workbench__toolbar"><strong>읽기 전용 편집 작업판</strong><span>{view.timelineId} · revision {view.expectedRevision}</span><div><button ref={leftTriggerRef} type="button" onClick={() => layout.mode === "drawer" ? openDrawer("left") : setUi((current) => ({ ...current, leftOpen: !current.leftOpen }))}>자산과 대본</button><button ref={rightTriggerRef} type="button" onClick={() => layout.mode === "drawer" ? openDrawer("right") : setUi((current) => ({ ...current, rightOpen: !current.rightOpen }))}>유진과 Inspector</button></div></header>
+    <header className="vb-editor-workbench__toolbar"><strong>편집 작업판</strong><span>{view.timelineId} · revision {view.expectedRevision}</span><div><button ref={leftTriggerRef} type="button" onClick={() => layout.mode === "drawer" ? openDrawer("left") : setUi((current) => ({ ...current, leftOpen: !current.leftOpen }))}>자산과 대본</button><button ref={rightTriggerRef} type="button" onClick={() => layout.mode === "drawer" ? openDrawer("right") : setUi((current) => ({ ...current, rightOpen: !current.rightOpen }))}>유진과 Inspector</button></div></header>
     <div ref={bodyRef} className="vb-editor-workbench__body">
       {layout.mode !== "drawer" ? <ResizablePanelGroup orientation="horizontal" className="vb-editor-workbench__panels">
         {leftVisible && <><ResizablePanel panelRef={leftPanelRef} defaultSize={`${ui.leftSize}px`} minSize="220px" onResize={(size) => setUi((current) => ({ ...current, leftSize: persistedPanelPixels(size, 220, current.leftSize) }))}>{dock("left")}</ResizablePanel><ResizableHandle aria-label="왼쪽 패널 크기 조절" onKeyDown={(event) => handleKey(event, "left")} /></>}
@@ -71,7 +92,14 @@ export function EditorWorkbench({ view, onPreviewRefresh }: { view: EditorViewMo
         {rightVisible && <><ResizableHandle aria-label="오른쪽 패널 크기 조절" onKeyDown={(event) => handleKey(event, "right")} /><ResizablePanel panelRef={rightPanelRef} defaultSize={`${ui.rightSize}px`} minSize="260px" onResize={(size) => setUi((current) => ({ ...current, rightSize: persistedPanelPixels(size, 260, current.rightSize) }))}>{dock("right")}</ResizablePanel></>}
       </ResizablePanelGroup> : <><div className="vb-editor-workbench__preview" data-preview-min-width="0">{stage}</div>{drawer}</>}
     </div>
-    <TimelineDock view={view} viewportWidthPx={Math.max(1, Math.round(availableWorkbenchWidth))} />
+    <TimelineDock
+      isSaving={isSavingTimeline}
+      mutationMessage={timelineMutationMessage}
+      onReorderNarration={onReorderNarration}
+      onTrimNarration={onTrimNarration}
+      view={view}
+      viewportWidthPx={Math.max(1, Math.round(availableWorkbenchWidth))}
+    />
   </section>;
 }
 

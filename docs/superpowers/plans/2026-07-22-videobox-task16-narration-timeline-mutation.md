@@ -15,8 +15,9 @@
 **Files:**
 - Modify: `apps/web/src/features/editor/editorCommandPort.ts`
 - Modify: `apps/web/src/features/editor/editorCommandPort.test.ts`
+- Modify: `apps/web/src/App.tsx`
 
-- [ ] **Step 1: Add a failing complete-layout test.**
+- [x] **Step 1: Add a failing complete-layout test.**
 
 ```ts
 await port.reorderNarration({
@@ -30,20 +31,22 @@ expect(api.reorderEditingSessionSegments).toHaveBeenCalledWith("p", "s", {
 });
 ```
 
-- [ ] **Step 2: Run RED.**
+- [x] **Step 2: Run RED.**
 
 Run: `npm --prefix apps/web test -- --run src/features/editor/editorCommandPort.test.ts -t "complete layout"`
 
 Expected: FAIL because `reorderNarration` has no `boundsById` input or payload.
 
-- [ ] **Step 3: Forward the complete typed layout.**
+- [x] **Step 3: Forward the complete typed layout.**
 
 ```ts
 reorderNarration(input: { segmentIds: string[]; boundsById: Record<string, { startSec: number; endSec: number }> }): Promise<EditingSession>;
 // map each entry to { start_sec, end_sec } and call the existing endpoint with revise
 ```
 
-- [ ] **Step 4: Run GREEN.**
+At the existing routed-port consumer in `App.tsx`, convert its already-calculated `bounds_by_id` to camelCase `boundsById` and pass it with `segmentIds`; do not make the new port field optional.
+
+- [x] **Step 4: Run GREEN.**
 
 Run: `npm --prefix apps/web test -- --run src/features/editor/editorCommandPort.test.ts`
 
@@ -55,7 +58,7 @@ Expected: PASS.
 - Create: `apps/web/src/features/editor/timeline/narrationMutation.ts`
 - Create: `apps/web/src/features/editor/timeline/narrationMutation.test.ts`
 
-- [ ] **Step 1: Write failing frame/clamp/reorder tests.**
+- [x] **Step 1: Write failing frame/clamp/reorder tests.**
 
 ```ts
 expect(deriveNarrationTrim({ clip, edge: "start", proposedSec: 0.01, narration, fps })).toEqual({ startSec: frameToSeconds(1, fps), endSec: 2 });
@@ -67,17 +70,17 @@ expect(reorderNarrationLayout({ narration, movingId: "right", targetIndex: 0 }))
 
 Also cover adjacent-bound clamp, one-frame minimum, invalid/unknown IDs, and frozen input.
 
-- [ ] **Step 2: Run RED.**
+- [x] **Step 2: Run RED.**
 
 Run: `npm --prefix apps/web test -- --run src/features/editor/timeline/narrationMutation.test.ts`
 
 Expected: FAIL because the helper module is absent.
 
-- [ ] **Step 3: Implement pure, immutable helpers.**
+- [x] **Step 3: Implement pure, immutable helpers.**
 
 Use only `secondsToFrameHalfUp` and `frameToSeconds` from `time-scale`; sort a copied narration list by start time/ID, clamp a trim to neighbour bounds, and generate contiguous reorder bounds from the earliest start.
 
-- [ ] **Step 4: Run GREEN.**
+- [x] **Step 4: Run GREEN.**
 
 Run: `npm --prefix apps/web test -- --run src/features/editor/timeline/narrationMutation.test.ts`
 
@@ -89,7 +92,7 @@ Expected: PASS.
 - Modify: `apps/web/src/features/editor/timeline/TimelineDock.tsx`
 - Modify: `apps/web/src/features/editor/timeline/timeline-dock.test.tsx`
 
-- [ ] **Step 1: Write failing interaction tests.**
+- [x] **Step 1: Write failing interaction tests.**
 
 ```tsx
 fireEvent.pointerDown(screen.getByRole("button", { name: "n-1 시작 자르기" }), { clientX: 100, pointerId: 1 });
@@ -101,17 +104,17 @@ expect(onTrimNarration).toHaveBeenCalledTimes(1);
 
 Cover end trim, cancel, narration-only controls, body drag reorder, disabled saving state, and preserved click/keyboard navigation.
 
-- [ ] **Step 2: Run RED.**
+- [x] **Step 2: Run RED.**
 
 Run: `npm --prefix apps/web test -- --run src/features/editor/timeline/timeline-dock.test.tsx -t "commits trim once"`
 
 Expected: FAIL because controls and callbacks are absent.
 
-- [ ] **Step 3: Implement local pointer drafts only.**
+- [x] **Step 3: Implement local pointer drafts only.**
 
 Add `onTrimNarration`, `onReorderNarration`, `isSaving`, and `mutationMessage` props. Render narration-only handles/body drag target, use pointer capture, and pass a pure draft result only from `pointerup`. Do not import `api` or `EditorCommandPort`, and never call a mutation from `pointermove`.
 
-- [ ] **Step 4: Run GREEN.**
+- [x] **Step 4: Run GREEN.**
 
 Run: `npm --prefix apps/web test -- --run src/features/editor/timeline/timeline-dock.test.tsx`
 
@@ -126,7 +129,7 @@ Expected: PASS.
 - Modify: `docs/development-status-2026-06-29.ko.md`
 - Create: `docs/handoffs/2026-07-22-videobox-task16-narration-timeline-mutation-closeout.ko.md`
 
-- [ ] **Step 1: Write failing route tests.**
+- [x] **Step 1: Write failing route tests.**
 
 ```tsx
 await user.pointer([{ target: trimHandle, keys: "[MouseLeft>]" }, { target: trimHandle }, { keys: "[/MouseLeft]" }]);
@@ -136,17 +139,17 @@ await waitFor(() => expect(load).toHaveBeenCalledTimes(2));
 
 Also make a revision-conflict rejection refresh the manifest and show a retry message without a second mutation.
 
-- [ ] **Step 2: Run RED.**
+- [x] **Step 2: Run RED.**
 
 Run: `npm --prefix apps/web test -- --run src/features/editor/workbench/editor-workbench-route.test.tsx -t "refreshes after narration trim"`
 
 Expected: FAIL because no mutation callbacks are wired.
 
-- [ ] **Step 3: Create current-revision port callbacks.**
+- [x] **Step 3: Create current-revision port callbacks.**
 
 Create `EditorCommandPort` from `state.view`, call `setNarrationBounds` or `reorderNarration` once, clear local draft through the changed view key, increment refresh token in `finally`, and retain the current view with a creator-safe mutation message until the refresh resolves.
 
-- [ ] **Step 4: Run GREEN and closeout gates.**
+- [x] **Step 4: Run GREEN and closeout gates.**
 
 Run: `npm --prefix apps/web test -- --run src/features/editor/timeline src/features/editor/workbench src/features/editor/editorCommandPort.test.ts`
 
@@ -167,3 +170,4 @@ Do not run or claim the full Python regression. Update SSOT/handoff only after i
 - Coverage: Tasks 1–4 cover the backend-required reorder layout, pure frame/overlap rules, pointer lifecycle, exactly-once mutation, revision refresh, failure safety, and closeout verification.
 - Scope: only existing narration bounds/order commands are used; no new backend/API, non-narration mutation, preview job, provider, or OpenCut work appears.
 - Consistency: `boundsById` is camelCase only in UI/port types and is mapped once to the backend `bounds_by_id`; all local times are frame-quantized through Task 14 helpers.
+- Closeout correction: Task 15's no-pointer policy was deliberately superseded only for Task 16 local pointer drafts. The Dock remains unable to import `EditorCommandPort`/API, issue a request or `mutate()`, write preview state, or use canvas.

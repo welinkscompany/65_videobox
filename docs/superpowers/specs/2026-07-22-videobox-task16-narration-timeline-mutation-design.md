@@ -18,7 +18,7 @@ Let a creator trim either end of a narration clip and drag narration clips into 
 ## Boundaries
 
 - The Task 14 pure math modules remain unchanged and import-free.
-- TimelineDock receives narrow async callbacks, not `EditorCommandPort` or `api`; the Task 15 Dock provenance boundary remains valid.
+- TimelineDock receives narrow async callbacks, not `EditorCommandPort` or `api`. Task 16 permits pointer-driven local drafts in the Dock, while provenance continues to forbid direct command-port/API imports, direct requests or `mutate()`, preview writes, and canvas.
 - Do not change B-roll/BGM/SFX/overlay/caption timing, split/merge, undo/redo, preview generation, provider/Hermes/Mem0, OpenCut runtime, or backend persistence/API contracts.
 
 ## Interaction and failure rules

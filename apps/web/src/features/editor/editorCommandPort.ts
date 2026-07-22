@@ -22,7 +22,7 @@ export type EditorCommandPort = Readonly<{
   splitNarration(input: { segmentId: string; splitSec: number }): Promise<EditingSession>;
   mergeNarration(input: { leftSegmentId: string; rightSegmentId: string }): Promise<EditingSession>;
   setNarrationBounds(input: { segmentId: string; startSec: number; endSec: number }): Promise<EditingSession>;
-  reorderNarration(input: { segmentIds: string[] }): Promise<EditingSession>;
+  reorderNarration(input: { segmentIds: string[]; boundsById: Record<string, { startSec: number; endSec: number }> }): Promise<EditingSession>;
   applyMedia(input: MediaCommand): Promise<EditingSession>;
   updateMediaControls(input: MediaCommand): Promise<EditingSession>;
   clearMedia(input: { kind: MediaKind; segmentId: string }): Promise<EditingSession>;
@@ -53,7 +53,11 @@ export function createEditorCommandPort(context: Context, commandApi: EditorComm
     splitNarration: ({ segmentId, splitSec }) => commandApi.splitEditingSessionSegment(projectId, sessionId, segmentId, { split_sec: splitSec, ...revise }),
     mergeNarration: ({ leftSegmentId, rightSegmentId }) => commandApi.mergeEditingSessionSegments(projectId, sessionId, { left_segment_id: leftSegmentId, right_segment_id: rightSegmentId, ...revise }),
     setNarrationBounds: ({ segmentId, startSec, endSec }) => commandApi.updateEditingSessionSegmentBounds(projectId, sessionId, segmentId, { start_sec: startSec, end_sec: endSec, ...revise }),
-    reorderNarration: ({ segmentIds }) => commandApi.reorderEditingSessionSegments(projectId, sessionId, { segment_ids: segmentIds, ...revise }),
+    reorderNarration: ({ segmentIds, boundsById }) => commandApi.reorderEditingSessionSegments(projectId, sessionId, {
+      segment_ids: segmentIds,
+      bounds_by_id: Object.fromEntries(Object.entries(boundsById).map(([segmentId, bounds]) => [segmentId, { start_sec: bounds.startSec, end_sec: bounds.endSec }])),
+      ...revise,
+    }),
     applyMedia,
     updateMediaControls: applyMedia,
     clearMedia: ({ kind, segmentId }) => kind === "broll" ? commandApi.clearEditingSessionBrollOverride(projectId, sessionId, segmentId, expectedRevision) : kind === "bgm" ? commandApi.clearEditingSessionMusicOverride(projectId, sessionId, segmentId, expectedRevision) : commandApi.clearEditingSessionSfxOverride(projectId, sessionId, segmentId, expectedRevision),

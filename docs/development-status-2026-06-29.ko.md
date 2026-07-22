@@ -1,6 +1,16 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 286. 2026-07-22 Task 15 read-only timeline navigation closeout`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 287. 2026-07-22 Task 16 narration timeline mutation closeout`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+
+## 287. 2026-07-22 Task 16 narration timeline mutation closeout
+
+- `[x] 구현 완료`: 내레이션 clip의 시작/끝 trim과 순서 변경을 추가했다. 포인터 이동은 Dock의 로컬 초안만 바꾸고, 실제 이동이 있는 release에서만 기존 revision-bound editing-session 명령을 정확히 한 번 호출한다. reorder는 완전한 `segment_ids`와 `bounds_by_id`를 전달하며, trim은 rational frame·이웃·timeline 경계와 한 프레임 최소 길이를 지킨다.
+- `[x] 실패 안전성`: `EditorWorkbenchRoute`가 현재 revision의 command port를 만들고 성공·conflict·일반 실패 모두에서 manifest를 다시 읽는다. 자동 재시도·강제 적용·preview job은 없고, A→B→A route race에서 오래된 완료 결과를 무시한다.
+- `[x] 경계 유지`: Task 14 순수 모듈은 변경하지 않았다. Task 16은 TimelineDock의 로컬 pointer draft만 허용하며 Dock의 `EditorCommandPort`/API import, direct request/`mutate()`, preview write, canvas는 provenance verifier에서 계속 차단한다. B-roll/BGM/SFX/overlay/caption, backend/API, provider/Hermes/Mem0, OpenCut runtime은 범위 밖이다.
+- `검증`: Task 16 quality re-review는 Critical/Important/Minor 0으로 승인됐다. frontend full `44 files / 443 passed`, production build 성공(기존 500 kB chunk warning), provenance pytest `21 passed`(기존 multipart warning 1), PowerShell verifier 성공, `git diff --check` 성공. 전체 Python regression은 실행하지 않았다.
+- `다음 goal`: Task 17은 다중 lane 편집 또는 다음 interaction slice의 **written spec**을 먼저 정하고 사용자 승인을 받아야 한다. Task 9 사람/환경 acceptance도 계속 별도다.
+- Task 9 사람/환경 acceptance는 변함없이 별도이며, 사용자가 고정한 공식 누적은 **9/22 (40.9%)**, 잔여 **59.1%**다.
+- handoff: `docs/handoffs/2026-07-22-videobox-task16-narration-timeline-mutation-closeout.ko.md`.
 
 ## 286. 2026-07-22 Task 15 read-only timeline navigation closeout
 

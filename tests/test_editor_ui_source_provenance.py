@@ -42,19 +42,16 @@ TASK14_PURE_REACT_IMPORT = re.compile(
     re.IGNORECASE,
 )
 TASK15_DOCK_PATH = "apps/web/src/features/editor/timeline/TimelineDock.tsx"
-TASK15_DOCK_FORBIDDEN_TERMS = (
+TIMELINE_DOCK_FORBIDDEN_TERMS = (
     "EditorCommandPort",
     "fetch(",
     "axios",
     "mutate(",
-    "mutation",
     "writePreview",
     "canvas",
-    "onPointer",
-    "setPointerCapture",
 )
-TASK15_DOCK_FORBIDDEN_IMPORT = re.compile(
-    r'''(?:from\s*|import\s*(?:\(\s*)?|require\(\s*)["'][^"']*(?:api|command|mutation)[^"']*["']''',
+TIMELINE_DOCK_FORBIDDEN_IMPORT = re.compile(
+    r'''(?:from\s*|import\s*(?:\(\s*)?|require\(\s*)["'][^"']*(?:api|command)[^"']*["']''',
     re.IGNORECASE,
 )
 
@@ -131,15 +128,16 @@ def test_task14_timeline_math_is_reference_only():
             assert not any(term.lower() in content.lower() for term in decision["forbidden_import_terms"])
 
 
-def test_task15_timeline_runtime_stays_read_only_and_task14_stays_pure() -> None:
+def test_task16_timeline_dock_keeps_local_pointer_drafts_and_task14_stays_pure() -> None:
     for relative in TASK14_PURE_PATHS:
         content = (ROOT / relative).read_text(encoding="utf-8")
         assert not any(term.lower() in content.lower() for term in TASK14_PURE_FORBIDDEN_TERMS)
         assert TASK14_PURE_REACT_IMPORT.search(content) is None
 
     dock = (ROOT / TASK15_DOCK_PATH).read_text(encoding="utf-8")
-    assert not any(term.lower() in dock.lower() for term in TASK15_DOCK_FORBIDDEN_TERMS)
-    assert TASK15_DOCK_FORBIDDEN_IMPORT.search(dock) is None
+    assert "onPointer" in dock
+    assert not any(term.lower() in dock.lower() for term in TIMELINE_DOCK_FORBIDDEN_TERMS)
+    assert TIMELINE_DOCK_FORBIDDEN_IMPORT.search(dock) is None
 
 
 def write_json(path: Path, value: dict) -> None:
@@ -214,7 +212,7 @@ def test_independent_verifier_requires_exact_task14_reference_decision() -> None
             temp.cleanup()
 
 
-def test_independent_verifier_rejects_task14_impurity_and_task15_mutation_runtime() -> None:
+def test_independent_verifier_rejects_task14_impurity_and_task16_direct_runtime() -> None:
     for relative, forbidden_source in (
         (TASK14_PURE_PATHS[0], 'import { useMemo } from "react";\n'),
         (TASK14_PURE_PATHS[0], 'import "react";\n'),
@@ -222,10 +220,9 @@ def test_independent_verifier_rejects_task14_impurity_and_task15_mutation_runtim
         (TASK15_DOCK_PATH, 'import { client } from "../api/editor";\n'),
         (TASK15_DOCK_PATH, 'import "../api/editor";\n'),
         (TASK15_DOCK_PATH, "void fetch('/api/editor/mutate');\n"),
-        (TASK15_DOCK_PATH, "const mutation = true;\n"),
+        (TASK15_DOCK_PATH, "void mutate();\n"),
         (TASK15_DOCK_PATH, "const writePreview = () => undefined;\n"),
         (TASK15_DOCK_PATH, "const canvas = document.createElement('canvas');\n"),
-        (TASK15_DOCK_PATH, "const onPointerMove = () => undefined;\n"),
     ):
         temp, root = verifier_fixture_with_production_sources()
         try:

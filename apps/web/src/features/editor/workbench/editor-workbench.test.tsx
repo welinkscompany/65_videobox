@@ -12,6 +12,8 @@ describe("EditorWorkbench", () => {
   it("uses the measured workbench width rather than viewport width", async () => {
     render(<EditorWorkbench view={view} />);
     expect(await screen.findByRole("region", { name: "편집 작업판" })).toHaveAttribute("data-editor-density", "desktop-single");
+    expect(screen.getByText("편집 작업판", { selector: "strong" })).toBeInTheDocument();
+    expect(screen.queryByText("읽기 전용 편집 작업판", { selector: "strong" })).toBeNull();
     expect(screen.getByRole("region", { name: "미리보기" }).parentElement).toHaveAttribute("data-preview-min-width", "640");
   });
 
