@@ -1,6 +1,16 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 290. 2026-07-23 Task 18 caption time authority repair closeout`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 291. 2026-07-23 Task 19 editor asset browser closeout`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+
+## 291. 2026-07-23 Task 19 editor asset browser closeout
+
+- `[x] asset truth와 표시`: Route-owned B-roll/Starter Pack 목록을 pure card model로 투영했다. 검색·유형 filter·권리/검수/오디오/적용 구간이 callback-only 브라우저에 표시되며, card는 API·mutation·native player를 만들지 않는다.
+- `[x] one preview owner`: PreviewStage/PreviewCoordinator는 video/audio/image B-roll과 BGM/SFX의 실제 형식을 정확히 한 surface로 전환한다. image는 비재생 surface이고, 반복 audition은 증가 request ID로 보장한다. local URL guard, exact preview 복귀, no-autoplay가 유지된다.
+- `[x] revision-safe apply`: B-roll direct apply와 BGM/SFX materialize-then-apply가 current revision port와 Route epoch fence를 사용한다. materialize failure 또는 A→B stale completion은 media command 0회이며, asset load failure는 editor를 막지 않는다.
+- `검증`: focused frontend `6 files / 62 passed`, frontend full `50 files / 490 passed`, production build 성공(기존 500 kB chunk warning), provenance verifier/diff check 성공. independent spec/quality/gap/source-to-runtime reverse review Critical/Important 0. 전체 Python regression은 실행하지 않았다.
+- `다음 goal`: Task 20은 persistent Eugene conversation, inline recommendation, typed Inspector의 별도 written spec과 사용자 승인 뒤에만 시작한다. Task 9 사람/환경 acceptance와 CapCut Desktop 실증은 계속 별도다.
+- Task 9 사람/환경 acceptance는 변함없이 별도이며, 사용자 지시대로 공식 누적은 **9/22 (40.9%)**, 잔여 **59.1%**를 유지한다.
+- handoff: `docs/handoffs/2026-07-23-videobox-task19-editor-asset-browser-closeout.ko.md`.
 
 ## 290. 2026-07-23 Task 18 caption time authority repair closeout
 

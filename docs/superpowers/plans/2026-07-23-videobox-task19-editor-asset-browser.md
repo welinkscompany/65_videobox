@@ -82,7 +82,7 @@ Run: `npm --prefix apps/web run test -- --run src/features/editor/assets/editorA
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit the pure unit.**
+- [x] **Step 5: Commit the pure unit.**
 
 ```powershell
 git add apps/web/src/features/editor/assets/editorAssetProjection.ts apps/web/src/features/editor/assets/editorAssetProjection.test.ts
@@ -156,7 +156,7 @@ Run: `npm --prefix apps/web run test -- --run src/features/editor/assets/EditorA
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit the browser.**
+- [x] **Step 5: Commit the browser.**
 
 ```powershell
 git add apps/web/src/features/editor/assets/EditorAssetBrowser.tsx apps/web/src/features/editor/assets/EditorAssetBrowser.test.tsx apps/web/src/styles/editor-workbench.css
@@ -229,7 +229,7 @@ Run: `npm --prefix apps/web run test -- --run src/features/editor/preview/previe
 
 Expected: PASS; playable audio/video auditions observe exactly one `audio` or `video`, while an image audition observes exactly one `img` and zero playable media elements.
 
-- [ ] **Step 5: Commit the one-player integration.**
+- [x] **Step 5: Commit the one-player integration.**
 
 ```powershell
 git add apps/web/src/features/editor/preview/preview-stage.tsx apps/web/src/features/editor/preview/preview-stage.test.tsx apps/web/src/features/editor/workbench/EditorWorkbench.tsx apps/web/src/features/editor/workbench/editorWorkbenchReadOnlyAdapters.tsx apps/web/src/features/editor/workbench/editor-workbench.test.tsx
@@ -313,7 +313,7 @@ Run: `npm --prefix apps/web run test -- --run src/features/editor/assets src/fea
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit the route integration.**
+- [x] **Step 5: Commit the route integration.**
 
 ```powershell
 git add apps/web/src/features/editor/workbench/EditorWorkbenchRoute.tsx apps/web/src/features/editor/workbench/editor-workbench-route.test.tsx apps/web/src/features/editor/workbench/EditorWorkbench.tsx apps/web/src/features/editor/workbench/editor-workbench.test.tsx
@@ -336,7 +336,7 @@ git commit -m "feat: apply editor assets through revision fence"
 - Modify: `docs/development-status-2026-06-29.ko.md`
 - Modify: `docs/implementation-plan.ko.md`
 
-- [ ] **Step 1: Run quality gates without a full Python regression.**
+- [x] **Step 1: Run quality gates without a full Python regression.**
 
 ```powershell
 npm --prefix apps/web run test -- --run src/features/editor/assets src/features/editor/preview/preview-stage.test.tsx src/features/editor/workbench/editor-workbench.test.tsx src/features/editor/workbench/editor-workbench-route.test.tsx src/features/editor/editorCommandPort.test.ts
@@ -349,18 +349,18 @@ git status --short
 
 Record exact pass/fail output and any pre-existing frontend stderr/build-size warnings. Do not invoke `.venv\\Scripts\\python.exe -m pytest` for the whole suite and do not claim a full Python regression.
 
-- [ ] **Step 2: Perform independent reviews in this order.**
+- [x] **Step 2: Perform independent reviews in this order.**
 
 1. Spec review: compare every acceptance-matrix row with tests and code; reject direct card API/player/mutation, unsupported voice/image-overlay apply, or missing failure fence.
 2. Quality review: inspect callback types, effect dependencies, route-epoch checks, button disabled semantics, local URL gating, and CSS narrow-drawer behavior.
 3. Gap review: test no target, unavailable library item, materialize failure, conflict, asset load failure, same asset re-audition, and stale route completion.
 4. Source-to-runtime reverse review: trace each card URL/API from route to `PreviewStage`/command port and confirm no external URL/player/import reaches runtime.
 
-- [ ] **Step 3: Write SSOT/handoff only after all review blockers are closed.**
+- [x] **Step 3: Write SSOT/handoff only after all review blockers are closed.**
 
 Document the actual commit SHA(s), exact verifications, source-map decision, protected `?? .tmp-final-fence-debug/` status, Task 9 cumulative **9/22 (40.9%)**, remaining **59.1%**, and the next goal: Task 20 needs its own written spec/approval. Do not mark Task 19 complete or alter progress until the implementation/reviews pass.
 
-- [ ] **Step 4: Commit and push the verified closeout.**
+- [x] **Step 4: Commit and push the verified closeout.**
 
 ```powershell
 git add docs/superpowers/specs/2026-07-23-videobox-task19-editor-asset-browser-design.md docs/superpowers/plans/2026-07-23-videobox-task19-editor-asset-browser.md docs/handoffs/2026-07-23-videobox-task19-editor-asset-browser-closeout.ko.md docs/development-status-2026-06-29.ko.md docs/implementation-plan.ko.md
