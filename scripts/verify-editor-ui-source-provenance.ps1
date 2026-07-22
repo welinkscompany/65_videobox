@@ -271,6 +271,42 @@ else {
   }
 }
 
+function Test-ForbiddenRuntimePatterns([string]$RelativePath, [string]$Boundary, [object[]]$Patterns, [bool]$AllowAbsent) {
+  $path = Join-Path $root $RelativePath
+  if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+    if (-not $AllowAbsent) { Add-Error "$Boundary path absent: $RelativePath" }
+    return
+  }
+  $content = Get-Content -Raw -LiteralPath $path
+  foreach ($entry in $Patterns) {
+    if ($content -match $entry.pattern) { Add-Error "$Boundary forbidden runtime boundary: $RelativePath ($($entry.name))" }
+  }
+}
+
+$task14PurePaths = @(
+  'apps/web/src/features/editor/timeline/time-scale.ts',
+  'apps/web/src/features/editor/timeline/timeline-geometry.ts',
+  'apps/web/src/features/editor/timeline/snapping.ts',
+  'apps/web/src/features/editor/timeline/hit-testing.ts'
+)
+$task14PurePatterns = @(
+  [pscustomobject]@{ name = 'React import'; pattern = '(?i)(?:from\s*|import\s*(?:\(\s*)?|require\(\s*)["''](?:react|react-dom)(?:/|["''])' },
+  [pscustomobject]@{ name = 'editor/API runtime'; pattern = '(?i)\b(?:EditorCommandPort|fetch\s*\(|axios\b)'} ,
+  [pscustomobject]@{ name = 'DOM or canvas runtime'; pattern = '(?i)\b(?:document|window|HTMLElement|MouseEvent|KeyboardEvent|WheelEvent|canvas)\b' }
+)
+foreach ($relative in $task14PurePaths) { Test-ForbiddenRuntimePatterns -RelativePath $relative -Boundary 'Task 14 pure timeline math' -Patterns $task14PurePatterns -AllowAbsent $true }
+
+$task15DockPatterns = @(
+  [pscustomobject]@{ name = 'EditorCommandPort'; pattern = '(?i)\bEditorCommandPort\b' },
+  [pscustomobject]@{ name = 'API request'; pattern = '(?i)\b(?:fetch\s*\(|axios\b)' },
+  [pscustomobject]@{ name = 'API or command import'; pattern = '(?i)(?:from\s*|import\s*(?:\(\s*)?|require\(\s*)["''][^"'']*(?:api|command|mutation)[^"'']*["'']' },
+  [pscustomobject]@{ name = 'session mutation'; pattern = '(?i)\b(?:mutate|mutation)\b' },
+  [pscustomobject]@{ name = 'preview write'; pattern = '(?i)\b(?:write|set|update)(?:Preview|Session|Revision)\b' },
+  [pscustomobject]@{ name = 'canvas'; pattern = '(?i)\bcanvas\b' },
+  [pscustomobject]@{ name = 'pointer editing'; pattern = '(?i)\b(?:onPointer\w*|PointerEvent|setPointerCapture|releasePointerCapture|pointer(?:down|move|up|cancel))\b' }
+)
+Test-ForbiddenRuntimePatterns -RelativePath 'apps/web/src/features/editor/timeline/TimelineDock.tsx' -Boundary 'Task 15 read-only timeline dock' -Patterns $task15DockPatterns -AllowAbsent $false
+
 foreach ($decision in $referenceOnlyDecisions) { Check-ReferenceOnlyDecision $decision }
 if ($null -ne $packageLock -and $null -ne $packageLock.PSObject.Properties['packages'] -and $null -ne $packageLock.packages.PSObject.Properties['node_modules/@supabase/supabase-js']) { Add-Error 'reference-only Supabase package-lock dependency' }
 

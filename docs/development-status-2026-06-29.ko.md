@@ -1,6 +1,16 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 285. 2026-07-22 Task 14 written-design handoff`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 286. 2026-07-22 Task 15 read-only timeline navigation closeout`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+
+## 286. 2026-07-22 Task 15 read-only timeline navigation closeout
+
+- `[x] 구현 완료`: Task 14 순수 모듈 위에 `timelineNavigation`과 `TimelineDock`을 추가했다. 고정 lane·half-open visible clip·ruler·gap/caption·실제 source-edge snap·empty state를 표시하며, seek/zoom/수평 wheel scroll/키보드 navigation/clip selection은 모두 Dock의 local reducer 상태만 바꾼다.
+- `[x] 경계 유지`: `EditorCommandPort`, API/mutation, preview write, pointer drag/trim, canvas, OpenCut source copy, provider/Hermes/Mem0는 추가하지 않았다. Task 14 네 pure module은 React/API/DOM/canvas와 side-effect import까지 provenance verifier에서 계속 차단한다. Task 15 Dock은 React만 허용하고 command/API/mutation/preview-write/canvas/pointer editing import·사용을 차단한다.
+- `[x] 성능/품질`: 60분·1,000 clip fixture가 later viewport `[360,368)`에서 `bulk-100..102`만 보이고 시작 경계에서 끝난 `bulk-99`는 제외함을 검증해, 인위 cap이 아닌 actual half-open filtering을 증명한다. TDD RED→GREEN, 독립 spec/quality/gap/source-to-runtime reverse review는 모두 승인됐다.
+- `검증`: timeline focused `64 passed`, frontend full `43 files / 400 passed`, production build 성공, provenance pytest `21 passed`(기존 multipart warning 1), PowerShell verifier 성공, `git diff --check` 성공. frontend full의 기존 React `act(...)`, jsdom navigation, intentional ErrorBoundary stderr와 build의 기존 500 kB chunk warning은 실패가 아니다. 전체 Python regression은 실행하지 않았다.
+- `다음 goal`: Task 16 mutation/trim/drag는 별도 written spec과 사용자 승인 뒤에만 시작한다. Task 15의 read-only navigation을 API/session/revision mutation으로 확장하지 않는다.
+- Task 9 사람/환경 acceptance는 변함없이 별도이며, 사용자가 고정한 공식 누적은 **9/22 (40.9%)**, 잔여 **59.1%**다.
+- handoff: `docs/handoffs/2026-07-22-videobox-task15-read-only-navigation-closeout.ko.md`.
 
 ## 285. 2026-07-22 Task 14 timeline geometry closeout
 

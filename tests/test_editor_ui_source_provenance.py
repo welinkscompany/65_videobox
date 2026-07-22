@@ -23,6 +23,40 @@ NOTICES_PATH = ROOT / "THIRD_PARTY_NOTICES.md"
 VERIFY_SCRIPT = ROOT / "scripts/verify-editor-ui-source-provenance.ps1"
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 COMMIT = re.compile(r"^[0-9a-f]{40}$")
+TASK14_PURE_PATHS = (
+    "apps/web/src/features/editor/timeline/time-scale.ts",
+    "apps/web/src/features/editor/timeline/timeline-geometry.ts",
+    "apps/web/src/features/editor/timeline/snapping.ts",
+    "apps/web/src/features/editor/timeline/hit-testing.ts",
+)
+TASK14_PURE_FORBIDDEN_TERMS = (
+    "EditorCommandPort",
+    "fetch(",
+    "axios",
+    "document",
+    "window",
+    "canvas",
+)
+TASK14_PURE_REACT_IMPORT = re.compile(
+    r'''(?:from\s*|import\s*(?:\(\s*)?|require\(\s*)["'](?:react|react-dom)(?:/|["'])''',
+    re.IGNORECASE,
+)
+TASK15_DOCK_PATH = "apps/web/src/features/editor/timeline/TimelineDock.tsx"
+TASK15_DOCK_FORBIDDEN_TERMS = (
+    "EditorCommandPort",
+    "fetch(",
+    "axios",
+    "mutate(",
+    "mutation",
+    "writePreview",
+    "canvas",
+    "onPointer",
+    "setPointerCapture",
+)
+TASK15_DOCK_FORBIDDEN_IMPORT = re.compile(
+    r'''(?:from\s*|import\s*(?:\(\s*)?|require\(\s*)["'][^"']*(?:api|command|mutation)[^"']*["']''',
+    re.IGNORECASE,
+)
 
 EXPECTED_PINS = {
     "shadcn-admin": "e16c87f213a5ba5e45964e9b67c792105ec74d26",
@@ -97,6 +131,17 @@ def test_task14_timeline_math_is_reference_only():
             assert not any(term.lower() in content.lower() for term in decision["forbidden_import_terms"])
 
 
+def test_task15_timeline_runtime_stays_read_only_and_task14_stays_pure() -> None:
+    for relative in TASK14_PURE_PATHS:
+        content = (ROOT / relative).read_text(encoding="utf-8")
+        assert not any(term.lower() in content.lower() for term in TASK14_PURE_FORBIDDEN_TERMS)
+        assert TASK14_PURE_REACT_IMPORT.search(content) is None
+
+    dock = (ROOT / TASK15_DOCK_PATH).read_text(encoding="utf-8")
+    assert not any(term.lower() in dock.lower() for term in TASK15_DOCK_FORBIDDEN_TERMS)
+    assert TASK15_DOCK_FORBIDDEN_IMPORT.search(dock) is None
+
+
 def write_json(path: Path, value: dict) -> None:
     path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
 
@@ -165,6 +210,29 @@ def test_independent_verifier_requires_exact_task14_reference_decision() -> None
             task14["inspected_upstream_paths"][0][field] = value
             write_json(root / "docs/oss/editor-ui-source-map.json", source_map)
             assert run_verifier(root).returncode != 0
+        finally:
+            temp.cleanup()
+
+
+def test_independent_verifier_rejects_task14_impurity_and_task15_mutation_runtime() -> None:
+    for relative, forbidden_source in (
+        (TASK14_PURE_PATHS[0], 'import { useMemo } from "react";\n'),
+        (TASK14_PURE_PATHS[0], 'import "react";\n'),
+        (TASK15_DOCK_PATH, 'import { EditorCommandPort } from "../EditorCommandPort";\n'),
+        (TASK15_DOCK_PATH, 'import { client } from "../api/editor";\n'),
+        (TASK15_DOCK_PATH, 'import "../api/editor";\n'),
+        (TASK15_DOCK_PATH, "void fetch('/api/editor/mutate');\n"),
+        (TASK15_DOCK_PATH, "const mutation = true;\n"),
+        (TASK15_DOCK_PATH, "const writePreview = () => undefined;\n"),
+        (TASK15_DOCK_PATH, "const canvas = document.createElement('canvas');\n"),
+        (TASK15_DOCK_PATH, "const onPointerMove = () => undefined;\n"),
+    ):
+        temp, root = verifier_fixture_with_production_sources()
+        try:
+            target = root / relative
+            target.write_text(target.read_text(encoding="utf-8") + forbidden_source, encoding="utf-8")
+            result = run_verifier(root)
+            assert result.returncode != 0, result.stdout + result.stderr
         finally:
             temp.cleanup()
 

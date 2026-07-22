@@ -4,6 +4,7 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "../../../c
 import type { PanelImperativeHandle, PanelSize } from "react-resizable-panels";
 import type { EditorViewModel } from "../editorViewModel";
 import { PreviewStage, type AuditionSource } from "../preview/preview-stage";
+import { TimelineDock } from "../timeline/TimelineDock";
 import { EditorWorkbenchReadOnlyAdapters } from "./editorWorkbenchReadOnlyAdapters";
 import { resolveEditorWorkbenchLayout, type EditorWorkbenchPersistedState } from "./editorWorkbenchLayout";
 
@@ -70,7 +71,7 @@ export function EditorWorkbench({ view, onPreviewRefresh }: { view: EditorViewMo
         {rightVisible && <><ResizableHandle aria-label="오른쪽 패널 크기 조절" onKeyDown={(event) => handleKey(event, "right")} /><ResizablePanel panelRef={rightPanelRef} defaultSize={`${ui.rightSize}px`} minSize="260px" onResize={(size) => setUi((current) => ({ ...current, rightSize: persistedPanelPixels(size, 260, current.rightSize) }))}>{dock("right")}</ResizablePanel></>}
       </ResizablePanelGroup> : <><div className="vb-editor-workbench__preview" data-preview-min-width="0">{stage}</div>{drawer}</>}
     </div>
-    <section aria-label="타임라인" className="vb-editor-workbench__timeline"><h2>타임라인</h2><p>{view.tracks.length}개 트랙 · {view.captions.length}개 자막 · {view.gaps.length}개 자산 공백 · {view.source.status}</p></section>
+    <TimelineDock view={view} viewportWidthPx={Math.max(1, Math.round(availableWorkbenchWidth))} />
   </section>;
 }
 
