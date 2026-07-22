@@ -36,7 +36,17 @@ export type EditorCommandPort = Readonly<{
 
 function mediaControls(value: EditorControls | undefined): BrollOverrideRequest["media_controls"] {
   if (!value) return undefined;
-  return { volume: value.volume, crop: value.crop, speed: value.speed, fade_in_sec: value.fadeInSec, fade_out_sec: value.fadeOutSec };
+  return {
+    ...(value.volume === undefined ? {} : { volume: value.volume }),
+    ...(value.crop === undefined ? {} : { crop: value.crop }),
+    ...(value.speed === undefined ? {} : { speed: value.speed }),
+    ...(value.fadeInSec === undefined ? {} : { fade_in_sec: value.fadeInSec }),
+    ...(value.fadeOutSec === undefined ? {} : { fade_out_sec: value.fadeOutSec }),
+    ...(value.fit === undefined ? {} : { fit: value.fit }),
+    ...(value.loop === undefined ? {} : { loop: value.loop }),
+    ...(value.pad === undefined ? {} : { pad: value.pad }),
+    ...(value.trimStartSec === undefined ? {} : { trim_start_sec: value.trimStartSec }),
+  };
 }
 function captionStyle(style: EditorCaptionStyle): CaptionStyleMutationRequest["style"] {
   return { font_family: style.fontFamily, font_size_px: style.fontSizePx, text_color: style.textColor, outline_color: style.outlineColor, outline_width_px: style.outlineWidthPx, background_color: style.backgroundColor, position_x_percent: style.positionXPercent, position_y_percent: style.positionYPercent, horizontal_align: style.horizontalAlign, safe_area_enabled: style.safeAreaEnabled, shadow_blur_px: style.shadowBlurPx };

@@ -8,7 +8,7 @@ const manifest: EditorPlaybackManifest = {
   output: { width: 1080, height: 1920, sample_aspect_ratio: "1:1", rotation: 0, duration_sec: 6 },
   tracks: [
     { track_id: "narration", track_type: "narration", clips: [{ clip_id: "n-1", segment_id: "seg-1", clip_type: "narration", asset_id: "a-n", asset_uri: "storage://x", start_sec: 0, end_sec: 3, media_controls: {} }] },
-    { track_id: "broll", track_type: "broll", clips: [{ clip_id: "b-1", segment_id: "seg-1", clip_type: "broll", asset_id: "a-b", asset_uri: "storage://x", start_sec: 0, end_sec: 3, media_controls: { volume: 0.5 } }] },
+    { track_id: "broll", track_type: "broll", clips: [{ clip_id: "b-1", segment_id: "seg-1", clip_type: "broll", asset_id: "a-b", asset_uri: "storage://x", start_sec: 0, end_sec: 3, media_controls: { volume: 0.5, fit: "crop", loop: false, pad: true, trim_start_sec: 0.25 } }] },
   ],
   captions: [{ segment_id: "seg-1", caption_id: "caption:seg-1", placement_id: "caption:caption:seg-1", text: "안녕하세요", start_sec: 0, end_sec: 3, style: { font_family: "Pretendard", font_size_px: 28, text_color: "#fff", outline_color: "#000", outline_width_px: 1, background_color: "#00000000", position_x_percent: 50, position_y_percent: 90, horizontal_align: "center", safe_area_enabled: true, shadow_blur_px: 0 } }],
   gap_slots: [{ gap_id: "gap-1", segment_id: "seg-2", start_sec: 3, end_sec: 6, reason: "asset_required" }],
@@ -23,7 +23,7 @@ describe("VideoBoxEditorAdapter", () => {
     expect(view.timebase).toBe("seconds");
     expect(view.timelineVersion).toBe("v4");
     expect(view.output).toEqual({ width: 1080, height: 1920, sampleAspectRatio: "1:1", rotation: 0, durationSec: 6 });
-    expect(view.tracks[1]).toMatchObject({ role: "broll", clips: [{ type: "broll", assetId: "a-b", assetUri: "storage://x", controls: { volume: 0.5 } }] });
+    expect(view.tracks[1]).toMatchObject({ role: "broll", clips: [{ type: "broll", assetId: "a-b", assetUri: "storage://x", controls: { volume: 0.5, fit: "crop", loop: false, pad: true, trimStartSec: 0.25 } }] });
     expect(view.captions[0]).toMatchObject({ segmentId: "seg-1", text: "안녕하세요" });
     expect(view.gaps).toEqual([{ gapId: "gap-1", segmentId: "seg-2", startSec: 3, endSec: 6, reason: "asset_required" }]);
     expect(view.source).toEqual({ status: "current", sourceSessionId: "session-1", sourceSessionRevision: 4 });

@@ -57,10 +57,10 @@ describe("EditorCommandPort", () => {
 
   it("keeps B-roll, BGM, and SFX separate when applying, clearing, and updating controls", async () => {
     const port = createEditorCommandPort({ projectId: "p", sessionId: "s", expectedRevision: 7 }, api);
-    await port.applyMedia({ kind: "broll", segmentId: "seg", assetId: "asset-b", controls: { volume: 0.6 } });
+    await port.applyMedia({ kind: "broll", segmentId: "seg", assetId: "asset-b", controls: { fit: "crop", loop: false, pad: true, trimStartSec: 0.6 } });
     await port.updateMediaControls({ kind: "bgm", segmentId: "seg", assetId: "asset-m", controls: { fadeInSec: 1 } });
     await port.clearMedia({ kind: "sfx", segmentId: "seg" });
-    expect(api.updateEditingSessionBroll).toHaveBeenCalledWith("p", "s", "seg", { asset_id: "asset-b", media_controls: { volume: 0.6 }, expected_revision: 7 });
+    expect(api.updateEditingSessionBroll).toHaveBeenCalledWith("p", "s", "seg", { asset_id: "asset-b", media_controls: { fit: "crop", loop: false, pad: true, trim_start_sec: 0.6 }, expected_revision: 7 });
     expect(api.updateEditingSessionMusicOverride).toHaveBeenCalledWith("p", "s", "seg", { asset_id: "asset-m", media_controls: { fade_in_sec: 1 }, expected_revision: 7 });
     expect(api.clearEditingSessionSfxOverride).toHaveBeenCalledWith("p", "s", "seg", 7);
   });
