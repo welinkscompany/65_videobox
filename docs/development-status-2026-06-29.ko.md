@@ -1,6 +1,13 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 291. 2026-07-23 Task 19 editor asset browser closeout`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 292. 2026-07-23 Task 19 next-session handoff`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+
+## 292. 2026-07-23 Task 19 next-session handoff
+
+- Task 19 closeout commit `bec13c1`과 upstream 동기화 `0 0`을 확인했다. 다음 세션은 `docs/handoffs/2026-07-23-videobox-next-session-context.ko.md`에서 같은 worktree/branch를 재개한다.
+- tracked 변경은 handoff 기록으로만 닫고 branch/worktree는 보존한다. `?? .tmp-final-fence-debug/`는 기존 범위 밖 잔재이므로 stage/remove하지 않는다.
+- 다음 구현 goal은 Task 20의 persistent Eugene conversation, inline recommendation, typed Inspector이며, actual contract 조사 → written spec → 사용자 승인 → TDD 순서다.
+- Task 9 사람/환경 acceptance와 CapCut Desktop 실증은 별도이며, 공식 누적은 사용자 지시대로 **9/22 (40.9%)**, 잔여 **59.1%**를 유지한다.
 
 ## 291. 2026-07-23 Task 19 editor asset browser closeout
 
