@@ -2,6 +2,12 @@
 
 > 현재 authoritative 상태/next slice 판단은 `## 292. 2026-07-23 Task 19 next-session handoff`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
 
+## 293. 2026-07-23 Task 20 Eugene/Inspector closeout
+
+- Task 20은 route-owned persistent Eugene conversation, inline recommendation, typed Inspector를 closeout했다. next goal은 Task 21 release-hardening gate다.
+- full frontend `52 files / 505 tests`, build, provenance verifier, `git diff --check`가 통과했다. 전체 Python regression은 실행하지 않았다.
+- `?? .tmp-final-fence-debug/`는 보존하며, 공식 누적은 **9/22 (40.9%)**, 잔여 **59.1%**를 유지한다.
+
 ## 292. 2026-07-23 Task 19 next-session handoff
 
 - Task 19 closeout commit `bec13c1`과 upstream 동기화 `0 0`을 확인했다. 다음 세션은 `docs/handoffs/2026-07-23-videobox-next-session-context.ko.md`에서 같은 worktree/branch를 재개한다.
