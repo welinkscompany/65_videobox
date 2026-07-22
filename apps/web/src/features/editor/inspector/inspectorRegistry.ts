@@ -28,7 +28,7 @@ export function projectInspectorTargets({ view, selectedSegmentId }: Readonly<{ 
     const mediaKind = track.role;
     if (!isMediaKind(mediaKind)) return [];
     return track.clips
-      .filter((clip) => clip.segmentId === selectedSegmentId && clip.type === mediaKind)
+      .filter((clip) => clip.segmentId === selectedSegmentId && clip.type === mediaKind && clip.assetId !== null)
       .map((clip) => ({ id: `clip:${clip.clipId}`, kind: "media" as const, label: mediaLabels[mediaKind], segmentId: selectedSegmentId, mediaKind, fields: mediaFields }));
   });
   const captionTargets = view.captions

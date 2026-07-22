@@ -47,6 +47,15 @@ describe("projectInspectorTargets", () => {
     expect(fields).not.toEqual(expect.arrayContaining(["voice", "effect", "keyframe", "mask", "transition", "captionStartSec", "captionEndSec"]));
   });
 
+  it("does not project a media target without the asset required by the command port", () => {
+    const assetlessView = {
+      ...view,
+      tracks: view.tracks.map((track) => track.role === "broll" ? { ...track, clips: track.clips.map((clip) => ({ ...clip, assetId: null })) } : track),
+    } as EditorViewModel;
+
+    expect(projectInspectorTargets({ view: assetlessView, selectedSegmentId: "segment-1" })).not.toContainEqual(expect.objectContaining({ id: "clip:broll-1" }));
+  });
+
   it("returns no targets without a selection or for an unsupported selection", () => {
     expect(projectInspectorTargets({ view, selectedSegmentId: null })).toEqual([]);
     expect(projectInspectorTargets({ view, selectedSegmentId: "segment-unsupported" })).toEqual([]);
