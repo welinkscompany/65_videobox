@@ -1,6 +1,7 @@
 import { api, type BrollAsset, type MediaLibraryAsset } from "../../../api";
 
 export type EditorAssetKind = "broll" | "bgm" | "sfx";
+export type EditorAssetAudioPresence = "오디오 있음" | "오디오 없음" | "오디오 정보 확인 중";
 
 export type EditorAssetSourceMetadata = Readonly<{
   tags: readonly string[];
@@ -21,6 +22,7 @@ export type EditorAssetCard = Readonly<{
   title: string;
   durationLabel: string;
   status: string;
+  audioPresence: EditorAssetAudioPresence;
   license: string;
   canApply: boolean;
   previewUrl: string;
@@ -66,6 +68,12 @@ function brollStatus(metadata: Readonly<Record<string, unknown>>): string {
   return `${base} · ${reviewStatus}`;
 }
 
+function brollAudioPresence(metadata: Readonly<Record<string, unknown>>): EditorAssetAudioPresence {
+  const values = [metadata.audio_present, metadata.has_audio].filter((value): value is boolean => typeof value === "boolean");
+  if (values.length === 0 || new Set(values).size !== 1) return "오디오 정보 확인 중";
+  return values[0] ? "오디오 있음" : "오디오 없음";
+}
+
 function libraryLicense(asset: MediaLibraryAsset): string {
   const license = asset.official_license_url.trim() || "라이선스 정보 없음";
   const attribution = asset.attribution_required
@@ -95,6 +103,7 @@ function projectBroll(projectId: string, asset: BrollAsset, index: number): Edit
     title: metadataTitle || `B-roll ${index + 1}`,
     durationLabel: durationLabel(metadata.duration_seconds),
     status: brollStatus(metadata),
+    audioPresence: brollAudioPresence(metadata),
     license: "프로젝트 로컬 B-roll",
     canApply: true,
     previewUrl: api.assetContentUrl(projectId, asset.asset_id),
@@ -123,6 +132,7 @@ function projectLibrary(asset: MediaLibraryAsset, index: number): EditorAssetCar
     title: `${prefix} ${index + 1}`,
     durationLabel: durationLabel(asset.duration_seconds),
     status: libraryStatus(asset),
+    audioPresence: "오디오 있음",
     license: libraryLicense(asset),
     canApply: availableForUse,
     previewUrl: api.mediaLibraryPreviewUrl(asset.library_asset_id),

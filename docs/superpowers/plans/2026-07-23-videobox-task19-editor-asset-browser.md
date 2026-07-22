@@ -105,7 +105,7 @@ git commit -m "feat: project editor asset cards"
 - Test: `apps/web/src/features/editor/assets/EditorAssetBrowser.test.tsx`
 - Modify: `apps/web/src/styles/editor-workbench.css`
 
-- [ ] **Step 1: Write failing browser tests.**
+- [x] **Step 1: Write failing browser tests.**
 
 ```tsx
 it("filters cards, describes the selected range, and requests preview without a media node", () => {
@@ -127,13 +127,13 @@ it("requires a target and a verified available card before explicit apply", () =
 });
 ```
 
-- [ ] **Step 2: Run RED.**
+- [x] **Step 2: Run RED.**
 
 Run: `npm --prefix apps/web run test -- --run src/features/editor/assets/EditorAssetBrowser.test.tsx`
 
 Expected: FAIL because `EditorAssetBrowser` does not exist.
 
-- [ ] **Step 3: Implement cards as presentational controls only.**
+- [x] **Step 3: Implement cards as presentational controls only.**
 
 ```tsx
 export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply }: Props) {
@@ -150,7 +150,7 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
 
 Use card-specific accessible button names, `aria-pressed` on the type filter, and CSS classes beginning `vb-editor-assets`. Do not render `<audio>`, `<video>`, `draggable`, or a direct `api` call.
 
-- [ ] **Step 4: Run GREEN.**
+- [x] **Step 4: Run GREEN.**
 
 Run: `npm --prefix apps/web run test -- --run src/features/editor/assets/EditorAssetBrowser.test.tsx src/features/editor/assets/editorAssetProjection.test.ts`
 
@@ -162,6 +162,17 @@ Expected: PASS.
 git add apps/web/src/features/editor/assets/EditorAssetBrowser.tsx apps/web/src/features/editor/assets/EditorAssetBrowser.test.tsx apps/web/src/styles/editor-workbench.css
 git commit -m "feat: add accessible editor asset browser"
 ```
+
+### Task 2 execution evidence (2026-07-23)
+
+- Initial RED: `npm --prefix apps/web run test -- --run src/features/editor/assets/EditorAssetBrowser.test.tsx` failed because `./EditorAssetBrowser` did not exist.
+- GREEN: `npm --prefix apps/web run test -- --run src/features/editor/assets/EditorAssetBrowser.test.tsx src/features/editor/assets/editorAssetProjection.test.ts` passed with `2 files / 8 tests`.
+- The browser owns only query and type-filter state. It renders no `audio`, `video`, draggable card, API call, or persistence behavior; preview and apply remain callback-only.
+- Step 5 remains open because this delegated task explicitly forbids staging and committing.
+- Card-target review RED: the focused browser test failed because the selected range and no-target guidance were outside each asset card.
+- Card-target review GREEN: `npm --prefix apps/web run test -- --run src/features/editor/assets/EditorAssetBrowser.test.tsx src/features/editor/assets/editorAssetProjection.test.ts` passed with `2 files / 8 tests` after each card rendered the selected range or no-target guidance.
+- Quality-review RED: after correcting the CSS fixture's Vite file-path setup, `npm --prefix apps/web run test -- --run src/features/editor/assets/editorAssetProjection.test.ts src/features/editor/assets/EditorAssetBrowser.test.tsx` failed with four expected assertions: absent projected audio presence, absent accessible filter group, absent card audio text, and missing wrap-safe CSS rule.
+- Quality-review GREEN: the same focused Task 1+2 command passed with `2 files / 12 tests`. B-roll audio status now requires explicit consistent `audio_present` or `has_audio` booleans; missing or conflicting metadata stays `오디오 정보 확인 중`, while supported BGM/SFX cards state `오디오 있음`.
 
 ## Task 3: Connect browser requests to the sole preview stage
 

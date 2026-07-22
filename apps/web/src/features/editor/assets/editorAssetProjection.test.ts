@@ -19,6 +19,23 @@ describe("editor asset projection", () => {
     expect(filterEditorAssets(cards, { type: "sfx", query: "license" })).toEqual([expect.objectContaining({ canApply: false, license: "검증 또는 이용 가능 상태 확인 필요" })]);
   });
 
+  it("reports B-roll audio only from explicit metadata and reports supported library audio truthfully", () => {
+    const cards = projectEditorAssets({
+      projectId: "p",
+      brollAssets: [
+        { asset_id: "with-audio", asset_type: "broll_video", storage_uri: "x", created_at: "now", metadata: { audio_present: true } },
+        { asset_id: "without-audio", asset_type: "broll_image", storage_uri: "x", created_at: "now", metadata: { has_audio: false } },
+        { asset_id: "audio-unknown", asset_type: "broll_video", storage_uri: "x", created_at: "now", metadata: {} },
+      ],
+      libraryAssets: [
+        { library_asset_id: "bgm-1", asset_id: "bgm", media_type: "music", duration_seconds: 2, version: "v1", verified: true, available: true, tags: [], source: "Starter", creator: "Creator", official_license_url: "", attribution_required: false, attribution_text: "" },
+        { library_asset_id: "sfx-1", asset_id: "sfx", media_type: "sfx", duration_seconds: 2, version: "v1", verified: true, available: true, tags: [], source: "Starter", creator: "Creator", official_license_url: "", attribution_required: false, attribution_text: "" },
+      ],
+    });
+
+    expect(cards.map((card) => card.audioPresence)).toEqual(["오디오 있음", "오디오 없음", "오디오 정보 확인 중", "오디오 있음", "오디오 있음"]);
+  });
+
   it("keeps unknown B-roll metadata honest and marks review explicitly", () => {
     const [card] = projectEditorAssets({
       projectId: "p",
