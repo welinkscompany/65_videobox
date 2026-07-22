@@ -765,10 +765,26 @@ def update_segment_caption(
 ) -> dict[str, Any]:
     updated = deepcopy(session)
     normalized_caption = caption_text.strip()
+    matched = False
     for segment in updated.get("segments", []):
-        if str(segment.get("segment_id")) != segment_id:
+        if not isinstance(segment, dict):
             continue
-        segment["caption_text"] = normalized_caption
+        containing_segment_id = str(segment.get("segment_id") or "")
+        if containing_segment_id == segment_id:
+            segment["caption_text"] = normalized_caption
+            matched = True
+        content_windows = segment.get("content_windows")
+        if not isinstance(content_windows, list):
+            continue
+        for window in content_windows:
+            if not isinstance(window, dict):
+                continue
+            source_segment_id = str(window.get("source_segment_id") or containing_segment_id)
+            if source_segment_id != segment_id:
+                continue
+            window["caption_text"] = normalized_caption
+            matched = True
+    if matched:
         return _apply_manual_mutation(before=session, updated=updated, mutation_type="caption_update", segment_id=segment_id, extra={"caption_text": normalized_caption})
     raise KeyError(f"Segment not found in editing session: {segment_id}")
 

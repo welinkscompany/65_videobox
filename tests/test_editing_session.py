@@ -227,6 +227,48 @@ def test_build_editing_session_from_review_timeline_creates_editable_segment_sta
     assert session["history"] == []
 
 
+def test_caption_update_materializes_the_updated_content_window_text() -> None:
+    from videobox_core_engine.composition_plan import materialize_editing_session_timeline
+    from videobox_core_engine.editing_session import build_editing_session, update_segment_caption
+
+    session = build_editing_session(
+        project_id="project_001",
+        timeline={"timeline_id": "timeline_001"},
+        segments=[{"segment_id": "segment_001", "text": "before", "start_sec": 0.0, "end_sec": 2.0}],
+    )
+
+    updated = update_segment_caption(session=session, segment_id="segment_001", caption_text="after")
+    materialized = materialize_editing_session_timeline(timeline={"tracks": []}, editing_session=updated)
+
+    assert materialized["session_captions"][0]["caption_text"] == "after"
+
+
+def test_caption_update_for_merged_child_changes_only_its_content_window() -> None:
+    from videobox_core_engine.editing_session import update_segment_caption
+
+    session = {
+        "session_revision": 1,
+        "history": [],
+        "segments": [{
+            "segment_id": "merged",
+            "caption_text": "merged before",
+            "start_sec": 0.0,
+            "end_sec": 2.0,
+            "content_windows": [
+                {"source_segment_id": "left", "caption_text": "left before", "start_offset_sec": 0.0, "duration_sec": 1.0},
+                {"source_segment_id": "right", "caption_text": "right before", "start_offset_sec": 1.0, "duration_sec": 1.0},
+            ],
+        }],
+    }
+
+    updated = update_segment_caption(session=session, segment_id="right", caption_text="right after")
+
+    assert updated["segments"][0]["caption_text"] == "merged before"
+    assert [window["caption_text"] for window in updated["segments"][0]["content_windows"]] == ["left before", "right after"]
+    assert updated["history"][-1]["mutation_type"] == "caption_update"
+    assert updated["history"][-1]["segment_id"] == "right"
+
+
 def test_save_editing_session_persists_current_state_and_history(tmp_path: Path) -> None:
     store = LocalProjectStore(tmp_path)
     project = store.bootstrap_project(name="Editing Session Project")

@@ -32,7 +32,7 @@ def _manifest_fixture(client: TestClient, tmp_path) -> tuple[str, str, str]:
     session = store.save_editing_session(
         project_id=project_id,
         timeline_id=timeline["timeline_id"],
-        session_payload={"caption_style": {"font_size_px": 48}, "history": [], "segments": [{"segment_id": "segment-1", "caption_text": "안녕하세요", "start_sec": 0.0, "end_sec": 2.0, "cut_action": "keep", "review_required": False, "source_sha256": "c" * 64, "media_revision": "media-r1"}]},
+        session_payload={"caption_style": {"font_size_px": 48}, "history": [], "segments": [{"segment_id": "segment-1", "caption_text": "안녕하세요", "start_sec": 0.0, "end_sec": 2.0, "cut_action": "keep", "review_required": False, "source_sha256": "c" * 64, "media_revision": "media-r1", "content_windows": [{"caption_id": "caption-segment-1-0", "source_segment_id": "segment-1", "caption_text": "안녕하세요", "start_offset_sec": 0.0, "duration_sec": 2.0, "review_required": False, "visual_overlays": []}]}]},
     )
     return project_id, other_project_id, session["session_id"]
 
@@ -65,6 +65,22 @@ def test_explicit_session_manifest_has_authoritative_typed_editor_contract(tmp_p
     assert body["source_status"] == {"status": "current", "source_session_id": session_id, "source_session_revision": 1}
     assert body["audition"]["asset_urls"]["asset-narration-1"].endswith("/assets/asset-narration-1/content")
     assert body["exact_preview"] == {"status": "unavailable"}
+
+
+def test_caption_patch_materializes_updated_content_window_in_playback_manifest(tmp_path) -> None:
+    client = TestClient(create_app(projects_root=tmp_path))
+    project_id, _, session_id = _manifest_fixture(client, tmp_path)
+
+    saved = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/segment-1/caption",
+        json={"caption_text": "반가워요", "expected_revision": 1},
+    )
+    manifest = client.get(f"/api/projects/{project_id}/editing-sessions/{session_id}/playback-manifest")
+
+    assert saved.status_code == 200
+    assert saved.json()["session_revision"] == 2
+    assert manifest.status_code == 200
+    assert manifest.json()["captions"][0]["text"] == "반가워요"
 
 
 def test_manifest_never_substitutes_latest_session_and_is_project_isolated(tmp_path) -> None:
