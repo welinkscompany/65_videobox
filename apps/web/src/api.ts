@@ -303,10 +303,6 @@ export type EditorMediaControls = {
   speed?: number;
   fade_in_sec?: number;
   fade_out_sec?: number;
-  fit?: "fit" | "crop";
-  loop?: boolean;
-  pad?: boolean;
-  trim_start_sec?: number;
 };
 export type EditorPlaybackManifest = {
   project_id: string;

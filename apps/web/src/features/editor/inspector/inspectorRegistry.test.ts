@@ -26,9 +26,9 @@ describe("projectInspectorTargets", () => {
   it("projects only port-representable controls that the current runtime honors", () => {
     const targets = projectInspectorTargets({ view, selectedSegmentId: "segment-1" });
 
-    expect(targets).toContainEqual({ id: "clip:broll-1", kind: "media", label: "보조 영상", segmentId: "segment-1", mediaKind: "broll", fields: ["fit", "loop", "pad", "trimStartSec"] });
     expect(targets).toContainEqual({ id: "clip:bgm-1", kind: "media", label: "배경 음악", segmentId: "segment-1", mediaKind: "bgm", fields: ["fadeInSec", "fadeOutSec"] });
     expect(targets).toContainEqual({ id: "clip:sfx-1", kind: "media", label: "효과음", segmentId: "segment-1", mediaKind: "sfx", fields: ["fadeInSec", "fadeOutSec"] });
+    expect(targets.find((target) => target.id === "clip:broll-1")).toBeUndefined();
     expect(targets).toContainEqual({ id: "caption:caption-1", kind: "caption", label: "연결 자막", segmentId: "segment-1", fields: ["text", "style"] });
   });
 
