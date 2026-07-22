@@ -3,7 +3,8 @@ import { type KeyboardEvent, useEffect, useLayoutEffect, useRef, useState } from
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "../../../components/ui/resizable";
 import type { PanelImperativeHandle, PanelSize } from "react-resizable-panels";
 import type { EditorViewModel } from "../editorViewModel";
-import { PreviewStage, type AuditionSource } from "../preview/preview-stage";
+import type { EditorAssetCard } from "../assets/editorAssetProjection";
+import { PreviewStage, type AuditionRequest, type AuditionSource } from "../preview/preview-stage";
 import { TimelineDock } from "../timeline/TimelineDock";
 import { activeSegmentIdAt, clampPlaybackSeconds } from "../transcript/playbackNavigation";
 import { EditorWorkbenchReadOnlyAdapters } from "./editorWorkbenchReadOnlyAdapters";
@@ -33,6 +34,8 @@ type EditorWorkbenchProps = Readonly<{
   onReorderNarration?: (input: NarrationReorder) => void | Promise<void>;
   onUpdatePlacements?: (input: TimelinePlacements) => void | Promise<void>;
   onUpdateCaption?: (input: CaptionText) => void | Promise<void>;
+  assetCards?: readonly EditorAssetCard[];
+  onApplyAssetCard?: (card: EditorAssetCard, segmentId: string) => void | Promise<void>;
   isSavingTimeline?: boolean;
   timelineMutationMessage?: string;
 }>;
@@ -44,6 +47,8 @@ export function EditorWorkbench({
   onReorderNarration,
   onUpdatePlacements,
   onUpdateCaption,
+  assetCards = [],
+  onApplyAssetCard,
   isSavingTimeline = false,
   timelineMutationMessage,
 }: EditorWorkbenchProps) {
@@ -53,6 +58,7 @@ export function EditorWorkbench({
   const [eugeneDraft, setEugeneDraft] = useState(readEugeneDraft);
   const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(view.local.selectedSegmentId);
   const [playbackSec, setPlaybackSec] = useState(view.local.seekSec);
+  const [auditionRequest, setAuditionRequest] = useState<AuditionRequest | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const drawerRef = useRef<HTMLDivElement>(null);
   const restoreFocusRef = useRef<"left" | "right" | null>(null);
@@ -92,7 +98,19 @@ export function EditorWorkbench({
     );
     setSelectedSegmentId(activeSegmentId);
   };
-  const dock = (side: "left" | "right") => <aside aria-label={side === "left" ? "자산과 대본" : "유진과 Inspector"} className={`vb-editor-workbench__dock vb-editor-workbench__dock--${side}`}><EditorWorkbenchReadOnlyAdapters view={view} dock={side} eugeneDraft={eugeneDraft} isSavingCaption={isSavingTimeline} onEugeneDraftChange={setEugeneDraft} onSaveCaption={onUpdateCaption} onSeek={seekPlayback} onSelectSegment={selectSegment} playbackSec={playbackSec} selectedSegmentId={selectedSegmentId} /></aside>;
+  const selectedNarration = selectedSegmentId === null ? null : view.tracks
+    .filter((track) => track.role === "narration")
+    .flatMap((track) => track.clips)
+    .find((clip) => clip.segmentId === selectedSegmentId) ?? null;
+  const assetTarget = selectedNarration === null ? null : { segmentId: selectedNarration.segmentId, startSec: selectedNarration.startSec, endSec: selectedNarration.endSec };
+  const previewAssetCard = (card: EditorAssetCard) => {
+    const mediaKind = card.previewKind ?? (card.kind === "broll" ? "video" : "audio");
+    setAuditionRequest((current) => ({
+      requestId: (current?.requestId ?? 0) + 1,
+      source: { id: card.id, label: card.title, url: card.previewUrl, mediaKind, timelineRange: assetTarget ?? { startSec: 0, endSec: view.output.durationSec } },
+    }));
+  };
+  const dock = (side: "left" | "right") => <aside aria-label={side === "left" ? "자산과 대본" : "유진과 Inspector"} className={`vb-editor-workbench__dock vb-editor-workbench__dock--${side}`}><EditorWorkbenchReadOnlyAdapters assetCards={assetCards} assetTarget={assetTarget} dock={side} eugeneDraft={eugeneDraft} isSavingCaption={isSavingTimeline} onApplyAssetCard={onApplyAssetCard} onEugeneDraftChange={setEugeneDraft} onPreviewAsset={previewAssetCard} onSaveCaption={onUpdateCaption} onSeek={seekPlayback} onSelectSegment={selectSegment} playbackSec={playbackSec} selectedSegmentId={selectedSegmentId} view={view} /></aside>;
   const resize = (side: "left" | "right", delta: number) => setUi((current) => { const key = side === "left" ? "leftSize" : "rightSize"; const value = Math.max(side === "left" ? 220 : 260, current[key] + delta); (side === "left" ? leftPanelRef : rightPanelRef).current?.resize(`${value}px`); return { ...current, [key]: value }; });
   const handleKey = (event: KeyboardEvent<HTMLDivElement>, side: "left" | "right") => { if (event.key === "ArrowLeft" || event.key === "ArrowRight") { event.preventDefault(); event.stopPropagation(); resize(side, event.key === "ArrowRight" ? 20 : -20); } };
   const trapDrawerFocus = (event: KeyboardEvent<HTMLDivElement>) => { if (event.key === "Escape") { closeAndRestore(); return; } if (event.key !== "Tab") return; const focusable = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('button:not([disabled]), [tabindex="0"]')); if (!focusable.length) { event.preventDefault(); return; } const first = focusable[0]; const last = focusable[focusable.length - 1]; if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); } };
@@ -106,7 +124,7 @@ export function EditorWorkbench({
     const mediaKind = auditionMediaKind(track.role, clip.overlayType);
     return mediaKind ? [{ id: clip.clipId, label: `${track.role === "broll" ? "B-roll" : track.role.toUpperCase()} · ${clip.segmentId}`, url, mediaKind, timelineRange: { startSec: clip.startSec, endSec: clip.endSec } }] : [];
   }));
-  const stage = <PreviewStage expectedRevision={view.expectedRevision} exactPreview={view.playback.exactPreview} captions={view.captions} onPlaybackTimeChange={seekPlayback} playbackSec={playbackSec} sources={sources} onRefresh={onPreviewRefresh} />;
+  const stage = <PreviewStage auditionRequest={auditionRequest} expectedRevision={view.expectedRevision} exactPreview={view.playback.exactPreview} captions={view.captions} onPlaybackTimeChange={seekPlayback} playbackSec={playbackSec} sources={sources} onRefresh={onPreviewRefresh} />;
   return <section className="vb-editor-workbench" aria-label="편집 작업판" data-project-id={view.projectId} data-session-id={view.sessionId} data-editor-density={layout.mode} data-available-workbench-width={Math.round(availableWorkbenchWidth)}>
     <header className="vb-editor-workbench__toolbar"><strong>편집 작업판</strong><span>{view.timelineId} · revision {view.expectedRevision}</span><div><button ref={leftTriggerRef} type="button" onClick={() => layout.mode === "drawer" ? openDrawer("left") : setUi((current) => ({ ...current, leftOpen: !current.leftOpen }))}>자산과 대본</button><button ref={rightTriggerRef} type="button" onClick={() => layout.mode === "drawer" ? openDrawer("right") : setUi((current) => ({ ...current, rightOpen: !current.rightOpen }))}>유진과 Inspector</button></div></header>
     <div ref={bodyRef} className="vb-editor-workbench__body">

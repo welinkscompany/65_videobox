@@ -1,6 +1,7 @@
 import { api, type BrollAsset, type MediaLibraryAsset } from "../../../api";
 
 export type EditorAssetKind = "broll" | "bgm" | "sfx";
+export type EditorAssetPreviewKind = "audio" | "video" | "image";
 export type EditorAssetAudioPresence = "오디오 있음" | "오디오 없음" | "오디오 정보 확인 중";
 
 export type EditorAssetSourceMetadata = Readonly<{
@@ -26,6 +27,7 @@ export type EditorAssetCard = Readonly<{
   license: string;
   canApply: boolean;
   previewUrl: string;
+  previewKind?: EditorAssetPreviewKind;
   sourceMetadata: EditorAssetSourceMetadata;
 }>;
 
@@ -45,6 +47,12 @@ const brollLabels: Readonly<Record<string, string>> = {
   broll_image: "이미지 B-roll",
   broll_audio: "오디오 B-roll",
 };
+
+function brollPreviewKind(assetType: string): EditorAssetPreviewKind {
+  if (assetType === "broll_audio") return "audio";
+  if (assetType === "broll_image") return "image";
+  return "video";
+}
 
 function durationLabel(value: unknown): string {
   if (typeof value !== "number" || !Number.isFinite(value)) return "길이 정보 없음";
@@ -107,6 +115,7 @@ function projectBroll(projectId: string, asset: BrollAsset, index: number): Edit
     license: "프로젝트 로컬 B-roll",
     canApply: true,
     previewUrl: api.assetContentUrl(projectId, asset.asset_id),
+    previewKind: brollPreviewKind(asset.asset_type),
     sourceMetadata: {
       tags: Array.isArray(metadata.tags) ? metadata.tags.filter((tag): tag is string => typeof tag === "string") : [],
       source: "프로젝트 로컬 B-roll",
@@ -136,6 +145,7 @@ function projectLibrary(asset: MediaLibraryAsset, index: number): EditorAssetCar
     license: libraryLicense(asset),
     canApply: availableForUse,
     previewUrl: api.mediaLibraryPreviewUrl(asset.library_asset_id),
+    previewKind: "audio",
     sourceMetadata: {
       tags: asset.tags,
       source: asset.source,

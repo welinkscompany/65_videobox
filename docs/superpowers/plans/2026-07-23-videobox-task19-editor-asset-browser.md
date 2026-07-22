@@ -4,7 +4,7 @@
 
 **Goal:** Add a revision-safe editor asset browser for project B-roll and verified Starter Pack BGM/SFX that uses the existing one-player preview stage and requires an explicit selected-segment apply.
 
-**Architecture:** `EditorAssetBrowser` is a presentational feature built from a pure asset projector. `EditorWorkbench` owns selected-segment targeting and a monotonic audition request for `PreviewStage`; `EditorWorkbenchRoute` owns asset loading, materialization, and the existing revision-bound command port. No card owns API data, media playback, or editing-session mutation.
+**Architecture:** `EditorAssetBrowser` is a presentational feature built from a pure asset projector. `EditorWorkbench` owns selected-segment targeting and a monotonic audition request for `PreviewStage`; `EditorWorkbenchRoute` owns asset loading, materialization, and the existing revision-bound command port. No card owns API data, media playback, or editing-session mutation. Image B-roll uses one non-playable image audition surface in the stage, not a second player; audio/video auditions continue to use the one playable media element.
 
 **Tech Stack:** React 19, TypeScript 5.8, Vitest, Testing Library, existing `api`, `EditorCommandPort`, `PreviewStage`, and `editor-workbench.css`.
 
@@ -183,14 +183,15 @@ git commit -m "feat: add accessible editor asset browser"
 - Modify: `apps/web/src/features/editor/workbench/editorWorkbenchReadOnlyAdapters.tsx`
 - Test: `apps/web/src/features/editor/workbench/editor-workbench.test.tsx`
 
-- [ ] **Step 1: Write failing one-player request tests.**
+- [x] **Step 1: Write failing one-player request tests.**
 
 ```tsx
 it("consumes a newer card audition request in its existing player", () => {
   const { container, rerender } = render(<PreviewStage {...current} auditionRequest={null} />);
-  rerender(<PreviewStage {...current} auditionRequest={{ requestId: 1, source: { id: "broll:image-1", label: "제품 사진", url: "/api/projects/p/assets/image-1/content", mediaKind: "video", timelineRange: { startSec: 3, endSec: 7 } } }} />);
+  rerender(<PreviewStage {...current} auditionRequest={{ requestId: 1, source: { id: "broll:image-1", label: "제품 사진", url: "/api/projects/p/assets/image-1/content", mediaKind: "image", timelineRange: { startSec: 3, endSec: 7 } } }} />);
   expect(screen.getByLabelText("제품 사진 소스 미리보기")).toBeInTheDocument();
-  expect(container.querySelectorAll("audio, video")).toHaveLength(1);
+  expect(container.querySelectorAll("audio, video")).toHaveLength(0);
+  expect(container.querySelectorAll("img")).toHaveLength(1);
 });
 
 it("sends an asset-card preview through the workbench stage in the narrow left drawer", async () => {
@@ -202,13 +203,13 @@ it("sends an asset-card preview through the workbench stage in the narrow left d
 });
 ```
 
-- [ ] **Step 2: Run RED.**
+- [x] **Step 2: Run RED.**
 
 Run: `npm --prefix apps/web run test -- --run src/features/editor/preview/preview-stage.test.tsx src/features/editor/workbench/editor-workbench.test.tsx`
 
 Expected: FAIL because `auditionRequest` and workbench asset props do not exist.
 
-- [ ] **Step 3: Add a monotonic request input, not a second player.**
+- [x] **Step 3: Add a monotonic request input, not a second player.**
 
 ```ts
 export type AuditionRequest = Readonly<{ requestId: number; source: AuditionSource }>;
@@ -222,11 +223,11 @@ useEffect(() => {
 
 In `EditorWorkbench`, derive the selected narration clip `{ segmentId, startSec, endSec }`, keep `requestId` in state, and pass browser props through the left adapter. A preview callback makes `{ requestId: current + 1, source }`; apply callbacks only travel upward. Do not let `EditorWorkbenchReadOnlyAdapters` import `api` or mount media.
 
-- [ ] **Step 4: Run GREEN.**
+- [x] **Step 4: Run GREEN.**
 
 Run: `npm --prefix apps/web run test -- --run src/features/editor/preview/preview-stage.test.tsx src/features/editor/workbench/editor-workbench.test.tsx src/features/editor/assets/EditorAssetBrowser.test.tsx`
 
-Expected: PASS and every test that counts `audio, video` observes one element.
+Expected: PASS; playable audio/video auditions observe exactly one `audio` or `video`, while an image audition observes exactly one `img` and zero playable media elements.
 
 - [ ] **Step 5: Commit the one-player integration.**
 
@@ -234,6 +235,17 @@ Expected: PASS and every test that counts `audio, video` observes one element.
 git add apps/web/src/features/editor/preview/preview-stage.tsx apps/web/src/features/editor/preview/preview-stage.test.tsx apps/web/src/features/editor/workbench/EditorWorkbench.tsx apps/web/src/features/editor/workbench/editorWorkbenchReadOnlyAdapters.tsx apps/web/src/features/editor/workbench/editor-workbench.test.tsx
 git commit -m "feat: preview editor assets in one stage"
 ```
+
+### Task 3 execution evidence (2026-07-23)
+
+- Initial RED: `npm --prefix apps/web run test -- --run src/features/editor/preview/preview-stage.test.tsx src/features/editor/workbench/editor-workbench.test.tsx` failed with the three expected assertions: `PreviewStage` did not consume `auditionRequest`, and the desktop and narrow-left-drawer workbench tests could not find `제품 사진 원본 미리보기` because cards/callbacks were not yet wired through the left adapter.
+- GREEN: after adding the request-ID input and the callback-only workbench/adapter wiring, `npm --prefix apps/web run test -- --run src/features/editor/preview/preview-stage.test.tsx src/features/editor/workbench/editor-workbench.test.tsx src/features/editor/assets/EditorAssetBrowser.test.tsx src/features/editor/assets/editorAssetProjection.test.ts` passed with `4 files / 35 tests`.
+- Focused regression: the same four-file command passed with `4 files / 36 tests` after covering selected-narration-only apply forwarding and replaying the same card after return to exact preview with a newer request ID. The asset browser renders no media.
+- Media-kind correction RED: `npm --prefix apps/web run test -- --run src/features/editor/assets/editorAssetProjection.test.ts src/features/editor/preview/preview-stage.test.tsx src/features/editor/workbench/editor-workbench.test.tsx src/features/editor/assets/EditorAssetBrowser.test.tsx` failed with `5` expected assertions: concrete B-roll/library preview kinds were absent, and image/B-roll-audio cards were incorrectly rendered as videos.
+- Media-kind correction GREEN: the same four-file command passed with `4 files / 39 tests`. `broll_audio` maps to one audio player, `broll_video` and unknown B-roll map to one video player, `broll_image` maps to one non-playable `img` surface with zero audio/video elements and no playback control, and library music/SFX map to audio. The local-URL guard and return-to-exact action remain in `PreviewStage`.
+- Narrow-image CSS RED: the same four-file command failed because `.vb-preview-stage__media-shell img` had no static rule supplying display, width/max-width, max-height, and `object-fit: contain`.
+- Narrow-image CSS GREEN: the same four-file command passed with `4 files / 40 tests` after adding the single constrained image rule; the preview-stage test reads the existing stylesheet directly and asserts those five properties.
+- Step 5 remains open: this delegated task explicitly forbids staging and committing.
 
 ## Task 4: Route-owned asset truth and revision-safe application
 

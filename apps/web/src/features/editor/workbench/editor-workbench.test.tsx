@@ -3,6 +3,22 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 
 import { EditorWorkbench, persistedPanelPixels } from "./EditorWorkbench";
 
+const assetCards = [{
+  id: "broll:image-1",
+  kind: "broll" as const,
+  assetId: "image-1",
+  label: "이미지 B-roll",
+  title: "제품 사진",
+  durationLabel: "4초",
+  status: "준비됨 · 검토 불필요",
+  audioPresence: "오디오 없음" as const,
+  license: "프로젝트 로컬 B-roll",
+  canApply: true,
+  previewUrl: "/api/projects/project-a/assets/image-1/content",
+  previewKind: "image" as const,
+  sourceMetadata: { tags: [], source: "프로젝트 로컬 B-roll", creator: "", officialLicenseUrl: "", attributionRequired: false, attributionText: "" },
+}] as const;
+
 beforeEach(() => { vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} }); vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({ width: 1000 } as DOMRect); vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => undefined); Object.defineProperty(window, "innerWidth", { configurable: true, value: 1920 }); });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); window.localStorage.clear(); });
 
@@ -27,6 +43,53 @@ describe("EditorWorkbench", () => {
     fireEvent.keyDown(dialog, { key: "Escape" });
     expect(screen.queryByRole("dialog")).toBeNull();
     await waitFor(() => expect(trigger).toHaveFocus());
+  });
+
+  it.each([
+    ["desktop", 1920],
+    ["narrow left drawer", 390],
+  ])("sends an asset-card preview through the workbench stage in the %s", async (_layout, width) => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: width });
+    const { container } = render(<EditorWorkbench view={view} assetCards={assetCards} />);
+
+    if (width === 390) fireEvent.click(screen.getByRole("button", { name: "자산과 대본" }));
+    fireEvent.click(await screen.findByRole("button", { name: "제품 사진 원본 미리보기" }));
+
+    expect(screen.getByLabelText("제품 사진 소스 미리보기")).toBeInTheDocument();
+    expect(screen.getByLabelText("제품 사진 소스 미리보기").tagName).toBe("IMG");
+    expect(container.querySelectorAll("audio, video")).toHaveLength(0);
+    expect(container.querySelectorAll("img")).toHaveLength(1);
+  });
+
+  it("uses audio elements for both B-roll audio and library audio cards", async () => {
+    const audioCards = [
+      { ...assetCards[0], id: "broll:audio-1", assetId: "audio-1", title: "현장 오디오", label: "오디오 B-roll", previewUrl: "/api/projects/project-a/assets/audio-1/content", previewKind: "audio" as const },
+      { ...assetCards[0], id: "library:bgm-1", assetId: "starter-bgm", libraryAssetId: "bgm-1", title: "BGM 1", label: "BGM", previewUrl: "/api/media-library/assets/bgm-1/preview", previewKind: "audio" as const },
+    ];
+    const { container } = render(<EditorWorkbench view={view} assetCards={audioCards} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "현장 오디오 원본 미리보기" }));
+    expect(screen.getByLabelText("현장 오디오 소스 미리보기").tagName).toBe("AUDIO");
+    expect(container.querySelectorAll("audio, video")).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "BGM 1 원본 미리보기" }));
+    expect(screen.getByLabelText("BGM 1 소스 미리보기").tagName).toBe("AUDIO");
+    expect(container.querySelectorAll("audio, video")).toHaveLength(1);
+  });
+
+  it("uses only a selected narration clip as the asset apply target and forwards it upward", () => {
+    const onApplyAssetCard = vi.fn();
+    const narrationView = {
+      ...view,
+      output: { ...view.output, durationSec: 4 },
+      tracks: [{ trackId: "narration", role: "narration", clips: [{ clipId: "n-1", segmentId: "segment-1", type: "narration", assetId: null, assetUri: null, startSec: 1, endSec: 3, controls: {} }] }],
+    } as const;
+    render(<EditorWorkbench view={narrationView} assetCards={assetCards} onApplyAssetCard={onApplyAssetCard} />);
+
+    expect(screen.getByRole("button", { name: "제품 사진 적용" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "n-1 클립 선택" }));
+    expect(screen.getAllByText("적용 구간: 1.00–3.00초").length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: "제품 사진 적용" }));
+    expect(onApplyAssetCard).toHaveBeenCalledWith(assetCards[0], "segment-1");
   });
 
   it("keeps the disabled Eugene draft in browser-local UI state without enabling any request", () => {

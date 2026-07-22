@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 import { PreviewStage } from "./preview-stage";
 
@@ -89,6 +91,41 @@ describe("PreviewStage", () => {
     expect(container.querySelectorAll("video, audio")).toHaveLength(1);
     fireEvent.click(screen.getByRole("button", { name: "편집본으로 돌아가기" }));
     expect(screen.getByLabelText("편집본 미리보기")).toBeInTheDocument();
+  });
+
+  it("consumes a newer card audition request in its existing player", () => {
+    const { container, rerender } = render(<PreviewStage {...current} auditionRequest={null} />);
+    rerender(<PreviewStage {...current} auditionRequest={{ requestId: 1, source: { id: "broll:image-1", label: "제품 사진", url: "/api/projects/project-a/assets/image-1/content", mediaKind: "video", timelineRange: { startSec: 3, endSec: 7 } } }} />);
+
+    expect(screen.getByLabelText("제품 사진 소스 미리보기")).toBeInTheDocument();
+    expect(container.querySelectorAll("audio, video")).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "편집본으로 돌아가기" }));
+    rerender(<PreviewStage {...current} auditionRequest={{ requestId: 2, source: { id: "broll:image-1", label: "제품 사진", url: "/api/projects/project-a/assets/image-1/content", mediaKind: "video", timelineRange: { startSec: 3, endSec: 7 } } }} />);
+    expect(screen.getByLabelText("제품 사진 소스 미리보기")).toBeInTheDocument();
+    expect(container.querySelectorAll("audio, video")).toHaveLength(1);
+  });
+
+  it("switches from a playable audition to one non-playable image surface without retaining media", () => {
+    const { container, rerender } = render(<PreviewStage {...current} auditionRequest={{ requestId: 1, source: { id: "audio-1", label: "현장 오디오", url: "/api/projects/project-a/assets/audio-1/content", mediaKind: "audio", timelineRange: { startSec: 3, endSec: 7 } } }} />);
+    expect(screen.getByLabelText("현장 오디오 소스 미리보기").tagName).toBe("AUDIO");
+    expect(container.querySelectorAll("audio, video")).toHaveLength(1);
+
+    rerender(<PreviewStage {...current} auditionRequest={{ requestId: 2, source: { id: "image-1", label: "제품 사진", url: "/api/projects/project-a/assets/image-1/content", mediaKind: "image", timelineRange: { startSec: 3, endSec: 7 } } }} />);
+    expect(screen.getByLabelText("제품 사진 소스 미리보기").tagName).toBe("IMG");
+    expect(container.querySelectorAll("audio, video")).toHaveLength(0);
+    expect(container.querySelectorAll("img")).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: "재생 또는 일시정지" })).toBeNull();
+  });
+
+  it("keeps an image audition constrained inside the preview shell", () => {
+    const css = readFileSync(resolve(process.cwd(), "src/styles/editor-workbench.css"), "utf8");
+    const imageRule = css.match(/\.vb-preview-stage__media-shell img\s*\{([^}]*)\}/)?.[1] ?? "";
+
+    expect(imageRule).toContain("display: block");
+    expect(imageRule).toMatch(/width:\s*(?:min\()?100%/);
+    expect(imageRule).toContain("max-width");
+    expect(imageRule).toContain("max-height");
+    expect(imageRule).toContain("object-fit: contain");
   });
 
   it("leaves Enter and Space on controls to their native action without toggling player playback", async () => {

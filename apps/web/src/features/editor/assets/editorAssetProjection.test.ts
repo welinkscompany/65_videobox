@@ -36,6 +36,21 @@ describe("editor asset projection", () => {
     expect(cards.map((card) => card.audioPresence)).toEqual(["오디오 있음", "오디오 없음", "오디오 정보 확인 중", "오디오 있음", "오디오 있음"]);
   });
 
+  it("projects preview kinds from concrete B-roll types and library media types", () => {
+    const cards = projectEditorAssets({
+      projectId: "p",
+      brollAssets: [
+        { asset_id: "image-1", asset_type: "broll_image", storage_uri: "x", created_at: "now", metadata: {} },
+        { asset_id: "audio-1", asset_type: "broll_audio", storage_uri: "x", created_at: "now", metadata: {} },
+        { asset_id: "video-1", asset_type: "broll_video", storage_uri: "x", created_at: "now", metadata: {} },
+        { asset_id: "unknown-1", asset_type: "unrecognized", storage_uri: "x", created_at: "now", metadata: {} },
+      ],
+      libraryAssets: [{ library_asset_id: "bgm-1", asset_id: "bgm", media_type: "music", duration_seconds: 2, version: "v1", verified: true, available: true, tags: [], source: "Starter", creator: "Creator", official_license_url: "", attribution_required: false, attribution_text: "" }],
+    });
+
+    expect(cards.map((card) => card.previewKind)).toEqual(["image", "audio", "video", "video", "audio"]);
+  });
+
   it("keeps unknown B-roll metadata honest and marks review explicitly", () => {
     const [card] = projectEditorAssets({
       projectId: "p",
