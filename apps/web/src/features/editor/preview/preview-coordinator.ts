@@ -1,6 +1,6 @@
 export type TimelineRange = Readonly<{ startSec: number; endSec: number }>;
 export type PreviewMedia = Readonly<{ id: string; url: string; timelineRange: TimelineRange }>;
-export type AuditionMedia = PreviewMedia & Readonly<{ mediaKind: "video" | "audio" }>;
+export type AuditionMedia = PreviewMedia & Readonly<{ mediaKind: "video" | "audio" | "image" }>;
 export type PreviewMode =
   | Readonly<{ kind: "idle"; activeMediaId: null }>
   | Readonly<{ kind: "exact"; activeMediaId: string; media: PreviewMedia }>
