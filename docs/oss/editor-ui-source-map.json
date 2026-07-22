@@ -287,6 +287,57 @@
         "apps/web/src/features/editor/workbench/EditorWorkbenchRoute.tsx"
       ],
       "forbidden_import_terms": ["EditorCore", "next/", "database", "renderer"]
+    },
+    {
+      "task": "Task 14 timeline geometry",
+      "source_pin": "opencut-classic",
+      "reference": "classic pure timeline math inspected; independent TypeScript implementation only",
+      "materialized_paths": [],
+      "local_paths": [
+        "apps/web/src/features/editor/timeline/time-scale.ts",
+        "apps/web/src/features/editor/timeline/timeline-geometry.ts",
+        "apps/web/src/features/editor/timeline/snapping.ts",
+        "apps/web/src/features/editor/timeline/hit-testing.ts"
+      ],
+      "inspected_upstream_paths": [
+        {
+          "path": "apps/web/src/fps/utils.ts",
+          "sha256": "b3d091725124abe21b348d34cb15643200fb8e650cbb2fab3ce16fb68c6dac28"
+        },
+        {
+          "path": "apps/web/src/timeline/pixel-utils.ts",
+          "sha256": "373bcd4b0d9fd88da7cffb05bd3ea3368c8aabcb13f275147cfceb59e70eaef0"
+        },
+        {
+          "path": "apps/web/src/timeline/snapping/build.ts",
+          "sha256": "7cf9b8dc203a691af38e99d16ceb401cb881055b93244f9f6afa65338ef46e1a"
+        },
+        {
+          "path": "apps/web/src/timeline/snapping/resolve.ts",
+          "sha256": "73f7865940cd914b09070ca3daa03325b03a31bd33ebb6766dc0975736c6fc0d"
+        },
+        {
+          "path": "apps/web/src/timeline/snapping/threshold.ts",
+          "sha256": "951ed0604bcd5960384a520a14cf66f554c2580f4e0098e0307939db73ced686"
+        },
+        {
+          "path": "apps/web/src/timeline/zoom-utils.ts",
+          "sha256": "00d105f58146956d915b4614ee1796a73513ff786bed90dd07d1245ee2fb84b6"
+        }
+      ],
+      "forbidden_import_terms": [
+        "EditorCore",
+        "next/",
+        "database",
+        "renderer",
+        "IndexedDB",
+        "OPFS",
+        "browser-export",
+        "EditorCommandPort",
+        "document",
+        "window",
+        "canvas"
+      ]
     }
   ]
 }

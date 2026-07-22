@@ -178,20 +178,100 @@ foreach ($dependencyField in @('dependencies', 'optionalDependencies', 'peerDepe
   $declared = $packageManifest.PSObject.Properties[$dependencyField].Value
   if ($null -ne $declared -and $null -ne $declared.PSObject.Properties['@supabase/supabase-js']) { Add-Error "reference-only Supabase declared dependency: $dependencyField" }
 }
-# Task 11 is a reference-only OpenCut classic panel-layout decision.  It must
-# never become a copied runtime surface or import a renderer/DB/editor core.
-$task11 = @($map.reference_only_decisions | Where-Object { $_.task -eq 'Task 11 editor workbench' })
-if ($task11.Count -ne 1 -or $task11[0].source_pin -ne 'opencut-classic' -or @($task11[0].materialized_paths).Count -ne 0) { Add-Error 'Task 11 reference-only provenance decision drift' }
-elseif (@($task11[0].local_paths).Count -eq 0) { Add-Error 'Task 11 workbench local path list missing' }
-else {
-  foreach ($relative in @($task11[0].local_paths)) {
+function Check-ReferenceOnlyDecision($decision) {
+  foreach ($field in @('task', 'source_pin', 'reference', 'materialized_paths', 'local_paths', 'forbidden_import_terms')) {
+    if (-not (Has-Property $decision $field)) { Add-Error "reference-only decision missing $field" }
+    elseif ($field -notin @('materialized_paths', 'local_paths', 'forbidden_import_terms') -and -not $decision.$field) { Add-Error "reference-only decision missing $field" }
+  }
+  if (-not $decision.task) { return }
+  if (-not $decision.source_pin -or -not $pinsByName.ContainsKey($decision.source_pin)) { Add-Error "$($decision.task) has an unknown source pin" }
+  if (@($decision.materialized_paths).Count -ne 0) { Add-Error "$($decision.task) reference-only decision cannot materialize paths" }
+  if (@($decision.local_paths).Count -eq 0) { Add-Error "$($decision.task) local path list missing" }
+  foreach ($relative in @($decision.local_paths)) {
+    if (-not (Is-RepoRelative $relative)) { Add-Error "$($decision.task) local path must be repository-relative"; continue }
     $path = Join-Path $root $relative
-    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { Add-Error "Task 11 path absent: $relative"; continue }
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+      if ($decision.task -ne 'Task 14 timeline geometry') { Add-Error "$($decision.task) path absent: $relative" }
+      continue
+    }
     $content = Get-Content -Raw -LiteralPath $path
-    if ($content -match 'Source-preservation header:') { Add-Error "Task 11 copied-source header forbidden: $relative" }
-    if ($content -match '(?i)EditorCore|next/|database|renderer') { Add-Error "Task 11 forbidden runtime import term: $relative" }
+    if ($content -match 'Source-preservation header:') { Add-Error "$($decision.task) copied-source header forbidden: $relative" }
+    foreach ($term in @($decision.forbidden_import_terms)) {
+      if (-not $term) { Add-Error "$($decision.task) has an empty forbidden import term"; continue }
+      if ($content -match ('(?i)' + [regex]::Escape($term))) { Add-Error "$($decision.task) forbidden runtime import term: $relative" }
+    }
+  }
+  if (Has-Property $decision 'inspected_upstream_paths') {
+    if (@($decision.inspected_upstream_paths).Count -eq 0) { Add-Error "$($decision.task) inspected upstream paths missing" }
+    foreach ($upstream in @($decision.inspected_upstream_paths)) {
+      if (-not (Has-Property $upstream 'path') -or -not (Has-Property $upstream 'sha256') -or -not (Is-RepoRelative $upstream.path) -or $upstream.sha256 -notmatch $shaPattern) {
+        Add-Error "$($decision.task) inspected upstream path or SHA is invalid"
+      }
+    }
   }
 }
+
+$referenceOnlyDecisions = @($map.reference_only_decisions)
+if ($referenceOnlyDecisions.Count -eq 0) { Add-Error 'reference-only provenance decisions missing' }
+
+function Test-ExactStringList([object[]]$Actual, [object[]]$Expected) {
+  if ($Actual.Count -ne $Expected.Count) { return $false }
+  for ($index = 0; $index -lt $Expected.Count; $index++) {
+    if ($Actual[$index] -ne $Expected[$index]) { return $false }
+  }
+  return $true
+}
+function Test-ExactUpstreamList([object[]]$Actual, [object[]]$Expected) {
+  if ($Actual.Count -ne $Expected.Count) { return $false }
+  for ($index = 0; $index -lt $Expected.Count; $index++) {
+    $item = $Actual[$index]
+    if ($null -eq $item -or -not (Test-ExactStringList -Actual @($item.PSObject.Properties.Name | Sort-Object) -Expected @('path', 'sha256'))) { return $false }
+    if ($item.path -ne $Expected[$index].path -or $item.sha256 -ne $Expected[$index].sha256) { return $false }
+  }
+  return $true
+}
+
+$expectedTask11ForbiddenTerms = @('EditorCore', 'next/', 'database', 'renderer')
+$task11 = @($referenceOnlyDecisions | Where-Object { $_.task -eq 'Task 11 editor workbench' })
+if ($task11.Count -ne 1 -or
+    $task11[0].source_pin -ne 'opencut-classic' -or
+    @($task11[0].materialized_paths).Count -ne 0 -or
+    -not (Test-ExactStringList -Actual @($task11[0].forbidden_import_terms) -Expected $expectedTask11ForbiddenTerms)) {
+  Add-Error 'Task 11 reference-only provenance decision drift'
+}
+
+$expectedTask14Fields = @('task', 'source_pin', 'reference', 'materialized_paths', 'local_paths', 'inspected_upstream_paths', 'forbidden_import_terms')
+$expectedTask14LocalPaths = @(
+  'apps/web/src/features/editor/timeline/time-scale.ts',
+  'apps/web/src/features/editor/timeline/timeline-geometry.ts',
+  'apps/web/src/features/editor/timeline/snapping.ts',
+  'apps/web/src/features/editor/timeline/hit-testing.ts'
+)
+$expectedTask14ForbiddenTerms = @('EditorCore', 'next/', 'database', 'renderer', 'IndexedDB', 'OPFS', 'browser-export', 'EditorCommandPort', 'document', 'window', 'canvas')
+$expectedTask14UpstreamPaths = @(
+  [pscustomobject]@{ path = 'apps/web/src/fps/utils.ts'; sha256 = 'b3d091725124abe21b348d34cb15643200fb8e650cbb2fab3ce16fb68c6dac28' },
+  [pscustomobject]@{ path = 'apps/web/src/timeline/pixel-utils.ts'; sha256 = '373bcd4b0d9fd88da7cffb05bd3ea3368c8aabcb13f275147cfceb59e70eaef0' },
+  [pscustomobject]@{ path = 'apps/web/src/timeline/snapping/build.ts'; sha256 = '7cf9b8dc203a691af38e99d16ceb401cb881055b93244f9f6afa65338ef46e1a' },
+  [pscustomobject]@{ path = 'apps/web/src/timeline/snapping/resolve.ts'; sha256 = '73f7865940cd914b09070ca3daa03325b03a31bd33ebb6766dc0975736c6fc0d' },
+  [pscustomobject]@{ path = 'apps/web/src/timeline/snapping/threshold.ts'; sha256 = '951ed0604bcd5960384a520a14cf66f554c2580f4e0098e0307939db73ced686' },
+  [pscustomobject]@{ path = 'apps/web/src/timeline/zoom-utils.ts'; sha256 = '00d105f58146956d915b4614ee1796a73513ff786bed90dd07d1245ee2fb84b6' }
+)
+$task14 = @($referenceOnlyDecisions | Where-Object { $_.task -eq 'Task 14 timeline geometry' })
+if ($task14.Count -ne 1) { Add-Error 'Task 14 reference-only provenance decision drift' }
+else {
+  $decision = $task14[0]
+  if (-not (Test-ExactStringList -Actual @($decision.PSObject.Properties.Name | Sort-Object) -Expected @($expectedTask14Fields | Sort-Object)) -or
+      $decision.source_pin -ne 'opencut-classic' -or
+      $decision.reference -ne 'classic pure timeline math inspected; independent TypeScript implementation only' -or
+      -not (Test-ExactStringList -Actual @($decision.materialized_paths) -Expected @()) -or
+      -not (Test-ExactStringList -Actual @($decision.local_paths) -Expected $expectedTask14LocalPaths) -or
+      -not (Test-ExactStringList -Actual @($decision.forbidden_import_terms) -Expected $expectedTask14ForbiddenTerms) -or
+      -not (Test-ExactUpstreamList -Actual @($decision.inspected_upstream_paths) -Expected $expectedTask14UpstreamPaths)) {
+    Add-Error 'Task 14 reference-only provenance decision drift'
+  }
+}
+
+foreach ($decision in $referenceOnlyDecisions) { Check-ReferenceOnlyDecision $decision }
 if ($null -ne $packageLock -and $null -ne $packageLock.PSObject.Properties['packages'] -and $null -ne $packageLock.packages.PSObject.Properties['node_modules/@supabase/supabase-js']) { Add-Error 'reference-only Supabase package-lock dependency' }
 
 if ($errors.Count -gt 0) { throw ("Editor UI provenance verification failed:`n - " + ($errors -join "`n - ")) }

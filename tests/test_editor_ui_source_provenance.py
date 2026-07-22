@@ -54,10 +54,47 @@ def test_task11_workbench_is_reference_only_and_has_no_runtime_imports():
     decision = next(item for item in decisions if item["task"] == "Task 11 editor workbench")
     assert decision["source_pin"] == "opencut-classic"
     assert decision["materialized_paths"] == []
+    assert decision["forbidden_import_terms"] == ["EditorCore", "next/", "database", "renderer"]
     for relative in decision["local_paths"]:
         content = (ROOT / relative).read_text(encoding="utf-8")
         assert "Source-preservation header:" not in content
         assert not any(term.lower() in content.lower() for term in decision["forbidden_import_terms"])
+
+
+def test_task14_timeline_math_is_reference_only():
+    source_map = read_json(SOURCE_MAP_PATH)
+    decisions = source_map["reference_only_decisions"]
+    decision = next(item for item in decisions if item["task"] == "Task 14 timeline geometry")
+    assert decision == {
+        "task": "Task 14 timeline geometry",
+        "source_pin": "opencut-classic",
+        "reference": "classic pure timeline math inspected; independent TypeScript implementation only",
+        "materialized_paths": [],
+        "local_paths": [
+            "apps/web/src/features/editor/timeline/time-scale.ts",
+            "apps/web/src/features/editor/timeline/timeline-geometry.ts",
+            "apps/web/src/features/editor/timeline/snapping.ts",
+            "apps/web/src/features/editor/timeline/hit-testing.ts",
+        ],
+        "inspected_upstream_paths": [
+            {"path": "apps/web/src/fps/utils.ts", "sha256": "b3d091725124abe21b348d34cb15643200fb8e650cbb2fab3ce16fb68c6dac28"},
+            {"path": "apps/web/src/timeline/pixel-utils.ts", "sha256": "373bcd4b0d9fd88da7cffb05bd3ea3368c8aabcb13f275147cfceb59e70eaef0"},
+            {"path": "apps/web/src/timeline/snapping/build.ts", "sha256": "7cf9b8dc203a691af38e99d16ceb401cb881055b93244f9f6afa65338ef46e1a"},
+            {"path": "apps/web/src/timeline/snapping/resolve.ts", "sha256": "73f7865940cd914b09070ca3daa03325b03a31bd33ebb6766dc0975736c6fc0d"},
+            {"path": "apps/web/src/timeline/snapping/threshold.ts", "sha256": "951ed0604bcd5960384a520a14cf66f554c2580f4e0098e0307939db73ced686"},
+            {"path": "apps/web/src/timeline/zoom-utils.ts", "sha256": "00d105f58146956d915b4614ee1796a73513ff786bed90dd07d1245ee2fb84b6"},
+        ],
+        "forbidden_import_terms": [
+            "EditorCore", "next/", "database", "renderer", "IndexedDB", "OPFS",
+            "browser-export", "EditorCommandPort", "document", "window", "canvas",
+        ],
+    }
+    for relative in decision["local_paths"]:
+        path = ROOT / relative
+        if path.is_file():
+            content = path.read_text(encoding="utf-8")
+            assert "Source-preservation header:" not in content
+            assert not any(term.lower() in content.lower() for term in decision["forbidden_import_terms"])
 
 
 def write_json(path: Path, value: dict) -> None:
@@ -91,6 +128,87 @@ def run_verifier(root: Path) -> subprocess.CompletedProcess[str]:
         text=True,
         check=False,
     )
+
+
+def verifier_fixture_with_production_sources() -> tuple[tempfile.TemporaryDirectory[str], Path]:
+    temp, root = verifier_fixture()
+    shutil.copytree(ROOT / "apps/web/src", root / "apps/web/src")
+    return temp, root
+
+
+def test_independent_verifier_requires_exact_task14_reference_decision() -> None:
+    temp, root = verifier_fixture_with_production_sources()
+    try:
+        assert run_verifier(root).returncode == 0
+        source_map = read_json(root / "docs/oss/editor-ui-source-map.json")
+        source_map["reference_only_decisions"] = [
+            item for item in source_map["reference_only_decisions"]
+            if item["task"] != "Task 14 timeline geometry"
+        ]
+        write_json(root / "docs/oss/editor-ui-source-map.json", source_map)
+        assert run_verifier(root).returncode != 0
+    finally:
+        temp.cleanup()
+
+    for field, value in (
+        ("path", "apps/web/src/timeline/tampered.ts"),
+        ("sha256", "0" * 64),
+    ):
+        temp, root = verifier_fixture_with_production_sources()
+        try:
+            assert run_verifier(root).returncode == 0
+            source_map = read_json(root / "docs/oss/editor-ui-source-map.json")
+            task14 = next(
+                item for item in source_map["reference_only_decisions"]
+                if item["task"] == "Task 14 timeline geometry"
+            )
+            task14["inspected_upstream_paths"][0][field] = value
+            write_json(root / "docs/oss/editor-ui-source-map.json", source_map)
+            assert run_verifier(root).returncode != 0
+        finally:
+            temp.cleanup()
+
+
+def test_independent_verifier_only_task14_allows_absent_local_paths() -> None:
+    temp, root = verifier_fixture_with_production_sources()
+    try:
+        assert run_verifier(root).returncode == 0
+        source_map = read_json(root / "docs/oss/editor-ui-source-map.json")
+        task14 = next(
+            item for item in source_map["reference_only_decisions"]
+            if item["task"] == "Task 14 timeline geometry"
+        )
+        for relative in task14["local_paths"]:
+            (root / relative).unlink(missing_ok=True)
+        assert run_verifier(root).returncode == 0
+
+        task11 = next(
+            item for item in source_map["reference_only_decisions"]
+            if item["task"] == "Task 11 editor workbench"
+        )
+        task11_path = root / task11["local_paths"][0]
+        assert task11_path.is_file()
+        task11_path.unlink()
+        assert run_verifier(root).returncode != 0
+    finally:
+        temp.cleanup()
+
+
+def test_independent_verifier_requires_exact_task11_forbidden_terms() -> None:
+    for forbidden_terms in ([], ["EditorCore", "next/", "database", "wrong-term"]):
+        temp, root = verifier_fixture_with_production_sources()
+        try:
+            assert run_verifier(root).returncode == 0
+            source_map = read_json(root / "docs/oss/editor-ui-source-map.json")
+            task11 = next(
+                item for item in source_map["reference_only_decisions"]
+                if item["task"] == "Task 11 editor workbench"
+            )
+            task11["forbidden_import_terms"] = forbidden_terms
+            write_json(root / "docs/oss/editor-ui-source-map.json", source_map)
+            assert run_verifier(root).returncode != 0
+        finally:
+            temp.cleanup()
 
 
 def materialized_fixture(root: Path) -> dict:

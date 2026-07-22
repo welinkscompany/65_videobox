@@ -2,11 +2,12 @@
 
 > 현재 authoritative 상태/next slice 판단은 `## 285. 2026-07-22 Task 14 written-design handoff`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
 
-## 285. 2026-07-22 Task 14 written-design handoff
+## 285. 2026-07-22 Task 14 timeline geometry closeout
 
-- `[~] 설계 승인·문서화 완료, 구현 전`: 사용자가 Task 14의 four-pure-module 설계를 승인했고, `eeca108ab`가 `time-scale`·`timeline-geometry`·`snapping`·`hit-testing`의 책임, rational FPS half-up 양자화, deterministic tie-break, UI/API mutation 금지와 검증 범위를 고정했다. 구현 source/test는 아직 만들지 않았다.
+- `[x] 구현 완료`: `time-scale`·`timeline-geometry`·`snapping`·`hit-testing`의 순수 TypeScript와 49 focused test를 추가했다. API seconds·rational FPS·half-up quantization·deterministic geometry/snap/hit-test만 다루며 UI navigation, pointer/React/DOM/canvas, API/EditorCommandPort/mutation은 추가하지 않았다.
 - `docs/superpowers/specs/2026-07-22-videobox-task14-timeline-geometry-design.md`는 self-review를 끝냈고 upstream `opencut-classic@cf5e79e919144200294fb9fed22a222592a0aeea`의 실제 inspected path/SHA를 implementation 전에 provenance에 기록하도록 명시한다. source copy, EditorCore/DB/renderer/Next/IndexedDB/OPFS/browser-export import는 금지다.
-- 다음 세션 gate: 사용자가 committed written spec을 한 번 검토·승인한 뒤에만 implementation plan을 작성하고 TDD를 시작한다. approval 전에는 Task 14 production source를 만들지 않는다.
+- 검증: timeline focused `49 passed`, frontend full 재실행 성공, production build 성공, provenance pytest `19 passed`(기존 multipart warning 1), PowerShell verifier 성공, `git diff --check` 성공. 전체 Python regression은 실행하지 않았다.
+- 다음 goal: Task 15의 UI navigation/performance는 별도 written spec·사용자 승인 뒤에만 시작한다. Task 16 mutation과 Hermes/provider/Mem0은 계속 범위 밖이다.
 - Task 9 사람/환경 acceptance는 변함없이 별도이며, 사용자가 고정한 공식 누적은 **9/22 (40.9%)**, 잔여 **59.1%**다. 전체 Python regression은 이전 사용자 중단 이후 **미검증**이며, 이번 planning closeout도 full-pass를 주장하지 않는다.
 - handoff: `docs/handoffs/2026-07-22-videobox-task14-written-design-handoff.ko.md`.
 
