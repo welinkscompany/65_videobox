@@ -131,6 +131,16 @@ function pointer(target: Element, type: string, clientX = 0) {
 }
 
 describe("TimelineDock", () => {
+  it("commits one frame-snapped placement update for a selected independent lane", () => {
+    const onUpdatePlacements = vi.fn();
+    const mutable = { ...view, tracks: view.tracks.map((track) => track.role === "broll" ? { ...track, clips: track.clips.map((clip) => ({ ...clip, placementId: "broll:b-1" })) } : track) };
+    render(<TimelineDock view={mutable} viewportWidthPx={1000} onUpdatePlacements={onUpdatePlacements} />);
+
+    selectTimelineClip("broll:b-1");
+    fireEvent.keyDown(screen.getByRole("button", { name: "broll:b-1 이동" }), { key: "ArrowRight" });
+
+    expect(onUpdatePlacements).toHaveBeenCalledWith({ changes: [{ placementId: "broll:b-1", kind: "broll", startSec: 5.04, endSec: 9.04 }] });
+  });
   it("selects narration clips with Enter and Space before exposing mutation controls", () => {
     render(<TimelineDock view={twoNarrationView} viewportWidthPx={400} />);
 
@@ -473,7 +483,7 @@ describe("TimelineDock", () => {
     render(<TimelineDock view={view} viewportWidthPx={400} />);
 
     const laneList = screen.getByRole("list", { name: "고정 트랙" });
-    expect(Array.from(laneList.children)).toHaveLength(5);
+    expect(Array.from(laneList.children)).toHaveLength(6);
     expect(Array.from(laneList.children).every((child) => child.getAttribute("role") === "listitem")).toBe(true);
     expect(screen.getByRole("group", { name: "타임라인 클립" })).not.toBe(laneList);
   });

@@ -6,6 +6,7 @@ import { findTimelineSnap, type SnapCandidate, type SnapCandidateKind } from "./
 import { frameToSeconds, pixelsToTime, secondsToFrameHalfUp } from "./time-scale";
 import { TIMELINE_LANES, type ClipRect, type TimelineLane } from "./timeline-geometry";
 import { deriveNarrationTrim, reorderNarrationLayout, type NarrationSegment, type NarrationReorderLayout } from "./narrationMutation";
+import { derivePlacementMove, derivePlacementTrim, type TimelinePlacement, type TimelinePlacementKind } from "./placementMutation";
 import {
   createTimelineNavigation,
   navigationKeyAction,
@@ -24,16 +25,19 @@ const laneLabel: Readonly<Record<TimelineLane, string>> = {
   bgm: "BGM",
   sfx: "효과음",
   overlay: "오버레이",
+  caption: "자막",
 };
 
 type TrimNarration = Readonly<{ segmentId: string; startSec: number; endSec: number }>;
 type ReorderNarration = Readonly<{ segmentIds: string[]; boundsById: NarrationReorderLayout["boundsById"] }>;
+type UpdatePlacements = Readonly<{ changes: TimelinePlacement[] }>;
 
 type Props = Readonly<{
   view: EditorViewModel;
   viewportWidthPx: number;
   onTrimNarration?: (input: TrimNarration) => void;
   onReorderNarration?: (input: ReorderNarration) => void;
+  onUpdatePlacements?: (input: UpdatePlacements) => void;
   isSaving?: boolean;
   mutationMessage?: string;
 }>;
@@ -56,6 +60,9 @@ type PointerDraft = Readonly<{
   targetIndex: number;
   layout: NarrationReorderLayout;
 }>;
+type PlacementMoveDraft = Readonly<{ pointerId: number; kind: "placement-move"; downClientX: number; hasMoved: boolean; placement: TimelinePlacement; placements: readonly TimelinePlacement[]; bounds: Readonly<{ startSec: number; endSec: number }> }>;
+type PlacementTrimDraft = Readonly<{ pointerId: number; kind: "placement-trim"; downClientX: number; hasMoved: boolean; placement: TimelinePlacement; edge: "start" | "end"; bounds: Readonly<{ startSec: number; endSec: number }> }>;
+type TimelinePointerDraft = PointerDraft | PlacementMoveDraft | PlacementTrimDraft;
 
 function formatSeconds(seconds: number): string {
   return String(Number(seconds.toFixed(6)));
@@ -67,12 +74,15 @@ function isEditableTarget(target: EventTarget | null): boolean {
 }
 
 function clipSources(view: EditorViewModel) {
-  return view.tracks.flatMap((track) => track.clips.map((clip) => ({
-    id: clip.clipId,
+  return [
+    ...view.tracks.flatMap((track) => track.clips.map((clip) => ({
+    id: clip.placementId ?? clip.clipId,
     role: track.role,
     startSec: clip.startSec,
     endSec: clip.endSec,
-  })));
+    }))),
+    ...view.captions.flatMap((caption) => caption.placementId ? [{ id: caption.placementId, role: "caption" as const, startSec: caption.startSec, endSec: caption.endSec }] : []),
+  ];
 }
 
 function narrationSegments(view: EditorViewModel): NarrationSegment[] {
@@ -138,14 +148,15 @@ function navigationReducer(
   return reduceTimelineNavigation(state, action, options);
 }
 
-export function TimelineDock({ view, viewportWidthPx, onTrimNarration, onReorderNarration, isSaving = false, mutationMessage }: Props) {
+export function TimelineDock({ view, viewportWidthPx, onTrimNarration, onReorderNarration, onUpdatePlacements, isSaving = false, mutationMessage }: Props) {
   const options = { durationSec: view.output.durationSec, viewportWidthPx, fps: view.fps };
   const [state, dispatch] = useReducer(
     (current: TimelineNavigationState, action: TimelineNavigationAction) => navigationReducer(current, action, options),
     options,
     (initial) => createTimelineNavigation({ durationSec: initial.durationSec, pixelsPerSecond: 100 }),
   );
-  const [pointerDraft, setPointerDraft] = useState<PointerDraft | null>(null);
+  const [pointerDraft, setPointerDraft] = useState<TimelinePointerDraft | null>(null);
+  const [selectedPlacementIds, setSelectedPlacementIds] = useState<readonly string[]>([]);
   const viewportEndSec = resolveViewportEnd(state, view.output.durationSec, viewportWidthPx);
   const rects = useMemo(() => projectVisibleTimelineClips({
     clips: clipSources(view),
@@ -190,14 +201,19 @@ export function TimelineDock({ view, viewportWidthPx, onTrimNarration, onReorder
     const deltaSec = pixelsToTime(event.deltaX, { pixelsPerSecond: state.pixelsPerSecond, originSec: 0 });
     dispatch({ type: "scroll", seconds: state.viewportStartSec + deltaSec });
   };
-  const selectClip = (rect: ClipRect) => {
+  const selectClip = (rect: ClipRect, additive = false) => {
     const hit = classifyTimelineHit({
       point: { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 },
       lane: rect.lane,
       edgeHandlePx: 1,
       rects: rects.map((item) => ({ ...item, zIndex: 0 })),
     });
-    if (hit.kind === "body") dispatch({ type: "select", clipId: hit.clipId });
+    if (hit.kind === "body") {
+      dispatch({ type: "select", clipId: hit.clipId });
+      const placement = placementsByClipId.get(hit.clipId);
+      if (placement) setSelectedPlacementIds((current) => additive ? (current.includes(placement.placementId) ? current.filter((id) => id !== placement.placementId) : [...current, placement.placementId]) : [placement.placementId]);
+      else if (!additive) setSelectedPlacementIds([]);
+    }
   };
   const narration = useMemo(() => narrationSegments(view), [view]);
   const narrationByClipId = useMemo(() => new Map(
@@ -205,6 +221,10 @@ export function TimelineDock({ view, viewportWidthPx, onTrimNarration, onReorder
       segmentId: clip.segmentId, startSec: clip.startSec, endSec: clip.endSec,
     }] as const)),
   ), [view]);
+  const placementsByClipId = useMemo(() => new Map<string, TimelinePlacement>([
+    ...view.tracks.flatMap((track) => track.clips.flatMap((clip) => clip.placementId ? [[clip.placementId, { placementId: clip.placementId, kind: track.role as TimelinePlacementKind, startSec: clip.startSec, endSec: clip.endSec } as TimelinePlacement] as const] : [])),
+    ...view.captions.flatMap((caption) => caption.placementId ? [[caption.placementId, { placementId: caption.placementId, kind: "caption" as const, startSec: caption.startSec, endSec: caption.endSec } as TimelinePlacement] as const] : []),
+  ]), [view]);
   const draftProjection = useMemo(() => {
     const boundsByClipId = new Map<string, Readonly<{ startSec: number; endSec: number }>>();
     const sources = clipSources(view).map((source) => {
@@ -214,6 +234,8 @@ export function TimelineDock({ view, viewportWidthPx, onTrimNarration, onReorder
         bounds = pointerDraft.bounds;
       } else if (narrationClip && pointerDraft?.kind === "reorder") {
         bounds = pointerDraft.layout.boundsById[narrationClip.segmentId] ?? bounds;
+      } else if ((pointerDraft?.kind === "placement-move" || pointerDraft?.kind === "placement-trim") && pointerDraft.placement.placementId === source.id) {
+        bounds = pointerDraft.bounds;
       }
       boundsByClipId.set(source.id, bounds);
       return { ...source, ...bounds };
@@ -347,6 +369,42 @@ export function TimelineDock({ view, viewportWidthPx, onTrimNarration, onReorder
     const result = reorderAtPointer(draft, event);
     if (result.targetIndex !== result.originalIndex) onReorderNarration?.(result.layout);
   };
+  const placementBoundsAtPointer = (draft: PlacementMoveDraft | PlacementTrimDraft, event: PointerEvent<HTMLElement>) => {
+    const deltaSec = pixelsToTime(pointerClientX(event) - draft.downClientX, { pixelsPerSecond: state.pixelsPerSecond, originSec: 0 });
+    return draft.kind === "placement-move"
+      ? derivePlacementMove({ placement: draft.placement, proposedStartSec: draft.placement.startSec + deltaSec, durationSec: view.output.durationSec, fps: view.fps })
+      : derivePlacementTrim({ placement: draft.placement, edge: draft.edge, proposedSec: (draft.edge === "start" ? draft.placement.startSec : draft.placement.endSec) + deltaSec, durationSec: view.output.durationSec, fps: view.fps });
+  };
+  const startPlacement = (event: PointerEvent<HTMLButtonElement>, placement: TimelinePlacement, operation: "move" | "trim", edge?: "start" | "end") => {
+    if (isSaving) return;
+    event.preventDefault(); event.stopPropagation();
+    const timelineTrack = event.currentTarget.closest<HTMLElement>("[data-timeline-track]");
+    if (timelineTrack) capturePointer(timelineTrack, event.pointerId);
+    const movePlacements = selectedPlacementIds.length > 1
+      ? selectedPlacementIds.map((id) => placementsByClipId.get(id)).filter((item): item is TimelinePlacement => Boolean(item))
+      : [placement];
+    setPointerDraft(operation === "move"
+      ? { pointerId: event.pointerId, kind: "placement-move", downClientX: pointerClientX(event), hasMoved: false, placement, placements: movePlacements, bounds: { startSec: placement.startSec, endSec: placement.endSec } }
+      : { pointerId: event.pointerId, kind: "placement-trim", downClientX: pointerClientX(event), hasMoved: false, placement, edge: edge!, bounds: { startSec: placement.startSec, endSec: placement.endSec } });
+  };
+  const movePlacement = (event: PointerEvent<HTMLElement>) => {
+    const draft = pointerDraft;
+    if (!draft || (draft.kind !== "placement-move" && draft.kind !== "placement-trim") || draft.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    setPointerDraft({ ...draft, hasMoved: draft.hasMoved || pointerClientX(event) !== draft.downClientX, bounds: placementBoundsAtPointer(draft, event) });
+  };
+  const endPlacement = (event: PointerEvent<HTMLElement>) => {
+    const draft = pointerDraft;
+    if (!draft || (draft.kind !== "placement-move" && draft.kind !== "placement-trim") || draft.pointerId !== event.pointerId) return;
+    event.preventDefault(); releasePointerCapture(event.currentTarget, event.pointerId); setPointerDraft(null);
+    if (draft.hasMoved || pointerClientX(event) !== draft.downClientX) {
+      const bounds = placementBoundsAtPointer(draft, event);
+      if (draft.kind === "placement-move" && draft.placements.length > 1) {
+        const deltaSec = bounds.startSec - draft.placement.startSec;
+        onUpdatePlacements?.({ changes: draft.placements.map((placement) => ({ ...placement, ...derivePlacementMove({ placement, proposedStartSec: placement.startSec + deltaSec, durationSec: view.output.durationSec, fps: view.fps }) })) });
+      } else updatePlacement(draft.placement, bounds);
+    }
+  };
   const cancelPointerDraft = (event: PointerEvent<HTMLElement>) => {
     if (pointerDraft?.pointerId !== event.pointerId) return;
     releasePointerCapture(event.currentTarget, event.pointerId);
@@ -355,10 +413,12 @@ export function TimelineDock({ view, viewportWidthPx, onTrimNarration, onReorder
   const movePointerDraft = (event: PointerEvent<HTMLElement>) => {
     if (pointerDraft?.kind === "trim") moveTrim(event);
     else if (pointerDraft?.kind === "reorder") moveReorder(event);
+    else movePlacement(event);
   };
   const endPointerDraft = (event: PointerEvent<HTMLElement>) => {
     if (pointerDraft?.kind === "trim") endTrim(event);
     else if (pointerDraft?.kind === "reorder") endReorder(event);
+    else endPlacement(event);
   };
   const keyboardTrim = (event: KeyboardEvent<HTMLButtonElement>, clip: NarrationSegment, edge: "start" | "end") => {
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
@@ -384,6 +444,22 @@ export function TimelineDock({ view, viewportWidthPx, onTrimNarration, onReorder
     const targetIndex = Math.min(narration.length - 1, Math.max(0, originalIndex + direction));
     if (targetIndex === originalIndex) return;
     onReorderNarration?.(reorderNarrationLayout({ narration, movingId: clip.segmentId, targetIndex }));
+  };
+  const updatePlacement = (placement: TimelinePlacement, bounds: Readonly<{ startSec: number; endSec: number }>) => {
+    if (bounds.startSec !== placement.startSec || bounds.endSec !== placement.endSec) onUpdatePlacements?.({ changes: [{ ...placement, ...bounds }] });
+  };
+  const keyboardPlacementMove = (event: KeyboardEvent<HTMLButtonElement>, placement: TimelinePlacement) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault(); event.stopPropagation(); if (isSaving) return;
+    const direction = event.key === "ArrowLeft" ? -1 : 1;
+    updatePlacement(placement, derivePlacementMove({ placement, proposedStartSec: frameToSeconds(Math.max(0, secondsToFrameHalfUp(placement.startSec, view.fps) + direction), view.fps), durationSec: view.output.durationSec, fps: view.fps }));
+  };
+  const keyboardPlacementTrim = (event: KeyboardEvent<HTMLButtonElement>, placement: TimelinePlacement, edge: "start" | "end") => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault(); event.stopPropagation(); if (isSaving) return;
+    const direction = event.key === "ArrowLeft" ? -1 : 1;
+    const current = edge === "start" ? placement.startSec : placement.endSec;
+    updatePlacement(placement, derivePlacementTrim({ placement, edge, proposedSec: frameToSeconds(Math.max(0, secondsToFrameHalfUp(current, view.fps) + direction), view.fps), durationSec: view.output.durationSec, fps: view.fps }));
   };
 
   return <section
@@ -411,6 +487,7 @@ export function TimelineDock({ view, viewportWidthPx, onTrimNarration, onReorder
       <div aria-label="타임라인 클립" role="group" style={{ inset: 0, position: "absolute" }}>
         {draftProjection.rects.map((rect) => {
         const narrationClip = rect.lane === "narration" ? narrationByClipId.get(rect.clipId) : undefined;
+        const placement = placementsByClipId.get(rect.clipId);
         const displayBounds = draftProjection.boundsByClipId.get(rect.clipId);
         const isSelected = state.selectedClipId === rect.clipId;
         return <div
@@ -426,12 +503,12 @@ export function TimelineDock({ view, viewportWidthPx, onTrimNarration, onReorder
       ><button
         aria-label={`${rect.clipId} 클립 선택`}
         aria-pressed={isSelected}
-        onClick={(event) => { event.stopPropagation(); selectClip(rect); }}
+        onClick={(event) => { event.stopPropagation(); selectClip(rect, event.shiftKey); }}
         onKeyDown={(event) => {
           if (event.key !== "Enter" && event.key !== " ") return;
           event.preventDefault();
           event.stopPropagation();
-          selectClip(rect);
+          selectClip(rect, event.shiftKey);
         }}
         style={{ height: "100%", width: "100%" }}
         type="button"
@@ -439,12 +516,17 @@ export function TimelineDock({ view, viewportWidthPx, onTrimNarration, onReorder
         <button aria-label={`${rect.clipId} 시작 자르기`} data-trim-edge="start" disabled={isSaving} onKeyDown={(event) => keyboardTrim(event, narrationClip, "start")} onPointerDown={(event) => startTrim(event, narrationClip, "start")} style={{ bottom: 0, left: 0, maxWidth: "33.333%", overflow: "hidden", padding: 0, pointerEvents: "auto", position: "absolute", top: 0, width: "33.333%" }} title="왼쪽·오른쪽 화살표로 한 프레임씩 조절" type="button">시작</button>
         <button aria-label={`${rect.clipId} 끝 자르기`} data-trim-edge="end" disabled={isSaving} onKeyDown={(event) => keyboardTrim(event, narrationClip, "end")} onPointerDown={(event) => startTrim(event, narrationClip, "end")} style={{ bottom: 0, maxWidth: "33.333%", overflow: "hidden", padding: 0, pointerEvents: "auto", position: "absolute", right: 0, top: 0, width: "33.333%" }} title="왼쪽·오른쪽 화살표로 한 프레임씩 조절" type="button">끝</button>
         <button aria-label={`${rect.clipId} 순서 바꾸기`} data-reorder-control="true" disabled={isSaving} onKeyDown={(event) => keyboardReorder(event, narrationClip)} onPointerDown={(event) => startReorder(event, narrationClip)} style={{ bottom: 0, left: "33.333%", maxWidth: "33.334%", overflow: "hidden", padding: 0, pointerEvents: "auto", position: "absolute", top: 0, width: "33.334%" }} title="왼쪽·오른쪽 화살표로 한 칸씩 이동" type="button">순서</button>
+      </span> : null}{placement && isSelected ? <span data-placement-controls="true" onClick={(event) => event.stopPropagation()} style={{ display: "flex", gap: 2, inset: 0, pointerEvents: "none", position: "absolute" }}>
+        <button aria-label={`${rect.clipId} 시작 자르기`} disabled={isSaving} onKeyDown={(event) => keyboardPlacementTrim(event, placement, "start")} onPointerDown={(event) => startPlacement(event, placement, "trim", "start")} style={{ pointerEvents: "auto" }} title="드래그하거나 왼쪽·오른쪽 화살표로 한 프레임씩 조절" type="button">시작</button>
+        <button aria-label={`${rect.clipId} 이동`} disabled={isSaving} onKeyDown={(event) => keyboardPlacementMove(event, placement)} onPointerDown={(event) => startPlacement(event, placement, "move")} style={{ pointerEvents: "auto" }} title="드래그하거나 왼쪽·오른쪽 화살표로 한 프레임씩 이동" type="button">이동</button>
+        <button aria-label={`${rect.clipId} 끝 자르기`} disabled={isSaving} onKeyDown={(event) => keyboardPlacementTrim(event, placement, "end")} onPointerDown={(event) => startPlacement(event, placement, "trim", "end")} style={{ pointerEvents: "auto" }} title="드래그하거나 왼쪽·오른쪽 화살표로 한 프레임씩 조절" type="button">끝</button>
       </span> : null}</div>;
         })}
       </div>
     </div>
     {visibleGaps.map((gap) => <p key={gap.gapId}>자산 공백: {gap.reason}</p>)}
     {caption ? <p>현재 자막: {caption.text}</p> : <p>현재 자막 없음</p>}
+    {selectedPlacementIds.length > 1 ? <p>선택한 독립 항목: {selectedPlacementIds.length}개</p> : null}
     {snap ? <p>스냅: {snapKindLabel[snap.kind]} ({snap.id}, {formatSeconds(snap.timeSec)}초)</p> : <p>스냅 없음</p>}
     {mutationMessage ? <p role="status">{mutationMessage}</p> : null}
     <output aria-label="재생 위치" data-seconds={formatSeconds(state.playheadSec)}>{formatSeconds(state.playheadSec)}초</output>

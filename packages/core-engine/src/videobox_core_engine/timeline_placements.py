@@ -44,6 +44,13 @@ def collect_timeline_placements(*, timeline: dict[str, object]) -> dict[str, dic
         if not isinstance(caption, dict):
             raise ValueError("timeline_placement_captions_invalid")
         _add_placement(result=result, kind="caption", base_id=str(caption.get("caption_id") or ""), start=caption.get("start_sec"), end=caption.get("end_sec"))
+    export_overlays = timeline.get("export_overlays", [])
+    if not isinstance(export_overlays, list):
+        raise ValueError("timeline_placement_export_overlays_invalid")
+    for overlay in export_overlays:
+        if not isinstance(overlay, dict):
+            raise ValueError("timeline_placement_export_overlays_invalid")
+        _add_placement(result=result, kind="overlay", base_id=str(overlay.get("clip_id") or ""), start=overlay.get("start_sec"), end=overlay.get("end_sec"))
     return {key: result[key] for key in sorted(result)}
 
 
@@ -126,6 +133,12 @@ def apply_timeline_placement_overrides(*, timeline: dict[str, object], overrides
         override = overrides.get(placement_id(kind="caption", base_id=str(caption.get("caption_id") or "")))
         if override:
             caption["start_sec"], caption["end_sec"] = override["start_sec"], override["end_sec"]
+    for overlay in materialized.get("export_overlays", []) if isinstance(materialized.get("export_overlays"), list) else []:
+        if not isinstance(overlay, dict):
+            continue
+        override = overrides.get(placement_id(kind="overlay", base_id=str(overlay.get("clip_id") or "")))
+        if override:
+            overlay["start_sec"], overlay["end_sec"] = override["start_sec"], override["end_sec"]
     return materialized
 
 

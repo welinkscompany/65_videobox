@@ -223,7 +223,7 @@ def materialize_editing_session_timeline(
         if str(segment.get("cut_action") or "keep") == "remove"
     }
     export_overlays: list[dict[str, Any]] = []
-    for raw_overlay in timeline.get("export_overlays", []):
+    for overlay_index, raw_overlay in enumerate(timeline.get("export_overlays", [])):
         if not isinstance(raw_overlay, dict):
             continue
         source_id = str(raw_overlay.get("segment_id") or "")
@@ -232,7 +232,7 @@ def materialize_editing_session_timeline(
         targets = source_targets.get(source_id)
         original_bounds = source_bounds.get(source_id)
         if not targets or original_bounds is None:
-            export_overlays.append(deepcopy(raw_overlay))
+            export_overlays.append({**deepcopy(raw_overlay), "clip_id": str(raw_overlay.get("clip_id") or f"export-overlay-{source_id}-{overlay_index}")})
             continue
         for _segment, source_slice, placement in targets:
             window_end = placement + float(source_slice["duration_sec"])
@@ -240,7 +240,7 @@ def materialize_editing_session_timeline(
             relative_end = _number(raw_overlay.get("end_sec")) - original_bounds[0] - float(source_slice["source_offset_sec"])
             start, end = max(placement, placement + relative_start), min(window_end, placement + relative_end)
             if end > start:
-                export_overlays.append({**deepcopy(raw_overlay), "segment_id": source_id, "start_sec": start, "end_sec": end})
+                export_overlays.append({**deepcopy(raw_overlay), "clip_id": str(raw_overlay.get("clip_id") or f"export-overlay-{source_id}-{overlay_index}"), "segment_id": source_id, "start_sec": start, "end_sec": end})
     session_captions: list[dict[str, Any]] = []
     for segment_id, segment in segments.items():
         if str(segment.get("cut_action") or "keep") == "remove":
@@ -283,7 +283,7 @@ def materialize_editing_session_timeline(
             if window_end <= window_start:
                 continue
             content_segment_id = str(window.get("source_segment_id") or segment_id)
-            session_captions.append({"caption_id": str(window.get("caption_id") or f"caption:{segment_id}:{window_index}"), "segment_id": content_segment_id, "caption_text": str(window.get("caption_text") or ""), "caption_style": deepcopy(window.get("caption_style") or segment.get("caption_style") or editing_session.get("caption_style") or {}), "start_sec": window_start, "end_sec": window_end, "review_required": window.get("review_required"), "tts_replacement": deepcopy(window.get("tts_replacement"))})
+            session_captions.append({"caption_id": str(window.get("caption_id") or f"caption-{segment_id}-{window_index}"), "segment_id": content_segment_id, "caption_text": str(window.get("caption_text") or ""), "caption_style": deepcopy(window.get("caption_style") or segment.get("caption_style") or editing_session.get("caption_style") or {}), "start_sec": window_start, "end_sec": window_end, "review_required": window.get("review_required"), "tts_replacement": deepcopy(window.get("tts_replacement"))})
             for ordinal, overlay in enumerate(window.get("visual_overlays", []) if isinstance(window.get("visual_overlays"), list) else []):
                 if not isinstance(overlay, dict):
                     continue
@@ -299,7 +299,7 @@ def materialize_editing_session_timeline(
                             clip[key] = payload[key]
                     tracks.setdefault("overlay", []).append(clip)
                 else:
-                    export_overlays.append({**payload, "segment_id": content_segment_id, "start_sec": window_start, "end_sec": window_end})
+                    export_overlays.append({**payload, "clip_id": str(payload.get("clip_id") or f"session-overlay-{segment_id}-{window_index}-{ordinal}"), "segment_id": content_segment_id, "start_sec": window_start, "end_sec": window_end})
     materialized["tracks"] = [{"track_type": kind, "clips": clips} for kind, clips in tracks.items() if clips]
     materialized["export_overlays"] = export_overlays
     materialized["session_captions"] = session_captions

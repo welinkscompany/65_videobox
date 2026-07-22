@@ -23,11 +23,13 @@ type NarrationReorder = Readonly<{
   segmentIds: string[];
   boundsById: Record<string, { startSec: number; endSec: number }>;
 }>;
+type TimelinePlacements = Readonly<{ changes: Array<{ placementId: string; kind: "broll" | "bgm" | "sfx" | "overlay" | "caption"; startSec: number; endSec: number }> }>;
 type EditorWorkbenchProps = Readonly<{
   view: EditorViewModel;
   onPreviewRefresh?: () => void | Promise<void>;
   onTrimNarration?: (input: NarrationTrim) => void | Promise<void>;
   onReorderNarration?: (input: NarrationReorder) => void | Promise<void>;
+  onUpdatePlacements?: (input: TimelinePlacements) => void | Promise<void>;
   isSavingTimeline?: boolean;
   timelineMutationMessage?: string;
 }>;
@@ -37,6 +39,7 @@ export function EditorWorkbench({
   onPreviewRefresh,
   onTrimNarration,
   onReorderNarration,
+  onUpdatePlacements,
   isSavingTimeline = false,
   timelineMutationMessage,
 }: EditorWorkbenchProps) {
@@ -96,6 +99,7 @@ export function EditorWorkbench({
       isSaving={isSavingTimeline}
       mutationMessage={timelineMutationMessage}
       onReorderNarration={onReorderNarration}
+      onUpdatePlacements={onUpdatePlacements}
       onTrimNarration={onTrimNarration}
       view={view}
       viewportWidthPx={Math.max(1, Math.round(availableWorkbenchWidth))}

@@ -697,6 +697,7 @@ class EditorMediaControlsResponse(BaseModel):
 class EditorClipResponse(BaseModel):
     clip_id: str
     segment_id: str
+    placement_id: str | None = None
     clip_type: Literal["narration", "broll", "bgm", "sfx", "overlay"]
     asset_id: str | None = None
     asset_uri: str | None = None
@@ -732,6 +733,8 @@ class EditorCaptionStyleResponse(BaseModel):
 
 class EditorCaptionResponse(BaseModel):
     segment_id: str
+    caption_id: str
+    placement_id: str
     text: str
     start_sec: float = Field(ge=0)
     end_sec: float = Field(ge=0)

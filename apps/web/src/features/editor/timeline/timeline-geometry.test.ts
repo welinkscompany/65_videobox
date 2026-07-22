@@ -20,7 +20,7 @@ describe("timeline geometry", () => {
   });
 
   it("keeps stable lanes in narration, broll, bgm, sfx, overlay order", () => {
-    expect(TIMELINE_LANES).toEqual(["narration", "broll", "bgm", "sfx", "overlay"]);
+    expect(TIMELINE_LANES).toEqual(["narration", "broll", "bgm", "sfx", "overlay", "caption"]);
   });
 
   it("keeps only the shared-boundary clip in a half-open viewport", () => {

@@ -32,7 +32,7 @@ def _manifest_fixture(client: TestClient, tmp_path) -> tuple[str, str, str]:
     session = store.save_editing_session(
         project_id=project_id,
         timeline_id=timeline["timeline_id"],
-        session_payload={"caption_style": {"font_size_px": 48}, "history": [], "segments": [{"segment_id": "segment-1", "caption_text": "안녕하세요", "start_sec": 0.0, "end_sec": 2.0, "cut_action": "keep", "source_sha256": "c" * 64, "media_revision": "media-r1"}]},
+        session_payload={"caption_style": {"font_size_px": 48}, "history": [], "segments": [{"segment_id": "segment-1", "caption_text": "안녕하세요", "start_sec": 0.0, "end_sec": 2.0, "cut_action": "keep", "review_required": False, "source_sha256": "c" * 64, "media_revision": "media-r1"}]},
     )
     return project_id, other_project_id, session["session_id"]
 
@@ -60,7 +60,7 @@ def test_explicit_session_manifest_has_authoritative_typed_editor_contract(tmp_p
     assert body["tracks"][0]["track_type"] == "narration"
     assert body["tracks"][0]["clips"][0]["media_controls"] == {"volume": 0.8}
     assert body["tracks"][1]["clips"][0]["expected_content_sha256"] == "b" * 64
-    assert body["captions"] == [{"segment_id": "segment-1", "text": "안녕하세요", "start_sec": 0.0, "end_sec": 2.0, "style": {"font_family": "Arial", "font_size_px": 48, "text_color": "#FFFFFFFF", "outline_color": "#000000FF", "outline_width_px": 3, "background_color": "#00000000", "position_x_percent": 50, "position_y_percent": 88, "horizontal_align": "center", "safe_area_enabled": True, "shadow_blur_px": 0}}]
+    assert body["captions"] == [{"segment_id": "segment-1", "caption_id": "caption-segment-1-0", "placement_id": "caption:caption-segment-1-0", "text": "안녕하세요", "start_sec": 0.0, "end_sec": 2.0, "style": {"font_family": "Arial", "font_size_px": 48, "text_color": "#FFFFFFFF", "outline_color": "#000000FF", "outline_width_px": 3, "background_color": "#00000000", "position_x_percent": 50, "position_y_percent": 88, "horizontal_align": "center", "safe_area_enabled": True, "shadow_blur_px": 0}}]
     assert body["gap_slots"][0]["gap_id"] == "gap-1"
     assert body["source_status"] == {"status": "current", "source_session_id": session_id, "source_session_revision": 1}
     assert body["audition"]["asset_urls"]["asset-narration-1"].endswith("/assets/asset-narration-1/content")
@@ -73,6 +73,26 @@ def test_manifest_never_substitutes_latest_session_and_is_project_isolated(tmp_p
 
     assert client.get(f"/api/projects/{project_id}/editing-sessions/latest/playback-manifest").status_code == 404
     assert client.get(f"/api/projects/{other_project_id}/editing-sessions/{session_id}/playback-manifest").status_code == 404
+
+
+def test_timeline_placement_patch_reappears_in_the_authoritative_manifest(tmp_path) -> None:
+    client = TestClient(create_app(projects_root=tmp_path))
+    project_id, _, session_id = _manifest_fixture(client, tmp_path)
+
+    saved = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/timeline-placements",
+        json={"expected_revision": 1, "changes": [{"placement_id": "broll:clip-broll-1", "kind": "broll", "start_sec": 0.5, "end_sec": 1.5}]},
+    )
+    manifest = client.get(f"/api/projects/{project_id}/editing-sessions/{session_id}/playback-manifest")
+
+    assert saved.status_code == 200
+    assert saved.json()["session_revision"] == 2
+    assert LocalProjectStore(tmp_path).get_editing_session(project_id=project_id, session_id=session_id)["timeline_placement_overrides"]["broll:clip-broll-1"]["start_sec"] == 0.5005
+    assert manifest.status_code == 200
+    broll = next(track for track in manifest.json()["tracks"] if track["track_type"] == "broll")["clips"][0]
+    assert broll["placement_id"] == "broll:clip-broll-1"
+    assert broll["start_sec"] == 0.5005
+    assert broll["end_sec"] == 1.5015
 
 
 def test_manifest_marks_old_timeline_source_stale_and_separates_stale_final(tmp_path) -> None:

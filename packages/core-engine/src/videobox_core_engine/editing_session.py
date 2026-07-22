@@ -79,7 +79,7 @@ def build_editing_session(
                 "sfx_override": None,
                 "tts_replacement": None,
                 "content_windows": [{
-                    "caption_id": f"caption:{segment['segment_id']}",
+                    "caption_id": f"caption-{segment['segment_id']}",
                     "start_offset_sec": 0.0,
                     "duration_sec": float(segment["end_sec"]) - float(segment["start_sec"]),
                     "source_segment_id": segment["segment_id"],
@@ -358,7 +358,7 @@ def _media_windows(segment: dict[str, Any]) -> list[dict[str, Any]]:
     if isinstance(raw, list) and raw:
         return [deepcopy(item) for item in raw if isinstance(item, dict)]
     return [{
-        "caption_id": f"caption:{str(segment.get('segment_id') or '')}",
+        "caption_id": f"caption-{str(segment.get('segment_id') or '')}",
         "start_offset_sec": 0.0,
         "duration_sec": float(segment.get("end_sec", 0.0)) - float(segment.get("start_sec", 0.0)),
         **{field: deepcopy(segment.get(field)) for field in ("broll_override", "music_override", "sfx_override")},

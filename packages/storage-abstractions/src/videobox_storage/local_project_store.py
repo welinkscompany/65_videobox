@@ -5633,6 +5633,7 @@ class LocalProjectStore:
             "history": session_payload.get("history", []),
             "undo_stack": session_payload.get("undo_stack", []),
             "redo_stack": session_payload.get("redo_stack", []),
+            "timeline_placement_overrides": session_payload.get("timeline_placement_overrides", {}),
             "created_at": created_value,
             "updated_at": updated_at,
         }

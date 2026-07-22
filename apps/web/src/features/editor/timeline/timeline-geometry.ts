@@ -1,6 +1,6 @@
 import { timeToPixels, type TimelineScale } from "./time-scale";
 
-export const TIMELINE_LANES = ["narration", "broll", "bgm", "sfx", "overlay"] as const;
+export const TIMELINE_LANES = ["narration", "broll", "bgm", "sfx", "overlay", "caption"] as const;
 
 export type TimelineLane = (typeof TIMELINE_LANES)[number];
 

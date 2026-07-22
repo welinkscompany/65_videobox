@@ -112,3 +112,16 @@ def test_applies_overrides_to_materialized_tracks_and_captions_without_losing_pa
     broll = next(track for track in result["tracks"] if track["track_type"] == "broll")["clips"][0]
     assert (broll["start_sec"], broll["end_sec"]) == (1.0, 3.0)
     assert result["session_captions"][0] == {"caption_id": "c-1", "text": "자막", "start_sec": 1.0, "end_sec": 2.0, "style": {"font": "x"}}
+
+
+def test_applies_overrides_to_non_asset_export_overlays() -> None:
+    timeline = _timeline()
+    timeline["export_overlays"] = [{"clip_id": "card-1", "segment_id": "seg-1", "start_sec": 0.0, "end_sec": 2.0, "overlay_type": "explanation_card"}]
+
+    placements = collect_timeline_placements(timeline=timeline)
+    result = apply_timeline_placement_overrides(timeline=timeline, overrides={
+        "overlay:card-1": {"placement_id": "overlay:card-1", "kind": "overlay", "start_sec": 1.0, "end_sec": 2.0},
+    })
+
+    assert placements["overlay:card-1"]["kind"] == "overlay"
+    assert result["export_overlays"][0]["start_sec"] == 1.0

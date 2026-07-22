@@ -1,6 +1,16 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 287. 2026-07-22 Task 16 narration timeline mutation closeout`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 288. 2026-07-22 Task 17 multi-lane timeline editing closeout`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+
+## 288. 2026-07-22 Task 17 multi-lane timeline editing closeout
+
+- `[x] 구현 완료`: B-roll/BGM/SFX/asset overlay/설명형 export overlay/caption에 stable `placement_id`를 부여하고, 한 revision-bound batch mutation으로 저장한다. manifest·exact FFmpeg/final composition·CapCut이 모두 같은 session materialization을 사용한다.
+- `[x] 실패 안전`: 서버는 알 수 없는 ID, kind 불일치, 중복, 비유한 값, 범위/한 프레임 위반을 거부한다. UI는 local draft만 clamp하고 release 때 한 번 저장한다. Route는 Task 16의 refresh/race fence를 그대로 사용하며 자동 재시도·force apply·preview job은 없다.
+- `[x] UI`: Dock은 독립 five lane과 caption lane을 표시하고 pointer/keyboard move·trim, Shift local multi-selection, saving disabled를 제공한다. API/command port는 Route 밖으로 새지 않는다.
+- `검증`: targeted Python `38 passed`(multipart warning 1), frontend full `45 files / 447 passed`, production build 성공(기존 500 kB chunk warning), UI provenance verifier 성공, `git diff --check` 성공. 전체 Python regression은 실행하지 않았다.
+- `다음 goal`: Task 18은 written spec과 사용자 승인 뒤에만 시작한다. Task 9 사람/환경 acceptance와 CapCut Desktop 실증은 계속 별도다.
+- Task 9 사람/환경 acceptance는 변함없이 별도이며, 사용자가 고정한 공식 누적은 **9/22 (40.9%)**, 잔여 **59.1%**다.
+- handoff: `docs/handoffs/2026-07-22-videobox-task17-multilane-timeline-editing-closeout.ko.md`.
 
 ## 287. 2026-07-22 Task 16 narration timeline mutation closeout
 

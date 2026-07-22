@@ -317,14 +317,14 @@ export type EditorPlaybackManifest = {
     track_id: string;
     track_type: "narration" | "broll" | "bgm" | "sfx" | "overlay";
     clips: Array<{
-      clip_id: string; segment_id: string; clip_type: "narration" | "broll" | "bgm" | "sfx" | "overlay";
+      clip_id: string; segment_id: string; placement_id?: string | null; clip_type: "narration" | "broll" | "bgm" | "sfx" | "overlay";
       asset_id: string | null; asset_uri: string | null; start_sec: number; end_sec: number;
       media_controls: EditorMediaControls; expected_content_sha256?: string | null; media_revision?: string | null;
       overlay_type?: "explanation_card" | "image_overlay" | "table_overlay" | null; overlay_payload?: Record<string, unknown>;
     }>;
   }>;
   captions: Array<{
-    segment_id: string; text: string; start_sec: number; end_sec: number;
+    segment_id: string; caption_id: string; placement_id: string; text: string; start_sec: number; end_sec: number;
     style: { font_family: string; font_size_px: number; text_color: string; outline_color: string; outline_width_px: number; background_color: string; position_x_percent: number; position_y_percent: number; horizontal_align: "left" | "center" | "right"; safe_area_enabled: boolean; shadow_blur_px: number };
   }>;
   gap_slots: Array<{ gap_id: string; segment_id: string; start_sec: number; end_sec: number; reason: string }>;

@@ -10,6 +10,8 @@ from math import floor
 from typing import Any
 
 from videobox_domain_models.caption_style import CaptionStyle
+from videobox_core_engine.composition_plan import materialize_editing_session_timeline
+from videobox_core_engine.timeline_placements import placement_id
 
 
 DEFAULT_FPS_NUM = 30
@@ -47,17 +49,24 @@ def build_editor_playback_manifest(
         raise KeyError("editor_manifest_project_mismatch")
     if str(session.get("timeline_id")) != str(timeline.get("timeline_id")):
         raise ValueError("editor_manifest_timeline_mismatch")
+    # Validate persisted source roles before materialization.  The materializer
+    # intentionally only emits renderer-supported tracks, so validating after
+    # it would otherwise turn an invalid stored role into a silent omission.
+    for item in timeline.get("tracks", []):
+        if isinstance(item, dict):
+            _track_contract(item)
     fps_num = _positive_int(timeline.get("fps_num"), DEFAULT_FPS_NUM)
     fps_den = _positive_int(timeline.get("fps_den"), DEFAULT_FPS_DEN)
-    output = timeline.get("output") if isinstance(timeline.get("output"), dict) else {}
-    segments = session.get("segments") if isinstance(session.get("segments"), list) else []
+    materialized = materialize_editing_session_timeline(timeline=timeline, editing_session=session, project_id=project_id)
+    output = materialized.get("output") if isinstance(materialized.get("output"), dict) else {}
+    segments = materialized.get("session_captions") if isinstance(materialized.get("session_captions"), list) else []
     raw_style = session.get("caption_style") if isinstance(session.get("caption_style"), dict) else {}
     style = CaptionStyle.from_dict(raw_style).to_dict()
     source_session_id = timeline.get("source_session_id")
     source_revision = timeline.get("source_session_revision")
     session_revision = int(session.get("session_revision") or 1)
     source_status = "current" if source_session_id == session.get("session_id") and source_revision == session_revision else "stale"
-    tracks = [contract for item in timeline.get("tracks", []) if isinstance(item, dict) if (contract := _track_contract(item)) is not None]
+    tracks = [contract for item in materialized.get("tracks", []) if isinstance(item, dict) if (contract := _track_contract(item)) is not None]
     asset_ids = sorted({str(clip["asset_id"]) for track in tracks for clip in track["clips"] if clip.get("asset_id")})
     preview = dict(exact_preview or {"status": "unavailable", "url": None, "source_session_revision": None})
     return {
@@ -79,7 +88,9 @@ def build_editor_playback_manifest(
         "captions": [
             {
                 "segment_id": str(segment["segment_id"]),
-                "text": str(segment.get("caption_text") or ""),
+                "caption_id": str(segment.get("caption_id") or placement_id(kind="caption", base_id=str(segment["segment_id"]))),
+                "placement_id": placement_id(kind="caption", base_id=str(segment.get("caption_id") or segment["segment_id"])),
+                "text": str(segment.get("caption_text") or segment.get("text") or ""),
                 "start_sec": float(segment.get("start_sec") or 0),
                 "end_sec": float(segment.get("end_sec") or 0),
                 "style": style,
@@ -87,7 +98,7 @@ def build_editor_playback_manifest(
             for segment in segments
             if isinstance(segment, dict) and segment.get("segment_id")
         ],
-        "gap_slots": [_gap_contract(gap) for gap in timeline.get("gap_slots", []) if isinstance(gap, dict)],
+        "gap_slots": [_gap_contract(gap) for gap in materialized.get("gap_slots", []) if isinstance(gap, dict)],
         "source_status": {"status": source_status, "source_session_id": source_session_id, "source_session_revision": source_revision},
         "audition": {"asset_urls": {asset_id: f"{asset_content_url_prefix}/{asset_id}/content" for asset_id in asset_ids}},
         "exact_preview": preview,
@@ -127,6 +138,7 @@ def _track_contract(track: dict[str, Any]) -> dict[str, Any] | None:
                 raise ValueError("editor_manifest_invalid_overlay_payload")
         clips.append({
             "clip_id": str(raw["clip_id"]), "segment_id": str(raw["segment_id"]),
+            "placement_id": placement_id(kind=clip_type, base_id=str(raw["clip_id"])) if clip_type != "narration" else None,
             "clip_type": clip_type,
             "asset_id": raw.get("asset_id"), "asset_uri": raw.get("asset_uri"),
             "start_sec": float(raw.get("start_sec") or 0), "end_sec": float(raw.get("end_sec") or 0),
