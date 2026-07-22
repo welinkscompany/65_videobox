@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 
-import { ApiConflictError, api, type BrollAsset, type MediaLibraryAsset } from "../../../api";
+import { ApiConflictError, api, type BrollAsset, type DirectorMessage, type DirectorMessageExchange, type DirectorProposal, type MediaLibraryAsset } from "../../../api";
 import { projectEditorAssets, type EditorAssetCard } from "../assets/editorAssetProjection";
 import { createEditorCommandPort, type EditorCommandPort } from "../editorCommandPort";
 import { VideoBoxEditorAdapter, type EditorViewModel } from "../editorViewModel";
 import { EditorWorkbench } from "./EditorWorkbench";
+import type { RightDockDirector, RightDockMessage, RightDockProposal } from "./rightDockTypes";
 
 type MutationState = Readonly<{ isSaving: boolean; message?: string }>;
 type AssetState = Readonly<{
@@ -12,6 +13,13 @@ type AssetState = Readonly<{
   brollAssets: readonly BrollAsset[];
   libraryAssets: readonly MediaLibraryAsset[];
   error: string | null;
+}>;
+type DirectorState = Readonly<{
+  key: string;
+  state: RightDockDirector["state"];
+  conversationId: string | null;
+  messages: readonly RightDockMessage[];
+  proposal: DirectorProposal | null;
 }>;
 
 const assetLoadError = "일부 자산을 불러오지 못했어요. 편집은 계속할 수 있어요. 잠시 후 다시 확인해 주세요.";
@@ -22,19 +30,41 @@ export function EditorWorkbenchRoute({ projectId, sessionId }: { projectId: stri
   const [state, setState] = useState<Readonly<{ key: string; view: EditorViewModel | null; error: string | null }>>({ key: requestKey, view: null, error: sessionId ? null : "편집 세션을 찾을 수 없어요. 다시 열어 주세요." });
   const [assets, setAssets] = useState<AssetState>({ key: requestKey, brollAssets: [], libraryAssets: [], error: null });
   const [mutation, setMutation] = useState<MutationState>({ isSaving: false });
+  const [director, setDirector] = useState<DirectorState>({ key: requestKey, state: sessionId ? "analysis_running" : "script_required", conversationId: null, messages: [], proposal: null });
   const mutationInFlight = useRef(false);
   const routeEpoch = useRef({ key: requestKey, value: 0 });
   const manifestOperationId = useRef(0);
   const mutationOperationId = useRef(0);
   const previewOperationId = useRef(0);
   const pollOperationId = useRef(0);
+  const directorOperationId = useRef(0);
+  const stableDirectorMessageId = useRef<string | null>(null);
   useEffect(() => {
     if (routeEpoch.current.key === requestKey) return;
     routeEpoch.current = { key: requestKey, value: routeEpoch.current.value + 1 };
     mutationOperationId.current += 1;
+    directorOperationId.current += 1;
+    stableDirectorMessageId.current = null;
     mutationInFlight.current = false;
     setMutation({ isSaving: false });
+    setDirector({ key: requestKey, state: sessionId ? "analysis_running" : "script_required", conversationId: null, messages: [], proposal: null });
   }, [requestKey]);
+  useEffect(() => {
+    if (!sessionId) return;
+    const epoch = routeEpoch.current.value;
+    const operationId = directorOperationId.current + 1;
+    directorOperationId.current = operationId;
+    let active = true;
+    const isCurrent = () => active && routeEpoch.current.value === epoch && directorOperationId.current === operationId;
+    setDirector({ key: requestKey, state: "analysis_running", conversationId: null, messages: [], proposal: null });
+    void api.reloadDirectorSession(projectId, sessionId).then((recovered) => {
+      if (!isCurrent()) return;
+      setDirector({ key: requestKey, state: recovered.proposal ? "proposal_ready" : "idle", conversationId: recovered.conversation?.conversation_id ?? null, messages: projectDirectorMessages(recovered.messages), proposal: recovered.proposal });
+    }).catch((error: unknown) => {
+      if (isCurrent()) setDirector({ key: requestKey, state: error instanceof SyntaxError || error instanceof TypeError ? "error" : "blocked", conversationId: null, messages: [], proposal: null });
+    });
+    return () => { active = false; };
+  }, [projectId, requestKey, sessionId]);
   useEffect(() => {
     if (!sessionId) { setState({ key: requestKey, view: null, error: "편집 세션을 찾을 수 없어요. 다시 열어 주세요." }); return; }
     const epoch = routeEpoch.current.value;
@@ -163,6 +193,58 @@ export function EditorWorkbenchRoute({ projectId, sessionId }: { projectId: stri
   const assetCards = assets.key === requestKey
     ? projectEditorAssets({ projectId, brollAssets: assets.brollAssets, libraryAssets: assets.libraryAssets })
     : [];
+  const activeDirector = director.key === requestKey ? director : { key: requestKey, state: "analysis_running" as const, conversationId: null, messages: [], proposal: null };
+  const isCurrentDirector = (epoch: number, operationId: number) => routeEpoch.current.value === epoch && directorOperationId.current === operationId;
+  const sendDirectorMessage = async (text: string) => {
+    if (!sessionId || !activeDirector.conversationId || !text.trim()) return;
+    const epoch = routeEpoch.current.value;
+    const operationId = directorOperationId.current + 1;
+    directorOperationId.current = operationId;
+    stableDirectorMessageId.current ??= globalThis.crypto?.randomUUID?.() ?? `director-${Date.now()}`;
+    const prepared = api.prepareDirectorMessage(projectId, activeDirector.conversationId, { session_id: sessionId, client_message_id: stableDirectorMessageId.current, text: text.trim() });
+    try {
+      const result = await prepared.send();
+      if (!isCurrentDirector(epoch, operationId)) return;
+      if (result.kind !== "exchange") return;
+      stableDirectorMessageId.current = null;
+      const proposalId = result.exchange.assistant_message.proposal_id ?? (typeof result.exchange.action_intent?.proposal_preflight?.proposal_id === "string" ? result.exchange.action_intent.proposal_preflight.proposal_id : null);
+      const messages = [...activeDirector.messages, projectDirectorExchange(result.exchange)];
+      if (!proposalId) { setDirector({ ...activeDirector, messages }); return; }
+      const proposal = await api.getDirectorProposal(projectId, proposalId);
+      if (isCurrentDirector(epoch, operationId)) setDirector({ ...activeDirector, state: "proposal_ready", messages, proposal });
+    } catch {
+      if (isCurrentDirector(epoch, operationId)) setDirector({ ...activeDirector, state: "blocked" });
+    }
+  };
+  const applyDirectorProposal = async (proposalId: string, candidateIds: readonly string[]) => {
+    if (!sessionId || !state.view || activeDirector.proposal?.proposal_id !== proposalId || !candidateIds.length) return;
+    const epoch = routeEpoch.current.value;
+    const operationId = directorOperationId.current + 1;
+    directorOperationId.current = operationId;
+    const currentRevision = state.view.expectedRevision;
+    setDirector({ ...activeDirector, state: "applying" });
+    try {
+      const preflight = await api.preflightDirectorProposal(projectId, proposalId);
+      if (!isCurrentDirector(epoch, operationId)) return;
+      if (preflight.status === "stale" || preflight.code === "stale_proposal") { setDirector({ ...activeDirector, state: "blocked" }); return; }
+      await api.batchApplyDirectorProposal(projectId, proposalId, { candidate_ids: [...candidateIds], expected_revision: currentRevision });
+      if (!isCurrentDirector(epoch, operationId)) return;
+      setDirector({ ...activeDirector, state: "proposal_ready" });
+      setRefreshToken((current) => current + 1);
+    } catch {
+      if (isCurrentDirector(epoch, operationId)) setDirector({ ...activeDirector, state: "blocked" });
+    }
+  };
+  const rightDock: RightDockDirector = {
+    state: activeDirector.state,
+    messages: activeDirector.messages,
+    proposal: projectDirectorProposal(activeDirector.proposal),
+    composerDisabled: !activeDirector.conversationId || activeDirector.state === "analysis_running" || activeDirector.state === "applying",
+    onSendMessage: sendDirectorMessage,
+    onApplyProposal: applyDirectorProposal,
+    onManualEdit: () => setDirector((current) => current.key === requestKey ? { ...current, state: "idle" } : current),
+    onPreviewCandidate: () => undefined,
+  };
   return <>
     {assets.key === requestKey && assets.error ? <p role="status">{assets.error}</p> : null}
     <EditorWorkbench
@@ -175,7 +257,29 @@ export function EditorWorkbenchRoute({ projectId, sessionId }: { projectId: stri
     onUpdateCaption={(input) => commitTimelineMutation((port) => port.setCaptionText(input))}
     onUpdatePlacements={(input) => commitTimelineMutation((port) => port.setTimelinePlacements(input))}
     timelineMutationMessage={mutation.message}
+    director={rightDock}
     view={state.view}
     />
   </>;
+}
+
+function projectDirectorProposal(proposal: DirectorProposal | null): RightDockProposal | null {
+  return proposal ? { proposalId: proposal.proposal_id, status: proposal.status, candidates: proposal.candidates.map((candidate) => ({ candidateId: candidate.candidate_id, visibleReferenceCode: candidate.visible_reference_code, mediaType: candidate.media_type, previewUrl: candidate.preview_uri })) } : null;
+}
+
+function projectDirectorExchange(exchange: DirectorMessageExchange): RightDockMessage {
+  return { id: exchange.assistant_message.message_id, userText: exchange.user_message.text, assistantText: exchange.assistant_message.text };
+}
+
+function projectDirectorMessages(messages: readonly DirectorMessage[]): readonly RightDockMessage[] {
+  const exchanges: RightDockMessage[] = [];
+  let pendingUser: DirectorMessage | null = null;
+  for (const message of messages) {
+    if (message.role === "user") { pendingUser = message; continue; }
+    if (message.role === "assistant" && pendingUser) {
+      exchanges.push({ id: message.message_id, userText: pendingUser.text, assistantText: message.text });
+      pendingUser = null;
+    }
+  }
+  return exchanges;
 }

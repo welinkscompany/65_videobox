@@ -3,24 +3,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 import { RightDock } from "./RightDock";
+import type { RightDockProposal } from "./rightDockTypes";
 
 afterEach(cleanup);
 
-const proposal = {
-  proposal_id: "proposal-1",
-  revision_code: "r1",
-  revision: 1,
-  base_session_revision: 4,
-  asset_index_revision: 1,
-  source_session_id: "session-1",
-  target_segment_ids: ["segment-1"],
-  source_script_segment_ids: ["segment-1"],
+const proposal: RightDockProposal = {
+  proposalId: "proposal-1",
   status: "ready",
-  diff: {},
-  expires_at: null,
   candidates: [
-    { candidate_id: "candidate-1", visible_reference_code: "B-001", media_type: "broll", asset_id: "asset-1", library_asset_id: null, reason_chips: [], scores: {}, availability: "available", review_status: "ready", preview_uri: null, controls: {}, expected_content_sha256: null, media_revision: "r1", canonical_metadata: {}, license_policy: "local", warning_provenance: [] },
-    { candidate_id: "candidate-2", visible_reference_code: "B-002", media_type: "broll", asset_id: "asset-2", library_asset_id: null, reason_chips: [], scores: {}, availability: "available", review_status: "ready", preview_uri: null, controls: {}, expected_content_sha256: null, media_revision: "r1", canonical_metadata: {}, license_policy: "local", warning_provenance: [] },
+    { candidateId: "candidate-1", visibleReferenceCode: "B-001", mediaType: "broll", previewUrl: null },
+    { candidateId: "candidate-2", visibleReferenceCode: "B-002", mediaType: "broll", previewUrl: null },
   ],
 } as const;
 
@@ -30,7 +22,7 @@ function PersistentDock() {
     draft={draft}
     onDraftChange={setDraft}
     proposal={proposal}
-    messages={[{ user_message: { message_id: "user-1", conversation_id: "conversation-1", project_id: "project-1", session_id: "session-1", role: "user", text: "B-roll을 추천해 줘", proposal_id: null, metadata: {}, client_message_id: null, created_at: "2026-07-23T00:00:00Z" }, assistant_message: { message_id: "assistant-1", conversation_id: "conversation-1", project_id: "project-1", session_id: "session-1", role: "assistant", text: "두 가지를 준비했어요.", proposal_id: "proposal-1", metadata: {}, client_message_id: null, created_at: "2026-07-23T00:00:01Z" } }]}
+    messages={[{ id: "assistant-1", userText: "B-roll을 추천해 줘", assistantText: "두 가지를 준비했어요." }]}
     inspectorTargets={[{ id: "segment-1", label: "세그먼트 1", kind: "caption" }]}
   />;
 }

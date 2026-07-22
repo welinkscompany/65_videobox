@@ -70,6 +70,21 @@ const music = {
   attribution_text: "",
 };
 
+const directorProposal = (proposalId = "proposal-1") => ({
+  proposal_id: proposalId,
+  revision_code: "P01",
+  revision: 1,
+  base_session_revision: 1,
+  asset_index_revision: 1,
+  source_session_id: "session-a",
+  target_segment_ids: ["segment-1"],
+  source_script_segment_ids: ["segment-1"],
+  status: "ready",
+  diff: {},
+  expires_at: null,
+  candidates: [{ candidate_id: "candidate-1", visible_reference_code: "P01-B-01", media_type: "broll", asset_id: "broll-1", library_asset_id: null, reason_chips: [], scores: {}, availability: "available", review_status: "ready", preview_uri: "https://preview.invalid/candidate-1.mp4", controls: {}, expected_content_sha256: null, media_revision: "r1", canonical_metadata: {}, license_policy: "local", warning_provenance: [] }],
+});
+
 function pointer(target: Element, type: string, clientX: number) {
   fireEvent(target, new MouseEvent(type, { bubbles: true, cancelable: true, clientX }));
 }
@@ -95,7 +110,7 @@ describe("EditorWorkbenchRoute", () => {
       .mockImplementation(() => new Promise((resolve) => { resolveApply = resolve; }) as never);
     vi.spyOn(api, "listMediaLibraryAssets").mockResolvedValue({ assets: [music] } as never);
 
-    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    const rendered = render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await openAssetBrowser();
     expect(await screen.findByRole("button", { name: "BGM 1 적용" })).toBeEnabled();
     fireEvent.click(screen.getByRole("button", { name: "n-1 클립 선택" }));
@@ -125,7 +140,7 @@ describe("EditorWorkbenchRoute", () => {
     const updateSfx = vi.spyOn(api, "updateEditingSessionSfxOverride");
     const updateBroll = vi.spyOn(api, "updateEditingSessionBroll");
 
-    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    const rendered = render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await openAssetBrowser();
     await screen.findByRole("button", { name: "BGM 1 적용" });
     fireEvent.click(screen.getByRole("button", { name: "n-1 클립 선택" }));
@@ -511,5 +526,59 @@ describe("EditorWorkbenchRoute", () => {
     await act(async () => { resolveOldPreview({}); });
     expect(load).toHaveBeenCalledTimes(3);
     expect(screen.getByText("timeline-session-a · revision 10")).toBeVisible();
+  });
+
+  it("adapts the recovered Eugene conversation into the dock, keeps manual edit available when blocked, and auditions a candidate through the sole PreviewStage", async () => {
+    vi.spyOn(api, "getEditorPlaybackManifest").mockImplementation((projectId, sessionId) => Promise.resolve(manifest(projectId, sessionId)) as never);
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
+      conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },
+      messages: [
+        { message_id: "user-1", conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a", role: "user", text: "B-roll을 추천해 줘", proposal_id: null, metadata: {}, client_message_id: null, created_at: "now" },
+        { message_id: "assistant-1", conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a", role: "assistant", text: "한 가지를 골랐어요.", proposal_id: "proposal-1", metadata: {}, client_message_id: null, created_at: "now" },
+      ],
+      proposal: directorProposal(), references: [],
+    } as never);
+
+    const rendered = render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    expect(await screen.findByText("timeline-session-a · revision 1")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "유진과 Inspector" }));
+    expect(await screen.findByText("한 가지를 골랐어요.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "추천 미리 듣기" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "추천 미리 듣기" }));
+    expect(document.querySelectorAll(".vb-preview-stage")).toHaveLength(1);
+    expect(document.querySelectorAll(".vb-editor-right-dock audio, .vb-editor-right-dock video")).toHaveLength(0);
+
+    vi.spyOn(api, "reloadDirectorSession").mockRejectedValueOnce(new Error("blocked"));
+    rendered.rerender(<EditorWorkbenchRoute projectId="project-b" sessionId="session-b" />);
+    expect(await screen.findByText("timeline-session-b · revision 1")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "유진과 Inspector" }));
+    fireEvent.click(await screen.findByRole("button", { name: "직접 편집하기" }));
+    expect(await screen.findByRole("button", { name: "자산과 대본" })).toBeVisible();
+  });
+
+  it("preflights then batch-applies only the current route proposal and ignores an old A send after navigation", async () => {
+    let resolveOldSend!: (value: unknown) => void;
+    vi.spyOn(api, "getEditorPlaybackManifest").mockImplementation((projectId, sessionId) => Promise.resolve(manifest(projectId, sessionId)) as never);
+    vi.spyOn(api, "reloadDirectorSession").mockImplementation((projectId, sessionId) => Promise.resolve({
+      conversation: { conversation_id: `conversation-${sessionId}`, project_id: String(projectId), session_id: String(sessionId) }, messages: [], proposal: directorProposal(`proposal-${sessionId}`), references: [],
+    }) as never);
+    const prepared = vi.spyOn(api, "prepareDirectorMessage").mockImplementation(() => ({ clientMessageId: "stable", send: () => new Promise((resolve) => { resolveOldSend = resolve; }) }) as never);
+    const preflight = vi.spyOn(api, "preflightDirectorProposal").mockResolvedValue({ status: "ready" } as never);
+    const batchApply = vi.spyOn(api, "batchApplyDirectorProposal").mockResolvedValue({} as never);
+    const rendered = render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    expect(await screen.findByText("timeline-session-a · revision 1")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "유진과 Inspector" }));
+    fireEvent.change(await screen.findByLabelText("유진에게 요청하기"), { target: { value: "A 요청" } });
+    fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
+    await waitFor(() => expect(prepared).toHaveBeenCalledTimes(1));
+
+    rendered.rerender(<EditorWorkbenchRoute projectId="project-b" sessionId="session-b" />);
+    expect(await screen.findByText("timeline-session-b · revision 1")).toBeVisible();
+    await act(async () => { resolveOldSend({ kind: "exchange", exchange: { user_message: {}, assistant_message: { proposal_id: "proposal-session-a", text: "stale A" } } }); });
+    expect(screen.queryByText("stale A")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "유진과 Inspector" }));
+    fireEvent.click(await screen.findByRole("button", { name: "선택한 추천 적용" }));
+    await waitFor(() => expect(preflight).toHaveBeenCalledWith("project-b", "proposal-session-b"));
+    expect(batchApply).toHaveBeenCalledWith("project-b", "proposal-session-b", { candidate_ids: ["candidate-1"], expected_revision: 1 });
   });
 });

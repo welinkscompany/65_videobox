@@ -9,6 +9,7 @@ import { TimelineDock } from "../timeline/TimelineDock";
 import { activeSegmentIdAt, clampPlaybackSeconds } from "../transcript/playbackNavigation";
 import { EditorWorkbenchReadOnlyAdapters } from "./editorWorkbenchReadOnlyAdapters";
 import { resolveEditorWorkbenchLayout, type EditorWorkbenchPersistedState } from "./editorWorkbenchLayout";
+import type { RightDockCandidate, RightDockDirector } from "./rightDockTypes";
 
 const storageKey = "videobox.editor-workbench.ui";
 const eugeneDraftStorageKey = "videobox.editor-workbench.eugene-draft";
@@ -38,6 +39,7 @@ type EditorWorkbenchProps = Readonly<{
   onApplyAssetCard?: (card: EditorAssetCard, segmentId: string) => void | Promise<void>;
   isSavingTimeline?: boolean;
   timelineMutationMessage?: string;
+  director?: RightDockDirector;
 }>;
 
 export function EditorWorkbench({
@@ -51,6 +53,7 @@ export function EditorWorkbench({
   onApplyAssetCard,
   isSavingTimeline = false,
   timelineMutationMessage,
+  director,
 }: EditorWorkbenchProps) {
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
   const [availableWorkbenchWidth, setAvailableWorkbenchWidth] = useState(() => window.innerWidth);
@@ -110,7 +113,17 @@ export function EditorWorkbench({
       source: { id: card.id, label: card.title, url: card.previewUrl, mediaKind, timelineRange: assetTarget ?? { startSec: 0, endSec: view.output.durationSec } },
     }));
   };
-  const dock = (side: "left" | "right") => <aside aria-label={side === "left" ? "자산과 대본" : "유진과 Inspector"} className={`vb-editor-workbench__dock vb-editor-workbench__dock--${side}`}><EditorWorkbenchReadOnlyAdapters assetCards={assetCards} assetTarget={assetTarget} dock={side} eugeneDraft={eugeneDraft} isSavingCaption={isSavingTimeline} onApplyAssetCard={onApplyAssetCard} onEugeneDraftChange={setEugeneDraft} onPreviewAsset={previewAssetCard} onSaveCaption={onUpdateCaption} onSeek={seekPlayback} onSelectSegment={selectSegment} playbackSec={playbackSec} selectedSegmentId={selectedSegmentId} view={view} /></aside>;
+  const previewDirectorCandidate = (candidate: RightDockCandidate) => {
+    const previewUrl = candidate.previewUrl;
+    if (!previewUrl) return;
+    setAuditionRequest((current) => ({
+      requestId: (current?.requestId ?? 0) + 1,
+      source: { id: `director:${candidate.candidateId}`, label: candidate.visibleReferenceCode, url: previewUrl, mediaKind: candidate.mediaType === "broll" || candidate.mediaType === "video" ? "video" : "audio", timelineRange: assetTarget ?? { startSec: 0, endSec: view.output.durationSec } },
+    }));
+  };
+  const openManualEditing = () => setUi((current) => layout.mode === "drawer" ? { ...current, activeDrawer: "left" } : { ...current, leftOpen: true });
+  const rightDirector = director ? { ...director, onManualEdit: () => { director.onManualEdit(); openManualEditing(); }, onPreviewCandidate: previewDirectorCandidate } : undefined;
+  const dock = (side: "left" | "right") => <aside aria-label={side === "left" ? "자산과 대본" : "유진과 Inspector"} className={`vb-editor-workbench__dock vb-editor-workbench__dock--${side}`}><EditorWorkbenchReadOnlyAdapters assetCards={assetCards} assetTarget={assetTarget} director={rightDirector} dock={side} eugeneDraft={eugeneDraft} isSavingCaption={isSavingTimeline} onApplyAssetCard={onApplyAssetCard} onEugeneDraftChange={setEugeneDraft} onPreviewAsset={previewAssetCard} onSaveCaption={onUpdateCaption} onSeek={seekPlayback} onSelectSegment={selectSegment} playbackSec={playbackSec} selectedSegmentId={selectedSegmentId} view={view} /></aside>;
   const resize = (side: "left" | "right", delta: number) => setUi((current) => { const key = side === "left" ? "leftSize" : "rightSize"; const value = Math.max(side === "left" ? 220 : 260, current[key] + delta); (side === "left" ? leftPanelRef : rightPanelRef).current?.resize(`${value}px`); return { ...current, [key]: value }; });
   const handleKey = (event: KeyboardEvent<HTMLDivElement>, side: "left" | "right") => { if (event.key === "ArrowLeft" || event.key === "ArrowRight") { event.preventDefault(); event.stopPropagation(); resize(side, event.key === "ArrowRight" ? 20 : -20); } };
   const trapDrawerFocus = (event: KeyboardEvent<HTMLDivElement>) => { if (event.key === "Escape") { closeAndRestore(); return; } if (event.key !== "Tab") return; const focusable = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('button:not([disabled]), [tabindex="0"]')); if (!focusable.length) { event.preventDefault(); return; } const first = focusable[0]; const last = focusable[focusable.length - 1]; if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); } };
