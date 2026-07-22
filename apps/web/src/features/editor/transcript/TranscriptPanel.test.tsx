@@ -58,6 +58,7 @@ describe("TranscriptPanel", () => {
 
     fireEvent.click(rowButtons[1]);
     fireEvent.change(editor, { target: { value: "저장 중 입력" } });
+    expect(editor).toHaveValue("첫 번째 자막");
     fireEvent.click(saveButton);
 
     expect(onSelectSegment).not.toHaveBeenCalled();

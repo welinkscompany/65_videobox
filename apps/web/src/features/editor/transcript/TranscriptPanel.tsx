@@ -57,7 +57,7 @@ export function TranscriptPanel({
       </ol> : <p>연결된 대본이 없습니다.</p>}
       {selectedEntry ? <>
         <label htmlFor="vb-transcript-caption">자막 텍스트</label>
-        <textarea aria-label={`${selectedEntry.segmentId} 자막 텍스트`} disabled={isSaving} id="vb-transcript-caption" onChange={(event) => setDraft(event.target.value)} onKeyDown={handleEditorKeyDown} value={draft} />
+        <textarea aria-label={`${selectedEntry.segmentId} 자막 텍스트`} disabled={isSaving} id="vb-transcript-caption" onChange={(event) => { if (!isSaving) setDraft(event.target.value); }} onKeyDown={handleEditorKeyDown} value={draft} />
         <button disabled={isSaving || !onSaveCaption || draft === selectedEntry.text} onClick={() => onSaveCaption?.({ segmentId: selectedEntry.segmentId, text: draft })} type="button">자막 저장</button>
       </> : null}
     </section>
