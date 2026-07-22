@@ -1,6 +1,16 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 289. 2026-07-22 Task 18 synchronized transcript and caption closeout`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 290. 2026-07-23 Task 18 caption time authority repair closeout`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+
+## 290. 2026-07-23 Task 18 caption time authority repair closeout
+
+- `[x] 시간 권한 보완`: caption placement ID는 manifest identity로만 유지하고, mutable placement collection에서 제외했다. 새 `caption:*` placement는 fail-closed로 거부하며, 기존 session의 `caption:*` override는 history/revision을 바꾸지 않은 채 materialization에서만 무시한다. 따라서 editor manifest·exact preview/final composition·CapCut materialization은 narration-derived caption bounds를 공통으로 사용한다.
+- `[x] 저장 중 입력 보완`: revision-bound caption save가 진행되는 동안 대본 행·textarea·save를 모두 잠근다. disabled DOM control에 강제로 dispatch한 change도 draft setter가 무시해 refresh 전에 입력이 유실될 조건을 만들지 않는다.
+- `[x] 자막 text materialization 보완`: caption PATCH는 top-level segment와 같은 `source_segment_id`의 content window text를 한 revisioned mutation으로 함께 갱신한다. merge 뒤 child caption은 해당 window만 바꾸며, materializer→manifest→exact/final composition이 새 text를 공통으로 소비한다.
+- `검증`: TDD RED→GREEN, targeted Python `78 passed`(기존 multipart PendingDeprecationWarning 1), focused frontend `7 files / 71 passed`, frontend full `48 files / 464 passed`, production build 성공(기존 500 kB chunk warning), provenance verifier/diff check 성공. independent spec/quality/gap/source-to-runtime reverse review Critical/Important 0. 전체 Python regression은 실행하지 않았다.
+- `다음 goal`: Task 19는 별도 written spec과 사용자 승인 뒤에만 시작한다. Task 9 사람/환경 acceptance와 CapCut Desktop 실증은 계속 별도다.
+- Task 9 사람/환경 acceptance는 변함없이 별도이며, 사용자가 고정한 공식 누적은 **9/22 (40.9%)**, 잔여 **59.1%**다.
+- handoff: `docs/handoffs/2026-07-23-videobox-task18-caption-authority-repair-closeout.ko.md`.
 
 ## 289. 2026-07-22 Task 18 synchronized transcript and caption closeout
 
