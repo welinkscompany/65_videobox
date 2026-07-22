@@ -29,7 +29,7 @@
 - Create: `apps/web/src/features/editor/assets/editorAssetProjection.ts`
 - Test: `apps/web/src/features/editor/assets/editorAssetProjection.test.ts`
 
-- [ ] **Step 1: Write the failing pure-contract tests.**
+- [x] **Step 1: Write the failing pure-contract tests.**
 
 ```ts
 import { describe, expect, it } from "vitest";
@@ -51,13 +51,13 @@ it("filters a normalized list by type and query without losing unavailable licen
 });
 ```
 
-- [ ] **Step 2: Run the focused test and verify RED.**
+- [x] **Step 2: Run the focused test and verify RED.**
 
 Run: `npm --prefix apps/web run test -- --run src/features/editor/assets/editorAssetProjection.test.ts`
 
 Expected: FAIL because `editorAssetProjection` does not exist.
 
-- [ ] **Step 3: Implement the smallest pure projector.**
+- [x] **Step 3: Implement the smallest pure projector.**
 
 ```ts
 export type EditorAssetKind = "broll" | "bgm" | "sfx";
@@ -76,7 +76,7 @@ export function filterEditorAssets(cards: readonly EditorAssetCard[], filter: { 
 
 Use `api.assetContentUrl(projectId, assetId)` for B-roll and `api.mediaLibraryPreviewUrl(libraryAssetId)` for library cards. Keep metadata conversion in this module; no React or API request belongs here.
 
-- [ ] **Step 4: Run the focused test and verify GREEN.**
+- [x] **Step 4: Run the focused test and verify GREEN.**
 
 Run: `npm --prefix apps/web run test -- --run src/features/editor/assets/editorAssetProjection.test.ts`
 
@@ -88,6 +88,15 @@ Expected: PASS.
 git add apps/web/src/features/editor/assets/editorAssetProjection.ts apps/web/src/features/editor/assets/editorAssetProjection.test.ts
 git commit -m "feat: project editor asset cards"
 ```
+
+### Task 1 execution evidence (2026-07-23)
+
+- Initial RED: `npm --prefix apps/web run test -- --run src/features/editor/assets/editorAssetProjection.test.ts` failed because `editorAssetProjection` did not exist.
+- Review-gap RED: the same command failed because the implementation marked `review_required` false, missing, and nonboolean values as `검토 완료`.
+- Review-gap GREEN: the same command passed with `4 tests passed`.
+- Licence/source-gap RED: the same command failed because B-roll output still contained the invented `manual source` label.
+- Licence/source GREEN: the same command passed with `5 tests passed`.
+- `git diff --check` passed; no stage or commit was made; protected `?? .tmp-final-fence-debug/` was preserved.
 
 ## Task 2: Accessible callback-only asset browser
 
