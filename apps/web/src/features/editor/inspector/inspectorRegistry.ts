@@ -1,7 +1,7 @@
 import type { EditorViewModel } from "../editorViewModel";
 
-type MediaKind = "broll" | "bgm" | "sfx";
-type MediaField = "volume" | "crop" | "speed" | "fadeInSec" | "fadeOutSec";
+type MediaKind = "bgm" | "sfx";
+type MediaField = "fadeInSec" | "fadeOutSec";
 type CaptionField = "text" | "style";
 type ExplanationCardField = "title" | "body" | "text";
 type ImageField = "assetId" | "text";
@@ -14,11 +14,11 @@ export type InspectorTarget =
   | Readonly<{ id: string; kind: "overlay"; label: string; segmentId: string; overlayKind: "image"; fields: readonly ImageField[] }>
   | Readonly<{ id: string; kind: "overlay"; label: string; segmentId: string; overlayKind: "table"; fields: readonly TableField[] }>;
 
-const mediaFields = ["volume", "crop", "speed", "fadeInSec", "fadeOutSec"] as const;
-const mediaLabels = { broll: "보조 영상", bgm: "배경 음악", sfx: "효과음" } as const;
+const mediaFields = ["fadeInSec", "fadeOutSec"] as const;
+const mediaLabels = { bgm: "배경 음악", sfx: "효과음" } as const;
 
 function isMediaKind(role: EditorViewModel["tracks"][number]["role"]): role is MediaKind {
-  return role === "broll" || role === "bgm" || role === "sfx";
+  return role === "bgm" || role === "sfx";
 }
 
 export function projectInspectorTargets({ view, selectedSegmentId }: Readonly<{ view: EditorViewModel; selectedSegmentId: string | null }>): readonly InspectorTarget[] {

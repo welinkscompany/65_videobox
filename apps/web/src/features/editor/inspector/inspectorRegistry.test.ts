@@ -23,12 +23,12 @@ const view = {
 } satisfies EditorViewModel;
 
 describe("projectInspectorTargets", () => {
-  it("projects only the existing media and linked-caption command fields for the selected segment", () => {
+  it("projects only port-representable controls that the current runtime honors", () => {
     const targets = projectInspectorTargets({ view, selectedSegmentId: "segment-1" });
 
-    for (const [id, mediaKind, label] of [["broll-1", "broll", "보조 영상"], ["bgm-1", "bgm", "배경 음악"], ["sfx-1", "sfx", "효과음"]] as const) {
-      expect(targets).toContainEqual({ id: `clip:${id}`, kind: "media", label, segmentId: "segment-1", mediaKind, fields: ["volume", "crop", "speed", "fadeInSec", "fadeOutSec"] });
-    }
+    expect(targets).toContainEqual({ id: "clip:bgm-1", kind: "media", label: "배경 음악", segmentId: "segment-1", mediaKind: "bgm", fields: ["fadeInSec", "fadeOutSec"] });
+    expect(targets).toContainEqual({ id: "clip:sfx-1", kind: "media", label: "효과음", segmentId: "segment-1", mediaKind: "sfx", fields: ["fadeInSec", "fadeOutSec"] });
+    expect(targets.find((target) => target.id === "clip:broll-1")).toBeUndefined();
     expect(targets).toContainEqual({ id: "caption:caption-1", kind: "caption", label: "연결 자막", segmentId: "segment-1", fields: ["text", "style"] });
   });
 
@@ -50,10 +50,10 @@ describe("projectInspectorTargets", () => {
   it("does not project a media target without the asset required by the command port", () => {
     const assetlessView = {
       ...view,
-      tracks: view.tracks.map((track) => track.role === "broll" ? { ...track, clips: track.clips.map((clip) => ({ ...clip, assetId: null })) } : track),
+      tracks: view.tracks.map((track) => track.role === "bgm" ? { ...track, clips: track.clips.map((clip) => ({ ...clip, assetId: null })) } : track),
     } as EditorViewModel;
 
-    expect(projectInspectorTargets({ view: assetlessView, selectedSegmentId: "segment-1" })).not.toContainEqual(expect.objectContaining({ id: "clip:broll-1" }));
+    expect(projectInspectorTargets({ view: assetlessView, selectedSegmentId: "segment-1" })).not.toContainEqual(expect.objectContaining({ id: "clip:bgm-1" }));
   });
 
   it("returns no targets without a selection or for an unsupported selection", () => {
