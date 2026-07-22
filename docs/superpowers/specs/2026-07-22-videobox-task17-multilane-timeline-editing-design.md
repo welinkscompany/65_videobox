@@ -16,7 +16,7 @@ Task 17 therefore adds a durable, revisioned placement layer. The source timelin
 
 ### Stable placement identity
 
-Every editor-manifest clip and caption receives a stable `placement_id` composed from its persisted track type and base clip/caption identity. It is not a display label, array index, or a narration segment ID. A placement also carries its `kind` (`broll`, `bgm`, `sfx`, `overlay`, or `caption`), source identity, and base time range.
+Every editor-manifest clip and caption receives a stable `placement_id` composed from its persisted track type and base clip/caption identity. It is not a display label, array index, or a narration segment ID. Captions receive a persisted `caption_id` when the session content window is created; `placement_id` uses that ID, so split/merge can never make two caption placements collide. A placement also carries its `kind` (`broll`, `bgm`, `sfx`, `overlay`, or `caption`), source identity, and base time range.
 
 The editing session gains `timeline_placement_overrides`, a map keyed by `placement_id`. Each value contains only:
 
@@ -43,7 +43,7 @@ The response remains the existing editing-session representation. The client the
 
 ## Timing rules
 
-- All committed endpoints are quantized with the existing rational FPS half-up policy.
+- UI draft helpers clamp a multi-move's shared delta, then all committed endpoints quantize with the existing rational FPS half-up policy. The server rejects rather than silently clamps any submitted out-of-range or non-frame-valid change.
 - A placement must satisfy `0 <= start_sec < end_sec <= output.duration_sec` and span at least one frame.
 - Move preserves every selected placement duration and relative offset. The shared delta is clamped so every selected placement remains inside the output range.
 - Trim changes one selected edge only. It never changes source media selection or narration bounds.
