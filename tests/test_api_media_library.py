@@ -577,3 +577,70 @@ def test_only_materialized_matching_project_audio_assets_can_override_and_build_
     assert bgm_payload["segments"][0]["source_uri"] == bgm["storage_uri"]
     sfx_payload = next(track for track in capcut_payload["capcut_tracks"] if track["track_name"] == "sfx")
     assert sfx_payload["segments"][0]["source_uri"] == sfx["storage_uri"]
+
+
+@pytest.mark.parametrize(
+    ("library_asset_id", "endpoint", "field"),
+    [
+        ("pack:starter-001:music-001", "music", "music_override"),
+        ("pack:starter-001:sfx-001", "sfx", "sfx_override"),
+    ],
+)
+def test_audio_control_api_preserves_selected_identity_and_rejects_stale_same_asset(
+    tmp_path: Path,
+    library_asset_id: str,
+    endpoint: str,
+    field: str,
+) -> None:
+    library = _indexed_library(tmp_path)
+    projects_root = tmp_path / "projects"
+    client = TestClient(create_app(projects_root=projects_root, media_library_store=library))
+    project_id, session_id = _create_timeline_session(client, tmp_path)
+    session = client.get(f"/api/projects/{project_id}/editing-sessions/{session_id}").json()
+    materialized = client.post(
+        f"/api/media-library/assets/{library_asset_id}/materialize",
+        json={"project_id": project_id},
+    ).json()
+    root = f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/{endpoint}"
+    selected = client.patch(
+        root,
+        json={"asset_id": materialized["asset_id"], "expected_revision": session["session_revision"]},
+    )
+    assert selected.status_code == 200, selected.text
+    selected_override = selected.json()["segments"][0][field]
+    approved_identity = {
+        key: selected_override[key]
+        for key in ("asset_uri", "expected_content_sha256", "media_revision")
+    }
+
+    controlled = client.patch(
+        root,
+        json={
+            "asset_id": materialized["asset_id"],
+            "media_controls": {"fade_in_sec": 0.25, "fade_out_sec": 0.5},
+            "expected_revision": selected.json()["session_revision"],
+        },
+    )
+    assert controlled.status_code == 200, controlled.text
+    controlled_override = controlled.json()["segments"][0][field]
+    assert {key: controlled_override[key] for key in approved_identity} == approved_identity
+
+    store = LocalProjectStore(projects_root)
+    store.resolve_storage_uri(
+        project_id=project_id,
+        storage_uri=materialized["storage_uri"],
+    ).write_bytes(b"changed after audio approval")
+    stale = client.patch(
+        root,
+        json={
+            "asset_id": materialized["asset_id"],
+            "media_controls": {"fade_in_sec": 0.4},
+            "expected_revision": controlled.json()["session_revision"],
+        },
+    )
+
+    assert stale.status_code == 400
+    assert stale.json()["detail"] == "stale_output_asset: content SHA-256 changed"
+    persisted = client.get(f"/api/projects/{project_id}/editing-sessions/{session_id}").json()
+    assert persisted["session_revision"] == controlled.json()["session_revision"]
+    assert persisted["segments"][0][field]["expected_content_sha256"] == approved_identity["expected_content_sha256"]

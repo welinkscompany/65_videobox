@@ -8,6 +8,7 @@ from videobox_core_engine.editor_playback_manifest import (
     seconds_to_frame,
 )
 from videobox_domain_models.jobs import JobStatus, JobType
+from videobox_domain_models.assets import AssetType
 from videobox_storage.local_project_store import LocalProjectStore
 
 
@@ -81,6 +82,97 @@ def test_caption_patch_materializes_updated_content_window_in_playback_manifest(
     assert saved.json()["session_revision"] == 2
     assert manifest.status_code == 200
     assert manifest.json()["captions"][0]["text"] == "반가워요"
+
+
+def test_overlay_patches_roundtrip_through_content_windows_and_typed_manifest(tmp_path) -> None:
+    client = TestClient(create_app(projects_root=tmp_path))
+    project_id, _, session_id = _manifest_fixture(client, tmp_path)
+
+    explanation = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/segment-1/explanation-card",
+        json={"title": "핵심", "body": "설명", "text": "핵심 설명", "expected_revision": 1},
+    )
+    assert explanation.status_code == 200
+    explanation_manifest = client.get(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/playback-manifest",
+    )
+    assert explanation_manifest.status_code == 200
+    explanation_clip = next(
+        clip
+        for track in explanation_manifest.json()["tracks"]
+        if track["track_type"] == "overlay"
+        for clip in track["clips"]
+    )
+    assert explanation_clip["overlay_type"] == "explanation_card"
+    assert explanation_clip["overlay_payload"]["text"] == "핵심 설명"
+
+    removed = client.delete(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/segment-1/explanation-card",
+        params={"expected_revision": 2},
+    )
+    assert removed.status_code == 200
+    removed_manifest = client.get(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/playback-manifest",
+    )
+    assert removed_manifest.status_code == 200
+    assert all(track["track_type"] != "overlay" for track in removed_manifest.json()["tracks"])
+
+    image_source = tmp_path / "overlay.png"
+    image_source.write_bytes(b"local-image")
+    image_asset = LocalProjectStore(tmp_path).register_asset(
+        project_id=project_id,
+        asset_type=AssetType.IMAGE,
+        source_path=image_source,
+    )
+    image = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/segment-1/image-overlay",
+        json={"asset_id": image_asset.asset_id, "text": "참고 이미지", "expected_revision": 3},
+    )
+    assert image.status_code == 200
+    image_manifest = client.get(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/playback-manifest",
+    )
+    assert image_manifest.status_code == 200
+    image_clip = next(
+        clip
+        for track in image_manifest.json()["tracks"]
+        if track["track_type"] == "overlay"
+        for clip in track["clips"]
+    )
+    assert image_clip["overlay_type"] == "image_overlay"
+    assert image_clip["asset_id"] == image_asset.asset_id
+    assert image_clip["overlay_payload"]["text"] == "참고 이미지"
+    assert client.delete(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/segment-1/image-overlay",
+        params={"expected_revision": 4},
+    ).status_code == 200
+
+    table = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/segment-1/table-overlay",
+        json={"columns": ["항목"], "rows": [["값"]], "text": "항목 | 값", "expected_revision": 5},
+    )
+    assert table.status_code == 200
+    table_manifest = client.get(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/playback-manifest",
+    )
+    assert table_manifest.status_code == 200
+    table_clip = next(
+        clip
+        for track in table_manifest.json()["tracks"]
+        if track["track_type"] == "overlay"
+        for clip in track["clips"]
+    )
+    assert table_clip["overlay_type"] == "table_overlay"
+    assert table_clip["overlay_payload"]["rows"] == [["값"]]
+    assert client.delete(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/segment-1/table-overlay",
+        params={"expected_revision": 6},
+    ).status_code == 200
+    final_manifest = client.get(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/playback-manifest",
+    )
+    assert final_manifest.status_code == 200
+    assert all(track["track_type"] != "overlay" for track in final_manifest.json()["tracks"])
 
 
 def test_manifest_never_substitutes_latest_session_and_is_project_isolated(tmp_path) -> None:

@@ -151,6 +151,72 @@ def test_session_selected_audio_and_image_assets_keep_immutable_identity_for_fin
         renderer.render_exact_preview_to_mp4(project_id=project.project_id, composition_plan=plan, timeline_context=materialized, output_path=tmp_path / "proxy.mp4", subtitle_ass_path=None)
 
 
+@pytest.mark.parametrize(
+    ("asset_type", "field", "update_method"),
+    [
+        (AssetType.BGM, "music_override", "update_editing_session_segment_music_override"),
+        (AssetType.SFX, "sfx_override", "update_editing_session_segment_sfx_override"),
+    ],
+)
+def test_control_only_audio_update_preserves_identity_and_rejects_changed_registered_bytes(
+    tmp_path: Path,
+    asset_type: AssetType,
+    field: str,
+    update_method: str,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name=f"{asset_type.value} control identity")
+    source = tmp_path / f"{asset_type.value}.wav"
+    source.write_bytes(b"approved audio")
+    asset = store.register_asset(project_id=project.project_id, asset_type=asset_type, source_path=source)
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id="timeline-audio-control",
+        session_payload={"segments": [{"segment_id": "seg_001", "start_sec": 0.0, "end_sec": 4.0}], "history": []},
+    )
+    runner = LocalPipelineRunner(store)
+    update = getattr(runner, update_method)
+    selected = update(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+        segment_id="seg_001",
+        asset_id=asset.asset_id,
+        expected_revision=session["session_revision"],
+    )
+    approved_identity = {
+        key: selected["segments"][0][field][key]
+        for key in ("asset_uri", "expected_content_sha256", "media_revision")
+    }
+
+    controlled = update(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+        segment_id="seg_001",
+        asset_id=asset.asset_id,
+        media_controls={"fade_in_sec": 0.25, "fade_out_sec": 0.5},
+        expected_revision=selected["session_revision"],
+    )
+
+    assert {
+        key: controlled["segments"][0][field][key]
+        for key in approved_identity
+    } == approved_identity
+    store.resolve_storage_uri(project_id=project.project_id, storage_uri=asset.storage_uri).write_bytes(b"changed after approval")
+
+    with pytest.raises(OutputSourceStaleError, match="stale_output_asset: content SHA-256 changed"):
+        update(
+            project_id=project.project_id,
+            session_id=session["session_id"],
+            segment_id="seg_001",
+            asset_id=asset.asset_id,
+            media_controls={"fade_in_sec": 0.75},
+            expected_revision=controlled["session_revision"],
+        )
+    persisted = store.get_editing_session(project_id=project.project_id, session_id=session["session_id"])
+    assert persisted["session_revision"] == controlled["session_revision"]
+    assert persisted["segments"][0][field]["expected_content_sha256"] == approved_identity["expected_content_sha256"]
+
+
 def test_plan_renderer_explicitly_preserves_gaps_and_later_broll_wins_overlap(tmp_path: Path) -> None:
     plan = CompositionPlan.from_timeline(timeline={
         "output": {"width": 1280, "height": 720},

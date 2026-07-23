@@ -868,6 +868,113 @@ def test_update_segment_music_override_records_history() -> None:
     assert updated["history"][-1]["mutation_type"] == "music_override_update"
 
 
+def test_partial_music_and_sfx_fade_updates_preserve_audio_controls_and_asset_identity() -> None:
+    from videobox_core_engine.editing_session import (
+        update_segment_music_override,
+        update_segment_sfx_override,
+    )
+
+    session = {
+        "session_id": "session_001",
+        "segments": [{
+            "segment_id": "seg_001",
+            "start_sec": 0.0,
+            "end_sec": 4.0,
+            "music_override": {
+                "asset_id": "music_001",
+                "asset_uri": "local://projects/project_001/assets/music_001",
+                "expected_content_sha256": "a" * 64,
+                "media_revision": "music-r2",
+                "media_controls": {"gain_db": -8.0, "fade_in_sec": 0.2, "fade_out_sec": 0.4, "ducking": True},
+            },
+            "sfx_override": {
+                "asset_id": "sfx_001",
+                "asset_uri": "local://projects/project_001/assets/sfx_001",
+                "expected_content_sha256": "b" * 64,
+                "media_revision": "sfx-r3",
+                "media_controls": {"gain_db": -3.0, "fade_in_sec": 0.1, "fade_out_sec": 0.2, "ducking": False},
+            },
+        }],
+        "history": [],
+    }
+
+    music = update_segment_music_override(
+        session=session,
+        segment_id="seg_001",
+        asset_id="music_001",
+        media_controls={"fade_in_sec": 1.0, "fade_out_sec": 0.75},
+    )
+    updated = update_segment_sfx_override(
+        session=music,
+        segment_id="seg_001",
+        asset_id="sfx_001",
+        media_controls={"fade_in_sec": 0.3, "fade_out_sec": 0.5},
+    )
+
+    assert updated["segments"][0]["music_override"] == {
+        "asset_id": "music_001",
+        "asset_uri": "local://projects/project_001/assets/music_001",
+        "expected_content_sha256": "a" * 64,
+        "media_revision": "music-r2",
+        "media_controls": {"gain_db": -8.0, "fade_in_sec": 1.0, "fade_out_sec": 0.75, "ducking": True},
+    }
+    assert updated["segments"][0]["sfx_override"] == {
+        "asset_id": "sfx_001",
+        "asset_uri": "local://projects/project_001/assets/sfx_001",
+        "expected_content_sha256": "b" * 64,
+        "media_revision": "sfx-r3",
+        "media_controls": {"gain_db": -3.0, "fade_in_sec": 0.3, "fade_out_sec": 0.5, "ducking": False},
+    }
+
+
+def test_overlay_updates_and_removals_synchronize_matching_content_windows() -> None:
+    from videobox_core_engine.editing_session import (
+        remove_segment_explanation_card,
+        remove_segment_image_overlay,
+        remove_segment_table_overlay,
+        update_segment_explanation_card,
+        update_segment_image_overlay,
+        update_segment_table_overlay,
+    )
+
+    session = {
+        "session_id": "session_001",
+        "segments": [{
+            "segment_id": "merged",
+            "start_sec": 0.0,
+            "end_sec": 4.0,
+            "visual_overlays": [],
+            "content_windows": [
+                {"source_segment_id": "source-a", "start_offset_sec": 0.0, "duration_sec": 2.0, "visual_overlays": []},
+                {"source_segment_id": "source-b", "start_offset_sec": 2.0, "duration_sec": 2.0, "visual_overlays": []},
+            ],
+        }],
+        "history": [],
+    }
+
+    explanation = update_segment_explanation_card(
+        session=session, segment_id="source-b", title="핵심", body="설명", text="핵심 설명",
+    )
+    image = update_segment_image_overlay(
+        session=explanation, segment_id="source-b", asset_id="image_001", text="참고 이미지",
+    )
+    table = update_segment_table_overlay(
+        session=image, segment_id="source-b", columns=["항목"], rows=[["값"]], text="항목 | 값",
+    )
+
+    overlays = table["segments"][0]["content_windows"][1]["visual_overlays"]
+    assert [item["overlay_type"] for item in overlays] == [
+        "explanation_card", "image_overlay", "table_overlay",
+    ]
+    assert table["segments"][0]["content_windows"][0]["visual_overlays"] == []
+
+    without_explanation = remove_segment_explanation_card(session=table, segment_id="source-b")
+    without_image = remove_segment_image_overlay(session=without_explanation, segment_id="source-b")
+    without_table = remove_segment_table_overlay(session=without_image, segment_id="source-b")
+
+    assert without_table["segments"][0]["content_windows"][1]["visual_overlays"] == []
+
+
 def test_clear_segment_music_override_records_history() -> None:
     from videobox_core_engine.editing_session import build_editing_session
     from videobox_core_engine.editing_session import clear_segment_music_override
@@ -998,7 +1105,7 @@ def test_update_segment_image_overlay_records_history() -> None:
 
     assert updated["segments"][0]["visual_overlays"] == [
         {
-            "overlay_type": "image_card",
+            "overlay_type": "image_overlay",
             "asset_id": "asset_image_001",
             "text": "Exterior reference image",
         }
@@ -1035,7 +1142,7 @@ def test_update_segment_table_overlay_records_history() -> None:
 
     assert updated["segments"][0]["visual_overlays"] == [
         {
-            "overlay_type": "table_card",
+            "overlay_type": "table_overlay",
             "columns": ["Metric", "Value"],
             "rows": [["CTR", "4.2%"]],
             "text": "Metric | Value\nCTR | 4.2%",
@@ -1084,7 +1191,7 @@ def test_remove_segment_image_and_table_overlays_record_history() -> None:
 
     assert removed_image["segments"][0]["visual_overlays"] == [
         {
-            "overlay_type": "table_card",
+            "overlay_type": "table_overlay",
             "columns": ["Metric", "Value"],
             "rows": [["CTR", "4.2%"]],
             "text": "Metric | Value\nCTR | 4.2%",

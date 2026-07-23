@@ -36,7 +36,15 @@ export type EditorCommandPort = Readonly<{
 
 function mediaControls(value: EditorControls | undefined): BrollOverrideRequest["media_controls"] {
   if (!value) return undefined;
-  return { volume: value.volume, crop: value.crop, speed: value.speed, fade_in_sec: value.fadeInSec, fade_out_sec: value.fadeOutSec };
+  return Object.fromEntries(Object.entries({
+    volume: value.volume,
+    crop: value.crop,
+    speed: value.speed,
+    gain_db: value.gainDb,
+    fade_in_sec: value.fadeInSec,
+    fade_out_sec: value.fadeOutSec,
+    ducking: value.ducking,
+  }).filter(([, item]) => item !== undefined));
 }
 function captionStyle(style: EditorCaptionStyle): CaptionStyleMutationRequest["style"] {
   return { font_family: style.fontFamily, font_size_px: style.fontSizePx, text_color: style.textColor, outline_color: style.outlineColor, outline_width_px: style.outlineWidthPx, background_color: style.backgroundColor, position_x_percent: style.positionXPercent, position_y_percent: style.positionYPercent, horizontal_align: style.horizontalAlign, safe_area_enabled: style.safeAreaEnabled, shadow_blur_px: style.shadowBlurPx };

@@ -109,6 +109,10 @@ describe("product shell", () => {
   it("starts collapsed only for the canonical editor and allows an explicit reopen", async () => {
     vi.spyOn(api, "listProjects").mockResolvedValue(projects);
     vi.spyOn(api, "getEditorPlaybackManifest").mockResolvedValue({ project_id: "first", session_id: "session-a", timeline_id: "timeline-a", session_revision: 1, timeline_version: "v1", timebase: "seconds", fps: { num: 30, den: 1 }, output: { width: 1080, height: 1920, sample_aspect_ratio: "1:1", rotation: 0, duration_sec: 1 }, tracks: [], captions: [], gap_slots: [], source_status: { status: "current", source_session_id: "session-a", source_session_revision: 1 }, audition: { asset_urls: {} }, exact_preview: { status: "unavailable", url: null, source_session_id: "session-a", source_session_revision: 1 } } as never);
+    vi.spyOn(api, "getEditingSession").mockResolvedValue({
+      project_id: "first", session_id: "session-a", timeline_id: "timeline-a", session_revision: 1,
+      segments: [], history: [],
+    } as never);
     const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects/first/editor?session_id=session-a"] }));
     render(<AppRouter router={router} />);
     await screen.findByRole("region", { name: "편집 작업판" });

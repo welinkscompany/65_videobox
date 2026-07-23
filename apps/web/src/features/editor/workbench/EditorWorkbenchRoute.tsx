@@ -3,7 +3,8 @@ import { useEffect, useRef, useState } from "react";
 import { ApiConflictError, api, type BrollAsset, type DirectorMessage, type DirectorMessageExchange, type DirectorProposal, type MediaLibraryAsset } from "../../../api";
 import { projectEditorAssets, type EditorAssetCard } from "../assets/editorAssetProjection";
 import { createEditorCommandPort, type EditorCommandPort } from "../editorCommandPort";
-import { VideoBoxEditorAdapter, type EditorViewModel } from "../editorViewModel";
+import { joinEditorSnapshot, type EditorSessionSnapshot } from "../editorSnapshot";
+import type { EditorViewModel } from "../editorViewModel";
 import { EditorWorkbench } from "./EditorWorkbench";
 import type { RightDockDirector, RightDockMessage, RightDockProposal } from "./rightDockTypes";
 
@@ -29,7 +30,7 @@ const assetLoadError = "일부 자산을 불러오지 못했어요. 편집은 �
 export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId = null }: { projectId: string; sessionId: string | null; requestedSegmentId?: string | null }) {
   const requestKey = `${projectId}:${sessionId ?? "missing"}`;
   const [refreshToken, setRefreshToken] = useState(0);
-  const [state, setState] = useState<Readonly<{ key: string; view: EditorViewModel | null; error: string | null }>>({ key: requestKey, view: null, error: sessionId ? null : "편집 세션을 찾을 수 없어요. 다시 열어 주세요." });
+  const [state, setState] = useState<Readonly<{ key: string; view: EditorViewModel | null; session: EditorSessionSnapshot | null; error: string | null }>>({ key: requestKey, view: null, session: null, error: sessionId ? null : "편집 세션을 찾을 수 없어요. 다시 열어 주세요." });
   const [assets, setAssets] = useState<AssetState>({ key: requestKey, brollAssets: [], libraryAssets: [], error: null });
   const [mutation, setMutation] = useState<MutationState>({ isSaving: false });
   const [director, setDirector] = useState<DirectorState>({ key: requestKey, state: sessionId ? "analysis_running" : "script_required", conversationId: null, messages: [], proposal: null });
@@ -74,19 +75,32 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     return () => { active = false; };
   }, [projectId, requestKey, sessionId]);
   useEffect(() => {
-    if (!sessionId) { setState({ key: requestKey, view: null, error: "편집 세션을 찾을 수 없어요. 다시 열어 주세요." }); return; }
+    if (!sessionId) { setState({ key: requestKey, view: null, session: null, error: "편집 세션을 찾을 수 없어요. 다시 열어 주세요." }); return; }
     const epoch = routeEpoch.current.value;
     const operationId = manifestOperationId.current + 1;
     manifestOperationId.current = operationId;
     let active = true;
     const isCurrent = () => active && routeEpoch.current.value === epoch && manifestOperationId.current === operationId;
-    setState({ key: requestKey, view: null, error: null });
-    void api.getEditorPlaybackManifest(projectId, sessionId).then((manifest) => {
+    setState((current) => current.key === requestKey && current.view && current.session
+      ? { ...current, error: null }
+      : { key: requestKey, view: null, session: null, error: null });
+    void Promise.all([
+      api.getEditorPlaybackManifest(projectId, sessionId),
+      api.getEditingSession(projectId, sessionId),
+    ]).then(([manifest, editingSession]) => {
       if (!isCurrent()) return;
-      const next = new VideoBoxEditorAdapter(manifest).viewModel;
-      if (next.projectId !== projectId || next.sessionId !== sessionId) { setState({ key: requestKey, view: null, error: "편집 세션 정보가 일치하지 않아요. 다시 열어 주세요." }); return; }
-      setState({ key: requestKey, view: next, error: null });
-    }).catch(() => { if (isCurrent()) setState({ key: requestKey, view: null, error: "재생 내용을 불러오지 못했어요. 새로고침 후 다시 확인해 주세요." }); });
+      const next = joinEditorSnapshot(manifest, editingSession);
+      if (next.view.projectId !== projectId || next.view.sessionId !== sessionId) throw new Error("editor_snapshot_identity_mismatch");
+      setState({ key: requestKey, view: next.view, session: next.session, error: null });
+    }).catch((error: unknown) => {
+      if (!isCurrent()) return;
+      const message = error instanceof Error && error.message === "editor_snapshot_identity_mismatch"
+          ? "편집 세션 정보가 일치하지 않아요. 다시 열어 주세요."
+          : "재생 내용을 불러오지 못했어요. 새로고침 후 다시 확인해 주세요.";
+      setState((current) => current.key === requestKey && current.view && current.session
+        ? { ...current, error: message }
+        : { key: requestKey, view: null, session: null, error: message });
+    });
     return () => { active = false; };
   }, [projectId, requestKey, refreshToken, sessionId]);
   useEffect(() => {
@@ -128,8 +142,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     return () => window.clearTimeout(poll);
   }, [requestKey, state.view?.playback.exactPreview.status, state.view?.playback.exactPreview.generationId]);
   if (state.key !== requestKey) return <main aria-live="polite"><p>편집 내용을 불러오는 중이에요.</p></main>;
-  if (state.error) return <main aria-live="polite"><p>{state.error}</p></main>;
-  if (!state.view) return <main aria-live="polite"><p>편집 내용을 불러오는 중이에요.</p></main>;
+  if (!state.view) return <main aria-live="polite"><p>{state.error ?? "편집 내용을 불러오는 중이에요."}</p></main>;
   const refreshPreview = async () => {
     if (!sessionId || !state.view) return;
     const epoch = routeEpoch.current.value;
@@ -171,13 +184,16 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     manifestOperationId.current = refreshOperationId;
     const isCurrentRefresh = () => isCurrent() && manifestOperationId.current === refreshOperationId;
     try {
-      const manifest = await api.getEditorPlaybackManifest(projectId, sessionId);
+      const [manifest, editingSession] = await Promise.all([
+        api.getEditorPlaybackManifest(projectId, sessionId),
+        api.getEditingSession(projectId, sessionId),
+      ]);
       if (!isCurrentRefresh()) return;
-      const next = new VideoBoxEditorAdapter(manifest).viewModel;
-      if (next.projectId !== projectId || next.sessionId !== sessionId) {
+      const next = joinEditorSnapshot(manifest, editingSession);
+      if (next.view.projectId !== projectId || next.view.sessionId !== sessionId) {
         resultMessage = "최신 편집 내용을 확인하지 못했어요. 새로고침한 뒤 다시 시도해 주세요.";
       } else {
-        setState({ key: requestKey, view: next, error: null });
+        setState({ key: requestKey, view: next.view, session: next.session, error: null });
       }
     } catch {
       if (isCurrent()) {
@@ -285,7 +301,10 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       setDirector({ ...activeDirector, state: "proposal_ready" });
       setRefreshToken((current) => current + 1);
     } catch {
-      if (isCurrentDirector(epoch, operationId)) setDirector({ ...activeDirector, state: "blocked" });
+      if (isCurrentDirector(epoch, operationId)) {
+        setDirector({ ...activeDirector, state: "blocked" });
+        setRefreshToken((current) => current + 1);
+      }
     } finally {
       if (isCurrentDirector(epoch, operationId)) directorMutationInFlight.current = false;
     }
@@ -304,6 +323,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     retryAfterSeconds: activeDirector.retryAfterSeconds,
   };
   return <>
+    {state.error ? <p role="status">{state.error}</p> : null}
     {assets.key === requestKey && assets.error ? <p role="status">{assets.error}</p> : null}
     <EditorWorkbench
     assetCards={assetCards}

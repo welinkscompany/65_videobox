@@ -105,12 +105,17 @@ describe("AppRouter URL ownership", () => {
       tracks: [{ track_id: "narration", track_type: "narration", clips: [{ clip_id: "clip-1", segment_id: "segment-1", clip_type: "narration", asset_id: null, asset_uri: null, start_sec: 0, end_sec: 2, media_controls: {} }] }],
       captions: [], gap_slots: [], source_status: { status: "current" }, audition: { asset_urls: {} }, exact_preview: { status: "unavailable" },
     } as never);
+    vi.spyOn(api, "getEditingSession").mockResolvedValue({
+      project_id: "project_a", session_id: "session-a", timeline_id: "timeline-a", session_revision: 1,
+      segments: [], history: [],
+    } as never);
     const latest = vi.spyOn(api, "getLatestEditingSession");
     const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects/project_a/editor?session_id=session-a&segment_id=segment-1"] }));
 
     render(<AppRouter router={router} />);
 
-    expect(await screen.findByRole("button", { name: "clip-1 클립 선택" })).toHaveAttribute("aria-pressed", "true");
+    const requestedClip = await screen.findByRole("button", { name: "clip-1 클립 선택" });
+    await waitFor(() => expect(requestedClip).toHaveAttribute("aria-pressed", "true"));
     expect(router.state.location.href).toBe("/projects/project_a/editor?session_id=session-a&segment_id=segment-1");
     expect(latest).not.toHaveBeenCalled();
   });
@@ -131,6 +136,10 @@ describe("AppRouter URL ownership", () => {
         { segment_id: "segment-2", caption_id: "caption-2", placement_id: "caption:segment-2", text: "둘째 장면", start_sec: 1, end_sec: 2, style: { font_family: "Pretendard", font_size_px: 20, text_color: "#fff", outline_color: "#000", outline_width_px: 1, background_color: "#00000000", position_x_percent: 50, position_y_percent: 90, horizontal_align: "center", safe_area_enabled: true, shadow_blur_px: 0 } },
       ],
       gap_slots: [], source_status: { status: "current" }, audition: { asset_urls: {} }, exact_preview: { status: "unavailable" },
+    } as never);
+    vi.spyOn(api, "getEditingSession").mockResolvedValue({
+      project_id: "project_a", session_id: "session-a", timeline_id: "timeline-a", session_revision: 1,
+      segments: [], history: [],
     } as never);
     const director = vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
       conversation: { conversation_id: "conversation-a", project_id: "project_a", session_id: "session-a" },
@@ -318,7 +327,8 @@ describe("AppRouter URL ownership", () => {
     expect(screen.getByRole("button", { name: "요청 보내기" })).toBeDisabled();
     expect(screen.getByText("아직 추천이 없어요. 직접 편집을 계속하거나 유진에게 요청할 수 있어요.")).toBeVisible();
     expect(loadManifest).toHaveBeenCalledTimes(1);
-    expect(loadSession).not.toHaveBeenCalled();
+    expect(loadSession).toHaveBeenCalledTimes(1);
+    expect(loadSession).toHaveBeenCalledWith("project_a", "editing_session_draft_1");
     expect(getTimeline).not.toHaveBeenCalled();
     expect(previewPartialRegeneration).not.toHaveBeenCalled();
     expect(runPartialRegeneration).not.toHaveBeenCalled();

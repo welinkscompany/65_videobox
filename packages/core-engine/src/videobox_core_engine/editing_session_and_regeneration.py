@@ -76,6 +76,7 @@ from videobox_core_engine.output_operator_copy import (
     OutputOperatorCopyBuilder,
     StaticOutputOperatorCopyBuilder,
 )
+from videobox_core_engine.output_source_verifier import OutputSourceStaleError
 from videobox_core_engine.preview_renderer import PreviewRenderer
 from videobox_core_engine.provider_trace import build_provider_trace
 from videobox_core_engine.recommenders import KeywordBrollRecommender, RuleBasedMusicRecommender
@@ -147,6 +148,53 @@ class EditingSessionRegenerationMixin:
             project_id=project_id, asset_id=asset_id, expected_type=expected_type,
         )["asset_uri"]
 
+    def _resolve_audio_update_identity(
+        self,
+        *,
+        session: dict[str, Any],
+        project_id: str,
+        segment_id: str,
+        asset_id: str,
+        field: str,
+        expected_type: AssetType,
+    ) -> dict[str, str]:
+        existing: dict[str, Any] | None = None
+        for segment in session.get("segments", []):
+            if not isinstance(segment, dict) or str(segment.get("segment_id") or "") != segment_id:
+                continue
+            candidate = segment.get(field)
+            if isinstance(candidate, dict) and str(candidate.get("asset_id") or "").strip() == asset_id.strip():
+                existing = candidate
+            break
+        if existing is None:
+            return self._resolve_project_asset_identity(
+                project_id=project_id,
+                asset_id=asset_id,
+                expected_type=expected_type,
+            )
+        approved = {
+            "asset_uri": str(existing.get("asset_uri") or "").strip(),
+            "expected_content_sha256": str(existing.get("expected_content_sha256") or "").strip(),
+            "media_revision": str(existing.get("media_revision") or "").strip(),
+        }
+        if not all(approved.values()):
+            raise OutputSourceStaleError("materialized source has no registered asset identity")
+        try:
+            current = self._resolve_project_asset_identity(
+                project_id=project_id,
+                asset_id=asset_id,
+                expected_type=expected_type,
+            )
+        except ValueError as exc:
+            raise OutputSourceStaleError("materialized source is missing or unavailable") from exc
+        if current["asset_uri"] != approved["asset_uri"]:
+            raise OutputSourceStaleError("asset identity does not match source URI")
+        if current["expected_content_sha256"] != approved["expected_content_sha256"]:
+            raise OutputSourceStaleError("content SHA-256 changed")
+        if current["media_revision"] != approved["media_revision"]:
+            raise OutputSourceStaleError("media revision changed")
+        return approved
+
     @staticmethod
     def _persist_override_identity(
         *, updated_session: dict[str, Any], segment_id: str, field: str, identity: dict[str, str],
@@ -161,18 +209,35 @@ class EditingSessionRegenerationMixin:
     def _persist_image_overlay_identity(
         *, updated_session: dict[str, Any], segment_id: str, asset_id: str, identity: dict[str, str],
     ) -> None:
+        has_direct_match = any(
+            isinstance(segment, dict) and str(segment.get("segment_id") or "") == segment_id
+            for segment in updated_session.get("segments", [])
+        )
+        matched = False
         for segment in updated_session.get("segments", []):
-            if str(segment.get("segment_id") or "") != segment_id:
+            if not isinstance(segment, dict):
                 continue
-            overlays = segment.get("visual_overlays")
-            if not isinstance(overlays, list):
-                break
-            for overlay in reversed(overlays):
-                if isinstance(overlay, dict) and str(overlay.get("asset_id") or "") == asset_id:
-                    overlay.update(identity)
-                    return
-            break
-        raise KeyError(f"Image overlay not found in editing session: {segment_id}")
+            containing_segment_id = str(segment.get("segment_id") or "")
+            direct_match = containing_segment_id == segment_id
+            overlay_lists: list[list[Any]] = []
+            if direct_match and isinstance(segment.get("visual_overlays"), list):
+                overlay_lists.append(segment["visual_overlays"])
+            content_windows = segment.get("content_windows")
+            if isinstance(content_windows, list):
+                for window in content_windows:
+                    if not isinstance(window, dict):
+                        continue
+                    source_segment_id = str(window.get("source_segment_id") or containing_segment_id)
+                    visible_match = direct_match if has_direct_match else source_segment_id == segment_id
+                    if visible_match and isinstance(window.get("visual_overlays"), list):
+                        overlay_lists.append(window["visual_overlays"])
+            for overlays in overlay_lists:
+                for overlay in reversed(overlays):
+                    if isinstance(overlay, dict) and str(overlay.get("asset_id") or "") == asset_id:
+                        overlay.update(identity)
+                        matched = True
+        if not matched:
+            raise KeyError(f"Image overlay not found in editing session: {segment_id}")
 
     def _save_editing_session_with_revision(
         self,
@@ -696,8 +761,13 @@ class EditingSessionRegenerationMixin:
         expected_revision: int,
     ) -> dict[str, Any]:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
-        identity = self._resolve_project_asset_identity(
-            project_id=project_id, asset_id=asset_id, expected_type=AssetType.BGM,
+        identity = self._resolve_audio_update_identity(
+            session=session,
+            project_id=project_id,
+            segment_id=segment_id,
+            asset_id=asset_id,
+            field="music_override",
+            expected_type=AssetType.BGM,
         )
         updated_session = update_segment_music_override(
             session=session,
@@ -728,8 +798,13 @@ class EditingSessionRegenerationMixin:
 
     def update_editing_session_segment_sfx_override(self, *, project_id: str, session_id: str, segment_id: str, asset_id: str, media_controls: dict[str, Any] | None = None, expected_revision: int) -> dict[str, Any]:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
-        identity = self._resolve_project_asset_identity(
-            project_id=project_id, asset_id=asset_id, expected_type=AssetType.SFX,
+        identity = self._resolve_audio_update_identity(
+            session=session,
+            project_id=project_id,
+            segment_id=segment_id,
+            asset_id=asset_id,
+            field="sfx_override",
+            expected_type=AssetType.SFX,
         )
         updated_session = update_segment_sfx_override(
             session=session, segment_id=segment_id, asset_id=asset_id,

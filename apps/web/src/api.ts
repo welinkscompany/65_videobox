@@ -301,8 +301,10 @@ export type EditorMediaControls = {
   volume?: number;
   crop?: string;
   speed?: number;
+  gain_db?: number;
   fade_in_sec?: number;
   fade_out_sec?: number;
+  ducking?: boolean;
 };
 export type EditorPlaybackManifest = {
   project_id: string;

@@ -85,6 +85,143 @@ def test_split_enforces_minimum_duration_and_preserves_editable_identity_and_lin
     assert "inverse_payload" in updated["history"][-1]
 
 
+def test_visual_overlay_clear_removes_direct_and_related_windows_from_materialized_manifest() -> None:
+    from videobox_core_engine.composition_plan import materialize_editing_session_timeline
+    from videobox_core_engine.editing_session import clear_segment_visual_overlays
+    from videobox_core_engine.editor_playback_manifest import build_editor_playback_manifest
+
+    project_id = "project_001"
+    session = {
+        "project_id": project_id,
+        "session_id": "session_001",
+        "timeline_id": "timeline_001",
+        "session_revision": 1,
+        "segments": [{
+            "segment_id": "visible-merged",
+            "start_sec": 0.0,
+            "end_sec": 4.0,
+            "visual_overlays": [{"overlay_type": "explanation_card", "text": "direct"}],
+            "content_windows": [
+                {
+                    "source_segment_id": "source-left",
+                    "start_offset_sec": 0.0,
+                    "duration_sec": 2.0,
+                    "visual_overlays": [{"overlay_type": "explanation_card", "text": "left"}],
+                },
+                {
+                    "source_segment_id": "source-right",
+                    "start_offset_sec": 2.0,
+                    "duration_sec": 2.0,
+                    "visual_overlays": [{"overlay_type": "table_overlay", "text": "right"}],
+                },
+            ],
+        }],
+        "history": [],
+    }
+    timeline = {
+        "project_id": project_id,
+        "timeline_id": "timeline_001",
+        "version": "v1",
+        "source_session_id": "session_001",
+        "source_session_revision": 1,
+        "output": {"width": 1080, "height": 1920, "duration_sec": 4.0},
+        "tracks": [],
+    }
+
+    cleared = clear_segment_visual_overlays(session=session, segment_id="visible-merged")
+    materialized = materialize_editing_session_timeline(
+        timeline=timeline,
+        editing_session=cleared,
+        project_id=project_id,
+    )
+    manifest = build_editor_playback_manifest(
+        project_id=project_id,
+        session=cleared,
+        timeline=timeline,
+        asset_content_url_prefix=f"/api/projects/{project_id}/assets",
+    )
+
+    assert cleared["segments"][0]["visual_overlays"] == []
+    assert all(window["visual_overlays"] == [] for window in cleared["segments"][0]["content_windows"])
+    assert materialized["export_overlays"] == []
+    assert not any(track["track_type"] == "overlay" for track in materialized["tracks"])
+    assert not any(track["track_type"] == "overlay" for track in manifest["tracks"])
+
+
+def test_split_overlay_updates_are_visible_segment_scoped_through_materialize_and_manifest() -> None:
+    from videobox_core_engine.composition_plan import materialize_editing_session_timeline
+    from videobox_core_engine.editing_session import (
+        remove_segment_image_overlay,
+        split_segment,
+        update_segment_image_overlay,
+    )
+    from videobox_core_engine.editor_playback_manifest import build_editor_playback_manifest
+
+    project_id = "project_001"
+    session = _session()
+    session["project_id"] = project_id
+    session["session_id"] = "session_001"
+    session["timeline_id"] = "timeline_001"
+    session["caption_style"] = {}
+    split = split_segment(session=session, segment_id="seg_001", split_sec=1.0)
+    left_id, right_id = [segment["segment_id"] for segment in split["segments"][:2]]
+    with_left = update_segment_image_overlay(
+        session=split,
+        segment_id=left_id,
+        asset_id="image-left",
+        text="left",
+    )
+    with_right = update_segment_image_overlay(
+        session=with_left,
+        segment_id=right_id,
+        asset_id="image-right",
+        text="right",
+    )
+    right_only = remove_segment_image_overlay(session=with_right, segment_id=left_id)
+    timeline = {
+        "project_id": project_id,
+        "timeline_id": "timeline_001",
+        "version": "v1",
+        "source_session_id": "session_001",
+        "source_session_revision": right_only["session_revision"],
+        "output": {"width": 1080, "height": 1920, "duration_sec": 6.0},
+        "tracks": [],
+    }
+
+    materialized = materialize_editing_session_timeline(
+        timeline=timeline,
+        editing_session=right_only,
+        project_id=project_id,
+    )
+    manifest = build_editor_playback_manifest(
+        project_id=project_id,
+        session=right_only,
+        timeline=timeline,
+        asset_content_url_prefix=f"/api/projects/{project_id}/assets",
+    )
+    materialized_overlays = [
+        clip
+        for track in materialized["tracks"]
+        if track["track_type"] == "overlay"
+        for clip in track["clips"]
+    ]
+    manifest_overlays = [
+        clip
+        for track in manifest["tracks"]
+        if track["track_type"] == "overlay"
+        for clip in track["clips"]
+    ]
+
+    assert right_only["segments"][0]["visual_overlays"] == []
+    assert right_only["segments"][0]["content_windows"][0]["visual_overlays"] == []
+    assert right_only["segments"][1]["visual_overlays"][0]["asset_id"] == "image-right"
+    assert right_only["segments"][1]["content_windows"][0]["visual_overlays"][0]["asset_id"] == "image-right"
+    assert [clip["segment_id"] for clip in materialized_overlays] == [right_id]
+    assert materialized_overlays[0]["overlay_payload"]["source_segment_id"] == "seg_001"
+    assert [clip["segment_id"] for clip in manifest_overlays] == [right_id]
+    assert manifest_overlays[0]["overlay_payload"]["source_segment_id"] == "seg_001"
+
+
 def test_merge_requires_adjacent_touching_segments_and_keeps_all_source_media_lineage() -> None:
     from videobox_core_engine.editing_session import merge_adjacent_segments
 

@@ -8,6 +8,28 @@ import { EditorWorkbenchRoute } from "./EditorWorkbenchRoute";
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 const manifest = (projectId: string, sessionId: string) => ({ project_id: projectId, session_id: sessionId, timeline_id: `timeline-${sessionId}`, session_revision: 1, timeline_version: "v1", timebase: "seconds", fps: { num: 30, den: 1 }, output: { width: 1080, height: 1920, sample_aspect_ratio: "1:1", rotation: 0, duration_sec: 1 }, tracks: [], captions: [], gap_slots: [], source_status: { status: "current", source_session_id: sessionId, source_session_revision: 1 }, audition: { asset_urls: {} }, exact_preview: { status: "unavailable", url: null, source_session_id: sessionId, source_session_revision: 1 } });
+const editingSession = (projectId: string, sessionId: string, revision = 1) => ({
+  project_id: projectId,
+  session_id: sessionId,
+  timeline_id: `timeline-${sessionId}`,
+  session_revision: revision,
+  segments: [],
+  history: [],
+  undo_count: 0,
+  redo_count: 0,
+  updated_at: "2026-07-23T00:00:00Z",
+});
+
+function mockEditingSessionRevisions(...revisions: number[]) {
+  const load = vi.mocked(api.getEditingSession);
+  load.mockReset();
+  for (const revision of revisions) {
+    load.mockImplementationOnce(
+      (projectId, sessionId) => Promise.resolve(editingSession(projectId, sessionId, revision)) as never,
+    );
+  }
+  return load;
+}
 
 async function expectEditorRevision(revision: number) {
   const workbench = await screen.findByRole("region", { name: "편집 작업판" });
@@ -102,8 +124,35 @@ async function openAssetBrowser() {
 describe("EditorWorkbenchRoute", () => {
   beforeEach(() => {
     vi.spyOn(api, "getEditorPlaybackManifest").mockResolvedValue(narrationManifest(1) as never);
+    vi.spyOn(api, "getEditingSession").mockImplementation(
+      (projectId, sessionId) => Promise.resolve(editingSession(projectId, sessionId)) as never,
+    );
     vi.spyOn(api, "listBrollAssets").mockResolvedValue([] as never);
     vi.spyOn(api, "listMediaLibraryAssets").mockResolvedValue({ assets: [] } as never);
+  });
+
+  it("publishes nothing until the matching manifest and session arrive together", async () => {
+    let resolveSession!: (value: unknown) => void;
+    vi.mocked(api.getEditorPlaybackManifest).mockResolvedValue(narrationManifest(4) as never);
+    vi.mocked(api.getEditingSession).mockImplementation(() => new Promise((resolve) => { resolveSession = resolve; }) as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.queryByRole("region", { name: "편집 작업판" })).toBeNull();
+    expect(screen.getByText("편집 내용을 불러오는 중이에요.")).toBeVisible();
+
+    await act(async () => { resolveSession(editingSession("project-a", "session-a", 4)); });
+    await expectEditorRevision(4);
+  });
+
+  it("fails closed instead of publishing a mixed manifest and editing session", async () => {
+    vi.mocked(api.getEditorPlaybackManifest).mockResolvedValue(narrationManifest(2) as never);
+    vi.mocked(api.getEditingSession).mockResolvedValue(editingSession("project-a", "session-a", 1) as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+
+    expect(await screen.findByText("편집 세션 정보가 일치하지 않아요. 다시 열어 주세요.")).toBeVisible();
+    expect(screen.queryByRole("region", { name: "편집 작업판" })).toBeNull();
   });
 
   it("focuses a valid requested segment once without reloading or resetting editor-local state", async () => {
@@ -346,6 +395,7 @@ describe("EditorWorkbenchRoute", () => {
     const load = vi.spyOn(api, "getEditorPlaybackManifest")
       .mockResolvedValueOnce(narrationManifest(1) as never)
       .mockResolvedValueOnce(narrationManifest(2, 1) as never);
+    mockEditingSessionRevisions(1, 2);
     const update = vi.spyOn(api, "updateEditingSessionSegmentBounds")
       .mockImplementation(() => new Promise((resolve) => { resolveUpdate = resolve; }) as never);
 
@@ -378,6 +428,7 @@ describe("EditorWorkbenchRoute", () => {
     const load = vi.spyOn(api, "getEditorPlaybackManifest")
       .mockResolvedValueOnce(captionManifest(4) as never)
       .mockResolvedValueOnce(captionManifest(5, "새 자막") as never);
+    mockEditingSessionRevisions(4, 5);
     const update = vi.spyOn(api, "updateEditingSessionCaption").mockResolvedValue({} as never);
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
@@ -397,6 +448,7 @@ describe("EditorWorkbenchRoute", () => {
     const load = vi.spyOn(api, "getEditorPlaybackManifest")
       .mockResolvedValueOnce(captionManifest(4) as never)
       .mockResolvedValueOnce(captionManifest(5, "다른 변경 자막") as never);
+    mockEditingSessionRevisions(4, 5);
     const update = vi.spyOn(api, "updateEditingSessionCaption").mockRejectedValue(
       new ApiConflictError({}, "/api/projects/project-a/editing-sessions/session-a/segments/segment-1/caption"),
     );
@@ -419,6 +471,7 @@ describe("EditorWorkbenchRoute", () => {
     const load = vi.spyOn(api, "getEditorPlaybackManifest")
       .mockResolvedValueOnce(narrationManifest(1) as never)
       .mockImplementationOnce(() => new Promise((resolve) => { resolveRefresh = resolve as typeof resolveRefresh; }));
+    mockEditingSessionRevisions(1, 2);
     const update = vi.spyOn(api, "updateEditingSessionSegmentBounds").mockRejectedValue(
       new ApiConflictError({}, "/api/projects/project-a/editing-sessions/session-a/segments/segment-1/bounds"),
     );
@@ -448,6 +501,7 @@ describe("EditorWorkbenchRoute", () => {
     const load = vi.spyOn(api, "getEditorPlaybackManifest")
       .mockResolvedValueOnce(twoNarrationManifest(3) as never)
       .mockResolvedValueOnce(twoNarrationManifest(4) as never);
+    mockEditingSessionRevisions(3, 4);
     const reorder = vi.spyOn(api, "reorderEditingSessionSegments").mockResolvedValue({} as never);
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
@@ -478,6 +532,7 @@ describe("EditorWorkbenchRoute", () => {
     const load = vi.spyOn(api, "getEditorPlaybackManifest")
       .mockResolvedValueOnce(narrationManifest(5) as never)
       .mockResolvedValueOnce(narrationManifest(5) as never);
+    mockEditingSessionRevisions(5, 5);
     const update = vi.spyOn(api, "updateEditingSessionSegmentBounds").mockRejectedValue(new Error("offline"));
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
@@ -504,6 +559,7 @@ describe("EditorWorkbenchRoute", () => {
       .mockResolvedValueOnce(manifest("project-b", "session-b") as never)
       .mockResolvedValueOnce(narrationManifest(10) as never)
       .mockResolvedValueOnce(narrationManifest(11, 1) as never);
+    mockEditingSessionRevisions(1, 1, 10, 11);
     const update = vi.spyOn(api, "updateEditingSessionSegmentBounds")
       .mockImplementationOnce(() => new Promise((resolve) => { resolveOldUpdate = resolve; }) as never)
       .mockImplementationOnce(() => new Promise((resolve) => { resolveNewUpdate = resolve; }) as never);
@@ -552,6 +608,7 @@ describe("EditorWorkbenchRoute", () => {
     const load = vi.spyOn(api, "getEditorPlaybackManifest")
       .mockResolvedValueOnce(twoNarrationManifest(1) as never)
       .mockResolvedValueOnce(twoNarrationManifest(2) as never);
+    mockEditingSessionRevisions(1, 2);
     vi.spyOn(api, "reorderEditingSessionSegments")
       .mockImplementation(() => new Promise((resolve) => { resolveUpdate = resolve; }) as never);
 
@@ -598,6 +655,7 @@ describe("EditorWorkbenchRoute", () => {
       .mockResolvedValueOnce(manifest("project-b", "session-b") as never)
       .mockResolvedValueOnce(narrationManifest(10) as never)
       .mockResolvedValueOnce(narrationManifest(2) as never);
+    mockEditingSessionRevisions(1, 1, 10, 2);
     const startPreview = vi.spyOn(api, "startExactPreview")
       .mockImplementation(() => new Promise((resolve) => { resolveOldPreview = resolve; }) as never);
 
@@ -712,6 +770,91 @@ describe("EditorWorkbenchRoute", () => {
     await waitFor(() => expect(batchApply).toHaveBeenCalledTimes(1));
     await act(async () => { resolveBatch({}); });
     expect(batchApply).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps Workbench local state mounted until a same-route Director refresh pair swaps atomically", async () => {
+    let resolveManifestRefresh!: (value: ReturnType<typeof narrationManifest>) => void;
+    let resolveSessionRefresh!: (value: ReturnType<typeof editingSession>) => void;
+    const manifestLoad = vi.mocked(api.getEditorPlaybackManifest);
+    manifestLoad.mockReset()
+      .mockResolvedValueOnce(twoNarrationManifest(1) as never)
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveManifestRefresh = resolve as typeof resolveManifestRefresh; }));
+    const sessionLoad = vi.mocked(api.getEditingSession);
+    sessionLoad.mockReset()
+      .mockResolvedValueOnce(editingSession("project-a", "session-a", 1) as never)
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveSessionRefresh = resolve as typeof resolveSessionRefresh; }));
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
+      conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },
+      messages: [],
+      proposal: directorProposal(),
+      references: [],
+    } as never);
+    vi.spyOn(api, "preflightDirectorProposal").mockResolvedValue({ status: "ready" } as never);
+    vi.spyOn(api, "batchApplyDirectorProposal").mockResolvedValue({} as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    const workbench = screen.getByRole("region", { name: "편집 작업판" });
+    const timeline = screen.getByTestId("timeline-track");
+    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+    const composer = await screen.findByLabelText("유진에게 요청하기");
+    fireEvent.change(composer, { target: { value: "작성 중인 요청" } });
+    fireEvent.click(screen.getByRole("button", { name: "n-2 클립 선택" }));
+    timeline.scrollLeft = 37;
+    fireEvent.click(screen.getByRole("button", { name: "선택한 추천 적용" }));
+
+    await waitFor(() => expect(manifestLoad).toHaveBeenCalledTimes(2));
+    expect(sessionLoad).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole("region", { name: "편집 작업판" })).toBe(workbench);
+    expect(screen.getByTestId("timeline-track")).toBe(timeline);
+    expect(screen.getByTestId("timeline-track").scrollLeft).toBe(37);
+    expect(screen.getByLabelText("유진에게 요청하기")).toHaveValue("작성 중인 요청");
+    expect(screen.getByRole("button", { name: "n-2 클립 선택" })).toHaveAttribute("aria-pressed", "true");
+    await expectEditorRevision(1);
+
+    await act(async () => { resolveManifestRefresh(twoNarrationManifest(2)); });
+    await expectEditorRevision(1);
+    expect(screen.getByRole("region", { name: "편집 작업판" })).toBe(workbench);
+
+    await act(async () => { resolveSessionRefresh(editingSession("project-a", "session-a", 2)); });
+    await expectEditorRevision(2);
+    expect(screen.getByRole("region", { name: "편집 작업판" })).toBe(workbench);
+    expect(screen.getByTestId("timeline-track")).toBe(timeline);
+    expect(screen.getByTestId("timeline-track").scrollLeft).toBe(37);
+    expect(screen.getByLabelText("유진에게 요청하기")).toHaveValue("작성 중인 요청");
+    expect(screen.getByRole("button", { name: "n-2 클립 선택" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("atomically refreshes the manifest and editing session after a Director batch apply failure", async () => {
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
+      conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },
+      messages: [],
+      proposal: directorProposal(),
+      references: [],
+    } as never);
+    vi.spyOn(api, "preflightDirectorProposal").mockResolvedValue({ status: "ready" } as never);
+    vi.spyOn(api, "batchApplyDirectorProposal").mockRejectedValue(new Error("apply failed"));
+    const manifestLoad = vi.mocked(api.getEditorPlaybackManifest);
+    manifestLoad.mockReset()
+      .mockResolvedValueOnce(narrationManifest(1) as never)
+      .mockRejectedValueOnce(new Error("refresh failed"));
+    const sessionLoad = vi.mocked(api.getEditingSession);
+    sessionLoad.mockReset()
+      .mockResolvedValueOnce(editingSession("project-a", "session-a", 1) as never)
+      .mockResolvedValueOnce(editingSession("project-a", "session-a", 1) as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    const workbench = screen.getByRole("region", { name: "편집 작업판" });
+    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+    fireEvent.click(await screen.findByRole("button", { name: "선택한 추천 적용" }));
+
+    await waitFor(() => expect(manifestLoad).toHaveBeenCalledTimes(2));
+    expect(sessionLoad).toHaveBeenCalledTimes(2);
+    expect(await screen.findByRole("button", { name: "직접 편집하기" })).toBeVisible();
+    expect(screen.getByText("재생 내용을 불러오지 못했어요. 새로고침 후 다시 확인해 주세요.")).toBeVisible();
+    expect(screen.getByRole("region", { name: "편집 작업판" })).toBe(workbench);
+    await expectEditorRevision(1);
   });
 
   it("locks the composer while Eugene is sending and reuses its client ID only for the explicit Retry-After retry", async () => {

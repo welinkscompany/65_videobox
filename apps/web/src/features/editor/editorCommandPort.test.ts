@@ -65,6 +65,34 @@ describe("EditorCommandPort", () => {
     expect(api.clearEditingSessionSfxOverride).toHaveBeenCalledWith("p", "s", "seg", 7);
   });
 
+  it("serializes authoritative BGM and SFX fade controls without replacing hidden gain or ducking", async () => {
+    const port = createEditorCommandPort({ projectId: "p", sessionId: "s", expectedRevision: 7 }, api);
+
+    await port.updateMediaControls({
+      kind: "bgm",
+      segmentId: "seg",
+      assetId: "asset-m",
+      controls: { gainDb: -7, fadeInSec: 1.25, fadeOutSec: 0.75, ducking: true },
+    });
+    await port.updateMediaControls({
+      kind: "sfx",
+      segmentId: "seg",
+      assetId: "asset-s",
+      controls: { gainDb: -3, fadeInSec: 0.2, fadeOutSec: 0.4, ducking: false },
+    });
+
+    expect(api.updateEditingSessionMusicOverride).toHaveBeenCalledWith("p", "s", "seg", {
+      asset_id: "asset-m",
+      media_controls: { gain_db: -7, fade_in_sec: 1.25, fade_out_sec: 0.75, ducking: true },
+      expected_revision: 7,
+    });
+    expect(api.updateEditingSessionSfxOverride).toHaveBeenCalledWith("p", "s", "seg", {
+      asset_id: "asset-s",
+      media_controls: { gain_db: -3, fade_in_sec: 0.2, fade_out_sec: 0.4, ducking: false },
+      expected_revision: 7,
+    });
+  });
+
   it("uses only supported discriminated overlays and caption endpoints", async () => {
     const port = createEditorCommandPort({ projectId: "p", sessionId: "s", expectedRevision: 7 }, api);
     await port.applyOverlay({ kind: "image", segmentId: "seg", assetId: "asset-image", text: "제품" });

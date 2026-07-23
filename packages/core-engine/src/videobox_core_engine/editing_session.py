@@ -852,16 +852,26 @@ def clear_segment_broll_override(
 
 def update_segment_sfx_override(*, session: dict[str, Any], segment_id: str, asset_id: str, asset_uri: str | None = None, media_controls: dict[str, Any] | None = None) -> dict[str, Any]:
     updated = deepcopy(session)
+    normalized_asset_id = asset_id.strip()
     for segment in updated.get("segments", []):
         if str(segment.get("segment_id")) != segment_id:
             continue
+        existing = segment.get("sfx_override")
+        same_asset = isinstance(existing, dict) and str(existing.get("asset_id") or "").strip() == normalized_asset_id
+        next_override = deepcopy(existing) if same_asset else {}
         _clear_windowed_media_override(segment=segment, field="sfx_override")
-        segment["sfx_override"] = {"asset_id": asset_id.strip()}
+        next_override["asset_id"] = normalized_asset_id
         if asset_uri:
-            segment["sfx_override"]["asset_uri"] = asset_uri
+            next_override["asset_uri"] = asset_uri
         if media_controls is not None:
-            segment["sfx_override"]["media_controls"] = normalize_media_controls(media_controls, media_kind="audio", duration_sec=float(segment.get("end_sec", 0.0)) - float(segment.get("start_sec", 0.0)))
-        return _apply_manual_mutation(before=session, updated=updated, mutation_type="sfx_override_update", segment_id=segment_id, extra={"asset_id": asset_id.strip()})
+            previous_controls = existing.get("media_controls") if same_asset and isinstance(existing.get("media_controls"), dict) else {}
+            next_override["media_controls"] = normalize_media_controls(
+                {**previous_controls, **media_controls},
+                media_kind="audio",
+                duration_sec=float(segment.get("end_sec", 0.0)) - float(segment.get("start_sec", 0.0)),
+            )
+        segment["sfx_override"] = next_override
+        return _apply_manual_mutation(before=session, updated=updated, mutation_type="sfx_override_update", segment_id=segment_id, extra={"asset_id": normalized_asset_id})
     raise KeyError(f"Segment not found in editing session: {segment_id}")
 
 
@@ -906,12 +916,33 @@ def clear_segment_visual_overlays(
     segment_id: str,
 ) -> dict[str, Any]:
     updated = deepcopy(session)
+    has_direct_match = any(
+        isinstance(segment, dict) and str(segment.get("segment_id") or "") == segment_id
+        for segment in updated.get("segments", [])
+    )
+    matched = False
     for segment in updated.get("segments", []):
-        if str(segment.get("segment_id")) != segment_id:
+        if not isinstance(segment, dict):
             continue
-        segment["visual_overlays"] = []
-        return _apply_manual_mutation(before=session, updated=updated, mutation_type="visual_overlay_clear", segment_id=segment_id)
-    raise KeyError(f"Segment not found in editing session: {segment_id}")
+        containing_segment_id = str(segment.get("segment_id") or "")
+        direct_match = containing_segment_id == segment_id
+        if direct_match:
+            segment["visual_overlays"] = []
+            matched = True
+        content_windows = segment.get("content_windows")
+        if not isinstance(content_windows, list):
+            continue
+        for window in content_windows:
+            if not isinstance(window, dict):
+                continue
+            source_segment_id = str(window.get("source_segment_id") or containing_segment_id)
+            if (has_direct_match and not direct_match) or (not has_direct_match and source_segment_id != segment_id):
+                continue
+            window["visual_overlays"] = []
+            matched = True
+    if not matched:
+        raise KeyError(f"Segment not found in editing session: {segment_id}")
+    return _apply_manual_mutation(before=session, updated=updated, mutation_type="visual_overlay_clear", segment_id=segment_id)
 
 
 def update_segment_explanation_card(
@@ -959,9 +990,9 @@ def update_segment_image_overlay(
     return _upsert_segment_overlay(
         session=session,
         segment_id=segment_id,
-        overlay_type="image_card",
+        overlay_type="image_overlay",
         overlay_payload={
-            "overlay_type": "image_card",
+            "overlay_type": "image_overlay",
             "asset_id": asset_id.strip(),
             "text": text.strip(),
         },
@@ -977,7 +1008,7 @@ def remove_segment_image_overlay(
     return _remove_segment_overlay(
         session=session,
         segment_id=segment_id,
-        overlay_type="image_card",
+        overlay_type="image_overlay",
         mutation_type="image_overlay_remove",
     )
 
@@ -993,9 +1024,9 @@ def update_segment_table_overlay(
     return _upsert_segment_overlay(
         session=session,
         segment_id=segment_id,
-        overlay_type="table_card",
+        overlay_type="table_overlay",
         overlay_payload={
-            "overlay_type": "table_card",
+            "overlay_type": "table_overlay",
             "columns": [str(item) for item in columns],
             "rows": [[str(cell) for cell in row] for row in rows],
             "text": text.strip(),
@@ -1012,7 +1043,7 @@ def remove_segment_table_overlay(
     return _remove_segment_overlay(
         session=session,
         segment_id=segment_id,
-        overlay_type="table_card",
+        overlay_type="table_overlay",
         mutation_type="table_overlay_remove",
     )
 
@@ -1030,12 +1061,21 @@ def update_segment_music_override(
     for segment in updated.get("segments", []):
         if str(segment.get("segment_id")) != segment_id:
             continue
+        existing = segment.get("music_override")
+        same_asset = isinstance(existing, dict) and str(existing.get("asset_id") or "").strip() == normalized_asset_id
+        next_override = deepcopy(existing) if same_asset else {}
         _clear_windowed_media_override(segment=segment, field="music_override")
-        segment["music_override"] = {"asset_id": normalized_asset_id}
+        next_override["asset_id"] = normalized_asset_id
         if asset_uri:
-            segment["music_override"]["asset_uri"] = asset_uri
+            next_override["asset_uri"] = asset_uri
         if media_controls is not None:
-            segment["music_override"]["media_controls"] = normalize_media_controls(media_controls, media_kind="audio", duration_sec=float(segment.get("end_sec", 0.0)) - float(segment.get("start_sec", 0.0)))
+            previous_controls = existing.get("media_controls") if same_asset and isinstance(existing.get("media_controls"), dict) else {}
+            next_override["media_controls"] = normalize_media_controls(
+                {**previous_controls, **media_controls},
+                media_kind="audio",
+                duration_sec=float(segment.get("end_sec", 0.0)) - float(segment.get("start_sec", 0.0)),
+            )
+        segment["music_override"] = next_override
         return _apply_manual_mutation(before=session, updated=updated, mutation_type="music_override_update", segment_id=segment_id, extra={"asset_id": normalized_asset_id})
     raise KeyError(f"Segment not found in editing session: {segment_id}")
 
@@ -1167,18 +1207,37 @@ def _upsert_segment_overlay(
     mutation_type: str,
 ) -> dict[str, Any]:
     updated = deepcopy(session)
+    has_direct_match = any(
+        isinstance(segment, dict) and str(segment.get("segment_id") or "") == segment_id
+        for segment in updated.get("segments", [])
+    )
+    matched = False
     for segment in updated.get("segments", []):
-        if str(segment.get("segment_id")) != segment_id:
+        if not isinstance(segment, dict):
             continue
-        overlays = [
-            overlay
-            for overlay in segment.get("visual_overlays", [])
-            if isinstance(overlay, dict) and str(overlay.get("overlay_type") or "") != overlay_type
-        ]
-        overlays.append(overlay_payload)
-        segment["visual_overlays"] = overlays
-        return _apply_manual_mutation(before=session, updated=updated, mutation_type=mutation_type, segment_id=segment_id, extra={"overlay_type": overlay_type})
-    raise KeyError(f"Segment not found in editing session: {segment_id}")
+        containing_segment_id = str(segment.get("segment_id") or "")
+        direct_match = containing_segment_id == segment_id
+        if direct_match:
+            segment["visual_overlays"] = _upsert_overlay_list(
+                segment.get("visual_overlays"), overlay_type=overlay_type, overlay_payload=overlay_payload,
+            )
+            matched = True
+        content_windows = segment.get("content_windows")
+        if not isinstance(content_windows, list):
+            continue
+        for window in content_windows:
+            if not isinstance(window, dict):
+                continue
+            source_segment_id = str(window.get("source_segment_id") or containing_segment_id)
+            if (has_direct_match and not direct_match) or (not has_direct_match and source_segment_id != segment_id):
+                continue
+            window["visual_overlays"] = _upsert_overlay_list(
+                window.get("visual_overlays"), overlay_type=overlay_type, overlay_payload=overlay_payload,
+            )
+            matched = True
+    if not matched:
+        raise KeyError(f"Segment not found in editing session: {segment_id}")
+    return _apply_manual_mutation(before=session, updated=updated, mutation_type=mutation_type, segment_id=segment_id, extra={"overlay_type": overlay_type})
 
 
 def _remove_segment_overlay(
@@ -1189,13 +1248,70 @@ def _remove_segment_overlay(
     mutation_type: str,
 ) -> dict[str, Any]:
     updated = deepcopy(session)
+    has_direct_match = any(
+        isinstance(segment, dict) and str(segment.get("segment_id") or "") == segment_id
+        for segment in updated.get("segments", [])
+    )
+    matched = False
     for segment in updated.get("segments", []):
-        if str(segment.get("segment_id")) != segment_id:
+        if not isinstance(segment, dict):
             continue
-        segment["visual_overlays"] = [
-            overlay
-            for overlay in segment.get("visual_overlays", [])
-            if not (isinstance(overlay, dict) and str(overlay.get("overlay_type") or "") == overlay_type)
-        ]
-        return _apply_manual_mutation(before=session, updated=updated, mutation_type=mutation_type, segment_id=segment_id, extra={"overlay_type": overlay_type})
-    raise KeyError(f"Segment not found in editing session: {segment_id}")
+        containing_segment_id = str(segment.get("segment_id") or "")
+        direct_match = containing_segment_id == segment_id
+        if direct_match:
+            segment["visual_overlays"] = _remove_overlay_from_list(
+                segment.get("visual_overlays"), overlay_type=overlay_type,
+            )
+            matched = True
+        content_windows = segment.get("content_windows")
+        if not isinstance(content_windows, list):
+            continue
+        for window in content_windows:
+            if not isinstance(window, dict):
+                continue
+            source_segment_id = str(window.get("source_segment_id") or containing_segment_id)
+            if (has_direct_match and not direct_match) or (not has_direct_match and source_segment_id != segment_id):
+                continue
+            window["visual_overlays"] = _remove_overlay_from_list(
+                window.get("visual_overlays"), overlay_type=overlay_type,
+            )
+            matched = True
+    if not matched:
+        raise KeyError(f"Segment not found in editing session: {segment_id}")
+    return _apply_manual_mutation(before=session, updated=updated, mutation_type=mutation_type, segment_id=segment_id, extra={"overlay_type": overlay_type})
+
+
+_OVERLAY_TYPE_ALIASES = {
+    "explanation_card": frozenset({"explanation_card"}),
+    "image_overlay": frozenset({"image", "image_card", "image_overlay"}),
+    "table_overlay": frozenset({"table_card", "table_overlay"}),
+}
+
+
+def _equivalent_overlay_types(overlay_type: str) -> frozenset[str]:
+    return _OVERLAY_TYPE_ALIASES.get(overlay_type, frozenset({overlay_type}))
+
+
+def _upsert_overlay_list(
+    raw_overlays: object,
+    *,
+    overlay_type: str,
+    overlay_payload: dict[str, Any],
+) -> list[dict[str, Any]]:
+    equivalent = _equivalent_overlay_types(overlay_type)
+    overlays = [
+        deepcopy(overlay)
+        for overlay in raw_overlays if isinstance(overlay, dict)
+        and str(overlay.get("overlay_type") or "") not in equivalent
+    ] if isinstance(raw_overlays, list) else []
+    overlays.append(deepcopy(overlay_payload))
+    return overlays
+
+
+def _remove_overlay_from_list(raw_overlays: object, *, overlay_type: str) -> list[dict[str, Any]]:
+    equivalent = _equivalent_overlay_types(overlay_type)
+    return [
+        deepcopy(overlay)
+        for overlay in raw_overlays if isinstance(overlay, dict)
+        and str(overlay.get("overlay_type") or "") not in equivalent
+    ] if isinstance(raw_overlays, list) else []

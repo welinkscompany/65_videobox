@@ -66,7 +66,11 @@ def build_editor_playback_manifest(
     source_revision = timeline.get("source_session_revision")
     session_revision = int(session.get("session_revision") or 1)
     source_status = "current" if source_session_id == session.get("session_id") and source_revision == session_revision else "stale"
-    tracks = [contract for item in materialized.get("tracks", []) if isinstance(item, dict) if (contract := _track_contract(item)) is not None]
+    raw_tracks = [item for item in materialized.get("tracks", []) if isinstance(item, dict)]
+    export_overlay_track = _export_overlay_track(materialized.get("export_overlays"))
+    if export_overlay_track is not None:
+        raw_tracks.append(export_overlay_track)
+    tracks = [contract for item in raw_tracks if (contract := _track_contract(item)) is not None]
     asset_ids = sorted({str(clip["asset_id"]) for track in tracks for clip in track["clips"] if clip.get("asset_id")})
     preview = dict(exact_preview or {"status": "unavailable", "url": None, "source_session_revision": None})
     return {
@@ -148,6 +152,40 @@ def _track_contract(track: dict[str, Any]) -> dict[str, Any] | None:
             "overlay_payload": dict(raw.get("overlay_payload") or {}) if clip_type == "overlay" and isinstance(raw.get("overlay_payload"), dict) else {},
         })
     return {"track_id": str(track.get("track_id") or "track"), "track_type": track_type, "clips": clips}
+
+
+def _export_overlay_track(raw_overlays: object) -> dict[str, Any] | None:
+    if not isinstance(raw_overlays, list):
+        return None
+    clips: list[dict[str, Any]] = []
+    for index, raw in enumerate(raw_overlays):
+        if not isinstance(raw, dict):
+            continue
+        raw_type = str(raw.get("overlay_type") or "").strip()
+        overlay_type = (
+            "image_overlay" if raw_type in {"image", "image_card", "image_overlay"}
+            else "table_overlay" if raw_type in {"table_card", "table_overlay"}
+            else raw_type
+        )
+        if overlay_type not in {"explanation_card", "image_overlay", "table_overlay"}:
+            continue
+        payload = dict(raw)
+        payload["overlay_type"] = overlay_type
+        clips.append({
+            "clip_id": str(raw.get("clip_id") or f"session-export-overlay-{index}"),
+            "segment_id": str(raw.get("segment_id") or ""),
+            "clip_type": "overlay",
+            "asset_id": raw.get("asset_id"),
+            "asset_uri": raw.get("asset_uri"),
+            "start_sec": float(raw.get("start_sec") or 0),
+            "end_sec": float(raw.get("end_sec") or 0),
+            "media_controls": {},
+            "expected_content_sha256": raw.get("expected_content_sha256"),
+            "media_revision": raw.get("media_revision"),
+            "overlay_type": overlay_type,
+            "overlay_payload": payload,
+        })
+    return {"track_id": "session_export_overlays", "track_type": "overlay", "clips": clips} if clips else None
 
 
 def _gap_contract(gap: dict[str, Any]) -> dict[str, Any]:

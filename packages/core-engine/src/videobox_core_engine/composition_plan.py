@@ -288,18 +288,21 @@ def materialize_editing_session_timeline(
                 if not isinstance(overlay, dict):
                     continue
                 payload = deepcopy(overlay)
+                payload["overlay_type"] = _canonical_overlay_type(payload.get("overlay_type"))
+                if content_segment_id != segment_id:
+                    payload["source_segment_id"] = content_segment_id
                 asset_id = str(payload.get("asset_id") or "").strip() or None
                 asset_uri = str(payload.get("asset_uri") or "").strip()
                 if not asset_uri and asset_id and project:
                     asset_uri = f"local://projects/{project}/assets/{asset_id}"
                 if asset_uri:
-                    clip = {"clip_id": f"session-overlay-{segment_id}-{window_index}-{ordinal}", "segment_id": content_segment_id, "asset_id": asset_id, "asset_uri": asset_uri, "start_sec": window_start, "end_sec": window_end, "overlay_type": str(payload.get("overlay_type") or "visual_overlay"), "overlay_payload": payload}
+                    clip = {"clip_id": f"session-overlay-{segment_id}-{window_index}-{ordinal}", "segment_id": segment_id, "asset_id": asset_id, "asset_uri": asset_uri, "start_sec": window_start, "end_sec": window_end, "overlay_type": str(payload.get("overlay_type") or "visual_overlay"), "overlay_payload": payload}
                     for key in ("expected_content_sha256", "media_revision"):
                         if payload.get(key):
                             clip[key] = payload[key]
                     tracks.setdefault("overlay", []).append(clip)
                 else:
-                    export_overlays.append({**payload, "clip_id": str(payload.get("clip_id") or f"session-overlay-{segment_id}-{window_index}-{ordinal}"), "segment_id": content_segment_id, "start_sec": window_start, "end_sec": window_end})
+                    export_overlays.append({**payload, "clip_id": str(payload.get("clip_id") or f"session-overlay-{segment_id}-{window_index}-{ordinal}"), "segment_id": segment_id, "start_sec": window_start, "end_sec": window_end})
     materialized["tracks"] = [{"track_type": kind, "clips": clips} for kind, clips in tracks.items() if clips]
     materialized["export_overlays"] = export_overlays
     materialized["session_captions"] = session_captions
@@ -316,6 +319,17 @@ def _number(value: object, default: float = 0.0) -> float:
     if not isfinite(parsed):
         raise ValueError("composition_plan_invalid_number")
     return parsed
+
+
+def _canonical_overlay_type(value: object) -> str:
+    overlay_type = str(value or "").strip()
+    if overlay_type == "explanation_card":
+        return overlay_type
+    if overlay_type in {"image", "image_card", "image_overlay"}:
+        return "image_overlay"
+    if overlay_type in {"table_card", "table_overlay"}:
+        return "table_overlay"
+    return overlay_type or "visual_overlay"
 
 
 @dataclass(frozen=True, slots=True)

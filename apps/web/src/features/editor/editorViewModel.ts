@@ -4,8 +4,10 @@ export type EditorControls = Readonly<{
   volume?: number;
   crop?: string;
   speed?: number;
+  gainDb?: number;
   fadeInSec?: number;
   fadeOutSec?: number;
+  ducking?: boolean;
 }>;
 export type EditorCaptionStyle = Readonly<{
   fontFamily: string; fontSizePx: number; textColor: string; outlineColor: string; outlineWidthPx: number;
@@ -25,7 +27,15 @@ export type EditorViewModel = Readonly<{
 }>;
 
 function controls(value: EditorMediaControls): EditorControls {
-  return { volume: value.volume, crop: value.crop, speed: value.speed, fadeInSec: value.fade_in_sec, fadeOutSec: value.fade_out_sec };
+  return {
+    volume: value.volume,
+    crop: value.crop,
+    speed: value.speed,
+    gainDb: value.gain_db,
+    fadeInSec: value.fade_in_sec,
+    fadeOutSec: value.fade_out_sec,
+    ducking: value.ducking,
+  };
 }
 
 export class VideoBoxEditorAdapter {
