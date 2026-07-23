@@ -80,7 +80,7 @@ test("current exact proxy plays a valid local MP4, requests bytes, and maps a na
   expect(state.rangeRequests).toContainEqual(expect.stringMatching(/^bytes=\d+-/));
   await video.evaluate((node) => { node.currentTime = 1.5; });
   await expect.poll(() => video.evaluate((node) => node.currentTime)).toBeCloseTo(1.5, 1);
-  await expect(page.locator("output")).toHaveText("타임라인 3.5초");
+  await expect(page.getByText("타임라인 3.5초", { exact: true })).toBeVisible();
   await expect(page.locator("audio, video")).toHaveCount(1);
 });
 

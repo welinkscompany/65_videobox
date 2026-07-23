@@ -2,9 +2,12 @@ import { defineConfig } from "@playwright/test";
 
 const loopbackHost = "127.0.0.1";
 const port = Number(process.env.PLAYWRIGHT_WEB_PORT ?? 4173);
+const fakeApiPort = Number(process.env.PLAYWRIGHT_FAKE_API_PORT ?? 8000);
+const fakeApiEnvironment = { ...process.env, PLAYWRIGHT_FAKE_API_PORT: String(fakeApiPort) };
 const fakeApiServer = {
   command: "node ./e2e/support/fake-api-server.mjs",
-  url: `http://${loopbackHost}:8000/health`,
+  url: `http://${loopbackHost}:${fakeApiPort}/health`,
+  env: fakeApiEnvironment,
   reuseExistingServer: Boolean(process.env.PLAYWRIGHT_REUSE_EXISTING),
   timeout: 30_000,
 };
@@ -26,6 +29,7 @@ export default defineConfig({
     {
       command: `npm run dev -- --host ${loopbackHost} --port ${port} --strictPort`,
       url: `http://${loopbackHost}:${port}`,
+      env: fakeApiEnvironment,
       reuseExistingServer: false,
       timeout: 30_000,
     },
