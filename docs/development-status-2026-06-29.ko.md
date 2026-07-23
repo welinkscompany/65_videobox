@@ -1,6 +1,14 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 292. 2026-07-23 Task 19 next-session handoff`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 294. 2026-07-23 Task 21 release-hardening closeout`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+
+## 294. 2026-07-23 Task 21 release-hardening closeout
+
+- Task 21은 Playwright E2E가 매 실행별 격리 loopback port를 배정하고, 모든 browser spec에 loopback/data/blob-only network gate를 설치하며, capture 뒤 PNG exact-set/dimension/SHA manifest를 검증하도록 닫았다. 일반 E2E는 승인된 PNG를 덮어쓰지 않고, 명시적 `VIDEOBOX_WRITE_PLAYWRIGHT_SNAPSHOTS=1`일 때만 갱신한다.
+- browser performance는 Chromium `149.0.7827.55`, `chromium-headless-workers-1-1920x1080` profile에서 warm-up 1회와 right-dock drag 5회로 측정했다. calibrated median baseline은 92 ms, p95 reference는 108 ms이고 같은 browser/profile에서 median 20% 초과 또는 구조 오류를 fail한다.
+- Task 22는 아직 완료가 아니다. 이미 parity가 있는 legacy `/projects/:projectId/editing`은 canonical editor route로 redirect하지만, job recovery, voice/TTS, subtitle/final/CapCut output UI와 legacy `App.tsx`/CSS 제거는 새 route parity를 만든 뒤에만 진행한다.
+- 검증: full frontend `52 files / 506 tests`, ordinary E2E `28 passed`와 post-capture manifest verifier, focused editor E2E `8 passed`와 verifier, production build, Editor UI OSS provenance/UI-system verifier, `git diff --check` 통과. React `act(...)`, jsdom navigation, intentional ErrorBoundary stderr 및 500 kB bundle warning은 exit 0인 기존 비실패 출력이다. 전체 Python regression은 실행하지 않았다.
+- `?? .tmp-final-fence-debug/`는 보존하며, 공식 누적은 **9/22 (40.9%)**, 잔여 **59.1%**를 유지한다. Task 9 사람/환경 acceptance와 CapCut Desktop 실증도 계속 별도다.
 
 ## 293. 2026-07-23 Task 20 Eugene/Inspector closeout
 
