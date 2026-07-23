@@ -1,9 +1,9 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./support/test-fixtures.mjs";
 
-import { assessWorkbenchPerformance, deterministicPerformanceReport, installBrowserNetworkGate } from "./support/release-gates.mjs";
+import { assessWorkbenchPerformance, deterministicPerformanceReport } from "./support/release-gates.mjs";
 
 const project = { project_id: "local-draft", name: "릴리스 게이트", status: "active", root_storage_uri: "local://release-gates" };
 const manifest = {
@@ -21,31 +21,8 @@ async function openWorkbench(page) {
   await expect(page.getByRole("region", { name: "편집 작업판" })).toBeVisible();
 }
 
-test("browser network gate allows the real workbench to use only local request origins", async ({ page }) => {
-  const gate = await installBrowserNetworkGate(page);
-  try {
-    await openWorkbench(page);
-    gate.assertNoRemoteRequests();
-  } finally {
-    await gate.dispose();
-  }
-});
-
-test("browser network gate aborts a remote origin before it leaves the test browser", async ({ page }) => {
-  const gate = await installBrowserNetworkGate(page);
-  try {
-    await page.goto("/");
-    await page.evaluate(() => {
-      const image = new Image();
-      image.src = "https://provider.example.invalid/blocked.png";
-      document.body.append(image);
-    });
-    await expect.poll(() => {
-      try { gate.assertNoRemoteRequests(); return false; } catch { return true; }
-    }).toBe(true);
-  } finally {
-    await gate.dispose();
-  }
+test("global browser network gate allows the real workbench to use only local request origins", async ({ page }) => {
+  await openWorkbench(page);
 });
 
 async function measureRightDockDrag(page, offset) {

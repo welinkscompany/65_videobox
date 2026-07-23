@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./support/test-fixtures.mjs";
 import { fulfillLocalMp4WithRanges } from "./support/valid-local-mp4-fixture.mjs";
 
 const project = {

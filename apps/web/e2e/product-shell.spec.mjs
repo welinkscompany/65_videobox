@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./support/test-fixtures.mjs";
 import { installFixedClock, waitForStableCapture } from "./support/fixed-clock.mjs";
 
 const loopbackHosts = new Set(["127.0.0.1", "localhost", "[::1]"]);

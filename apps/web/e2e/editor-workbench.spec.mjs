@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./support/test-fixtures.mjs";
 import { installFixedClock, waitForStableCapture } from "./support/fixed-clock.mjs";
 
 const snapshots = [[1920, 1080], [1440, 900], [1280, 800], [768, 1024], [390, 844]];
