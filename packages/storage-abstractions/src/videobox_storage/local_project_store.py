@@ -3676,6 +3676,158 @@ class LocalProjectStore:
         )
         return self.get_capcut_draft_export(project_id=project_id, export_id=export_id)
 
+    def claim_capcut_draft_handoff(
+        self, *, project_id: str, job_id: str
+    ) -> dict[str, Any] | None:
+        """Capture the current CapCut handoff lineage before its external copy.
+
+        The CapCut registration itself must run outside the SQLite writer lock.
+        This claim therefore records the exact job/export/session tuple that the
+        later publisher must compare-and-swap before exposing handoff metadata.
+        """
+        connection = self._connection(project_id)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            job = connection.execute(
+                """SELECT job_id, job_type, status, output_ref FROM jobs
+                   WHERE project_id = ? AND job_id = ?""",
+                (project_id, job_id),
+            ).fetchone()
+            if (
+                job is None
+                or str(job["job_type"]) != JobType.CAPCUT_DRAFT_EXPORT.value
+                or str(job["status"]) != JobStatus.SUCCEEDED.value
+                or not job["output_ref"]
+            ):
+                connection.rollback()
+                return None
+            export = connection.execute(
+                """SELECT export_id, timeline_id, file_uri, status, is_current,
+                          source_session_id, source_session_revision
+                   FROM exports
+                   WHERE project_id = ? AND export_id = ?
+                     AND export_type = ?""",
+                (project_id, str(job["output_ref"]), "capcut_draft_export"),
+            ).fetchone()
+            if (
+                export is None
+                or str(export["status"]) != JobStatus.SUCCEEDED.value
+                or not bool(export["is_current"])
+            ):
+                connection.rollback()
+                return None
+            active_session = connection.execute(
+                """SELECT session_id, timeline_id, session_revision
+                   FROM editing_sessions
+                   WHERE project_id = ?
+                   ORDER BY updated_at DESC, created_at DESC, session_id DESC
+                   LIMIT 1""",
+                (project_id,),
+            ).fetchone()
+            export_session_id = export["source_session_id"]
+            export_session_revision = export["source_session_revision"]
+            if export_session_id is not None:
+                if (
+                    active_session is None
+                    or str(active_session["session_id"]) != str(export_session_id)
+                    or str(active_session["timeline_id"]) != str(export["timeline_id"])
+                    or int(active_session["session_revision"]) != int(export_session_revision)
+                ):
+                    connection.rollback()
+                    return None
+            connection.commit()
+            return {
+                "claim_token": uuid.uuid4().hex,
+                "job_id": str(job["job_id"]),
+                "export_id": str(export["export_id"]),
+                "timeline_id": str(export["timeline_id"]),
+                "file_uri": str(export["file_uri"]),
+                "export_source_session_id": str(export_session_id) if export_session_id is not None else None,
+                "export_source_session_revision": int(export_session_revision) if export_session_revision is not None else None,
+                "active_session_id": str(active_session["session_id"]) if active_session is not None else None,
+                "active_session_revision": int(active_session["session_revision"]) if active_session is not None else None,
+            }
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def publish_capcut_draft_handoff_if_current(
+        self, *, project_id: str, claim: dict[str, Any], handoff: dict[str, Any]
+    ) -> bool:
+        """Publish handoff metadata only if the earlier external-copy claim survives."""
+        connection = self._connection(project_id)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            job = connection.execute(
+                """SELECT job_type, status, output_ref FROM jobs
+                   WHERE project_id = ? AND job_id = ?""",
+                (project_id, str(claim["job_id"])),
+            ).fetchone()
+            export = connection.execute(
+                """SELECT timeline_id, status, is_current, source_session_id,
+                          source_session_revision, metadata_json
+                   FROM exports
+                   WHERE project_id = ? AND export_id = ?
+                     AND export_type = ?""",
+                (project_id, str(claim["export_id"]), "capcut_draft_export"),
+            ).fetchone()
+            active_session = connection.execute(
+                """SELECT session_id, session_revision FROM editing_sessions
+                   WHERE project_id = ?
+                   ORDER BY updated_at DESC, created_at DESC, session_id DESC
+                   LIMIT 1""",
+                (project_id,),
+            ).fetchone()
+            claim_is_current = (
+                job is not None
+                and str(job["job_type"]) == JobType.CAPCUT_DRAFT_EXPORT.value
+                and str(job["status"]) == JobStatus.SUCCEEDED.value
+                and str(job["output_ref"] or "") == str(claim["export_id"])
+                and export is not None
+                and str(export["timeline_id"]) == str(claim["timeline_id"])
+                and str(export["status"]) == JobStatus.SUCCEEDED.value
+                and bool(export["is_current"])
+                and (str(export["source_session_id"]) if export["source_session_id"] is not None else None)
+                == claim["export_source_session_id"]
+                and (int(export["source_session_revision"]) if export["source_session_revision"] is not None else None)
+                == claim["export_source_session_revision"]
+                and (str(active_session["session_id"]) if active_session is not None else None)
+                == claim["active_session_id"]
+                and (int(active_session["session_revision"]) if active_session is not None else None)
+                == claim["active_session_revision"]
+            )
+            if not claim_is_current:
+                connection.rollback()
+                return False
+            metadata = json.loads(str(export["metadata_json"] or "{}"))
+            metadata["handoff"] = handoff
+            cursor = connection.execute(
+                """UPDATE exports SET metadata_json = ?
+                   WHERE project_id = ? AND export_id = ? AND export_type = ?
+                     AND status = ? AND is_current = 1""",
+                (
+                    json.dumps(metadata, ensure_ascii=True),
+                    project_id,
+                    str(claim["export_id"]),
+                    "capcut_draft_export",
+                    JobStatus.SUCCEEDED.value,
+                ),
+            )
+            if cursor.rowcount != 1:
+                connection.rollback()
+                return False
+            connection.commit()
+            return True
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+        finally:
+            connection.close()
+
     def create_media_analysis(
         self,
         *,

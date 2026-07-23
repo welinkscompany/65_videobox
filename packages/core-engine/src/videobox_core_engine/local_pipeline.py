@@ -1928,15 +1928,20 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
             timeline_id=str(export["timeline_id"]),
         )
         self._ensure_output_dependencies_fresh(project_id=project_id, timeline=timeline)
-        source_path = self.store.resolve_storage_uri(project_id=project_id, storage_uri=export["file_uri"])
+        claim = self.store.claim_capcut_draft_handoff(project_id=project_id, job_id=job_id)
+        if claim is None:
+            raise OutputSourceStaleError("CapCut draft export freshness changed")
+        source_path = self.store.resolve_storage_uri(project_id=project_id, storage_uri=claim["file_uri"])
+        registered = None
         try:
             registered = self.capcut_handoff_service.register(
                 source_draft_path=source_path,
-                export_id=str(export["export_id"]),
+                export_id=str(claim["export_id"]),
+                ownership_token=str(claim["claim_token"]),
             )
             handoff = {
                 "status": registered.status,
-                "source_file_uri": export["file_uri"],
+                "source_file_uri": claim["file_uri"],
                 "registered_project_path": str(registered.registered_path),
                 "error_message": None,
                 "registered_at": registered.registered_at,
@@ -1945,17 +1950,23 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         except CapCutHandoffError as exc:
             handoff = {
                 "status": "failed",
-                "source_file_uri": export["file_uri"],
+                "source_file_uri": claim["file_uri"],
                 "registered_project_path": None,
                 "error_message": str(exc),
                 "registered_at": None,
                 "reused": False,
             }
-        self.store.update_capcut_draft_handoff(
+        if not self.store.publish_capcut_draft_handoff_if_current(
             project_id=project_id,
-            export_id=str(export["export_id"]),
+            claim=claim,
             handoff=handoff,
-        )
+        ):
+            if registered is not None:
+                self.capcut_handoff_service.cleanup_request_owned_registration(
+                    record=registered,
+                    ownership_token=str(claim["claim_token"]),
+                )
+            raise OutputSourceStaleError("CapCut draft export freshness changed")
         return handoff
 
     def get_capcut_handoff_diagnostics(self) -> dict[str, Any]:

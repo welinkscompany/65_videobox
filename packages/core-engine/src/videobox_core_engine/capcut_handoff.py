@@ -32,9 +32,11 @@ class CapCutHandoffDiagnostics:
 class CapCutHandoffRecord:
     source_path: Path
     registered_path: Path
+    export_id: str
     status: str
     registered_at: str
     reused: bool
+    ownership_token: str | None = None
 
 
 class CapCutHandoffService:
@@ -49,7 +51,9 @@ class CapCutHandoffService:
         self.local_app_data = local_app_data or Path(os.environ.get("LOCALAPPDATA") or "")
         self._copytree = copytree
 
-    def register(self, *, source_draft_path: Path, export_id: str) -> CapCutHandoffRecord:
+    def register(
+        self, *, source_draft_path: Path, export_id: str, ownership_token: str | None = None
+    ) -> CapCutHandoffRecord:
         source = Path(source_draft_path)
         if not (source / "draft_content.json").is_file():
             raise CapCutHandoffError("VideoBox CapCut 초안 파일을 찾지 못했습니다. 내보내기를 다시 실행하세요.")
@@ -57,7 +61,7 @@ class CapCutHandoffService:
         project_root = self._project_root()
         destination = project_root / f"videobox-{export_id}"
         if self._is_owned_destination(destination=destination, export_id=export_id) and self._is_complete_draft(destination):
-            return self._record(source=source, destination=destination, reused=True)
+            return self._record(source=source, destination=destination, export_id=export_id, reused=True)
         if destination.exists():
             if not self._is_owned_destination(destination=destination, export_id=export_id):
                 raise CapCutHandoffError(
@@ -73,7 +77,11 @@ class CapCutHandoffService:
                 raise OSError("copied CapCut draft is incomplete")
             temporary.replace(destination)
             created_destination = True
-            self._write_ownership_marker(destination=destination, export_id=export_id)
+            self._write_ownership_marker(
+                destination=destination,
+                export_id=export_id,
+                ownership_token=ownership_token,
+            )
         except Exception as exc:
             shutil.rmtree(temporary, ignore_errors=True)
             if created_destination:
@@ -81,7 +89,38 @@ class CapCutHandoffService:
             raise CapCutHandoffError(
                 "CapCut 프로젝트 등록에 실패했습니다. 디스크 공간과 프로젝트 폴더 권한을 확인한 뒤 다시 시도하세요."
             ) from exc
-        return self._record(source=source, destination=destination, reused=False)
+        return self._record(
+            source=source,
+            destination=destination,
+            export_id=export_id,
+            reused=False,
+            ownership_token=ownership_token,
+        )
+
+    def cleanup_request_owned_registration(
+        self, *, record: CapCutHandoffRecord, ownership_token: str
+    ) -> bool:
+        """Remove only a destination and marker created by this exact request."""
+        if record.reused or record.ownership_token != ownership_token:
+            return False
+        marker_path = self._ownership_marker_path(record.export_id)
+        expected_marker = {
+            "export_id": record.export_id,
+            "registered_path": str(record.registered_path),
+            "ownership_token": ownership_token,
+        }
+        try:
+            marker = json.loads(marker_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return False
+        if marker != expected_marker:
+            return False
+        try:
+            marker_path.unlink()
+            shutil.rmtree(record.registered_path, ignore_errors=False)
+        except OSError:
+            return False
+        return True
 
     def diagnose(self) -> CapCutHandoffDiagnostics:
         project_root = self.local_app_data / "CapCut" / "User Data" / "Projects" / "com.lveditor.draft"
@@ -186,14 +225,22 @@ class CapCutHandoffService:
             marker = json.loads(marker_path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return False
-        return marker == {"export_id": export_id, "registered_path": str(destination)}
+        return isinstance(marker, dict) and (
+            marker.get("export_id") == export_id
+            and marker.get("registered_path") == str(destination)
+        )
 
-    def _write_ownership_marker(self, *, destination: Path, export_id: str) -> None:
+    def _write_ownership_marker(
+        self, *, destination: Path, export_id: str, ownership_token: str | None = None
+    ) -> None:
         marker_path = self._ownership_marker_path(export_id)
         marker_path.parent.mkdir(parents=True, exist_ok=True)
         temporary = marker_path.with_suffix(".tmp")
+        marker = {"export_id": export_id, "registered_path": str(destination)}
+        if ownership_token is not None:
+            marker["ownership_token"] = ownership_token
         temporary.write_text(
-            json.dumps({"export_id": export_id, "registered_path": str(destination)}),
+            json.dumps(marker),
             encoding="utf-8",
         )
         temporary.replace(marker_path)
@@ -226,13 +273,17 @@ class CapCutHandoffService:
         return path.is_dir() and (path / "draft_content.json").is_file()
 
     @staticmethod
-    def _record(*, source: Path, destination: Path, reused: bool) -> CapCutHandoffRecord:
+    def _record(
+        *, source: Path, destination: Path, export_id: str, reused: bool, ownership_token: str | None = None
+    ) -> CapCutHandoffRecord:
         return CapCutHandoffRecord(
             source_path=source,
             registered_path=destination,
+            export_id=export_id,
             status="ready",
             registered_at=datetime.now(UTC).isoformat(),
             reused=reused,
+            ownership_token=ownership_token,
         )
 
 

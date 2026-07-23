@@ -253,6 +253,62 @@ def test_register_capcut_draft_handoff_rejects_a_stale_export_before_registering
     assert persisted["export"]["handoff"] is None
 
 
+def test_register_capcut_draft_handoff_discards_a_registration_when_its_session_becomes_stale_after_copy(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="CapCut handoff post-copy stale fence")
+    local_app_data = tmp_path / "LocalAppData"
+    executable = local_app_data / "CapCut" / "Apps" / "8.7.0" / "CapCut.exe"
+    executable.parent.mkdir(parents=True)
+    executable.write_bytes(b"capcut")
+    project_root = local_app_data / "CapCut" / "User Data" / "Projects" / "com.lveditor.draft"
+    project_root.mkdir(parents=True)
+    timeline_job_id = _build_approved_timeline_job(
+        store,
+        LocalPipelineRunner(store, pycapcut_exporter=_FakePyCapCutExporter()),
+        project.project_id,
+    )
+    timeline_id = store.get_job(project_id=project.project_id, job_id=timeline_job_id)["output_ref"]
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline_id,
+        session_payload={"segments": [], "history": []},
+    )
+    runner_without_handoff = LocalPipelineRunner(store, pycapcut_exporter=_FakePyCapCutExporter())
+    runner_without_handoff.approve_timeline_review(project_id=project.project_id, timeline_job_id=timeline_job_id)
+    export_job = runner_without_handoff.start_capcut_draft_export(
+        project_id=project.project_id,
+        timeline_job_id=timeline_job_id,
+    )
+
+    class _SessionMutatingHandoffService(CapCutHandoffService):
+        def register(self, **kwargs: Any):  # type: ignore[no-untyped-def]
+            record = super().register(**kwargs)
+            current = store.get_editing_session(project_id=project.project_id, session_id=session["session_id"])
+            store.update_editing_session(
+                project_id=project.project_id,
+                session_id=current["session_id"],
+                session_payload={"segments": [], "history": []},
+                expected_revision=current["session_revision"],
+            )
+            return record
+
+    runner = LocalPipelineRunner(
+        store,
+        pycapcut_exporter=_FakePyCapCutExporter(),
+        capcut_handoff_service=_SessionMutatingHandoffService(local_app_data=local_app_data),
+    )
+
+    with pytest.raises(OutputSourceStaleError, match="CapCut draft export freshness changed"):
+        runner.register_capcut_draft_handoff(project_id=project.project_id, job_id=export_job["job_id"])
+
+    export = runner.get_capcut_draft_export_result(project_id=project.project_id, job_id=export_job["job_id"])["export"]
+    assert export["handoff"] is None
+    assert not (project_root / f"videobox-{export['export_id']}").exists()
+    assert not (local_app_data / "VideoBox" / "capcut-handoffs" / f"{export['export_id']}.json").exists()
+
+
 def test_capcut_draft_export_result_preserves_failed_job_reason_with_null_artifact(tmp_path: Path) -> None:
     store = LocalProjectStore(tmp_path)
     project = store.bootstrap_project(name="CapCut failure recovery")
