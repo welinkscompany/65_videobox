@@ -22,6 +22,7 @@ type OutputState = {
   finalJobs: JobRecord[];
   finalJob: JobRecord | null;
   finalRender: FinalRenderJob | null;
+  capcutJobs: JobRecord[];
   capcutDraft: CapCutDraftExportJob | null;
   diagnostics: CapCutHandoffDiagnostics | null;
 };
@@ -43,16 +44,21 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
   const [subtitleErrorProjectId, setSubtitleErrorProjectId] = useState<string | null>(null);
   const [isRenderingFinal, setIsRenderingFinal] = useState(false);
   const [finalErrorProjectId, setFinalErrorProjectId] = useState<string | null>(null);
+  const [isExportingCapcutDraft, setIsExportingCapcutDraft] = useState(false);
+  const [capcutErrorProjectId, setCapcutErrorProjectId] = useState<string | null>(null);
   const requestEpoch = useRef(0);
   const subtitleSubmissionEpoch = useRef(0);
   const finalSubmissionEpoch = useRef(0);
+  const capcutSubmissionEpoch = useRef(0);
   const currentProjectId = useRef(projectId);
   const subtitleRequestProjectId = useRef<string | null>(null);
   const finalRequestProjectId = useRef<string | null>(null);
+  const capcutRequestProjectId = useRef<string | null>(null);
   const finalInFlightTimelineKey = useRef<string | null>(null);
+  const capcutInFlightTimelineKey = useRef<string | null>(null);
   currentProjectId.current = projectId;
 
-  const refresh = useCallback(async (options?: { jobs?: JobRecord[]; subtitle?: SubtitleJob | null; finalRender?: FinalRenderJob | null }) => {
+  const refresh = useCallback(async (options?: { jobs?: JobRecord[]; subtitle?: SubtitleJob | null; finalRender?: FinalRenderJob | null; capcutDraft?: CapCutDraftExportJob | null }) => {
     const refreshProjectId = projectId;
     const epoch = requestEpoch.current + 1;
     requestEpoch.current = epoch;
@@ -72,7 +78,8 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
       const subtitleRecord = timelineJob ? mostRecentJob(jobs, "subtitle_render", timelineJob.job_id) : null;
       const finalJobs = timelineJob ? jobs.filter((job) => job.job_type === "final_render" && job.input_ref === timelineJob.job_id) : [];
       const finalJob = timelineJob ? mostRecentJob(finalJobs, "final_render") : mostRecentJob(jobs, "final_render");
-      const capcutJob = mostRecentJob(jobs, "capcut_draft_export");
+      const capcutJobs = timelineJob ? jobs.filter((job) => job.job_type === "capcut_draft_export" && job.input_ref === timelineJob.job_id) : [];
+      const capcutJob = timelineJob ? mostRecentJob(capcutJobs, "capcut_draft_export") : null;
       const [timeline, review, subtitle, finalRender, capcutDraft, diagnostics] = await Promise.all([
         timelineJob ? api.getTimeline(refreshProjectId, timelineJob.job_id) : Promise.resolve(null),
         timelineJob ? api.getReviewSnapshot(refreshProjectId, timelineJob.job_id) : Promise.resolve(null),
@@ -82,11 +89,13 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
         options?.finalRender && finalJob && options.finalRender.job_id === finalJob.job_id
           ? Promise.resolve(options.finalRender)
           : finalJob ? api.getFinalRender(refreshProjectId, finalJob.job_id) : Promise.resolve(null),
-        capcutJob ? api.getCapcutDraftExport(refreshProjectId, capcutJob.job_id) : Promise.resolve(null),
+        options?.capcutDraft && capcutJob && options.capcutDraft.job_id === capcutJob.job_id
+          ? Promise.resolve(options.capcutDraft)
+          : capcutJob ? api.getCapcutDraftExport(refreshProjectId, capcutJob.job_id) : Promise.resolve(null),
         api.getCapcutHandoffDiagnostics().catch(() => null),
       ]);
       if (!isCurrentRequest()) return;
-      setState({ projectId: refreshProjectId, timelineJob, timeline, review, subtitle, finalJobs, finalJob, finalRender, capcutDraft, diagnostics });
+      setState({ projectId: refreshProjectId, timelineJob, timeline, review, subtitle, finalJobs, finalJob, finalRender, capcutJobs, capcutDraft, diagnostics });
     } catch {
       if (!isCurrentRequest()) return;
       setState(null);
@@ -99,18 +108,24 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
   useEffect(() => {
     subtitleSubmissionEpoch.current += 1;
     finalSubmissionEpoch.current += 1;
+    capcutSubmissionEpoch.current += 1;
     subtitleRequestProjectId.current = null;
     finalRequestProjectId.current = null;
     finalInFlightTimelineKey.current = null;
+    capcutRequestProjectId.current = null;
+    capcutInFlightTimelineKey.current = null;
     setIsRenderingSubtitle(false);
     setSubtitleErrorProjectId(null);
     setIsRenderingFinal(false);
     setFinalErrorProjectId(null);
+    setIsExportingCapcutDraft(false);
+    setCapcutErrorProjectId(null);
     void refresh();
     return () => {
       requestEpoch.current += 1;
       subtitleSubmissionEpoch.current += 1;
       finalSubmissionEpoch.current += 1;
+      capcutSubmissionEpoch.current += 1;
     };
   }, [refresh]);
 
@@ -120,6 +135,8 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
   const subtitleError = subtitleErrorProjectId === projectId;
   const isRenderingCurrentFinal = isRenderingFinal && finalRequestProjectId.current === projectId;
   const finalError = finalErrorProjectId === projectId;
+  const isExportingCurrentCapcutDraft = isExportingCapcutDraft && capcutRequestProjectId.current === projectId;
+  const capcutError = capcutErrorProjectId === projectId;
   if (isLoading && !state && !hasError) return <section className="vb-outputs" aria-live="polite"><p>출력 상태를 불러오는 중이에요.</p></section>;
   if (hasError) return <section className="vb-outputs" aria-live="polite" data-testid="outputs-page"><h1>출력</h1><p>출력 상태를 불러오지 못했어요.</p><p>잠시 후 상태를 다시 확인하거나 편집 화면에서 작업을 이어가세요.</p><Button variant="outline" onClick={() => void refresh()}>상태 다시 확인</Button><Button onClick={onOpenEditor}>편집 열기</Button></section>;
 
@@ -138,8 +155,10 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
   const finalRender = currentState?.finalRender;
   const currentFinal = finalRender?.status === "succeeded" && finalRender.render?.is_current === true;
   const staleFinal = finalRender?.status === "succeeded" && Boolean(finalRender.render) && !currentFinal;
-  const capcutHandoff = currentState?.capcutDraft?.export?.handoff;
-  const capcutReady = currentState?.capcutDraft?.status === "succeeded" && capcutHandoff?.status === "ready";
+  const capcutJobs = currentState?.capcutJobs ?? [];
+  const hasPendingCapcut = capcutJobs.some((job) => job.status === "pending" || job.status === "running");
+  const canExportCapcutDraft = canRenderFinal && !hasPendingCapcut;
+  const capcutDraft = currentState?.capcutDraft;
   const handleRenderSubtitle = async () => {
     const submissionProjectId = projectId;
     if (currentProjectId.current !== submissionProjectId || !timelineJob || !canRenderSubtitle || isRenderingCurrentSubtitle) return;
@@ -188,9 +207,35 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
       if (submissionEpoch === finalSubmissionEpoch.current && currentProjectId.current === submissionProjectId) setIsRenderingFinal(false);
     }
   };
+  const handleExportCapcutDraft = async () => {
+    const submissionProjectId = projectId;
+    const timelineKey = timelineJob ? `${submissionProjectId}:${timelineJob.job_id}` : null;
+    if (currentProjectId.current !== submissionProjectId || !timelineJob || !timelineKey || !canExportCapcutDraft || isExportingCurrentCapcutDraft || capcutInFlightTimelineKey.current === timelineKey) return;
+    const submissionEpoch = capcutSubmissionEpoch.current + 1;
+    const requestEpochAtSubmission = requestEpoch.current;
+    capcutSubmissionEpoch.current = submissionEpoch;
+    capcutRequestProjectId.current = submissionProjectId;
+    capcutInFlightTimelineKey.current = timelineKey;
+    setIsExportingCapcutDraft(true);
+    setCapcutErrorProjectId(null);
+    try {
+      const result = await api.startCapcutDraftExport(submissionProjectId, { timeline_job_id: timelineJob.job_id });
+      const [jobs, nextCapcutDraft] = await Promise.all([
+        api.listJobs(submissionProjectId),
+        api.getCapcutDraftExport(submissionProjectId, result.job_id),
+      ]);
+      if (submissionEpoch !== capcutSubmissionEpoch.current || requestEpochAtSubmission !== requestEpoch.current || currentProjectId.current !== submissionProjectId) return;
+      await refresh({ jobs, capcutDraft: nextCapcutDraft });
+    } catch {
+      if (submissionEpoch === capcutSubmissionEpoch.current && currentProjectId.current === submissionProjectId) setCapcutErrorProjectId(submissionProjectId);
+    } finally {
+      if (capcutInFlightTimelineKey.current === timelineKey) capcutInFlightTimelineKey.current = null;
+      if (submissionEpoch === capcutSubmissionEpoch.current && currentProjectId.current === submissionProjectId) setIsExportingCapcutDraft(false);
+    }
+  };
 
   return <section className="vb-outputs" aria-live="polite" data-testid="outputs-page">
-    <div><p className="vb-eyebrow">출력</p><h1>완성본과 CapCut 초안</h1><p>현재 승인된 편집본의 자막과 완성본을 여기에서 만들 수 있어요. CapCut 초안은 편집 화면에서 시작해 주세요.</p></div>
+    <div><p className="vb-eyebrow">출력</p><h1>완성본과 CapCut 초안</h1><p>현재 승인된 편집본의 자막, 완성본, CapCut 초안을 여기에서 만들 수 있어요.</p></div>
     <div className="vb-home-grid">
       <Card>
         <CardHeader><CardTitle>자막</CardTitle><CardDescription>{currentState?.subtitle?.status === "succeeded" ? "자막이 준비되었어요." : currentState?.subtitle?.status === "failed" ? "자막을 만들지 못했어요." : timelineJob ? "현재 편집본의 자막을 만들 수 있어요." : "아직 자막이 없어요."}</CardDescription></CardHeader>
@@ -215,12 +260,18 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
         </CardContent>
       </Card>
       <Card>
-        <CardHeader><CardTitle>CapCut 초안</CardTitle><CardDescription>{capcutReady ? "CapCut에서 초안을 열 수 있어요." : currentState?.capcutDraft?.status === "failed" || capcutHandoff?.status === "failed" ? "CapCut 초안 준비를 완료하지 못했어요." : currentState?.capcutDraft?.export ? "CapCut 초안의 연결 준비가 필요해요." : "아직 CapCut 초안이 없어요."}</CardDescription></CardHeader>
+        <CardHeader><CardTitle>CapCut 초안</CardTitle><CardDescription>{capcutDraft?.status === "succeeded" && capcutDraft.export ? "CapCut 초안이 준비되었어요." : capcutDraft?.status === "failed" ? "CapCut 초안을 만들지 못했어요." : hasPendingCapcut ? "CapCut 초안을 만드는 중이에요." : timelineJob ? "현재 편집본의 CapCut 초안을 만들 수 있어요." : "아직 CapCut 초안이 없어요."}</CardDescription></CardHeader>
         <CardContent>
-          {currentState?.capcutDraft?.export?.notes.length ? <p>일부 효과는 CapCut에서 확인해 주세요.</p> : null}
-          {currentState?.capcutDraft?.status === "failed" || capcutHandoff?.status === "failed" ? <p>편집 화면에서 상태를 확인한 뒤 다시 진행해 주세요.</p> : null}
+          {capcutError ? <p>CapCut 초안을 만들지 못했어요. 편집 상태를 확인한 뒤 다시 시도해 주세요.</p> : null}
+          {!timelineJob ? <p>먼저 편집 화면에서 현재 초안을 준비해 주세요.</p> : null}
+          {timelineJob && !canRenderSubtitle ? <p>검토 승인과 확인할 항목을 모두 마친 뒤 CapCut 초안을 만들 수 있어요.</p> : null}
+          {hasPendingCapcut ? <p>완료될 때까지 기다린 뒤 상태를 다시 확인해 주세요.</p> : null}
+          {capcutDraft?.status === "failed" ? <p>CapCut 초안 다시 만들기를 눌러 새 작업을 시작할 수 있어요.</p> : null}
+          {capcutDraft?.status === "succeeded" && capcutDraft.export ? <p>로컬 저장 위치: {capcutDraft.export.file_uri}</p> : null}
+          {capcutDraft?.export?.notes.length ? <p>일부 효과는 CapCut에서 확인해 주세요.</p> : null}
           {currentState?.diagnostics && !currentState.diagnostics.is_supported ? <p>이 기기의 CapCut 연결 상태를 확인해 주세요.</p> : null}
           {!currentState?.diagnostics ? <p>CapCut 연결 상태는 지금 확인할 수 없어요. 잠시 후 다시 확인해 주세요.</p> : null}
+          <Button disabled={!canExportCapcutDraft || isExportingCurrentCapcutDraft} onClick={() => void handleExportCapcutDraft()}>{isExportingCurrentCapcutDraft ? "CapCut 초안 만드는 중" : capcutDraft?.status === "failed" || capcutError ? "CapCut 초안 다시 만들기" : "CapCut 초안 만들기"}</Button>
         </CardContent>
       </Card>
     </div>

@@ -104,7 +104,7 @@ describe("AppRouter URL ownership", () => {
     expect(getProject).not.toHaveBeenCalled();
   });
 
-  it("mounts the canonical output route as a read-only status surface", async () => {
+  it("does not run output mutations while the canonical output route mounts", async () => {
     vi.spyOn(api, "listProjects").mockResolvedValue([{ project_id: "project_a", name: "A", status: "active", root_storage_uri: "local://a" }]);
     vi.spyOn(api, "getLatestEditingSession").mockResolvedValue(null);
     vi.spyOn(api, "listJobs").mockResolvedValue([{ job_id: "final_a", project_id: "project_a", job_type: "final_render", status: "succeeded", input_ref: "timeline_a", output_ref: "final_a", error_message: null, started_at: "2026-07-23T09:00:00Z", finished_at: "2026-07-23T09:01:00Z" }]);
