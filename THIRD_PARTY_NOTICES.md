@@ -14,6 +14,10 @@ in the source map. VideoBox rewrites navigation, project data, copy, and all
 authentication/team/administration behavior; none of those upstream features
 are materialized.
 
+Task 22 adds local, read-only voice readiness to that adapted shell. It reads
+existing VideoBox state only and does not add upstream authentication, provider,
+or administration behavior.
+
 ## Future materialization rule
 
 Before a source file or generated component is added, record its pinned source
