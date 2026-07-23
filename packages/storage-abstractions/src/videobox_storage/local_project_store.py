@@ -33,6 +33,7 @@ from videobox_core_engine.creation_interview import (
 # Heavy exports (rendered mp4s, CapCut drafts) can be large; keep only the most
 # recent N per export_type per project so disk usage does not grow unbounded.
 DEFAULT_EXPORT_RETENTION_COUNT = 5
+CAPCUT_DRAFT_HANDOFF_CLAIM_LEASE_SECONDS = 300
 RETIRED_CREDENTIAL_TABLE = "g" + "emini_provider_keys"
 
 
@@ -3630,7 +3631,8 @@ class LocalProjectStore:
         row = self._fetchone(
             project_id,
             """
-            SELECT export_id, project_id, timeline_id, export_type, file_uri, status, metadata_json, created_at, source_session_revision, is_current, invalidated_at, invalidated_reason
+            SELECT export_id, project_id, timeline_id, export_type, file_uri, status, metadata_json, created_at, source_session_revision, is_current, invalidated_at, invalidated_reason,
+                   handoff_claim_token, handoff_claimed_at, handoff_claim_expires_at
             FROM exports
             WHERE project_id = ? AND export_id = ?
             """,
@@ -3642,6 +3644,29 @@ class LocalProjectStore:
         if not file_path.exists():
             raise KeyError(f"Export artifact missing: {export_id}")
         metadata = json.loads(str(row["metadata_json"] or "{}"))
+        handoff = metadata.get("handoff")
+        if not isinstance(handoff, dict) and row["handoff_claim_token"] is not None:
+            expires_at = str(row["handoff_claim_expires_at"] or "")
+            try:
+                active_claim = bool(expires_at) and datetime.fromisoformat(expires_at) > datetime.now(UTC)
+            except (TypeError, ValueError):
+                active_claim = False
+            handoff = {
+                "status": "in_progress" if active_claim else "failed",
+                "source_file_uri": row["file_uri"],
+                "registered_project_path": None,
+                "error_message": None if active_claim else "CapCut 등록 요청이 중단되었어요. 다시 등록해 주세요.",
+                "registered_at": None,
+                "reused": False,
+                "recoverable": not active_claim,
+                "recoverable_at": expires_at or None,
+            }
+        elif isinstance(handoff, dict):
+            handoff = {
+                **handoff,
+                "recoverable": bool(handoff.get("recoverable", handoff.get("status") == "failed")),
+                "recoverable_at": handoff.get("recoverable_at"),
+            }
         return {
             "export_id": row["export_id"],
             "timeline_id": row["timeline_id"],
@@ -3649,7 +3674,7 @@ class LocalProjectStore:
             "file_uri": row["file_uri"],
             "status": row["status"],
             "notes": list(metadata.get("notes") or []),
-            "handoff": metadata.get("handoff"),
+            "handoff": handoff,
             "created_at": row["created_at"],
             "source_session_revision": row["source_session_revision"],
             "is_current": bool(row["is_current"]),
@@ -3705,7 +3730,8 @@ class LocalProjectStore:
             export = connection.execute(
                 """SELECT export_id, timeline_id, file_uri, status, is_current,
                           source_session_id, source_session_revision, metadata_json,
-                          handoff_claim_token, handoff_claim_job_id
+                          handoff_claim_token, handoff_claim_job_id, handoff_claimed_at,
+                          handoff_claim_expires_at
                    FROM exports
                    WHERE project_id = ? AND export_id = ?
                      AND export_type = ?""",
@@ -3745,24 +3771,35 @@ class LocalProjectStore:
                     "state": "ready",
                     "handoff": {**existing_handoff, "reused": True},
                 }
-            if export["handoff_claim_token"] is not None:
+            now = datetime.now(UTC)
+            now_iso = now.isoformat()
+            expires_at = str(export["handoff_claim_expires_at"] or "")
+            try:
+                active_claim = export["handoff_claim_token"] is not None and bool(expires_at) and datetime.fromisoformat(expires_at) > now
+            except (TypeError, ValueError):
+                active_claim = False
+            if active_claim:
                 connection.commit()
-                return {"state": "in_progress"}
+                return {"state": "in_progress", "recoverable_at": expires_at}
 
             claim_token = uuid.uuid4().hex
+            expires_at = (now + timedelta(seconds=CAPCUT_DRAFT_HANDOFF_CLAIM_LEASE_SECONDS)).isoformat()
             cursor = connection.execute(
                 """UPDATE exports
-                   SET handoff_claim_token = ?, handoff_claim_job_id = ?
+                   SET handoff_claim_token = ?, handoff_claim_job_id = ?, handoff_claimed_at = ?, handoff_claim_expires_at = ?
                    WHERE project_id = ? AND export_id = ? AND export_type = ?
                      AND status = ? AND is_current = 1
-                     AND handoff_claim_token IS NULL""",
+                     AND (handoff_claim_token IS NULL OR handoff_claim_expires_at IS NULL OR handoff_claim_expires_at <= ?)""",
                 (
                     claim_token,
                     str(job["job_id"]),
+                    now_iso,
+                    expires_at,
                     project_id,
                     str(export["export_id"]),
                     "capcut_draft_export",
                     JobStatus.SUCCEEDED.value,
+                    now_iso,
                 ),
             )
             if cursor.rowcount != 1:
@@ -3780,6 +3817,8 @@ class LocalProjectStore:
                 "export_source_session_revision": int(export_session_revision) if export_session_revision is not None else None,
                 "active_session_id": str(active_session["session_id"]) if active_session is not None else None,
                 "active_session_revision": int(active_session["session_revision"]) if active_session is not None else None,
+                "claimed_at": now_iso,
+                "expires_at": expires_at,
             }
         except Exception:
             if connection.in_transaction:
@@ -3803,7 +3842,7 @@ class LocalProjectStore:
             export = connection.execute(
                 """SELECT timeline_id, status, is_current, source_session_id,
                           source_session_revision, metadata_json, handoff_claim_token,
-                          handoff_claim_job_id
+                          handoff_claim_job_id, handoff_claim_expires_at
                    FROM exports
                    WHERE project_id = ? AND export_id = ?
                      AND export_type = ?""",
@@ -3816,6 +3855,13 @@ class LocalProjectStore:
                    LIMIT 1""",
                 (project_id,),
             ).fetchone()
+            now_iso = datetime.now(UTC).isoformat()
+            try:
+                claim_not_expired = bool(export and export["handoff_claim_expires_at"]) and datetime.fromisoformat(
+                    str(export["handoff_claim_expires_at"])
+                ) > datetime.fromisoformat(now_iso)
+            except (TypeError, ValueError):
+                claim_not_expired = False
             claim_is_current = (
                 job is not None
                 and str(job["job_type"]) == JobType.CAPCUT_DRAFT_EXPORT.value
@@ -3835,6 +3881,7 @@ class LocalProjectStore:
                 == claim["active_session_revision"]
                 and str(export["handoff_claim_token"] or "") == str(claim["claim_token"])
                 and str(export["handoff_claim_job_id"] or "") == str(claim["job_id"])
+                and claim_not_expired
             )
             if not claim_is_current:
                 connection.rollback()
@@ -3843,10 +3890,12 @@ class LocalProjectStore:
             metadata["handoff"] = handoff
             cursor = connection.execute(
                 """UPDATE exports
-                   SET metadata_json = ?, handoff_claim_token = NULL, handoff_claim_job_id = NULL
+                   SET metadata_json = ?, handoff_claim_token = NULL, handoff_claim_job_id = NULL,
+                       handoff_claimed_at = NULL, handoff_claim_expires_at = NULL
                    WHERE project_id = ? AND export_id = ? AND export_type = ?
                      AND status = ? AND is_current = 1
-                     AND handoff_claim_token = ? AND handoff_claim_job_id = ?""",
+                     AND handoff_claim_token = ? AND handoff_claim_job_id = ?
+                     AND handoff_claim_expires_at > ?""",
                 (
                     json.dumps(metadata, ensure_ascii=True),
                     project_id,
@@ -3855,6 +3904,7 @@ class LocalProjectStore:
                     JobStatus.SUCCEEDED.value,
                     str(claim["claim_token"]),
                     str(claim["job_id"]),
+                    now_iso,
                 ),
             )
             if cursor.rowcount != 1:
@@ -3862,6 +3912,34 @@ class LocalProjectStore:
                 return False
             connection.commit()
             return True
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def release_capcut_draft_handoff_claim(self, *, project_id: str, claim: dict[str, Any]) -> bool:
+        """Release only this owner token; never clear a claim reclaimed by another request."""
+        connection = self._connection(project_id)
+        try:
+            self._begin_capcut_draft_handoff_transaction(connection)
+            cursor = connection.execute(
+                """UPDATE exports
+                   SET handoff_claim_token = NULL, handoff_claim_job_id = NULL,
+                       handoff_claimed_at = NULL, handoff_claim_expires_at = NULL
+                   WHERE project_id = ? AND export_id = ? AND export_type = ?
+                     AND handoff_claim_token = ? AND handoff_claim_job_id = ?""",
+                (
+                    project_id,
+                    str(claim["export_id"]),
+                    "capcut_draft_export",
+                    str(claim["claim_token"]),
+                    str(claim["job_id"]),
+                ),
+            )
+            connection.commit()
+            return cursor.rowcount == 1
         except Exception:
             if connection.in_transaction:
                 connection.rollback()
@@ -5762,6 +5840,8 @@ class LocalProjectStore:
             for column, declaration in (
                 ("handoff_claim_token", "TEXT"),
                 ("handoff_claim_job_id", "TEXT"),
+                ("handoff_claimed_at", "TEXT"),
+                ("handoff_claim_expires_at", "TEXT"),
             ):
                 if column not in columns:
                     connection.execute(f"ALTER TABLE exports ADD COLUMN {column} {declaration}")

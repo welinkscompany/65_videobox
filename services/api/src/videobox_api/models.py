@@ -1013,6 +1013,8 @@ class CapCutDraftHandoffResponse(BaseModel):
     error_message: str | None = None
     registered_at: str | None = None
     reused: bool = False
+    recoverable: bool = False
+    recoverable_at: str | None = None
 
 
 class CapCutHandoffDiagnosticsResponse(BaseModel):

@@ -342,7 +342,8 @@ PROJECT_SCHEMA_STATEMENTS = (
         created_at TEXT NOT NULL,
         source_session_id TEXT, source_session_revision INTEGER, is_current INTEGER NOT NULL DEFAULT 1,
         invalidated_at TEXT, invalidated_reason TEXT,
-        handoff_claim_token TEXT, handoff_claim_job_id TEXT
+        handoff_claim_token TEXT, handoff_claim_job_id TEXT,
+        handoff_claimed_at TEXT, handoff_claim_expires_at TEXT
     )
     """,
     """

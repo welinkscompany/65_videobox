@@ -637,6 +637,8 @@ export type CapCutDraftHandoff = {
   error_message?: string | null;
   registered_at?: string | null;
   reused: boolean;
+  recoverable?: boolean;
+  recoverable_at?: string | null;
 };
 
 export type CapCutHandoffDiagnostics = {

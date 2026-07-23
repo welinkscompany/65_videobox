@@ -175,7 +175,10 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
   const currentCapcutDraft = capcutDraft?.status === "succeeded" && capcutDraft.export?.status === "succeeded" && capcutDraft.export.is_current === true;
   const staleCapcutDraft = capcutDraft?.status === "succeeded" && Boolean(capcutDraft.export) && !currentCapcutDraft;
   const capcutHandoff = currentCapcutDraft ? capcutDraft?.export?.handoff ?? null : null;
-  const canRegisterCapcutHandoff = Boolean(currentCapcutDraft && capcutDraft?.export && capcutHandoff?.status !== "ready");
+  const capcutHandoffInProgress = capcutHandoff?.status === "in_progress";
+  const canRegisterCapcutHandoff = Boolean(
+    currentCapcutDraft && capcutDraft?.export && capcutHandoff?.status !== "ready" && !capcutHandoffInProgress,
+  );
   const handleRenderSubtitle = async () => {
     const submissionProjectId = projectId;
     if (currentProjectId.current !== submissionProjectId || !timelineJob || !canRenderSubtitle || isRenderingCurrentSubtitle) return;
@@ -312,6 +315,7 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
           {currentCapcutDraft && capcutDraft.export ? <p>로컬 저장 위치: {capcutDraft.export.file_uri}</p> : null}
           {currentCapcutDraft && capcutDraft.export?.notes.length ? <p>일부 효과는 CapCut에서 확인해 주세요.</p> : null}
           {capcutHandoff?.status === "ready" ? <p>{capcutHandoff.reused ? "기존 CapCut 등록 정보를 다시 사용해요." : "CapCut 등록 상태가 준비되었어요."}</p> : null}
+          {capcutHandoffInProgress ? <p>CapCut 등록이 진행 중이에요. 잠시 후 상태를 다시 확인해 주세요.</p> : null}
           {capcutHandoff?.status === "failed" ? <p>CapCut 등록을 완료하지 못했어요. 상태를 확인한 뒤 다시 시도해 주세요.</p> : null}
           {capcutHandoffError ? <p>CapCut 등록 상태를 확인하지 못했어요. 상태를 다시 확인한 뒤 시도해 주세요.</p> : null}
           {currentCapcutDraft ? <p>실제 CapCut Desktop에서 열기와 가져오기는 별도로 확인해야 해요.</p> : null}

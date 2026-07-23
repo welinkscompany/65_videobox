@@ -73,6 +73,8 @@ POSTGRES_MIGRATION_STATEMENTS = (
     ),
     "ALTER TABLE exports ADD COLUMN IF NOT EXISTS handoff_claim_token TEXT",
     "ALTER TABLE exports ADD COLUMN IF NOT EXISTS handoff_claim_job_id TEXT",
+    "ALTER TABLE exports ADD COLUMN IF NOT EXISTS handoff_claimed_at TEXT",
+    "ALTER TABLE exports ADD COLUMN IF NOT EXISTS handoff_claim_expires_at TEXT",
     *(
         f"""
         DO $$

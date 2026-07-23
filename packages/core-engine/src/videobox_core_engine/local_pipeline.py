@@ -1937,9 +1937,9 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
             raise ValueError("capcut_draft_handoff_in_progress")
         if claim.get("state") != "owner":
             raise RuntimeError("capcut_draft_handoff_claim_invalid")
-        source_path = self.store.resolve_storage_uri(project_id=project_id, storage_uri=claim["file_uri"])
         registered = None
         try:
+            source_path = self.store.resolve_storage_uri(project_id=project_id, storage_uri=claim["file_uri"])
             registered = self.capcut_handoff_service.register(
                 source_draft_path=source_path,
                 export_id=str(claim["export_id"]),
@@ -1952,6 +1952,8 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 "error_message": None,
                 "registered_at": registered.registered_at,
                 "reused": registered.reused,
+                "recoverable": False,
+                "recoverable_at": None,
             }
         except CapCutHandoffError as exc:
             handoff = {
@@ -1961,13 +1963,40 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 "error_message": str(exc),
                 "registered_at": None,
                 "reused": False,
+                "recoverable": True,
+                "recoverable_at": None,
             }
-        if not self.store.publish_capcut_draft_handoff_if_current(
-            project_id=project_id,
-            claim=claim,
-            handoff=handoff,
-        ):
-            if registered is not None:
+        except Exception:
+            # This is deliberately a recoverable local operation.  Do not leak
+            # an owner token merely because a filesystem adapter violated its
+            # expected error type.
+            handoff = {
+                "status": "failed",
+                "source_file_uri": claim["file_uri"],
+                "registered_project_path": None,
+                "error_message": "CapCut 등록에 실패했어요. 상태를 확인한 뒤 다시 등록해 주세요.",
+                "registered_at": None,
+                "reused": False,
+                "recoverable": True,
+                "recoverable_at": None,
+            }
+        try:
+            published = self.store.publish_capcut_draft_handoff_if_current(
+                project_id=project_id,
+                claim=claim,
+                handoff=handoff,
+            )
+        except Exception:
+            released = self.store.release_capcut_draft_handoff_claim(project_id=project_id, claim=claim)
+            if registered is not None and released:
+                self.capcut_handoff_service.cleanup_request_owned_registration(
+                    record=registered,
+                    ownership_token=str(claim["claim_token"]),
+                )
+            raise
+        if not published:
+            released = self.store.release_capcut_draft_handoff_claim(project_id=project_id, claim=claim)
+            if registered is not None and released:
                 self.capcut_handoff_service.cleanup_request_owned_registration(
                     record=registered,
                     ownership_token=str(claim["claim_token"]),

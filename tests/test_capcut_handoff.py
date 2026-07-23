@@ -51,6 +51,20 @@ def test_register_reuses_complete_matching_destination_idempotently(tmp_path: Pa
     assert second.registered_path == first.registered_path
 
 
+def test_reclaimed_registration_rewrites_marker_so_an_abandoned_owner_cannot_delete_the_reused_destination(
+    tmp_path: Path,
+) -> None:
+    service, _ = _configured_service(tmp_path)
+    source = _write_draft(tmp_path / "source" / "timeline_lease")
+
+    abandoned = service.register(source_draft_path=source, export_id="export_lease", ownership_token="old-owner")
+    reclaimed = service.register(source_draft_path=source, export_id="export_lease", ownership_token="new-owner")
+
+    assert reclaimed.reused is True
+    assert service.cleanup_request_owned_registration(record=abandoned, ownership_token="old-owner") is False
+    assert reclaimed.registered_path.is_dir()
+
+
 def test_register_replaces_incomplete_collision_and_removes_partial_directory(tmp_path: Path) -> None:
     service, project_root = _configured_service(tmp_path)
     source = _write_draft(tmp_path / "source" / "timeline_002")

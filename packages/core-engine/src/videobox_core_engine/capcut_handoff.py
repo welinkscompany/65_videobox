@@ -61,7 +61,23 @@ class CapCutHandoffService:
         project_root = self._project_root()
         destination = project_root / f"videobox-{export_id}"
         if self._is_owned_destination(destination=destination, export_id=export_id) and self._is_complete_draft(destination):
-            return self._record(source=source, destination=destination, export_id=export_id, reused=True)
+            # A reclaimed durable lease must supersede the abandoned owner's
+            # marker before it can report reuse.  Otherwise that old owner
+            # could later pass the marker check and delete a destination now
+            # being used by the new request.
+            if ownership_token is not None:
+                self._write_ownership_marker(
+                    destination=destination,
+                    export_id=export_id,
+                    ownership_token=ownership_token,
+                )
+            return self._record(
+                source=source,
+                destination=destination,
+                export_id=export_id,
+                reused=True,
+                ownership_token=ownership_token,
+            )
         if destination.exists():
             if not self._is_owned_destination(destination=destination, export_id=export_id):
                 raise CapCutHandoffError(

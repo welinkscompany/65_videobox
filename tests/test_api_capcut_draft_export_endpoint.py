@@ -271,6 +271,80 @@ def test_capcut_handoff_claim_uses_an_explicit_postgres_row_lock_contract() -> N
     ]
 
 
+def test_capcut_draft_export_get_surfaces_a_durable_in_progress_handoff_claim(tmp_path: Path) -> None:
+    """A fresh page load must see another request's durable claim, not offer a duplicate POST."""
+    app = create_app(
+        projects_root=tmp_path,
+        capcut_handoff_service=CapCutHandoffService(local_app_data=tmp_path / "NoCapCut"),
+    )
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "CapCut durable GET"}).json()["project_id"]
+    store = LocalProjectStore(tmp_path)
+    job, _ = _save_current_capcut_draft_export_job(store, project_id=project_id)
+
+    claim = store.claim_capcut_draft_handoff(project_id=project_id, job_id=job["job_id"])
+
+    assert claim is not None and claim["state"] == "owner"
+    response = client.get(f"/api/projects/{project_id}/capcut-draft-exports/{job['job_id']}")
+    assert response.status_code == 200
+    handoff = response.json()["export"]["handoff"]
+    assert handoff["status"] == "in_progress"
+    assert handoff["recoverable"] is False
+    assert handoff["recoverable_at"]
+    assert handoff["source_file_uri"] == response.json()["export"]["file_uri"]
+
+
+def test_capcut_draft_handoff_expired_durable_claim_is_reclaimed_by_the_next_explicit_post(tmp_path: Path) -> None:
+    """A dead owner must not permanently strand a current export."""
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="CapCut expired claim recovery")
+    job, _ = _save_current_capcut_draft_export_job(store, project_id=project.project_id)
+    first = store.claim_capcut_draft_handoff(project_id=project.project_id, job_id=job["job_id"])
+    assert first is not None and first["state"] == "owner"
+
+    connection = store._connection(project.project_id)
+    try:
+        connection.execute(
+            "UPDATE exports SET handoff_claim_expires_at = ? WHERE project_id = ? AND export_id = ?",
+            ("2000-01-01T00:00:00+00:00", project.project_id, first["export_id"]),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    assert not store.publish_capcut_draft_handoff_if_current(
+        project_id=project.project_id,
+        claim=first,
+        handoff={"status": "ready", "source_file_uri": first["file_uri"], "reused": False},
+    )
+    second = store.claim_capcut_draft_handoff(project_id=project.project_id, job_id=job["job_id"])
+    assert second is not None and second["state"] == "owner"
+    assert second["claim_token"] != first["claim_token"]
+
+
+def test_capcut_draft_handoff_unexpected_registration_error_publishes_recoverable_failure_and_releases_claim(
+    tmp_path: Path,
+) -> None:
+    """Unexpected local failures must not leave the durable owner token stranded."""
+    class ExplodingHandoffService(CapCutHandoffService):
+        def register(self, **kwargs):  # type: ignore[no-untyped-def]
+            raise RuntimeError("unexpected handoff explosion")
+
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="CapCut unexpected registration recovery")
+    job, _ = _save_current_capcut_draft_export_job(store, project_id=project.project_id)
+    runner = LocalPipelineRunner(store, capcut_handoff_service=ExplodingHandoffService(local_app_data=tmp_path / "NoCapCut"))
+
+    handoff = runner.register_capcut_draft_handoff(project_id=project.project_id, job_id=job["job_id"])
+
+    assert handoff["status"] == "failed"
+    assert handoff["recoverable"] is True
+    export = store.get_capcut_draft_export(project_id=project.project_id, export_id=job["output_ref"])
+    assert export["handoff"]["status"] == "failed"
+    reclaimed = store.claim_capcut_draft_handoff(project_id=project.project_id, job_id=job["job_id"])
+    assert reclaimed is not None and reclaimed["state"] == "owner"
+
+
 def test_capcut_handoff_diagnostics_api_reports_injected_windows_readiness_without_llm_call(tmp_path: Path) -> None:
     local_app_data = tmp_path / "LocalAppData"
     executable = local_app_data / "CapCut" / "Apps" / "8.9.1.3802" / "CapCut.exe"
