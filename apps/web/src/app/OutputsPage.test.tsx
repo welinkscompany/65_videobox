@@ -72,7 +72,7 @@ function stubReadOnlyOutputApi() {
   });
   vi.spyOn(api, "getCapcutDraftExport").mockResolvedValue({
     job_id: capcutJob.job_id, status: "succeeded", export: {
-      export_id: "capcut-a", timeline_id: "timeline-a", export_type: "capcut_draft", file_uri: "local://draft.zip", status: "succeeded", notes: [],
+      export_id: "capcut-a", timeline_id: "timeline-a", export_type: "capcut_draft", file_uri: "local://draft.zip", status: "succeeded", notes: [], is_current: true,
       handoff: { status: "ready", source_file_uri: "local://draft.zip", reused: false },
     },
   });
@@ -421,7 +421,7 @@ describe("OutputsPage", () => {
     const startCapcutDraftExport = vi.spyOn(api, "startCapcutDraftExport").mockResolvedValue({ job_id: currentCapcutJob.job_id, status: "succeeded" });
     vi.spyOn(api, "getCapcutDraftExport").mockResolvedValue({
       job_id: currentCapcutJob.job_id, status: "succeeded", export: {
-        export_id: "capcut-current", timeline_id: "timeline-a", export_type: "capcut_draft", file_uri: "local://draft-current.zip", status: "succeeded", notes: [],
+        export_id: "capcut-current", timeline_id: "timeline-a", export_type: "capcut_draft", file_uri: "local://draft-current.zip", status: "succeeded", notes: [], is_current: true,
       },
     } as never);
 
@@ -434,6 +434,24 @@ describe("OutputsPage", () => {
     expect(screen.getByText("로컬 저장 위치: local://draft-current.zip")).toBeVisible();
     expect(screen.queryByRole("link", { name: /draft-current/i })).not.toBeInTheDocument();
     expect(startCapcutDraftExport).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not present a stale CapCut draft as ready or expose its local URI", async () => {
+    const staleCapcutJob = { ...capcutJob, input_ref: "timeline-current" };
+    stubCanonicalSubtitleApi({ jobs: [activeTimelineJob, staleCapcutJob] as never });
+    vi.spyOn(api, "getCapcutDraftExport").mockResolvedValue({
+      job_id: staleCapcutJob.job_id, status: "succeeded", export: {
+        export_id: "capcut-stale", timeline_id: "timeline-a", export_type: "capcut_draft", file_uri: "local://draft-stale.zip", status: "succeeded", notes: [],
+        source_session_revision: 1, is_current: false, invalidated_at: "2026-07-23T09:10:00Z", invalidated_reason: "editing_session_mutation",
+      },
+    } as never);
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+
+    expect(await screen.findByText("CapCut 초안이 최신 편집본과 달라요.")).toBeVisible();
+    expect(screen.queryByText("CapCut 초안이 준비되었어요.")).not.toBeInTheDocument();
+    expect(screen.queryByText("로컬 저장 위치: local://draft-stale.zip")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "CapCut 초안 만들기" })).toBeEnabled();
   });
 
   it("ignores a CapCut draft from another timeline when choosing the current draft", async () => {
@@ -539,7 +557,7 @@ describe("OutputsPage", () => {
     listJobs.mockResolvedValueOnce([activeTimelineJob] as never).mockReturnValueOnce(delayedSubmissionJobs as never).mockResolvedValueOnce([activeTimelineJob, refreshedCapcut] as never);
     vi.spyOn(api, "startCapcutDraftExport").mockResolvedValue({ job_id: submittedCapcut.job_id, status: "succeeded" });
     vi.spyOn(api, "getCapcutDraftExport").mockImplementation((_projectId, jobId) => Promise.resolve({
-      job_id: jobId, status: "succeeded", export: { export_id: jobId, timeline_id: "timeline-a", export_type: "capcut_draft", file_uri: `local://${jobId}.zip`, status: "succeeded", notes: [] },
+      job_id: jobId, status: "succeeded", export: { export_id: jobId, timeline_id: "timeline-a", export_type: "capcut_draft", file_uri: `local://${jobId}.zip`, status: "succeeded", notes: [], is_current: true },
     }) as never);
 
     render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);

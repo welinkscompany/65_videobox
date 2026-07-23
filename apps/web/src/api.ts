@@ -624,6 +624,10 @@ export type CapCutDraftExportArtifact = {
   created_at?: string | null;
   notes: string[];
   handoff?: CapCutDraftHandoff | null;
+  source_session_revision?: number | null;
+  is_current: boolean;
+  invalidated_at?: string | null;
+  invalidated_reason?: string | null;
 };
 
 export type CapCutDraftHandoff = {
