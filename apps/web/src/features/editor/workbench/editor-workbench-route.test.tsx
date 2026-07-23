@@ -9,6 +9,11 @@ afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 const manifest = (projectId: string, sessionId: string) => ({ project_id: projectId, session_id: sessionId, timeline_id: `timeline-${sessionId}`, session_revision: 1, timeline_version: "v1", timebase: "seconds", fps: { num: 30, den: 1 }, output: { width: 1080, height: 1920, sample_aspect_ratio: "1:1", rotation: 0, duration_sec: 1 }, tracks: [], captions: [], gap_slots: [], source_status: { status: "current", source_session_id: sessionId, source_session_revision: 1 }, audition: { asset_urls: {} }, exact_preview: { status: "unavailable", url: null, source_session_id: sessionId, source_session_revision: 1 } });
 
+async function expectEditorRevision(revision: number) {
+  const workbench = await screen.findByRole("region", { name: "편집 작업판" });
+  await waitFor(() => expect(workbench).toHaveAttribute("data-editor-revision", String(revision)));
+}
+
 const narrationManifest = (revision: number, startSec = 0) => ({
   ...manifest("project-a", "session-a"),
   session_revision: revision,
@@ -180,9 +185,9 @@ describe("EditorWorkbenchRoute", () => {
       : Promise.resolve([{ ...broll, asset_id: "broll-b", metadata: { ...broll.metadata, title: "B 자산" } }] as never));
 
     const rendered = render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
-    expect(await screen.findByText("timeline-session-a · revision 1")).toBeVisible();
+    await expectEditorRevision(1);
     rendered.rerender(<EditorWorkbenchRoute projectId="project-b" sessionId="session-b" />);
-    expect(await screen.findByText("timeline-session-b · revision 1")).toBeVisible();
+    await expectEditorRevision(1);
     await openAssetBrowser();
     expect(await screen.findByRole("button", { name: "B 자산 적용" })).toBeVisible();
 
@@ -211,13 +216,13 @@ describe("EditorWorkbenchRoute", () => {
     await waitFor(() => expect(materialize).toHaveBeenCalledWith("library-bgm-1", "project-a"));
 
     rendered.rerender(<EditorWorkbenchRoute projectId="project-b" sessionId="session-b" />);
-    expect(await screen.findByText("timeline-session-b · revision 1")).toBeVisible();
+    await expectEditorRevision(1);
     await act(async () => { resolveMaterialized({ asset_id: "materialized-bgm" }); });
 
     expect(updateMusic).not.toHaveBeenCalled();
     expect(updateSfx).not.toHaveBeenCalled();
     expect(updateBroll).not.toHaveBeenCalled();
-    expect(screen.getByText("timeline-session-b · revision 1")).toBeVisible();
+    await expectEditorRevision(1);
     expect(screen.queryByText("변경 내용을 저장하지 못했어요. 최신 내용을 확인한 뒤 다시 시도해 주세요.")).toBeNull();
   });
 
@@ -226,7 +231,7 @@ describe("EditorWorkbenchRoute", () => {
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
 
-    expect(await screen.findByText("timeline-session-a · revision 1")).toBeVisible();
+    await expectEditorRevision(1);
     expect(await screen.findByText("일부 자산을 불러오지 못했어요. 편집은 계속할 수 있어요. 잠시 후 다시 확인해 주세요.")).toBeVisible();
     expect(screen.getByRole("button", { name: "n-1 클립 선택" })).toBeEnabled();
   });
@@ -235,12 +240,12 @@ describe("EditorWorkbenchRoute", () => {
     let resolveB!: (value: ReturnType<typeof manifest>) => void;
     const load = vi.spyOn(api, "getEditorPlaybackManifest").mockImplementation((projectId, sessionId) => sessionId === "session-a" ? Promise.resolve(manifest(projectId, sessionId)) : new Promise((resolve) => { resolveB = resolve; }));
     const rendered = render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
-    expect(await screen.findByText("timeline-session-a · revision 1")).toBeVisible();
+    await expectEditorRevision(1);
     rendered.rerender(<EditorWorkbenchRoute projectId="project-b" sessionId="session-b" />);
-    expect(screen.queryByText("timeline-session-a · revision 1")).toBeNull();
+    expect(screen.queryByRole("region", { name: "편집 작업판" })).toBeNull();
     expect(screen.getByText("편집 내용을 불러오는 중이에요.")).toBeVisible();
     resolveB(manifest("project-b", "session-b"));
-    expect(await screen.findByText("timeline-session-b · revision 1")).toBeVisible();
+    await expectEditorRevision(1);
     expect(load).toHaveBeenCalledTimes(2);
   });
 
@@ -262,7 +267,7 @@ describe("EditorWorkbenchRoute", () => {
       .mockImplementation(() => new Promise((resolve) => { resolveUpdate = resolve; }) as never);
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
-    expect(await screen.findByText("timeline-session-a · revision 1")).toBeVisible();
+    await expectEditorRevision(1);
     fireEvent.click(screen.getByRole("button", { name: "n-1 클립 선택" }));
     const track = screen.getByTestId("timeline-track");
     vi.spyOn(track, "getBoundingClientRect").mockReturnValue({ left: 0 } as DOMRect);
@@ -283,7 +288,7 @@ describe("EditorWorkbenchRoute", () => {
     expect(trim).toBeDisabled();
     resolveUpdate({});
     await waitFor(() => expect(load).toHaveBeenCalledTimes(2));
-    expect(await screen.findByText("timeline-session-a · revision 2")).toBeVisible();
+    await expectEditorRevision(2);
   });
 
   it("saves linked caption text through the same revision fence and refreshes the manifest", async () => {
@@ -293,7 +298,7 @@ describe("EditorWorkbenchRoute", () => {
     const update = vi.spyOn(api, "updateEditingSessionCaption").mockResolvedValue({} as never);
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
-    expect(await screen.findByText("timeline-session-a · revision 4")).toBeVisible();
+    await expectEditorRevision(4);
     fireEvent.click(screen.getByRole("button", { name: "자산과 대본" }));
     expect(await screen.findByRole("dialog", { name: "자산과 대본" })).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "원래 자막 대본 선택" }));
@@ -301,7 +306,7 @@ describe("EditorWorkbenchRoute", () => {
     fireEvent.click(screen.getByRole("button", { name: "자막 저장" }));
 
     await waitFor(() => expect(update).toHaveBeenCalledWith("project-a", "session-a", "segment-1", { caption_text: "새 자막", expected_revision: 4 }));
-    expect(await screen.findByText("timeline-session-a · revision 5")).toBeVisible();
+    await expectEditorRevision(5);
     expect(load).toHaveBeenCalledTimes(2);
   });
 
@@ -314,7 +319,7 @@ describe("EditorWorkbenchRoute", () => {
     );
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
-    expect(await screen.findByText("timeline-session-a · revision 4")).toBeVisible();
+    await expectEditorRevision(4);
     fireEvent.click(screen.getByRole("button", { name: "자산과 대본" }));
     expect(await screen.findByRole("dialog", { name: "자산과 대본" })).toBeVisible();
     fireEvent.change(screen.getByRole("textbox", { name: "segment-1 자막 텍스트" }), { target: { value: "새 자막" } });
@@ -322,7 +327,7 @@ describe("EditorWorkbenchRoute", () => {
 
     expect(await screen.findByText("다른 변경이 먼저 저장됐어요. 최신 내용을 확인한 뒤 다시 시도해 주세요.")).toBeVisible();
     expect(update).toHaveBeenCalledTimes(1);
-    expect(await screen.findByText("timeline-session-a · revision 5")).toBeVisible();
+    await expectEditorRevision(5);
     expect(load).toHaveBeenCalledTimes(2);
   });
 
@@ -336,7 +341,7 @@ describe("EditorWorkbenchRoute", () => {
     );
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
-    expect(await screen.findByText("timeline-session-a · revision 1")).toBeVisible();
+    await expectEditorRevision(1);
     fireEvent.click(screen.getByRole("button", { name: "n-1 클립 선택" }));
     const track = screen.getByTestId("timeline-track");
     vi.spyOn(track, "getBoundingClientRect").mockReturnValue({ left: 0 } as DOMRect);
@@ -346,13 +351,13 @@ describe("EditorWorkbenchRoute", () => {
     pointer(trim, "pointerup", 200);
 
     expect(await screen.findByText("다른 변경이 먼저 저장됐어요. 최신 내용을 확인한 뒤 다시 시도해 주세요.")).toBeVisible();
-    expect(screen.getByText("timeline-session-a · revision 1")).toBeVisible();
+    await expectEditorRevision(1);
     expect(update).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(load).toHaveBeenCalledTimes(2));
     expect(update).toHaveBeenCalledTimes(1);
 
     resolveRefresh(narrationManifest(2, 0));
-    expect(await screen.findByText("timeline-session-a · revision 2")).toBeVisible();
+    await expectEditorRevision(2);
     expect(update).toHaveBeenCalledTimes(1);
   });
 
@@ -363,7 +368,7 @@ describe("EditorWorkbenchRoute", () => {
     const reorder = vi.spyOn(api, "reorderEditingSessionSegments").mockResolvedValue({} as never);
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
-    expect(await screen.findByText("timeline-session-a · revision 3")).toBeVisible();
+    await expectEditorRevision(3);
     fireEvent.click(screen.getByRole("button", { name: "n-1 클립 선택" }));
     const track = screen.getByTestId("timeline-track");
     vi.spyOn(track, "getBoundingClientRect").mockReturnValue({ left: 0 } as DOMRect);
@@ -393,7 +398,7 @@ describe("EditorWorkbenchRoute", () => {
     const update = vi.spyOn(api, "updateEditingSessionSegmentBounds").mockRejectedValue(new Error("offline"));
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
-    expect(await screen.findByText("timeline-session-a · revision 5")).toBeVisible();
+    await expectEditorRevision(5);
     fireEvent.click(screen.getByRole("button", { name: "n-1 클립 선택" }));
     const track = screen.getByTestId("timeline-track");
     vi.spyOn(track, "getBoundingClientRect").mockReturnValue({ left: 0 } as DOMRect);
@@ -421,7 +426,7 @@ describe("EditorWorkbenchRoute", () => {
       .mockImplementationOnce(() => new Promise((resolve) => { resolveNewUpdate = resolve; }) as never);
 
     const rendered = render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
-    expect(await screen.findByText("timeline-session-a · revision 1")).toBeVisible();
+    await expectEditorRevision(1);
     fireEvent.click(screen.getByRole("button", { name: "n-1 클립 선택" }));
     let track = screen.getByTestId("timeline-track");
     vi.spyOn(track, "getBoundingClientRect").mockReturnValue({ left: 0 } as DOMRect);
@@ -432,9 +437,9 @@ describe("EditorWorkbenchRoute", () => {
     await waitFor(() => expect(update).toHaveBeenCalledTimes(1));
 
     rendered.rerender(<EditorWorkbenchRoute projectId="project-b" sessionId="session-b" />);
-    expect(await screen.findByText("timeline-session-b · revision 1")).toBeVisible();
+    await expectEditorRevision(1);
     rendered.rerender(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
-    expect(await screen.findByText("timeline-session-a · revision 10")).toBeVisible();
+    await expectEditorRevision(10);
     fireEvent.click(screen.getByRole("button", { name: "n-1 클립 선택" }));
     track = screen.getByTestId("timeline-track");
     vi.spyOn(track, "getBoundingClientRect").mockReturnValue({ left: 0 } as DOMRect);
@@ -447,13 +452,13 @@ describe("EditorWorkbenchRoute", () => {
 
     await act(async () => { resolveOldUpdate({}); });
     expect(load).toHaveBeenCalledTimes(3);
-    expect(screen.getByText("timeline-session-a · revision 10")).toBeVisible();
+    await expectEditorRevision(10);
     expect(screen.getByText("변경 내용을 저장하고 있어요.")).toBeVisible();
     expect(trim).toBeDisabled();
 
     resolveNewUpdate({});
     await waitFor(() => expect(load).toHaveBeenCalledTimes(4));
-    expect(await screen.findByText("timeline-session-a · revision 11")).toBeVisible();
+    await expectEditorRevision(11);
     expect(screen.getByText("변경 내용을 저장했어요.")).toBeVisible();
   });
 
@@ -485,7 +490,7 @@ describe("EditorWorkbenchRoute", () => {
     }
 
     render(<Harness />);
-    expect(await screen.findByText("timeline-session-a · revision 1")).toBeVisible();
+    await expectEditorRevision(1);
     fireEvent.click(screen.getByRole("button", { name: "n-1 클립 선택" }));
     const reorder = screen.getByRole("button", { name: "n-1 순서 바꾸기" });
     fireEvent.keyDown(reorder, { key: "ArrowRight" });
@@ -494,11 +499,11 @@ describe("EditorWorkbenchRoute", () => {
     act(() => {
       startTransition(() => navigate("b"));
     });
-    expect(screen.getByText("timeline-session-a · revision 1")).toBeVisible();
+    await expectEditorRevision(1);
 
     await act(async () => { resolveUpdate({}); });
     await waitFor(() => expect(load).toHaveBeenCalledTimes(2));
-    expect(await screen.findByText("timeline-session-a · revision 2")).toBeVisible();
+    await expectEditorRevision(2);
     expect(screen.getByText("변경 내용을 저장했어요.")).toBeVisible();
     expect(reorder).not.toBeDisabled();
   });
@@ -514,18 +519,18 @@ describe("EditorWorkbenchRoute", () => {
       .mockImplementation(() => new Promise((resolve) => { resolveOldPreview = resolve; }) as never);
 
     const rendered = render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
-    expect(await screen.findByText("timeline-session-a · revision 1")).toBeVisible();
+    await expectEditorRevision(1);
     fireEvent.click(screen.getByRole("button", { name: "미리보기 새로 만들기" }));
     await waitFor(() => expect(startPreview).toHaveBeenCalledTimes(1));
 
     rendered.rerender(<EditorWorkbenchRoute projectId="project-b" sessionId="session-b" />);
-    expect(await screen.findByText("timeline-session-b · revision 1")).toBeVisible();
+    await expectEditorRevision(1);
     rendered.rerender(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
-    expect(await screen.findByText("timeline-session-a · revision 10")).toBeVisible();
+    await expectEditorRevision(10);
 
     await act(async () => { resolveOldPreview({}); });
     expect(load).toHaveBeenCalledTimes(3);
-    expect(screen.getByText("timeline-session-a · revision 10")).toBeVisible();
+    await expectEditorRevision(10);
   });
 
   it("adapts the recovered Eugene conversation into the dock, keeps manual edit available when blocked, and auditions a candidate through the sole PreviewStage", async () => {
@@ -540,8 +545,8 @@ describe("EditorWorkbenchRoute", () => {
     } as never);
 
     const rendered = render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
-    expect(await screen.findByText("timeline-session-a · revision 1")).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "유진과 Inspector" }));
+    await expectEditorRevision(1);
+    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
     expect(await screen.findByText("한 가지를 골랐어요.")).toBeVisible();
     expect(screen.getByRole("button", { name: "추천 미리 듣기" })).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "추천 미리 듣기" }));
@@ -550,8 +555,8 @@ describe("EditorWorkbenchRoute", () => {
 
     vi.spyOn(api, "reloadDirectorSession").mockRejectedValueOnce(new Error("blocked"));
     rendered.rerender(<EditorWorkbenchRoute projectId="project-b" sessionId="session-b" />);
-    expect(await screen.findByText("timeline-session-b · revision 1")).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "유진과 Inspector" }));
+    await expectEditorRevision(1);
+    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
     fireEvent.click(await screen.findByRole("button", { name: "직접 편집하기" }));
     expect(await screen.findByRole("button", { name: "자산과 대본" })).toBeVisible();
   });
@@ -566,17 +571,17 @@ describe("EditorWorkbenchRoute", () => {
     const preflight = vi.spyOn(api, "preflightDirectorProposal").mockResolvedValue({ status: "ready" } as never);
     const batchApply = vi.spyOn(api, "batchApplyDirectorProposal").mockResolvedValue({} as never);
     const rendered = render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
-    expect(await screen.findByText("timeline-session-a · revision 1")).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "유진과 Inspector" }));
+    await expectEditorRevision(1);
+    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
     fireEvent.change(await screen.findByLabelText("유진에게 요청하기"), { target: { value: "A 요청" } });
     fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
     await waitFor(() => expect(prepared).toHaveBeenCalledTimes(1));
 
     rendered.rerender(<EditorWorkbenchRoute projectId="project-b" sessionId="session-b" />);
-    expect(await screen.findByText("timeline-session-b · revision 1")).toBeVisible();
+    await expectEditorRevision(1);
     await act(async () => { resolveOldSend({ kind: "exchange", exchange: { user_message: {}, assistant_message: { proposal_id: "proposal-session-a", text: "stale A" } } }); });
     expect(screen.queryByText("stale A")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "유진과 Inspector" }));
+    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
     fireEvent.click(await screen.findByRole("button", { name: "선택한 추천 적용" }));
     await waitFor(() => expect(preflight).toHaveBeenCalledWith("project-b", "proposal-session-b"));
     expect(batchApply).toHaveBeenCalledWith("project-b", "proposal-session-b", { candidate_ids: ["candidate-1"], expected_revision: 1 });
@@ -588,10 +593,10 @@ describe("EditorWorkbenchRoute", () => {
     const createProposal = vi.spyOn(api, "createDirectorProposal").mockResolvedValue(directorProposal() as never);
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
-    expect(await screen.findByText("timeline-session-a · revision 1")).toBeVisible();
+    await expectEditorRevision(1);
     expect(createConversation).not.toHaveBeenCalled();
     expect(createProposal).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "유진과 Inspector" }));
+    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
     fireEvent.click(await screen.findByRole("button", { name: "유진에게 추천받기" }));
 
     await waitFor(() => expect(createConversation).toHaveBeenCalledWith("project-a", { session_id: "session-a" }));
@@ -612,8 +617,8 @@ describe("EditorWorkbenchRoute", () => {
     const batchApply = vi.spyOn(api, "batchApplyDirectorProposal").mockImplementation(() => new Promise((resolve) => { resolveBatch = resolve; }) as never);
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
-    expect(await screen.findByText("timeline-session-a · revision 1")).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "유진과 Inspector" }));
+    await expectEditorRevision(1);
+    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
     const apply = await screen.findByRole("button", { name: "선택한 추천 적용" });
     fireEvent.click(apply);
     fireEvent.click(apply);
@@ -635,8 +640,8 @@ describe("EditorWorkbenchRoute", () => {
     } as never);
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
-    expect(await screen.findByText("timeline-session-a · revision 1")).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "유진과 Inspector" }));
+    await expectEditorRevision(1);
+    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
     const composer = await screen.findByRole("textbox", { name: "유진에게 요청하기" });
     fireEvent.change(composer, { target: { value: "A 요청" } });
     fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
@@ -662,8 +667,8 @@ describe("EditorWorkbenchRoute", () => {
       conversation: { conversation_id: `conversation-${sessionId}`, project_id: String(projectId), session_id: String(sessionId) }, messages: [], proposal: null, references: [],
     }) as never);
     const rendered = render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
-    expect(await screen.findByText("timeline-session-a · revision 1")).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "유진과 Inspector" }));
+    await expectEditorRevision(1);
+    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
     fireEvent.change(await screen.findByRole("textbox", { name: "유진에게 요청하기" }), { target: { value: "A 요청" } });
     fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
     await act(async () => { resolveSend({ kind: "in_progress", retryAfterSeconds: 0 }); });
@@ -671,9 +676,9 @@ describe("EditorWorkbenchRoute", () => {
     expect(retry).toHaveBeenCalledTimes(1);
 
     rendered.rerender(<EditorWorkbenchRoute projectId="project-b" sessionId="session-b" />);
-    expect(await screen.findByText("timeline-session-b · revision 1")).toBeVisible();
+    await expectEditorRevision(1);
     await act(async () => { resolveRetry({ kind: "exchange", exchange: { user_message: { message_id: "user-a", text: "A 요청" }, assistant_message: { message_id: "assistant-a", proposal_id: null, text: "stale retry" } } }); });
     expect(screen.queryByText("stale retry")).toBeNull();
-    expect(screen.getByText("timeline-session-b · revision 1")).toBeVisible();
+    await expectEditorRevision(1);
   });
 });

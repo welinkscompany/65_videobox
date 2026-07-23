@@ -86,8 +86,8 @@ export function RightDock({
     </section>
 
     <section className="vb-editor-workbench__summary">
-      <button type="button" aria-expanded={inspectorOpen} onClick={() => setInspectorOpen((open) => !open)}>{inspectorOpen ? "Inspector 닫기" : "Inspector 열기"}</button>
-      {inspectorOpen ? <div role="region" aria-label="Inspector" className="vb-editor-right-dock__inspector"><h2>Inspector</h2>{selectedSegment ? <p>선택 구간: {selectedSegment.segmentId} · {selectedSegment.startSec.toFixed(2)}–{selectedSegment.endSec.toFixed(2)}초</p> : <p>선택한 구간이 없어요.</p>}{inspectorTargets.length ? <ul>{inspectorTargets.map((target) => <li key={target.id}>{target.label} · {target.kind}</li>)}</ul> : <p>현재 편집 명령이 지원하는 항목만 표시됩니다.</p>}</div> : null}
+      <button type="button" aria-expanded={inspectorOpen} onClick={() => setInspectorOpen((open) => !open)}>{inspectorOpen ? "편집 항목 닫기" : "편집 항목 열기"}</button>
+      {inspectorOpen ? <div role="region" aria-label="편집 항목" className="vb-editor-right-dock__inspector"><h2>편집 항목</h2>{selectedSegment ? <p>선택 구간: {selectedSegment.segmentId} · {selectedSegment.startSec.toFixed(2)}–{selectedSegment.endSec.toFixed(2)}초</p> : <p>선택한 구간이 없어요.</p>}{inspectorTargets.length ? <ul>{inspectorTargets.map((target) => <li key={target.id}>{target.label} · {target.kind}</li>)}</ul> : <p>현재 편집 명령이 지원하는 항목만 표시됩니다.</p>}</div> : null}
     </section>
   </div>;
 }

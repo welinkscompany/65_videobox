@@ -36,9 +36,9 @@ describe("EditorWorkbench", () => {
   it("opens a narrow drawer, focuses it, and restores the trigger after Escape", async () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
     render(<EditorWorkbench view={view} />);
-    const trigger = screen.getByRole("button", { name: "유진과 Inspector" });
+    const trigger = screen.getByRole("button", { name: "유진과 편집 항목" });
     fireEvent.click(trigger);
-    const dialog = await screen.findByRole("dialog", { name: "유진과 Inspector" });
+    const dialog = await screen.findByRole("dialog", { name: "유진과 편집 항목" });
     expect(dialog).toHaveFocus();
     fireEvent.keyDown(dialog, { key: "Escape" });
     expect(screen.queryByRole("dialog")).toBeNull();
@@ -160,8 +160,8 @@ describe("EditorWorkbench", () => {
     } as const;
     window.localStorage.setItem("videobox.editor-workbench.ui", JSON.stringify({ leftOpen: false, rightOpen: true, activeDrawer: null, leftSize: 280, rightSize: 320 }));
     render(<EditorWorkbench view={brollOnlyView} />);
-    fireEvent.click(screen.getByRole("button", { name: "Inspector 열기" }));
-    expect(screen.getByRole("region", { name: "Inspector" })).not.toHaveTextContent("broll 트랙");
+    fireEvent.click(screen.getByRole("button", { name: "편집 항목 열기" }));
+    expect(screen.getByRole("region", { name: "편집 항목" })).not.toHaveTextContent("broll 트랙");
     expect(screen.getByText("현재 편집 명령이 지원하는 항목만 표시됩니다.")).toBeInTheDocument();
   });
 

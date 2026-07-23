@@ -36,9 +36,9 @@ describe("RightDock", () => {
     fireEvent.click(screen.getByRole("radio", { name: "B-002 선택" }));
     Object.defineProperty(history, "scrollTop", { configurable: true, writable: true, value: 72 });
 
-    fireEvent.click(screen.getByRole("button", { name: "Inspector 열기" }));
-    expect(screen.getByRole("region", { name: "Inspector" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Inspector 닫기" }));
+    fireEvent.click(screen.getByRole("button", { name: "편집 항목 열기" }));
+    expect(screen.getByRole("region", { name: "편집 항목" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "편집 항목 닫기" }));
 
     expect(screen.getByLabelText("유진에게 요청하기")).toHaveValue("다음 추천도 보여 줘");
     expect(screen.getByRole("radio", { name: "B-002 선택" })).toBeChecked();

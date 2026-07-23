@@ -32,6 +32,8 @@ const uiFiles = [
   "features/director/ProposalCandidateCard.tsx",
   "features/media/ManualMediaLibrary.tsx",
   "features/media/MediaAnalysisPanel.tsx",
+  "features/editor/workbench/EditorWorkbench.tsx",
+  "features/editor/workbench/RightDock.tsx",
 ];
 
 function renderedCopy(source: string): string {
@@ -189,6 +191,7 @@ describe("user-facing dashboard copy", () => {
     "model",
     "context",
     "pipeline",
+    "Inspector",
     "job",
     "로컬 검수",
     "등록된 job 없음",
