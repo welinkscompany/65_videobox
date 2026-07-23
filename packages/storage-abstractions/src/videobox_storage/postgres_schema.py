@@ -71,6 +71,8 @@ POSTGRES_MIGRATION_STATEMENTS = (
             ("invalidated_reason", "TEXT"),
         )
     ),
+    "ALTER TABLE exports ADD COLUMN IF NOT EXISTS handoff_claim_token TEXT",
+    "ALTER TABLE exports ADD COLUMN IF NOT EXISTS handoff_claim_job_id TEXT",
     *(
         f"""
         DO $$

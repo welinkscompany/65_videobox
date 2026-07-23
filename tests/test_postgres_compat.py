@@ -1,5 +1,5 @@
 from videobox_storage.postgres_compat import translate_sql
-from videobox_storage.postgres_schema import POSTGRES_SCHEMA_STATEMENTS
+from videobox_storage.postgres_schema import POSTGRES_MIGRATION_STATEMENTS, POSTGRES_SCHEMA_STATEMENTS
 
 
 def test_translate_sql_preserves_postgres_upsert_and_converts_sqlite_placeholders() -> None:
@@ -62,3 +62,10 @@ def test_translate_sql_preserves_unknown_revision_upsert() -> None:
 def test_postgres_schema_has_no_sqlite_only_autoincrement_syntax() -> None:
     assert POSTGRES_SCHEMA_STATEMENTS
     assert all("AUTOINCREMENT" not in statement for statement in POSTGRES_SCHEMA_STATEMENTS)
+
+
+def test_postgres_migrations_add_durable_capcut_handoff_claim_columns() -> None:
+    statements = "\n".join(POSTGRES_MIGRATION_STATEMENTS)
+
+    assert "ALTER TABLE exports ADD COLUMN IF NOT EXISTS handoff_claim_token TEXT" in statements
+    assert "ALTER TABLE exports ADD COLUMN IF NOT EXISTS handoff_claim_job_id TEXT" in statements
