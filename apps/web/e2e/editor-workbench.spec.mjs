@@ -30,7 +30,7 @@ test("desktop pointer drag persists the actual dock width across reload", async 
   await page.evaluate(() => localStorage.removeItem("videobox.editor-workbench.ui"));
   await page.goto("/projects/local-draft/editor?session_id=editor-workbench-e2e");
   const workbench = page.getByRole("region", { name: "편집 작업판" });
-  const rightDock = page.getByRole("complementary", { name: "유진과 Inspector" });
+  const rightDock = page.getByRole("complementary", { name: "유진과 편집 항목" });
   const before = await rightDock.boundingBox();
   const handle = await page.getByLabel("오른쪽 패널 크기 조절").boundingBox();
   if (!handle) throw new Error("right resize handle is missing");
@@ -42,8 +42,8 @@ test("desktop pointer drag persists the actual dock width across reload", async 
   const resizedWidth = (await rightDock.boundingBox())?.width ?? 0;
   await page.reload();
   await expect(workbench).toHaveAttribute("data-editor-density", "desktop-both");
-  await expect.poll(async () => (await page.getByRole("complementary", { name: "유진과 Inspector" }).boundingBox())?.width ?? 0).toBeCloseTo(resizedWidth, 0);
-  await page.getByRole("button", { name: "유진과 Inspector" }).click();
+  await expect.poll(async () => (await page.getByRole("complementary", { name: "유진과 편집 항목" }).boundingBox())?.width ?? 0).toBeCloseTo(resizedWidth, 0);
+  await page.getByRole("button", { name: "유진과 편집 항목" }).click();
   await expect(workbench).toHaveAttribute("data-editor-density", "desktop-single");
 });
 
@@ -71,9 +71,9 @@ test("narrow drawer traps focus and returns it to its trigger", async ({ page })
   await page.route("**/playback-manifest", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(manifest) }));
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/projects/local-draft/editor?session_id=editor-workbench-e2e");
-  const trigger = page.getByRole("button", { name: "유진과 Inspector" });
+  const trigger = page.getByRole("button", { name: "유진과 편집 항목" });
   await trigger.click();
-  const drawer = page.getByRole("dialog", { name: "유진과 Inspector" });
+  const drawer = page.getByRole("dialog", { name: "유진과 편집 항목" });
   await expect(drawer).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(drawer).toHaveCount(0);
