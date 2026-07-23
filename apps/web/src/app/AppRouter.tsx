@@ -237,7 +237,7 @@ function SettingsRoutePage() {
   const projectId = resolveLastValidProjectId(window.localStorage.getItem(lastProjectKey), projects) ?? projects[0]?.project_id;
   if (!projectId) return <ProjectsPage />;
   return <ProductShell projectId={projectId} projects={projects} section="settings" onNavigate={(nextProjectId, nextSection) => void navigate({ to: resolveWorkspaceLocation(nextProjectId, nextSection) })} onOpenSettings={() => void navigate({ to: "/settings/general" })}>
-    <SettingsPage section={section as typeof validSections[number]} onNavigate={(nextSection) => void navigate({ to: `/settings/${nextSection}` })} />
+    <SettingsPage projectId={projectId} section={section as typeof validSections[number]} onNavigate={(nextSection) => void navigate({ to: `/settings/${nextSection}` })} />
   </ProductShell>;
 }
 

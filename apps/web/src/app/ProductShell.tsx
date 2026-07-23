@@ -6,7 +6,7 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { Menu, PanelLeftClose, Settings, Video } from "lucide-react";
 
-import type { Project } from "../api";
+import { api, type Project } from "../api";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty";
@@ -54,10 +54,26 @@ export function HomePage({ projectId, onNavigate }: { projectId: string; onNavig
 }
 function HomeCard({ title, description, action, onClick }: { title: string; description: string; action: string; onClick: () => void }) { return <Card><CardHeader><CardTitle>{title}</CardTitle><CardDescription>{description}</CardDescription></CardHeader><CardContent><Button variant="outline" onClick={onClick}>{action}</Button></CardContent></Card>; }
 
-export function SettingsPage({ section, onNavigate }: { section: SettingsSection; onNavigate: (section: SettingsSection) => void }) {
+export function SettingsPage({ section, onNavigate, projectId }: { section: SettingsSection; onNavigate: (section: SettingsSection) => void; projectId: string }) {
   const [settings, setSettings] = useState(readSettings); const update = (patch: Partial<SettingsState>) => setSettings((previous) => { const next = { ...previous, ...patch }; saveSettings(next); return next; });
   const labels: Record<SettingsSection, string> = { general: "일반", appearance: "화면", "ai-privacy": "AI·개인정보", storage: "저장공간", output: "출력" };
-  return <section className="vb-settings" data-testid="settings-page"><p className="vb-eyebrow">설정</p><h1>{labels[section]}</h1><div className="vb-settings-nav">{(Object.keys(labels) as SettingsSection[]).map((key) => <Button key={key} variant={key === section ? "default" : "outline"} onClick={() => onNavigate(key)}>{labels[key]}</Button>)}</div><p>이 기기에 저장되는 작업 환경을 조절합니다.</p><p className="vb-setting-note">설정은 이 기기에서만 관리됩니다.</p>{section === "general" && <SettingToggle label="시작할 때 마지막 프로젝트 열기" checked={settings.openLastProject} onChange={(checked) => update({ openLastProject: checked })} />}{section === "appearance" && <><SettingToggle label="조밀한 화면" checked={settings.compact} onChange={(checked) => update({ compact: checked })} /><SettingToggle label="움직임 줄이기" checked={settings.reducedMotion} onChange={(checked) => update({ reducedMotion: checked })} /></>}{section === "ai-privacy" && <SettingToggle label="이 기기에서만 처리" checked={settings.aiEnabled} onChange={(checked) => update({ aiEnabled: checked })} />}{section === "storage" && <SettingToggle label="저장 공간 알림" checked={settings.storageAlert} onChange={(checked) => update({ storageAlert: checked })} />}{section === "output" && <div className="vb-setting-control"><span>기본 파일 형식</span><Button variant={settings.exportFormat === "mp4" ? "default" : "outline"} onClick={() => update({ exportFormat: "mp4" })}>MP4</Button><Button variant={settings.exportFormat === "mov" ? "default" : "outline"} onClick={() => update({ exportFormat: "mov" })}>MOV</Button></div>}</section>;
+  return <section className="vb-settings" data-testid="settings-page"><p className="vb-eyebrow">설정</p><h1>{labels[section]}</h1><div className="vb-settings-nav">{(Object.keys(labels) as SettingsSection[]).map((key) => <Button key={key} variant={key === section ? "default" : "outline"} onClick={() => onNavigate(key)}>{labels[key]}</Button>)}</div><p>이 기기에 저장되는 작업 환경을 조절합니다.</p><p className="vb-setting-note">설정은 이 기기에서만 관리됩니다.</p>{section === "general" && <SettingToggle label="시작할 때 마지막 프로젝트 열기" checked={settings.openLastProject} onChange={(checked) => update({ openLastProject: checked })} />}{section === "appearance" && <><SettingToggle label="조밀한 화면" checked={settings.compact} onChange={(checked) => update({ compact: checked })} /><SettingToggle label="움직임 줄이기" checked={settings.reducedMotion} onChange={(checked) => update({ reducedMotion: checked })} /></>}{section === "ai-privacy" && <><SettingToggle label="이 기기에서만 처리" checked={settings.aiEnabled} onChange={(checked) => update({ aiEnabled: checked })} /><VoiceReadinessPanel projectId={projectId} /></>}{section === "storage" && <SettingToggle label="저장 공간 알림" checked={settings.storageAlert} onChange={(checked) => update({ storageAlert: checked })} />}{section === "output" && <div className="vb-setting-control"><span>기본 파일 형식</span><Button variant={settings.exportFormat === "mp4" ? "default" : "outline"} onClick={() => update({ exportFormat: "mp4" })}>MP4</Button><Button variant={settings.exportFormat === "mov" ? "default" : "outline"} onClick={() => update({ exportFormat: "mov" })}>MOV</Button></div>}</section>;
+}
+function VoiceReadinessPanel({ projectId }: { projectId: string | null }) {
+  const [readiness, setReadiness] = useState<{ samples: number; approved: number; pending: number; rejected: number } | null>(null);
+  const [error, setError] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    if (!projectId) { setError(true); return () => { cancelled = true; }; }
+    void Promise.all([api.listVoiceSamples(projectId), api.getLatestEditingSession(projectId)]).then(async ([samples, session]) => {
+      const candidateLists = await Promise.all((session?.segments ?? []).map((segment) => api.listTtsCandidates(projectId, segment.segment_id)));
+      if (cancelled) return;
+      const candidates = candidateLists.flatMap((result) => result.candidates);
+      setReadiness({ samples: samples.length, approved: candidates.filter((candidate) => candidate.operator_review_status === "approved").length, pending: candidates.filter((candidate) => candidate.operator_review_status !== "approved" && candidate.operator_review_status !== "rejected").length, rejected: candidates.filter((candidate) => candidate.operator_review_status === "rejected").length });
+    }).catch(() => { if (!cancelled) setError(true); });
+    return () => { cancelled = true; };
+  }, [projectId]);
+  return <section className="vb-setting-control" aria-label="내 목소리 준비 상태"><strong>내 목소리 준비 상태</strong>{error ? <p className="error-banner">음성 준비 상태를 불러오지 못했어요. 편집 화면에서 다시 확인해 주세요.</p> : readiness ? <><p>{`저장한 내 목소리 ${readiness.samples}개`}</p><p>{`들어 보고 승인한 후보 ${readiness.approved}개`}</p><p>{`듣기 검수가 필요한 후보 ${readiness.pending}개`}</p>{readiness.rejected > 0 ? <p>{`다시 확인이 필요한 후보 ${readiness.rejected}개`}</p> : null}</> : <p className="meta-copy">내 목소리 준비 상태를 확인하는 중이에요.</p>}<p className="vb-setting-note">음성 샘플 추가, 후보 만들기, 듣기 검수는 이 화면에서 변경할 수 없어요.</p></section>;
 }
 export function ProductEmptyPage({ title, description, action, onClick }: { title: string; description: string; action: string; onClick: () => void }) { return <Empty><EmptyHeader><EmptyTitle>{title}</EmptyTitle><EmptyDescription>{description}</EmptyDescription></EmptyHeader><Button onClick={onClick}>{action}</Button></Empty>; }
 function SettingToggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (checked: boolean) => void }) { return <Button variant="outline" className="vb-setting-control" aria-pressed={checked} onClick={() => onChange(!checked)}>{label}: {checked ? "켜짐" : "꺼짐"}</Button>; }
