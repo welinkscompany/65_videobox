@@ -16,8 +16,47 @@ const capcutJob = {
   input_ref: "timeline-a", output_ref: "capcut-a", error_message: null,
   started_at: "2026-07-23T09:00:00Z", finished_at: "2026-07-23T09:01:00Z",
 };
+const activeTimelineJob = {
+  job_id: "timeline-current", project_id: "project_a", job_type: "timeline_build", status: "succeeded",
+  input_ref: "readiness-a", output_ref: "timeline-a", error_message: null,
+  started_at: "2026-07-23T09:00:00Z", finished_at: "2026-07-23T09:01:00Z",
+};
+const subtitleJob = {
+  job_id: "subtitle-current", project_id: "project_a", job_type: "subtitle_render", status: "succeeded",
+  input_ref: "timeline-current", output_ref: "subtitle-a", error_message: null,
+  started_at: "2026-07-23T09:02:00Z", finished_at: "2026-07-23T09:03:00Z",
+};
+
+function stubCanonicalSubtitleApi({
+  reviewStatus = "approved",
+  reviewFlags = [],
+  pendingRecommendations = [],
+  jobs = [activeTimelineJob],
+}: {
+  reviewStatus?: string;
+  reviewFlags?: unknown[];
+  pendingRecommendations?: unknown[];
+  jobs?: typeof activeTimelineJob[];
+} = {}) {
+  vi.spyOn(api, "getLatestEditingSession").mockResolvedValue({ session_id: "session-a", project_id: "project_a", timeline_id: "timeline-a" } as never);
+  vi.spyOn(api, "listJobs").mockResolvedValue(jobs as never);
+  vi.spyOn(api, "getTimeline").mockResolvedValue({
+    job_id: activeTimelineJob.job_id, status: "succeeded", timeline: {
+      timeline_id: "timeline-a", project_id: "project_a", version: "v1", output_mode: "short", review_status: reviewStatus,
+      tracks: [], review_flags: reviewFlags, pending_recommendations: pendingRecommendations,
+    },
+  } as never);
+  vi.spyOn(api, "getReviewSnapshot").mockResolvedValue({
+    project_id: "project_a", timeline_id: "timeline-a", review_status: reviewStatus,
+    segments: [], applied_recommendations: [], pending_recommendations: pendingRecommendations, review_flags: reviewFlags,
+  } as never);
+  vi.spyOn(api, "getCapcutHandoffDiagnostics").mockResolvedValue({
+    status: "ready", is_supported: true, project_root_path: "local://capcut", project_root_exists: true, write_access: true, checked_at: "2026-07-23T09:01:00Z",
+  });
+}
 
 function stubReadOnlyOutputApi() {
+  vi.spyOn(api, "getLatestEditingSession").mockResolvedValue(null);
   vi.spyOn(api, "listJobs").mockResolvedValue([finalJob, capcutJob]);
   vi.spyOn(api, "getFinalRender").mockResolvedValue({
     job_id: finalJob.job_id, status: "succeeded", render: {
@@ -36,6 +75,79 @@ function stubReadOnlyOutputApi() {
 }
 
 describe("OutputsPage", () => {
+  it("starts one subtitle render for the approved active timeline and refreshes its typed status", async () => {
+    stubCanonicalSubtitleApi();
+    const renderSubtitle = vi.spyOn(api, "renderSubtitle").mockResolvedValue({ job_id: subtitleJob.job_id, status: "succeeded" });
+    vi.spyOn(api, "getSubtitle").mockResolvedValue({
+      job_id: subtitleJob.job_id, status: "succeeded", subtitle: {
+        subtitle_id: "subtitle-a", project_id: "project_a", timeline_id: "timeline-a", format: "srt", file_uri: "local://subtitle.srt", status: "succeeded", notes: [],
+      },
+    });
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+
+    const action = await screen.findByRole("button", { name: "자막 만들기" });
+    expect(action).toBeEnabled();
+    fireEvent.click(action);
+
+    await waitFor(() => expect(renderSubtitle).toHaveBeenCalledWith("project_a", { timeline_job_id: "timeline-current" }));
+    await waitFor(() => expect(api.getSubtitle).toHaveBeenCalledWith("project_a", "subtitle-current"));
+    expect(await screen.findByText("자막이 준비되었어요.")).toBeVisible();
+    expect(renderSubtitle).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps subtitle rendering disabled when the active review has a blocker", async () => {
+    stubCanonicalSubtitleApi({ reviewFlags: [{ code: "review_required", segment_id: "segment-a", message: "확인이 필요해요." }] });
+    const renderSubtitle = vi.spyOn(api, "renderSubtitle");
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+
+    const action = await screen.findByRole("button", { name: "자막 만들기" });
+    expect(action).toBeDisabled();
+    fireEvent.click(action);
+    expect(renderSubtitle).not.toHaveBeenCalled();
+  });
+
+  it("keeps subtitle failure recoverable until the user explicitly tries again", async () => {
+    stubCanonicalSubtitleApi();
+    const renderSubtitle = vi.spyOn(api, "renderSubtitle").mockRejectedValueOnce(new Error("offline")).mockResolvedValueOnce({ job_id: subtitleJob.job_id, status: "succeeded" });
+    vi.spyOn(api, "getSubtitle").mockResolvedValue({
+      job_id: subtitleJob.job_id, status: "succeeded", subtitle: {
+        subtitle_id: "subtitle-a", project_id: "project_a", timeline_id: "timeline-a", format: "srt", file_uri: "local://subtitle.srt", status: "succeeded", notes: [],
+      },
+    });
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "자막 만들기" }));
+    expect(await screen.findByText("자막을 만들지 못했어요. 편집 상태를 확인한 뒤 다시 시도해 주세요.")).toBeVisible();
+    expect(renderSubtitle).toHaveBeenCalledTimes(1);
+    const retry = screen.getByRole("button", { name: "자막 만들기" });
+    expect(retry).toBeEnabled();
+    fireEvent.click(retry);
+    await waitFor(() => expect(renderSubtitle).toHaveBeenCalledTimes(2));
+  });
+
+  it("does not let a delayed project A subtitle state replace project B", async () => {
+    let resolveProjectA!: (session: { session_id: string; project_id: string; timeline_id: string }) => void;
+    const projectASession = new Promise<{ session_id: string; project_id: string; timeline_id: string }>((resolve) => { resolveProjectA = resolve; });
+    vi.spyOn(api, "getLatestEditingSession").mockReturnValueOnce(projectASession as never).mockResolvedValueOnce(null);
+    vi.spyOn(api, "listJobs").mockResolvedValue([activeTimelineJob] as never);
+    vi.spyOn(api, "getCapcutHandoffDiagnostics").mockResolvedValue({
+      status: "ready", is_supported: true, project_root_path: "local://capcut", project_root_exists: true, write_access: true, checked_at: "2026-07-23T09:01:00Z",
+    });
+    const getTimeline = vi.spyOn(api, "getTimeline");
+
+    const view = render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+    view.rerender(<OutputsPage projectId="project_b" onOpenEditor={vi.fn()} />);
+    expect(await screen.findByText("아직 자막이 없어요.")).toBeVisible();
+
+    resolveProjectA({ session_id: "session-a", project_id: "project_a", timeline_id: "timeline-a" });
+    await waitFor(() => expect(getTimeline).not.toHaveBeenCalled());
+    expect(screen.getByText("아직 자막이 없어요.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "자막 만들기" })).toBeDisabled();
+  });
+
   it("shows a current final preview and ready CapCut handoff using read-only APIs only", async () => {
     stubReadOnlyOutputApi();
     const openEditor = vi.fn();
@@ -51,6 +163,16 @@ describe("OutputsPage", () => {
     expect(startFinalRender).not.toHaveBeenCalled();
     expect(startCapcutDraftExport).not.toHaveBeenCalled();
     expect(registerCapcutDraftHandoff).not.toHaveBeenCalled();
+  });
+
+  it("keeps read-only output status available when the active session lookup fails", async () => {
+    stubReadOnlyOutputApi();
+    vi.spyOn(api, "getLatestEditingSession").mockRejectedValue(new Error("offline"));
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+
+    expect(await screen.findByText("완성본을 확인할 수 있어요.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "자막 만들기" })).toBeDisabled();
   });
 
   it("labels an old final as stale and keeps recovery in the editor", async () => {
@@ -72,6 +194,7 @@ describe("OutputsPage", () => {
   });
 
   it("keeps a failed status read recoverable without offering output mutations", async () => {
+    vi.spyOn(api, "getLatestEditingSession").mockResolvedValue(null);
     const listJobs = vi.spyOn(api, "listJobs").mockRejectedValueOnce(new Error("offline")).mockResolvedValueOnce([]);
     const startFinalRender = vi.spyOn(api, "startFinalRender");
     const startCapcutDraftExport = vi.spyOn(api, "startCapcutDraftExport");
@@ -84,12 +207,13 @@ describe("OutputsPage", () => {
     await waitFor(() => expect(listJobs).toHaveBeenCalledTimes(2));
     expect(startFinalRender).not.toHaveBeenCalled();
     expect(startCapcutDraftExport).not.toHaveBeenCalled();
-    expect(screen.queryByRole("button", { name: /만들기|내보내기|등록/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "자막 만들기" })).toBeDisabled();
   });
 
   it("does not let a delayed project A status response replace project B", async () => {
     let resolveProjectA!: (jobs: typeof finalJob[]) => void;
     const projectAJobs = new Promise<typeof finalJob[]>((resolve) => { resolveProjectA = resolve; });
+    vi.spyOn(api, "getLatestEditingSession").mockResolvedValue(null);
     vi.spyOn(api, "listJobs").mockReturnValueOnce(projectAJobs).mockResolvedValueOnce([]);
     const getFinalRender = vi.spyOn(api, "getFinalRender").mockResolvedValue({
       job_id: finalJob.job_id, status: "succeeded", render: {
@@ -105,7 +229,7 @@ describe("OutputsPage", () => {
     expect(await screen.findByText("아직 완성본이 없어요.")).toBeVisible();
 
     resolveProjectA([finalJob]);
-    await waitFor(() => expect(getFinalRender).toHaveBeenCalledWith("project_a", "final-current"));
+    await waitFor(() => expect(getFinalRender).not.toHaveBeenCalled());
     expect(screen.getByText("아직 완성본이 없어요.")).toBeVisible();
     expect(screen.queryByText("완성본을 확인할 수 있어요.")).not.toBeInTheDocument();
   });
