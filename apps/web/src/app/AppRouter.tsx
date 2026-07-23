@@ -76,6 +76,16 @@ const projectsRoute = createRoute({
 const workspaceRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/projects/$projectId/$section",
+  beforeLoad: ({ params, search }) => {
+    if (params.section !== "editing") return;
+    const sessionId = typeof (search as { session_id?: unknown }).session_id === "string"
+      ? (search as { session_id: string }).session_id
+      : null;
+    throw redirect({
+      href: `/projects/${encodeURIComponent(params.projectId)}/editor${sessionId === null ? "" : `?session_id=${encodeURIComponent(sessionId)}`}`,
+      replace: true,
+    });
+  },
   component: WorkspacePage,
 });
 

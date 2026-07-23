@@ -114,20 +114,18 @@ describe("AppRouter URL ownership", () => {
     expect(router.state.location.pathname).toBe("/projects");
   });
 
-  it("keeps a valid direct workspace URL through a router remount", async () => {
+  it("redirects the prior editing URL to the canonical workbench without mounting legacy workspace data", async () => {
     const projects = [{ project_id: "project_a", name: "A", status: "active", root_storage_uri: "local://a" }];
     vi.spyOn(api, "listProjects").mockResolvedValue(projects);
-    const history = createMemoryHistory({ initialEntries: ["/projects/project_a/editing"] });
-    const first = createAppRouter(new ProjectCatalog(), history);
+    const getProject = vi.spyOn(api, "getProject");
+    const loadManifest = vi.spyOn(api, "getEditorPlaybackManifest").mockRejectedValue(new Error("not ready"));
+    const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects/project_a/editing?session_id=legacy-session"] }));
 
-    render(<AppRouter router={first} />);
-    await waitFor(() => expect(first.state.location.pathname).toBe("/projects/project_a/editing"));
-    await waitFor(() => expect(window.localStorage.getItem("videobox.last-valid-project")).toBe("project_a"));
-    cleanup();
+    render(<AppRouter router={router} />);
 
-    const remounted = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects/project_a/editing"] }));
-    render(<AppRouter router={remounted} />);
-    await waitFor(() => expect(remounted.state.location.pathname).toBe("/projects/project_a/editing"));
+    await waitFor(() => expect(router.state.location.href).toBe("/projects/project_a/editor?session_id=legacy-session"));
+    await waitFor(() => expect(loadManifest).toHaveBeenCalledWith("project_a", "legacy-session"));
+    expect(getProject).not.toHaveBeenCalled();
   });
 
   it("mounts the canonical editor as a dense read-only workbench without legacy media", async () => {
@@ -291,11 +289,11 @@ describe("AppRouter URL ownership", () => {
     vi.spyOn(api, "listJobs").mockResolvedValue([]);
     vi.spyOn(api, "listBrollAssets").mockResolvedValue([]);
     vi.spyOn(api, "getLatestEditingSession").mockResolvedValue(null);
-    const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects/project_a/editing"] }));
+    const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects/project_a/timeline"] }));
     render(<AppRouter router={router} />);
     await waitFor(() => expect(api.getProject).toHaveBeenCalledWith("project_a"));
 
-    await act(async () => { await router.navigate({ to: "/projects/project_b/editing" }); });
+    await act(async () => { await router.navigate({ to: "/projects/project_b/timeline" }); });
     await waitFor(() => expect(api.getProject).toHaveBeenCalledWith("project_b"));
     await act(async () => { resolveB(projects[1]); });
     await screen.findByRole("heading", { name: "B" });
