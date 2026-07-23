@@ -18,3 +18,10 @@ export function fixedClockInit(epochMs) {
 export async function installFixedClock(page) {
   await page.addInitScript(fixedClockInit, fixedClockEpochMs);
 }
+
+export async function waitForStableCapture(page) {
+  await page.evaluate(async () => {
+    await document.fonts?.ready;
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  });
+}

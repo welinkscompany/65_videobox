@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { fixedClockEpochMs, fixedClockInit, installFixedClock } from "./fixed-clock.mjs";
+import { fixedClockEpochMs, fixedClockInit, installFixedClock, waitForStableCapture } from "./fixed-clock.mjs";
 
 test("pins Date construction and Date.now without freezing browser timers", async () => {
   const nativeDate = globalThis.Date;
@@ -19,4 +19,10 @@ test("installs the same fixed clock before a snapshot navigation", async () => {
   const calls = [];
   await installFixedClock({ addInitScript: async (...args) => { calls.push(args); } });
   assert.deepEqual(calls, [[fixedClockInit, fixedClockEpochMs]]);
+});
+
+test("waits for fonts and two paint frames before writing a deterministic snapshot", async () => {
+  const calls = [];
+  await waitForStableCapture({ evaluate: async (callback) => { calls.push(callback); } });
+  assert.equal(calls.length, 1);
 });
