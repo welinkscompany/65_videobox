@@ -8138,11 +8138,19 @@ def test_output_gating_blocks_mixed_case_review_flag_code_on_approved_timeline(
 def test_output_jobs_ignore_unknown_dict_shaped_review_flag_on_approved_timeline(tmp_path: Path) -> None:
     store = LocalProjectStore(tmp_path)
     project = store.bootstrap_project(name="Approved State Unknown Review Flag Project")
+    narration_source = tmp_path / "approved-state-unknown-review-flag.wav"
+    narration_source.write_bytes(b"narration")
+    narration_asset = store.register_asset(
+        project_id=project.project_id,
+        asset_type=AssetType.NARRATION_AUDIO,
+        source_path=narration_source,
+    )
     timeline = store.save_timeline_run(
         project_id=project.project_id,
         output_mode="review",
         timeline_payload={
             "project_id": project.project_id,
+            "narration_source_uri": narration_asset.storage_uri,
             "tracks": [
                 {
                     "track_id": "narration_primary",
@@ -8248,11 +8256,19 @@ def test_output_jobs_ignore_stale_non_bool_segment_review_required_on_approved_t
 ) -> None:
     store = LocalProjectStore(tmp_path)
     project = store.bootstrap_project(name="Approved State Stale Review Required Project")
+    narration_source = tmp_path / "approved-state-stale-review-required.wav"
+    narration_source.write_bytes(b"narration")
+    narration_asset = store.register_asset(
+        project_id=project.project_id,
+        asset_type=AssetType.NARRATION_AUDIO,
+        source_path=narration_source,
+    )
     timeline = store.save_timeline_run(
         project_id=project.project_id,
         output_mode="review",
         timeline_payload={
             "project_id": project.project_id,
+            "narration_source_uri": narration_asset.storage_uri,
             "tracks": [
                 {
                     "track_id": "narration_primary",
@@ -13738,12 +13754,26 @@ def test_rejecting_one_duplicate_pending_recommendation_keeps_shared_review_flag
 def test_approved_tts_replacement_flows_through_preview_and_export_outputs(tmp_path: Path) -> None:
     store = LocalProjectStore(tmp_path)
     project = store.bootstrap_project(name="Approved TTS Output Project")
+    narration_source = tmp_path / "approved-tts-narration-source.wav"
+    narration_source.write_bytes(b"narration")
+    narration_asset = store.register_asset(
+        project_id=project.project_id,
+        asset_type=AssetType.NARRATION_AUDIO,
+        source_path=narration_source,
+    )
+    tts_source = tmp_path / "approved-tts-replacement.wav"
+    tts_source.write_bytes(b"tts")
+    tts_asset = store.register_asset(
+        project_id=project.project_id,
+        asset_type=AssetType.GENERATED_TTS_AUDIO,
+        source_path=tts_source,
+    )
     timeline = store.save_timeline_run(
         project_id=project.project_id,
         output_mode="review",
         timeline_payload={
             "project_id": project.project_id,
-            "narration_source_uri": f"local://projects/{project.project_id}/inputs/narration/source.wav",
+            "narration_source_uri": narration_asset.storage_uri,
             "tracks": [
                 {
                     "track_id": "narration_primary",
@@ -13752,10 +13782,7 @@ def test_approved_tts_replacement_flows_through_preview_and_export_outputs(tmp_p
                         {
                             "clip_id": "clip_narration_001",
                             "segment_id": "seg_001",
-                            "asset_uri": (
-                                f"local://projects/{project.project_id}/assets/generated/"
-                                "asset_tts_approved_001.wav"
-                            ),
+                            "asset_uri": tts_asset.storage_uri,
                             "start_sec": 0.0,
                             "end_sec": 1.0,
                             "clip_type": "narration",
@@ -13777,14 +13804,12 @@ def test_approved_tts_replacement_flows_through_preview_and_export_outputs(tmp_p
                     "recommendation_id": "rec_tts_seg_001",
                     "target_segment_id": "seg_001",
                     "recommendation_type": "tts_replacement",
-                    "selected_asset_id": "asset_tts_approved_001",
+                    "selected_asset_id": tts_asset.asset_id,
                     "score": 1.0,
                     "reason": "Approved narration replacement.",
                     "auto_apply_allowed": True,
                     "review_required": False,
-                    "payload": {
-                        "selected_asset_uri": f"local://projects/{project.project_id}/assets/generated/asset_tts_approved_001.wav"
-                    },
+                    "payload": {"selected_asset_uri": tts_asset.storage_uri},
                     "created_at": "2026-06-29T00:00:00+00:00",
                 }
             ],
@@ -13833,13 +13858,13 @@ def test_approved_tts_replacement_flows_through_preview_and_export_outputs(tmp_p
         project_id=project.project_id,
         storage_uri=preview_payload["preview"]["player_uri"],
     )
-    assert "asset_tts_approved_001" in preview_html_path.read_text(encoding="utf-8")
+    assert tts_asset.storage_uri in preview_html_path.read_text(encoding="utf-8")
     voiceover_track = next(
         track for track in export_payload["export"]["capcut_tracks"] if track["track_name"] == "voiceover"
     )
     assert [segment["source_uri"] for segment in voiceover_track["segments"]] == [
-        f"local://projects/{project.project_id}/assets/generated/asset_tts_approved_001.wav",
-        f"local://projects/{project.project_id}/inputs/narration/source.wav",
+        tts_asset.storage_uri,
+        narration_asset.storage_uri,
     ]
 
 
@@ -13849,6 +13874,13 @@ def test_review_approval_persists_tts_narration_asset_uri_before_preview_and_exp
     app = create_app(projects_root=tmp_path)
     client = TestClient(app)
     project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+    tts_source = tmp_path / "review-approved-tts-replacement.wav"
+    tts_source.write_bytes(b"tts")
+    tts_asset = LocalProjectStore(tmp_path).register_asset(
+        project_id=project_id,
+        asset_type=AssetType.GENERATED_TTS_AUDIO,
+        source_path=tts_source,
+    )
 
     timeline_result = client.get(f"/api/projects/{project_id}/timelines/{timeline_job_id}")
     timeline_payload = timeline_result.json()["timeline"]
@@ -13863,16 +13895,12 @@ def test_review_approval_persists_tts_narration_asset_uri_before_preview_and_exp
         "recommendation_id": "rec_tts_review_002",
         "target_segment_id": "seg_002",
         "recommendation_type": "tts_replacement",
-        "selected_asset_id": "asset_tts_review_002",
+        "selected_asset_id": tts_asset.asset_id,
         "score": 0.94,
         "reason": "Operator approved the regenerated narration take.",
         "auto_apply_allowed": False,
         "review_required": True,
-        "payload": {
-            "selected_asset_uri": (
-                f"local://projects/{project_id}/assets/generated/asset_tts_review_002.wav"
-            )
-        },
+        "payload": {"selected_asset_uri": tts_asset.storage_uri},
         "created_at": "2026-07-01T00:00:00+00:00",
         "provider_trace": build_provider_trace(final_provider="rule_based_fallback"),
     }
@@ -13987,6 +14015,13 @@ def test_review_approval_duplicate_tts_narration_clips_flow_through_preview_and_
     app = create_app(projects_root=tmp_path)
     client = TestClient(app)
     project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+    tts_source = tmp_path / "review-approved-duplicate-tts-replacement.wav"
+    tts_source.write_bytes(b"tts")
+    tts_asset = LocalProjectStore(tmp_path).register_asset(
+        project_id=project_id,
+        asset_type=AssetType.GENERATED_TTS_AUDIO,
+        source_path=tts_source,
+    )
 
     timeline_result = client.get(f"/api/projects/{project_id}/timelines/{timeline_job_id}")
     timeline_payload = timeline_result.json()["timeline"]
@@ -14001,16 +14036,12 @@ def test_review_approval_duplicate_tts_narration_clips_flow_through_preview_and_
         "recommendation_id": "rec_tts_review_duplicate_output",
         "target_segment_id": "seg_002",
         "recommendation_type": "tts_replacement",
-        "selected_asset_id": "asset_tts_review_duplicate_output",
+        "selected_asset_id": tts_asset.asset_id,
         "score": 0.94,
         "reason": "Operator approved the regenerated narration take.",
         "auto_apply_allowed": False,
         "review_required": True,
-        "payload": {
-            "selected_asset_uri": (
-                f"local://projects/{project_id}/assets/generated/asset_tts_review_duplicate_output.wav"
-            )
-        },
+        "payload": {"selected_asset_uri": tts_asset.storage_uri},
         "created_at": "2026-07-03T00:00:00+00:00",
         "provider_trace": build_provider_trace(final_provider="rule_based_fallback"),
     }
