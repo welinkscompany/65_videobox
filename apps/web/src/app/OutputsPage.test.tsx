@@ -86,4 +86,27 @@ describe("OutputsPage", () => {
     expect(startCapcutDraftExport).not.toHaveBeenCalled();
     expect(screen.queryByRole("button", { name: /만들기|내보내기|등록/ })).not.toBeInTheDocument();
   });
+
+  it("does not let a delayed project A status response replace project B", async () => {
+    let resolveProjectA!: (jobs: typeof finalJob[]) => void;
+    const projectAJobs = new Promise<typeof finalJob[]>((resolve) => { resolveProjectA = resolve; });
+    vi.spyOn(api, "listJobs").mockReturnValueOnce(projectAJobs).mockResolvedValueOnce([]);
+    const getFinalRender = vi.spyOn(api, "getFinalRender").mockResolvedValue({
+      job_id: finalJob.job_id, status: "succeeded", render: {
+        export_id: "final-a", timeline_id: "timeline-a", export_type: "final_render", file_uri: "local://final.mp4", status: "succeeded", is_current: true,
+      },
+    });
+    vi.spyOn(api, "getCapcutHandoffDiagnostics").mockResolvedValue({
+      status: "ready", is_supported: true, project_root_path: "local://capcut", project_root_exists: true, write_access: true, checked_at: "2026-07-23T09:01:00Z",
+    });
+
+    const view = render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+    view.rerender(<OutputsPage projectId="project_b" onOpenEditor={vi.fn()} />);
+    expect(await screen.findByText("아직 완성본이 없어요.")).toBeVisible();
+
+    resolveProjectA([finalJob]);
+    await waitFor(() => expect(getFinalRender).toHaveBeenCalledWith("project_a", "final-current"));
+    expect(screen.getByText("아직 완성본이 없어요.")).toBeVisible();
+    expect(screen.queryByText("완성본을 확인할 수 있어요.")).not.toBeInTheDocument();
+  });
 });

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   api,
@@ -29,8 +29,11 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
   const [state, setState] = useState<OutputState | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(false);
+  const requestEpoch = useRef(0);
 
   const refresh = useCallback(async () => {
+    const epoch = requestEpoch.current + 1;
+    requestEpoch.current = epoch;
     setIsLoading(true);
     setError(false);
     try {
@@ -42,16 +45,21 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
         capcutJob ? api.getCapcutDraftExport(projectId, capcutJob.job_id) : Promise.resolve(null),
         api.getCapcutHandoffDiagnostics().catch(() => null),
       ]);
+      if (epoch !== requestEpoch.current) return;
       setState({ finalRender, capcutDraft, diagnostics });
     } catch {
+      if (epoch !== requestEpoch.current) return;
       setState(null);
       setError(true);
     } finally {
-      setIsLoading(false);
+      if (epoch === requestEpoch.current) setIsLoading(false);
     }
   }, [projectId]);
 
-  useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => {
+    void refresh();
+    return () => { requestEpoch.current += 1; };
+  }, [refresh]);
 
   if (isLoading && !state && !error) return <section className="vb-outputs" aria-live="polite"><p>출력 상태를 불러오는 중이에요.</p></section>;
   if (error) return <section className="vb-outputs" aria-live="polite" data-testid="outputs-page"><h1>출력</h1><p>출력 상태를 불러오지 못했어요.</p><p>잠시 후 상태를 다시 확인하거나 편집 화면에서 작업을 이어가세요.</p><Button variant="outline" onClick={() => void refresh()}>상태 다시 확인</Button><Button onClick={onOpenEditor}>편집 열기</Button></section>;
