@@ -1,0 +1,8 @@
+{
+  "schema": "videobox-workbench-performance-baseline-v1",
+  "capture_profile": "chromium-headless-workers-1-1920x1080",
+  "interaction": "right_dock_drag",
+  "median_ms": 250,
+  "capture_intent": "initial absolute guard pending a calibrated reference capture",
+  "regression_limit_percent": 20
+}
