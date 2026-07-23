@@ -106,6 +106,89 @@ describe("EditorWorkbenchRoute", () => {
     vi.spyOn(api, "listMediaLibraryAssets").mockResolvedValue({ assets: [] } as never);
   });
 
+  it("focuses a valid requested segment once without reloading or resetting editor-local state", async () => {
+    const load = vi.mocked(api.getEditorPlaybackManifest).mockResolvedValue(twoNarrationManifest(1) as never);
+    const reloadDirector = vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
+      conversation: { conversation_id: "conversation-a", project_id: "project-a", session_id: "session-a" },
+      messages: [],
+      proposal: null,
+      references: [],
+    } as never);
+    const rendered = render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" requestedSegmentId="segment-2" />);
+    const workbench = await screen.findByRole("region", { name: "편집 작업판" });
+    const timeline = screen.getByTestId("timeline-track");
+    const preview = screen.getByRole("region", { name: "미리보기" });
+    await waitFor(() => expect(screen.getByRole("button", { name: "n-2 클립 선택" })).toHaveAttribute("aria-pressed", "true"));
+    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+    fireEvent.change(await screen.findByLabelText("유진에게 요청하기"), { target: { value: "작성 중인 요청" } });
+    fireEvent.click(screen.getByRole("button", { name: "n-1 클립 선택" }));
+    timeline.scrollLeft = 31;
+
+    rendered.rerender(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" requestedSegmentId="segment-2" />);
+
+    expect(screen.getByRole("button", { name: "n-1 클립 선택" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByLabelText("유진에게 요청하기")).toHaveValue("작성 중인 요청");
+    expect(screen.getByTestId("timeline-track")).toBe(timeline);
+    expect(screen.getByRole("region", { name: "미리보기" })).toBe(preview);
+    expect(screen.getByRole("region", { name: "편집 작업판" })).toBe(workbench);
+    expect(screen.getByTestId("timeline-track").scrollLeft).toBe(31);
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(reloadDirector).toHaveBeenCalledTimes(1);
+
+    rendered.rerender(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" requestedSegmentId="segment-1" />);
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.getByRole("button", { name: "n-1 클립 선택" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "n-2 클립 선택" })).toHaveAttribute("aria-pressed", "false");
+    rendered.rerender(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" requestedSegmentId="segment-2" />);
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.getByRole("button", { name: "n-1 클립 선택" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("button", { name: "n-2 클립 선택" })).toHaveAttribute("aria-pressed", "true");
+    expect(load).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not focus a blank or unknown requested segment", async () => {
+    vi.mocked(api.getEditorPlaybackManifest).mockResolvedValue(twoNarrationManifest(1) as never);
+    const blank = render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" requestedSegmentId=" " />);
+    await expectEditorRevision(1);
+    expect(screen.getByRole("button", { name: "n-2 클립 선택" })).toHaveAttribute("aria-pressed", "false");
+    blank.unmount();
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" requestedSegmentId="segment-missing" />);
+    await expectEditorRevision(1);
+    expect(screen.getByRole("button", { name: "n-2 클립 선택" })).toHaveAttribute("aria-pressed", "false");
+    expect(api.getEditorPlaybackManifest).toHaveBeenLastCalledWith("project-a", "session-a");
+  });
+
+  it.each([" ", "segment-missing"])(
+    "resets only the active timeline selection when valid segment A re-enters after %j",
+    async (intermediateSegmentId) => {
+      const load = vi.mocked(api.getEditorPlaybackManifest).mockResolvedValue(twoNarrationManifest(1) as never);
+      const rendered = render(
+        <EditorWorkbenchRoute projectId="project-a" sessionId="session-a" requestedSegmentId="segment-1" />,
+      );
+      const workbench = await screen.findByRole("region", { name: "편집 작업판" });
+      const timeline = screen.getByTestId("timeline-track");
+      await waitFor(() => expect(screen.getByRole("button", { name: "n-1 클립 선택" })).toHaveAttribute("aria-pressed", "true"));
+
+      rendered.rerender(
+        <EditorWorkbenchRoute projectId="project-a" sessionId="session-a" requestedSegmentId={intermediateSegmentId} />,
+      );
+      fireEvent.click(screen.getByRole("button", { name: "n-2 클립 선택" }));
+      timeline.scrollLeft = 43;
+
+      rendered.rerender(
+        <EditorWorkbenchRoute projectId="project-a" sessionId="session-a" requestedSegmentId="segment-1" />,
+      );
+
+      await waitFor(() => expect(screen.getByRole("button", { name: "n-1 클립 선택" })).toHaveAttribute("aria-pressed", "true"));
+      expect(screen.getByRole("button", { name: "n-2 클립 선택" })).toHaveAttribute("aria-pressed", "false");
+      expect(screen.getByRole("region", { name: "편집 작업판" })).toBe(workbench);
+      expect(screen.getByTestId("timeline-track")).toBe(timeline);
+      expect(screen.getByTestId("timeline-track").scrollLeft).toBe(43);
+      expect(load).toHaveBeenCalledTimes(1);
+    },
+  );
+
   it("materializes verified BGM before one current-revision music command while saving disables apply", async () => {
     let resolveMaterialized!: (value: { asset_id: string }) => void;
     let resolveApply!: (value: unknown) => void;

@@ -525,6 +525,10 @@ export type ReviewApproval = {
   review_status: string;
   approved_at: string | null;
   updated_at: string;
+  source_session_revision: number | null;
+  is_current: boolean;
+  invalidated_at: string | null;
+  invalidated_reason: string | null;
 };
 
 export type AssetResponse = {
@@ -952,6 +956,8 @@ export const api = {
     request<TimelineJob>(`/api/projects/${projectId}/timelines/${jobId}`),
   getReviewSnapshot: (projectId: string, jobId: string) =>
     request<ReviewSnapshot>(`/api/projects/${projectId}/review-snapshots/${jobId}`),
+  getReviewApproval: (projectId: string, timelineId: string) =>
+    request<ReviewApproval>(`/api/projects/${projectId}/review-approvals/timelines/${timelineId}`),
   approveReviewRecommendation: (
     projectId: string,
     jobId: string,

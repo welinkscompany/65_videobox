@@ -41,6 +41,7 @@ type Props = Readonly<{
   onSelectSegment?: (segmentId: string) => void;
   onPlaybackSeek?: (seconds: number) => void;
   selectedSegmentId?: string | null;
+  selectionResetKey?: string | number | null;
   playbackSec?: number;
   isSaving?: boolean;
   mutationMessage?: string;
@@ -152,7 +153,7 @@ function navigationReducer(
   return reduceTimelineNavigation(state, action, options);
 }
 
-export function TimelineDock({ view, viewportWidthPx, onTrimNarration, onReorderNarration, onUpdatePlacements, onSelectSegment, onPlaybackSeek, selectedSegmentId = null, playbackSec, isSaving = false, mutationMessage }: Props) {
+export function TimelineDock({ view, viewportWidthPx, onTrimNarration, onReorderNarration, onUpdatePlacements, onSelectSegment, onPlaybackSeek, selectedSegmentId = null, selectionResetKey = null, playbackSec, isSaving = false, mutationMessage }: Props) {
   const options = { durationSec: view.output.durationSec, viewportWidthPx, fps: view.fps };
   const [state, dispatch] = useReducer(
     (current: TimelineNavigationState, action: TimelineNavigationAction) => navigationReducer(current, action, options),
@@ -166,9 +167,17 @@ export function TimelineDock({ view, viewportWidthPx, onTrimNarration, onReorder
   );
   const [pointerDraft, setPointerDraft] = useState<TimelinePointerDraft | null>(null);
   const [selectedPlacementIds, setSelectedPlacementIds] = useState<readonly string[]>([]);
+  const previousSelectionResetKey = useRef(selectionResetKey);
   const onPlaybackSeekRef = useRef(onPlaybackSeek);
   useEffect(() => { onPlaybackSeekRef.current = onPlaybackSeek; }, [onPlaybackSeek]);
   useEffect(() => { onPlaybackSeekRef.current?.(state.playheadSec); }, [state.playheadSec]);
+  useEffect(() => {
+    if (previousSelectionResetKey.current === selectionResetKey) return;
+    previousSelectionResetKey.current = selectionResetKey;
+    dispatch({ type: "select", clipId: null });
+    setSelectedPlacementIds([]);
+    setPointerDraft(null);
+  }, [selectionResetKey]);
   useEffect(() => {
     if (playbackSec === undefined || !Number.isFinite(playbackSec) || playbackSec === state.playheadSec) return;
     dispatch({ type: "seek", seconds: playbackSec });

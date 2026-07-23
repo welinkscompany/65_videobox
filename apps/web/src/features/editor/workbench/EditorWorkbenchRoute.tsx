@@ -26,7 +26,7 @@ type DirectorState = Readonly<{
 
 const assetLoadError = "일부 자산을 불러오지 못했어요. 편집은 계속할 수 있어요. 잠시 후 다시 확인해 주세요.";
 
-export function EditorWorkbenchRoute({ projectId, sessionId }: { projectId: string; sessionId: string | null }) {
+export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId = null }: { projectId: string; sessionId: string | null; requestedSegmentId?: string | null }) {
   const requestKey = `${projectId}:${sessionId ?? "missing"}`;
   const [refreshToken, setRefreshToken] = useState(0);
   const [state, setState] = useState<Readonly<{ key: string; view: EditorViewModel | null; error: string | null }>>({ key: requestKey, view: null, error: sessionId ? null : "편집 세션을 찾을 수 없어요. 다시 열어 주세요." });
@@ -316,6 +316,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId }: { projectId: stri
     onUpdatePlacements={(input) => commitTimelineMutation((port) => port.setTimelinePlacements(input))}
     timelineMutationMessage={mutation.message}
     director={rightDock}
+    requestedSegmentId={requestedSegmentId}
     view={state.view}
     />
   </>;

@@ -16,7 +16,7 @@ let uploadedBroll = false;
 let bundleSequence = 0;
 let latestBundle = null;
 const atomicSession = { session_id: "editing_session_e2e", project_id: "local-draft", timeline_id: "timeline_e2e", session_revision: 1, history: [], undo_count: 0, redo_count: 0, segments: [{ segment_id: "segment-e2e", caption_text: "여름 여행을 소개합니다.", start_sec: 0, end_sec: 1, cut_action: "keep", review_required: false, broll_override: null, visual_overlays: [], music_override: null, sfx_override: null, tts_replacement: null }] };
-const jobs = { jobs: [{ job_id: "timeline_build_e2e", job_type: "timeline_build", status: "succeeded", input_ref: "readiness_e2e", output_ref: "timeline_e2e", error_message: null, started_at: "now", finished_at: "now" }, { job_id: "final-e2e", job_type: "final_render", status: "succeeded", input_ref: "timeline_build_e2e", output_ref: "final-export-e2e", error_message: null, started_at: "now", finished_at: "now" }] };
+const jobs = { jobs: [{ job_id: "timeline_build_e2e", project_id: "local-draft", job_type: "timeline_build", status: "succeeded", input_ref: "readiness_e2e", output_ref: "timeline_e2e", error_message: null, started_at: "now", finished_at: "now" }, { job_id: "final-e2e", project_id: "local-draft", job_type: "final_render", status: "succeeded", input_ref: "timeline_build_e2e", output_ref: "final-export-e2e", error_message: null, started_at: "now", finished_at: "now" }] };
 
 function sendJson(response, status, payload) {
   response.writeHead(status, {
@@ -35,6 +35,27 @@ function resetDraftScenario() {
   jobs.jobs = [];
 }
 
+function resetReviewScenario() {
+  uploadedBroll = false;
+  bundleSequence = 0;
+  latestBundle = null;
+  readiness.status = "needs_assets";
+  readiness.revision = 1;
+  readiness.result = { gap_slots: [{ gap_slot_id: "gap-1", reason: "장면 영상이 없어요." }] };
+  atomicSession.session_id = "editing_session_e2e";
+  atomicSession.project_id = "local-draft";
+  atomicSession.timeline_id = "timeline_e2e";
+  atomicSession.session_revision = 1;
+  atomicSession.history = [];
+  atomicSession.undo_count = 0;
+  atomicSession.redo_count = 0;
+  atomicSession.segments = [{ segment_id: "segment-e2e", caption_text: "여름 여행을 소개합니다.", start_sec: 0, end_sec: 1, cut_action: "keep", review_required: false, broll_override: null, visual_overlays: [], music_override: null, sfx_override: null, tts_replacement: null }];
+  jobs.jobs = [
+    { job_id: "timeline_build_e2e", project_id: "local-draft", job_type: "timeline_build", status: "succeeded", input_ref: "readiness_e2e", output_ref: "timeline_e2e", error_message: null, started_at: "now", finished_at: "now" },
+    { job_id: "final-e2e", project_id: "local-draft", job_type: "final_render", status: "succeeded", input_ref: "timeline_build_e2e", output_ref: "final-export-e2e", error_message: null, started_at: "now", finished_at: "now" },
+  ];
+}
+
 function createBundle() {
   bundleSequence += 1;
   const suffix = String(bundleSequence);
@@ -49,8 +70,8 @@ function createBundle() {
     gap_slots: isGapOnly ? readiness.result.gap_slots : [], output_blocked: isGapOnly,
   };
   atomicSession.session_id = latestBundle.session_id; atomicSession.timeline_id = latestBundle.timeline_id;
-  jobs.jobs = [{ job_id: latestBundle.timeline_job_id, job_type: "timeline_build", status: "succeeded", input_ref: "readiness_e2e", output_ref: latestBundle.timeline_id, error_message: null, started_at: "now", finished_at: "now" }];
-  if (!isGapOnly) jobs.jobs.push({ job_id: `final-e2e-${suffix}`, job_type: "final_render", status: "succeeded", input_ref: latestBundle.timeline_job_id, output_ref: `final-export-e2e-${suffix}`, error_message: null, started_at: "now", finished_at: "now" });
+  jobs.jobs = [{ job_id: latestBundle.timeline_job_id, project_id: "local-draft", job_type: "timeline_build", status: "succeeded", input_ref: "readiness_e2e", output_ref: latestBundle.timeline_id, error_message: null, started_at: "now", finished_at: "now" }];
+  if (!isGapOnly) jobs.jobs.push({ job_id: `final-e2e-${suffix}`, project_id: "local-draft", job_type: "final_render", status: "succeeded", input_ref: latestBundle.timeline_job_id, output_ref: `final-export-e2e-${suffix}`, error_message: null, started_at: "now", finished_at: "now" });
   return latestBundle;
 }
 
@@ -58,28 +79,41 @@ createServer((request, response) => {
   const url = new URL(request.url ?? "/", `http://${host}:${port}`);
   if (url.pathname === "/health") return sendJson(response, 200, { status: "ok", mode: "e2e-local" });
   if (url.pathname === "/__e2e/reset-draft" && request.method === "POST") { resetDraftScenario(); return sendJson(response, 200, { status: "reset" }); }
-  if (url.pathname === "/__e2e/draft-state" && request.method === "GET") return sendJson(response, 200, { latest_bundle: latestBundle });
+  if (url.pathname === "/__e2e/reset-review" && request.method === "POST") { resetReviewScenario(); return sendJson(response, 200, { status: "reset" }); }
+  if (url.pathname === "/__e2e/draft-state" && request.method === "GET") return sendJson(response, 200, {
+    uploaded_broll: uploadedBroll,
+    bundle_sequence: bundleSequence,
+    latest_bundle: latestBundle,
+    readiness,
+    atomic_session: atomicSession,
+    jobs: jobs.jobs,
+  });
   if (url.pathname === "/api/projects" && request.method === "GET") return sendJson(response, 200, { projects: [project] });
   if (url.pathname === "/api/projects/local-draft" && request.method === "GET") return sendJson(response, 200, project);
   if (url.pathname === "/api/projects/local-draft/jobs" && request.method === "GET") return sendJson(response, 200, jobs);
   if (/^\/api\/projects\/local-draft\/editing-sessions\/[^/]+\/playback-manifest$/.test(url.pathname) && request.method === "GET") {
     const sessionId = url.pathname.split("/")[5];
-    if (!latestBundle || sessionId !== latestBundle.session_id) return sendJson(response, 404, { detail: "session_not_found" });
-    const isCurrent = !latestBundle.output_blocked;
+    const activeSessionId = latestBundle?.session_id ?? atomicSession.session_id;
+    const activeTimelineId = latestBundle?.timeline_id ?? atomicSession.timeline_id;
+    if (sessionId !== activeSessionId) return sendJson(response, 404, { detail: "session_not_found" });
+    const isCurrent = !latestBundle?.output_blocked;
+    const reviewSegmentId = latestBundle?.segment_ids[0] ?? "segment-e2e";
     return sendJson(response, 200, {
-      project_id: "local-draft", session_id: latestBundle.session_id, timeline_id: latestBundle.timeline_id, session_revision: 1, timeline_version: "v1",
+      project_id: "local-draft", session_id: activeSessionId, timeline_id: activeTimelineId, session_revision: 1, timeline_version: "v1",
       timebase: "seconds", fps: { num: 30, den: 1 }, output: { width: 1080, height: 1920, sample_aspect_ratio: "1:1", rotation: 0, duration_sec: 1 },
-      tracks: [], captions: [], gap_slots: latestBundle.gap_slots.map((gap) => ({ gap_id: gap.gap_slot_id, segment_id: latestBundle.segment_ids[0], start_sec: 0, end_sec: 1, reason: gap.reason })),
-      source_status: { status: "current", source_session_id: latestBundle.session_id, source_session_revision: 1 }, audition: { asset_urls: {} },
-      exact_preview: isCurrent
-        ? { status: "current", url: `/api/projects/local-draft/final-renders/final-e2e-${bundleSequence}/content`, source_session_id: latestBundle.session_id, source_session_revision: 1, artifact_revision: 1 }
-        : { status: "unavailable", url: null, source_session_id: latestBundle.session_id, source_session_revision: 1 },
+      tracks: latestBundle ? [] : [{ track_id: "narration", track_type: "narration", clips: [{ clip_id: "narration-e2e", segment_id: reviewSegmentId, clip_type: "narration", asset_id: null, asset_uri: null, start_sec: 0, end_sec: 1, media_controls: {} }] }],
+      captions: [], gap_slots: (latestBundle?.gap_slots ?? []).map((gap) => ({ gap_id: gap.gap_slot_id, segment_id: reviewSegmentId, start_sec: 0, end_sec: 1, reason: gap.reason })),
+      source_status: { status: "current", source_session_id: activeSessionId, source_session_revision: 1 }, audition: { asset_urls: {} },
+      exact_preview: isCurrent && latestBundle
+        ? { status: "current", url: `/api/projects/local-draft/final-renders/final-e2e-${bundleSequence}/content`, source_session_id: activeSessionId, source_session_revision: 1, artifact_revision: 1 }
+        : { status: "unavailable", url: null, source_session_id: activeSessionId, source_session_revision: 1 },
     });
   }
   if (url.pathname.startsWith("/api/projects/local-draft/editing-sessions/") && request.method === "GET") return sendJson(response, 200, atomicSession);
   if (url.pathname === "/api/projects/local-draft/editing-sessions/latest" && request.method === "GET") return sendJson(response, 200, atomicSession);
-  if (url.pathname.startsWith("/api/projects/local-draft/timelines/") && request.method === "GET") return sendJson(response, 200, { job_id: latestBundle?.timeline_job_id, status: "succeeded", timeline: { timeline_id: latestBundle?.timeline_id, project_id: "local-draft", tracks: [], review_flags: latestBundle?.output_blocked ? [{ code: "draft_gap_placeholder" }] : [], pending_recommendations: [] } });
-  if (url.pathname.startsWith("/api/projects/local-draft/review-snapshots/") && request.method === "GET") return sendJson(response, 200, { project_id: "local-draft", timeline_id: latestBundle?.timeline_id, review_status: latestBundle?.output_blocked ? "blocked" : "approved", segments: [], applied_recommendations: [], pending_recommendations: [], review_flags: [] });
+  if (url.pathname.startsWith("/api/projects/local-draft/timelines/") && request.method === "GET") return sendJson(response, 200, { job_id: latestBundle?.timeline_job_id ?? "timeline_build_e2e", status: "succeeded", timeline: { timeline_id: latestBundle?.timeline_id ?? "timeline_e2e", project_id: "local-draft", version: "v1", output_mode: "review", review_status: latestBundle?.output_blocked ? "blocked" : "draft", tracks: [], applied_recommendations: [], review_flags: latestBundle?.output_blocked ? [{ code: "draft_gap_placeholder", segment_id: latestBundle.segment_ids[0], message: "장면 영상을 확인해 주세요." }] : [], pending_recommendations: [] } });
+  if (url.pathname.startsWith("/api/projects/local-draft/review-snapshots/") && request.method === "GET") return sendJson(response, 200, { project_id: "local-draft", timeline_id: latestBundle?.timeline_id ?? "timeline_e2e", review_status: latestBundle?.output_blocked ? "blocked" : "draft", segments: latestBundle ? [] : [{ segment_id: "segment-e2e", text: "여름 여행을 소개합니다.", start_sec: 0, end_sec: 1, confidence: 1, review_required: false, cleanup_decision: "keep" }], applied_recommendations: [], pending_recommendations: [], review_flags: [] });
+  if (/^\/api\/projects\/local-draft\/review-approvals\/timelines\/[^/]+$/.test(url.pathname) && request.method === "GET") return sendJson(response, 200, { project_id: "local-draft", timeline_id: latestBundle?.timeline_id ?? "timeline_e2e", review_status: "draft", approved_at: null, updated_at: "now", source_session_revision: 1, is_current: true, invalidated_at: null, invalidated_reason: null });
   if (url.pathname.startsWith("/api/projects/local-draft/final-renders/") && url.pathname.endsWith("/content") && request.method === "GET") { response.writeHead(200, { "content-type": "video/mp4", "accept-ranges": "bytes", "content-length": validTinyPlayableMp4.length }); return response.end(validTinyPlayableMp4); }
   if (url.pathname.startsWith("/api/projects/local-draft/final-renders/") && request.method === "GET") return sendJson(response, latestBundle?.output_blocked ? 400 : 200, latestBundle?.output_blocked ? { detail: "gap_blocks_final_output" } : { job_id: `final-e2e-${bundleSequence}`, status: "succeeded", render: { export_id: `final-export-e2e-${bundleSequence}`, timeline_id: latestBundle?.timeline_id, export_type: "final_render", file_uri: "local://final-e2e.mp4", status: "succeeded", source_session_revision: 1, is_current: true } });
   if (url.pathname === "/api/projects/local-draft/creation-briefs/brief-e2e" && request.method === "GET") return sendJson(response, 200, approvedBrief);

@@ -63,6 +63,96 @@ describe("AppRouter URL ownership", () => {
     await waitFor(() => expect(router.state.location.href).toBe("/projects/project_a/editor?session_id=editing_session_latest"));
   });
 
+  it("parses segment_id for a pinned editor without adding it to session resolution", async () => {
+    vi.spyOn(api, "listProjects").mockResolvedValue([{ project_id: "project_a", name: "A", status: "active", root_storage_uri: "local://a" }]);
+    vi.spyOn(api, "getEditorPlaybackManifest").mockResolvedValue({
+      project_id: "project_a", session_id: "session-a", timeline_id: "timeline-a", session_revision: 1, timeline_version: "v1",
+      timebase: "seconds", fps: { num: 30, den: 1 }, output: { width: 1080, height: 1920, sample_aspect_ratio: "1:1", rotation: 0, duration_sec: 2 },
+      tracks: [{ track_id: "narration", track_type: "narration", clips: [{ clip_id: "clip-1", segment_id: "segment-1", clip_type: "narration", asset_id: null, asset_uri: null, start_sec: 0, end_sec: 2, media_controls: {} }] }],
+      captions: [], gap_slots: [], source_status: { status: "current" }, audition: { asset_urls: {} }, exact_preview: { status: "unavailable" },
+    } as never);
+    const latest = vi.spyOn(api, "getLatestEditingSession");
+    const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects/project_a/editor?session_id=session-a&segment_id=segment-1"] }));
+
+    render(<AppRouter router={router} />);
+
+    expect(await screen.findByRole("button", { name: "clip-1 클립 선택" })).toHaveAttribute("aria-pressed", "true");
+    expect(router.state.location.href).toBe("/projects/project_a/editor?session_id=session-a&segment_id=segment-1");
+    expect(latest).not.toHaveBeenCalled();
+  });
+
+  it("keeps one mounted editor while actual search transitions A to B to A refocus the active segment", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1920 });
+    window.localStorage.setItem("videobox.editor-workbench.ui", JSON.stringify({ leftOpen: true, rightOpen: true, activeDrawer: null, leftSize: 280, rightSize: 320 }));
+    vi.spyOn(api, "listProjects").mockResolvedValue([{ project_id: "project_a", name: "A", status: "active", root_storage_uri: "local://a" }]);
+    const manifest = vi.spyOn(api, "getEditorPlaybackManifest").mockResolvedValue({
+      project_id: "project_a", session_id: "session-a", timeline_id: "timeline-a", session_revision: 1, timeline_version: "v1",
+      timebase: "seconds", fps: { num: 30, den: 1 }, output: { width: 1080, height: 1920, sample_aspect_ratio: "1:1", rotation: 0, duration_sec: 2 },
+      tracks: [{ track_id: "narration", track_type: "narration", clips: [
+        { clip_id: "clip-1", segment_id: "segment-1", clip_type: "narration", asset_id: null, asset_uri: null, start_sec: 0, end_sec: 1, media_controls: {} },
+        { clip_id: "clip-2", segment_id: "segment-2", clip_type: "narration", asset_id: null, asset_uri: null, start_sec: 1, end_sec: 2, media_controls: {} },
+      ] }],
+      captions: [
+        { segment_id: "segment-1", caption_id: "caption-1", placement_id: "caption:segment-1", text: "첫 장면", start_sec: 0, end_sec: 1, style: { font_family: "Pretendard", font_size_px: 20, text_color: "#fff", outline_color: "#000", outline_width_px: 1, background_color: "#00000000", position_x_percent: 50, position_y_percent: 90, horizontal_align: "center", safe_area_enabled: true, shadow_blur_px: 0 } },
+        { segment_id: "segment-2", caption_id: "caption-2", placement_id: "caption:segment-2", text: "둘째 장면", start_sec: 1, end_sec: 2, style: { font_family: "Pretendard", font_size_px: 20, text_color: "#fff", outline_color: "#000", outline_width_px: 1, background_color: "#00000000", position_x_percent: 50, position_y_percent: 90, horizontal_align: "center", safe_area_enabled: true, shadow_blur_px: 0 } },
+      ],
+      gap_slots: [], source_status: { status: "current" }, audition: { asset_urls: {} }, exact_preview: { status: "unavailable" },
+    } as never);
+    const director = vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
+      conversation: { conversation_id: "conversation-a", project_id: "project_a", session_id: "session-a" },
+      messages: [], proposal: null, references: [],
+    } as never);
+    vi.spyOn(api, "listBrollAssets").mockResolvedValue([]);
+    vi.spyOn(api, "listMediaLibraryAssets").mockResolvedValue({ assets: [] });
+    const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects/project_a/editor?session_id=session-a&segment_id=segment-1"] }));
+    render(<AppRouter router={router} />);
+
+    const workbench = await screen.findByRole("region", { name: "편집 작업판" });
+    const preview = screen.getByRole("region", { name: "미리보기" });
+    const timeline = screen.getByTestId("timeline-track");
+    const rightDock = screen.getByRole("complementary", { name: "유진과 편집 항목" });
+    expect(screen.getByLabelText("segment-1 자막 텍스트")).toBeVisible();
+    fireEvent.change(screen.getByLabelText("유진에게 요청하기"), { target: { value: "보존할 요청" } });
+    fireEvent.click(screen.getByRole("button", { name: "clip-2 클립 선택" }));
+    timeline.scrollLeft = 47;
+
+    await act(async () => { await router.navigate({ to: "/projects/$projectId/$section", params: { projectId: "project_a", section: "editor" }, search: { session_id: "session-a", segment_id: "segment-2" } as never }); });
+    expect(await screen.findByLabelText("segment-2 자막 텍스트")).toBeVisible();
+    await act(async () => { await router.navigate({ to: "/projects/$projectId/$section", params: { projectId: "project_a", section: "editor" }, search: { session_id: "session-a", segment_id: "segment-1" } as never }); });
+    expect(await screen.findByLabelText("segment-1 자막 텍스트")).toBeVisible();
+
+    expect(screen.getByRole("region", { name: "편집 작업판" })).toBe(workbench);
+    expect(screen.getByRole("region", { name: "미리보기" })).toBe(preview);
+    expect(screen.getByTestId("timeline-track")).toBe(timeline);
+    expect(screen.getByRole("complementary", { name: "유진과 편집 항목" })).toBe(rightDock);
+    expect(screen.getByLabelText("유진에게 요청하기")).toHaveValue("보존할 요청");
+    expect(screen.getByTestId("timeline-track").scrollLeft).toBe(47);
+    expect(screen.getByRole("button", { name: "clip-1 클립 선택" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "clip-2 클립 선택" })).toHaveAttribute("aria-pressed", "false");
+    expect(manifest).toHaveBeenCalledTimes(1);
+    expect(director).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["timeline", "review"])("routes /%s to the canonical timeline review owner", async (section) => {
+    vi.spyOn(api, "listProjects").mockResolvedValue([{ project_id: "project_a", name: "A", status: "active", root_storage_uri: "local://a" }]);
+    vi.spyOn(api, "getLatestEditingSession").mockResolvedValue({
+      session_id: "session-a", project_id: "project_a", timeline_id: "timeline-a", session_revision: 1, segments: [], history: [],
+    });
+    vi.spyOn(api, "listJobs").mockResolvedValue([{
+      job_id: "job-a", project_id: "project_a", job_type: "timeline_build", status: "succeeded", input_ref: null, output_ref: "timeline-a",
+      error_message: null, started_at: "2026-07-23T00:00:00Z", finished_at: "2026-07-23T00:01:00Z",
+    }]);
+    vi.spyOn(api, "getTimeline").mockResolvedValue({ job_id: "job-a", status: "succeeded", timeline: { timeline_id: "timeline-a", project_id: "project_a", version: "v1", output_mode: "review", review_status: "draft", tracks: [], review_flags: [], applied_recommendations: [], pending_recommendations: [] } });
+    vi.spyOn(api, "getReviewSnapshot").mockResolvedValue({ project_id: "project_a", timeline_id: "timeline-a", review_status: "draft", segments: [], applied_recommendations: [], pending_recommendations: [], review_flags: [] });
+    vi.spyOn(api, "getReviewApproval").mockResolvedValue({ project_id: "project_a", timeline_id: "timeline-a", review_status: "draft", approved_at: null, updated_at: "now", source_session_revision: 1, is_current: true, invalidated_at: null, invalidated_reason: null });
+    const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: [`/projects/project_a/${section}`] }));
+
+    render(<AppRouter router={router} />);
+
+    expect(await screen.findByTestId("timeline-review-page")).toHaveAttribute("data-project-id", "project_a");
+    expect(screen.getByRole("heading", { name: "영상 검토" })).toBeVisible();
+  });
+
   it("fails closed for a blank canonical editor session instead of resolving the latest session", async () => {
     vi.spyOn(api, "listProjects").mockResolvedValue([{ project_id: "project_a", name: "A", status: "active", root_storage_uri: "local://a" }]);
     const latest = vi.spyOn(api, "getLatestEditingSession");
@@ -296,28 +386,30 @@ describe("AppRouter URL ownership", () => {
       { project_id: "project_a", name: "A", status: "active", root_storage_uri: "local://a" },
       { project_id: "project_b", name: "B", status: "active", root_storage_uri: "local://b" },
     ];
-    let resolveA!: (project: typeof projects[number]) => void;
-    let resolveB!: (project: typeof projects[number]) => void;
+    let resolveA!: (session: Awaited<ReturnType<typeof api.getLatestEditingSession>>) => void;
     vi.spyOn(api, "listProjects").mockResolvedValue(projects);
-    vi.spyOn(api, "getProject").mockImplementation((projectId) => new Promise((resolve) => {
-      if (projectId === "project_a") resolveA = resolve;
-      else resolveB = resolve;
-    }));
-    vi.spyOn(api, "listJobs").mockResolvedValue([]);
-    vi.spyOn(api, "listBrollAssets").mockResolvedValue([]);
-    vi.spyOn(api, "getLatestEditingSession").mockResolvedValue(null);
+    const getLatest = vi.spyOn(api, "getLatestEditingSession").mockImplementation((projectId) => (
+      projectId === "project_a"
+        ? new Promise((resolve) => { resolveA = resolve; })
+        : Promise.resolve({ session_id: "session-b", project_id: "project_b", timeline_id: "timeline-b", session_revision: 1, segments: [], history: [] })
+    ));
+    vi.spyOn(api, "listJobs").mockImplementation((projectId) => Promise.resolve(projectId === "project_b" ? [{
+      job_id: "job-b", project_id: "project_b", job_type: "timeline_build", status: "succeeded", input_ref: null, output_ref: "timeline-b",
+      error_message: null, started_at: "now", finished_at: "now",
+    }] : []));
+    vi.spyOn(api, "getTimeline").mockResolvedValue({ job_id: "job-b", status: "succeeded", timeline: { timeline_id: "timeline-b", project_id: "project_b", version: "v1", output_mode: "review", review_status: "draft", tracks: [], review_flags: [], applied_recommendations: [], pending_recommendations: [] } });
+    vi.spyOn(api, "getReviewSnapshot").mockResolvedValue({ project_id: "project_b", timeline_id: "timeline-b", review_status: "draft", segments: [], applied_recommendations: [], pending_recommendations: [], review_flags: [] });
+    vi.spyOn(api, "getReviewApproval").mockResolvedValue({ project_id: "project_b", timeline_id: "timeline-b", review_status: "draft", approved_at: null, updated_at: "now", source_session_revision: 1, is_current: true, invalidated_at: null, invalidated_reason: null });
     const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects/project_a/timeline"] }));
     render(<AppRouter router={router} />);
-    await waitFor(() => expect(api.getProject).toHaveBeenCalledWith("project_a"));
+    await waitFor(() => expect(getLatest).toHaveBeenCalledWith("project_a"));
 
     await act(async () => { await router.navigate({ to: "/projects/project_b/timeline" }); });
-    await waitFor(() => expect(api.getProject).toHaveBeenCalledWith("project_b"));
-    await act(async () => { resolveB(projects[1]); });
-    await screen.findByRole("heading", { name: "B" });
+    await waitFor(() => expect(getLatest).toHaveBeenCalledWith("project_b"));
+    expect(await screen.findByTestId("timeline-review-page")).toHaveAttribute("data-project-id", "project_b");
 
-    await act(async () => { resolveA(projects[0]); });
-    await waitFor(() => expect(screen.getByRole("heading", { name: "B" })).toBeTruthy());
-    expect(screen.queryByRole("heading", { name: "A" })).toBeNull();
+    await act(async () => { resolveA({ session_id: "session-a", project_id: "project_a", timeline_id: "timeline-a", session_revision: 1, segments: [], history: [] }); });
+    expect(screen.getByTestId("timeline-review-page")).toHaveAttribute("data-project-id", "project_b");
   });
 
   it("navigates catalog and recovery choices to a real project home", async () => {

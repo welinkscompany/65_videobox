@@ -7,6 +7,7 @@ import {
   redirect,
   useNavigate,
   useRouter,
+  useRouterState,
 } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
@@ -14,6 +15,7 @@ import { api, type Project } from "../api";
 import { ProjectOnboarding } from "../ProjectOnboarding";
 import { CreationInterview } from "../features/creation/CreationInterview";
 import { DraftGapMedia } from "../features/media/DraftGapMedia";
+import { TimelineReviewPage } from "../features/review/TimelineReviewPage";
 import { LegacyWorkspacePage } from "./LegacyWorkspacePage";
 import { EditorWorkbenchRoute } from "../features/editor/workbench/EditorWorkbenchRoute";
 import { HomePage, opensLastProjectOnStart, ProductEmptyPage, ProductShell, SettingsPage } from "./ProductShell";
@@ -79,11 +81,16 @@ const workspaceRoute = createRoute({
   path: "/projects/$projectId/$section",
   beforeLoad: ({ params, search }) => {
     if (params.section !== "editing") return;
-    const sessionId = typeof (search as { session_id?: unknown }).session_id === "string"
-      ? (search as { session_id: string }).session_id
+    const routeSearch = search as { session_id?: unknown; segment_id?: unknown };
+    const sessionId = typeof routeSearch.session_id === "string"
+      ? routeSearch.session_id
       : null;
+    const segmentId = typeof routeSearch.segment_id === "string" ? routeSearch.segment_id : null;
+    const nextSearch = new URLSearchParams();
+    if (sessionId !== null) nextSearch.set("session_id", sessionId);
+    if (segmentId !== null) nextSearch.set("segment_id", segmentId);
     throw redirect({
-      href: `/projects/${encodeURIComponent(params.projectId)}/editor${sessionId === null ? "" : `?session_id=${encodeURIComponent(sessionId)}`}`,
+      href: `/projects/${encodeURIComponent(params.projectId)}/editor${nextSearch.size === 0 ? "" : `?${nextSearch.toString()}`}`,
       replace: true,
     });
   },
@@ -137,10 +144,18 @@ function WorkspacePage() {
   const projects = rootRoute.useLoaderData() as Project[];
   const navigate = useNavigate();
   const router = useRouter();
-  const rawEditingSessionId = typeof router.state.location.search.session_id === "string"
-    ? router.state.location.search.session_id
+  const routeSearch = useRouterState({ select: (routerState) => routerState.location.search }) as {
+    session_id?: unknown;
+    segment_id?: unknown;
+  };
+  const rawEditingSessionId = typeof routeSearch.session_id === "string"
+    ? routeSearch.session_id
     : null;
   const requestedEditingSessionId = rawEditingSessionId?.trim() || null;
+  const rawRequestedSegmentId = typeof routeSearch.segment_id === "string"
+    ? routeSearch.segment_id
+    : null;
+  const requestedSegmentId = rawRequestedSegmentId?.trim() || null;
   const normalizedSection = section === "editor" ? "editing" : section;
   if (!isWorkspaceSection(normalizedSection) || !projects.some((project) => project.project_id === projectId)) {
     return <RecoveryPage />;
@@ -172,9 +187,21 @@ function WorkspacePage() {
       <OutputsPage projectId={projectId} onOpenEditor={() => navigateTo(projectId, "editing")} />
     </ProductShell>;
   }
+  if (normalizedSection === "timeline" || normalizedSection === "review") {
+    return <ProductShell projectId={projectId} projects={projects} section={normalizedSection} onNavigate={navigateTo} onOpenSettings={() => void navigate({ to: "/settings/general" })}>
+      <TimelineReviewPage
+        projectId={projectId}
+        onOpenSegment={({ projectId: targetProjectId, sessionId, segmentId }) => void navigate({
+          to: "/projects/$projectId/$section",
+          params: { projectId: targetProjectId, section: "editor" },
+          search: { session_id: sessionId, segment_id: segmentId } as never,
+        })}
+      />
+    </ProductShell>;
+  }
   if (section === "editor" && rawEditingSessionId !== null && !requestedEditingSessionId) {
     return <ProductShell projectId={projectId} projects={projects} section="editing" onNavigate={navigateTo} onOpenSettings={() => void navigate({ to: "/settings/general" })} forceCollapsed>
-      <EditorWorkbenchRoute projectId={projectId} sessionId={null} />
+      <EditorWorkbenchRoute projectId={projectId} sessionId={null} requestedSegmentId={requestedSegmentId} />
     </ProductShell>;
   }
   if (section === "editor" && !requestedEditingSessionId) {
@@ -182,7 +209,7 @@ function WorkspacePage() {
   }
   if (section === "editor") {
     return <ProductShell projectId={projectId} projects={projects} section="editing" onNavigate={navigateTo} onOpenSettings={() => void navigate({ to: "/settings/general" })} forceCollapsed>
-      <EditorWorkbenchRoute projectId={projectId} sessionId={requestedEditingSessionId} />
+      <EditorWorkbenchRoute projectId={projectId} sessionId={requestedEditingSessionId} requestedSegmentId={requestedSegmentId} />
     </ProductShell>;
   }
   return (

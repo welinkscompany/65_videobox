@@ -40,6 +40,7 @@ type EditorWorkbenchProps = Readonly<{
   isSavingTimeline?: boolean;
   timelineMutationMessage?: string;
   director?: RightDockDirector;
+  requestedSegmentId?: string | null;
 }>;
 
 export function EditorWorkbench({
@@ -54,6 +55,7 @@ export function EditorWorkbench({
   isSavingTimeline = false,
   timelineMutationMessage,
   director,
+  requestedSegmentId = null,
 }: EditorWorkbenchProps) {
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
   const [availableWorkbenchWidth, setAvailableWorkbenchWidth] = useState(() => window.innerWidth);
@@ -61,6 +63,7 @@ export function EditorWorkbench({
   const [eugeneDraft, setEugeneDraft] = useState(readEugeneDraft);
   const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(view.local.selectedSegmentId);
   const [playbackSec, setPlaybackSec] = useState(view.local.seekSec);
+  const [requestedSegmentFocusEpoch, setRequestedSegmentFocusEpoch] = useState(0);
   const [auditionRequest, setAuditionRequest] = useState<AuditionRequest | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const drawerRef = useRef<HTMLDivElement>(null);
@@ -69,6 +72,7 @@ export function EditorWorkbench({
   const rightPanelRef = useRef<PanelImperativeHandle>(null);
   const leftTriggerRef = useRef<HTMLButtonElement>(null);
   const rightTriggerRef = useRef<HTMLButtonElement>(null);
+  const activeRequestedSegmentKey = useRef<string | null>(null);
   useEffect(() => { const update = () => setViewportWidth(window.innerWidth); window.addEventListener("resize", update); return () => window.removeEventListener("resize", update); }, []);
   useLayoutEffect(() => {
     const measure = () => setAvailableWorkbenchWidth(bodyRef.current?.getBoundingClientRect().width || window.innerWidth);
@@ -86,6 +90,27 @@ export function EditorWorkbench({
     setSelectedSegmentId((current) => current && segmentIds.has(current) ? current : segmentIds.has(view.local.selectedSegmentId ?? "") ? view.local.selectedSegmentId : null);
     setPlaybackSec((current) => clampPlaybackSeconds(current, view.output.durationSec));
   }, [view.expectedRevision, view.local.selectedSegmentId, view.output.durationSec, view.projectId, view.sessionId, view.tracks]);
+  useEffect(() => {
+    const normalizedRequestedSegmentId = requestedSegmentId?.trim() || null;
+    if (!normalizedRequestedSegmentId) {
+      activeRequestedSegmentKey.current = null;
+      return;
+    }
+    const key = `${view.sessionId}:${normalizedRequestedSegmentId}`;
+    if (activeRequestedSegmentKey.current === key) return;
+    const requestedNarration = view.tracks
+      .filter((track) => track.role === "narration")
+      .flatMap((track) => track.clips)
+      .find((clip) => clip.segmentId === normalizedRequestedSegmentId);
+    if (!requestedNarration) {
+      activeRequestedSegmentKey.current = null;
+      return;
+    }
+    activeRequestedSegmentKey.current = key;
+    setRequestedSegmentFocusEpoch((current) => current + 1);
+    setSelectedSegmentId(requestedNarration.segmentId);
+    setPlaybackSec(clampPlaybackSeconds(requestedNarration.startSec, view.output.durationSec));
+  }, [requestedSegmentId, view.output.durationSec, view.sessionId, view.tracks]);
   useEffect(() => { const side = restoreFocusRef.current; if (!ui.activeDrawer && side) { restoreFocusRef.current = null; window.setTimeout(() => (side === "left" ? leftTriggerRef : rightTriggerRef).current?.focus(), 0); } }, [ui.activeDrawer]);
   const layout = resolveEditorWorkbenchLayout({ viewportWidth, availableWorkbenchWidth, persisted: ui });
   const openDrawer = (side: "left" | "right") => setUi((current) => ({ ...current, activeDrawer: side }));
@@ -156,6 +181,7 @@ export function EditorWorkbench({
       onPlaybackSeek={seekPlayback}
       onSelectSegment={selectSegment}
       playbackSec={playbackSec}
+      selectionResetKey={requestedSegmentFocusEpoch}
       selectedSegmentId={selectedSegmentId}
       view={view}
       viewportWidthPx={Math.max(1, Math.round(availableWorkbenchWidth))}
