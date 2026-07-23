@@ -35,6 +35,44 @@ def _poll_until_finished(get_result, *, timeout_seconds: float = 30.0):
     raise TimeoutError("Job did not finish in time.")
 
 
+def _save_current_capcut_draft_export_job(store: LocalProjectStore, *, project_id: str) -> tuple[dict, dict]:
+    timeline = store.save_timeline_run(
+        project_id=project_id,
+        output_mode="review",
+        timeline_payload={"tracks": [], "review_flags": [], "pending_recommendations": []},
+    )
+    session = store.save_editing_session(
+        project_id=project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={"segments": [], "history": []},
+    )
+    store.save_review_state(
+        project_id=project_id,
+        timeline_id=timeline["timeline_id"],
+        status="approved",
+        source_session_revision=session["session_revision"],
+    )
+    source_draft = store.project_root(project_id) / "source_draft"
+    source_draft.mkdir()
+    (source_draft / "draft_content.json").write_text("{}", encoding="utf-8")
+    export = store.save_capcut_draft_export(
+        project_id=project_id,
+        timeline_id=timeline["timeline_id"],
+        source_draft_path=source_draft,
+    )
+    job = store.create_job(
+        project_id=project_id,
+        job_type=JobType.CAPCUT_DRAFT_EXPORT,
+        input_ref="timeline_build_job_001",
+    )
+    return store.update_job(
+        project_id=project_id,
+        job_id=job["job_id"],
+        status=JobStatus.SUCCEEDED,
+        output_ref=export["export_id"],
+    ), session
+
+
 def test_capcut_draft_export_result_api_preserves_null_artifact_and_failure_reason(tmp_path: Path) -> None:
     app = create_app(
         projects_root=tmp_path,
@@ -66,7 +104,7 @@ def test_capcut_draft_export_result_api_preserves_null_artifact_and_failure_reas
     }
 
 
-def test_capcut_draft_handoff_api_persists_failed_registration_with_recovery_reason(tmp_path: Path) -> None:
+def test_capcut_draft_handoff_api_refuses_a_direct_post_without_an_authoritative_current_export(tmp_path: Path) -> None:
     app = create_app(
         projects_root=tmp_path,
         capcut_handoff_service=CapCutHandoffService(local_app_data=tmp_path / "NoCapCut"),
@@ -74,33 +112,83 @@ def test_capcut_draft_handoff_api_persists_failed_registration_with_recovery_rea
     client = TestClient(app)
     project_id = client.post("/api/projects", json={"name": "CapCut handoff API contract"}).json()["project_id"]
     store = LocalProjectStore(tmp_path)
-    source_draft = tmp_path / "source_draft"
-    source_draft.mkdir()
-    (source_draft / "draft_content.json").write_text("{}", encoding="utf-8")
-    export = store.save_capcut_draft_export(
+    job, _ = _save_current_capcut_draft_export_job(store, project_id=project_id)
+    store.update_editing_session(
         project_id=project_id,
-        timeline_id="timeline_001",
-        source_draft_path=source_draft,
+        session_id=store.get_latest_editing_session(project_id=project_id)["session_id"],
+        session_payload={"segments": [], "history": []},
+        expected_revision=store.get_latest_editing_session(project_id=project_id)["session_revision"],
     )
-    job = store.create_job(
-        project_id=project_id,
-        job_type=JobType.CAPCUT_DRAFT_EXPORT,
-        input_ref="timeline_build_job_001",
+
+    response = client.post(f"/api/projects/{project_id}/capcut-draft-exports/{job['job_id']}/handoff")
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "stale_output_asset: CapCut draft export freshness changed"
+
+
+def test_capcut_draft_handoff_api_refuses_a_failed_export_job_even_when_it_has_an_export(tmp_path: Path) -> None:
+    app = create_app(
+        projects_root=tmp_path,
+        capcut_handoff_service=CapCutHandoffService(local_app_data=tmp_path / "NoCapCut"),
     )
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "CapCut failed handoff API contract"}).json()["project_id"]
+    store = LocalProjectStore(tmp_path)
+    job, _ = _save_current_capcut_draft_export_job(store, project_id=project_id)
     store.update_job(
         project_id=project_id,
         job_id=job["job_id"],
-        status=JobStatus.SUCCEEDED,
-        output_ref=export["export_id"],
+        status=JobStatus.FAILED,
+        output_ref=job["output_ref"],
+        error_message="draft export failed after artifact write",
     )
+
+    response = client.post(f"/api/projects/{project_id}/capcut-draft-exports/{job['job_id']}/handoff")
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "capcut_draft_handoff_requires_succeeded_export_job"
+
+
+def test_capcut_draft_handoff_api_persists_failed_registration_with_recovery_reason(tmp_path: Path) -> None:
+    app = create_app(
+        projects_root=tmp_path,
+        capcut_handoff_service=CapCutHandoffService(local_app_data=tmp_path / "NoCapCut"),
+    )
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "CapCut unavailable handoff API contract"}).json()["project_id"]
+    job, _ = _save_current_capcut_draft_export_job(LocalProjectStore(tmp_path), project_id=project_id)
 
     response = client.post(f"/api/projects/{project_id}/capcut-draft-exports/{job['job_id']}/handoff")
 
     assert response.status_code == 200
     body = response.json()
     assert body["handoff"]["status"] == "failed"
-    assert body["handoff"]["source_file_uri"] == export["file_uri"]
     assert "CapCut 설치를 확인" in body["handoff"]["error_message"]
+
+
+def test_capcut_draft_handoff_api_reuses_a_current_successful_export(tmp_path: Path) -> None:
+    local_app_data = tmp_path / "LocalAppData"
+    executable = local_app_data / "CapCut" / "Apps" / "8.7.0" / "CapCut.exe"
+    executable.parent.mkdir(parents=True)
+    executable.write_bytes(b"capcut")
+    (local_app_data / "CapCut" / "User Data" / "Projects" / "com.lveditor.draft").mkdir(parents=True)
+    app = create_app(
+        projects_root=tmp_path,
+        capcut_handoff_service=CapCutHandoffService(local_app_data=local_app_data),
+    )
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "CapCut current handoff API contract"}).json()["project_id"]
+    job, _ = _save_current_capcut_draft_export_job(LocalProjectStore(tmp_path), project_id=project_id)
+
+    first = client.post(f"/api/projects/{project_id}/capcut-draft-exports/{job['job_id']}/handoff")
+    reused = client.post(f"/api/projects/{project_id}/capcut-draft-exports/{job['job_id']}/handoff")
+
+    assert first.status_code == 200
+    assert first.json()["handoff"]["status"] == "ready"
+    assert first.json()["handoff"]["reused"] is False
+    assert reused.status_code == 200
+    assert reused.json()["handoff"]["status"] == "ready"
+    assert reused.json()["handoff"]["reused"] is True
 
 
 def test_capcut_handoff_diagnostics_api_reports_injected_windows_readiness_without_llm_call(tmp_path: Path) -> None:

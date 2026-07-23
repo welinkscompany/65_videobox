@@ -1910,10 +1910,24 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
             raise ValueError("draft_bundle_gap_blocks_final_and_capcut_output")
 
     def register_capcut_draft_handoff(self, *, project_id: str, job_id: str) -> dict[str, Any]:
-        result = self.get_capcut_draft_export_result(project_id=project_id, job_id=job_id)
-        export = result["export"]
-        if export is None:
-            raise RuntimeError("CapCut 초안 결과가 없어 등록할 수 없습니다. 실제 CapCut 초안 내보내기를 다시 실행하세요.")
+        job = self.store.get_job(project_id=project_id, job_id=job_id)
+        if str(job.get("job_type")) != JobType.CAPCUT_DRAFT_EXPORT.value:
+            raise ValueError("capcut_draft_handoff_requires_capcut_draft_export_job")
+        if str(job.get("status")) != JobStatus.SUCCEEDED.value or not job.get("output_ref"):
+            raise ValueError("capcut_draft_handoff_requires_succeeded_export_job")
+        export = self.store.get_capcut_draft_export(
+            project_id=project_id,
+            export_id=str(job["output_ref"]),
+        )
+        if str(export.get("status")) != JobStatus.SUCCEEDED.value:
+            raise ValueError("capcut_draft_handoff_requires_succeeded_export")
+        if not bool(export.get("is_current")):
+            raise OutputSourceStaleError("CapCut draft export freshness changed")
+        timeline = self.store.get_timeline_run(
+            project_id=project_id,
+            timeline_id=str(export["timeline_id"]),
+        )
+        self._ensure_output_dependencies_fresh(project_id=project_id, timeline=timeline)
         source_path = self.store.resolve_storage_uri(project_id=project_id, storage_uri=export["file_uri"])
         try:
             registered = self.capcut_handoff_service.register(
