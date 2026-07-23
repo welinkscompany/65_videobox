@@ -4199,6 +4199,98 @@ class LocalProjectStore:
         )
         return payload
 
+    def create_or_reuse_active_final_render_job(
+        self,
+        *,
+        project_id: str,
+        timeline_job_id: str,
+    ) -> tuple[dict[str, Any], bool]:
+        """Atomically claim the one active final render for a timeline job.
+
+        A terminal job deliberately is not reusable: a person may explicitly
+        start a new render after a failure or after a completed export.  Only
+        ``pending`` and ``running`` records are a live claim.
+        """
+        connection = self._connection(project_id)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            # SQLite's BEGIN IMMEDIATE serializes writers.  PostgreSQL uses a
+            # compatible connection wrapper, where the translated BEGIN needs
+            # this narrow table lock to give the select-then-insert claim the
+            # same serialization guarantee.
+            if not isinstance(connection, sqlite3.Connection):
+                connection.execute("LOCK TABLE jobs IN SHARE ROW EXCLUSIVE MODE")
+            existing = connection.execute(
+                """
+                SELECT job_id, project_id, job_type, status, input_ref, output_ref,
+                       error_message, started_at, finished_at, progress_percent
+                FROM jobs
+                WHERE project_id = ?
+                  AND job_type = ?
+                  AND input_ref = ?
+                  AND status IN (?, ?)
+                ORDER BY COALESCE(started_at, '') DESC, job_id DESC
+                LIMIT 1
+                """,
+                (
+                    project_id,
+                    JobType.FINAL_RENDER.value,
+                    timeline_job_id,
+                    JobStatus.PENDING.value,
+                    JobStatus.RUNNING.value,
+                ),
+            ).fetchone()
+            if existing is not None:
+                connection.commit()
+                return dict(existing), False
+
+            sequence_row = connection.execute(
+                "SELECT COUNT(*) AS count FROM jobs WHERE project_id = ?", (project_id,)
+            ).fetchone()
+            sequence = int(sequence_row["count"]) + 1
+            job_id = f"{JobType.FINAL_RENDER.value}_job_{sequence:03d}"
+            started_at = self._now_iso()
+            payload = {
+                "job_id": job_id,
+                "project_id": project_id,
+                "job_type": JobType.FINAL_RENDER.value,
+                "status": JobStatus.RUNNING.value,
+                "input_ref": timeline_job_id,
+                "output_ref": None,
+                "error_message": None,
+                "started_at": started_at,
+                "finished_at": None,
+                "progress_percent": None,
+            }
+            connection.execute(
+                """
+                INSERT INTO jobs (
+                    job_id, project_id, job_type, status, input_ref, output_ref,
+                    error_message, started_at, finished_at, progress_percent
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    payload["job_id"],
+                    payload["project_id"],
+                    payload["job_type"],
+                    payload["status"],
+                    payload["input_ref"],
+                    payload["output_ref"],
+                    payload["error_message"],
+                    payload["started_at"],
+                    payload["finished_at"],
+                    payload["progress_percent"],
+                ),
+            )
+            connection.commit()
+            return payload, True
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+        finally:
+            connection.close()
+
     def update_job(
         self,
         *,

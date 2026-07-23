@@ -159,15 +159,16 @@ def build_outputs_router(orchestrator: ApiOrchestrator) -> APIRouter:
             )
         except Exception as exc:
             raise _http_error(exc) from exc
-        threading.Thread(
-            target=orchestrator.run_final_render_job,
-            kwargs={
-                "project_id": project_id,
-                "timeline_job_id": payload.timeline_job_id,
-                "job": {"job_id": result["job_id"]},
-            },
-            daemon=True,
-        ).start()
+        if result.pop("should_start", True):
+            threading.Thread(
+                target=orchestrator.run_final_render_job,
+                kwargs={
+                    "project_id": project_id,
+                    "timeline_job_id": payload.timeline_job_id,
+                    "job": {"job_id": result["job_id"]},
+                },
+                daemon=True,
+            ).start()
         return StartJobResponse(**result)
 
     @router.get("/api/projects/{project_id}/final-renders/{job_id}")

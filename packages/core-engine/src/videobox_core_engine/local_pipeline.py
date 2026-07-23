@@ -1579,12 +1579,11 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         start_final_render_job + run_final_render_job so the HTTP request does not
         block for the full render duration."""
         self.assert_timeline_output_allowed(project_id=project_id, timeline_job_id=timeline_job_id)
-        job = self.store.create_job(
-            project_id=project_id,
-            job_type=JobType.FINAL_RENDER,
-            input_ref=timeline_job_id,
-            status=JobStatus.RUNNING,
+        job, should_start = self.store.create_or_reuse_active_final_render_job(
+            project_id=project_id, timeline_job_id=timeline_job_id
         )
+        if not should_start:
+            return {"job_id": job["job_id"], "status": job["status"]}
         self.run_final_render_job(project_id=project_id, timeline_job_id=timeline_job_id, job=job)
         refreshed_job = self.store.get_job(project_id=project_id, job_id=job["job_id"])
         if refreshed_job["status"] == JobStatus.FAILED.value:
@@ -1596,13 +1595,10 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         (the API layer) is responsible for invoking run_final_render_job in the
         background so the HTTP request does not block for the render duration."""
         self.assert_timeline_output_allowed(project_id=project_id, timeline_job_id=timeline_job_id)
-        job = self.store.create_job(
-            project_id=project_id,
-            job_type=JobType.FINAL_RENDER,
-            input_ref=timeline_job_id,
-            status=JobStatus.RUNNING,
+        job, should_start = self.store.create_or_reuse_active_final_render_job(
+            project_id=project_id, timeline_job_id=timeline_job_id
         )
-        return {"job_id": job["job_id"], "status": job["status"]}
+        return {"job_id": job["job_id"], "status": job["status"], "should_start": should_start}
 
     def run_final_render_job(self, *, project_id: str, timeline_job_id: str, job: dict[str, Any]) -> None:
         try:
