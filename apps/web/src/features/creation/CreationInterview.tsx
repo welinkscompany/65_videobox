@@ -5,6 +5,7 @@ import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Textarea } from "../../components/ui/textarea";
 import { AssetPreviewPlayer, type PreviewCandidate } from "../director/AssetPreviewPlayer";
+import { usePlaceholderConfirmation } from "./usePlaceholderConfirmation";
 
 const briefStorageKey = (projectId: string) => `videobox.creation-brief.${projectId}`;
 const pendingKey = (projectId: string, source: "paste" | "upload") => `videobox.creation-pending.${projectId}.${source}`;
@@ -61,7 +62,7 @@ export function CreationInterview({ projectId }: { projectId: string }) {
   const [recordingFile, setRecordingFile] = useState<File | null>(null);
   const [candidateRanges, setCandidateRanges] = useState<Record<string, { start: string; end: string }>>({});
   const [rangeRetry, setRangeRetry] = useState<PendingCandidateRange | null>(null);
-  const [allowPlaceholder, setAllowPlaceholder] = useState(false);
+  const { confirmed: allowPlaceholder, setConfirmed: setAllowPlaceholder } = usePlaceholderConfirmation(readiness);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const recordingStreamRef = useRef<MediaStream | null>(null);
   const recordingDiscardRef = useRef(false);
@@ -111,7 +112,6 @@ export function CreationInterview({ projectId }: { projectId: string }) {
     if (!candidates) return;
     setCandidateRanges(Object.fromEntries(candidates.filter(isUsableBrollCandidate).map((item) => [item.asset_id, { start: String(item.target_range.start_sec), end: String(item.target_range.end_sec) }] )));
   }, [readiness]);
-  useEffect(() => { setAllowPlaceholder(false); }, [readiness?.readiness_id, readiness?.revision]);
 
   const currentQuestion = brief?.questions[brief.current_step] ?? null;
   const usableBrollCandidates = (readiness?.result?.broll_candidates ?? []).filter(isUsableBrollCandidate);

@@ -238,6 +238,26 @@ describe("CreationInterview", () => {
     }));
   });
 
+  it("keeps the placeholder confirmation when the same readiness effect flushes after the creator checks it", async () => {
+    window.localStorage.setItem("videobox.creation-brief.project_1", "brief_1");
+    window.localStorage.setItem("videobox.draft-readiness.project_1", "readiness_gap");
+    const approved = { ...firstBrief, questions: [], current_step: 0, status: "approved", revision: 5 };
+    const needsAssets = { readiness_id: "readiness_gap", brief_id: "brief_1", status: "needs_assets", revision: 3, result: { gap_slots: [{ gap_slot_id: "gap-1", reason: "영상이 없어요." }] } } as never;
+    vi.spyOn(api, "getCreationBrief").mockResolvedValue(approved);
+    vi.spyOn(api, "getDraftReadiness").mockResolvedValue(needsAssets);
+    const create = vi.spyOn(api, "createAtomicDraftBundle").mockResolvedValue({ session_id: "editing_1" } as never);
+    render(<CreationInterview projectId="project_1" />);
+
+    const confirmation = await screen.findByLabelText("빈 구간을 남긴 채 편집용 초안을 만들겠습니다");
+    fireEvent.click(confirmation);
+    await Promise.resolve();
+
+    expect(confirmation).toBeChecked();
+    expect(screen.getByRole("button", { name: "빈 구간 포함 초안 만들기" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "빈 구간 포함 초안 만들기" }));
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+  });
+
   it("saves each B-roll candidate's chosen seconds with the current readiness revision", async () => {
     window.localStorage.setItem("videobox.creation-brief.project_1", "brief_1");
     const approved = { ...firstBrief, questions: [], current_step: 0, status: "approved", revision: 5 };
@@ -313,7 +333,7 @@ describe("CreationInterview", () => {
 
     expect(await screen.findByRole("button", { name: "무음으로 초안 준비" })).toBeVisible();
     expect(screen.queryByText("이전 기획 결과")).not.toBeInTheDocument();
-    expect(window.localStorage.getItem("videobox.draft-readiness.project_1")).toBeNull();
+    await waitFor(() => expect(window.localStorage.getItem("videobox.draft-readiness.project_1")).toBeNull());
   });
 
   it("shows a helpful retry when microphone permission is denied", async () => {
