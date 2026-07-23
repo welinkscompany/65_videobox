@@ -39,6 +39,7 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
   const [isRenderingSubtitle, setIsRenderingSubtitle] = useState(false);
   const [subtitleError, setSubtitleError] = useState(false);
   const requestEpoch = useRef(0);
+  const subtitleSubmissionEpoch = useRef(0);
 
   const refresh = useCallback(async (options?: { jobs?: JobRecord[]; subtitle?: SubtitleJob | null }) => {
     const epoch = requestEpoch.current + 1;
@@ -79,10 +80,14 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
   }, [projectId]);
 
   useEffect(() => {
+    subtitleSubmissionEpoch.current += 1;
     setIsRenderingSubtitle(false);
     setSubtitleError(false);
     void refresh();
-    return () => { requestEpoch.current += 1; };
+    return () => {
+      requestEpoch.current += 1;
+      subtitleSubmissionEpoch.current += 1;
+    };
   }, [refresh]);
 
   if (isLoading && !state && !error) return <section className="vb-outputs" aria-live="polite"><p>출력 상태를 불러오는 중이에요.</p></section>;
@@ -103,7 +108,8 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
   const capcutReady = state?.capcutDraft?.status === "succeeded" && capcutHandoff?.status === "ready";
   const handleRenderSubtitle = async () => {
     if (!timelineJob || !canRenderSubtitle || isRenderingSubtitle) return;
-    const epoch = requestEpoch.current;
+    const submissionEpoch = subtitleSubmissionEpoch.current + 1;
+    subtitleSubmissionEpoch.current = submissionEpoch;
     setIsRenderingSubtitle(true);
     setSubtitleError(false);
     try {
@@ -112,12 +118,12 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
         api.listJobs(projectId),
         api.getSubtitle(projectId, result.job_id),
       ]);
-      if (epoch !== requestEpoch.current) return;
+      if (submissionEpoch !== subtitleSubmissionEpoch.current) return;
       await refresh({ jobs, subtitle });
     } catch {
-      if (epoch === requestEpoch.current) setSubtitleError(true);
+      if (submissionEpoch === subtitleSubmissionEpoch.current) setSubtitleError(true);
     } finally {
-      if (epoch === requestEpoch.current) setIsRenderingSubtitle(false);
+      if (submissionEpoch === subtitleSubmissionEpoch.current) setIsRenderingSubtitle(false);
     }
   };
 

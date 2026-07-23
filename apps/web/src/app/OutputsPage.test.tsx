@@ -128,6 +128,27 @@ describe("OutputsPage", () => {
     await waitFor(() => expect(renderSubtitle).toHaveBeenCalledTimes(2));
   });
 
+  it("keeps subtitle retry available when a status refresh finishes before its request", async () => {
+    stubCanonicalSubtitleApi();
+    let resolveSubtitle!: (result: { job_id: string; status: string }) => void;
+    const pendingSubtitle = new Promise<{ job_id: string; status: string }>((resolve) => { resolveSubtitle = resolve; });
+    const renderSubtitle = vi.spyOn(api, "renderSubtitle").mockReturnValueOnce(pendingSubtitle as never).mockRejectedValueOnce(new Error("offline"));
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "자막 만들기" }));
+    expect(screen.getByRole("button", { name: "자막 만드는 중" })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "상태 다시 확인" }));
+    await waitFor(() => expect(api.listJobs).toHaveBeenCalledTimes(2));
+    resolveSubtitle({ job_id: subtitleJob.job_id, status: "succeeded" });
+
+    const retry = await screen.findByRole("button", { name: "자막 만들기" });
+    expect(retry).toBeEnabled();
+    fireEvent.click(retry);
+    await waitFor(() => expect(renderSubtitle).toHaveBeenCalledTimes(2));
+  });
+
   it("does not let a delayed project A subtitle state replace project B", async () => {
     let resolveProjectA!: (session: { session_id: string; project_id: string; timeline_id: string }) => void;
     const projectASession = new Promise<{ session_id: string; project_id: string; timeline_id: string }>((resolve) => { resolveProjectA = resolve; });
