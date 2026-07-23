@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { api } from "../api";
 import { OutputsPage } from "./OutputsPage";
@@ -570,6 +570,208 @@ describe("OutputsPage", () => {
     resolveSubmissionJobs([activeTimelineJob, submittedCapcut] as never);
     await waitFor(() => expect(api.getCapcutDraftExport).toHaveBeenCalledWith("project_a", "capcut-submitted"));
     await waitFor(() => expect(screen.getByText("로컬 저장 위치: local://capcut-refreshed.zip")).toBeVisible());
+  });
+
+  it("registers only the current CapCut draft after an explicit click and refreshes its typed handoff", async () => {
+    const currentCapcutJob = { ...capcutJob, input_ref: "timeline-current", job_id: "capcut-current-timeline" };
+    stubCanonicalSubtitleApi({ jobs: [activeTimelineJob, currentCapcutJob] as never });
+    const getCapcutDraftExport = vi.spyOn(api, "getCapcutDraftExport")
+      .mockResolvedValueOnce({
+        job_id: currentCapcutJob.job_id, status: "succeeded", export: {
+          export_id: "capcut-current", timeline_id: "timeline-a", export_type: "capcut_draft", file_uri: "local://draft-current.zip", status: "succeeded", notes: [], is_current: true,
+          handoff: { status: "pending", source_file_uri: "local://draft-current.zip", reused: false },
+        },
+      } as never)
+      .mockResolvedValueOnce({
+        job_id: currentCapcutJob.job_id, status: "succeeded", export: {
+          export_id: "capcut-current", timeline_id: "timeline-a", export_type: "capcut_draft", file_uri: "local://draft-current.zip", status: "succeeded", notes: [], is_current: true,
+          handoff: { status: "ready", source_file_uri: "local://draft-current.zip", registered_project_path: "local://capcut/project", reused: false },
+        },
+      } as never);
+    const registerCapcutDraftHandoff = vi.spyOn(api, "registerCapcutDraftHandoff").mockResolvedValue({
+      handoff: { status: "ready", source_file_uri: "local://draft-current.zip", registered_project_path: "local://capcut/project", reused: false },
+    });
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+
+    expect(await screen.findByRole("button", { name: "CapCut에 등록" })).toBeEnabled();
+    expect(registerCapcutDraftHandoff).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "CapCut에 등록" }));
+
+    await waitFor(() => expect(registerCapcutDraftHandoff).toHaveBeenCalledWith("project_a", "capcut-current-timeline"));
+    await waitFor(() => expect(getCapcutDraftExport).toHaveBeenLastCalledWith("project_a", "capcut-current-timeline"));
+    expect(await screen.findByText("CapCut 등록 상태가 준비되었어요.")).toBeVisible();
+    expect(screen.getByText("실제 CapCut Desktop에서 열기와 가져오기는 별도로 확인해야 해요.")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "CapCut에 등록" })).not.toBeInTheDocument();
+  });
+
+  it("does not expose CapCut registration for a stale draft", async () => {
+    const staleCapcutJob = { ...capcutJob, input_ref: "timeline-current" };
+    stubCanonicalSubtitleApi({ jobs: [activeTimelineJob, staleCapcutJob] as never });
+    vi.spyOn(api, "getCapcutDraftExport").mockResolvedValue({
+      job_id: staleCapcutJob.job_id, status: "succeeded", export: {
+        export_id: "capcut-stale", timeline_id: "timeline-a", export_type: "capcut_draft", file_uri: "local://draft-stale.zip", status: "succeeded", notes: [], is_current: false,
+        handoff: { status: "pending", source_file_uri: "local://draft-stale.zip", reused: false },
+      },
+    } as never);
+    const registerCapcutDraftHandoff = vi.spyOn(api, "registerCapcutDraftHandoff");
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+
+    expect(await screen.findByText("CapCut 초안이 최신 편집본과 달라요.")).toBeVisible();
+    expect(screen.queryByRole("button", { name: /CapCut에 등록|CapCut 등록 다시 시도/ })).not.toBeInTheDocument();
+    expect(registerCapcutDraftHandoff).not.toHaveBeenCalled();
+  });
+
+  it("does not expose CapCut registration when the current export artifact did not succeed", async () => {
+    const currentCapcutJob = { ...capcutJob, input_ref: "timeline-current", job_id: "capcut-current-timeline" };
+    stubCanonicalSubtitleApi({ jobs: [activeTimelineJob, currentCapcutJob] as never });
+    vi.spyOn(api, "getCapcutDraftExport").mockResolvedValue({
+      job_id: currentCapcutJob.job_id, status: "succeeded", export: {
+        export_id: "capcut-current", timeline_id: "timeline-a", export_type: "capcut_draft", file_uri: "local://draft-current.zip", status: "failed", notes: [], is_current: true,
+        handoff: { status: "pending", source_file_uri: "local://draft-current.zip", reused: false },
+      },
+    } as never);
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+
+    expect(await screen.findByText("CapCut 초안이 최신 편집본과 달라요.")).toBeVisible();
+    expect(screen.queryByRole("button", { name: /CapCut에 등록|CapCut 등록 다시 시도/ })).not.toBeInTheDocument();
+  });
+
+  it("keeps a failed current CapCut registration recoverable only by another explicit click", async () => {
+    const currentCapcutJob = { ...capcutJob, input_ref: "timeline-current", job_id: "capcut-current-timeline" };
+    stubCanonicalSubtitleApi({ jobs: [activeTimelineJob, currentCapcutJob] as never });
+    vi.spyOn(api, "getCapcutDraftExport").mockResolvedValue({
+      job_id: currentCapcutJob.job_id, status: "succeeded", export: {
+        export_id: "capcut-current", timeline_id: "timeline-a", export_type: "capcut_draft", file_uri: "local://draft-current.zip", status: "succeeded", notes: [], is_current: true,
+        handoff: { status: "failed", source_file_uri: "local://draft-current.zip", error_message: "write failed", reused: false },
+      },
+    } as never);
+    const registerCapcutDraftHandoff = vi.spyOn(api, "registerCapcutDraftHandoff").mockResolvedValue({
+      handoff: { status: "failed", source_file_uri: "local://draft-current.zip", error_message: "write failed", reused: false },
+    });
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+
+    const action = await screen.findByRole("button", { name: "CapCut 등록 다시 시도" });
+    expect(screen.getByText("CapCut 등록을 완료하지 못했어요. 상태를 확인한 뒤 다시 시도해 주세요.")).toBeVisible();
+    expect(registerCapcutDraftHandoff).not.toHaveBeenCalled();
+    fireEvent.click(action);
+    await waitFor(() => expect(registerCapcutDraftHandoff).toHaveBeenCalledTimes(1));
+    await Promise.resolve();
+    expect(registerCapcutDraftHandoff).toHaveBeenCalledTimes(1);
+  });
+
+  it("starts only one current CapCut registration for rapid double clicks", async () => {
+    const currentCapcutJob = { ...capcutJob, input_ref: "timeline-current", job_id: "capcut-current-timeline" };
+    stubCanonicalSubtitleApi({ jobs: [activeTimelineJob, currentCapcutJob] as never });
+    vi.spyOn(api, "getCapcutDraftExport").mockResolvedValue({
+      job_id: currentCapcutJob.job_id, status: "succeeded", export: {
+        export_id: "capcut-current", timeline_id: "timeline-a", export_type: "capcut_draft", file_uri: "local://draft-current.zip", status: "succeeded", notes: [], is_current: true,
+        handoff: { status: "pending", source_file_uri: "local://draft-current.zip", reused: false },
+      },
+    } as never);
+    const pendingHandoff = new Promise<{ handoff: { status: string; source_file_uri: string; reused: boolean } }>(() => {});
+    const registerCapcutDraftHandoff = vi.spyOn(api, "registerCapcutDraftHandoff").mockReturnValue(pendingHandoff as never);
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+
+    const action = await screen.findByRole("button", { name: "CapCut에 등록" });
+    fireEvent.click(action);
+    fireEvent.click(action);
+    expect(registerCapcutDraftHandoff).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "CapCut 등록 중" })).toBeDisabled();
+  });
+
+  it("does not let a delayed CapCut registration replace a newer manual refresh", async () => {
+    const currentCapcutJob = { ...capcutJob, input_ref: "timeline-current", job_id: "capcut-current-timeline" };
+    stubCanonicalSubtitleApi({ jobs: [activeTimelineJob, currentCapcutJob] as never });
+    let resolveStaleHandoff!: (value: unknown) => void;
+    const staleHandoff = new Promise((resolve) => { resolveStaleHandoff = resolve; });
+    vi.spyOn(api, "getCapcutDraftExport")
+      .mockResolvedValueOnce({
+        job_id: currentCapcutJob.job_id, status: "succeeded", export: {
+          export_id: "capcut-current", timeline_id: "timeline-a", export_type: "capcut_draft", file_uri: "local://draft-current.zip", status: "succeeded", notes: [], is_current: true,
+          handoff: { status: "pending", source_file_uri: "local://draft-current.zip", reused: false },
+        },
+      } as never)
+      .mockReturnValueOnce(staleHandoff as never)
+      .mockResolvedValueOnce({
+        job_id: currentCapcutJob.job_id, status: "succeeded", export: {
+          export_id: "capcut-current", timeline_id: "timeline-a", export_type: "capcut_draft", file_uri: "local://draft-current.zip", status: "succeeded", notes: [], is_current: true,
+          handoff: { status: "ready", source_file_uri: "local://draft-current.zip", reused: true },
+        },
+      } as never);
+    vi.spyOn(api, "registerCapcutDraftHandoff").mockResolvedValue({
+      handoff: { status: "failed", source_file_uri: "local://draft-current.zip", error_message: "old response", reused: false },
+    });
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "CapCut에 등록" }));
+    await waitFor(() => expect(api.getCapcutDraftExport).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByRole("button", { name: "상태 다시 확인" }));
+    expect(await screen.findByText("기존 CapCut 등록 정보를 다시 사용해요.")).toBeVisible();
+
+    await act(async () => {
+      resolveStaleHandoff({
+        job_id: currentCapcutJob.job_id, status: "succeeded", export: {
+          export_id: "capcut-current", timeline_id: "timeline-a", export_type: "capcut_draft", file_uri: "local://draft-current.zip", status: "succeeded", notes: [], is_current: true,
+          handoff: { status: "failed", source_file_uri: "local://draft-current.zip", error_message: "old response", reused: false },
+        },
+      });
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText("기존 CapCut 등록 정보를 다시 사용해요.")).toBeVisible();
+    expect(screen.queryByText("CapCut 등록을 완료하지 못했어요. 상태를 확인한 뒤 다시 시도해 주세요.")).not.toBeInTheDocument();
+  });
+
+  it("does not let an in-flight project A CapCut registration change project B state", async () => {
+    const currentCapcutJob = { ...capcutJob, input_ref: "timeline-current", job_id: "capcut-current-timeline" };
+    let rejectProjectAHandoff!: (error: Error) => void;
+    const projectAHandoff = new Promise<{ handoff: { status: string; source_file_uri: string; reused: boolean } }>((_resolve, reject) => { rejectProjectAHandoff = reject; });
+    const projectBSession = new Promise<null>(() => {});
+    const projectBJobs = new Promise<[]>(() => {});
+    vi.spyOn(api, "getLatestEditingSession").mockImplementation((requestedProjectId) => (
+      requestedProjectId === "project_b"
+        ? projectBSession as never
+        : Promise.resolve({ session_id: "session-a", project_id: "project_a", timeline_id: "timeline-a" }) as never
+    ));
+    vi.spyOn(api, "listJobs").mockImplementation((requestedProjectId) => (
+      requestedProjectId === "project_b" ? projectBJobs as never : Promise.resolve([activeTimelineJob, currentCapcutJob]) as never
+    ));
+    vi.spyOn(api, "getTimeline").mockResolvedValue({
+      job_id: activeTimelineJob.job_id, status: "succeeded", timeline: {
+        timeline_id: "timeline-a", project_id: "project_a", version: "v1", output_mode: "short", review_status: "approved",
+        tracks: [], review_flags: [], pending_recommendations: [],
+      },
+    } as never);
+    vi.spyOn(api, "getReviewSnapshot").mockResolvedValue({
+      project_id: "project_a", timeline_id: "timeline-a", review_status: "approved", segments: [], applied_recommendations: [], pending_recommendations: [], review_flags: [],
+    } as never);
+    vi.spyOn(api, "getCapcutDraftExport").mockResolvedValue({
+      job_id: currentCapcutJob.job_id, status: "succeeded", export: {
+        export_id: "capcut-current", timeline_id: "timeline-a", export_type: "capcut_draft", file_uri: "local://draft-current.zip", status: "succeeded", notes: [], is_current: true,
+        handoff: { status: "pending", source_file_uri: "local://draft-current.zip", reused: false },
+      },
+    } as never);
+    vi.spyOn(api, "getCapcutHandoffDiagnostics").mockResolvedValue(null as never);
+    vi.spyOn(api, "registerCapcutDraftHandoff").mockReturnValue(projectAHandoff as never);
+
+    const view = render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "CapCut에 등록" }));
+    expect(screen.getByRole("button", { name: "CapCut 등록 중" })).toBeDisabled();
+
+    view.rerender(<OutputsPage projectId="project_b" onOpenEditor={vi.fn()} />);
+    await act(async () => {
+      rejectProjectAHandoff(new Error("offline"));
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByRole("button", { name: "CapCut 등록 중" })).not.toBeInTheDocument();
+    expect(screen.queryByText("CapCut 등록 상태를 확인하지 못했어요. 상태를 다시 확인한 뒤 시도해 주세요.")).not.toBeInTheDocument();
   });
 
   it("keeps a historical CapCut draft read-only when no current editing timeline is available", async () => {
