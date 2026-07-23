@@ -15,10 +15,11 @@ import { api, type Project } from "../api";
 import { ProjectOnboarding } from "../ProjectOnboarding";
 import { CreationInterview } from "../features/creation/CreationInterview";
 import { DraftGapMedia } from "../features/media/DraftGapMedia";
+import { MediaWorkspacePage } from "../features/media/MediaWorkspacePage";
 import { TimelineReviewPage } from "../features/review/TimelineReviewPage";
 import { LegacyWorkspacePage } from "./LegacyWorkspacePage";
 import { EditorWorkbenchRoute } from "../features/editor/workbench/EditorWorkbenchRoute";
-import { HomePage, opensLastProjectOnStart, ProductEmptyPage, ProductShell, SettingsPage } from "./ProductShell";
+import { HomePage, opensLastProjectOnStart, ProductShell, SettingsPage } from "./ProductShell";
 import { OutputsPage } from "./OutputsPage";
 import { ProjectWorkspaceProvider, resolveLastValidProjectId } from "./ProjectWorkspaceProvider";
 import { isWorkspaceSection, resolveWorkspaceLocation, type WorkspaceSection } from "./routeManifest";
@@ -175,11 +176,13 @@ function WorkspacePage() {
     </ProductShell>;
   }
   if (normalizedSection === "media") {
-    const requestedReturn = new URLSearchParams(window.location.search).get("return_to");
-    const safeReturn = requestedReturn && requestedReturn.startsWith(`/projects/${projectId}/create`) ? requestedReturn : null;
+    const requestedReturn = typeof (routeSearch as { return_to?: unknown }).return_to === "string"
+      ? (routeSearch as { return_to: string }).return_to
+      : null;
+    const safeReturn = resolveSafeCreationReturn(projectId, requestedReturn);
     if (safeReturn) return <ProductShell projectId={projectId} projects={projects} section={section} onNavigate={navigateTo} onOpenSettings={() => void navigate({ to: "/settings/general" })}><DraftGapMedia projectId={projectId} returnTo={safeReturn} /></ProductShell>;
     return <ProductShell projectId={projectId} projects={projects} section={normalizedSection} onNavigate={navigateTo} onOpenSettings={() => void navigate({ to: "/settings/general" })}>
-      <ProductEmptyPage title="자산을 준비해 주세요" description="영상에 넣을 사진, 영상, 소리를 추가하면 여기에서 고를 수 있어요." action="새 영상 만들기" onClick={() => navigateTo(projectId, "create")} />
+      <MediaWorkspacePage projectId={projectId} />
     </ProductShell>;
   }
   if (normalizedSection === "outputs") {
@@ -228,6 +231,18 @@ function WorkspacePage() {
       />
     </ProjectWorkspaceProvider>
   );
+}
+
+function resolveSafeCreationReturn(projectId: string, requestedReturn: string | null) {
+  if (!requestedReturn) return null;
+  try {
+    const parsed = new URL(requestedReturn, window.location.origin);
+    const expectedPath = `/projects/${encodeURIComponent(projectId)}/create`;
+    if (parsed.origin !== window.location.origin || parsed.pathname !== expectedPath || parsed.hash) return null;
+    return `${parsed.pathname}${parsed.search}`;
+  } catch {
+    return null;
+  }
 }
 
 function CanonicalEditorEntry({ projectId }: { projectId: string }) {

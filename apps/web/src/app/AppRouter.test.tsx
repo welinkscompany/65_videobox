@@ -46,6 +46,40 @@ describe("ProjectCatalog", () => {
 });
 
 describe("AppRouter URL ownership", () => {
+  it("owns ordinary media with the canonical workspace and keeps the creation return adapter narrow", async () => {
+    const project = { project_id: "project_a", name: "A", status: "active", root_storage_uri: "local://a" };
+    vi.spyOn(api, "listProjects").mockResolvedValue([project]);
+    vi.spyOn(api, "listBrollAssets").mockResolvedValue([]);
+    vi.spyOn(api, "listMediaAnalysis").mockResolvedValue({ items: [] });
+    const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects/project_a/media"] }));
+    render(<AppRouter router={router} />);
+
+    expect(await screen.findByTestId("media-workspace-page")).toHaveAttribute("data-project-id", "project_a");
+    expect(screen.queryByRole("heading", { name: "장면 영상 추가" })).not.toBeInTheDocument();
+    cleanup();
+
+    const safeRouter = createAppRouter(new ProjectCatalog(), createMemoryHistory({
+      initialEntries: ["/projects/project_a/media?return_to=%2Fprojects%2Fproject_a%2Fcreate%3Fbrief_id%3Dbrief-1"],
+    }));
+    render(<AppRouter router={safeRouter} />);
+    expect(await screen.findByRole("heading", { name: "장면 영상 추가" })).toBeVisible();
+    cleanup();
+
+    for (const unsafeReturn of [
+      "https://example.com/projects/project_a/create",
+      "/projects/project_b/create",
+      "/projects/project_a/create-extra",
+    ]) {
+      const unsafeRouter = createAppRouter(new ProjectCatalog(), createMemoryHistory({
+        initialEntries: [`/projects/project_a/media?return_to=${encodeURIComponent(unsafeReturn)}`],
+      }));
+      render(<AppRouter router={unsafeRouter} />);
+      expect(await screen.findByTestId("media-workspace-page")).toBeVisible();
+      expect(screen.queryByRole("heading", { name: "장면 영상 추가" })).not.toBeInTheDocument();
+      cleanup();
+    }
+  });
+
   it("uses /editor for new editing links while continuing to read the prior editing URL", () => {
     expect(resolveWorkspaceLocation("project_a", "editing")).toBe("/projects/project_a/editor");
     expect(parseWorkspaceLocation("/projects/project_a/editor")).toEqual({ projectId: "project_a", section: "editing" });

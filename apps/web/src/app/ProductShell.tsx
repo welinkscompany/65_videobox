@@ -9,11 +9,12 @@ import { Menu, PanelLeftClose, Settings, Video } from "lucide-react";
 import { api, type Project } from "../api";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "../components/ui/dialog";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../components/ui/dropdown-menu";
 import { Sidebar, SidebarContent, SidebarFooter, SidebarHeader, SidebarInset, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarProvider, SidebarRail, SidebarTrigger } from "../components/ui/sidebar";
 import { localDeploymentCapabilities } from "./deploymentCapabilities";
 import { resolveWorkspaceLocation, type WorkspaceSection } from "./routeManifest";
+import { JobRecovery } from "../features/jobs/JobRecovery";
 
 type ShellSection = WorkspaceSection | "media" | "outputs";
 type SettingsSection = "general" | "appearance" | "ai-privacy" | "storage" | "output";
@@ -26,6 +27,8 @@ export function opensLastProjectOnStart() { return readSettings().openLastProjec
 
 export function ProductShell({ projectId, projects, section, onNavigate, onOpenSettings, children, forceCollapsed = false }: { projectId: string; projects: Project[]; section: ShellSection; onNavigate: (projectId: string, section: WorkspaceSection) => void; onOpenSettings: () => void; children: ReactNode; forceCollapsed?: boolean }) {
   const [collapsed, setCollapsed] = useState(forceCollapsed);
+  const [jobDialogOpen, setJobDialogOpen] = useState(false);
+  const [jobRecoveryBusy, setJobRecoveryBusy] = useState(false);
   const previousForceCollapsed = useRef(forceCollapsed);
   const mobileTriggerRef = useRef<HTMLButtonElement>(null);
   if (forceCollapsed && !previousForceCollapsed.current) {
@@ -35,6 +38,10 @@ export function ProductShell({ projectId, projects, section, onNavigate, onOpenS
   const current = projects.find((project) => project.project_id === projectId) ?? projects[0];
   const nav = [["홈", "home"], ["새 영상 만들기", "create"], ["편집", "editing"], ["검토", "review"], ["자산", "media"], ["출력", "outputs"]] as const;
   const go = (next: string) => { if (window.innerWidth < 768) document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); onNavigate(projectId, next as WorkspaceSection); };
+  const setJobDialogOpenSafely = (open: boolean) => {
+    if (!open && jobRecoveryBusy) return;
+    setJobDialogOpen(open);
+  };
   useEffect(() => { const restoreMobileTrigger = (event: KeyboardEvent) => { if (event.key === "Escape" && window.innerWidth < 768) queueMicrotask(() => mobileTriggerRef.current?.focus()); }; document.addEventListener("keydown", restoreMobileTrigger); return () => document.removeEventListener("keydown", restoreMobileTrigger); }, []);
   return <SidebarProvider open={!collapsed} onOpenChange={(open) => setCollapsed(!open)}>
     <div className="vb-product-shell">
@@ -44,7 +51,7 @@ export function ProductShell({ projectId, projects, section, onNavigate, onOpenS
       <div className="vb-project-switcher" aria-label="프로젝트 전환"><p>현재 프로젝트</p>{projects.map((project) => <Button key={project.project_id} variant="ghost" aria-label={project.name} aria-pressed={project.project_id === projectId} onClick={() => onNavigate(project.project_id, "home")}>{project.name}</Button>)}</div>
       </SidebarHeader><SidebarContent><nav aria-label="영상 제작" className="vb-product-nav"><SidebarMenu>{nav.map(([label, target]) => <SidebarMenuItem key={target}><SidebarMenuButton isActive={section === target || (target === "review" && section === "timeline")} tooltip={label} onClick={() => go(target)}>{label}</SidebarMenuButton></SidebarMenuItem>)}</SidebarMenu></nav></SidebarContent><SidebarFooter><div className="vb-sidebar-footer"><Button variant="ghost" onClick={onOpenSettings}><Settings aria-hidden="true" /> <span>설정</span></Button><small>{localDeploymentCapabilities.aiExecution === "local" ? "이 기기에서 작업" : "AI 기능 끔"}</small></div></SidebarFooter><SidebarRail />
     </Sidebar>
-    <SidebarInset className="vb-product-main"><header className="vb-product-header"><SidebarTrigger ref={mobileTriggerRef} className="vb-mobile-menu" aria-label="메뉴 열기" /><Button variant="ghost" size="icon" aria-label="사이드바 접기" onClick={() => setCollapsed((value) => !value)} className="vb-collapse"><PanelLeftClose /></Button><div><p>{current?.name ?? "프로젝트"}</p><strong>{section === "home" ? "홈" : section === "create" ? "새 영상 만들기" : section === "media" ? "자산" : section === "outputs" ? "출력" : section === "settings" ? "설정" : section === "timeline" || section === "review" ? "검토" : "편집"}</strong></div><DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline">작업 상태</Button></DropdownMenuTrigger><DropdownMenuContent><DropdownMenuItem disabled>진행 중인 작업이 없어요</DropdownMenuItem></DropdownMenuContent></DropdownMenu><Button onClick={() => onNavigate(projectId, "create")}>새 영상 만들기</Button></header><div className="vb-product-content">{children}</div></SidebarInset>
+    <SidebarInset className="vb-product-main"><header className="vb-product-header"><SidebarTrigger ref={mobileTriggerRef} className="vb-mobile-menu" aria-label="메뉴 열기" /><Button variant="ghost" size="icon" aria-label="사이드바 접기" onClick={() => setCollapsed((value) => !value)} className="vb-collapse"><PanelLeftClose /></Button><div><p>{current?.name ?? "프로젝트"}</p><strong>{section === "home" ? "홈" : section === "create" ? "새 영상 만들기" : section === "media" ? "자산" : section === "outputs" ? "출력" : section === "settings" ? "설정" : section === "timeline" || section === "review" ? "검토" : "편집"}</strong></div><Dialog open={jobDialogOpen} onOpenChange={setJobDialogOpenSafely}><DialogTrigger asChild><Button variant="outline">작업 상태</Button></DialogTrigger><DialogContent showCloseButton={!jobRecoveryBusy} onEscapeKeyDown={(event) => { if (jobRecoveryBusy) event.preventDefault(); }} onPointerDownOutside={(event) => { if (jobRecoveryBusy) event.preventDefault(); }} onInteractOutside={(event) => { if (jobRecoveryBusy) event.preventDefault(); }}><DialogHeader><DialogTitle>작업 상태</DialogTitle><DialogDescription>로컬 작업 상태를 확인하고 실패한 작업을 다시 시작할 수 있어요.</DialogDescription></DialogHeader><JobRecovery projectId={projectId} onBusyChange={setJobRecoveryBusy} /></DialogContent></Dialog><Button onClick={() => onNavigate(projectId, "create")}>새 영상 만들기</Button></header><div className="vb-product-content">{children}</div></SidebarInset>
     </div>
   </SidebarProvider>;
 }

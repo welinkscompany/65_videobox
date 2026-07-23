@@ -52,7 +52,7 @@ test("mobile menu exposes the same creator navigation", async ({ page }) => {
   await expect(menu.getByRole("button", { name: "자산" })).toBeVisible();
   await menu.getByRole("button", { name: "자산" }).click();
   await expect(page).toHaveURL(/\/projects\/local-draft\/media$/);
-  await expect(page.getByText("자산을 준비해 주세요", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "자산 보관함" })).toBeVisible();
 });
 
 test("mobile Sheet closes with Escape and returns focus, while the desktop rail collapses", async ({ page }) => {

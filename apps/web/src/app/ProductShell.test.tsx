@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createMemoryHistory } from "@tanstack/react-router";
 
 import { api } from "../api";
 import { AppRouter, createAppRouter, ProjectCatalog } from "./AppRouter";
 
-beforeEach(() => { vi.stubGlobal("scrollTo", vi.fn()); vi.stubGlobal("matchMedia", (query: string) => ({ matches: false, media: query, onchange: null, addEventListener: () => {}, removeEventListener: () => {}, addListener: () => {}, removeListener: () => {}, dispatchEvent: () => false })); vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} }); });
+beforeEach(() => { vi.stubGlobal("scrollTo", vi.fn()); vi.stubGlobal("PointerEvent", MouseEvent); vi.stubGlobal("matchMedia", (query: string) => ({ matches: false, media: query, onchange: null, addEventListener: () => {}, removeEventListener: () => {}, addListener: () => {}, removeListener: () => {}, dispatchEvent: () => false })); vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} }); });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); window.localStorage.clear(); });
 
 const projects = [
@@ -14,6 +14,98 @@ const projects = [
 ];
 
 describe("product shell", () => {
+  it("opens the current-project recovery surface only when the user asks for job status", async () => {
+    vi.spyOn(api, "listProjects").mockResolvedValue(projects);
+    const listJobs = vi.spyOn(api, "listJobs").mockResolvedValue([{
+      job_id: "job-internal",
+      project_id: "first",
+      job_type: "transcription",
+      status: "failed",
+      input_ref: "asset-internal",
+      output_ref: null,
+      error_message: "provider internal",
+      started_at: "now",
+      finished_at: "now",
+    }]);
+    const retry = vi.spyOn(api, "retryJob");
+    const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects/first/home"] }));
+    render(<AppRouter router={router} />);
+
+    const trigger = await screen.findByRole("button", { name: "작업 상태" });
+    expect(listJobs).not.toHaveBeenCalled();
+    expect(retry).not.toHaveBeenCalled();
+    fireEvent.click(trigger);
+
+    expect(await screen.findByRole("dialog", { name: "작업 상태" })).toBeVisible();
+    expect(screen.getByText("로컬 작업 상태를 확인하고 실패한 작업을 다시 시작할 수 있어요.")).toBeVisible();
+    expect(screen.getByRole("region", { name: "작업 복구" })).toBeVisible();
+    expect(screen.getByText("음성 받아쓰기")).toBeVisible();
+    expect(retry).not.toHaveBeenCalled();
+  });
+
+  it("keeps the recovery dialog mounted while a retry is pending and allows close after it settles", async () => {
+    let releaseRetry!: (value: { job_id: string; status: string }) => void;
+    vi.spyOn(api, "listProjects").mockResolvedValue(projects);
+    vi.spyOn(api, "listJobs")
+      .mockResolvedValueOnce([{
+        job_id: "job-old",
+        project_id: "first",
+        job_type: "transcription",
+        status: "failed",
+        input_ref: "asset-lineage",
+        output_ref: null,
+        error_message: "local failure",
+        started_at: "2026-07-23T00:00:00Z",
+        finished_at: "2026-07-23T00:00:01Z",
+      }])
+      .mockResolvedValueOnce([{
+        job_id: "job-old",
+        project_id: "first",
+        job_type: "transcription",
+        status: "failed",
+        input_ref: "asset-lineage",
+        output_ref: null,
+        error_message: "local failure",
+        started_at: "2026-07-23T00:00:00Z",
+        finished_at: "2026-07-23T00:00:01Z",
+      }, {
+        job_id: "job-new",
+        project_id: "first",
+        job_type: "transcription",
+        status: "running",
+        input_ref: "asset-lineage",
+        output_ref: null,
+        error_message: null,
+        started_at: "2026-07-23T00:00:02Z",
+        finished_at: null,
+      }]);
+    const retry = vi.spyOn(api, "retryJob").mockImplementation(() => new Promise((resolve) => {
+      releaseRetry = resolve;
+    }));
+    const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects/first/home"] }));
+    render(<AppRouter router={router} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "작업 상태" }));
+    const retryButton = await screen.findByRole("button", { name: "다시 실행" });
+    fireEvent.click(retryButton);
+    expect(retry).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: "Close" })).not.toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.getByRole("dialog", { name: "작업 상태" })).toBeVisible();
+    fireEvent.click(retryButton);
+    expect(retry).toHaveBeenCalledTimes(1);
+
+    await act(async () => releaseRetry({ job_id: "job-new", status: "running" }));
+    const close = await screen.findByRole("button", { name: "Close" });
+    fireEvent.click(close);
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "작업 상태" })).not.toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "작업 상태" }));
+    expect(await screen.findByRole("dialog", { name: "작업 상태" })).toBeVisible();
+    expect(retry).toHaveBeenCalledTimes(1);
+  });
+
   it("starts collapsed only for the canonical editor and allows an explicit reopen", async () => {
     vi.spyOn(api, "listProjects").mockResolvedValue(projects);
     vi.spyOn(api, "getEditorPlaybackManifest").mockResolvedValue({ project_id: "first", session_id: "session-a", timeline_id: "timeline-a", session_revision: 1, timeline_version: "v1", timebase: "seconds", fps: { num: 30, den: 1 }, output: { width: 1080, height: 1920, sample_aspect_ratio: "1:1", rotation: 0, duration_sec: 1 }, tracks: [], captions: [], gap_slots: [], source_status: { status: "current", source_session_id: "session-a", source_session_revision: 1 }, audition: { asset_urls: {} }, exact_preview: { status: "unavailable", url: null, source_session_id: "session-a", source_session_revision: 1 } } as never);

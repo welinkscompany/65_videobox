@@ -17,6 +17,16 @@ let bundleSequence = 0;
 let latestBundle = null;
 const atomicSession = { session_id: "editing_session_e2e", project_id: "local-draft", timeline_id: "timeline_e2e", session_revision: 1, history: [], undo_count: 0, redo_count: 0, segments: [{ segment_id: "segment-e2e", caption_text: "여름 여행을 소개합니다.", start_sec: 0, end_sec: 1, cut_action: "keep", review_required: false, broll_override: null, visual_overlays: [], music_override: null, sfx_override: null, tts_replacement: null }] };
 const jobs = { jobs: [{ job_id: "timeline_build_e2e", project_id: "local-draft", job_type: "timeline_build", status: "succeeded", input_ref: "readiness_e2e", output_ref: "timeline_e2e", error_message: null, started_at: "now", finished_at: "now" }, { job_id: "final-e2e", project_id: "local-draft", job_type: "final_render", status: "succeeded", input_ref: "timeline_build_e2e", output_ref: "final-export-e2e", error_message: null, started_at: "now", finished_at: "now" }] };
+const mediaAssets = [
+  { asset_id: "asset-media-preview", asset_type: "broll_video", storage_uri: "local://media/preview.mp4", metadata: { title: "항구 전경", duration_seconds: 4 }, created_at: "now" },
+  { asset_id: "asset-media-running", asset_type: "broll_video", storage_uri: "local://media/running.mp4", metadata: { title: "산책 장면", duration_seconds: 3 }, created_at: "now" },
+  { asset_id: "asset-media-review", asset_type: "broll_video", storage_uri: "local://media/review.mp4", metadata: { title: "회의 장면", duration_seconds: 2 }, created_at: "now" },
+  { asset_id: "asset-media-failed", asset_type: "broll_video", storage_uri: "local://media/failed.mp4", metadata: { title: "야경 장면", duration_seconds: 5 }, created_at: "now" },
+];
+let mediaAnalyses = [];
+let mediaState = {};
+let globalRecoveryJobs = [];
+let jobRecoveryState = {};
 
 function sendJson(response, status, payload) {
   response.writeHead(status, {
@@ -24,6 +34,12 @@ function sendJson(response, status, payload) {
     "cache-control": "no-store",
   });
   response.end(JSON.stringify(payload));
+}
+
+async function readJson(request) {
+  let raw = "";
+  for await (const chunk of request) raw += chunk;
+  return raw ? JSON.parse(raw) : null;
 }
 
 function resetDraftScenario() {
@@ -56,6 +72,39 @@ function resetReviewScenario() {
   ];
 }
 
+function resetMediaScenario() {
+  mediaAnalyses = [
+    { analysis_id: "analysis-media-preview", asset_id: "asset-media-preview", status: "succeeded", progress_percent: 100, queue_position: null, error_code: null, error_message: null, result: null, created_at: "now" },
+    { analysis_id: "analysis-media-running", asset_id: "asset-media-running", status: "running", progress_percent: 50, queue_position: null, error_code: null, error_message: null, result: null, created_at: "now" },
+    { analysis_id: "analysis-media-review", asset_id: "asset-media-review", status: "needs_review", progress_percent: 100, queue_position: null, error_code: null, error_message: null, result: null, created_at: "now" },
+    { analysis_id: "analysis-media-failed", asset_id: "asset-media-failed", status: "failed", progress_percent: 100, queue_position: null, error_code: "LOCAL_ANALYSIS_FAILED", error_message: "local analysis failed", result: null, created_at: "now" },
+  ];
+  mediaState = {
+    asset_list_count: 0,
+    analysis_list_count: 0,
+    preview_count: 0,
+    preview_asset_id: null,
+    cancel_count: 0,
+    retry_count: 0,
+    review_count: 0,
+    review_body: null,
+  };
+}
+
+function resetJobScenario() {
+  jobs.jobs = [
+    { job_id: "timeline_build_e2e", project_id: "local-draft", job_type: "timeline_build", status: "succeeded", input_ref: "readiness_e2e", output_ref: "timeline_e2e", error_message: null, started_at: "now", finished_at: "now" },
+    { job_id: "job-recovery-current", project_id: "local-draft", job_type: "transcription", status: "failed", input_ref: "asset-narration-e2e", output_ref: null, error_message: "local transcription failed", started_at: "now", finished_at: "now" },
+  ];
+  globalRecoveryJobs = [
+    { job_id: "job-recovery-global", project_id: "archive-project", project_name: "보관한 영상", job_type: "broll_recommendation", status: "failed", input_ref: "analysis-archive", output_ref: null, error_message: "local recommendation failed", started_at: "now", finished_at: "now" },
+  ];
+  jobRecoveryState = { retry_count: 0, retried_project_id: null, retried_job_id: null, global_list_count: 0 };
+}
+
+resetMediaScenario();
+resetJobScenario();
+
 function createBundle() {
   bundleSequence += 1;
   const suffix = String(bundleSequence);
@@ -75,11 +124,17 @@ function createBundle() {
   return latestBundle;
 }
 
-createServer((request, response) => {
+createServer(async (request, response) => {
   const url = new URL(request.url ?? "/", `http://${host}:${port}`);
   if (url.pathname === "/health") return sendJson(response, 200, { status: "ok", mode: "e2e-local" });
   if (url.pathname === "/__e2e/reset-draft" && request.method === "POST") { resetDraftScenario(); return sendJson(response, 200, { status: "reset" }); }
   if (url.pathname === "/__e2e/reset-review" && request.method === "POST") { resetReviewScenario(); return sendJson(response, 200, { status: "reset" }); }
+  if (url.pathname === "/__e2e/reset-media" && request.method === "POST") { resetMediaScenario(); return sendJson(response, 200, { status: "reset" }); }
+  if (url.pathname === "/__e2e/reset-jobs" && request.method === "POST") { resetJobScenario(); return sendJson(response, 200, { status: "reset" }); }
+  if (url.pathname === "/__e2e/media-state" && request.method === "GET") return sendJson(response, 200, mediaState);
+  if (url.pathname === "/__e2e/job-state" && request.method === "GET") {
+    return sendJson(response, 200, { ...jobRecoveryState, global_jobs: globalRecoveryJobs });
+  }
   if (url.pathname === "/__e2e/draft-state" && request.method === "GET") return sendJson(response, 200, {
     uploaded_broll: uploadedBroll,
     bundle_sequence: bundleSequence,
@@ -91,6 +146,46 @@ createServer((request, response) => {
   if (url.pathname === "/api/projects" && request.method === "GET") return sendJson(response, 200, { projects: [project] });
   if (url.pathname === "/api/projects/local-draft" && request.method === "GET") return sendJson(response, 200, project);
   if (url.pathname === "/api/projects/local-draft/jobs" && request.method === "GET") return sendJson(response, 200, jobs);
+  if (url.pathname === "/api/jobs" && request.method === "GET") { jobRecoveryState.global_list_count += 1; return sendJson(response, 200, { jobs: globalRecoveryJobs }); }
+  if (url.pathname === "/api/projects/local-draft/assets/broll-video" && request.method === "GET") { mediaState.asset_list_count += 1; return sendJson(response, 200, { assets: mediaAssets }); }
+  if (url.pathname === "/api/projects/local-draft/media-analysis" && request.method === "GET") { mediaState.analysis_list_count += 1; return sendJson(response, 200, { items: mediaAnalyses }); }
+  if (/^\/api\/projects\/local-draft\/assets\/[^/]+\/analysis-preview$/.test(url.pathname) && request.method === "GET") {
+    mediaState.preview_count += 1;
+    mediaState.preview_asset_id = decodeURIComponent(url.pathname.split("/")[5]);
+    return sendJson(response, 200, { analysis_id: "analysis-media-preview", preview: { duration_sec: 4 } });
+  }
+  if (url.pathname === "/api/projects/local-draft/media-analysis/analysis-media-running/cancel" && request.method === "POST") {
+    mediaState.cancel_count += 1;
+    mediaAnalyses = mediaAnalyses.map((item) => item.analysis_id === "analysis-media-running" ? { ...item, status: "cancelled" } : item);
+    return sendJson(response, 200, mediaAnalyses.find((item) => item.analysis_id === "analysis-media-running"));
+  }
+  if (url.pathname === "/api/projects/local-draft/media-analysis/analysis-media-failed/retry" && request.method === "POST") {
+    mediaState.retry_count += 1;
+    mediaAnalyses = mediaAnalyses.map((item) => item.analysis_id === "analysis-media-failed" ? { ...item, status: "queued", error_code: null, error_message: null } : item);
+    return sendJson(response, 200, mediaAnalyses.find((item) => item.analysis_id === "analysis-media-failed"));
+  }
+  if (url.pathname === "/api/projects/local-draft/media-analysis/analysis-media-review/review" && request.method === "PATCH") {
+    mediaState.review_count += 1;
+    mediaState.review_body = await readJson(request);
+    mediaAnalyses = mediaAnalyses.map((item) => item.analysis_id === "analysis-media-review" ? { ...item, status: "succeeded" } : item);
+    return sendJson(response, 200, mediaAnalyses.find((item) => item.analysis_id === "analysis-media-review"));
+  }
+  if (url.pathname === "/api/projects/archive-project/jobs/job-recovery-global/retry" && request.method === "POST") {
+    jobRecoveryState.retry_count += 1;
+    jobRecoveryState.retried_project_id = "archive-project";
+    jobRecoveryState.retried_job_id = "job-recovery-global";
+    globalRecoveryJobs = [
+      ...globalRecoveryJobs,
+      {
+        ...globalRecoveryJobs.find((item) => item.job_id === "job-recovery-global"),
+        job_id: "job-recovery-global-retry",
+        status: "succeeded",
+        output_ref: "recommendation-e2e",
+        error_message: null,
+      },
+    ];
+    return sendJson(response, 202, { job_id: "job-recovery-global-retry", status: "succeeded" });
+  }
   if (/^\/api\/projects\/local-draft\/editing-sessions\/[^/]+\/playback-manifest$/.test(url.pathname) && request.method === "GET") {
     const sessionId = url.pathname.split("/")[5];
     const activeSessionId = latestBundle?.session_id ?? atomicSession.session_id;

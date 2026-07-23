@@ -32,6 +32,8 @@ const uiFiles = [
   "features/director/ProposalCandidateCard.tsx",
   "features/media/ManualMediaLibrary.tsx",
   "features/media/MediaAnalysisPanel.tsx",
+  "features/media/MediaWorkspacePage.tsx",
+  "features/jobs/JobRecovery.tsx",
   "features/editor/workbench/EditorWorkbench.tsx",
   "features/editor/workbench/RightDock.tsx",
 ];
