@@ -149,6 +149,78 @@ describe("OutputsPage", () => {
     await waitFor(() => expect(renderSubtitle).toHaveBeenCalledTimes(2));
   });
 
+  it("does not offer project A's subtitle action while project B is still loading", async () => {
+    const projectBSession = new Promise<null>(() => {});
+    const projectBJobs = new Promise<[]>(() => {});
+    vi.spyOn(api, "getLatestEditingSession").mockImplementation((requestedProjectId) => (
+      requestedProjectId === "project_b"
+        ? projectBSession as never
+        : Promise.resolve({ session_id: "session-a", project_id: "project_a", timeline_id: "timeline-a" }) as never
+    ));
+    vi.spyOn(api, "listJobs").mockImplementation((requestedProjectId) => (
+      requestedProjectId === "project_b" ? projectBJobs as never : Promise.resolve([activeTimelineJob]) as never
+    ));
+    vi.spyOn(api, "getTimeline").mockResolvedValue({
+      job_id: activeTimelineJob.job_id, status: "succeeded", timeline: {
+        timeline_id: "timeline-a", project_id: "project_a", version: "v1", output_mode: "short", review_status: "approved",
+        tracks: [], review_flags: [], pending_recommendations: [],
+      },
+    } as never);
+    vi.spyOn(api, "getReviewSnapshot").mockResolvedValue({
+      project_id: "project_a", timeline_id: "timeline-a", review_status: "approved", segments: [], applied_recommendations: [], pending_recommendations: [], review_flags: [],
+    } as never);
+    vi.spyOn(api, "getCapcutHandoffDiagnostics").mockResolvedValue(null as never);
+    const renderSubtitle = vi.spyOn(api, "renderSubtitle");
+
+    const view = render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+    expect(await screen.findByRole("button", { name: "자막 만들기" })).toBeEnabled();
+
+    view.rerender(<OutputsPage projectId="project_b" onOpenEditor={vi.fn()} />);
+
+    const action = screen.getByRole("button", { name: "자막 만들기" });
+    expect(action).toBeDisabled();
+    fireEvent.click(action);
+    expect(renderSubtitle).not.toHaveBeenCalled();
+  });
+
+  it("does not let an in-flight project A subtitle request change project B state", async () => {
+    let rejectProjectASubtitle!: (error: Error) => void;
+    const projectASubtitle = new Promise<{ job_id: string; status: string }>((_resolve, reject) => { rejectProjectASubtitle = reject; });
+    const projectBSession = new Promise<null>(() => {});
+    const projectBJobs = new Promise<[]>(() => {});
+    vi.spyOn(api, "getLatestEditingSession").mockImplementation((requestedProjectId) => (
+      requestedProjectId === "project_b"
+        ? projectBSession as never
+        : Promise.resolve({ session_id: "session-a", project_id: "project_a", timeline_id: "timeline-a" }) as never
+    ));
+    vi.spyOn(api, "listJobs").mockImplementation((requestedProjectId) => (
+      requestedProjectId === "project_b" ? projectBJobs as never : Promise.resolve([activeTimelineJob]) as never
+    ));
+    vi.spyOn(api, "getTimeline").mockResolvedValue({
+      job_id: activeTimelineJob.job_id, status: "succeeded", timeline: {
+        timeline_id: "timeline-a", project_id: "project_a", version: "v1", output_mode: "short", review_status: "approved",
+        tracks: [], review_flags: [], pending_recommendations: [],
+      },
+    } as never);
+    vi.spyOn(api, "getReviewSnapshot").mockResolvedValue({
+      project_id: "project_a", timeline_id: "timeline-a", review_status: "approved", segments: [], applied_recommendations: [], pending_recommendations: [], review_flags: [],
+    } as never);
+    vi.spyOn(api, "getCapcutHandoffDiagnostics").mockResolvedValue(null as never);
+    vi.spyOn(api, "renderSubtitle").mockReturnValue(projectASubtitle as never);
+
+    const view = render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "자막 만들기" }));
+    expect(screen.getByRole("button", { name: "자막 만드는 중" })).toBeDisabled();
+
+    view.rerender(<OutputsPage projectId="project_b" onOpenEditor={vi.fn()} />);
+    rejectProjectASubtitle(new Error("offline"));
+
+    await Promise.resolve();
+    expect(screen.getByRole("button", { name: "자막 만들기" })).toBeDisabled();
+    expect(screen.queryByText("자막을 만들지 못했어요. 편집 상태를 확인한 뒤 다시 시도해 주세요.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "자막 만드는 중" })).not.toBeInTheDocument();
+  });
+
   it("does not let a delayed project A subtitle state replace project B", async () => {
     let resolveProjectA!: (session: { session_id: string; project_id: string; timeline_id: string }) => void;
     const projectASession = new Promise<{ session_id: string; project_id: string; timeline_id: string }>((resolve) => { resolveProjectA = resolve; });
