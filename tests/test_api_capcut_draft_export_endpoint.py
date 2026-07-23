@@ -255,6 +255,61 @@ def test_capcut_draft_handoff_allows_one_external_registration_for_concurrent_cu
     assert export["handoff"]["reused"] is False
 
 
+def test_capcut_draft_handoff_renews_its_durable_lease_during_a_slow_registration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A live owner must not be reclaimed merely because the copy outlives one lease."""
+    import videobox_storage.local_project_store as local_project_store
+
+    monkeypatch.setattr(local_project_store, "CAPCUT_DRAFT_HANDOFF_CLAIM_LEASE_SECONDS", 0.12)
+    local_app_data = tmp_path / "LocalAppData"
+    executable = local_app_data / "CapCut" / "Apps" / "8.7.0" / "CapCut.exe"
+    executable.parent.mkdir(parents=True)
+    executable.write_bytes(b"capcut")
+    (local_app_data / "CapCut" / "User Data" / "Projects" / "com.lveditor.draft").mkdir(parents=True)
+
+    class BlockingHandoffService(CapCutHandoffService):
+        def __init__(self) -> None:
+            super().__init__(local_app_data=local_app_data)
+            self.started = threading.Event()
+            self.release = threading.Event()
+            self.calls = 0
+
+        def register(self, **kwargs):  # type: ignore[no-untyped-def]
+            self.calls += 1
+            self.started.set()
+            assert self.release.wait(timeout=5)
+            return super().register(**kwargs)
+
+    service = BlockingHandoffService()
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="CapCut lease renewal")
+    job, _ = _save_current_capcut_draft_export_job(store, project_id=project.project_id)
+    runner = LocalPipelineRunner(store, capcut_handoff_service=service)
+    first: dict[str, object] = {}
+
+    def register_first() -> None:
+        try:
+            first["result"] = runner.register_capcut_draft_handoff(project_id=project.project_id, job_id=job["job_id"])
+        except Exception as exc:  # pragma: no cover - asserted below
+            first["error"] = exc
+
+    owner = threading.Thread(target=register_first)
+    owner.start()
+    assert service.started.wait(timeout=5)
+    time.sleep(0.18)
+
+    with pytest.raises(ValueError, match="capcut_draft_handoff_in_progress"):
+        runner.register_capcut_draft_handoff(project_id=project.project_id, job_id=job["job_id"])
+    assert service.calls == 1
+
+    service.release.set()
+    owner.join(timeout=5)
+    assert not owner.is_alive()
+    assert "error" not in first
+    assert first["result"]["status"] == "ready"
+
+
 def test_capcut_handoff_claim_uses_an_explicit_postgres_row_lock_contract() -> None:
     """PostgreSQL must serialize the claim without relying on SQLite BEGIN IMMEDIATE."""
     statements: list[str] = []

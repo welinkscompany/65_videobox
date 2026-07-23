@@ -3827,6 +3827,46 @@ class LocalProjectStore:
         finally:
             connection.close()
 
+    @staticmethod
+    def capcut_draft_handoff_claim_renewal_interval_seconds() -> float:
+        """Renew well before expiry while keeping a crashed owner recoverable."""
+        return CAPCUT_DRAFT_HANDOFF_CLAIM_LEASE_SECONDS / 3
+
+    def renew_capcut_draft_handoff_claim(self, *, project_id: str, claim: dict[str, Any]) -> bool:
+        """Extend only this still-live owner token; a stale owner can never revive itself."""
+        connection = self._connection(project_id)
+        try:
+            self._begin_capcut_draft_handoff_transaction(connection)
+            now = datetime.now(UTC)
+            now_iso = now.isoformat()
+            expires_at = (now + timedelta(seconds=CAPCUT_DRAFT_HANDOFF_CLAIM_LEASE_SECONDS)).isoformat()
+            cursor = connection.execute(
+                """UPDATE exports
+                   SET handoff_claim_expires_at = ?
+                   WHERE project_id = ? AND export_id = ? AND export_type = ?
+                     AND status = ? AND is_current = 1
+                     AND handoff_claim_token = ? AND handoff_claim_job_id = ?
+                     AND handoff_claim_expires_at > ?""",
+                (
+                    expires_at,
+                    project_id,
+                    str(claim["export_id"]),
+                    "capcut_draft_export",
+                    JobStatus.SUCCEEDED.value,
+                    str(claim["claim_token"]),
+                    str(claim["job_id"]),
+                    now_iso,
+                ),
+            )
+            connection.commit()
+            return cursor.rowcount == 1
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+        finally:
+            connection.close()
+
     def publish_capcut_draft_handoff_if_current(
         self, *, project_id: str, claim: dict[str, Any], handoff: dict[str, Any]
     ) -> bool:

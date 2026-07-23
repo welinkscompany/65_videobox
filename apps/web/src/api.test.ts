@@ -257,4 +257,15 @@ describe("caption style API conflicts", () => {
     expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/projects/project_a/media-library/assets/pack%3Amusic/favorite", expect.objectContaining({ method: "PUT", body: JSON.stringify({ enabled: true }) }));
     vi.unstubAllGlobals();
   });
+
+  it("preserves the durable in-progress CapCut handoff response as a typed error", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ detail: "capcut_draft_handoff_in_progress" }),
+      { status: 400, headers: { "Content-Type": "application/json" } },
+    )));
+
+    await expect(api.registerCapcutDraftHandoff("project_a", "capcut-a"))
+      .rejects.toMatchObject({ code: "capcut_draft_handoff_in_progress" });
+    vi.unstubAllGlobals();
+  });
 });

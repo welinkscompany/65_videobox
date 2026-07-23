@@ -667,6 +667,15 @@ export class ApiConflictError<T> extends Error {
   }
 }
 
+export class CapcutDraftHandoffInProgressError extends Error {
+  readonly code = "capcut_draft_handoff_in_progress";
+
+  constructor() {
+    super("CapCut draft handoff is already in progress");
+    this.name = "CapcutDraftHandoffInProgressError";
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, init);
   if (!response.ok) {
@@ -679,6 +688,16 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(`Request failed: ${path} (${response.status})`);
   }
   return (await response.json()) as T;
+}
+
+async function registerCapcutDraftHandoffRequest(path: string): Promise<{ handoff: CapCutDraftHandoff }> {
+  const response = await fetch(path, { method: "POST" });
+  if (response.status === 400) {
+    const payload = await response.json().catch(() => null) as { detail?: unknown } | null;
+    if (payload?.detail === "capcut_draft_handoff_in_progress") throw new CapcutDraftHandoffInProgressError();
+  }
+  if (!response.ok) throw new Error(`Request failed: ${path} (${response.status})`);
+  return (await response.json()) as { handoff: CapCutDraftHandoff };
 }
 
 async function sendDirectorMessageRequest(path: string, payload: DirectorMessageSubmitRequest): Promise<DirectorMessageSendResult> {
@@ -1364,10 +1383,7 @@ export const api = {
   getCapcutDraftExport: (projectId: string, jobId: string) =>
     request<CapCutDraftExportJob>(`/api/projects/${projectId}/capcut-draft-exports/${jobId}`),
   registerCapcutDraftHandoff: (projectId: string, jobId: string) =>
-    request<{ handoff: CapCutDraftHandoff }>(
-      `/api/projects/${projectId}/capcut-draft-exports/${jobId}/handoff`,
-      { method: "POST" },
-    ),
+    registerCapcutDraftHandoffRequest(`/api/projects/${projectId}/capcut-draft-exports/${jobId}/handoff`),
   getCapcutHandoffDiagnostics: () => request<CapCutHandoffDiagnostics>("/api/capcut/handoff-diagnostics"),
   retryJob: (projectId: string, jobId: string) =>
     request<{ job_id: string; status: string }>(`/api/projects/${projectId}/jobs/${jobId}/retry`, {

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   api,
+  CapcutDraftHandoffInProgressError,
   type CapCutDraftExportJob,
   type CapCutHandoffDiagnostics,
   type FinalRenderJob,
@@ -270,8 +271,18 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
       const nextCapcutDraft = await api.getCapcutDraftExport(submissionProjectId, capcutDraftJobId);
       if (submissionEpoch !== capcutHandoffSubmissionEpoch.current || requestEpochAtSubmission !== requestEpoch.current || currentProjectId.current !== submissionProjectId) return;
       await refresh({ capcutDraft: nextCapcutDraft });
-    } catch {
-      if (submissionEpoch === capcutHandoffSubmissionEpoch.current && requestEpochAtSubmission === requestEpoch.current && currentProjectId.current === submissionProjectId) setCapcutHandoffErrorProjectId(submissionProjectId);
+    } catch (error) {
+      if (error instanceof CapcutDraftHandoffInProgressError || (typeof error === "object" && error !== null && "code" in error && error.code === "capcut_draft_handoff_in_progress")) {
+        try {
+          const nextCapcutDraft = await api.getCapcutDraftExport(submissionProjectId, capcutDraftJobId);
+          if (submissionEpoch !== capcutHandoffSubmissionEpoch.current || requestEpochAtSubmission !== requestEpoch.current || currentProjectId.current !== submissionProjectId) return;
+          await refresh({ capcutDraft: nextCapcutDraft });
+        } catch {
+          if (submissionEpoch === capcutHandoffSubmissionEpoch.current && requestEpochAtSubmission === requestEpoch.current && currentProjectId.current === submissionProjectId) setCapcutHandoffErrorProjectId(submissionProjectId);
+        }
+      } else if (submissionEpoch === capcutHandoffSubmissionEpoch.current && requestEpochAtSubmission === requestEpoch.current && currentProjectId.current === submissionProjectId) {
+        setCapcutHandoffErrorProjectId(submissionProjectId);
+      }
     } finally {
       if (capcutHandoffInFlightJobKey.current === handoffJobKey) capcutHandoffInFlightJobKey.current = null;
       if (submissionEpoch === capcutHandoffSubmissionEpoch.current && currentProjectId.current === submissionProjectId) setIsRegisteringCapcutHandoff(false);

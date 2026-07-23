@@ -702,6 +702,35 @@ describe("OutputsPage", () => {
     expect(screen.getByRole("button", { name: "CapCut 등록 중" })).toBeDisabled();
   });
 
+  it("refetches the durable in-progress CapCut handoff after its typed 400 response", async () => {
+    const currentCapcutJob = { ...capcutJob, input_ref: "timeline-current", job_id: "capcut-current-timeline" };
+    stubCanonicalSubtitleApi({ jobs: [activeTimelineJob, currentCapcutJob] as never });
+    vi.spyOn(api, "getCapcutDraftExport")
+      .mockResolvedValueOnce({
+        job_id: currentCapcutJob.job_id, status: "succeeded", export: {
+          export_id: "capcut-current", timeline_id: "timeline-a", export_type: "capcut_draft", file_uri: "local://draft-current.zip", status: "succeeded", notes: [], is_current: true,
+          handoff: { status: "pending", source_file_uri: "local://draft-current.zip", reused: false },
+        },
+      } as never)
+      .mockResolvedValueOnce({
+        job_id: currentCapcutJob.job_id, status: "succeeded", export: {
+          export_id: "capcut-current", timeline_id: "timeline-a", export_type: "capcut_draft", file_uri: "local://draft-current.zip", status: "succeeded", notes: [], is_current: true,
+          handoff: { status: "in_progress", source_file_uri: "local://draft-current.zip", reused: false, recoverable: false },
+        },
+      } as never);
+    vi.spyOn(api, "registerCapcutDraftHandoff").mockRejectedValue(Object.assign(
+      new Error("Request failed: handoff (400)"),
+      { code: "capcut_draft_handoff_in_progress" },
+    ));
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "CapCut에 등록" }));
+    expect(await screen.findByText("CapCut 등록이 진행 중이에요. 잠시 후 상태를 다시 확인해 주세요.")).toBeVisible();
+    expect(screen.queryByText("CapCut 등록 상태를 확인하지 못했어요. 상태를 다시 확인한 뒤 시도해 주세요.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /CapCut에 등록|CapCut 등록 다시 시도/ })).not.toBeInTheDocument();
+  });
+
   it("does not let a delayed CapCut registration replace a newer manual refresh", async () => {
     const currentCapcutJob = { ...capcutJob, input_ref: "timeline-current", job_id: "capcut-current-timeline" };
     stubCanonicalSubtitleApi({ jobs: [activeTimelineJob, currentCapcutJob] as never });
