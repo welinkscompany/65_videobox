@@ -1931,6 +1931,12 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         claim = self.store.claim_capcut_draft_handoff(project_id=project_id, job_id=job_id)
         if claim is None:
             raise OutputSourceStaleError("CapCut draft export freshness changed")
+        if claim.get("state") == "ready":
+            return dict(claim["handoff"])
+        if claim.get("state") == "in_progress":
+            raise ValueError("capcut_draft_handoff_in_progress")
+        if claim.get("state") != "owner":
+            raise RuntimeError("capcut_draft_handoff_claim_invalid")
         source_path = self.store.resolve_storage_uri(project_id=project_id, storage_uri=claim["file_uri"])
         registered = None
         try:

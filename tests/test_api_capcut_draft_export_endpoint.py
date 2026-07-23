@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import shutil
 import subprocess
+import threading
 import time
 from pathlib import Path
 
@@ -11,6 +12,7 @@ from fastapi.testclient import TestClient
 
 from videobox_api.main import create_app
 from videobox_core_engine.capcut_handoff import CapCutHandoffService
+from videobox_core_engine.local_pipeline import LocalPipelineRunner
 from videobox_core_engine.settings import CapCutDraftExportConfig
 from videobox_domain_models.jobs import JobStatus, JobType
 from videobox_provider_interfaces.stt import STTResult, STTSegment
@@ -189,6 +191,84 @@ def test_capcut_draft_handoff_api_reuses_a_current_successful_export(tmp_path: P
     assert reused.status_code == 200
     assert reused.json()["handoff"]["status"] == "ready"
     assert reused.json()["handoff"]["reused"] is True
+
+
+def test_capcut_draft_handoff_allows_one_external_registration_for_concurrent_current_requests(tmp_path: Path) -> None:
+    """A second request must observe the durable claim, never copy/publish over its owner."""
+    local_app_data = tmp_path / "LocalAppData"
+    executable = local_app_data / "CapCut" / "Apps" / "8.7.0" / "CapCut.exe"
+    executable.parent.mkdir(parents=True)
+    executable.write_bytes(b"capcut")
+    (local_app_data / "CapCut" / "User Data" / "Projects" / "com.lveditor.draft").mkdir(parents=True)
+
+    class BlockingHandoffService(CapCutHandoffService):
+        def __init__(self) -> None:
+            super().__init__(local_app_data=local_app_data)
+            self.started = threading.Event()
+            self.release = threading.Event()
+            self.calls = 0
+            self._calls_lock = threading.Lock()
+
+        def register(self, **kwargs):  # type: ignore[no-untyped-def]
+            with self._calls_lock:
+                self.calls += 1
+                is_first = self.calls == 1
+            if is_first:
+                self.started.set()
+                assert self.release.wait(timeout=5)
+            return super().register(**kwargs)
+
+    service = BlockingHandoffService()
+    app = create_app(projects_root=tmp_path, capcut_handoff_service=service)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "CapCut concurrent handoff"}).json()["project_id"]
+    job, _ = _save_current_capcut_draft_export_job(LocalProjectStore(tmp_path), project_id=project_id)
+    pipeline = LocalPipelineRunner(app.state.store, capcut_handoff_service=service)
+    first: dict[str, object] = {}
+
+    def register_first() -> None:
+        try:
+            first["result"] = pipeline.register_capcut_draft_handoff(project_id=project_id, job_id=job["job_id"])
+        except Exception as exc:  # pragma: no cover - asserted below
+            first["error"] = exc
+
+    owner = threading.Thread(target=register_first)
+    owner.start()
+    assert service.started.wait(timeout=5)
+
+    with pytest.raises(ValueError, match="capcut_draft_handoff_in_progress"):
+        pipeline.register_capcut_draft_handoff(project_id=project_id, job_id=job["job_id"])
+    assert service.calls == 1
+
+    service.release.set()
+    owner.join(timeout=5)
+    assert not owner.is_alive()
+    assert "error" not in first
+    assert first["result"]["status"] == "ready"
+
+    reused = pipeline.register_capcut_draft_handoff(project_id=project_id, job_id=job["job_id"])
+    assert reused["status"] == "ready"
+    assert reused["reused"] is True
+    assert service.calls == 1
+    export = LocalProjectStore(tmp_path).get_capcut_draft_export(project_id=project_id, export_id=job["output_ref"])
+    assert export["handoff"]["status"] == "ready"
+    assert export["handoff"]["reused"] is False
+
+
+def test_capcut_handoff_claim_uses_an_explicit_postgres_row_lock_contract() -> None:
+    """PostgreSQL must serialize the claim without relying on SQLite BEGIN IMMEDIATE."""
+    statements: list[str] = []
+
+    class PostgresConnection:
+        def execute(self, statement: str) -> None:
+            statements.append(statement)
+
+    LocalProjectStore._begin_capcut_draft_handoff_transaction(PostgresConnection())
+
+    assert statements == [
+        "BEGIN",
+        "LOCK TABLE jobs, exports, editing_sessions IN SHARE ROW EXCLUSIVE MODE",
+    ]
 
 
 def test_capcut_handoff_diagnostics_api_reports_injected_windows_readiness_without_llm_call(tmp_path: Path) -> None:

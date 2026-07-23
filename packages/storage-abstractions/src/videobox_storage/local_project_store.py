@@ -3679,15 +3679,16 @@ class LocalProjectStore:
     def claim_capcut_draft_handoff(
         self, *, project_id: str, job_id: str
     ) -> dict[str, Any] | None:
-        """Capture the current CapCut handoff lineage before its external copy.
+        """Durably claim one current export before the external CapCut copy.
 
-        The CapCut registration itself must run outside the SQLite writer lock.
-        This claim therefore records the exact job/export/session tuple that the
-        later publisher must compare-and-swap before exposing handoff metadata.
+        The external copy runs after the transaction, but its owner token stays
+        on the export.  A competing request therefore cannot start another copy
+        while the first request is in flight, including after a process-local
+        restart.
         """
         connection = self._connection(project_id)
         try:
-            connection.execute("BEGIN IMMEDIATE")
+            self._begin_capcut_draft_handoff_transaction(connection)
             job = connection.execute(
                 """SELECT job_id, job_type, status, output_ref FROM jobs
                    WHERE project_id = ? AND job_id = ?""",
@@ -3703,7 +3704,8 @@ class LocalProjectStore:
                 return None
             export = connection.execute(
                 """SELECT export_id, timeline_id, file_uri, status, is_current,
-                          source_session_id, source_session_revision
+                          source_session_id, source_session_revision, metadata_json,
+                          handoff_claim_token, handoff_claim_job_id
                    FROM exports
                    WHERE project_id = ? AND export_id = ?
                      AND export_type = ?""",
@@ -3735,9 +3737,41 @@ class LocalProjectStore:
                 ):
                     connection.rollback()
                     return None
+            metadata = json.loads(str(export["metadata_json"] or "{}"))
+            existing_handoff = metadata.get("handoff")
+            if isinstance(existing_handoff, dict) and existing_handoff.get("status") == "ready":
+                connection.commit()
+                return {
+                    "state": "ready",
+                    "handoff": {**existing_handoff, "reused": True},
+                }
+            if export["handoff_claim_token"] is not None:
+                connection.commit()
+                return {"state": "in_progress"}
+
+            claim_token = uuid.uuid4().hex
+            cursor = connection.execute(
+                """UPDATE exports
+                   SET handoff_claim_token = ?, handoff_claim_job_id = ?
+                   WHERE project_id = ? AND export_id = ? AND export_type = ?
+                     AND status = ? AND is_current = 1
+                     AND handoff_claim_token IS NULL""",
+                (
+                    claim_token,
+                    str(job["job_id"]),
+                    project_id,
+                    str(export["export_id"]),
+                    "capcut_draft_export",
+                    JobStatus.SUCCEEDED.value,
+                ),
+            )
+            if cursor.rowcount != 1:
+                connection.rollback()
+                return {"state": "in_progress"}
             connection.commit()
             return {
-                "claim_token": uuid.uuid4().hex,
+                "state": "owner",
+                "claim_token": claim_token,
                 "job_id": str(job["job_id"]),
                 "export_id": str(export["export_id"]),
                 "timeline_id": str(export["timeline_id"]),
@@ -3757,10 +3791,10 @@ class LocalProjectStore:
     def publish_capcut_draft_handoff_if_current(
         self, *, project_id: str, claim: dict[str, Any], handoff: dict[str, Any]
     ) -> bool:
-        """Publish handoff metadata only if the earlier external-copy claim survives."""
+        """Publish only for the exact durable owner while its lineage is current."""
         connection = self._connection(project_id)
         try:
-            connection.execute("BEGIN IMMEDIATE")
+            self._begin_capcut_draft_handoff_transaction(connection)
             job = connection.execute(
                 """SELECT job_type, status, output_ref FROM jobs
                    WHERE project_id = ? AND job_id = ?""",
@@ -3768,7 +3802,8 @@ class LocalProjectStore:
             ).fetchone()
             export = connection.execute(
                 """SELECT timeline_id, status, is_current, source_session_id,
-                          source_session_revision, metadata_json
+                          source_session_revision, metadata_json, handoff_claim_token,
+                          handoff_claim_job_id
                    FROM exports
                    WHERE project_id = ? AND export_id = ?
                      AND export_type = ?""",
@@ -3798,6 +3833,8 @@ class LocalProjectStore:
                 == claim["active_session_id"]
                 and (int(active_session["session_revision"]) if active_session is not None else None)
                 == claim["active_session_revision"]
+                and str(export["handoff_claim_token"] or "") == str(claim["claim_token"])
+                and str(export["handoff_claim_job_id"] or "") == str(claim["job_id"])
             )
             if not claim_is_current:
                 connection.rollback()
@@ -3805,15 +3842,19 @@ class LocalProjectStore:
             metadata = json.loads(str(export["metadata_json"] or "{}"))
             metadata["handoff"] = handoff
             cursor = connection.execute(
-                """UPDATE exports SET metadata_json = ?
+                """UPDATE exports
+                   SET metadata_json = ?, handoff_claim_token = NULL, handoff_claim_job_id = NULL
                    WHERE project_id = ? AND export_id = ? AND export_type = ?
-                     AND status = ? AND is_current = 1""",
+                     AND status = ? AND is_current = 1
+                     AND handoff_claim_token = ? AND handoff_claim_job_id = ?""",
                 (
                     json.dumps(metadata, ensure_ascii=True),
                     project_id,
                     str(claim["export_id"]),
                     "capcut_draft_export",
                     JobStatus.SUCCEEDED.value,
+                    str(claim["claim_token"]),
+                    str(claim["job_id"]),
                 ),
             )
             if cursor.rowcount != 1:
@@ -5620,6 +5661,7 @@ class LocalProjectStore:
             self._ensure_editing_session_json_column(connection)
             self._ensure_tts_candidate_acceptance_columns(connection)
             self._ensure_artifact_freshness_columns(connection)
+            self._ensure_capcut_draft_handoff_claim_columns(connection)
             self._ensure_director_message_metadata_column(connection)
             self._ensure_director_claim_columns(connection)
             self._ensure_creation_brief_columns(connection)
@@ -5710,6 +5752,34 @@ class LocalProjectStore:
             if owns_transaction:
                 connection.rollback()
             raise
+
+    def _ensure_capcut_draft_handoff_claim_columns(self, connection: sqlite3.Connection) -> None:
+        owns_transaction = not connection.in_transaction
+        if owns_transaction:
+            connection.execute("BEGIN IMMEDIATE")
+        try:
+            columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(exports)").fetchall()}
+            for column, declaration in (
+                ("handoff_claim_token", "TEXT"),
+                ("handoff_claim_job_id", "TEXT"),
+            ):
+                if column not in columns:
+                    connection.execute(f"ALTER TABLE exports ADD COLUMN {column} {declaration}")
+            if owns_transaction:
+                connection.commit()
+        except Exception:
+            if owns_transaction:
+                connection.rollback()
+            raise
+
+    @staticmethod
+    def _begin_capcut_draft_handoff_transaction(connection: Any) -> None:
+        """Start a claim/publish transaction without treating SQLite syntax as portable."""
+        if isinstance(connection, sqlite3.Connection):
+            connection.execute("BEGIN IMMEDIATE")
+            return
+        connection.execute("BEGIN")
+        connection.execute("LOCK TABLE jobs, exports, editing_sessions IN SHARE ROW EXCLUSIVE MODE")
 
     def _ensure_artifact_freshness_triggers(self, connection: sqlite3.Connection) -> None:
         # This migration deliberately replaces an earlier trigger definition so
