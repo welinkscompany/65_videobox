@@ -17,6 +17,7 @@ import { DraftGapMedia } from "../features/media/DraftGapMedia";
 import { LegacyWorkspacePage } from "./LegacyWorkspacePage";
 import { EditorWorkbenchRoute } from "../features/editor/workbench/EditorWorkbenchRoute";
 import { HomePage, opensLastProjectOnStart, ProductEmptyPage, ProductShell, SettingsPage } from "./ProductShell";
+import { OutputsPage } from "./OutputsPage";
 import { ProjectWorkspaceProvider, resolveLastValidProjectId } from "./ProjectWorkspaceProvider";
 import { isWorkspaceSection, resolveWorkspaceLocation, type WorkspaceSection } from "./routeManifest";
 
@@ -158,13 +159,17 @@ function WorkspacePage() {
       <CreationInterview projectId={projectId} />
     </ProductShell>;
   }
-  if (normalizedSection === "media" || normalizedSection === "outputs") {
-    const isMedia = normalizedSection === "media";
-    const requestedReturn = isMedia ? new URLSearchParams(window.location.search).get("return_to") : null;
+  if (normalizedSection === "media") {
+    const requestedReturn = new URLSearchParams(window.location.search).get("return_to");
     const safeReturn = requestedReturn && requestedReturn.startsWith(`/projects/${projectId}/create`) ? requestedReturn : null;
-    if (isMedia && safeReturn) return <ProductShell projectId={projectId} projects={projects} section={section} onNavigate={navigateTo} onOpenSettings={() => void navigate({ to: "/settings/general" })}><DraftGapMedia projectId={projectId} returnTo={safeReturn} /></ProductShell>;
+    if (safeReturn) return <ProductShell projectId={projectId} projects={projects} section={section} onNavigate={navigateTo} onOpenSettings={() => void navigate({ to: "/settings/general" })}><DraftGapMedia projectId={projectId} returnTo={safeReturn} /></ProductShell>;
     return <ProductShell projectId={projectId} projects={projects} section={normalizedSection} onNavigate={navigateTo} onOpenSettings={() => void navigate({ to: "/settings/general" })}>
-      <ProductEmptyPage title={isMedia ? "자산을 준비해 주세요" : "아직 완성본이 없어요"} description={isMedia ? "영상에 넣을 사진, 영상, 소리를 추가하면 여기에서 고를 수 있어요." : "편집을 마치면 이곳에서 완성본을 확인할 수 있어요."} action={safeReturn ? "기획으로 돌아가기" : isMedia ? "새 영상 만들기" : "편집 열기"} onClick={() => safeReturn ? window.location.assign(safeReturn) : navigateTo(projectId, isMedia ? "create" : "editing")} />
+      <ProductEmptyPage title="자산을 준비해 주세요" description="영상에 넣을 사진, 영상, 소리를 추가하면 여기에서 고를 수 있어요." action="새 영상 만들기" onClick={() => navigateTo(projectId, "create")} />
+    </ProductShell>;
+  }
+  if (normalizedSection === "outputs") {
+    return <ProductShell projectId={projectId} projects={projects} section="outputs" onNavigate={navigateTo} onOpenSettings={() => void navigate({ to: "/settings/general" })}>
+      <OutputsPage projectId={projectId} onOpenEditor={() => navigateTo(projectId, "editing")} />
     </ProductShell>;
   }
   if (section === "editor" && rawEditingSessionId !== null && !requestedEditingSessionId) {
