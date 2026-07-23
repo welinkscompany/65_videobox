@@ -36,11 +36,13 @@ function stubCanonicalSubtitleApi({
   reviewStatus = "approved",
   reviewFlags = [],
   pendingRecommendations = [],
+  timelinePendingRecommendations = pendingRecommendations,
   jobs = [activeTimelineJob],
 }: {
   reviewStatus?: string;
   reviewFlags?: unknown[];
   pendingRecommendations?: unknown[];
+  timelinePendingRecommendations?: unknown[];
   jobs?: typeof activeTimelineJob[];
 } = {}) {
   vi.spyOn(api, "getLatestEditingSession").mockResolvedValue({ session_id: "session-a", project_id: "project_a", timeline_id: "timeline-a" } as never);
@@ -48,7 +50,7 @@ function stubCanonicalSubtitleApi({
   vi.spyOn(api, "getTimeline").mockResolvedValue({
     job_id: activeTimelineJob.job_id, status: "succeeded", timeline: {
       timeline_id: "timeline-a", project_id: "project_a", version: "v1", output_mode: "short", review_status: reviewStatus,
-      tracks: [], review_flags: reviewFlags, pending_recommendations: pendingRecommendations,
+      tracks: [], review_flags: reviewFlags, pending_recommendations: timelinePendingRecommendations,
     },
   } as never);
   vi.spyOn(api, "getReviewSnapshot").mockResolvedValue({
@@ -306,6 +308,71 @@ describe("OutputsPage", () => {
     expect(action).toBeDisabled();
     fireEvent.click(action);
     expect(startFinalRender).not.toHaveBeenCalled();
+  });
+
+  it("keeps final rendering disabled when the timeline still has pending recommendations", async () => {
+    stubCanonicalSubtitleApi({ timelinePendingRecommendations: [{ recommendation_id: "timeline-pending" }] });
+    const startFinalRender = vi.spyOn(api, "startFinalRender");
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+
+    const action = await screen.findByRole("button", { name: "완성본 만들기" });
+    expect(action).toBeDisabled();
+    fireEvent.click(action);
+    expect(startFinalRender).not.toHaveBeenCalled();
+  });
+
+  it("does not start another final render when an older current-timeline job is still running", async () => {
+    const runningOlderFinal = { ...currentFinalJob, job_id: "final-running-older", status: "running", started_at: "2026-07-23T09:03:00Z", finished_at: null };
+    const succeededNewerFinal = { ...currentFinalJob, job_id: "final-succeeded-newer", started_at: "2026-07-23T09:06:00Z", finished_at: "2026-07-23T09:07:00Z" };
+    stubCanonicalSubtitleApi({ jobs: [activeTimelineJob, runningOlderFinal, succeededNewerFinal] as never });
+    vi.spyOn(api, "getFinalRender").mockResolvedValue({ job_id: succeededNewerFinal.job_id, status: "succeeded", render: { export_id: "final-succeeded-newer", timeline_id: "timeline-a", export_type: "final_render", file_uri: "local://newer.mp4", status: "succeeded", is_current: true } } as never);
+    const startFinalRender = vi.spyOn(api, "startFinalRender");
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+
+    const action = await screen.findByRole("button", { name: "완성본 만들기" });
+    expect(action).toBeDisabled();
+    fireEvent.click(action);
+    expect(startFinalRender).not.toHaveBeenCalled();
+  });
+
+  it("starts only one final render for rapid double clicks", async () => {
+    stubCanonicalSubtitleApi();
+    const pendingFinal = new Promise<{ job_id: string; status: string }>(() => {});
+    const startFinalRender = vi.spyOn(api, "startFinalRender").mockReturnValue(pendingFinal as never);
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+
+    const action = await screen.findByRole("button", { name: "완성본 만들기" });
+    fireEvent.click(action);
+    fireEvent.click(action);
+    expect(startFinalRender).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not let a delayed final submission follow-up overwrite a newer manual refresh", async () => {
+    stubCanonicalSubtitleApi();
+    let resolveSubmissionJobs!: (jobs: typeof activeTimelineJob[]) => void;
+    const delayedSubmissionJobs = new Promise<typeof activeTimelineJob[]>((resolve) => { resolveSubmissionJobs = resolve; });
+    const submittedFinal = { ...currentFinalJob, job_id: "final-submitted", started_at: "2026-07-23T09:04:00Z", finished_at: "2026-07-23T09:05:00Z" };
+    const refreshedFinal = { ...currentFinalJob, job_id: "final-refreshed", started_at: "2026-07-23T09:06:00Z", finished_at: "2026-07-23T09:07:00Z" };
+    const listJobs = vi.mocked(api.listJobs);
+    listJobs.mockResolvedValueOnce([activeTimelineJob] as never).mockReturnValueOnce(delayedSubmissionJobs as never).mockResolvedValueOnce([activeTimelineJob, refreshedFinal] as never);
+    vi.spyOn(api, "startFinalRender").mockResolvedValue({ job_id: submittedFinal.job_id, status: "succeeded" });
+    vi.spyOn(api, "getFinalRender").mockImplementation((_projectId, jobId) => Promise.resolve({
+      job_id: jobId, status: "succeeded", render: { export_id: jobId, timeline_id: "timeline-a", export_type: "final_render", file_uri: `local://${jobId}.mp4`, status: "succeeded", is_current: true },
+    }) as never);
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "완성본 만들기" }));
+    await waitFor(() => expect(listJobs).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByRole("button", { name: "상태 다시 확인" }));
+    expect(await screen.findByLabelText("완성본 재생")).toHaveAttribute("src", "/api/projects/project_a/final-renders/final-refreshed/content");
+
+    resolveSubmissionJobs([activeTimelineJob, submittedFinal] as never);
+    await waitFor(() => expect(api.getFinalRender).toHaveBeenCalledWith("project_a", "final-submitted"));
+    await waitFor(() => expect(screen.getByLabelText("완성본 재생")).toHaveAttribute("src", "/api/projects/project_a/final-renders/final-refreshed/content"));
   });
 
   it("does not let an in-flight project A final render change project B state", async () => {

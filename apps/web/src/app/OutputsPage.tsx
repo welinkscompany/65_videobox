@@ -19,6 +19,7 @@ type OutputState = {
   timeline: TimelineJob | null;
   review: ReviewSnapshot | null;
   subtitle: SubtitleJob | null;
+  finalJobs: JobRecord[];
   finalJob: JobRecord | null;
   finalRender: FinalRenderJob | null;
   capcutDraft: CapCutDraftExportJob | null;
@@ -48,6 +49,7 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
   const currentProjectId = useRef(projectId);
   const subtitleRequestProjectId = useRef<string | null>(null);
   const finalRequestProjectId = useRef<string | null>(null);
+  const finalInFlightTimelineKey = useRef<string | null>(null);
   currentProjectId.current = projectId;
 
   const refresh = useCallback(async (options?: { jobs?: JobRecord[]; subtitle?: SubtitleJob | null; finalRender?: FinalRenderJob | null }) => {
@@ -68,7 +70,8 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
         ? mostRecentJob(jobs.filter((job) => job.status === "succeeded" && job.output_ref === session.timeline_id), "timeline_build")
         : null;
       const subtitleRecord = timelineJob ? mostRecentJob(jobs, "subtitle_render", timelineJob.job_id) : null;
-      const finalJob = timelineJob ? mostRecentJob(jobs, "final_render", timelineJob.job_id) : mostRecentJob(jobs, "final_render");
+      const finalJobs = timelineJob ? jobs.filter((job) => job.job_type === "final_render" && job.input_ref === timelineJob.job_id) : [];
+      const finalJob = timelineJob ? mostRecentJob(finalJobs, "final_render") : mostRecentJob(jobs, "final_render");
       const capcutJob = mostRecentJob(jobs, "capcut_draft_export");
       const [timeline, review, subtitle, finalRender, capcutDraft, diagnostics] = await Promise.all([
         timelineJob ? api.getTimeline(refreshProjectId, timelineJob.job_id) : Promise.resolve(null),
@@ -83,7 +86,7 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
         api.getCapcutHandoffDiagnostics().catch(() => null),
       ]);
       if (!isCurrentRequest()) return;
-      setState({ projectId: refreshProjectId, timelineJob, timeline, review, subtitle, finalJob, finalRender, capcutDraft, diagnostics });
+      setState({ projectId: refreshProjectId, timelineJob, timeline, review, subtitle, finalJobs, finalJob, finalRender, capcutDraft, diagnostics });
     } catch {
       if (!isCurrentRequest()) return;
       setState(null);
@@ -98,6 +101,7 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
     finalSubmissionEpoch.current += 1;
     subtitleRequestProjectId.current = null;
     finalRequestProjectId.current = null;
+    finalInFlightTimelineKey.current = null;
     setIsRenderingSubtitle(false);
     setSubtitleErrorProjectId(null);
     setIsRenderingFinal(false);
@@ -124,11 +128,12 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
     timelineJob && currentState?.timeline && currentState.review &&
     currentState.review.review_status === "approved" &&
     currentState.timeline.timeline.review_flags.length === 0 &&
+    currentState.timeline.timeline.pending_recommendations.length === 0 &&
     currentState.review.review_flags.length === 0 &&
     currentState.review.pending_recommendations.length === 0,
   );
   const finalJob = currentState?.finalJob;
-  const hasPendingFinal = finalJob?.status === "pending" || finalJob?.status === "running";
+  const hasPendingFinal = currentState?.finalJobs.some((job) => job.status === "pending" || job.status === "running") === true;
   const canRenderFinal = canRenderSubtitle && !hasPendingFinal;
   const finalRender = currentState?.finalRender;
   const currentFinal = finalRender?.status === "succeeded" && finalRender.render?.is_current === true;
@@ -159,10 +164,13 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
   };
   const handleRenderFinal = async () => {
     const submissionProjectId = projectId;
-    if (currentProjectId.current !== submissionProjectId || !timelineJob || !canRenderFinal || isRenderingCurrentFinal) return;
+    const timelineKey = timelineJob ? `${submissionProjectId}:${timelineJob.job_id}` : null;
+    if (currentProjectId.current !== submissionProjectId || !timelineJob || !timelineKey || !canRenderFinal || isRenderingCurrentFinal || finalInFlightTimelineKey.current === timelineKey) return;
     const submissionEpoch = finalSubmissionEpoch.current + 1;
+    const requestEpochAtSubmission = requestEpoch.current;
     finalSubmissionEpoch.current = submissionEpoch;
     finalRequestProjectId.current = submissionProjectId;
+    finalInFlightTimelineKey.current = timelineKey;
     setIsRenderingFinal(true);
     setFinalErrorProjectId(null);
     try {
@@ -171,11 +179,12 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
         api.listJobs(submissionProjectId),
         api.getFinalRender(submissionProjectId, result.job_id),
       ]);
-      if (submissionEpoch !== finalSubmissionEpoch.current || currentProjectId.current !== submissionProjectId) return;
+      if (submissionEpoch !== finalSubmissionEpoch.current || requestEpochAtSubmission !== requestEpoch.current || currentProjectId.current !== submissionProjectId) return;
       await refresh({ jobs, finalRender: nextFinalRender });
     } catch {
       if (submissionEpoch === finalSubmissionEpoch.current && currentProjectId.current === submissionProjectId) setFinalErrorProjectId(submissionProjectId);
     } finally {
+      if (finalInFlightTimelineKey.current === timelineKey) finalInFlightTimelineKey.current = null;
       if (submissionEpoch === finalSubmissionEpoch.current && currentProjectId.current === submissionProjectId) setIsRenderingFinal(false);
     }
   };
