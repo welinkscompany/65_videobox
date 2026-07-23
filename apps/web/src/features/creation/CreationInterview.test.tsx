@@ -258,6 +258,31 @@ describe("CreationInterview", () => {
     await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
   });
 
+  it("clears the placeholder confirmation through delayed readiness A to B to A transitions", async () => {
+    window.localStorage.setItem("videobox.creation-brief.project_1", "brief_1");
+    window.localStorage.setItem("videobox.draft-readiness.project_1", "readiness_a");
+    const approved = { ...firstBrief, questions: [], current_step: 0, status: "approved", revision: 5 };
+    const readinessA = { readiness_id: "readiness_a", brief_id: "brief_1", status: "needs_assets", revision: 3, result: { gap_slots: [{ gap_slot_id: "gap-a", reason: "A 자산이 없어요." }] } } as never;
+    const readinessB = { readiness_id: "readiness_b", brief_id: "brief_1", status: "needs_assets", revision: 4, result: { gap_slots: [{ gap_slot_id: "gap-b", reason: "B 자산이 없어요." }] } } as never;
+    vi.spyOn(api, "getCreationBrief").mockResolvedValue(approved);
+    vi.spyOn(api, "getDraftReadiness").mockResolvedValue(readinessA);
+    const retry = vi.spyOn(api, "retryDraftReadiness").mockResolvedValueOnce(readinessB).mockResolvedValueOnce(readinessA);
+    render(<CreationInterview projectId="project_1" />);
+
+    const confirmation = await screen.findByLabelText("빈 구간을 남긴 채 편집용 초안을 만들겠습니다");
+    fireEvent.click(confirmation);
+    expect(confirmation).toBeChecked();
+
+    fireEvent.click(screen.getByRole("button", { name: "다시 준비" }));
+    await waitFor(() => expect(retry).toHaveBeenCalledWith("project_1", "readiness_a", 3));
+    await waitFor(() => expect(screen.getByLabelText("빈 구간을 남긴 채 편집용 초안을 만들겠습니다")).not.toBeChecked());
+
+    fireEvent.click(screen.getByRole("button", { name: "다시 준비" }));
+    await waitFor(() => expect(retry).toHaveBeenLastCalledWith("project_1", "readiness_b", 4));
+    await waitFor(() => expect(screen.getByLabelText("빈 구간을 남긴 채 편집용 초안을 만들겠습니다")).not.toBeChecked());
+    expect(screen.getByRole("button", { name: "빈 구간 포함 초안 만들기" })).toBeDisabled();
+  });
+
   it("saves each B-roll candidate's chosen seconds with the current readiness revision", async () => {
     window.localStorage.setItem("videobox.creation-brief.project_1", "brief_1");
     const approved = { ...firstBrief, questions: [], current_step: 0, status: "approved", revision: 5 };
