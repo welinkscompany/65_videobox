@@ -1,5 +1,5 @@
 import { expect, test } from "./support/test-fixtures.mjs";
-import { installFixedClock, waitForStableCapture } from "./support/fixed-clock.mjs";
+import { installFixedClock, playwrightSnapshotOptions, waitForStableCapture } from "./support/fixed-clock.mjs";
 
 const loopbackHosts = new Set(["127.0.0.1", "localhost", "[::1]"]);
 const snapshots = [
@@ -110,10 +110,6 @@ for (const [width, height] of snapshots) {
     await page.goto("/projects/local-draft/home");
     await expect(page.getByTestId("product-home")).toBeVisible();
     await waitForStableCapture(page);
-    await page.screenshot({
-      path: `e2e/snapshots/product-shell-${width}.png`,
-      animations: "disabled",
-      caret: "hide",
-    });
+    await page.screenshot(playwrightSnapshotOptions(`e2e/snapshots/product-shell-${width}.png`));
   });
 }

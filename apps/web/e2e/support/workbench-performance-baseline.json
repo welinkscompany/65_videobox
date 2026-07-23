@@ -1,8 +1,11 @@
 {
   "schema": "videobox-workbench-performance-baseline-v1",
   "capture_profile": "chromium-headless-workers-1-1920x1080",
+  "browser_version": "149.0.7827.55",
+  "captured_on": "2026-07-23",
   "interaction": "right_dock_drag",
-  "median_ms": 250,
-  "capture_intent": "initial absolute guard pending a calibrated reference capture",
+  "median_ms": 92,
+  "p95_ms": 108,
+  "capture_intent": "calibrated reference capture on 2026-07-23",
   "regression_limit_percent": 20
 }

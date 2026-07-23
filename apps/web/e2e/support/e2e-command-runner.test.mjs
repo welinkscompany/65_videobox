@@ -42,3 +42,26 @@ test("E2E command runs the snapshot verifier only after Playwright succeeds", as
   ]);
   assert.deepEqual(calls.map(({ fakePort, webPort }) => [fakePort, webPort]), [["43103", "43104"], ["43103", "43104"]]);
 });
+
+test("focused editor commands use isolated ports and the verifier", async () => {
+  const calls = [];
+  const available = [43105, 43106];
+  const status = await runE2eCommand({
+    env: {},
+    findFreePort: async () => available.shift(),
+    run: async (_command, args, env) => {
+      calls.push({ args, fakePort: env.PLAYWRIGHT_FAKE_API_PORT, webPort: env.PLAYWRIGHT_WEB_PORT });
+      return 0;
+    },
+    args: ["e2e/editor-workbench.spec.mjs"],
+  });
+
+  assert.equal(status, 0);
+  assert.deepEqual(calls.map(({ args }) => args), [
+    ["./node_modules/@playwright/test/cli.js", "test", "e2e/editor-workbench.spec.mjs"],
+    ["./e2e/verify-snapshot-manifest.mjs"],
+  ]);
+  assert.deepEqual(calls.map(({ fakePort, webPort }) => [fakePort, webPort]), [
+    ["43105", "43106"], ["43105", "43106"],
+  ]);
+});

@@ -4,6 +4,8 @@
 
 생성 계약은 Chromium, loopback-only fake API fixture, epoch `0`의 고정 시간 계약, `animations: "disabled"`, `caret: "hide"`다. 화면에 시간을 새로 표시하는 E2E를 추가하면 캡처 전에 이 epoch를 적용해야 한다.
 
+일반 E2E는 화면을 캡처해 검사하지만 승인된 PNG를 덮어쓰지 않는다. 사람이 차이를 검토한 뒤에만 `VIDEOBOX_WRITE_PLAYWRIGHT_SNAPSHOTS=1 npm run test:e2e`로 PNG를 다시 쓴다.
+
 검증:
 
 `node e2e/verify-snapshot-manifest.mjs`

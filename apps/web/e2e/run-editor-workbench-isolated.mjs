@@ -1,14 +1,16 @@
 import { spawn } from "node:child_process";
 
-const child = spawn(process.execPath, ["./node_modules/@playwright/test/cli.js", "test", "e2e/editor-workbench.spec.mjs"], {
-  stdio: "inherit",
-  env: { ...process.env, PLAYWRIGHT_SKIP_FAKE_API: "1", PLAYWRIGHT_WEB_PORT: "4174" },
-});
+import { runE2eCommand } from "./support/e2e-command-runner.mjs";
 
-child.on("error", (error) => {
-  console.error(error);
-  process.exitCode = 1;
-});
-child.on("exit", (code, signal) => {
-  process.exitCode = code ?? (signal ? 1 : 0);
+function run(command, args, env) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { cwd: process.cwd(), env, stdio: "inherit" });
+    child.once("error", reject);
+    child.once("exit", (code, signal) => resolve(code ?? (signal ? 1 : 0)));
+  });
+}
+
+process.exitCode = await runE2eCommand({
+  run,
+  args: ["e2e/editor-workbench.spec.mjs"],
 });

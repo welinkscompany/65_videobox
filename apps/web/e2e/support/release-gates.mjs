@@ -51,7 +51,8 @@ export async function installBrowserNetworkGate(page) {
 }
 
 export function assessWorkbenchPerformance({ browserVersion, ciProfile, warmupMs, measurementsMs }) {
-  const structuralFailure = !browserVersion || !ciProfile || !Number.isFinite(warmupMs) ||
+  const baselineCompatible = browserVersion === performanceBaseline.browser_version && ciProfile === performanceBaseline.capture_profile;
+  const structuralFailure = !browserVersion || !ciProfile || !baselineCompatible || !Number.isFinite(warmupMs) ||
     measurementsMs.length !== 5 || measurementsMs.some((value) => !Number.isFinite(value) || value < 0);
   const sorted = [...measurementsMs].sort((left, right) => left - right);
   const medianMs = structuralFailure ? null : sorted[2];
@@ -63,12 +64,14 @@ export function assessWorkbenchPerformance({ browserVersion, ciProfile, warmupMs
     warmup_count: 1,
     measurement_count: 5,
     baseline_median_ms: performanceBaseline.median_ms,
+    baseline_p95_ms: performanceBaseline.p95_ms,
     baseline_capture_profile: performanceBaseline.capture_profile,
     baseline_capture_intent: performanceBaseline.capture_intent,
     regression_limit_percent: performanceBaseline.regression_limit_percent,
     warmup_ms: warmupMs,
     measurements_ms: measurementsMs,
     median_ms: medianMs,
+    p95_ms: structuralFailure ? null : sorted.at(-1),
     regression,
     structural_failure: structuralFailure,
   };

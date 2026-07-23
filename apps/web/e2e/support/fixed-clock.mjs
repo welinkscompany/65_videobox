@@ -25,3 +25,11 @@ export async function waitForStableCapture(page) {
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
   });
 }
+
+export function playwrightSnapshotOptions(path, shouldWrite = process.env.VIDEOBOX_WRITE_PLAYWRIGHT_SNAPSHOTS === "1") {
+  return {
+    ...(shouldWrite ? { path } : {}),
+    animations: "disabled",
+    caret: "hide",
+  };
+}

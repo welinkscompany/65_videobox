@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { fixedClockEpochMs, fixedClockInit, installFixedClock, waitForStableCapture } from "./fixed-clock.mjs";
+import { fixedClockEpochMs, fixedClockInit, installFixedClock, playwrightSnapshotOptions, waitForStableCapture } from "./fixed-clock.mjs";
 
 test("pins Date construction and Date.now without freezing browser timers", async () => {
   const nativeDate = globalThis.Date;
@@ -25,4 +25,9 @@ test("waits for fonts and two paint frames before writing a deterministic snapsh
   const calls = [];
   await waitForStableCapture({ evaluate: async (callback) => { calls.push(callback); } });
   assert.equal(calls.length, 1);
+});
+
+test("captures for visual checks without overwriting approved artifacts unless explicitly requested", () => {
+  assert.deepEqual(playwrightSnapshotOptions("e2e/snapshots/example.png", false), { animations: "disabled", caret: "hide" });
+  assert.deepEqual(playwrightSnapshotOptions("e2e/snapshots/example.png", true), { path: "e2e/snapshots/example.png", animations: "disabled", caret: "hide" });
 });
