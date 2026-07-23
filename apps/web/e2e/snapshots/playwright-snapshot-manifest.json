@@ -1,0 +1,32 @@
+{
+  "artifact_set": "videobox-playwright-e2e-snapshots",
+  "manifest_version": 1,
+  "generator": {
+    "runner": "Playwright",
+    "browser": "chromium",
+    "fixture": {
+      "network": "loopback-only",
+      "api": "e2e/support/fake-api-server.mjs"
+    },
+    "clock": {
+      "mode": "fixed",
+      "epoch_ms": 0
+    },
+    "capture": {
+      "animations": "disabled",
+      "caret": "hide"
+    }
+  },
+  "snapshots": [
+    { "path": "editor-workbench-1280x800.png", "viewport": { "width": 1280, "height": 800 }, "bytes": 55430, "sha256": "19d2022ef9fe6f6433f2954c42055723600e3d0458de4d2f9ad4e1fe2fa99491" },
+    { "path": "editor-workbench-1440x900.png", "viewport": { "width": 1440, "height": 900 }, "bytes": 64280, "sha256": "3a8be519404e32e6518e33a78586ee188e41aca5df782b361b5a66491908b43c" },
+    { "path": "editor-workbench-1920x1080.png", "viewport": { "width": 1920, "height": 1080 }, "bytes": 106393, "sha256": "2acd929d27da90aab496263368ff993e168c69c58242760b507946403390ac32" },
+    { "path": "editor-workbench-390x844.png", "viewport": { "width": 390, "height": 844 }, "bytes": 26418, "sha256": "6d3a16ba93954679fb5a4e2b3beb2c7ec4a661f3b9edbfef5280a7b00dd8102f" },
+    { "path": "editor-workbench-768x1024.png", "viewport": { "width": 768, "height": 1024 }, "bytes": 52473, "sha256": "affc774b1b98264cfdfc76b6a00881d1596ea29c50a2fad2b1eb5dfe50775358" },
+    { "path": "product-shell-1280.png", "viewport": { "width": 1280, "height": 800 }, "bytes": 53644, "sha256": "8b2c7a7ff650e2347d5b1c6a42f683faaeea2afc5286dce2f9293ac7ac580a42" },
+    { "path": "product-shell-1440.png", "viewport": { "width": 1440, "height": 960 }, "bytes": 55779, "sha256": "c9e6405e4b01b3dd82fe32fd60e9c98f7ff1458b0024931de86707a1fe5a8d8e" },
+    { "path": "product-shell-1920.png", "viewport": { "width": 1920, "height": 1080 }, "bytes": 59226, "sha256": "85d85ab4ee401b1fcf2c066a043e93752cacfab2efd89ee8f8901bd2f6a5c813" },
+    { "path": "product-shell-390.png", "viewport": { "width": 390, "height": 844 }, "bytes": 47112, "sha256": "21d3430b391abeca286c353c1b21f2ec1e7bec6e85fb30e37138b33053e9b8cb" },
+    { "path": "product-shell-768.png", "viewport": { "width": 768, "height": 1024 }, "bytes": 49929, "sha256": "c9c2f630def83f5d2a4a577d2721c1ff47213d22cb6cdc66ef932c7858240ad9" }
+  ]
+}

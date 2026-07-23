@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { installFixedClock } from "./support/fixed-clock.mjs";
 
 const loopbackHosts = new Set(["127.0.0.1", "localhost", "[::1]"]);
 const snapshots = [
@@ -18,6 +19,7 @@ async function blockExternalNetwork(page) {
 }
 
 test.beforeEach(async ({ page }) => {
+  await installFixedClock(page);
   await blockExternalNetwork(page);
 });
 
