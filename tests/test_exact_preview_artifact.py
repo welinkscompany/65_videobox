@@ -234,8 +234,30 @@ def test_plan_audio_ducks_bgm_against_the_mixed_full_narration_track(tmp_path: P
     ]})
     graph = FfmpegFinalRenderer(store=LocalProjectStore(tmp_path)).build_plan_audio_filter_graph(composition_plan=plan, source_indices={"n1": 0, "n2": 1, "bgm": 2})
 
-    assert "[a_n1][a_n2]amix=inputs=2:duration=longest[narration_sidechain]" in graph
+    assert "[a_n1][a_n2]amix=inputs=2:duration=longest[narration_mix]" in graph
+    assert "[narration_mix]asplit=2[narration_final][narration_sidechain]" in graph
     assert "[a_bgm][narration_sidechain]sidechaincompress" in graph
+
+
+def test_plan_audio_ducking_splits_the_single_narration_mix_before_final_mix(tmp_path: Path) -> None:
+    plan = CompositionPlan.from_timeline(timeline={"tracks": [
+        {"track_type": "narration", "clips": [
+            {"clip_id": "n1", "asset_uri": "local://n1", "start_sec": 0, "end_sec": 1},
+            {"clip_id": "n2", "asset_uri": "local://n2", "start_sec": 1, "end_sec": 2},
+        ]},
+        {"track_type": "bgm", "clips": [
+            {"clip_id": "bgm", "asset_uri": "local://bgm", "start_sec": 0, "end_sec": 2, "media_controls": {"ducking": True}},
+        ]},
+    ]})
+
+    graph = FfmpegFinalRenderer(store=LocalProjectStore(tmp_path)).build_plan_audio_filter_graph(
+        composition_plan=plan, source_indices={"n1": 0, "n2": 1, "bgm": 2}
+    )
+
+    assert "[a_n1][a_n2]amix=inputs=2:duration=longest[narration_mix]" in graph
+    assert "[narration_mix]asplit=2[narration_final][narration_sidechain]" in graph
+    assert "[a_bgm][narration_sidechain]sidechaincompress=threshold=0.05:ratio=8[duck_bgm]" in graph
+    assert "[narration_final][duck_bgm]amix=inputs=2:duration=longest" in graph
 
 
 def test_plan_broll_pad_uses_legacy_black_tpad_not_frame_clone(tmp_path: Path) -> None:

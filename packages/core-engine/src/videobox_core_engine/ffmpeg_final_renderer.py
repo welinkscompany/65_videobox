@@ -188,19 +188,34 @@ class FfmpegFinalRenderer:
         duration = max(composition_plan.duration_sec, 0.001)
         narration = [item for item in composition_plan.items if item.track_type == "narration"]
         filters: list[str] = []
-        labels: list[str] = []
+        narration_labels: list[str] = []
         for item in narration:
             label = f"a_{item.clip_id}"
             delay = max(0, round(item.start_sec * 1000))
             filters.append(f"[{source_indices[item.clip_id]}:a]atrim=start={item.source_in_sec}:end={item.source_out_sec},asetpts=PTS-STARTPTS,adelay={delay}|{delay}[{label}]")
-            labels.append(f"[{label}]")
-        if not labels:
-            filters.append(f"anullsrc=r=48000:cl=stereo,atrim=duration={duration}[a_base]")
-            labels.append("[a_base]")
-        narration_sidechain = labels[0]
-        if len(narration) > 1:
-            filters.append(f"{''.join(labels)}amix=inputs={len(labels)}:duration=longest[narration_sidechain]")
+            narration_labels.append(f"[{label}]")
+        if not narration_labels:
+            filters.append(f"anullsrc=r=48000:cl=stereo,atrim=duration={duration}[narration_mix]")
+        elif len(narration_labels) == 1:
+            filters.append(f"{narration_labels[0]}anull[narration_mix]")
+        else:
+            filters.append(f"{''.join(narration_labels)}amix=inputs={len(narration_labels)}:duration=longest[narration_mix]")
+
+        has_ducked_bgm = any(
+            item.track_type == "bgm"
+            and normalize_media_controls(
+                item.media_controls,
+                media_kind="audio",
+                duration_sec=max(item.end_sec - item.start_sec, 0.001),
+            )["ducking"]
+            for item in composition_plan.items
+        )
+        narration_sidechain = "[narration_mix]"
+        labels = ["[narration_mix]"]
+        if has_ducked_bgm:
+            filters.append("[narration_mix]asplit=2[narration_final][narration_sidechain]")
             narration_sidechain = "[narration_sidechain]"
+            labels = ["[narration_final]"]
         for item in composition_plan.items:
             if item.track_type == "broll":
                 controls = normalize_media_controls(item.media_controls, media_kind="broll", duration_sec=max(item.end_sec - item.start_sec, 0.001))
