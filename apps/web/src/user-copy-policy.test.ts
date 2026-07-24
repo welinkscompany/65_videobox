@@ -19,23 +19,29 @@ import {
 import { describe, expect, it } from "vitest";
 
 const uiFiles = [
-  "App.tsx",
   "ErrorBoundary.tsx",
-  "features/director/AssetPreviewPlayer.tsx",
   "ProjectOnboarding.tsx",
+  "app/AppRouter.tsx",
+  "app/OutputsPage.tsx",
+  "app/ProductShell.tsx",
   "features/creation/CreationInterview.tsx",
-  "features/director/DirectorWorkspace.tsx",
-  "features/director/DirectorWorkspacePanel.tsx",
-  "features/director/ProposalComparisonTray.tsx",
-  "features/director/DirectorHistoryControls.tsx",
+  "features/director/AssetPreviewPlayer.tsx",
   "features/director/MediaReferenceBadge.tsx",
-  "features/director/ProposalCandidateCard.tsx",
-  "features/media/ManualMediaLibrary.tsx",
-  "features/media/MediaAnalysisPanel.tsx",
-  "features/media/MediaWorkspacePage.tsx",
-  "features/jobs/JobRecovery.tsx",
+  "features/editor/assets/EditorAssetBrowser.tsx",
+  "features/editor/inspector/InspectorControls.tsx",
+  "features/editor/preview/preview-stage.tsx",
+  "features/editor/timeline/TimelineDock.tsx",
+  "features/editor/transcript/CaptionLane.tsx",
+  "features/editor/transcript/TranscriptPanel.tsx",
   "features/editor/workbench/EditorWorkbench.tsx",
+  "features/editor/workbench/editorWorkbenchReadOnlyAdapters.tsx",
+  "features/editor/workbench/EditorWorkbenchRoute.tsx",
   "features/editor/workbench/RightDock.tsx",
+  "features/jobs/JobRecovery.tsx",
+  "features/media/DraftGapMedia.tsx",
+  "features/media/MediaWorkspacePage.tsx",
+  "features/review/TimelineReviewPage.tsx",
+  "features/settings/VoiceTtsSettings.tsx",
 ];
 
 function renderedCopy(source: string): string {
@@ -108,10 +114,10 @@ function containsForbiddenDashboardCopy(copy: string, forbiddenTerm: string): bo
 }
 
 describe("user-facing dashboard copy", () => {
-  it("includes Director candidate and media-reference copy while ignoring implementation props", () => {
+  it("includes the retained media-reference copy while ignoring implementation props", () => {
     expect(uiFiles).toEqual(expect.arrayContaining([
       "features/director/MediaReferenceBadge.tsx",
-      "features/director/ProposalCandidateCard.tsx",
+      "features/editor/workbench/RightDock.tsx",
     ]));
 
     const copy = renderedCopy('<section data-state="Local Media Director">revision</section>');
@@ -166,7 +172,7 @@ describe("user-facing dashboard copy", () => {
     const copy = dashboardCopy();
 
     expect(copy).toContain("유진");
-    expect(copy).toContain("유진 영상 도우미");
+    expect(copy).toContain("유진 대화");
     expect(copy).toMatch(/영상|편집|대본|자막/);
     expect(copy).not.toContain("루미");
   });

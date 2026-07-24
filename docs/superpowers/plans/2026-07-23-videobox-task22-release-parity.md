@@ -145,6 +145,8 @@ Every migrated mutation begins with an observed focused RED and preserves curren
 
 ## 22D — Remove Legacy Owners
 
+**Status (2026-07-24): complete.** The unreachable legacy shell, output adapter, CSS, App-only Director/media/session bridges, obsolete tests and stale fast-path references are removed. Canonical creation helpers and persisted preview/export readers remain.
+
 After every row in the parity owner matrix is GREEN and 22A–22C evidence is complete:
 
 - Route `/timeline`, `/review`, `/settings`, `/editor`, `/media`, and `/outputs` only to canonical owners.

@@ -12,6 +12,7 @@ import {
 import { useEffect, useState } from "react";
 
 import { api, type Project } from "../api";
+import { Button } from "../components/ui/button";
 import { ProjectOnboarding } from "../ProjectOnboarding";
 import { CreationInterview } from "../features/creation/CreationInterview";
 import { DraftGapMedia } from "../features/media/DraftGapMedia";
@@ -20,7 +21,7 @@ import { TimelineReviewPage } from "../features/review/TimelineReviewPage";
 import { EditorWorkbenchRoute } from "../features/editor/workbench/EditorWorkbenchRoute";
 import { HomePage, opensLastProjectOnStart, ProductShell, SettingsPage } from "./ProductShell";
 import { OutputsPage } from "./OutputsPage";
-import { resolveLastValidProjectId } from "./ProjectWorkspaceProvider";
+import { resolveLastValidProjectId } from "./projectSelection";
 import { isWorkspaceSection, resolveWorkspaceLocation, type WorkspaceSection } from "./routeManifest";
 
 const lastProjectKey = "videobox.last-valid-project";
@@ -138,9 +139,9 @@ function ProjectsPage() {
     <main data-testid="projects-catalog">
       <h1>프로젝트</h1>
       {projects.map((project) => (
-        <button key={project.project_id} type="button" onClick={() => void navigate({ to: resolveWorkspaceLocation(project.project_id, "home") })}>
+        <Button key={project.project_id} type="button" onClick={() => void navigate({ to: resolveWorkspaceLocation(project.project_id, "home") })}>
           {project.name}
-        </button>
+        </Button>
       ))}
     </main>
   );
@@ -286,10 +287,10 @@ function RecoveryPage() {
     <main data-testid="project-recovery">
       <h1>프로젝트를 찾을 수 없어요</h1>
       {projects.length > 0 ? projects.map((project) => (
-        <button key={project.project_id} type="button" onClick={() => void navigate({ to: resolveWorkspaceLocation(project.project_id, "home") })}>
+        <Button key={project.project_id} type="button" onClick={() => void navigate({ to: resolveWorkspaceLocation(project.project_id, "home") })}>
           {project.name}
-        </button>
-      )) : <button type="button" onClick={() => void navigate({ to: "/projects" })}>프로젝트 목록으로</button>}
+        </Button>
+      )) : <Button type="button" onClick={() => void navigate({ to: "/projects" })}>프로젝트 목록으로</Button>}
     </main>
   );
 }

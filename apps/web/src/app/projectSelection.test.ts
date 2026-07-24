@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { resolveLastValidProjectId } from "./ProjectWorkspaceProvider";
+import { resolveLastValidProjectId } from "./projectSelection";
 
 describe("route-owned project selection", () => {
   it("uses a saved project only when it remains in the loaded catalog", () => {

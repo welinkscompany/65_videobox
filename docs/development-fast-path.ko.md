@@ -77,9 +77,9 @@
 - `preflight-frontend`는 blocked-warning surface, resumed preflight degraded warning, resumed mismatch non-reuse, resumed scope cleanup 경계를 기본으로 묶는다
 - 새 slice에서 RED/GREEN은 helper 전체 대신 정확히 1개 테스트만 먼저 본다
   - backend: `pytest tests/test_api.py -q -k "<exact test name>"`
-  - frontend: `npm test -- --run src/app.test.tsx -t "<exact test name>"`
+  - frontend: `npm test -- --run <canonical test file> -t "<exact test name>"`
 - lane close가 필요하면 script override를 써서 helper 범위를 더 줄인다
-- current status 문서에 `frontend src/app.test.tsx 전체`를 주장할 때는 helper gate와 별도로 `npm test -- --run src/app.test.tsx`를 다시 실행한다
+- current status 문서에 특정 canonical frontend test file 전체를 주장할 때는 helper gate와 별도로 그 파일을 다시 실행한다
 - broader는 slice close 직전까지만 미룬다. 다만 focused 없이 broader부터 돌리지는 않는다
 
 속도 우선 기본값:
@@ -88,7 +88,7 @@
 2. lane close에서는 해당 lane helper만 돌린다
 3. slice close에서는 `current-focused` 대신 `current-focused-parallel`을 먼저 쓴다
 4. 문서 수정은 focused green 이후로 미룬다
-5. `frontend src/app.test.tsx` 전체 재실행은 상태 문서 갱신이나 task close가 필요할 때만 돌린다
+5. canonical focused test file 전체 재실행은 상태 문서 갱신이나 task close가 필요할 때만 돌린다
 
 ## 4. review-action 변경 시 꼭 보는 함정
 
@@ -122,7 +122,7 @@
 4. minimal GREEN만 넣고 같은 exact test를 다시 돌린다
 5. lane close가 필요하면 관련 helper만 돌린다
 6. slice가 닫히면 `current-focused-parallel`을 다시 돌린다
-7. 현재 상태 문서에 frontend 전체 수치를 남길 필요가 있으면 `npm test -- --run src/app.test.tsx`를 별도로 돌린다
+7. 현재 상태 문서에 frontend 전체 수치를 남길 필요가 있으면 `npm test -- --run`을 별도로 돌린다
 8. task 단위가 닫히면 `broader`를 돌린다
 9. 그 뒤에만 spec review -> code-quality review를 붙인다
 

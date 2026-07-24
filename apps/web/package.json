@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "test": "vitest run",
-    "test:focused": "vitest run --run src/app.test.tsx",
+    "test:focused": "vitest run src/task22-parity-owners.test.ts src/features/editor/workbench/editor-workbench-route.test.tsx",
     "test:e2e": "node ./e2e/run-isolated.mjs",
     "test:e2e:editor-workbench": "node ./e2e/run-editor-workbench-isolated.mjs"
   },

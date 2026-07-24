@@ -57,14 +57,14 @@ $reviewActionFrontendExpr = if ($FrontendPattern -and $Mode -eq "review-action-f
     $FrontendPattern
 }
 else {
-    'approves a pending recommendation through the review action and refreshes the review snapshot|opens the actionable pending recommendation in the editing session when marked for manual edit'
+    'loads read-only current review data and links an exact segment to the pinned editor|keeps an already approved review read-only and calls no mutation endpoint'
 }
 
 $preflightFrontendExpr = if ($FrontendPattern -and $Mode -eq "preflight-frontend") {
     $FrontendPattern
 }
 else {
-    'shows a blocked preflight warning before execution when the rerun preserves existing review blockers|shows a limited restore warning when resumed preflight interpretation cannot be restored|clears resumed candidate restore warnings when the operator changes the rerun target|clears resumed candidate restore warnings when the operator changes the rerun fields|clears resumed candidate restore warnings when the operator reopens review|clears resumed candidate restore warnings when the operator approves the active candidate timeline|clears resumed candidate restore warnings when the operator requests a fresh preflight|reuses blocked preflight interpretation on refresh-resume for the latest fresh candidate|aligns the selected rerun scope with the resumed candidate before reusing preflight interpretation|does not reuse resumed preflight interpretation when the restored preflight scope differs from the resumed candidate|does not reuse resumed preflight interpretation when the restored preflight session_id differs from the resumed candidate session|does not reuse resumed preflight interpretation when the restored preflight fields include duplicates|does not reuse resumed preflight interpretation when restored targeted segments differ from the resumed candidate scope|does not reuse resumed preflight interpretation when restored targeted segment review state differs from the editing session|does not reuse resumed preflight interpretation when restored targeted segment tts replacement differs from the editing session|does not reuse resumed preflight interpretation when restored targeted segment visual overlays differ from the editing session|does not reuse resumed preflight interpretation when restored targeted segment broll override differs from the editing session|does not reuse resumed preflight interpretation when restored targeted segment music override differs from the editing session|does not reuse preflight interpretation for a resumed multi-segment candidate that the current editor cannot represent|clears resumed multi-segment scope when the operator changes the rerun target|clears resumed multi-segment scope when the operator changes the rerun fields|maps a backend image_card overlay into the image overlay preflight field|maps a backend legacy image overlay into the image overlay preflight field|maps a backend hook_title overlay into the visual overlay preflight field|maps a backend canonical visual_overlay into the visual overlay preflight field'
+    'requires impact preflight before one explicit partial run, then resumes only from an explicit result read|recovers the latest succeeded same-session result after a fresh route mount|fails closed when a preflight response does not match the prepared segment|invalidates an unresolved A partial preflight after route navigation to B|ignores an old A partial run completion after route navigation to B'
 }
 
 function Invoke-Step {
@@ -156,7 +156,7 @@ switch ($Mode) {
     "review-action-frontend" {
         Invoke-Step `
             -Label "Frontend review-action maintenance slice" `
-            -Command "npm test -- --run src/app.test.tsx -t `"$reviewActionFrontendExpr`"" `
+            -Command "npm test -- --run src/features/review/TimelineReviewPage.test.tsx -t `"$reviewActionFrontendExpr`"" `
             -WorkingDirectory $frontendRoot
     }
     "output-gating" {
@@ -174,7 +174,7 @@ switch ($Mode) {
     "preflight-frontend" {
         Invoke-Step `
             -Label "Frontend preflight slice" `
-            -Command "npm test -- --run src/app.test.tsx -t `"$preflightFrontendExpr`"" `
+            -Command "npm test -- --run src/features/editor/workbench/editor-workbench-route.test.tsx -t `"$preflightFrontendExpr`"" `
             -WorkingDirectory $frontendRoot
     }
     "current-focused" {
@@ -188,7 +188,7 @@ switch ($Mode) {
             -WorkingDirectory $repoRoot
         Invoke-Step `
             -Label "Frontend preflight slice" `
-            -Command "npm test -- --run src/app.test.tsx -t `"$preflightFrontendExpr`"" `
+            -Command "npm test -- --run src/features/editor/workbench/editor-workbench-route.test.tsx -t `"$preflightFrontendExpr`"" `
             -WorkingDirectory $frontendRoot
     }
     "current-focused-parallel" {
@@ -205,7 +205,7 @@ switch ($Mode) {
             },
             @{
                 Label = "Frontend preflight slice"
-                Command = "npm test -- --run src/app.test.tsx -t `"$preflightFrontendExpr`""
+                Command = "npm test -- --run src/features/editor/workbench/editor-workbench-route.test.tsx -t `"$preflightFrontendExpr`""
                 WorkingDirectory = $frontendRoot
             }
         )
@@ -231,7 +231,7 @@ switch ($Mode) {
             -WorkingDirectory $repoRoot
         Invoke-Step `
             -Label "Frontend preflight slice" `
-            -Command "npm test -- --run src/app.test.tsx -t `"$preflightFrontendExpr`"" `
+            -Command "npm test -- --run src/features/editor/workbench/editor-workbench-route.test.tsx -t `"$preflightFrontendExpr`"" `
             -WorkingDirectory $frontendRoot
         Invoke-Step `
             -Label "Frontend production build" `
@@ -249,7 +249,7 @@ switch ($Mode) {
             -WorkingDirectory $repoRoot
         Invoke-Step `
             -Label "Media Director frontend features" `
-            -Command "npm test -- --run src/app.test.tsx src/features/director src/features/media" `
+            -Command "npm test -- --run src/features/editor/workbench/editor-workbench-route.test.tsx src/features/director src/features/media" `
             -WorkingDirectory $frontendRoot
     }
     "media-director-live-smoke" {

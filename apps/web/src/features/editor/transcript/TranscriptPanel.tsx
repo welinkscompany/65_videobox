@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
 
+import { Button } from "../../../components/ui/button";
+import { Textarea } from "../../../components/ui/textarea";
 import { CaptionLane } from "./CaptionLane";
 import { activeSegmentIdAt } from "./playbackNavigation";
 import { visibleTranscriptWindow, type TranscriptEntry } from "./transcriptProjection";
@@ -50,15 +52,15 @@ export function TranscriptPanel({
       <h2>대본</h2>
       {visibleEntries.length ? <ol>
         {visibleEntries.map((entry) => <li key={entry.segmentId}>
-          <button aria-current={entry.segmentId === activeSegmentId ? "true" : undefined} aria-label={`${entry.text} 대본 선택`} disabled={isSaving} onClick={() => select(entry)} type="button">
+          <Button aria-current={entry.segmentId === activeSegmentId ? "true" : undefined} aria-label={`${entry.text} 대본 선택`} disabled={isSaving} onClick={() => select(entry)} type="button">
             {entry.text} · {seconds(entry.startSec)}–{seconds(entry.endSec)}
-          </button>
+          </Button>
         </li>)}
       </ol> : <p>연결된 대본이 없습니다.</p>}
       {selectedEntry ? <>
         <label htmlFor="vb-transcript-caption">자막 텍스트</label>
-        <textarea aria-label={`${selectedEntry.segmentId} 자막 텍스트`} disabled={isSaving} id="vb-transcript-caption" onChange={(event) => { if (!isSaving) setDraft(event.target.value); }} onKeyDown={handleEditorKeyDown} value={draft} />
-        <button disabled={isSaving || !onSaveCaption || draft === selectedEntry.text} onClick={() => onSaveCaption?.({ segmentId: selectedEntry.segmentId, text: draft })} type="button">자막 저장</button>
+        <Textarea aria-label={`${selectedEntry.segmentId} 자막 텍스트`} disabled={isSaving} id="vb-transcript-caption" onChange={(event) => { if (!isSaving) setDraft(event.target.value); }} onKeyDown={handleEditorKeyDown} value={draft} />
+        <Button disabled={isSaving || !onSaveCaption || draft === selectedEntry.text} onClick={() => onSaveCaption?.({ segmentId: selectedEntry.segmentId, text: draft })} type="button">자막 저장</Button>
       </> : null}
     </section>
     <CaptionLane entries={entries} selectedSegmentId={currentSegmentId} />

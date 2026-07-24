@@ -1,6 +1,17 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, relative, resolve } from "node:path";
 
+import {
+  ScriptKind,
+  ScriptTarget,
+  createSourceFile,
+  forEachChild,
+  isIdentifier,
+  isJsxAttribute,
+  isJsxElement,
+  isJsxSelfClosingElement,
+  isStringLiteral,
+} from "typescript";
 import { describe, expect, it } from "vitest";
 
 const sourceRoot = import.meta.dirname;
@@ -40,7 +51,110 @@ function sourcePath(file: string) {
   return relative(sourceRoot, file).replaceAll("\\", "/");
 }
 
+function nativeControlSignatures(file: string) {
+  const source = readFileSync(file, "utf8");
+  const sourceFile = createSourceFile(file, source, ScriptTarget.Latest, true, ScriptKind.TSX);
+  const signatures: string[] = [];
+  const nativeControls = new Set(["button", "input", "select", "textarea", "dialog"]);
+
+  function visit(node: Parameters<typeof forEachChild>[0]): void {
+    const openingElement = isJsxElement(node)
+      ? node.openingElement
+      : isJsxSelfClosingElement(node)
+        ? node
+        : null;
+    const tagName = openingElement?.tagName;
+    if (openingElement && tagName && isIdentifier(tagName) && nativeControls.has(tagName.text)) {
+      const marker = openingElement.attributes.properties.find(
+        (property) => isJsxAttribute(property) && property.name.text === "data-native-control",
+      );
+      const markerValue = marker && isJsxAttribute(marker) && marker.initializer && isStringLiteral(marker.initializer)
+        ? marker.initializer.text
+        : "<missing>";
+      signatures.push(`${tagName.text}:${markerValue}`);
+    }
+    forEachChild(node, visit);
+  }
+
+  visit(sourceFile);
+  return signatures.sort();
+}
+
+const nativeControlAllowlist = {
+  "features/director/AssetPreviewPlayer.tsx": {
+    controls: ["button:candidate-preview", "button:narration-mute", "button:narration-solo"],
+    reason: "Media audition transport directly coordinates the owned audio and video elements.",
+  },
+  "features/editor/preview/preview-stage.tsx": {
+    controls: ["button:audition-source", "button:refresh-exact", "button:return-exact", "button:toggle-playback"],
+    reason: "The one-player preview transport directly owns playback and audition state.",
+  },
+  "features/editor/timeline/TimelineDock.tsx": {
+    controls: [
+      "button:placement-move",
+      "button:placement-trim-end",
+      "button:placement-trim-start",
+      "button:timeline-clip-select",
+      "button:timeline-reorder",
+      "button:timeline-trim-end",
+      "button:timeline-trim-start",
+    ],
+    reason: "Timeline drag, trim, and keyboard interaction requires direct pointer and focus ownership.",
+  },
+} as const;
+
 describe("Task 22 canonical production owners", () => {
+  it("removes retired legacy shell owners, styles, adapters, and fast-path references", () => {
+    const retiredFiles = [
+      "App.tsx",
+      "app.test.tsx",
+      "app/LegacyWorkspacePage.tsx",
+      "legacy-baseline.test.tsx",
+      "legacy-output-api.ts",
+      "styles/legacy.css",
+      "app/ProjectWorkspaceProvider.tsx",
+      "app/ProjectWorkspaceProvider.test.tsx",
+      "features/editor/legacySessionProjection.ts",
+      "features/editor/legacySessionProjection.test.ts",
+      "features/media/ManualMediaLibrary.tsx",
+      "features/media/manual-media-library.test.tsx",
+      "features/media/MediaAnalysisPanel.tsx",
+      "features/media/media-analysis-panel.test.tsx",
+      "features/director/DirectorWorkspacePanel.tsx",
+      "features/director/DirectorWorkspacePanel.test.tsx",
+      "features/director/DirectorWorkspace.tsx",
+      "features/director/director-workspace.test.tsx",
+      "features/director/DirectorContextBar.tsx",
+      "features/director/DirectorContextBar.test.tsx",
+      "features/director/ProposalCandidateCard.tsx",
+      "features/director/ProposalCandidateCard.test.tsx",
+      "features/director/ProposalComparisonTray.tsx",
+      "features/director/proposal-comparison-tray.test.tsx",
+      "features/director/DirectorHistoryControls.tsx",
+      "features/director/director-history-controls.test.tsx",
+      "features/director/director-apply-scope.ts",
+      "features/director/director-apply-scope.test.ts",
+      "features/director/directorTypes.ts",
+      "features/director/useResponsiveDirector.ts",
+      "features/director/responsive-director.test.tsx",
+      "features/director/useEditingShortcuts.ts",
+      "features/director/editing-shortcuts.test.tsx",
+    ];
+    for (const retiredFile of retiredFiles) {
+      expect(existsSync(resolve(sourceRoot, retiredFile)), `${retiredFile} must be removed`).toBe(false);
+    }
+
+    const references = [
+      readFileSync(resolve(sourceRoot, "styles/index.css"), "utf8"),
+      readFileSync(resolve(sourceRoot, "ui-system.test.tsx"), "utf8"),
+      readFileSync(resolve(sourceRoot, "user-copy-policy.test.ts"), "utf8"),
+      readFileSync(resolve(webRoot, "package.json"), "utf8"),
+      readFileSync(resolve(webRoot, "../../scripts/dev-fast-path.ps1"), "utf8"),
+      readFileSync(resolve(webRoot, "../../scripts/review-action-fast-path.ps1"), "utf8"),
+    ].join("\n");
+    expect(references).not.toMatch(/(?:src\/)?app\.test\.tsx|@import\s+["']\.\/legacy\.css|readFileSync\([^)]*legacy\.css|legacy-output-api/);
+  });
+
   it("keeps legacy output calls and their legacy UI owners unreachable from main.tsx", () => {
     const reachable = reachableTypeScriptModules(entrypoint);
     const paths = [...reachable].map(sourcePath);
@@ -54,6 +168,40 @@ describe("Task 22 canonical production owners", () => {
       expect(source, `${sourcePath(file)} references a legacy output mutation`).not.toMatch(/\b(?:renderPreview|exportCapcut)\b/);
       for (const endpoint of endpointStrings) expect(source, `${sourcePath(file)} contains ${endpoint}`).not.toContain(endpoint);
     }
+  });
+
+  it("keeps the canonical production graph free of retired legacy class owners", () => {
+    const retiredClassPattern = /(?:\bvb-legacy\b|\baction-button\b|\btab-button\b|\berror-banner\b|\bsection-kicker\b|\bmeta-copy\b|\brecommendation-evidence\b|className=["'](?:field|panel|content)["'])/;
+    for (const file of reachableTypeScriptModules(entrypoint)) {
+      if (!file.endsWith(".tsx")) continue;
+      expect(readFileSync(file, "utf8"), `${sourcePath(file)} retains a legacy class owner`).not.toMatch(retiredClassPattern);
+    }
+  });
+
+  it("keeps native controls on an explicit reachable AST allowlist", () => {
+    const observed = new Map<string, string[]>();
+    for (const file of reachableTypeScriptModules(entrypoint)) {
+      if (!file.endsWith(".tsx") || sourcePath(file).startsWith("components/ui/")) continue;
+      const signatures = nativeControlSignatures(file);
+      if (signatures.length > 0) observed.set(sourcePath(file), signatures);
+    }
+
+    for (const [file, signatures] of observed) {
+      const entry = nativeControlAllowlist[file as keyof typeof nativeControlAllowlist];
+      expect(entry, `${file} needs a documented native-control exception`).toBeDefined();
+      expect(signatures, `${file} native-control inventory drifted`).toEqual(entry?.controls);
+      expect(entry?.reason.trim().length, `${file} needs an exception reason`).toBeGreaterThan(20);
+    }
+    for (const file of Object.keys(nativeControlAllowlist)) {
+      expect(observed.has(file), `${file} is an unused native-control exception`).toBe(true);
+    }
+  });
+
+  it("retains the persisted preview and export compatibility readers without restoring mutations", () => {
+    const client = readFileSync(resolve(sourceRoot, "api.ts"), "utf8");
+    expect(client).toMatch(/getPreview:[\s\S]{0,180}\/previews\/\$\{jobId\}/);
+    expect(client).toMatch(/getExport:[\s\S]{0,180}\/exports\/\$\{jobId\}/);
+    expect(client).not.toMatch(/\b(?:renderPreview|exportCapcut)\s*:/);
   });
 
   it("keeps every retained workspace section on its canonical component owner", () => {

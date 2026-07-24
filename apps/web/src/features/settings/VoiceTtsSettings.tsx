@@ -7,6 +7,8 @@ import {
   type TtsCandidateRecord,
 } from "../../api";
 import { Button } from "../../components/ui/button";
+import { Input } from "../../components/ui/input";
+import { NativeSelect } from "../../components/ui/native-select";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 type ActionToken = { epoch: number; name: string };
@@ -309,10 +311,10 @@ export function VoiceTtsSettings({ projectId }: { projectId: string }) {
     <section aria-label="내 목소리와 읽어보기 후보" className="vb-setting-control">
       <h2>내 목소리 샘플</h2>
       <p className="vb-setting-note">이 기기에 있는 본인 음성만 추가해 주세요.</p>
-      {loadState === "loading" || loadState === "idle" ? <p className="meta-copy">음성 설정을 불러오는 중이에요.</p> : null}
+      {loadState === "loading" || loadState === "idle" ? <p className="text-sm text-muted-foreground">음성 설정을 불러오는 중이에요.</p> : null}
       {loadState === "error" ? (
         <div>
-          <p className="error-banner">음성 설정을 불러오지 못했어요.</p>
+          <p className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">음성 설정을 불러오지 못했어요.</p>
           <Button disabled={initialLoadRef.current?.key === projectId} onClick={() => void loadSettings(projectId, epochRef.current)} type="button">
             다시 불러오기
           </Button>
@@ -322,14 +324,14 @@ export function VoiceTtsSettings({ projectId }: { projectId: string }) {
         <>
           <p>{`저장한 내 목소리 ${samples.length}개`}</p>
           <Button disabled={isBusy} onClick={() => void reloadSamples()} type="button">목록 새로고침</Button>
-          {samples.length === 0 ? <p className="meta-copy">아직 저장한 목소리가 없어요.</p> : (
+          {samples.length === 0 ? <p className="text-sm text-muted-foreground">아직 저장한 목소리가 없어요.</p> : (
             <ul>
               {samples.map((sample, index) => <li key={sample.asset_id}>{`내 목소리 ${index + 1}`}</li>)}
             </ul>
           )}
-          <label className="field">
+          <label className="grid gap-2 text-sm">
             <span>후보에 사용할 목소리</span>
-            <select
+            <NativeSelect
               aria-label="후보에 사용할 목소리"
               disabled={isBusy || samples.length === 0}
               onChange={(event) => setSelectedSampleId(event.target.value)}
@@ -337,15 +339,16 @@ export function VoiceTtsSettings({ projectId }: { projectId: string }) {
             >
               {samples.length === 0 ? <option value="">먼저 목소리를 추가해 주세요</option> : null}
               {samples.map((sample, index) => <option key={sample.asset_id} value={sample.asset_id}>{`내 목소리 ${index + 1}`}</option>)}
-            </select>
+            </NativeSelect>
           </label>
         </>
       ) : null}
       <div>
-        <label className="field">
+        <label className="grid gap-2 text-sm">
           <span>음성 파일의 로컬 경로</span>
-          <input
+          <Input
             aria-label="음성 파일의 로컬 경로"
+            className="rounded-md border bg-background px-3 py-2"
             disabled={isBusy || loadState !== "ready"}
             onChange={(event) => setLocalPath(event.target.value)}
             placeholder="예: D:\voices\my-voice.wav"
@@ -357,12 +360,13 @@ export function VoiceTtsSettings({ projectId }: { projectId: string }) {
         </Button>
       </div>
       <div>
-        <label className="field">
+        <label className="grid gap-2 text-sm">
           <span>음성 파일 업로드</span>
-          <input
+          <Input
             key={uploadInputVersion}
             accept="audio/*"
             aria-label="음성 파일 업로드"
+            className="rounded-md border bg-background px-3 py-2"
             disabled={isBusy || loadState !== "ready"}
             onChange={(event) => setUploadFile(event.target.files?.[0] ?? null)}
             type="file"
@@ -375,10 +379,10 @@ export function VoiceTtsSettings({ projectId }: { projectId: string }) {
 
       <h2>문장별 읽어보기 후보</h2>
       <p className="vb-setting-note">구간을 직접 고른 뒤 후보를 만들고 들어 보세요. 청취 결정만으로 편집본은 바뀌지 않아요.</p>
-      {loadState === "ready" && segments.length === 0 ? <p className="meta-copy">먼저 편집 초안을 만들어 주세요.</p> : null}
-      <label className="field">
+      {loadState === "ready" && segments.length === 0 ? <p className="text-sm text-muted-foreground">먼저 편집 초안을 만들어 주세요.</p> : null}
+      <label className="grid gap-2 text-sm">
         <span>후보를 만들 구간</span>
-        <select
+        <NativeSelect
           aria-label="후보를 만들 구간"
           disabled={isBusy || loadState !== "ready" || segments.length === 0}
           onChange={(event) => selectSegment(event.target.value)}
@@ -390,7 +394,7 @@ export function VoiceTtsSettings({ projectId }: { projectId: string }) {
               {`${index + 1}번 구간 · ${segment.caption_text}`}
             </option>
           ))}
-        </select>
+        </NativeSelect>
       </label>
       <Button
         disabled={isBusy || candidateLoadState === "loading" || !selectedSegment || !selectedSampleId || !selectedSegment.caption_text.trim()}
@@ -401,10 +405,10 @@ export function VoiceTtsSettings({ projectId }: { projectId: string }) {
       </Button>
       {selectedSegment ? (
         <section aria-label="선택한 구간의 읽어보기 후보">
-          {candidateLoadState === "loading" ? <p className="meta-copy">이 구간의 후보를 불러오는 중이에요.</p> : null}
+          {candidateLoadState === "loading" ? <p className="text-sm text-muted-foreground">이 구간의 후보를 불러오는 중이에요.</p> : null}
           {candidateLoadState === "error" ? (
             <div>
-              <p className="error-banner">이 구간의 후보를 불러오지 못했어요.</p>
+              <p className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">이 구간의 후보를 불러오지 못했어요.</p>
               <Button
                 disabled={candidateLoadRef.current?.key === `${projectId}:${selectedSegment.segment_id}`}
                 onClick={() => void loadCandidates(projectId, selectedSegment.segment_id, epochRef.current)}
@@ -414,7 +418,7 @@ export function VoiceTtsSettings({ projectId }: { projectId: string }) {
               </Button>
             </div>
           ) : null}
-          {candidateLoadState === "ready" && candidates.length === 0 ? <p className="meta-copy">이 구간에는 아직 후보가 없어요.</p> : null}
+          {candidateLoadState === "ready" && candidates.length === 0 ? <p className="text-sm text-muted-foreground">이 구간에는 아직 후보가 없어요.</p> : null}
           {candidates.map((candidate, index) => {
             const label = `후보 ${index + 1}`;
             const reviewable = candidate.technical_status === "accepted" && candidate.operator_review_status === "pending";
@@ -422,7 +426,7 @@ export function VoiceTtsSettings({ projectId }: { projectId: string }) {
               <article aria-label={label} key={candidate.candidate_id}>
                 <strong>{label}</strong>
                 <p>{`${label} · ${candidateStatus(candidate)}`}</p>
-                <p className="meta-copy">{candidate.source_text}</p>
+                <p className="text-sm text-muted-foreground">{candidate.source_text}</p>
                 <audio
                   aria-label={`${label} 들어보기`}
                   controls
@@ -451,8 +455,8 @@ export function VoiceTtsSettings({ projectId }: { projectId: string }) {
           })}
         </section>
       ) : null}
-      {message ? <p aria-live="polite" className="meta-copy">{message}</p> : null}
-      {actionError ? <p aria-live="polite" className="error-banner">{actionError}</p> : null}
+      {message ? <p aria-live="polite" className="text-sm text-muted-foreground">{message}</p> : null}
+      {actionError ? <p aria-live="polite" className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">{actionError}</p> : null}
     </section>
   );
 }

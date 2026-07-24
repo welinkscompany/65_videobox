@@ -1,5 +1,4 @@
-/* Explicit style composition: tokens/primitives first, legacy dashboard second. */
+/* Explicit canonical style composition: tokens/primitives, shell, then editor. */
 @import "./theme.css";
-@import "./legacy.css";
 @import "./product-shell.css";
 @import "./editor-workbench.css";

@@ -3,8 +3,6 @@ import type {
   EditingSession,
   EditingSessionSegment,
   JobRecord,
-  RecommendationItem,
-  ReviewSnapshot,
 } from "../api";
 
 export type LoadState = "idle" | "loading" | "ready" | "error";
@@ -259,40 +257,6 @@ export function formatStringList(value: unknown) {
         .map((item) => formatDisplayTag(item))
         .join(", ")
     : "";
-}
-
-export function formatRecommendationScore(score: number) {
-  return Number.isFinite(score) ? score.toFixed(2) : "없음";
-}
-
-export function renderBrollRecommendationEvidence(
-  item: RecommendationItem,
-  brollAssets: BrollAsset[],
-  segments: ReviewSnapshot["segments"],
-) {
-  if (item.recommendation_type !== "broll") {
-    return null;
-  }
-  const selectedAsset = brollAssets.find((asset) => asset.asset_id === item.selected_asset_id);
-  const selectedAssetLabel = selectedAsset
-    ? `${formatBrollAssetTitle(selectedAsset)} - ${selectedAsset.asset_id}`
-    : item.selected_asset_id || "B롤 미선택";
-  const segment = segments.find((candidate) => candidate.segment_id === item.target_segment_id);
-  const matchedTags = formatStringList(item.payload.matched_tags ?? item.payload.tags);
-  const assetTags = selectedAsset ? formatBrollAssetTags(selectedAsset) : "";
-
-  return (
-    <div className="recommendation-evidence">
-      <span>
-        세그먼트 {item.target_segment_id}
-        {segment ? `: ${formatDisplayText(segment.text)}` : ""}
-      </span>
-      <span>자산: {selectedAssetLabel}</span>
-      <span>점수 {formatRecommendationScore(item.score)}</span>
-      {matchedTags ? <span>매칭: {matchedTags}</span> : null}
-      {assetTags ? <span>태그: {assetTags}</span> : null}
-    </div>
-  );
 }
 
 export type EditingSegmentDraft = {

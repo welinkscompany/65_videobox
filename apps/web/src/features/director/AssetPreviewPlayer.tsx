@@ -18,14 +18,14 @@ export function AssetPreviewPlayer({ proposalId: _proposalId, candidates, previe
   const [narrationMuted, setNarrationMuted] = useState(false); const [narrationSolo, setNarrationSolo] = useState(false);
   useEffect(() => { if (narrationContext.current) { narrationContext.current.muted = narrationMuted; narrationContext.current.volume = narrationSolo ? 1 : 0.65; } }, [narrationMuted, narrationSolo]);
   const activeCandidate = candidates.find((candidate) => candidate.candidateId === active);
-  return <section aria-label="추천 미리보기" aria-live="polite"><div><button type="button" aria-pressed={narrationMuted} onClick={() => setNarrationMuted((value) => !value)}>나레이션 미리듣기 음소거</button><button type="button" aria-pressed={narrationSolo} onClick={() => setNarrationSolo((value) => !value)}>나레이션만 듣기</button><span>미리듣기 설정은 편집본의 음량을 바꾸지 않아요.</span></div>
+  return <section aria-label="추천 미리보기" aria-live="polite"><div><button data-native-control="narration-mute" type="button" aria-pressed={narrationMuted} onClick={() => setNarrationMuted((value) => !value)}>나레이션 미리듣기 음소거</button><button data-native-control="narration-solo" type="button" aria-pressed={narrationSolo} onClick={() => setNarrationSolo((value) => !value)}>나레이션만 듣기</button><span>미리듣기 설정은 편집본의 음량을 바꾸지 않아요.</span></div>
     {narrationPreviewUrl ? <audio ref={narrationContext} data-testid="director-narration-context-preview" preload="metadata" src={narrationPreviewUrl} /> : null}
     {candidates.map((candidate) => {
       const audio = candidate.mediaType === "bgm" || candidate.mediaType === "music" || candidate.mediaType === "sfx";
       const inSec = Number(candidate.controls.in_sec ?? 0); const outSec = Number(candidate.controls.out_sec ?? 0);
       const onTimeUpdate = (event: React.SyntheticEvent<HTMLMediaElement>) => { const node = event.currentTarget; if (!audio && outSec > inSec && node.currentTime >= outSec) node.currentTime = inSec; };
       const label = /[가-힣\s]/.test(candidate.referenceCode) ? candidate.referenceCode : mediaReferenceLabel(candidate.referenceCode, "proposal");
-      return <div key={candidate.candidateId}><button type="button" onClick={() => activate(candidate, true)}>{label} {audio ? "미리듣기" : "미리보기"}</button>
+      return <div key={candidate.candidateId}><button data-native-control="candidate-preview" type="button" onClick={() => activate(candidate, true)}>{label} {audio ? "미리듣기" : "미리보기"}</button>
         {audio ? <audio ref={(node) => { media.current[candidate.candidateId] = node; }} data-testid="director-audio-preview" controls src={previewUrl(candidate.candidateId)} onPlay={() => activate(candidate, false)} /> : <video ref={(node) => { media.current[candidate.candidateId] = node; }} controls src={previewUrl(candidate.candidateId)} onPlay={() => activate(candidate, false)} onTimeUpdate={onTimeUpdate} />}
       </div>;
     })}<p>{activeCandidate ? `${mediaReferenceLabel(activeCandidate.referenceCode, "proposal")} 미리보기 중` : "미리보기 선택 없음"}</p>

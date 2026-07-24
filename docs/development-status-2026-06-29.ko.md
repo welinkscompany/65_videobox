@@ -1,6 +1,19 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 298. 2026-07-24 Task 22C3 canonical output ownership closeout`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 299. 2026-07-24 Task 22D legacy owner removal closeout`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+
+## 299. 2026-07-24 Task 22D legacy owner removal closeout
+
+- `[x] legacy shell 제거`: production에서 이미 끊긴 `App.tsx`, `LegacyWorkspacePage`, `legacy-output-api`, `legacy.css`, legacy baseline/app tests를 삭제했다. App에서만 사용되던 old Director workspace, ManualMediaLibrary/MediaAnalysisPanel, legacy session projection과 test-only orphan도 함께 제거했다.
+- `[x] canonical owner 보존`: `main.tsx → AppRoot → AppRouter/ProductShell → canonical page` 그래프와 Task 22의 9-row route/component/E2E owner를 유지했다. canonical creation이 사용하는 `AssetPreviewPlayer`/`MediaReferenceBadge`, 기존 저장 산출물을 읽는 `getPreview/getExport`와 backend/storage reader, `/editing` 입력 redirect는 삭제하지 않았다.
+- `[x] UI/운영 이관`: ProjectOnboarding, ErrorBoundary, Voice/TTS의 legacy CSS class를 canonical Button/Tailwind로 옮겼다. 일반 button/input/select/textarea는 canonical UI primitive로 모았고, unused ProjectWorkspaceProvider는 route-owned pure project selection으로 축소했다. package/script/fast-path/사용자 copy inventory가 삭제된 `app.test.tsx`를 가리키지 않으며 사용자 copy AST 검사는 모든 canonical page/editor surface까지 확장했다.
+- `[x] 재도입 방지`: parity inventory가 삭제 대상 파일, production import graph의 legacy output mutation, retired class owner를 검사한다. reachable production TSX에서 직접 쓰는 native control은 media/pointer ownership 3개 파일만 허용하며, 각 control의 안정적인 `data-native-control` ID·이유·정확한 AST 목록이 모두 일치해야 한다. production bundle에서 `renderPreview`, `exportCapcut`, old endpoint, `vb-legacy`, `action-button`, `legacy.css`는 모두 0건이다.
+- `검증`: Task 22/canonical editor focused `2 files / 67 passed`, full frontend `49 files / 557 passed`, canonical output/product-shell Playwright E2E `14 passed`와 snapshot manifest verifier, production build, bundle legacy-string inventory, Editor UI OSS provenance/UI-system verifier, external-runtime/network guard `2 files / 6 passed`, package-lock 기반 CycloneDX SBOM 생성(`--omit=optional`), `git diff --check` 통과. canonical review/preflight fast-path는 각각 실제 test를 선택해 `2 passed`, `5 passed`, review helper `2 passed`였다. 독립 spec/quality/gap/reverse 재검토의 Critical/Important/Moderate는 0이다. 전체 Python regression은 실행하지 않았다.
+- BGM/SFX library preview/materialize/apply와 typed Inspector edit/clear 검증은 canonical EditorAssetBrowser/EditorWorkbench/command-port 테스트로 유지된다. 실제 사용자 샘플의 구간별 exact AAC 역방향 증거는 §295/§297을 따르며 사람 청취 품질 판단은 별도다.
+- `다음 goal`: Task 22E six-gate independent release audit와 22F full release gate를 현재 canonical baseline에서 실행한다. 실제 CapCut Desktop 실증과 Task 9 사람/환경 acceptance는 별도다.
+- 보호된 `?? .tmp-final-fence-debug/`, `?? .tmp-real-video-dogfood/`, `?? apps/web/.tmp-real-video-dogfood/`와 사용자 원본 샘플은 stage/remove/delete하지 않았다.
+- 공식 누적은 사용자 지시대로 **9/22 (40.9%)**, 잔여 **59.1%**를 유지한다.
+- handoff: `docs/handoffs/2026-07-24-videobox-task22d-legacy-owner-removal-closeout.ko.md`.
 
 ## 298. 2026-07-24 Task 22C3 canonical output ownership closeout
 

@@ -1,5 +1,7 @@
 import { useState } from "react";
 
+import { Button } from "../../../components/ui/button";
+import { Input } from "../../../components/ui/input";
 import { filterEditorAssets, type EditorAssetCard, type EditorAssetKind } from "./editorAssetProjection";
 
 type EditorAssetTarget = Readonly<{
@@ -38,10 +40,10 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
     <div className="vb-editor-assets__controls">
       <label className="vb-editor-assets__search-label">
         <span>자산 검색</span>
-        <input className="vb-editor-assets__search" type="search" aria-label="자산 검색" value={query} onChange={(event) => setQuery(event.target.value)} />
+        <Input className="vb-editor-assets__search" type="search" aria-label="자산 검색" value={query} onChange={(event) => setQuery(event.target.value)} />
       </label>
       <div className="vb-editor-assets__filters" role="group" aria-label="자산 유형 필터">
-        {filters.map((filter) => <button key={filter.type} className="vb-editor-assets__filter" type="button" aria-pressed={type === filter.type} onClick={() => setType(filter.type)}>{filter.label} 필터</button>)}
+        {filters.map((filter) => <Button key={filter.type} className="vb-editor-assets__filter" type="button" aria-pressed={type === filter.type} onClick={() => setType(filter.type)}>{filter.label} 필터</Button>)}
       </div>
     </div>
     <p className="vb-editor-assets__target" role="status">{targetLabel(target)}</p>
@@ -57,8 +59,8 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
           <p className="vb-editor-assets__reason">직접 선택한 자산</p>
           <p className="vb-editor-assets__card-target">{targetLabel(target)}</p>
           <div className="vb-editor-assets__actions">
-            <button type="button" aria-label={`${card.title} 원본 미리보기`} disabled={!card.previewUrl} onClick={() => onPreview(card)}>원본 미리보기</button>
-            <button type="button" aria-label={`${card.title} 적용`} disabled={applyDisabled} onClick={() => target && onApply(card, target.segmentId)}>적용</button>
+            <Button type="button" aria-label={`${card.title} 원본 미리보기`} disabled={!card.previewUrl} onClick={() => onPreview(card)}>원본 미리보기</Button>
+            <Button type="button" aria-label={`${card.title} 적용`} disabled={applyDisabled} onClick={() => target && onApply(card, target.segmentId)}>적용</Button>
           </div>
         </article>;
       })}

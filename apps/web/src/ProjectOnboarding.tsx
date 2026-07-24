@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 
 import { api, type Project } from "./api";
+import { Button } from "./components/ui/button";
+import { Input } from "./components/ui/input";
 
 type ProjectOnboardingProps = {
   onProjectCreated: (project: Project) => void | Promise<void>;
@@ -96,54 +98,54 @@ export function ProjectOnboarding({ onProjectCreated, onIngestComplete, existing
   }
 
   return (
-    <section className="panel" aria-labelledby="project-onboarding-heading">
-      <p className="section-kicker">새 작업</p>
+    <section className="grid gap-4 rounded-xl border bg-card p-6 text-card-foreground shadow-sm" aria-labelledby="project-onboarding-heading">
+      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">새 작업</p>
       <h2 id="project-onboarding-heading">영상 만들기 시작</h2>
-      <p className="meta-copy">이 컴퓨터에 저장한 나레이션과 대본 파일의 위치를 입력해 주세요.</p>
-      <form onSubmit={(event) => void handleSubmit(event)}>
-        <label>
+      <p className="text-sm text-muted-foreground">이 컴퓨터에 저장한 나레이션과 대본 파일의 위치를 입력해 주세요.</p>
+      <form className="grid gap-4" onSubmit={(event) => void handleSubmit(event)}>
+        <label className="grid gap-2 text-sm">
           프로젝트 이름
-          <input value={name} onChange={(event) => setName(event.target.value)} />
+          <Input value={name} onChange={(event) => setName(event.target.value)} />
         </label>
-        <label>
+        <label className="grid gap-2 text-sm">
           나레이션 로컬 경로
-          <input value={narrationPath} onChange={(event) => setNarrationPath(event.target.value)} />
+          <Input value={narrationPath} onChange={(event) => setNarrationPath(event.target.value)} />
         </label>
-        <label>
+        <label className="grid gap-2 text-sm">
           스크립트 로컬 경로
-          <input value={scriptPath} onChange={(event) => setScriptPath(event.target.value)} />
+          <Input value={scriptPath} onChange={(event) => setScriptPath(event.target.value)} />
         </label>
-        <button className="action-button primary" disabled={isSubmitting} type="submit">
+        <Button disabled={isSubmitting} type="submit">
           {isSubmitting ? "프로젝트 준비 중" : project ? "소스 등록" : "프로젝트 만들고 소스 등록"}
-        </button>
+        </Button>
       </form>
       {narrationStatus === "succeeded" ? <p>나레이션 등록 완료</p> : null}
       {narrationStatus === "failed" && project ? (
-        <div className="error-banner" role="alert">
+        <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive" role="alert">
           <p>{narrationError ?? "나레이션을 등록하지 못했습니다."}</p>
-          <button className="action-button subtle" onClick={() => void registerNarration(project.project_id).then(async (ok) => {
+          <Button variant="outline" onClick={() => void registerNarration(project.project_id).then(async (ok) => {
             if (ok && scriptStatus === "succeeded") await onProjectCreated(project);
           }).catch(() => setCreationError("프로젝트를 시작하지 못했습니다."))} type="button">
             나레이션 다시 등록
-          </button>
+          </Button>
         </div>
       ) : null}
       {scriptStatus === "succeeded" ? <p>스크립트 등록 완료</p> : null}
       {scriptStatus === "failed" && project ? (
-        <div className="error-banner" role="alert">
+        <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive" role="alert">
           <p>{scriptError ?? "스크립트를 등록하지 못했습니다."}</p>
-          <button className="action-button subtle" onClick={() => void registerScript(project.project_id).then(async (ok) => {
+          <Button variant="outline" onClick={() => void registerScript(project.project_id).then(async (ok) => {
             if (ok && narrationStatus === "succeeded") await onProjectCreated(project);
           }).catch(() => setCreationError("프로젝트를 시작하지 못했습니다."))} type="button">
             스크립트 다시 등록
-          </button>
+          </Button>
         </div>
       ) : null}
-      {creationError ? <p className="error-banner" role="alert">{creationError}</p> : null}
+      {creationError ? <p className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive" role="alert">{creationError}</p> : null}
       {creationError && project && narrationStatus === "succeeded" && scriptStatus === "succeeded" ? (
-        <button className="action-button subtle" type="button" onClick={() => void Promise.resolve(onProjectCreated(project)).catch(() => setCreationError("프로젝트를 시작하지 못했습니다."))}>
+        <Button variant="outline" type="button" onClick={() => void Promise.resolve(onProjectCreated(project)).catch(() => setCreationError("프로젝트를 시작하지 못했습니다."))}>
           계속하기
-        </button>
+        </Button>
       ) : null}
     </section>
   );

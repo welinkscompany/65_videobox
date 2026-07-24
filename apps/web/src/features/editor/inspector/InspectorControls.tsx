@@ -1,6 +1,10 @@
 import { useEffect, useState } from "react";
 
 import type { CaptionStyleScope } from "../../../api";
+import { Button } from "../../../components/ui/button";
+import { Input } from "../../../components/ui/input";
+import { NativeSelect } from "../../../components/ui/native-select";
+import { Textarea } from "../../../components/ui/textarea";
 import type { EditorCaptionStyle, EditorControls } from "../editorViewModel";
 import type { InspectorTarget } from "./inspectorRegistry";
 
@@ -161,7 +165,7 @@ export function InspectorControls({
         <>
           <p>{`${selectedSegment.startSec.toFixed(2)}–${selectedSegment.endSec.toFixed(2)}초 구간`}</p>
           <div>
-            <button
+            <Button
               disabled={disabled || selectedSegment.endSec <= selectedSegment.startSec}
               onClick={() => emit({
                 kind: "split-narration",
@@ -171,8 +175,8 @@ export function InspectorControls({
               type="button"
             >
               구간 중간에서 나누기
-            </button>
-            <button
+            </Button>
+            <Button
               disabled={disabled || !selectedSegment.nextSegmentId}
               onClick={() => {
                 if (selectedSegment.nextSegmentId) emit({
@@ -184,18 +188,18 @@ export function InspectorControls({
               type="button"
             >
               다음 구간과 합치기
-            </button>
+            </Button>
           </div>
           <label>
             선택 구간 처리
-            <select disabled={disabled} onChange={(event) => setCutAction(asCutAction(event.target.value))} value={cutAction}>
+            <NativeSelect aria-label="선택 구간 처리" disabled={disabled} onChange={(event) => setCutAction(asCutAction(event.target.value))} value={cutAction}>
               <option value="keep">유지</option>
               <option value="remove">삭제</option>
-            </select>
+            </NativeSelect>
           </label>
-          <button disabled={disabled} onClick={() => emit({ kind: "set-cut-action", segmentId: selectedSegment.segmentId, cutAction })} type="button">
+          <Button disabled={disabled} onClick={() => emit({ kind: "set-cut-action", segmentId: selectedSegment.segmentId, cutAction })} type="button">
             컷 저장
-          </button>
+          </Button>
         </>
       ) : <p>먼저 편집할 구간을 선택해 주세요.</p>}
 
@@ -207,13 +211,13 @@ export function InspectorControls({
             <>
               <label>
                 {`${target.label} 페이드 인`}
-                <input disabled={disabled} min="0" onChange={(event) => setFadeInSec(numberValue(event.target.value, fadeInSec))} step="0.05" type="number" value={fadeInSec} />
+                <Input disabled={disabled} min="0" onChange={(event) => setFadeInSec(numberValue(event.target.value, fadeInSec))} step="0.05" type="number" value={fadeInSec} />
               </label>
               <label>
                 {`${target.label} 페이드 아웃`}
-                <input disabled={disabled} min="0" onChange={(event) => setFadeOutSec(numberValue(event.target.value, fadeOutSec))} step="0.05" type="number" value={fadeOutSec} />
+                <Input disabled={disabled} min="0" onChange={(event) => setFadeOutSec(numberValue(event.target.value, fadeOutSec))} step="0.05" type="number" value={fadeOutSec} />
               </label>
-              <button
+              <Button
                 disabled={disabled}
                 onClick={() => {
                   if (target.mediaKind !== "broll") emit({
@@ -227,37 +231,37 @@ export function InspectorControls({
                 type="button"
               >
                 {`${target.label} 설정 저장`}
-              </button>
+              </Button>
             </>
           ) : null}
-          <button disabled={disabled} onClick={() => emit({ kind: "clear-media", mediaKind: target.mediaKind, segmentId: target.segmentId })} type="button">
+          <Button disabled={disabled} onClick={() => emit({ kind: "clear-media", mediaKind: target.mediaKind, segmentId: target.segmentId })} type="button">
             {`${target.label} 지우기`}
-          </button>
+          </Button>
         </fieldset>
       ) : null}
 
       {target?.kind === "caption" ? (
         <fieldset>
           <legend>자막 스타일</legend>
-          <label>글꼴<input disabled={disabled} onChange={(event) => setCaptionStyle((current) => ({ ...current, fontFamily: event.target.value }))} value={captionStyle.fontFamily} /></label>
-          <label>글자 크기<input disabled={disabled} min="1" onChange={(event) => setCaptionStyle((current) => ({ ...current, fontSizePx: numberValue(event.target.value, current.fontSizePx) }))} type="number" value={captionStyle.fontSizePx} /></label>
-          <label>글자 색<input disabled={disabled} onChange={(event) => setCaptionStyle((current) => ({ ...current, textColor: event.target.value }))} value={captionStyle.textColor} /></label>
-          <label>외곽선 색<input disabled={disabled} onChange={(event) => setCaptionStyle((current) => ({ ...current, outlineColor: event.target.value }))} value={captionStyle.outlineColor} /></label>
-          <label>외곽선 두께<input disabled={disabled} min="0" onChange={(event) => setCaptionStyle((current) => ({ ...current, outlineWidthPx: numberValue(event.target.value, current.outlineWidthPx) }))} type="number" value={captionStyle.outlineWidthPx} /></label>
-          <label>배경 색<input disabled={disabled} onChange={(event) => setCaptionStyle((current) => ({ ...current, backgroundColor: event.target.value }))} value={captionStyle.backgroundColor} /></label>
-          <label>가로 위치<input disabled={disabled} max="100" min="0" onChange={(event) => setCaptionStyle((current) => ({ ...current, positionXPercent: numberValue(event.target.value, current.positionXPercent) }))} type="number" value={captionStyle.positionXPercent} /></label>
-          <label>세로 위치<input disabled={disabled} max="100" min="0" onChange={(event) => setCaptionStyle((current) => ({ ...current, positionYPercent: numberValue(event.target.value, current.positionYPercent) }))} type="number" value={captionStyle.positionYPercent} /></label>
+          <label>글꼴<Input disabled={disabled} onChange={(event) => setCaptionStyle((current) => ({ ...current, fontFamily: event.target.value }))} value={captionStyle.fontFamily} /></label>
+          <label>글자 크기<Input disabled={disabled} min="1" onChange={(event) => setCaptionStyle((current) => ({ ...current, fontSizePx: numberValue(event.target.value, current.fontSizePx) }))} type="number" value={captionStyle.fontSizePx} /></label>
+          <label>글자 색<Input disabled={disabled} onChange={(event) => setCaptionStyle((current) => ({ ...current, textColor: event.target.value }))} value={captionStyle.textColor} /></label>
+          <label>외곽선 색<Input disabled={disabled} onChange={(event) => setCaptionStyle((current) => ({ ...current, outlineColor: event.target.value }))} value={captionStyle.outlineColor} /></label>
+          <label>외곽선 두께<Input disabled={disabled} min="0" onChange={(event) => setCaptionStyle((current) => ({ ...current, outlineWidthPx: numberValue(event.target.value, current.outlineWidthPx) }))} type="number" value={captionStyle.outlineWidthPx} /></label>
+          <label>배경 색<Input disabled={disabled} onChange={(event) => setCaptionStyle((current) => ({ ...current, backgroundColor: event.target.value }))} value={captionStyle.backgroundColor} /></label>
+          <label>가로 위치<Input disabled={disabled} max="100" min="0" onChange={(event) => setCaptionStyle((current) => ({ ...current, positionXPercent: numberValue(event.target.value, current.positionXPercent) }))} type="number" value={captionStyle.positionXPercent} /></label>
+          <label>세로 위치<Input disabled={disabled} max="100" min="0" onChange={(event) => setCaptionStyle((current) => ({ ...current, positionYPercent: numberValue(event.target.value, current.positionYPercent) }))} type="number" value={captionStyle.positionYPercent} /></label>
           <label>
             가로 정렬
-            <select disabled={disabled} onChange={(event) => setCaptionStyle((current) => ({ ...current, horizontalAlign: event.target.value as EditorCaptionStyle["horizontalAlign"] }))} value={captionStyle.horizontalAlign}>
+            <NativeSelect aria-label="가로 정렬" disabled={disabled} onChange={(event) => setCaptionStyle((current) => ({ ...current, horizontalAlign: event.target.value as EditorCaptionStyle["horizontalAlign"] }))} value={captionStyle.horizontalAlign}>
               <option value="left">왼쪽</option><option value="center">가운데</option><option value="right">오른쪽</option>
-            </select>
+            </NativeSelect>
           </label>
-          <label>안전 영역 사용<input checked={captionStyle.safeAreaEnabled} disabled={disabled} onChange={(event) => setCaptionStyle((current) => ({ ...current, safeAreaEnabled: event.target.checked }))} type="checkbox" /></label>
-          <label>그림자 흐림<input disabled={disabled} min="0" onChange={(event) => setCaptionStyle((current) => ({ ...current, shadowBlurPx: numberValue(event.target.value, current.shadowBlurPx) }))} type="number" value={captionStyle.shadowBlurPx} /></label>
-          <button disabled={disabled} onClick={() => emit({ kind: "save-caption-style", segmentIds: [target.segmentId], scope: "current_caption", style: captionStyle })} type="button">
+          <label>안전 영역 사용<Input checked={captionStyle.safeAreaEnabled} disabled={disabled} onChange={(event) => setCaptionStyle((current) => ({ ...current, safeAreaEnabled: event.target.checked }))} type="checkbox" /></label>
+          <label>그림자 흐림<Input disabled={disabled} min="0" onChange={(event) => setCaptionStyle((current) => ({ ...current, shadowBlurPx: numberValue(event.target.value, current.shadowBlurPx) }))} type="number" value={captionStyle.shadowBlurPx} /></label>
+          <Button disabled={disabled} onClick={() => emit({ kind: "save-caption-style", segmentIds: [target.segmentId], scope: "current_caption", style: captionStyle })} type="button">
             자막 스타일 저장
-          </button>
+          </Button>
         </fieldset>
       ) : null}
 
@@ -266,18 +270,18 @@ export function InspectorControls({
           <legend>{target.label}</legend>
           {target.overlayKind === "explanation-card" ? (
             <>
-              <label>제목<input disabled={disabled} onChange={(event) => setOverlayTitle(event.target.value)} value={overlayTitle} /></label>
-              <label>본문<textarea disabled={disabled} onChange={(event) => setOverlayBody(event.target.value)} value={overlayBody} /></label>
+              <label>제목<Input disabled={disabled} onChange={(event) => setOverlayTitle(event.target.value)} value={overlayTitle} /></label>
+              <label>본문<Textarea disabled={disabled} onChange={(event) => setOverlayBody(event.target.value)} value={overlayBody} /></label>
             </>
           ) : null}
           {target.overlayKind === "table" ? (
             <>
-              <label>열 이름<input disabled={disabled} onChange={(event) => setTableColumns(event.target.value)} value={tableColumns} /></label>
-              <label>표 행<textarea disabled={disabled} onChange={(event) => setTableRows(event.target.value)} value={tableRows} /></label>
+              <label>열 이름<Input disabled={disabled} onChange={(event) => setTableColumns(event.target.value)} value={tableColumns} /></label>
+              <label>표 행<Textarea disabled={disabled} onChange={(event) => setTableRows(event.target.value)} value={tableRows} /></label>
             </>
           ) : null}
-          <label>설명<textarea disabled={disabled} onChange={(event) => setOverlayText(event.target.value)} value={overlayText} /></label>
-          <button
+          <label>설명<Textarea disabled={disabled} onChange={(event) => setOverlayText(event.target.value)} value={overlayText} /></label>
+          <Button
             disabled={disabled || (target.overlayKind === "image" && !target.value.assetId)}
             onClick={() => {
               if (target.overlayKind === "explanation-card") emit({ kind: "save-overlay", overlayKind: target.overlayKind, segmentId: target.segmentId, title: overlayTitle, body: overlayBody, text: overlayText });
@@ -287,10 +291,10 @@ export function InspectorControls({
             type="button"
           >
             {`${target.label} 저장`}
-          </button>
-          <button disabled={disabled} onClick={() => emit({ kind: "clear-overlay", overlayKind: target.overlayKind, segmentId: target.segmentId })} type="button">
+          </Button>
+          <Button disabled={disabled} onClick={() => emit({ kind: "clear-overlay", overlayKind: target.overlayKind, segmentId: target.segmentId })} type="button">
             {`${target.label} 지우기`}
-          </button>
+          </Button>
         </fieldset>
       ) : null}
 
@@ -298,7 +302,7 @@ export function InspectorControls({
         <fieldset>
           <legend>부분 재생성</legend>
           {partialRegeneration.fields.map((field) => <label key={field}>
-            <input
+            <Input
               checked={selectedPartialFields.includes(field)}
               disabled={disabled}
               onChange={(event) => setSelectedPartialFields((current) => event.target.checked
@@ -308,9 +312,9 @@ export function InspectorControls({
             />
             {partialFieldLabels[field] ?? field}
           </label>)}
-          <button disabled={disabled || selectedPartialFields.length === 0} onClick={() => partialAction("partial-preflight")} type="button">재생성 범위 미리보기</button>
-          <button disabled={disabled || !partialRegeneration.canRun || !preparedFieldsMatch || !preparedSegmentMatches} onClick={() => partialAction("partial-run")} type="button">부분 재생성 실행</button>
-          <button disabled={disabled || !partialRegeneration.canResume} onClick={() => partialAction("partial-resume")} type="button">이전 결과 열기</button>
+          <Button disabled={disabled || selectedPartialFields.length === 0} onClick={() => partialAction("partial-preflight")} type="button">재생성 범위 미리보기</Button>
+          <Button disabled={disabled || !partialRegeneration.canRun || !preparedFieldsMatch || !preparedSegmentMatches} onClick={() => partialAction("partial-run")} type="button">부분 재생성 실행</Button>
+          <Button disabled={disabled || !partialRegeneration.canResume} onClick={() => partialAction("partial-resume")} type="button">이전 결과 열기</Button>
         </fieldset>
       ) : null}
     </section>

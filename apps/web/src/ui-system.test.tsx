@@ -12,22 +12,10 @@ describe("UI system", () => {
     expect(document.documentElement.style.getPropertyValue("--vb-canvas")).toBe("")
   })
 
-  it("keeps the legacy dashboard namespace separate from a new primitive", () => {
-    const style = document.createElement("style")
-    style.textContent = readFileSync(resolve(process.cwd(), "src/styles/legacy.css"), "utf8").split("@scope")[0]
-    document.head.append(style)
-    render(
-      <>
-        <div className="vb-legacy"><button className="action-button primary">기존 작업</button></div>
-        <Button>새 작업</Button>
-      </>,
-    )
-    const legacy = screen.getByRole("button", { name: "기존 작업" })
-    const primitive = screen.getByRole("button", { name: "새 작업" })
-    expect(legacy.className).toContain("action-button")
-    expect(primitive.className).not.toContain("action-button")
-    expect(getComputedStyle(legacy).fontFamily).toContain("Space Grotesk")
-    expect(getComputedStyle(primitive).fontFamily).not.toContain("Space Grotesk")
-    style.remove()
+  it("composes only canonical shell and editor styles", () => {
+    const styles = readFileSync(resolve(process.cwd(), "src/styles/index.css"), "utf8")
+    expect(styles).toContain("./product-shell.css")
+    expect(styles).toContain("./editor-workbench.css")
+    expect(styles).not.toContain("legacy.css")
   })
 })
