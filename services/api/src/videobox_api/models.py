@@ -689,8 +689,17 @@ class EditorMediaControlsResponse(BaseModel):
     volume: float | None = None
     crop: str | None = None
     speed: float | None = None
+    gain_db: float | None = None
     fade_in_sec: float | None = None
     fade_out_sec: float | None = None
+    ducking: bool | None = None
+    fit: Literal["fit", "crop"] | None = None
+    loop: bool | None = None
+    pad: bool | None = None
+    trim_start_sec: float | None = Field(default=None, ge=0)
+    preserve_source_audio: bool | None = None
+    in_sec: float | None = Field(default=None, ge=0)
+    out_sec: float | None = Field(default=None, gt=0)
     model_config = {"extra": "forbid"}
 
 

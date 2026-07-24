@@ -152,11 +152,50 @@ def materialize_editing_session_timeline(
         for segment in editing_session.get("segments", [])
         if isinstance(segment, dict) and str(segment.get("segment_id") or "").strip()
     }
+    source_tracks = [
+        track for track in timeline.get("tracks", [])
+        if isinstance(track, dict)
+    ]
+    narration_clips = [
+        clip
+        for track in source_tracks
+        if str(track.get("track_type") or "").strip().lower() == "narration"
+        for clip in track.get("clips", [])
+        if isinstance(clip, dict)
+    ]
+    caption_clips = sorted(
+        [
+            clip
+            for track in source_tracks
+            if str(track.get("track_type") or "").strip().lower() == "caption"
+            for clip in track.get("clips", [])
+            if isinstance(clip, dict)
+            and str(clip.get("segment_id") or "").strip()
+            and _number(clip.get("end_sec")) > _number(clip.get("start_sec"))
+        ],
+        key=lambda clip: (_number(clip.get("start_sec")), _number(clip.get("end_sec"))),
+    )
+    global_narration_clip: dict[str, Any] | None = None
+    if len(narration_clips) == 1 and len(caption_clips) > 1:
+        narration = narration_clips[0]
+        narration_start = _number(narration.get("start_sec"))
+        narration_end = _number(narration.get("end_sec"))
+        if (
+            str(narration.get("segment_id") or "") == str(caption_clips[0].get("segment_id") or "")
+            and narration_start == _number(caption_clips[0].get("start_sec"))
+            and narration_end == _number(caption_clips[-1].get("end_sec"))
+            and all(
+                _number(left.get("end_sec")) == _number(right.get("start_sec"))
+                for left, right in zip(caption_clips, caption_clips[1:])
+            )
+        ):
+            # Atomic drafts intentionally retain one narration source across
+            # multiple visible caption segments. Its first segment_id is an
+            # anchor, not permission to trim the source to that caption.
+            global_narration_clip = narration
     source_durations: dict[str, float] = {}
     source_bounds: dict[str, tuple[float, float]] = {}
-    for track in timeline.get("tracks", []):
-        if not isinstance(track, dict):
-            continue
+    for track in source_tracks:
         for clip in track.get("clips", []) if isinstance(track.get("clips"), list) else []:
             if isinstance(clip, dict) and str(clip.get("segment_id") or ""):
                 source_id = str(clip["segment_id"])
@@ -179,16 +218,85 @@ def materialize_editing_session_timeline(
         for source_slice in _session_source_slices(editing_session=editing_session, segment=segment, source_durations=source_durations):
             source_targets.setdefault(str(source_slice["segment_id"]), []).append((segment, source_slice, placement))
             placement += float(source_slice["duration_sec"])
+
+    def caption_has_identity_projection(caption: dict[str, Any]) -> bool:
+        source_id = str(caption.get("segment_id") or "")
+        targets = source_targets.get(source_id, [])
+        if source_id in removed_source_ids or len(targets) != 1:
+            return False
+        segment, source_slice, placement = targets[0]
+        source_offset = float(source_slice["source_offset_sec"])
+        if source_slice.get("legacy_timeline_anchor"):
+            source_offset -= _number(caption.get("start_sec"))
+        return (
+            str(segment.get("segment_id") or "") == source_id
+            and float(placement) == _number(caption.get("start_sec"))
+            and source_offset == 0.0
+            and float(source_slice["duration_sec"])
+            == _number(caption.get("end_sec")) - _number(caption.get("start_sec"))
+        )
+
     tracks: dict[str, list[dict[str, Any]]] = {}
+    track_ids: dict[str, str] = {}
+    used_track_ids: set[str] = set()
     for track in timeline.get("tracks", []):
         if not isinstance(track, dict):
             continue
         track_type = str(track.get("track_type") or "").strip().lower()
         if track_type not in _SUPPORTED_TRACKS:
             continue
+        if track_type not in track_ids:
+            base_track_id = str(track.get("track_id") or "").strip() or f"track_{track_type}"
+            track_id = base_track_id
+            if track_id in used_track_ids:
+                track_id = f"{base_track_id}_{track_type}"
+                suffix = 2
+                while track_id in used_track_ids:
+                    track_id = f"{base_track_id}_{track_type}_{suffix}"
+                    suffix += 1
+            track_ids[track_type] = track_id
+            used_track_ids.add(track_id)
         clips: list[dict[str, Any]] = []
         for raw in track.get("clips", []) if isinstance(track.get("clips"), list) else []:
             if not isinstance(raw, dict):
+                continue
+            if track_type == "narration" and raw is global_narration_clip:
+                identity_projection = all(caption_has_identity_projection(caption) for caption in caption_clips)
+                if identity_projection:
+                    clips.append(deepcopy(raw))
+                    continue
+                narration_start = _number(raw.get("start_sec"))
+                base_source_in = _number(raw.get("source_in_sec", raw.get("in_sec", 0.0)))
+                source_limit = _number(
+                    raw.get(
+                        "source_out_sec",
+                        raw.get("out_sec", base_source_in + _number(raw.get("end_sec")) - narration_start),
+                    )
+                )
+                base_clip_id = str(raw.get("clip_id") or "narration")
+                for caption in caption_clips:
+                    source_id = str(caption.get("segment_id") or "")
+                    caption_source_in = base_source_in + _number(caption.get("start_sec")) - narration_start
+                    caption_duration = _number(caption.get("end_sec")) - _number(caption.get("start_sec"))
+                    for target_index, (segment, source_slice, placement) in enumerate(source_targets.get(source_id, [])):
+                        source_offset = float(source_slice["source_offset_sec"])
+                        if source_slice.get("legacy_timeline_anchor"):
+                            source_offset -= _number(caption.get("start_sec"))
+                        duration = min(
+                            float(source_slice["duration_sec"]),
+                            caption_duration - source_offset,
+                            source_limit - caption_source_in - source_offset,
+                        )
+                        if duration <= 0:
+                            continue
+                        clip = deepcopy(raw)
+                        target_segment_id = str(segment.get("segment_id") or source_id)
+                        clip["clip_id"] = f"{base_clip_id}__{source_id}__{target_segment_id}__{target_index}"
+                        clip["segment_id"] = target_segment_id
+                        clip["start_sec"], clip["end_sec"] = placement, placement + duration
+                        clip["source_in_sec"] = caption_source_in + source_offset
+                        clip["source_out_sec"] = clip["source_in_sec"] + duration
+                        clips.append(clip)
                 continue
             source_id = str(raw.get("segment_id") or "")
             targets = source_targets.get(source_id)
@@ -198,8 +306,33 @@ def materialize_editing_session_timeline(
                 clips.append(deepcopy(raw))
                 continue
             original_start, original_end = _number(raw.get("start_sec")), _number(raw.get("end_sec"))
-            original_source_in = _number(raw.get("source_in_sec", raw.get("in_sec", 0.0)))
-            original_source_out = _number(raw.get("source_out_sec", raw.get("out_sec", original_source_in + (original_end - original_start))))
+            raw_controls = raw.get("media_controls") if isinstance(raw.get("media_controls"), dict) else {}
+            base_source_in = _number(raw.get("source_in_sec", raw.get("in_sec", 0.0)))
+            has_explicit_source_out = "source_out_sec" in raw or "out_sec" in raw
+            base_source_out = _number(
+                raw.get(
+                    "source_out_sec",
+                    raw.get("out_sec", base_source_in + (original_end - original_start)),
+                )
+            )
+            bake_source_controls = track_type == "broll" and any(
+                key in raw_controls for key in ("trim_start_sec", "in_sec", "out_sec")
+            )
+            if bake_source_controls:
+                trim_start = _number(raw_controls.get("trim_start_sec"))
+                original_source_in = base_source_in + trim_start + _number(raw_controls.get("in_sec"))
+                natural_source_out = (
+                    base_source_out + trim_start
+                    if has_explicit_source_out
+                    else original_source_in + (original_end - original_start)
+                )
+                original_source_out = min(
+                    natural_source_out,
+                    _number(raw_controls.get("out_sec"), natural_source_out),
+                )
+            else:
+                original_source_in = base_source_in
+                original_source_out = base_source_out
             for segment, source_slice, placement in targets:
                 duration = float(source_slice["duration_sec"])
                 if duration <= 0:
@@ -213,8 +346,15 @@ def materialize_editing_session_timeline(
                 for interval_start, interval_end in _uncovered_intervals(start=placement, end=placement + duration, covered=covered):
                     clip = deepcopy(raw)
                     source_piece_start = source_in + interval_start - placement
+                    clip["segment_id"] = str(segment.get("segment_id") or source_id)
                     clip["start_sec"], clip["end_sec"] = interval_start, interval_end
                     clip["source_in_sec"], clip["source_out_sec"] = source_piece_start, min(original_source_out, source_piece_start + interval_end - interval_start)
+                    if bake_source_controls:
+                        controls = deepcopy(raw_controls)
+                        controls.pop("trim_start_sec", None)
+                        controls.pop("in_sec", None)
+                        controls.pop("out_sec", None)
+                        clip["media_controls"] = controls
                     clips.append(clip)
         if clips:
             tracks[track_type] = clips
@@ -303,7 +443,56 @@ def materialize_editing_session_timeline(
                     tracks.setdefault("overlay", []).append(clip)
                 else:
                     export_overlays.append({**payload, "clip_id": str(payload.get("clip_id") or f"session-overlay-{segment_id}-{window_index}-{ordinal}"), "segment_id": segment_id, "start_sec": window_start, "end_sec": window_end})
-    materialized["tracks"] = [{"track_type": kind, "clips": clips} for kind, clips in tracks.items() if clips]
+    materialized_gaps: list[dict[str, Any]] = []
+    for raw_gap in timeline.get("gap_slots", []):
+        if not isinstance(raw_gap, dict):
+            continue
+        source_id = str(raw_gap.get("segment_id") or "")
+        targets = source_targets.get(source_id)
+        if targets is None:
+            if source_id not in removed_source_ids:
+                materialized_gaps.append(deepcopy(raw_gap))
+            continue
+        for segment, source_slice, placement in targets:
+            duration = float(source_slice["duration_sec"])
+            if duration <= 0:
+                continue
+            gap = deepcopy(raw_gap)
+            gap["segment_id"] = str(segment.get("segment_id") or source_id)
+            gap["target_range"] = {
+                "start_sec": placement,
+                "end_sec": placement + duration,
+            }
+            if "start_sec" in gap:
+                gap["start_sec"] = placement
+            if "end_sec" in gap:
+                gap["end_sec"] = placement + duration
+            materialized_gaps.append(gap)
+
+    def materialized_track_id(kind: str) -> str:
+        existing = track_ids.get(kind)
+        if existing is not None:
+            return existing
+        base = f"track_{kind}"
+        candidate = base
+        suffix = 2
+        while candidate in used_track_ids:
+            candidate = f"{base}_{suffix}"
+            suffix += 1
+        track_ids[kind] = candidate
+        used_track_ids.add(candidate)
+        return candidate
+
+    materialized["tracks"] = [
+        {
+            "track_id": materialized_track_id(kind),
+            "track_type": kind,
+            "clips": clips,
+        }
+        for kind, clips in tracks.items()
+        if clips
+    ]
+    materialized["gap_slots"] = materialized_gaps
     materialized["export_overlays"] = export_overlays
     materialized["session_captions"] = session_captions
     from videobox_core_engine.timeline_placements import apply_timeline_placement_overrides

@@ -35,13 +35,30 @@ def test_director_reload_get_is_behavioral_read_only_and_never_calls_a_provider(
     app = create_app(projects_root=tmp_path / "projects", local_only_runtime_service_factory=lambda _: ForbiddenRuntime())
     client = TestClient(app)
     project_id = client.post("/api/projects", json={"name": "reload"}).json()["project_id"]
-    session = app.state.store.save_editing_session(project_id=project_id, timeline_id="timeline", session_payload={"segments": [], "history": []})
+    session = app.state.store.save_editing_session(
+        project_id=project_id,
+        timeline_id="timeline",
+        session_payload={
+            "segments": [{
+                "segment_id": "segment-1",
+                "start_sec": 0,
+                "end_sec": 1,
+                "broll_override": {"asset_id": "asset-1"},
+            }],
+            "history": [],
+        },
+    )
     before = deepcopy(app.state.store.get_editing_session(project_id=project_id, session_id=session["session_id"]))
 
     response = client.get(f"/api/projects/{project_id}/director/sessions/{session['session_id']}/reload")
 
     assert response.status_code == 200
     assert response.json()["conversation"] is None and response.json()["proposal"] is None
+    assert response.json()["references"] == [{
+        "reference_code": "B-01",
+        "immutable_id": {"segment_id": "segment-1", "track_type": "broll"},
+        "source": "timeline",
+    }]
     assert app.state.store.get_editing_session(project_id=project_id, session_id=session["session_id"]) == before
     assert ForbiddenRuntime.calls == 0
 

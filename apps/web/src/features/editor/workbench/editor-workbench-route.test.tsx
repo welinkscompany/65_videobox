@@ -674,6 +674,44 @@ describe("EditorWorkbenchRoute", () => {
     await expectEditorRevision(10);
   });
 
+  it("keeps polling while an exact preview remains pending across more than one refresh", async () => {
+    const pending = {
+      ...narrationManifest(1),
+      exact_preview: {
+        status: "pending" as const,
+        url: null,
+        source_session_id: "session-a",
+        source_session_revision: 1,
+        generation_id: "generation-1",
+        artifact_revision: 1,
+        timeline_start_sec: 0,
+        timeline_end_sec: 5,
+      },
+    };
+    const succeeded = {
+      ...pending,
+      exact_preview: {
+        ...pending.exact_preview,
+        status: "succeeded" as const,
+        url: "/api/projects/project-a/exact-previews/generation-1/content",
+      },
+    };
+    const load = vi.mocked(api.getEditorPlaybackManifest);
+    load.mockReset();
+    load.mockResolvedValueOnce(pending as never);
+    load.mockResolvedValueOnce(pending as never);
+    load.mockResolvedValueOnce(succeeded as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+
+    expect(await screen.findByText("미리보기를 준비하고 있어요.")).toBeVisible();
+    expect(await screen.findByLabelText("편집본 미리보기", {}, { timeout: 5_000 })).toHaveAttribute(
+      "src",
+      "/api/projects/project-a/exact-previews/generation-1/content",
+    );
+    expect(load).toHaveBeenCalledTimes(3);
+  });
+
   it("adapts the recovered Eugene conversation into the dock, keeps manual edit available when blocked, and auditions a candidate through the sole PreviewStage", async () => {
     vi.spyOn(api, "getEditorPlaybackManifest").mockImplementation((projectId, sessionId) => Promise.resolve(manifest(projectId, sessionId)) as never);
     vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({

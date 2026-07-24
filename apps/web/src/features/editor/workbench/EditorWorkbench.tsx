@@ -86,10 +86,13 @@ export function EditorWorkbench({
   useEffect(() => { window.localStorage.setItem(eugeneDraftStorageKey, eugeneDraft); }, [eugeneDraft]);
   useEffect(() => { if (ui.activeDrawer) drawerRef.current?.focus(); }, [ui.activeDrawer]);
   useEffect(() => {
-    const segmentIds = new Set(view.tracks.filter((track) => track.role === "narration").flatMap((track) => track.clips.map((clip) => clip.segmentId)));
+    const segmentIds = new Set([
+      ...view.tracks.filter((track) => track.role === "narration").flatMap((track) => track.clips.map((clip) => clip.segmentId)),
+      ...view.captions.map((caption) => caption.segmentId),
+    ]);
     setSelectedSegmentId((current) => current && segmentIds.has(current) ? current : segmentIds.has(view.local.selectedSegmentId ?? "") ? view.local.selectedSegmentId : null);
     setPlaybackSec((current) => clampPlaybackSeconds(current, view.output.durationSec));
-  }, [view.expectedRevision, view.local.selectedSegmentId, view.output.durationSec, view.projectId, view.sessionId, view.tracks]);
+  }, [view.captions, view.expectedRevision, view.local.selectedSegmentId, view.output.durationSec, view.projectId, view.sessionId, view.tracks]);
   useEffect(() => {
     const normalizedRequestedSegmentId = requestedSegmentId?.trim() || null;
     if (!normalizedRequestedSegmentId) {
@@ -101,7 +104,8 @@ export function EditorWorkbench({
     const requestedNarration = view.tracks
       .filter((track) => track.role === "narration")
       .flatMap((track) => track.clips)
-      .find((clip) => clip.segmentId === normalizedRequestedSegmentId);
+      .find((clip) => clip.segmentId === normalizedRequestedSegmentId)
+      ?? view.captions.find((caption) => caption.segmentId === normalizedRequestedSegmentId);
     if (!requestedNarration) {
       activeRequestedSegmentKey.current = null;
       return;
@@ -110,7 +114,7 @@ export function EditorWorkbench({
     setRequestedSegmentFocusEpoch((current) => current + 1);
     setSelectedSegmentId(requestedNarration.segmentId);
     setPlaybackSec(clampPlaybackSeconds(requestedNarration.startSec, view.output.durationSec));
-  }, [requestedSegmentId, view.output.durationSec, view.sessionId, view.tracks]);
+  }, [requestedSegmentId, view.captions, view.output.durationSec, view.sessionId, view.tracks]);
   useEffect(() => { const side = restoreFocusRef.current; if (!ui.activeDrawer && side) { restoreFocusRef.current = null; window.setTimeout(() => (side === "left" ? leftTriggerRef : rightTriggerRef).current?.focus(), 0); } }, [ui.activeDrawer]);
   const layout = resolveEditorWorkbenchLayout({ viewportWidth, availableWorkbenchWidth, persisted: ui });
   const openDrawer = (side: "left" | "right") => setUi((current) => ({ ...current, activeDrawer: side }));
@@ -121,7 +125,9 @@ export function EditorWorkbench({
     const nextSeconds = clampPlaybackSeconds(seconds, view.output.durationSec);
     setPlaybackSec(nextSeconds);
     const activeSegmentId = activeSegmentIdAt(
-      view.tracks.filter((track) => track.role === "narration").flatMap((track) => track.clips.map((clip) => ({ segmentId: clip.segmentId, startSec: clip.startSec, endSec: clip.endSec }))),
+      view.captions.length
+        ? view.captions
+        : view.tracks.filter((track) => track.role === "narration").flatMap((track) => track.clips.map((clip) => ({ segmentId: clip.segmentId, startSec: clip.startSec, endSec: clip.endSec }))),
       nextSeconds,
     );
     setSelectedSegmentId(activeSegmentId);
@@ -129,7 +135,9 @@ export function EditorWorkbench({
   const selectedNarration = selectedSegmentId === null ? null : view.tracks
     .filter((track) => track.role === "narration")
     .flatMap((track) => track.clips)
-    .find((clip) => clip.segmentId === selectedSegmentId) ?? null;
+    .find((clip) => clip.segmentId === selectedSegmentId)
+    ?? view.captions.find((caption) => caption.segmentId === selectedSegmentId)
+    ?? null;
   const assetTarget = selectedNarration === null ? null : { segmentId: selectedNarration.segmentId, startSec: selectedNarration.startSec, endSec: selectedNarration.endSec };
   const previewAssetCard = (card: EditorAssetCard) => {
     const mediaKind = card.previewKind ?? (card.kind === "broll" ? "video" : "audio");

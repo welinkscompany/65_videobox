@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 
 from videobox_api.main import create_app
 from videobox_core_engine.composition_plan import CompositionPlan, materialize_editing_session_timeline
+from videobox_core_engine.editor_playback_manifest import build_editor_playback_manifest
 from videobox_core_engine.ffmpeg_final_renderer import FfmpegFinalRenderer
 from videobox_core_engine.local_pipeline import LocalPipelineRunner
 from videobox_core_engine.exact_preview import ExactPreviewRequest
@@ -47,6 +48,491 @@ def test_current_session_materializes_overrides_cut_and_source_bounds_once() -> 
     broll = next(item for item in plan.items if item.track_type == "broll")
     assert (broll.source_in_sec, broll.source_out_sec) == (0.75, 1.75)
     assert "old-b" not in [clip["clip_id"] for track in materialized["tracks"] for clip in track["clips"]]
+
+
+def test_atomic_broll_source_window_is_promoted_once_before_composition() -> None:
+    timeline = {
+        "tracks": [{
+            "track_type": "broll",
+            "clips": [{
+                "clip_id": "atomic-broll",
+                "segment_id": "segment-1",
+                "asset_uri": "local://atomic-broll",
+                "start_sec": 0,
+                "end_sec": 5,
+                "media_controls": {
+                    "in_sec": 1,
+                    "out_sec": 6,
+                    "loop": False,
+                    "pad": False,
+                },
+            }],
+        }]
+    }
+    session = {
+        "segments": [{
+            "segment_id": "segment-1",
+            "start_sec": 0,
+            "end_sec": 5,
+            "source_offset_sec": 0,
+            "source_slices": [{
+                "segment_id": "segment-1",
+                "source_offset_sec": 0,
+                "duration_sec": 5,
+            }],
+            "cut_action": "keep",
+        }],
+    }
+
+    materialized = materialize_editing_session_timeline(
+        timeline=timeline,
+        editing_session=session,
+    )
+    clip = materialized["tracks"][0]["clips"][0]
+    plan = CompositionPlan.from_timeline(timeline=materialized)
+
+    assert (clip["source_in_sec"], clip["source_out_sec"]) == (1, 6)
+    assert "in_sec" not in clip["media_controls"]
+    assert "out_sec" not in clip["media_controls"]
+    assert (plan.items[0].source_in_sec, plan.items[0].source_out_sec) == (1.0, 6.0)
+
+
+def test_promoted_source_window_preserves_trim_plus_in_out_semantics() -> None:
+    timeline = {
+        "tracks": [{
+            "track_type": "broll",
+            "clips": [{
+                "clip_id": "trimmed-broll",
+                "segment_id": "segment-1",
+                "asset_uri": "local://trimmed-broll",
+                "start_sec": 0,
+                "end_sec": 2,
+                "media_controls": {
+                    "trim_start_sec": 0.25,
+                    "in_sec": 0.5,
+                    "out_sec": 1.75,
+                    "loop": False,
+                    "pad": True,
+                },
+            }],
+        }]
+    }
+    session = {
+        "segments": [{
+            "segment_id": "segment-1",
+            "start_sec": 0,
+            "end_sec": 2,
+            "source_slices": [{
+                "segment_id": "segment-1",
+                "source_offset_sec": 0,
+                "duration_sec": 2,
+            }],
+            "cut_action": "keep",
+        }],
+    }
+
+    plan = CompositionPlan.from_timeline(timeline=materialize_editing_session_timeline(
+        timeline=timeline,
+        editing_session=session,
+    ))
+
+    assert (plan.items[0].source_in_sec, plan.items[0].source_out_sec) == (0.75, 1.75)
+
+
+def test_atomic_single_narration_keeps_full_source_across_multiple_visible_captions() -> None:
+    timeline = {
+        "tracks": [
+            {
+                "track_id": "narration",
+                "track_type": "narration",
+                "clips": [{
+                    "clip_id": "full-narration",
+                    "segment_id": "segment-1",
+                    "asset_uri": "local://full-narration",
+                    "start_sec": 0,
+                    "end_sec": 20,
+                }],
+            },
+            {
+                "track_id": "captions",
+                "track_type": "caption",
+                "clips": [
+                    {
+                        "clip_id": f"caption-{index}",
+                        "segment_id": f"segment-{index}",
+                        "start_sec": (index - 1) * 5,
+                        "end_sec": index * 5,
+                        "text": f"장면 {index}",
+                    }
+                    for index in range(1, 5)
+                ],
+            },
+        ],
+    }
+    session = {
+        "segments": [
+            {
+                "segment_id": f"segment-{index}",
+                "start_sec": (index - 1) * 5,
+                "end_sec": index * 5,
+                "caption_text": f"장면 {index}",
+                "cut_action": "keep",
+            }
+            for index in range(1, 5)
+        ],
+        "history": [],
+        "undo_stack": [],
+        "redo_stack": [],
+    }
+
+    materialized = materialize_editing_session_timeline(
+        timeline=timeline,
+        editing_session=session,
+    )
+    plan = CompositionPlan.from_timeline(
+        timeline=materialized,
+        captions=materialized["session_captions"],
+    )
+    narration = next(item for item in plan.items if item.track_type == "narration")
+
+    assert (narration.start_sec, narration.end_sec) == (0.0, 20.0)
+    assert (narration.source_in_sec, narration.source_out_sec) == (0.0, 20.0)
+    assert [(cue.start_sec, cue.end_sec, cue.text) for cue in plan.captions] == [
+        (0.0, 5.0, "장면 1"),
+        (5.0, 10.0, "장면 2"),
+        (10.0, 15.0, "장면 3"),
+        (15.0, 20.0, "장면 4"),
+    ]
+    assert plan.duration_sec == 20.0
+
+
+def test_atomic_single_narration_removes_the_matching_caption_source_slice() -> None:
+    from videobox_core_engine.editing_session import update_segment_cut_action
+
+    timeline = {
+        "tracks": [
+            {
+                "track_type": "narration",
+                "clips": [{
+                    "clip_id": "full-narration",
+                    "segment_id": "segment-1",
+                    "asset_uri": "local://full-narration",
+                    "start_sec": 0,
+                    "end_sec": 20,
+                }],
+            },
+            {
+                "track_type": "caption",
+                "clips": [
+                    {
+                        "clip_id": f"caption-{index}",
+                        "segment_id": f"segment-{index}",
+                        "start_sec": (index - 1) * 5,
+                        "end_sec": index * 5,
+                        "text": f"장면 {index}",
+                    }
+                    for index in range(1, 5)
+                ],
+            },
+        ],
+    }
+    initial_session = {
+        "segments": [
+            {
+                "segment_id": f"segment-{index}",
+                "start_sec": (index - 1) * 5,
+                "end_sec": index * 5,
+                "caption_text": f"장면 {index}",
+                "cut_action": "keep",
+            }
+            for index in range(1, 5)
+        ],
+        "history": [],
+        "undo_stack": [],
+        "redo_stack": [],
+    }
+    session = update_segment_cut_action(
+        session=initial_session,
+        segment_id="segment-2",
+        cut_action="remove",
+    )
+
+    materialized = materialize_editing_session_timeline(
+        timeline=timeline,
+        editing_session=session,
+    )
+    plan = CompositionPlan.from_timeline(
+        timeline=materialized,
+        captions=materialized["session_captions"],
+    )
+
+    assert [
+        (item.start_sec, item.end_sec, item.source_in_sec, item.source_out_sec)
+        for item in plan.items
+        if item.track_type == "narration"
+    ] == [
+        (0.0, 5.0, 0.0, 5.0),
+        (10.0, 15.0, 10.0, 15.0),
+        (15.0, 20.0, 15.0, 20.0),
+    ]
+    assert [cue.text for cue in plan.captions] == ["장면 1", "장면 3", "장면 4"]
+    assert plan.duration_sec == 20.0
+
+
+def test_atomic_single_narration_reorders_caption_source_slices_with_the_session() -> None:
+    from videobox_core_engine.editing_session import reorder_segments
+
+    timeline = {
+        "tracks": [
+            {
+                "track_type": "narration",
+                "clips": [{
+                    "clip_id": "full-narration",
+                    "segment_id": "segment-1",
+                    "asset_uri": "local://full-narration",
+                    "start_sec": 0,
+                    "end_sec": 20,
+                }],
+            },
+            {
+                "track_type": "caption",
+                "clips": [
+                    {
+                        "clip_id": f"caption-{index}",
+                        "segment_id": f"segment-{index}",
+                        "start_sec": (index - 1) * 5,
+                        "end_sec": index * 5,
+                        "text": f"장면 {index}",
+                    }
+                    for index in range(1, 5)
+                ],
+            },
+        ],
+    }
+    initial_session = {
+        "segments": [
+            {
+                "segment_id": f"segment-{index}",
+                "start_sec": (index - 1) * 5,
+                "end_sec": index * 5,
+                "caption_text": f"장면 {index}",
+                "cut_action": "keep",
+            }
+            for index in range(1, 5)
+        ],
+        "history": [],
+        "undo_stack": [],
+        "redo_stack": [],
+    }
+    session = reorder_segments(
+        session=initial_session,
+        segment_ids=["segment-4", "segment-3", "segment-2", "segment-1"],
+        bounds_by_id={
+            f"segment-{source_index}": {
+                "start_sec": target_index * 5,
+                "end_sec": (target_index + 1) * 5,
+            }
+            for target_index, source_index in enumerate((4, 3, 2, 1))
+        },
+    )
+
+    materialized = materialize_editing_session_timeline(
+        timeline=timeline,
+        editing_session=session,
+    )
+    plan = CompositionPlan.from_timeline(
+        timeline=materialized,
+        captions=materialized["session_captions"],
+    )
+    narration = [item for item in plan.items if item.track_type == "narration"]
+
+    assert [
+        (item.start_sec, item.end_sec, item.source_in_sec, item.source_out_sec)
+        for item in narration
+    ] == [
+        (0.0, 5.0, 15.0, 20.0),
+        (5.0, 10.0, 10.0, 15.0),
+        (10.0, 15.0, 5.0, 10.0),
+        (15.0, 20.0, 0.0, 5.0),
+    ]
+    assert len({item.clip_id for item in narration}) == 4
+    assert [cue.text for cue in plan.captions] == ["장면 4", "장면 3", "장면 2", "장면 1"]
+    assert plan.duration_sec == 20.0
+
+
+def test_actual_atomic_bundle_keeps_full_narration_in_manifest_composition_and_capcut(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class RecordingCapCutExporter:
+        def __init__(self) -> None:
+            self.timelines: list[dict[str, object]] = []
+
+        def export_timeline(
+            self,
+            *,
+            project_id: str,
+            timeline: dict[str, object],
+            drafts_root: Path,
+            draft_name: str,
+            subtitle_file_path: Path | None = None,
+            editing_session: dict[str, object] | None = None,
+        ) -> Path:
+            self.timelines.append(timeline)
+            draft_path = drafts_root / draft_name
+            draft_path.mkdir(parents=True)
+            (draft_path / "draft_content.json").write_text("{}", encoding="utf-8")
+            return draft_path
+
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project("Actual atomic narration projection")
+    for index in range(4):
+        source = tmp_path / f"scene-{index}.mp4"
+        source.write_bytes(f"scene-{index}".encode())
+        store.register_asset(
+            project_id=project.project_id,
+            asset_type=AssetType.BROLL_VIDEO,
+            source_path=source,
+        )
+    monkeypatch.setattr(store, "_probe_playable_broll_duration", lambda **_kwargs: 6.0)
+    brief = store.create_creation_brief(
+        project_id=project.project_id,
+        script_filename="script.txt",
+        script_text="첫 장면입니다. 둘째 장면입니다. 셋째 장면입니다. 마지막 장면입니다.",
+        idempotency_key="actual-atomic",
+        capability_profile={},
+        runtime=type("R", (), {"plan_questions": lambda *_args, **_kwargs: []})(),
+    )
+    brief = store.bypass_creation_interview(
+        project_id=project.project_id,
+        brief_id=brief["brief_id"],
+        expected_revision=brief["revision"],
+    )
+    brief = store.update_creation_brief_summary(
+        project_id=project.project_id,
+        brief_id=brief["brief_id"],
+        summary="네 장면",
+        expected_revision=brief["revision"],
+    )
+    brief = store.approve_creation_brief(
+        project_id=project.project_id,
+        brief_id=brief["brief_id"],
+        expected_revision=brief["revision"],
+    )
+    readiness = store.start_draft_readiness(
+        project_id=project.project_id,
+        brief_id=brief["brief_id"],
+        narration_choice={"kind": "silent"},
+        idempotency_key="actual-atomic-ready",
+        expected_brief_revision=brief["revision"],
+        defer=False,
+    )
+    bundle = store.materialize_atomic_draft_bundle(
+        project_id=project.project_id,
+        brief_id=brief["brief_id"],
+        expected_brief_revision=brief["revision"],
+        readiness_id=readiness["readiness_id"],
+        expected_readiness_revision=readiness["revision"],
+        idempotency_key="actual-atomic-bundle",
+    )
+    session = store.get_editing_session(
+        project_id=project.project_id,
+        session_id=bundle["session_id"],
+    )
+    timeline = store.get_timeline_run(
+        project_id=project.project_id,
+        timeline_id=bundle["timeline_id"],
+    )
+
+    assert len(session["segments"]) == 4
+    assert session["history"] == []
+    assert all("source_offset_sec" not in segment for segment in session["segments"])
+    assert all("source_slices" not in segment for segment in session["segments"])
+    manifest = build_editor_playback_manifest(
+        project_id=project.project_id,
+        session=session,
+        timeline=timeline,
+        asset_content_url_prefix=f"/api/projects/{project.project_id}/assets",
+    )
+    narration_manifest = next(track for track in manifest["tracks"] if track["track_type"] == "narration")
+    assert [(clip["start_sec"], clip["end_sec"]) for clip in narration_manifest["clips"]] == [(0.0, 20.0)]
+    exporter = RecordingCapCutExporter()
+    runner = LocalPipelineRunner(store, pycapcut_exporter=exporter)
+    plan = runner.build_composition_plan(
+        timeline=timeline,
+        editing_session=session,
+        project_id=project.project_id,
+    )
+    narration_plan = [item for item in plan.items if item.track_type == "narration"]
+    assert [(item.start_sec, item.end_sec, item.source_in_sec, item.source_out_sec) for item in narration_plan] == [
+        (0.0, 20.0, 0.0, 20.0),
+    ]
+    runner.approve_timeline_review(
+        project_id=project.project_id,
+        timeline_job_id=bundle["timeline_job_id"],
+    )
+
+    capcut = runner.start_capcut_draft_export(
+        project_id=project.project_id,
+        timeline_job_id=bundle["timeline_job_id"],
+    )
+
+    assert capcut["status"] == "succeeded"
+    narration_capcut = next(track for track in exporter.timelines[0]["tracks"] if track["track_type"] == "narration")
+    assert [(clip["start_sec"], clip["end_sec"]) for clip in narration_capcut["clips"]] == [(0.0, 20.0)]
+
+
+def test_materialized_gap_slot_follows_its_visible_placeholder_after_session_relayout() -> None:
+    timeline = {
+        "tracks": [{
+            "track_type": "broll",
+            "clips": [{
+                "clip_id": "gap-placeholder",
+                "segment_id": "source-gap",
+                "gap_slot_id": "gap-1",
+                "asset_uri": "local://gap-placeholder",
+                "start_sec": 0,
+                "end_sec": 2,
+            }],
+        }],
+        "gap_slots": [{
+            "gap_slot_id": "gap-1",
+            "segment_id": "source-gap",
+            "source_segment_id": "script-1",
+            "target_range": {"start_sec": 0, "end_sec": 2},
+            "reason": "missing_broll",
+        }],
+    }
+    session = {
+        "segments": [{
+            "segment_id": "visible-gap",
+            "start_sec": 3,
+            "end_sec": 4,
+            "source_offset_sec": 0,
+            "source_slices": [{
+                "segment_id": "source-gap",
+                "source_offset_sec": 0,
+                "duration_sec": 1,
+            }],
+            "cut_action": "keep",
+        }],
+    }
+
+    materialized = materialize_editing_session_timeline(
+        timeline=timeline,
+        editing_session=session,
+    )
+    placeholder = materialized["tracks"][0]["clips"][0]
+    gap = materialized["gap_slots"][0]
+
+    assert (placeholder["segment_id"], placeholder["start_sec"], placeholder["end_sec"]) == (
+        "visible-gap",
+        3,
+        4,
+    )
+    assert gap["segment_id"] == "visible-gap"
+    assert gap["target_range"] == {"start_sec": 3, "end_sec": 4}
+    assert gap["source_segment_id"] == "script-1"
 
 
 def test_current_session_remove_cut_removes_all_segment_media_and_caption() -> None:
@@ -781,3 +1267,96 @@ def test_narration_only_exact_proxy_uses_reviewable_black_canvas_with_audio(tmp_
     pixel = subprocess.run(["ffmpeg", "-v", "error", "-ss", "0.5", "-i", str(output), "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"], check=True, capture_output=True).stdout
     assert "video" in probe and "audio" in probe
     assert tuple(pixel[:3]) == (0, 0, 0)
+
+
+def test_materialized_track_ids_remain_unique_when_legacy_roles_share_an_id() -> None:
+    timeline = {
+        "tracks": [
+            {
+                "track_id": "shared",
+                "track_type": "narration",
+                "clips": [
+                    {
+                        "clip_id": "n",
+                        "segment_id": "s",
+                        "asset_uri": "local://n",
+                        "start_sec": 0,
+                        "end_sec": 1,
+                    }
+                ],
+            },
+            {
+                "track_id": "shared",
+                "track_type": "broll",
+                "clips": [
+                    {
+                        "clip_id": "b",
+                        "segment_id": "s",
+                        "asset_uri": "local://b",
+                        "start_sec": 0,
+                        "end_sec": 1,
+                    }
+                ],
+            },
+        ]
+    }
+    session = {
+        "segments": [
+            {
+                "segment_id": "s",
+                "start_sec": 0,
+                "end_sec": 1,
+                "caption_text": "한 장면",
+                "cut_action": "keep",
+            }
+        ]
+    }
+
+    materialized = materialize_editing_session_timeline(
+        timeline=timeline,
+        editing_session=session,
+    )
+
+    assert [track["track_id"] for track in materialized["tracks"]] == [
+        "shared",
+        "shared_broll",
+    ]
+
+
+def test_session_only_track_fallback_id_is_unique_against_source_track_ids() -> None:
+    timeline = {
+        "tracks": [{
+            "track_id": "track_broll",
+            "track_type": "narration",
+            "clips": [{
+                "clip_id": "narration",
+                "segment_id": "segment-1",
+                "asset_uri": "local://narration",
+                "start_sec": 0,
+                "end_sec": 1,
+            }],
+        }]
+    }
+    session = {
+        "segments": [{
+            "segment_id": "segment-1",
+            "start_sec": 0,
+            "end_sec": 1,
+            "source_offset_sec": 0,
+            "cut_action": "keep",
+            "broll_override": {
+                "asset_id": "replacement",
+                "asset_uri": "local://replacement",
+            },
+        }],
+    }
+
+    materialized = materialize_editing_session_timeline(
+        timeline=timeline,
+        editing_session=session,
+    )
+
+    assert [track["track_id"] for track in materialized["tracks"]] == [
+        "track_broll",
+        "track_broll_2",
+    ]

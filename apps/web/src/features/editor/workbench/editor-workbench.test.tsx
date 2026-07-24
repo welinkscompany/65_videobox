@@ -92,6 +92,27 @@ describe("EditorWorkbench", () => {
     expect(onApplyAssetCard).toHaveBeenCalledWith(assetCards[0], "segment-1");
   });
 
+  it("uses a selected session caption as the asset target when narration is one long source clip", () => {
+    const onApplyAssetCard = vi.fn();
+    const sessionSegmentView = {
+      ...view,
+      output: { ...view.output, durationSec: 10 },
+      tracks: [{ trackId: "narration", role: "narration", clips: [
+        { clipId: "n-1", segmentId: "visible-1", type: "narration", assetId: null, assetUri: null, startSec: 0, endSec: 10, controls: {} },
+      ] }],
+      captions: [
+        { segmentId: "visible-1", placementId: "caption:visible-1", text: "첫 장면", startSec: 0, endSec: 5, style: { fontFamily: "Pretendard", fontSizePx: 28, textColor: "#fff", outlineColor: "#000", outlineWidthPx: 1, backgroundColor: "#00000000", positionXPercent: 50, positionYPercent: 90, horizontalAlign: "center", safeAreaEnabled: true, shadowBlurPx: 0 } },
+        { segmentId: "visible-2", placementId: "caption:visible-2", text: "둘째 장면", startSec: 5, endSec: 10, style: { fontFamily: "Pretendard", fontSizePx: 28, textColor: "#fff", outlineColor: "#000", outlineWidthPx: 1, backgroundColor: "#00000000", positionXPercent: 50, positionYPercent: 90, horizontalAlign: "center", safeAreaEnabled: true, shadowBlurPx: 0 } },
+      ],
+    } as const;
+    render(<EditorWorkbench view={sessionSegmentView} assetCards={assetCards} onApplyAssetCard={onApplyAssetCard} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "caption:visible-2 클립 선택" }));
+    expect(screen.getAllByText("적용 구간: 5.00–10.00초").length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: "제품 사진 적용" }));
+    expect(onApplyAssetCard).toHaveBeenCalledWith(assetCards[0], "visible-2");
+  });
+
   it("keeps the disabled Eugene draft in browser-local UI state without enabling any request", () => {
     window.localStorage.setItem("videobox.editor-workbench.eugene-draft", "다음에 확인할 추천 초안");
     window.localStorage.setItem("videobox.editor-workbench.ui", JSON.stringify({ leftOpen: false, rightOpen: true, activeDrawer: null, leftSize: 280, rightSize: 320 }));

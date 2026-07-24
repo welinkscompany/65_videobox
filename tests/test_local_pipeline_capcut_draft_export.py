@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import shutil
+import subprocess
 from typing import Any
 import wave
 
@@ -11,6 +13,7 @@ from videobox_capcut_export.pycapcut_adapter import CapCutDraftExportResult, PyC
 from videobox_core_engine.capcut_handoff import CapCutHandoffService
 from videobox_core_engine.local_pipeline import LocalPipelineRunner
 from videobox_core_engine.output_source_verifier import OutputSourceStaleError
+from videobox_domain_models.assets import AssetType
 from videobox_domain_models.jobs import JobStatus, JobType
 from videobox_storage.local_project_store import LocalProjectStore
 
@@ -29,14 +32,20 @@ class _FakePyCapCutExporter:
         subtitle_file_path: Path | None = None,
         editing_session: dict[str, Any] | None = None,
     ) -> Path:
-        self.received_calls.append({"project_id": project_id, "draft_name": draft_name, "editing_session": editing_session})
+        self.received_calls.append({"project_id": project_id, "draft_name": draft_name, "editing_session": editing_session, "timeline": timeline})
         draft_path = drafts_root / draft_name
         draft_path.mkdir(parents=True, exist_ok=True)
         (draft_path / "draft_content.json").write_text("{}", encoding="utf-8")
         return draft_path
 
 
-def _build_approved_timeline_job(store: LocalProjectStore, runner: LocalPipelineRunner, project_id: str) -> str:
+def _build_approved_timeline_job(
+    store: LocalProjectStore,
+    runner: LocalPipelineRunner,
+    project_id: str,
+    *,
+    extra_tracks: list[dict[str, Any]] | None = None,
+) -> str:
     raw_audio_asset_dir = store.project_root(project_id)
     raw_audio_path = raw_audio_asset_dir / "narration_source.wav"
     raw_audio_path.parent.mkdir(parents=True, exist_ok=True)
@@ -82,7 +91,7 @@ def _build_approved_timeline_job(store: LocalProjectStore, runner: LocalPipeline
                 ],
             }
             for track in timeline.tracks
-        ],
+        ] + list(extra_tracks or []),
         "review_flags": [],
         "applied_recommendations": timeline.applied_recommendations,
         "pending_recommendations": timeline.pending_recommendations,
@@ -166,12 +175,285 @@ def test_start_capcut_draft_export_passes_matching_editing_session_to_adapter(tm
     runner = LocalPipelineRunner(store, pycapcut_exporter=fake_exporter)
     timeline_job_id = _build_approved_timeline_job(store, runner, project.project_id)
     timeline_id = runner.get_timeline_result(project_id=project.project_id, job_id=timeline_job_id)["timeline"]["timeline_id"]
-    store.save_editing_session(project_id=project.project_id, timeline_id=timeline_id, session_payload={"project_id": project.project_id, "timeline_id": timeline_id, "caption_style": {"text_color": "#00FF00FF"}, "segments": [{"segment_id": "seg_001", "caption_text": "CapCut style", "start_sec": 0.0, "end_sec": 2.0}], "history": []})
+    store.save_editing_session(project_id=project.project_id, timeline_id=timeline_id, session_payload={"project_id": project.project_id, "timeline_id": timeline_id, "caption_style": {"text_color": "#00FF00FF"}, "segments": [{"segment_id": "seg_001", "caption_text": "CapCut style", "start_sec": 4.0, "end_sec": 6.0}], "history": []})
     runner.approve_timeline_review(project_id=project.project_id, timeline_job_id=timeline_job_id)
 
     runner.start_capcut_draft_export(project_id=project.project_id, timeline_job_id=timeline_job_id)
 
     assert fake_exporter.received_calls[0]["editing_session"]["caption_style"]["text_color"] == "#00FF00FF"
+    narration = next(
+        track
+        for track in fake_exporter.received_calls[0]["timeline"]["tracks"]
+        if track["track_type"] == "narration"
+    )
+    assert (narration["clips"][0]["start_sec"], narration["clips"][0]["end_sec"]) == (4.0, 6.0)
+
+
+def test_capcut_draft_export_passes_only_materialized_session_captions_to_adapter(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="CapCut materialized captions")
+    fake_exporter = _FakePyCapCutExporter()
+    runner = LocalPipelineRunner(store, pycapcut_exporter=fake_exporter)
+    timeline_job_id = _build_approved_timeline_job(store, runner, project.project_id)
+    timeline_id = runner.get_timeline_result(
+        project_id=project.project_id,
+        job_id=timeline_job_id,
+    )["timeline"]["timeline_id"]
+    store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline_id,
+        session_payload={
+            "project_id": project.project_id,
+            "timeline_id": timeline_id,
+            "caption_style": {"text_color": "#00FF00FF"},
+            "segments": [
+                {
+                    "segment_id": "seg_removed",
+                    "caption_text": "삭제된 자막",
+                    "start_sec": 0.0,
+                    "end_sec": 1.0,
+                    "cut_action": "remove",
+                },
+                {
+                    "segment_id": "seg_merged",
+                    "caption_text": "병합 전 자막",
+                    "start_sec": 1.0,
+                    "end_sec": 3.0,
+                    "content_windows": [
+                        {
+                            "source_segment_id": "seg_kept",
+                            "caption_text": "병합 후 남은 자막",
+                            "start_offset_sec": 0.0,
+                            "duration_sec": 2.0,
+                        }
+                    ],
+                },
+            ],
+            "history": [],
+        },
+    )
+    runner.approve_timeline_review(project_id=project.project_id, timeline_job_id=timeline_job_id)
+
+    runner.start_capcut_draft_export(project_id=project.project_id, timeline_job_id=timeline_job_id)
+
+    received = fake_exporter.received_calls[0]
+    assert received["editing_session"]["segments"] == received["timeline"]["session_captions"]
+    assert [
+        (caption["segment_id"], caption["caption_text"], caption["start_sec"], caption["end_sec"])
+        for caption in received["editing_session"]["segments"]
+    ] == [("seg_kept", "병합 후 남은 자막", 1.0, 3.0)]
+
+
+def test_capcut_draft_export_maps_materialized_broll_source_window_to_adapter_controls(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="CapCut materialized B-roll source window")
+    fake_exporter = _FakePyCapCutExporter()
+    runner = LocalPipelineRunner(store, pycapcut_exporter=fake_exporter)
+    timeline_job_id = _build_approved_timeline_job(
+        store,
+        runner,
+        project.project_id,
+        extra_tracks=[
+            {
+                "track_id": "broll_overlay",
+                "track_type": "broll",
+                "clips": [
+                    {
+                        "clip_id": "clip_broll_001",
+                        "segment_id": "seg_001",
+                        "asset_uri": f"local://projects/{project.project_id}/assets/asset_broll_001",
+                        "start_sec": 0.0,
+                        "end_sec": 2.0,
+                        "media_controls": {
+                            "fit": "fit",
+                            "loop": False,
+                            "pad": True,
+                            "trim_start_sec": 0.0,
+                            "in_sec": 1.0,
+                            "out_sec": 3.0,
+                        },
+                    }
+                ],
+            }
+        ],
+    )
+    timeline_id = runner.get_timeline_result(
+        project_id=project.project_id,
+        job_id=timeline_job_id,
+    )["timeline"]["timeline_id"]
+    store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline_id,
+        session_payload={
+            "project_id": project.project_id,
+            "timeline_id": timeline_id,
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "",
+                    "start_sec": 0.0,
+                    "end_sec": 2.0,
+                    "cut_action": "keep",
+                }
+            ],
+            "history": [],
+        },
+    )
+    runner.approve_timeline_review(project_id=project.project_id, timeline_job_id=timeline_job_id)
+
+    runner.start_capcut_draft_export(project_id=project.project_id, timeline_job_id=timeline_job_id)
+
+    received_timeline = fake_exporter.received_calls[0]["timeline"]
+    broll = next(track for track in received_timeline["tracks"] if track["track_type"] == "broll")
+    clip = broll["clips"][0]
+    assert (clip["source_in_sec"], clip["source_out_sec"]) == (1.0, 3.0)
+    assert (clip["media_controls"]["in_sec"], clip["media_controls"]["out_sec"]) == (1.0, 3.0)
+
+
+@pytest.mark.skipif(
+    shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None,
+    reason="ffmpeg/ffprobe not installed",
+)
+def test_atomic_reverse_reorder_capcut_draft_uses_materialized_narration_source_windows(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path / "projects")
+    project = store.bootstrap_project(name="CapCut reversed atomic narration")
+    narration_path = tmp_path / "narration-20s.wav"
+    with wave.open(str(narration_path), "wb") as output:
+        output.setnchannels(1)
+        output.setsampwidth(2)
+        output.setframerate(8_000)
+        output.writeframes(b"\x00\x00" * 20 * 8_000)
+    narration = store.register_asset(
+        project_id=project.project_id,
+        asset_type=AssetType.NARRATION_AUDIO,
+        source_path=narration_path,
+    )
+    broll_path = tmp_path / "broll-5s.mp4"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=black:s=160x90:r=15:d=5",
+            "-an",
+            "-c:v",
+            "libx264",
+            str(broll_path),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    for _ in range(4):
+        store.register_asset(
+            project_id=project.project_id,
+            asset_type=AssetType.BROLL_VIDEO,
+            source_path=broll_path,
+        )
+    brief = store.create_creation_brief(
+        project_id=project.project_id,
+        script_filename="script.txt",
+        script_text="첫 장면입니다. 둘째 장면입니다. 셋째 장면입니다. 마지막 장면입니다.",
+        idempotency_key="reverse-capcut-brief",
+        capability_profile={},
+        runtime=type(
+            "NoQuestions",
+            (),
+            {"plan_questions": lambda *_args, **_kwargs: []},
+        )(),
+    )
+    brief = store.bypass_creation_interview(
+        project_id=project.project_id,
+        brief_id=brief["brief_id"],
+        expected_revision=brief["revision"],
+    )
+    brief = store.update_creation_brief_summary(
+        project_id=project.project_id,
+        brief_id=brief["brief_id"],
+        summary="네 장면 역순 편집",
+        expected_revision=brief["revision"],
+    )
+    brief = store.approve_creation_brief(
+        project_id=project.project_id,
+        brief_id=brief["brief_id"],
+        expected_revision=brief["revision"],
+    )
+    readiness = store.start_draft_readiness(
+        project_id=project.project_id,
+        brief_id=brief["brief_id"],
+        narration_choice={"kind": "existing", "asset_id": narration.asset_id},
+        idempotency_key="reverse-capcut-ready",
+        expected_brief_revision=brief["revision"],
+        defer=False,
+    )
+    bundle = store.materialize_atomic_draft_bundle(
+        project_id=project.project_id,
+        brief_id=brief["brief_id"],
+        expected_brief_revision=brief["revision"],
+        readiness_id=readiness["readiness_id"],
+        expected_readiness_revision=readiness["revision"],
+        idempotency_key="reverse-capcut-bundle",
+    )
+    pipeline = LocalPipelineRunner(
+        store,
+        pycapcut_exporter=PyCapCutRealExportAdapter(
+            store=store,
+            video_width=160,
+            video_height=90,
+            video_fps=15,
+        ),
+    )
+    session = store.get_editing_session(
+        project_id=project.project_id,
+        session_id=bundle["session_id"],
+    )
+    original_ids = [str(segment["segment_id"]) for segment in session["segments"]]
+    assert len(original_ids) == 4
+    reversed_ids = list(reversed(original_ids))
+    bounds_by_id = {
+        segment_id: {"start_sec": index * 5.0, "end_sec": (index + 1) * 5.0}
+        for index, segment_id in enumerate(reversed_ids)
+    }
+    reordered = pipeline.reorder_editing_session_segments(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+        segment_ids=reversed_ids,
+        bounds_by_id=bounds_by_id,
+        expected_revision=session["session_revision"],
+    )
+    assert [str(segment["segment_id"]) for segment in reordered["segments"]] == reversed_ids
+    pipeline.approve_timeline_review(
+        project_id=project.project_id,
+        timeline_job_id=bundle["timeline_job_id"],
+    )
+
+    result = pipeline.start_capcut_draft_export(
+        project_id=project.project_id,
+        timeline_job_id=bundle["timeline_job_id"],
+    )
+
+    export = pipeline.get_capcut_draft_export_result(
+        project_id=project.project_id,
+        job_id=result["job_id"],
+    )["export"]
+    draft_path = store.resolve_storage_uri(
+        project_id=project.project_id,
+        storage_uri=export["file_uri"],
+    )
+    content = json.loads((draft_path / "draft_content.json").read_text(encoding="utf-8"))
+    voiceover = next(track["segments"] for track in content["tracks"] if track["name"] == "voiceover")
+    assert [
+        (segment["source_timerange"]["start"], segment["source_timerange"]["duration"])
+        for segment in voiceover
+    ] == [
+        (15_000_000, 5_000_000),
+        (10_000_000, 5_000_000),
+        (5_000_000, 5_000_000),
+        (0, 5_000_000),
+    ]
 
 
 def test_capcut_draft_export_persists_adapter_compatibility_warnings(tmp_path: Path) -> None:

@@ -35,7 +35,7 @@ def test_gap_bundle_is_hard_blocked_before_final_or_capcut_job_is_queued(tmp_pat
     bundle = client.post(f"{base}/draft-bundles", json={"brief_id":brief["brief_id"],"readiness_id":run["readiness_id"],"expected_brief_revision":brief["revision"],"expected_readiness_revision":run["revision"],"idempotency_key":"once","allow_placeholder":True}).json()
     manifest = client.get(f"{base}/editing-sessions/{bundle['session_id']}/playback-manifest")
     assert manifest.status_code == 200
-    assert manifest.json()["gap_slots"] == [{"gap_id": "gap-broll-1", "segment_id": "script-1", "start_sec": 0.0, "end_sec": 5.0, "reason": "장면을 보여 줄 영상이 없어요."}]
+    assert manifest.json()["gap_slots"] == [{"gap_id": "gap-broll-1", "segment_id": bundle["segment_ids"][0], "start_sec": 0.0, "end_sec": 5.0, "reason": "장면을 보여 줄 영상이 없어요."}]
     placeholder = next(clip for track in manifest.json()["tracks"] if track["track_type"] == "broll" for clip in track["clips"] if clip["asset_id"].startswith("asset_gap_placeholder_"))
     matching_gap = next(gap for gap in manifest.json()["gap_slots"] if gap["gap_id"] == "gap-broll-1")
     assert placeholder["clip_type"] == "broll" and placeholder["segment_id"] == matching_gap["segment_id"]

@@ -8,6 +8,13 @@ export type EditorControls = Readonly<{
   fadeInSec?: number;
   fadeOutSec?: number;
   ducking?: boolean;
+  fit?: "fit" | "crop";
+  loop?: boolean;
+  pad?: boolean;
+  trimStartSec?: number;
+  preserveSourceAudio?: boolean;
+  inSec?: number;
+  outSec?: number;
 }>;
 export type EditorCaptionStyle = Readonly<{
   fontFamily: string; fontSizePx: number; textColor: string; outlineColor: string; outlineWidthPx: number;
@@ -35,6 +42,13 @@ function controls(value: EditorMediaControls): EditorControls {
     fadeInSec: value.fade_in_sec,
     fadeOutSec: value.fade_out_sec,
     ducking: value.ducking,
+    fit: value.fit,
+    loop: value.loop,
+    pad: value.pad,
+    trimStartSec: value.trim_start_sec,
+    preserveSourceAudio: value.preserve_source_audio,
+    inSec: value.in_sec,
+    outSec: value.out_sec,
   };
 }
 

@@ -1777,14 +1777,35 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 else None
             )
             editing_session = self._editing_session_for_output_timeline(project_id=project_id, timeline=timeline)
+            materialized_timeline = materialize_editing_session_timeline(
+                timeline=timeline,
+                editing_session=editing_session,
+                project_id=project_id,
+            )
+            for track in materialized_timeline.get("tracks", []):
+                if not isinstance(track, dict) or str(track.get("track_type") or "").strip().lower() != "broll":
+                    continue
+                for clip in track.get("clips", []):
+                    if not isinstance(clip, dict) or "source_in_sec" not in clip or "source_out_sec" not in clip:
+                        continue
+                    raw_controls = clip.get("media_controls")
+                    controls = dict(raw_controls) if isinstance(raw_controls, dict) else {}
+                    controls["in_sec"] = clip["source_in_sec"]
+                    controls["out_sec"] = clip["source_out_sec"]
+                    clip["media_controls"] = controls
+            capcut_editing_session = (
+                {**editing_session, "segments": materialized_timeline.get("session_captions", [])}
+                if editing_session is not None
+                else None
+            )
             with tempfile.TemporaryDirectory(prefix="videobox_capcut_draft_") as raw_drafts_root:
                 draft_path = self.pycapcut_exporter.export_timeline(
                     project_id=project_id,
-                    timeline=timeline,
+                    timeline=materialized_timeline,
                     drafts_root=Path(raw_drafts_root),
                     draft_name=str(timeline["timeline_id"]),
                     subtitle_file_path=subtitle_file_path,
-                    editing_session=editing_session,
+                    editing_session=capcut_editing_session,
                 )
                 persisted = self.store.save_capcut_draft_export(
                     project_id=project_id,

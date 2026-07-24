@@ -78,7 +78,14 @@ def build_director_proposals_router(store: LocalProjectStore) -> APIRouter:
             "messages": messages,
             "proposal": payload(project_id, proposal) if proposal else None,
             "references": [
-                {"reference_code": item.reference_code, "immutable_id": item.immutable_id, "source": item.source}
+                {
+                    "reference_code": str(item["reference_code"]),
+                    "immutable_id": {
+                        "segment_id": str(item["segment_id"]),
+                        "track_type": str(item["track_type"]),
+                    },
+                    "source": "timeline",
+                }
                 for item in director_timeline_references(
                     store.get_editing_session(project_id=project_id, session_id=session_id)
                 ).get("segments", [])

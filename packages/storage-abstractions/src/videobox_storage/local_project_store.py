@@ -531,7 +531,8 @@ class LocalProjectStore:
         # budget.  Stage it under the active generation before BEGIN IMMEDIATE;
         # the transaction below still owns all authoritative CAS/fence checks
         # and the atomic rename which makes the bytes eligible for a pointer.
-        temporary = destination_dir / f".{generation_id}.{uuid.uuid4().hex}.tmp"
+        generation_token = generation_id.rsplit("_", 1)[-1][-8:]
+        temporary = destination_dir / f".ep-{generation_token}-{uuid.uuid4().hex[:6]}.tmp"
         try:
             shutil.copyfile(artifact_path, temporary)
         except Exception:
@@ -759,15 +760,20 @@ class LocalProjectStore:
                     continue
                 # Only this renderer's published names and atomic temporary
                 # names are eligible; unrelated derived files are untouched.
-                if not (candidate.name.startswith("exact_preview_") and candidate.suffix == ".mp4") and not candidate.name.startswith(".exact_preview_"):
+                if (
+                    not (candidate.name.startswith("exact_preview_") and candidate.suffix == ".mp4")
+                    and not candidate.name.startswith(".exact_preview_")
+                    and not candidate.name.startswith(".ep-")
+                ):
                     continue
-                # finish_exact_preview publishes `.<generation>.<nonce>.tmp`
+                # finish_exact_preview publishes `.ep-<short-generation>-<nonce>.tmp`
                 # then `<generation>.mp4` before its fenced DB pointer update.
                 # Those files are deliberately unreferenced during that small
                 # window, so an active claim is an ownership fence for cleanup.
                 if any(
                     candidate.name == f"{generation_id}.mp4"
                     or candidate.name.startswith(f".{generation_id}.")
+                    or candidate.name.startswith(f".ep-{generation_id.rsplit('_', 1)[-1][-8:]}-")
                     for generation_id in active_generation_ids
                 ):
                     continue
@@ -1529,21 +1535,52 @@ class LocalProjectStore:
                         placeholder_assets.append((placeholder_asset_id, gap, placeholder_sha256, placeholder_created_at))
                 provenance_by_asset = {str(item.get("asset_id")): item for item in current_result.get("source_snapshot", []) if isinstance(item, dict)}
                 segments = list(current_result.get("script_segments") or []); clips: list[dict[str, Any]] = []
+                visible_segment_by_source_id: dict[str, dict[str, Any]] = {}
                 for index, item in enumerate(segments):
-                    segment_id = f"segment_draft_{uuid.uuid4().hex[:10]}"; clips.append({"clip_id": f"clip_caption_{uuid.uuid4().hex[:10]}", "segment_id": segment_id, "text": item.get("text", ""), "start_sec": item.get("start_sec", index * 5), "end_sec": item.get("end_sec", (index + 1) * 5)})
+                    source_segment_id = str(item.get("segment_id") or f"script-{index + 1}")
+                    segment_id = f"segment_draft_{uuid.uuid4().hex[:10]}"
+                    caption_clip = {"clip_id": f"clip_caption_{uuid.uuid4().hex[:10]}", "segment_id": segment_id, "source_segment_id": source_segment_id, "text": item.get("text", ""), "start_sec": item.get("start_sec", index * 5), "end_sec": item.get("end_sec", (index + 1) * 5)}
+                    clips.append(caption_clip)
+                    visible_segment_by_source_id[source_segment_id] = caption_clip
                     connection.execute("INSERT INTO segments (segment_id,project_id,start_sec,end_sec,text,source_asset_id,metadata_json) VALUES (?,?,?,?,?,?,?)", (segment_id, project_id, clips[-1]["start_sec"], clips[-1]["end_sec"], clips[-1]["text"], brief.get("script_asset_id"), json.dumps({"draft_bundle_id": bundle_id})))
                 broll = [item for item in current_result.get("broll_candidates", []) if not item.get("skipped")]
                 for item in broll:
                     asset_ids.append(str(item["asset_id"])); provenance = provenance_by_asset.get(str(item["asset_id"]), {})
-                    clips.append({"clip_id": f"clip_broll_{uuid.uuid4().hex[:10]}", "clip_type": "broll", "asset_id": item["asset_id"], "segment_id": item.get("segment_id") or (clips[0]["segment_id"] if clips else "segment_broll"), "start_sec": item.get("target_range", {}).get("start_sec", 0), "end_sec": item.get("target_range", {}).get("end_sec", 5), "media_controls": {}, "expected_content_sha256": provenance.get("sha256"), "media_revision": provenance.get("media_revision")})
-                for placeholder_asset_id, gap, placeholder_sha256, placeholder_created_at in placeholder_assets:
-                    clips.append({"clip_id": f"clip_gap_placeholder_{uuid.uuid4().hex[:10]}", "clip_type": "broll", "asset_id": placeholder_asset_id, "segment_id": gap.get("segment_id") or gap.get("gap_slot_id"), "gap_slot_id": gap.get("gap_slot_id"), "label": "자산이 필요한 임시 장면", "start_sec": gap.get("target_range", {}).get("start_sec", 0), "end_sec": gap.get("target_range", {}).get("end_sec", 5), "media_controls": {}, "expected_content_sha256": placeholder_sha256, "media_revision": placeholder_created_at})
+                    source_segment_id = str(item.get("segment_id") or "")
+                    visible_segment = visible_segment_by_source_id.get(source_segment_id)
+                    if visible_segment is None:
+                        raise ValueError("atomic_draft_bundle_segment_alignment_invalid")
+                    source_range = item.get("target_range") if isinstance(item.get("target_range"), dict) else {}
+                    source_in_sec = float(source_range.get("start_sec", 0))
+                    source_out_sec = float(source_range.get("end_sec", 5))
+                    target_duration_sec = float(visible_segment["end_sec"]) - float(visible_segment["start_sec"])
+                    clips.append({"clip_id": f"clip_broll_{uuid.uuid4().hex[:10]}", "clip_type": "broll", "asset_id": item["asset_id"], "segment_id": visible_segment["segment_id"], "source_segment_id": source_segment_id, "start_sec": visible_segment["start_sec"], "end_sec": visible_segment["end_sec"], "media_controls": {"in_sec": source_in_sec, "out_sec": source_out_sec, "loop": False, "pad": source_out_sec - source_in_sec < target_duration_sec}, "expected_content_sha256": provenance.get("sha256"), "media_revision": provenance.get("media_revision")})
+                aligned_gaps = []
+                for gap in current_gaps:
+                    aligned_gap = deepcopy(gap)
+                    source_segment_id = str(gap.get("segment_id") or "")
+                    visible_segment = visible_segment_by_source_id.get(source_segment_id)
+                    if visible_segment is not None:
+                        aligned_gap["source_segment_id"] = source_segment_id
+                        aligned_gap["segment_id"] = visible_segment["segment_id"]
+                        aligned_gap["target_range"] = {
+                            "start_sec": visible_segment["start_sec"],
+                            "end_sec": visible_segment["end_sec"],
+                        }
+                    aligned_gaps.append(aligned_gap)
+                aligned_gap_by_id = {
+                    str(gap.get("gap_slot_id") or ""): gap
+                    for gap in aligned_gaps
+                }
+                for placeholder_asset_id, source_gap, placeholder_sha256, placeholder_created_at in placeholder_assets:
+                    gap = aligned_gap_by_id.get(str(source_gap.get("gap_slot_id") or ""), source_gap)
+                    clips.append({"clip_id": f"clip_gap_placeholder_{uuid.uuid4().hex[:10]}", "clip_type": "broll", "asset_id": placeholder_asset_id, "segment_id": gap.get("segment_id") or gap.get("gap_slot_id"), "source_segment_id": gap.get("source_segment_id"), "gap_slot_id": gap.get("gap_slot_id"), "label": "자산이 필요한 임시 장면", "start_sec": gap.get("target_range", {}).get("start_sec", 0), "end_sec": gap.get("target_range", {}).get("end_sec", 5), "media_controls": {}, "expected_content_sha256": placeholder_sha256, "media_revision": placeholder_created_at})
                 asset_uris = {str(row["asset_id"]): str(row["storage_uri"]) for row in connection.execute("SELECT asset_id,storage_uri FROM assets WHERE project_id=?", (project_id,)).fetchall()}
                 narration_clip = {"clip_id": f"clip_narration_{uuid.uuid4().hex[:10]}", "clip_type": "narration", "asset_id": narration_asset_id, "segment_id": clips[0]["segment_id"] if clips else "segment_narration", "asset_uri": asset_uris[str(narration_asset_id)], "start_sec": 0, "end_sec": max([c["end_sec"] for c in clips] or [1]), "media_controls": {}, "expected_content_sha256": narration_provenance.get("sha256"), "media_revision": narration_provenance.get("media_revision")}
                 broll_clips = [{**c, "asset_uri": asset_uris.get(str(c.get("asset_id")), "")} for c in clips if "asset_id" in c and c.get("asset_id") != narration_asset_id]
                 tracks = [{"track_id": f"track_narration_{uuid.uuid4().hex[:8]}", "track_type": "narration", "clips": [narration_clip]}, {"track_id": f"track_caption_{uuid.uuid4().hex[:8]}", "track_type": "caption", "clips": [c for c in clips if "text" in c]}, {"track_id": f"track_broll_{uuid.uuid4().hex[:8]}", "track_type": "broll", "clips": broll_clips}]
-                review_flags = [{"code": "draft_gap_placeholder", "segment_id": gap.get("gap_slot_id"), "message": "자산이 필요한 임시 장면입니다."} for gap in current_gaps]
-                timeline = {"timeline_id": timeline_id, "project_id": project_id, "version": "draft-v1", "source_session_id": session_id, "source_session_revision": 1, "tracks": tracks, "gap_slots": current_gaps, "review_flags": review_flags, "pending_recommendations": [], "applied_recommendations": [], "bgm_policy": current_result.get("bgm"), "sfx_policy": current_result.get("sfx"), "placeholder_policy": "in_app_only" if current_gaps else None}
+                review_flags = [{"code": "draft_gap_placeholder", "segment_id": gap.get("segment_id") or gap.get("gap_slot_id"), "message": "자산이 필요한 임시 장면입니다."} for gap in aligned_gaps]
+                timeline = {"timeline_id": timeline_id, "project_id": project_id, "version": "draft-v1", "source_session_id": session_id, "source_session_revision": 1, "tracks": tracks, "gap_slots": aligned_gaps, "review_flags": review_flags, "pending_recommendations": [], "applied_recommendations": [], "bgm_policy": current_result.get("bgm"), "sfx_policy": current_result.get("sfx"), "placeholder_policy": "in_app_only" if current_gaps else None}
                 session_segments = [
                     {
                         "segment_id": clip["segment_id"],
@@ -1560,7 +1597,7 @@ class LocalProjectStore:
                     }
                     for clip in clips if "text" in clip
                 ]
-                session = {"session_id": session_id, "project_id": project_id, "timeline_id": timeline_id, "tracks": tracks, "segments": session_segments, "gap_slots": current_gaps, "draft_bundle_id": bundle_id, "session_revision": 1, "history": [], "undo_stack": [], "redo_stack": []}
+                session = {"session_id": session_id, "project_id": project_id, "timeline_id": timeline_id, "tracks": tracks, "segments": session_segments, "gap_slots": aligned_gaps, "draft_bundle_id": bundle_id, "session_revision": 1, "history": [], "undo_stack": [], "redo_stack": []}
                 timeline_path = root / "timelines" / f"{timeline_id}.json"; session_path = root / "editing_sessions" / f"{session_id}.json"; timeline_path.parent.mkdir(parents=True, exist_ok=True); session_path.parent.mkdir(parents=True, exist_ok=True)
                 for target, payload, kind in ((timeline_path, timeline, "timeline_mirror"), (session_path, session, "session_mirror")):
                     staged = stage / target.name
@@ -1571,7 +1608,7 @@ class LocalProjectStore:
                 connection.execute("INSERT INTO editing_sessions (session_id,project_id,timeline_id,file_uri,summary_json,session_revision,session_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)", (session_id, project_id, timeline_id, session_uri, json.dumps({"draft_bundle_id": bundle_id}), 1, json.dumps(session, ensure_ascii=False), now, now))
                 connection.execute("INSERT INTO jobs (job_id,project_id,job_type,status,input_ref,output_ref,error_message,started_at,finished_at) VALUES (?,?,?,?,?,?,?,?,?)", (timeline_job_id, project_id, JobType.TIMELINE_BUILD.value, JobStatus.SUCCEEDED.value, readiness_id, timeline_id, None, now, now))
                 connection.execute("INSERT INTO review_approvals (timeline_id,project_id,status,approved_at,updated_at,source_session_revision,is_current) VALUES (?,?,?,?,?,?,?)", (timeline_id, project_id, "blocked" if current_gaps else "draft", None, now, 1, 1))
-                response = {"bundle_id": bundle_id, "session_id": session_id, "timeline_id": timeline_id, "timeline_job_id": timeline_job_id, "segment_ids": [c["segment_id"] for c in clips if "segment_id" in c], "asset_ids": list(dict.fromkeys(asset_ids)), "clip_ids": [c["clip_id"] for c in clips], "gap_slots": current_gaps, "output_blocked": bool(current_gaps)}
+                response = {"bundle_id": bundle_id, "session_id": session_id, "timeline_id": timeline_id, "timeline_job_id": timeline_job_id, "segment_ids": [c["segment_id"] for c in clips if "text" in c], "asset_ids": list(dict.fromkeys(asset_ids)), "clip_ids": [c["clip_id"] for c in clips], "gap_slots": aligned_gaps, "output_blocked": bool(current_gaps)}
                 connection.execute("INSERT INTO atomic_draft_bundles (bundle_id,project_id,brief_id,readiness_id,input_fingerprint,idempotency_key,session_id,timeline_id,result_json,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)", (bundle_id, project_id, brief_id, readiness_id, fingerprint, idempotency_key, session_id, timeline_id, json.dumps(response, ensure_ascii=False), now))
                 self._atomic_bundle_fault("before_db_commit")
                 connection.commit()

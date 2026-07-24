@@ -4,6 +4,7 @@ import shutil
 import subprocess
 import json
 from pathlib import Path
+import wave
 
 import pytest
 
@@ -56,6 +57,92 @@ def test_export_timeline_maps_editing_session_caption_style_to_real_capcut_text_
 def _generate(command: list[str]) -> None:
     result = subprocess.run(command, capture_output=True, text=True, timeout=60)
     assert result.returncode == 0, result.stderr
+
+
+def _write_silent_wav(path: Path, *, duration_sec: int = 20) -> None:
+    with wave.open(str(path), "wb") as output:
+        output.setnchannels(1)
+        output.setsampwidth(2)
+        output.setframerate(8_000)
+        output.writeframes(b"\x00\x00" * duration_sec * 8_000)
+
+
+def test_standalone_narration_without_source_bounds_keeps_legacy_full_source_start(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Legacy standalone narration")
+    narration_path = tmp_path / "legacy-20s.wav"
+    _write_silent_wav(narration_path)
+    narration = store.register_asset(
+        project_id=project.project_id,
+        asset_type=AssetType.NARRATION_AUDIO,
+        source_path=narration_path,
+    )
+
+    result = PyCapCutRealExportAdapter(store=store).export_timeline(
+        project_id=project.project_id,
+        timeline={
+            "tracks": [
+                {
+                    "track_type": "narration",
+                    "clips": [
+                        {
+                            "asset_uri": narration.storage_uri,
+                            "start_sec": 5.0,
+                            "end_sec": 10.0,
+                        }
+                    ],
+                }
+            ]
+        },
+        drafts_root=tmp_path / "legacy-drafts",
+        draft_name="legacy-full-source",
+    )
+
+    content = json.loads((result.draft_path / "draft_content.json").read_text(encoding="utf-8"))
+    voiceover = next(track["segments"] for track in content["tracks"] if track["name"] == "voiceover")
+    assert voiceover[0]["source_timerange"] == {"start": 0, "duration": 5_000_000}
+
+
+@pytest.mark.parametrize(
+    "source_bounds",
+    [
+        {"source_in_sec": 1.0},
+        {"source_out_sec": 2.0},
+        {"source_in_sec": float("nan"), "source_out_sec": 2.0},
+        {"source_in_sec": 0.0, "source_out_sec": float("inf")},
+        {"source_in_sec": -1.0, "source_out_sec": 2.0},
+        {"source_in_sec": 2.0, "source_out_sec": 2.0},
+    ],
+)
+def test_explicit_narration_source_bounds_fail_closed_when_incomplete_or_invalid(
+    tmp_path: Path,
+    source_bounds: dict[str, float],
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Invalid explicit narration bounds")
+    narration_path = tmp_path / "invalid-bounds.wav"
+    _write_silent_wav(narration_path)
+    narration = store.register_asset(
+        project_id=project.project_id,
+        asset_type=AssetType.NARRATION_AUDIO,
+        source_path=narration_path,
+    )
+    clip = {
+        "asset_uri": narration.storage_uri,
+        "start_sec": 0.0,
+        "end_sec": 1.0,
+        **source_bounds,
+    }
+
+    with pytest.raises(PyCapCutExportError, match="narration source bounds"):
+        PyCapCutRealExportAdapter(store=store).export_timeline(
+            project_id=project.project_id,
+            timeline={"tracks": [{"track_type": "narration", "clips": [clip]}]},
+            drafts_root=tmp_path / "invalid-drafts",
+            draft_name="invalid-source-bounds",
+        )
 
 
 @pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg/ffprobe not installed on this machine")

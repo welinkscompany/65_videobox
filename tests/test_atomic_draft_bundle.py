@@ -6,6 +6,7 @@ from videobox_domain_models.jobs import JobStatus, JobType
 from videobox_core_engine.local_pipeline import LocalPipelineRunner
 from videobox_capcut_export.pycapcut_adapter import PyCapCutRealExportAdapter
 from videobox_core_engine.capcut_handoff import CapCutHandoffService
+from videobox_core_engine.editor_playback_manifest import build_editor_playback_manifest
 import subprocess
 import json
 import pytest
@@ -17,8 +18,12 @@ from pathlib import Path
 FFMPEG_AVAILABLE = shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
 
 
-def _ready(store: LocalProjectStore, project_id: str) -> tuple[dict, dict]:
-    brief = store.create_creation_brief(project_id=project_id, script_filename="script.txt", script_text="제품을 소개합니다.", idempotency_key="brief", capability_profile={}, runtime=type("R", (), {"plan_questions": lambda *_args, **_kwargs: []})())
+def _ready(
+    store: LocalProjectStore,
+    project_id: str,
+    script_text: str = "제품을 소개합니다.",
+) -> tuple[dict, dict]:
+    brief = store.create_creation_brief(project_id=project_id, script_filename="script.txt", script_text=script_text, idempotency_key="brief", capability_profile={}, runtime=type("R", (), {"plan_questions": lambda *_args, **_kwargs: []})())
     brief = store.bypass_creation_interview(project_id=project_id, brief_id=brief["brief_id"], expected_revision=brief["revision"])
     brief = store.update_creation_brief_summary(project_id=project_id, brief_id=brief["brief_id"], summary="제품 소개", expected_revision=brief["revision"])
     brief = store.approve_creation_brief(project_id=project_id, brief_id=brief["brief_id"], expected_revision=brief["revision"])
@@ -38,6 +43,89 @@ def test_materializes_one_real_draft_bundle_and_reuses_same_idempotency_result(t
     session = store.get_editing_session(project_id=project.project_id, session_id=first["session_id"])
     assert session["timeline_id"] == first["timeline_id"]
     assert any(track["track_type"] == "narration" for track in session["tracks"])
+    visible_segment_id = session["segments"][0]["segment_id"]
+    placeholder = next(
+        clip
+        for track in session["tracks"]
+        for clip in track["clips"]
+        if clip.get("gap_slot_id")
+    )
+    assert placeholder["segment_id"] == visible_segment_id
+    assert placeholder["source_segment_id"] == "script-1"
+    assert session["gap_slots"][0]["segment_id"] == visible_segment_id
+    assert session["gap_slots"][0]["source_segment_id"] == "script-1"
+
+
+def test_real_asset_bundle_keeps_unique_tracks_and_places_each_source_on_its_visible_segment(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    store = LocalProjectStore(tmp_path / "projects")
+    project = store.bootstrap_project("Aligned real assets")
+    for index in range(4):
+        source = tmp_path / f"scene-{index}.mp4"
+        source.write_bytes(f"scene-{index}".encode())
+        store.register_asset(
+            project_id=project.project_id,
+            asset_type=AssetType.BROLL_VIDEO,
+            source_path=source,
+        )
+    monkeypatch.setattr(
+        store,
+        "_probe_playable_broll_duration",
+        lambda **_kwargs: 6.0,
+    )
+    brief, readiness = _ready(
+        store,
+        project.project_id,
+        "첫 장면입니다. 둘째 장면입니다. 셋째 장면입니다. 마지막 장면입니다.",
+    )
+
+    bundle = store.materialize_atomic_draft_bundle(
+        project_id=project.project_id,
+        brief_id=brief["brief_id"],
+        expected_brief_revision=brief["revision"],
+        readiness_id=readiness["readiness_id"],
+        expected_readiness_revision=readiness["revision"],
+        idempotency_key="aligned-assets",
+    )
+    session = store.get_editing_session(
+        project_id=project.project_id,
+        session_id=bundle["session_id"],
+    )
+    timeline = store.get_timeline_run(
+        project_id=project.project_id,
+        timeline_id=bundle["timeline_id"],
+    )
+    manifest = build_editor_playback_manifest(
+        project_id=project.project_id,
+        session=session,
+        timeline=timeline,
+        asset_content_url_prefix=f"/api/projects/{project.project_id}/assets",
+    )
+    visible = [
+        (segment["segment_id"], segment["start_sec"], segment["end_sec"])
+        for segment in session["segments"]
+    ]
+    broll = next(track for track in manifest["tracks"] if track["track_type"] == "broll")
+
+    assert len({track["track_id"] for track in manifest["tracks"]}) == len(manifest["tracks"])
+    assert [
+        (clip["segment_id"], clip["start_sec"], clip["end_sec"])
+        for clip in broll["clips"]
+    ] == visible
+    raw_broll = next(track for track in timeline["tracks"] if track["track_type"] == "broll")
+    assert [clip["source_segment_id"] for clip in raw_broll["clips"]] == [
+        "script-1",
+        "script-2",
+        "script-3",
+        "script-4",
+    ]
+    assert [
+        (clip["media_controls"]["in_sec"], clip["media_controls"]["out_sec"])
+        for clip in raw_broll["clips"]
+    ] == [(0, 5.0)] * 4
+    assert bundle["segment_ids"] == [segment_id for segment_id, _, _ in visible]
 
 
 def test_concurrent_duplicate_approval_returns_one_atomic_bundle(tmp_path):

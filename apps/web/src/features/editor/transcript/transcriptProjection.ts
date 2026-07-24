@@ -4,10 +4,8 @@ export type TranscriptCaption = TimedSegment & Readonly<{ text: string }>;
 export type TranscriptEntry = TranscriptCaption;
 
 export function projectTranscriptEntries(input: Readonly<{ narration: readonly TimedSegment[]; captions: readonly TranscriptCaption[] }>): TranscriptEntry[] {
-  const narration = new Map(input.narration.filter((item) => item.endSec > item.startSec).map((item) => [item.segmentId, item]));
   return input.captions
-    .filter((caption) => narration.has(caption.segmentId) && caption.endSec > caption.startSec)
-    .map((caption) => ({ ...caption, startSec: narration.get(caption.segmentId)!.startSec, endSec: narration.get(caption.segmentId)!.endSec }))
+    .filter((caption) => caption.endSec > caption.startSec)
     .sort((left, right) => left.startSec - right.startSec || left.segmentId.localeCompare(right.segmentId));
 }
 

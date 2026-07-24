@@ -501,6 +501,41 @@ def test_exact_preview_record_is_project_scoped_and_publish_is_copied_under_proj
         store.get_exact_preview(project_id=project_b.project_id, generation_id=record["generation_id"])
 
 
+def test_exact_preview_publish_staging_name_is_bounded_for_long_windows_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="preview bounded staging")
+    session = _session(store, project.project_id)
+    record = store.begin_exact_preview(
+        project_id=project.project_id,
+        request=ExactPreviewRequest(session_id=str(session["session_id"]), expected_revision=1),
+        fingerprint="sha256:bounded-stage",
+    )
+    assert store.claim_exact_preview(
+        project_id=project.project_id,
+        generation_id=record["generation_id"],
+        owner_token="worker",
+    )
+    worker_output = tmp_path / "worker.mp4"
+    worker_output.write_bytes(b"proxy")
+    original_copyfile = shutil.copyfile
+    staging_names: list[str] = []
+
+    def bounded_copyfile(source: str | os.PathLike[str], destination: str | os.PathLike[str]) -> str:
+        staging_names.append(Path(destination).name)
+        return str(original_copyfile(source, destination))
+
+    monkeypatch.setattr("videobox_storage.local_project_store.shutil.copyfile", bounded_copyfile)
+
+    assert store.finish_exact_preview(
+        project_id=project.project_id,
+        generation_id=record["generation_id"],
+        fingerprint="sha256:bounded-stage",
+        artifact_path=worker_output,
+        owner_token="worker",
+    )
+    assert staging_names and len(staging_names[0]) <= 32
+
+
 def test_exact_preview_retry_creates_a_new_generation_after_failure(tmp_path: Path) -> None:
     store = LocalProjectStore(tmp_path)
     project = store.bootstrap_project(name="preview retry")
