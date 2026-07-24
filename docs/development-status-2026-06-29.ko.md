@@ -1,6 +1,20 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 297. 2026-07-24 Task 22C1 supported editor commands/partial regeneration closeout`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 298. 2026-07-24 Task 22C3 canonical output ownership closeout`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+
+## 298. 2026-07-24 Task 22C3 canonical output ownership closeout
+
+- `[x] canonical output owner`: `/projects/:id/outputs`와 `OutputsPage`가 exact preview 상태 참조, 자막, final render, current CapCut draft/handoff, stale 표시와 명시적 새로고침을 소유한다. exact preview URL이나 두 번째 player는 만들지 않고 재생은 editor의 한 player로 유지한다.
+- `[x] current-revision fence`: 자막/final/CapCut mutation은 active editing session과 route project, timeline, durable review approval의 `source_session_revision/is_current`가 모두 맞을 때만 열린다. 과거 승인·과거 산출물·session 없는 산출물은 current로 취급하지 않는다.
+- `[x] 중복 생성 방지`: mutation은 single-flight다. 수동 새로고침 뒤 도착한 오래된 성공/실패는 request epoch로 버리고 authoritative state를 다시 읽는다. POST가 성공한 뒤 readback만 실패해도 생성 실패로 표시하지 않고 authoritative refresh로 reconcile해 같은 작업의 재제출을 유도하지 않는다.
+- `[x] legacy reachability 제거`: canonical production graph에서 legacy `preview_render`/`exportCapcut` mutation을 제거했다. 호환 호출은 현재 도달 불가능한 legacy module로 격리했고 persisted-data reader는 유지했다. settings 이동은 `project_id`를 보존하며 unknown project route는 project-scoped request 0으로 복구한다.
+- `[x] parity/E2E`: 9개 parity row는 실제 route/component/E2E assertion으로 고정했다. loopback E2E는 exact preview의 별도 URL, subtitle/final/CapCut/handoff, old revision stale 처리와 새 revision lineage 복구, unknown route 복구 및 old endpoint call 0을 확인한다.
+- `검증`: TDD RED→GREEN, focused frontend `3 files / 90 passed`, full frontend `63 files / 726 passed`, output/product-shell Playwright E2E `14 passed`와 snapshot manifest verifier, TypeScript no-emit, production build, Editor UI OSS provenance/UI-system verifier, external-runtime/network guard `2 files / 6 passed`, `git diff --check` 통과. independent spec/quality/gap/reverse review는 Critical/Important/Moderate 0이다. 기존 React `act(...)`, jsdom navigation, intentional ErrorBoundary stderr와 500 kB bundle warning은 exit 0인 비실패 출력이다. 전체 Python regression은 실행하지 않았다.
+- 실제 사용자 샘플의 BGM/SFX 입력·편집·구간별 exact AAC 역방향 증거는 §295와 §297을 따른다. 자동 테스트는 사람 청취 품질 판단이나 실제 CapCut Desktop 실증을 대체하지 않는다.
+- `다음 goal`: Task 22D에서 parity owner matrix를 유지한 채 도달 불가능한 legacy `App.tsx`/CSS/components/tests와 격리 adapter를 `rg`/AST inventory 후 제거한다. persisted-data reader는 보존하고 22E/F release audit로 이어간다.
+- `?? .tmp-final-fence-debug/`, `?? .tmp-real-video-dogfood/`, `?? apps/web/.tmp-real-video-dogfood/`와 사용자 원본 샘플은 stage/remove/delete하지 않았다.
+- Task 9 사람/환경 acceptance와 실제 CapCut Desktop 실증은 계속 별도다. 공식 누적은 사용자 지시대로 **9/22 (40.9%)**, 잔여 **59.1%**를 유지한다.
+- handoff: `docs/handoffs/2026-07-24-videobox-task22c3-canonical-output-closeout.ko.md`.
 
 ## 297. 2026-07-24 Task 22C1 supported editor commands/partial regeneration closeout
 

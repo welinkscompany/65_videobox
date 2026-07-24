@@ -520,6 +520,10 @@ export type SubtitleArtifact = {
   status: string;
   notes: string[];
   created_at?: string | null;
+  source_session_revision?: number | null;
+  is_current?: boolean;
+  invalidated_at?: string | null;
+  invalidated_reason?: string | null;
 };
 
 export type SubtitleJob = {
@@ -689,7 +693,7 @@ export class CapcutDraftHandoffInProgressError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, init);
   if (!response.ok) {
     if (response.status === 409) {
@@ -939,22 +943,6 @@ export const api = {
     }),
   renderSubtitle: (projectId: string, payload: OutputJobRequest) =>
     request<{ job_id: string; status: string }>(`/api/projects/${projectId}/jobs/subtitle-render`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-    }),
-  renderPreview: (projectId: string, payload: OutputJobRequest) =>
-    request<{ job_id: string; status: string }>(`/api/projects/${projectId}/jobs/preview-render`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-    }),
-  exportCapcut: (projectId: string, payload: OutputJobRequest) =>
-    request<{ job_id: string; status: string }>(`/api/projects/${projectId}/jobs/capcut-export`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

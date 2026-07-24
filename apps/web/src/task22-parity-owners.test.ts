@@ -1,0 +1,167 @@
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, relative, resolve } from "node:path";
+
+import { describe, expect, it } from "vitest";
+
+const sourceRoot = import.meta.dirname;
+const webRoot = resolve(sourceRoot, "..");
+const entrypoint = resolve(sourceRoot, "main.tsx");
+const importPattern = /\b(?:import|export)\s+(?:type\s+)?(?:[^"'`;]*?\s+from\s+)?["'](\.[^"']+)["']/g;
+
+function resolveTypeScriptImport(importer: string, specifier: string) {
+  const base = resolve(dirname(importer), specifier);
+  const candidates = [
+    base,
+    `${base}.ts`,
+    `${base}.tsx`,
+    resolve(base, "index.ts"),
+    resolve(base, "index.tsx"),
+  ];
+  return candidates.find((candidate) => /\.(?:ts|tsx)$/.test(candidate) && existsSync(candidate)) ?? null;
+}
+
+function reachableTypeScriptModules(entry: string) {
+  const reachable = new Set<string>();
+  const pending = [entry];
+  while (pending.length > 0) {
+    const file = pending.pop()!;
+    if (reachable.has(file)) continue;
+    reachable.add(file);
+    const source = readFileSync(file, "utf8");
+    for (const match of source.matchAll(importPattern)) {
+      const dependency = resolveTypeScriptImport(file, match[1]);
+      if (dependency && !reachable.has(dependency)) pending.push(dependency);
+    }
+  }
+  return reachable;
+}
+
+function sourcePath(file: string) {
+  return relative(sourceRoot, file).replaceAll("\\", "/");
+}
+
+describe("Task 22 canonical production owners", () => {
+  it("keeps legacy output calls and their legacy UI owners unreachable from main.tsx", () => {
+    const reachable = reachableTypeScriptModules(entrypoint);
+    const paths = [...reachable].map(sourcePath);
+    const endpointStrings = ["/jobs/preview-render", "/jobs/capcut-export"];
+
+    expect(paths).not.toContain("App.tsx");
+    expect(paths).not.toContain("app/LegacyWorkspacePage.tsx");
+
+    for (const file of reachable) {
+      const source = readFileSync(file, "utf8");
+      expect(source, `${sourcePath(file)} references a legacy output mutation`).not.toMatch(/\b(?:renderPreview|exportCapcut)\b/);
+      for (const endpoint of endpointStrings) expect(source, `${sourcePath(file)} contains ${endpoint}`).not.toContain(endpoint);
+    }
+  });
+
+  it("keeps every retained workspace section on its canonical component owner", () => {
+    const router = readFileSync(resolve(sourceRoot, "app/AppRouter.tsx"), "utf8");
+    const owners = [
+      [/normalizedSection === "home"/, /<HomePage\b/],
+      [/normalizedSection === "create"/, /<CreationInterview\b/],
+      [/normalizedSection === "media"/, /<MediaWorkspacePage\b/],
+      [/normalizedSection === "outputs"/, /<OutputsPage\b/],
+      [/normalizedSection === "timeline" \|\| normalizedSection === "review"/, /<TimelineReviewPage\b/],
+      [/section === "editor"/, /<EditorWorkbenchRoute\b/],
+    ] as const;
+
+    for (const [routeGuard, owner] of owners) {
+      expect(router).toMatch(routeGuard);
+      expect(router).toMatch(owner);
+    }
+    expect(router).toMatch(/params\.section === "settings"/);
+    expect(router).toMatch(/\/settings\/general/);
+    expect(router).toMatch(/<SettingsPage\b/);
+  });
+
+  it("keeps the canonical output acceptance path on exact preview, current render, draft, and explicit stale recovery", () => {
+    const outputs = readFileSync(resolve(sourceRoot, "app/OutputsPage.tsx"), "utf8");
+    const outputTests = readFileSync(resolve(sourceRoot, "app/OutputsPage.test.tsx"), "utf8");
+    const e2e = readFileSync(resolve(sourceRoot, "../e2e/z-script-first-vertical.spec.mjs"), "utf8");
+
+    expect(outputs).toContain("getEditorPlaybackManifest");
+    expect(outputs).toContain("exactPreviewState");
+    expect(outputs).toContain("편집에서 미리보기 열기");
+    expect(outputTests).toContain("does not let a delayed project A exact-preview response replace project B");
+    expect(outputTests).toContain("keeps retained final output visible when the exact-preview status read fails");
+    expect(e2e).toContain("/exact-previews/exact-e2e-");
+    expect(e2e).toContain("__e2e/mark-outputs-stale");
+    expect(e2e).toContain("실제 CapCut Desktop에서 열기와 가져오기는 별도로 확인해야 해요.");
+  });
+
+  it("keeps every Task 22 parity row mapped to a canonical route, component test, and E2E owner", () => {
+    const router = readFileSync(resolve(sourceRoot, "app/AppRouter.tsx"), "utf8");
+    const shell = readFileSync(resolve(sourceRoot, "app/ProductShell.tsx"), "utf8");
+    const rows = [
+      {
+        capability: "project create/select and source ingest",
+        ownerSource: router, owner: /normalizedSection === "create"[\s\S]{0,240}<CreationInterview\b/,
+        componentEvidence: [["project-onboarding.test.tsx", "registers narration plus script from local paths"], ["features/creation/CreationInterview.test.tsx", "uploads a supported creator script"]],
+        e2eEvidence: ["z-script-first-vertical.spec.mjs", "ready-assets approval uses returned IDs"],
+      },
+      {
+        capability: "media list and recovery",
+        ownerSource: router, owner: /normalizedSection === "media"[\s\S]{0,800}<MediaWorkspacePage\b/,
+        componentEvidence: [["features/media/MediaWorkspacePage.test.tsx", "supports cancel, retry, and review"]],
+        e2eEvidence: ["media-recovery.spec.mjs", "recovers local analysis with authoritative refreshes"],
+      },
+      {
+        capability: "current/global job recovery",
+        ownerSource: shell, owner: /<JobRecovery projectId=\{projectId\}/,
+        componentEvidence: [["features/jobs/JobRecovery.test.tsx", "retries a global row with its own project and job IDs"]],
+        e2eEvidence: ["job-recovery.spec.mjs", "lazily retries a global row"],
+      },
+      {
+        capability: "script draft and atomic creation",
+        ownerSource: router, owner: /normalizedSection === "create"[\s\S]{0,240}<CreationInterview\b/,
+        componentEvidence: [["features/creation/CreationInterview.test.tsx", "requires an explicit creator confirmation"]],
+        e2eEvidence: ["z-script-first-vertical.spec.mjs", "gap-only approval preserves returned gap IDs"],
+      },
+      {
+        capability: "timeline and review",
+        ownerSource: router, owner: /normalizedSection === "timeline" \|\| normalizedSection === "review"[\s\S]{0,500}<TimelineReviewPage\b/,
+        componentEvidence: [["features/review/TimelineReviewPage.test.tsx", "links an exact segment to the pinned editor"]],
+        e2eEvidence: ["review-to-editor.spec.mjs", "opens the pinned editor"],
+      },
+      {
+        capability: "editor workbench",
+        ownerSource: router, owner: /section === "editor"[\s\S]{0,300}<EditorWorkbenchRoute\b/,
+        componentEvidence: [["features/editor/workbench/editor-workbench-route.test.tsx", "publishes nothing until the matching manifest and session arrive together"]],
+        e2eEvidence: ["exact-preview.spec.mjs", "current exact proxy plays a valid local MP4"],
+      },
+      {
+        capability: "settings and voice review",
+        ownerSource: router, owner: /path: "\/settings\/\$section"[\s\S]{0,180}component: SettingsRoutePage/,
+        componentEvidence: [["features/settings/VoiceTtsSettings.test.tsx", "creates and reviews candidates"]],
+        e2eEvidence: ["voice-tts-settings.spec.mjs", "canonical settings route"],
+      },
+      {
+        capability: "canonical outputs",
+        ownerSource: router, owner: /normalizedSection === "outputs"[\s\S]{0,240}<OutputsPage\b/,
+        componentEvidence: [["app/OutputsPage.test.tsx", "owns the current exact-preview reference"]],
+        e2eEvidence: ["z-script-first-vertical.spec.mjs", "current-revision playback and CapCut smoke"],
+      },
+      {
+        capability: "route recovery",
+        ownerSource: router, owner: /notFoundComponent: RecoveryPage/,
+        componentEvidence: [["app/AppRouter.test.tsx", "renders recovery for an unknown project"]],
+        e2eEvidence: ["product-shell.spec.mjs", "unknown project route offers canonical recovery"],
+      },
+    ] as const;
+
+    for (const row of rows) {
+      expect(row.ownerSource, `${row.capability} canonical owner`).toMatch(row.owner);
+      for (const [componentTest, marker] of row.componentEvidence) {
+        const componentPath = resolve(sourceRoot, componentTest);
+        expect(existsSync(componentPath), `${row.capability} component owner ${componentTest}`).toBe(true);
+        expect(readFileSync(componentPath, "utf8"), `${row.capability} component assertion ${marker}`).toContain(marker);
+      }
+      const [e2eFile, e2eMarker] = row.e2eEvidence;
+      const e2ePath = resolve(webRoot, "e2e", e2eFile);
+      expect(existsSync(e2ePath), `${row.capability} E2E owner ${e2eFile}`).toBe(true);
+      expect(readFileSync(e2ePath, "utf8"), `${row.capability} E2E assertion ${e2eMarker}`).toContain(e2eMarker);
+    }
+  });
+});

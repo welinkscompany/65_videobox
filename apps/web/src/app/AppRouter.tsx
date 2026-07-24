@@ -17,11 +17,10 @@ import { CreationInterview } from "../features/creation/CreationInterview";
 import { DraftGapMedia } from "../features/media/DraftGapMedia";
 import { MediaWorkspacePage } from "../features/media/MediaWorkspacePage";
 import { TimelineReviewPage } from "../features/review/TimelineReviewPage";
-import { LegacyWorkspacePage } from "./LegacyWorkspacePage";
 import { EditorWorkbenchRoute } from "../features/editor/workbench/EditorWorkbenchRoute";
 import { HomePage, opensLastProjectOnStart, ProductShell, SettingsPage } from "./ProductShell";
 import { OutputsPage } from "./OutputsPage";
-import { ProjectWorkspaceProvider, resolveLastValidProjectId } from "./ProjectWorkspaceProvider";
+import { resolveLastValidProjectId } from "./ProjectWorkspaceProvider";
 import { isWorkspaceSection, resolveWorkspaceLocation, type WorkspaceSection } from "./routeManifest";
 
 const lastProjectKey = "videobox.last-valid-project";
@@ -80,7 +79,14 @@ const projectsRoute = createRoute({
 const workspaceRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/projects/$projectId/$section",
-  beforeLoad: ({ params, search }) => {
+  beforeLoad: async ({ context, params, search }) => {
+    if (params.section === "settings") {
+      const projects = await context.catalog.load();
+      if (!projects.some((project) => project.project_id === params.projectId)) {
+        throw redirect({ href: `/projects/${encodeURIComponent(params.projectId)}/home`, replace: true });
+      }
+      throw redirect({ href: `/settings/general?project_id=${encodeURIComponent(params.projectId)}`, replace: true });
+    }
     if (params.section !== "editing") return;
     const routeSearch = search as { session_id?: unknown; segment_id?: unknown };
     const sessionId = typeof routeSearch.session_id === "string"
@@ -144,7 +150,6 @@ function WorkspacePage() {
   const { projectId, section } = workspaceRoute.useParams();
   const projects = rootRoute.useLoaderData() as Project[];
   const navigate = useNavigate();
-  const router = useRouter();
   const routeSearch = useRouterState({ select: (routerState) => routerState.location.search }) as {
     session_id?: unknown;
     segment_id?: unknown;
@@ -215,22 +220,7 @@ function WorkspacePage() {
       <EditorWorkbenchRoute projectId={projectId} sessionId={requestedEditingSessionId} requestedSegmentId={requestedSegmentId} />
     </ProductShell>;
   }
-  return (
-    <ProjectWorkspaceProvider value={{ projectId, section, projects }}>
-      <LegacyWorkspacePage
-        projectId={projectId}
-        section={normalizedSection}
-        editingSessionId={normalizedSection === "editing" ? requestedEditingSessionId : null}
-        catalogProjects={projects}
-        onNavigate={navigateTo}
-        onProjectCreated={async (project) => {
-          await router.options.context.catalog.refresh();
-          await router.invalidate();
-          await navigate({ to: resolveWorkspaceLocation(project.project_id, "create") });
-        }}
-      />
-    </ProjectWorkspaceProvider>
-  );
+  return <RecoveryPage />;
 }
 
 function resolveSafeCreationReturn(projectId: string, requestedReturn: string | null) {
@@ -274,12 +264,18 @@ function SettingsRoutePage() {
   const { section } = settingsRoute.useParams();
   const projects = rootRoute.useLoaderData() as Project[];
   const navigate = useNavigate();
+  const routeSearch = useRouterState({ select: (routerState) => routerState.location.search }) as {
+    project_id?: unknown;
+  };
   const validSections = ["general", "appearance", "ai-privacy", "voice", "storage", "output"] as const;
   if (!validSections.includes(section as typeof validSections[number])) return <RecoveryPage />;
-  const projectId = resolveLastValidProjectId(window.localStorage.getItem(lastProjectKey), projects) ?? projects[0]?.project_id;
+  const requestedProjectId = typeof routeSearch.project_id === "string" ? routeSearch.project_id.trim() : "";
+  if (requestedProjectId && !projects.some((project) => project.project_id === requestedProjectId)) return <RecoveryPage />;
+  const projectId = requestedProjectId || resolveLastValidProjectId(window.localStorage.getItem(lastProjectKey), projects) || projects[0]?.project_id;
   if (!projectId) return <ProjectsPage />;
-  return <ProductShell projectId={projectId} projects={projects} section="settings" onNavigate={(nextProjectId, nextSection) => void navigate({ to: resolveWorkspaceLocation(nextProjectId, nextSection) })} onOpenSettings={() => void navigate({ to: "/settings/general" })}>
-    <SettingsPage projectId={projectId} section={section as typeof validSections[number]} onNavigate={(nextSection) => void navigate({ to: `/settings/${nextSection}` })} />
+  const settingsLocation = (nextSection: typeof validSections[number]) => `/settings/${nextSection}?project_id=${encodeURIComponent(projectId)}`;
+  return <ProductShell projectId={projectId} projects={projects} section="settings" onNavigate={(nextProjectId, nextSection) => void navigate({ to: resolveWorkspaceLocation(nextProjectId, nextSection) })} onOpenSettings={() => void navigate({ to: settingsLocation("general") })}>
+    <SettingsPage projectId={projectId} section={section as typeof validSections[number]} onNavigate={(nextSection) => void navigate({ to: settingsLocation(nextSection) })} />
   </ProductShell>;
 }
 

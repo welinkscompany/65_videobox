@@ -254,6 +254,60 @@ describe("AppRouter URL ownership", () => {
     expect(startCapcutDraftExport).not.toHaveBeenCalled();
   });
 
+  it("redirects project-scoped settings to the canonical general settings owner", async () => {
+    vi.spyOn(api, "listProjects").mockResolvedValue([
+      { project_id: "project_a", name: "A", status: "active", root_storage_uri: "local://a" },
+    ]);
+    const getPreview = vi.spyOn(api, "getPreview");
+    const getExport = vi.spyOn(api, "getExport");
+    const router = createAppRouter(
+      new ProjectCatalog(),
+      createMemoryHistory({ initialEntries: ["/projects/project_a/settings"] }),
+    );
+
+    render(<AppRouter router={router} />);
+
+    expect(await screen.findByTestId("settings-page")).toBeVisible();
+    expect(screen.getByRole("heading", { name: "일반" })).toBeVisible();
+    await waitFor(() => expect(router.state.location.pathname).toBe("/settings/general"));
+    expect(getPreview).not.toHaveBeenCalled();
+    expect(getExport).not.toHaveBeenCalled();
+  });
+
+  it("preserves a validated project identity while redirecting project-scoped settings", async () => {
+    window.localStorage.setItem("videobox.last-valid-project", "project_a");
+    vi.spyOn(api, "listProjects").mockResolvedValue([
+      { project_id: "project_a", name: "A", status: "active", root_storage_uri: "local://a" },
+      { project_id: "project_b", name: "B", status: "active", root_storage_uri: "local://b" },
+    ]);
+    const router = createAppRouter(
+      new ProjectCatalog(),
+      createMemoryHistory({ initialEntries: ["/projects/project_b/settings"] }),
+    );
+
+    render(<AppRouter router={router} />);
+
+    expect(await screen.findByTestId("settings-page")).toBeVisible();
+    expect(screen.getByRole("button", { name: "B" })).toHaveAttribute("aria-pressed", "true");
+    await waitFor(() => expect(router.state.location.href).toBe("/settings/general?project_id=project_b"));
+  });
+
+  it("does not redirect an unknown project-scoped settings URL into another project's settings", async () => {
+    window.localStorage.setItem("videobox.last-valid-project", "project_a");
+    vi.spyOn(api, "listProjects").mockResolvedValue([
+      { project_id: "project_a", name: "A", status: "active", root_storage_uri: "local://a" },
+    ]);
+    const router = createAppRouter(
+      new ProjectCatalog(),
+      createMemoryHistory({ initialEntries: ["/projects/missing/settings"] }),
+    );
+
+    render(<AppRouter router={router} />);
+
+    expect(await screen.findByTestId("project-recovery")).toBeVisible();
+    expect(screen.queryByTestId("settings-page")).not.toBeInTheDocument();
+  });
+
   it("shows onboarding at /projects when the catalog is empty", async () => {
     vi.spyOn(api, "listProjects").mockResolvedValue([]);
     const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects"] }));

@@ -125,6 +125,8 @@ Create `apps/web/e2e/voice-tts-settings.spec.mjs`, then run:
 
 ### 22C3 — Superseded legacy output contracts
 
+**Status (2026-07-24): complete.** `/projects/:id/outputs` now owns exact-preview status reference, current-revision subtitle/final/CapCut draft/handoff and stale recovery. Legacy output mutations are unreachable from the canonical production graph; one-player ownership remains in the editor.
+
 **RED**
 
 - Add inventory tests proving the canonical product has no reachable call to legacy `preview_render` or `exportCapcut`.

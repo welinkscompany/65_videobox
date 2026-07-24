@@ -30,6 +30,7 @@ import {
   type MediaLibraryInstallState,
   type AssetResponse,
 } from "./api";
+import { legacyOutputApi } from "./legacy-output-api";
 import { MediaAnalysisPanel } from "./features/media/MediaAnalysisPanel";
 import { ManualMediaLibrary } from "./features/media/ManualMediaLibrary";
 import { DirectorWorkspacePanel } from "./features/director/DirectorWorkspacePanel";
@@ -1229,7 +1230,7 @@ export function App({
     setIsRenderingPreview(true);
     setErrorMessage(null);
     try {
-      const renderResult = await api.renderPreview(selectedProjectId, {
+      const renderResult = await legacyOutputApi.renderPreview(selectedProjectId, {
         timeline_job_id: activeTimelineJobId,
       });
       const [jobItems, preview] = await Promise.all([
@@ -1254,7 +1255,7 @@ export function App({
     setIsExportingCapcut(true);
     setErrorMessage(null);
     try {
-      const exportResult = await api.exportCapcut(selectedProjectId, {
+      const exportResult = await legacyOutputApi.exportCapcut(selectedProjectId, {
         timeline_job_id: activeTimelineJobId,
       });
       const [jobItems, capcutExport] = await Promise.all([

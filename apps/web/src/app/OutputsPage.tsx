@@ -5,8 +5,11 @@ import {
   CapcutDraftHandoffInProgressError,
   type CapCutDraftExportJob,
   type CapCutHandoffDiagnostics,
+  type EditingSession,
+  type EditorPlaybackManifest,
   type FinalRenderJob,
   type JobRecord,
+  type ReviewApproval,
   type ReviewSnapshot,
   type SubtitleJob,
   type TimelineJob,
@@ -14,11 +17,15 @@ import {
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 
+type ExactPreviewState = "current" | "pending" | "running" | "failed" | "stale" | "unavailable" | "unknown";
+
 type OutputState = {
   projectId: string;
+  session: EditingSession | null;
   timelineJob: JobRecord | null;
   timeline: TimelineJob | null;
   review: ReviewSnapshot | null;
+  approval: ReviewApproval | null;
   subtitle: SubtitleJob | null;
   finalJobs: JobRecord[];
   finalJob: JobRecord | null;
@@ -26,6 +33,7 @@ type OutputState = {
   capcutJobs: JobRecord[];
   capcutDraft: CapCutDraftExportJob | null;
   diagnostics: CapCutHandoffDiagnostics | null;
+  exactPreviewState: ExactPreviewState;
 };
 
 function mostRecentJob(jobs: JobRecord[], jobType: string, inputRef?: string | null) {
@@ -35,6 +43,53 @@ function mostRecentJob(jobs: JobRecord[], jobType: string, inputRef?: string | n
     const latestTimestamp = latest.finished_at ?? latest.started_at ?? "";
     return timestamp > latestTimestamp ? job : latest;
   }, null);
+}
+
+function deriveExactPreviewState(
+  routeProjectId: string,
+  session: EditingSession | null,
+  manifest: EditorPlaybackManifest | null,
+  readFailed: boolean,
+): ExactPreviewState {
+  if (!session) return "unavailable";
+  if (readFailed || !manifest) return "unknown";
+  const manifestIsCurrent = (
+    session.project_id === routeProjectId &&
+    manifest.project_id === session.project_id &&
+    manifest.session_id === session.session_id &&
+    manifest.timeline_id === session.timeline_id &&
+    manifest.session_revision === session.session_revision &&
+    manifest.source_status.status === "current" &&
+    manifest.source_status.source_session_id === session.session_id &&
+    manifest.source_status.source_session_revision === session.session_revision
+  );
+  if (!manifestIsCurrent || manifest.exact_preview.status === "stale") return "stale";
+  if (manifest.exact_preview.status === "unavailable") return "unavailable";
+  const exactPreviewMatchesSession = (
+    manifest.exact_preview.source_session_id === session.session_id &&
+    manifest.exact_preview.source_session_revision === session.session_revision
+  );
+  if (!exactPreviewMatchesSession) return "stale";
+  if (manifest.exact_preview.status === "pending" || manifest.exact_preview.status === "running" || manifest.exact_preview.status === "failed") {
+    return manifest.exact_preview.status;
+  }
+  if (manifest.exact_preview.status !== "succeeded") return "stale";
+  return (
+    Boolean(manifest.exact_preview.url) &&
+    manifest.exact_preview.artifact_revision === session.session_revision
+  ) ? "current" : "stale";
+}
+
+function exactPreviewDescription(state: ExactPreviewState | undefined) {
+  switch (state) {
+    case "current": return "현재 편집본 미리보기가 준비되었어요.";
+    case "pending":
+    case "running": return "미리보기를 준비하고 있어요.";
+    case "failed": return "미리보기를 만들지 못했어요.";
+    case "stale": return "미리보기가 최신 편집본과 달라요.";
+    case "unavailable": return "아직 미리보기가 없어요.";
+    default: return "미리보기 상태를 지금 확인할 수 없어요.";
+  }
 }
 
 export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; onOpenEditor: () => void }) {
@@ -74,7 +129,7 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
     setErrorProjectId(null);
     try {
       const [session, jobs] = await Promise.all([
-        api.getLatestEditingSession(refreshProjectId).catch(() => null),
+        api.getLatestEditingSession(refreshProjectId),
         options?.jobs ? Promise.resolve(options.jobs) : api.listJobs(refreshProjectId),
       ]);
       if (!isCurrentRequest()) return;
@@ -86,9 +141,11 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
       const finalJob = timelineJob ? mostRecentJob(finalJobs, "final_render") : mostRecentJob(jobs, "final_render");
       const capcutJobs = timelineJob ? jobs.filter((job) => job.job_type === "capcut_draft_export" && job.input_ref === timelineJob.job_id) : [];
       const capcutJob = timelineJob ? mostRecentJob(capcutJobs, "capcut_draft_export") : null;
-      const [timeline, review, subtitle, finalRender, capcutDraft, diagnostics] = await Promise.all([
+      let exactPreviewReadFailed = false;
+      const [timeline, review, approval, subtitle, finalRender, capcutDraft, diagnostics, playbackManifest] = await Promise.all([
         timelineJob ? api.getTimeline(refreshProjectId, timelineJob.job_id) : Promise.resolve(null),
         timelineJob ? api.getReviewSnapshot(refreshProjectId, timelineJob.job_id) : Promise.resolve(null),
+        timelineJob && session ? api.getReviewApproval(refreshProjectId, session.timeline_id) : Promise.resolve(null),
         options?.subtitle && session && options.subtitle.subtitle.timeline_id === session.timeline_id
           ? Promise.resolve(options.subtitle)
           : subtitleRecord ? api.getSubtitle(refreshProjectId, subtitleRecord.job_id) : Promise.resolve(null),
@@ -99,9 +156,34 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
           ? Promise.resolve(options.capcutDraft)
           : capcutJob ? api.getCapcutDraftExport(refreshProjectId, capcutJob.job_id) : Promise.resolve(null),
         api.getCapcutHandoffDiagnostics().catch(() => null),
+        session
+          ? api.getEditorPlaybackManifest(refreshProjectId, session.session_id).catch(() => {
+            exactPreviewReadFailed = true;
+            return null;
+          })
+          : Promise.resolve(null),
       ]);
       if (!isCurrentRequest()) return;
-      setState({ projectId: refreshProjectId, timelineJob, timeline, review, subtitle, finalJobs, finalJob, finalRender, capcutJobs, capcutDraft, diagnostics });
+      setSubtitleErrorProjectId(null);
+      setFinalErrorProjectId(null);
+      setCapcutErrorProjectId(null);
+      setCapcutHandoffErrorProjectId(null);
+      setState({
+        projectId: refreshProjectId,
+        session,
+        timelineJob,
+        timeline,
+        review,
+        approval,
+        subtitle,
+        finalJobs,
+        finalJob,
+        finalRender,
+        capcutJobs,
+        capcutDraft,
+        diagnostics,
+        exactPreviewState: deriveExactPreviewState(refreshProjectId, session, playbackManifest, exactPreviewReadFailed),
+      });
     } catch {
       if (!isCurrentRequest()) return;
       setState(null);
@@ -155,9 +237,20 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
   if (hasError) return <section className="vb-outputs" aria-live="polite" data-testid="outputs-page"><h1>출력</h1><p>출력 상태를 불러오지 못했어요.</p><p>잠시 후 상태를 다시 확인하거나 편집 화면에서 작업을 이어가세요.</p><Button variant="outline" onClick={() => void refresh()}>상태 다시 확인</Button><Button onClick={onOpenEditor}>편집 열기</Button></section>;
 
   const timelineJob = currentState?.timelineJob;
+  const currentSession = currentState?.session;
   const canRenderSubtitle = Boolean(
-    timelineJob && currentState?.timeline && currentState.review &&
+    timelineJob && currentSession && currentState?.timeline && currentState.review && currentState.approval &&
+    currentSession.project_id === projectId &&
+    currentState.timeline.timeline.project_id === projectId &&
+    currentState.timeline.timeline.timeline_id === currentSession.timeline_id &&
+    currentState.review.project_id === projectId &&
+    currentState.review.timeline_id === currentSession.timeline_id &&
+    currentState.approval.project_id === projectId &&
+    currentState.approval.timeline_id === currentSession.timeline_id &&
+    currentState.approval.source_session_revision === currentSession.session_revision &&
+    currentState.approval.is_current === true &&
     currentState.review.review_status === "approved" &&
+    currentState.approval.review_status === "approved" &&
     currentState.timeline.timeline.review_flags.length === 0 &&
     currentState.timeline.timeline.pending_recommendations.length === 0 &&
     currentState.review.review_flags.length === 0 &&
@@ -166,14 +259,31 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
   const finalJob = currentState?.finalJob;
   const hasPendingFinal = currentState?.finalJobs.some((job) => job.status === "pending" || job.status === "running") === true;
   const canRenderFinal = canRenderSubtitle && !hasPendingFinal;
+  const subtitle = currentState?.subtitle;
+  const currentSubtitle = subtitle?.status === "succeeded" && subtitle.subtitle?.status === "succeeded" && currentSession != null && (
+    currentSession.project_id === projectId &&
+    subtitle.subtitle.project_id === projectId &&
+    subtitle.subtitle.timeline_id === currentSession.timeline_id &&
+    subtitle.subtitle.source_session_revision === currentSession.session_revision &&
+    subtitle.subtitle.is_current === true
+  );
+  const staleSubtitle = subtitle?.status === "succeeded" && Boolean(subtitle.subtitle) && !currentSubtitle;
   const finalRender = currentState?.finalRender;
-  const currentFinal = finalRender?.status === "succeeded" && finalRender.render?.is_current === true;
+  const currentFinal = finalRender?.status === "succeeded" && finalRender.render?.is_current === true && currentSession != null && (
+    currentSession.project_id === projectId &&
+      finalRender.render.timeline_id === currentSession.timeline_id &&
+      finalRender.render.source_session_revision === currentSession.session_revision
+  );
   const staleFinal = finalRender?.status === "succeeded" && Boolean(finalRender.render) && !currentFinal;
   const capcutJobs = currentState?.capcutJobs ?? [];
   const hasPendingCapcut = capcutJobs.some((job) => job.status === "pending" || job.status === "running");
   const canExportCapcutDraft = canRenderFinal && !hasPendingCapcut;
   const capcutDraft = currentState?.capcutDraft;
-  const currentCapcutDraft = capcutDraft?.status === "succeeded" && capcutDraft.export?.status === "succeeded" && capcutDraft.export.is_current === true;
+  const currentCapcutDraft = capcutDraft?.status === "succeeded" && capcutDraft.export?.status === "succeeded" && capcutDraft.export.is_current === true && currentSession != null && (
+    currentSession.project_id === projectId &&
+      capcutDraft.export.timeline_id === currentSession.timeline_id &&
+      capcutDraft.export.source_session_revision === currentSession.session_revision
+  );
   const staleCapcutDraft = capcutDraft?.status === "succeeded" && Boolean(capcutDraft.export) && !currentCapcutDraft;
   const capcutHandoff = currentCapcutDraft ? capcutDraft?.export?.handoff ?? null : null;
   const capcutHandoffInProgress = capcutHandoff?.status === "in_progress";
@@ -184,20 +294,33 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
     const submissionProjectId = projectId;
     if (currentProjectId.current !== submissionProjectId || !timelineJob || !canRenderSubtitle || isRenderingCurrentSubtitle) return;
     const submissionEpoch = subtitleSubmissionEpoch.current + 1;
+    const requestEpochAtSubmission = requestEpoch.current;
     subtitleSubmissionEpoch.current = submissionEpoch;
     subtitleRequestProjectId.current = submissionProjectId;
     setIsRenderingSubtitle(true);
     setSubtitleErrorProjectId(null);
     try {
       const result = await api.renderSubtitle(submissionProjectId, { timeline_job_id: timelineJob.job_id });
+      try {
       const [jobs, subtitle] = await Promise.all([
         api.listJobs(submissionProjectId),
         api.getSubtitle(submissionProjectId, result.job_id),
       ]);
       if (submissionEpoch !== subtitleSubmissionEpoch.current || currentProjectId.current !== submissionProjectId) return;
-      await refresh({ jobs, subtitle });
+      await (requestEpochAtSubmission === requestEpoch.current
+        ? refresh({ jobs, subtitle })
+        : refresh());
+      } catch {
+        if (submissionEpoch !== subtitleSubmissionEpoch.current || currentProjectId.current !== submissionProjectId) return;
+        await refresh();
+      }
     } catch {
-      if (submissionEpoch === subtitleSubmissionEpoch.current && currentProjectId.current === submissionProjectId) setSubtitleErrorProjectId(submissionProjectId);
+      if (submissionEpoch !== subtitleSubmissionEpoch.current || currentProjectId.current !== submissionProjectId) return;
+      if (requestEpochAtSubmission !== requestEpoch.current) {
+        await refresh();
+        return;
+      }
+      setSubtitleErrorProjectId(submissionProjectId);
     } finally {
       if (submissionEpoch === subtitleSubmissionEpoch.current && currentProjectId.current === submissionProjectId) setIsRenderingSubtitle(false);
     }
@@ -215,14 +338,26 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
     setFinalErrorProjectId(null);
     try {
       const result = await api.startFinalRender(submissionProjectId, { timeline_job_id: timelineJob.job_id });
+      try {
       const [jobs, nextFinalRender] = await Promise.all([
         api.listJobs(submissionProjectId),
         api.getFinalRender(submissionProjectId, result.job_id),
       ]);
-      if (submissionEpoch !== finalSubmissionEpoch.current || requestEpochAtSubmission !== requestEpoch.current || currentProjectId.current !== submissionProjectId) return;
-      await refresh({ jobs, finalRender: nextFinalRender });
+      if (submissionEpoch !== finalSubmissionEpoch.current || currentProjectId.current !== submissionProjectId) return;
+      await (requestEpochAtSubmission === requestEpoch.current
+        ? refresh({ jobs, finalRender: nextFinalRender })
+        : refresh());
+      } catch {
+        if (submissionEpoch !== finalSubmissionEpoch.current || currentProjectId.current !== submissionProjectId) return;
+        await refresh();
+      }
     } catch {
-      if (submissionEpoch === finalSubmissionEpoch.current && currentProjectId.current === submissionProjectId) setFinalErrorProjectId(submissionProjectId);
+      if (submissionEpoch !== finalSubmissionEpoch.current || currentProjectId.current !== submissionProjectId) return;
+      if (requestEpochAtSubmission !== requestEpoch.current) {
+        await refresh();
+        return;
+      }
+      setFinalErrorProjectId(submissionProjectId);
     } finally {
       if (finalInFlightTimelineKey.current === timelineKey) finalInFlightTimelineKey.current = null;
       if (submissionEpoch === finalSubmissionEpoch.current && currentProjectId.current === submissionProjectId) setIsRenderingFinal(false);
@@ -241,14 +376,26 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
     setCapcutErrorProjectId(null);
     try {
       const result = await api.startCapcutDraftExport(submissionProjectId, { timeline_job_id: timelineJob.job_id });
+      try {
       const [jobs, nextCapcutDraft] = await Promise.all([
         api.listJobs(submissionProjectId),
         api.getCapcutDraftExport(submissionProjectId, result.job_id),
       ]);
-      if (submissionEpoch !== capcutSubmissionEpoch.current || requestEpochAtSubmission !== requestEpoch.current || currentProjectId.current !== submissionProjectId) return;
-      await refresh({ jobs, capcutDraft: nextCapcutDraft });
+      if (submissionEpoch !== capcutSubmissionEpoch.current || currentProjectId.current !== submissionProjectId) return;
+      await (requestEpochAtSubmission === requestEpoch.current
+        ? refresh({ jobs, capcutDraft: nextCapcutDraft })
+        : refresh());
+      } catch {
+        if (submissionEpoch !== capcutSubmissionEpoch.current || currentProjectId.current !== submissionProjectId) return;
+        await refresh();
+      }
     } catch {
-      if (submissionEpoch === capcutSubmissionEpoch.current && currentProjectId.current === submissionProjectId) setCapcutErrorProjectId(submissionProjectId);
+      if (submissionEpoch !== capcutSubmissionEpoch.current || currentProjectId.current !== submissionProjectId) return;
+      if (requestEpochAtSubmission !== requestEpoch.current) {
+        await refresh();
+        return;
+      }
+      setCapcutErrorProjectId(submissionProjectId);
     } finally {
       if (capcutInFlightTimelineKey.current === timelineKey) capcutInFlightTimelineKey.current = null;
       if (submissionEpoch === capcutSubmissionEpoch.current && currentProjectId.current === submissionProjectId) setIsExportingCapcutDraft(false);
@@ -268,19 +415,33 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
     setCapcutHandoffErrorProjectId(null);
     try {
       await api.registerCapcutDraftHandoff(submissionProjectId, capcutDraftJobId);
+      try {
       const nextCapcutDraft = await api.getCapcutDraftExport(submissionProjectId, capcutDraftJobId);
-      if (submissionEpoch !== capcutHandoffSubmissionEpoch.current || requestEpochAtSubmission !== requestEpoch.current || currentProjectId.current !== submissionProjectId) return;
-      await refresh({ capcutDraft: nextCapcutDraft });
+      if (submissionEpoch !== capcutHandoffSubmissionEpoch.current || currentProjectId.current !== submissionProjectId) return;
+      await (requestEpochAtSubmission === requestEpoch.current
+        ? refresh({ capcutDraft: nextCapcutDraft })
+        : refresh());
+      } catch {
+        if (submissionEpoch !== capcutHandoffSubmissionEpoch.current || currentProjectId.current !== submissionProjectId) return;
+        await refresh();
+      }
     } catch (error) {
+      if (submissionEpoch !== capcutHandoffSubmissionEpoch.current || currentProjectId.current !== submissionProjectId) return;
+      if (requestEpochAtSubmission !== requestEpoch.current) {
+        await refresh();
+        return;
+      }
       if (error instanceof CapcutDraftHandoffInProgressError || (typeof error === "object" && error !== null && "code" in error && error.code === "capcut_draft_handoff_in_progress")) {
         try {
           const nextCapcutDraft = await api.getCapcutDraftExport(submissionProjectId, capcutDraftJobId);
-          if (submissionEpoch !== capcutHandoffSubmissionEpoch.current || requestEpochAtSubmission !== requestEpoch.current || currentProjectId.current !== submissionProjectId) return;
-          await refresh({ capcutDraft: nextCapcutDraft });
+          if (submissionEpoch !== capcutHandoffSubmissionEpoch.current || currentProjectId.current !== submissionProjectId) return;
+          await (requestEpochAtSubmission === requestEpoch.current
+            ? refresh({ capcutDraft: nextCapcutDraft })
+            : refresh());
         } catch {
-          if (submissionEpoch === capcutHandoffSubmissionEpoch.current && requestEpochAtSubmission === requestEpoch.current && currentProjectId.current === submissionProjectId) setCapcutHandoffErrorProjectId(submissionProjectId);
+          if (submissionEpoch === capcutHandoffSubmissionEpoch.current && currentProjectId.current === submissionProjectId) setCapcutHandoffErrorProjectId(submissionProjectId);
         }
-      } else if (submissionEpoch === capcutHandoffSubmissionEpoch.current && requestEpochAtSubmission === requestEpoch.current && currentProjectId.current === submissionProjectId) {
+      } else if (submissionEpoch === capcutHandoffSubmissionEpoch.current && currentProjectId.current === submissionProjectId) {
         setCapcutHandoffErrorProjectId(submissionProjectId);
       }
     } finally {
@@ -293,7 +454,14 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
     <div><p className="vb-eyebrow">출력</p><h1>완성본과 CapCut 초안</h1><p>현재 승인된 편집본의 자막, 완성본, CapCut 초안을 여기에서 만들 수 있어요.</p></div>
     <div className="vb-home-grid">
       <Card>
-        <CardHeader><CardTitle>자막</CardTitle><CardDescription>{currentState?.subtitle?.status === "succeeded" ? "자막이 준비되었어요." : currentState?.subtitle?.status === "failed" ? "자막을 만들지 못했어요." : timelineJob ? "현재 편집본의 자막을 만들 수 있어요." : "아직 자막이 없어요."}</CardDescription></CardHeader>
+        <CardHeader><CardTitle>편집본 미리보기</CardTitle><CardDescription>{exactPreviewDescription(currentState?.exactPreviewState)}</CardDescription></CardHeader>
+        <CardContent>
+          <p>재생은 편집 화면의 한 플레이어에서 확인해 주세요.</p>
+          <Button onClick={onOpenEditor}>편집에서 미리보기 열기</Button>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader><CardTitle>자막</CardTitle><CardDescription>{currentSubtitle ? "자막이 준비되었어요." : staleSubtitle ? "자막이 최신 편집본과 달라요." : currentState?.subtitle?.status === "failed" ? "자막을 만들지 못했어요." : timelineJob ? "현재 편집본의 자막을 만들 수 있어요." : "아직 자막이 없어요."}</CardDescription></CardHeader>
         <CardContent>
           {subtitleError ? <p>자막을 만들지 못했어요. 편집 상태를 확인한 뒤 다시 시도해 주세요.</p> : null}
           {!timelineJob ? <p>먼저 편집 화면에서 현재 초안을 준비해 주세요.</p> : null}

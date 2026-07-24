@@ -15,6 +15,10 @@ const readiness = { readiness_id: "readiness_e2e", project_id: "local-draft", br
 let uploadedBroll = false;
 let bundleSequence = 0;
 let latestBundle = null;
+let outputsCurrent = true;
+let outputArtifactRevision = 1;
+let outputLineage = 1;
+let capcutHandoffStatus = "not_started";
 const atomicSession = { session_id: "editing_session_e2e", project_id: "local-draft", timeline_id: "timeline_e2e", session_revision: 1, history: [], undo_count: 0, redo_count: 0, segments: [{ segment_id: "segment-e2e", caption_text: "여름 여행을 소개합니다.", start_sec: 0, end_sec: 1, cut_action: "keep", review_required: false, broll_override: null, visual_overlays: [], music_override: null, sfx_override: null, tts_replacement: null }] };
 const jobs = { jobs: [{ job_id: "timeline_build_e2e", project_id: "local-draft", job_type: "timeline_build", status: "succeeded", input_ref: "readiness_e2e", output_ref: "timeline_e2e", error_message: null, started_at: "now", finished_at: "now" }, { job_id: "final-e2e", project_id: "local-draft", job_type: "final_render", status: "succeeded", input_ref: "timeline_build_e2e", output_ref: "final-export-e2e", error_message: null, started_at: "now", finished_at: "now" }] };
 const mediaAssets = [
@@ -23,6 +27,27 @@ const mediaAssets = [
   { asset_id: "asset-media-review", asset_type: "broll_video", storage_uri: "local://media/review.mp4", metadata: { title: "회의 장면", duration_seconds: 2 }, created_at: "now" },
   { asset_id: "asset-media-failed", asset_type: "broll_video", storage_uri: "local://media/failed.mp4", metadata: { title: "야경 장면", duration_seconds: 5 }, created_at: "now" },
 ];
+
+function currentOutputIds() {
+  const suffix = `${bundleSequence}-r${outputLineage}`;
+  return {
+    subtitle: `subtitle-e2e-${suffix}`,
+    final: `final-e2e-${suffix}`,
+    capcut: `capcut-e2e-${suffix}`,
+    exact: `exact-e2e-${suffix}`,
+  };
+}
+
+function outputJobsForCurrentLineage() {
+  const ids = currentOutputIds();
+  const timelineJobId = latestBundle?.timeline_job_id ?? "timeline_build_e2e";
+  const timestamp = `2026-07-24T00:00:0${outputLineage}Z`;
+  return [
+    { job_id: ids.subtitle, project_id: "local-draft", job_type: "subtitle_render", status: "succeeded", input_ref: timelineJobId, output_ref: `subtitle-export-${ids.subtitle}`, error_message: null, started_at: timestamp, finished_at: timestamp },
+    { job_id: ids.final, project_id: "local-draft", job_type: "final_render", status: "succeeded", input_ref: timelineJobId, output_ref: `final-export-${ids.final}`, error_message: null, started_at: timestamp, finished_at: timestamp },
+    { job_id: ids.capcut, project_id: "local-draft", job_type: "capcut_draft_export", status: "succeeded", input_ref: timelineJobId, output_ref: `capcut-export-${ids.capcut}`, error_message: null, started_at: timestamp, finished_at: timestamp },
+  ];
+}
 let mediaAnalyses = [];
 let mediaState = {};
 let globalRecoveryJobs = [];
@@ -48,6 +73,10 @@ function resetDraftScenario() {
   readiness.revision = 1;
   readiness.result = { gap_slots: [{ gap_slot_id: "gap-1", reason: "장면 영상이 없어요." }] };
   latestBundle = null;
+  outputsCurrent = true;
+  outputArtifactRevision = 1;
+  outputLineage = 1;
+  capcutHandoffStatus = "not_started";
   jobs.jobs = [];
 }
 
@@ -118,9 +147,13 @@ function createBundle() {
     clip_ids: [`clip-caption-${suffix}`, ...(isGapOnly ? [`clip-gap-${suffix}`] : [`clip-broll-${suffix}`])],
     gap_slots: isGapOnly ? readiness.result.gap_slots : [], output_blocked: isGapOnly,
   };
-  atomicSession.session_id = latestBundle.session_id; atomicSession.timeline_id = latestBundle.timeline_id;
+  atomicSession.session_id = latestBundle.session_id; atomicSession.timeline_id = latestBundle.timeline_id; atomicSession.session_revision = 1;
+  outputsCurrent = true;
+  outputArtifactRevision = 1;
+  outputLineage = 1;
+  capcutHandoffStatus = "not_started";
   jobs.jobs = [{ job_id: latestBundle.timeline_job_id, project_id: "local-draft", job_type: "timeline_build", status: "succeeded", input_ref: "readiness_e2e", output_ref: latestBundle.timeline_id, error_message: null, started_at: "now", finished_at: "now" }];
-  if (!isGapOnly) jobs.jobs.push({ job_id: `final-e2e-${suffix}`, project_id: "local-draft", job_type: "final_render", status: "succeeded", input_ref: latestBundle.timeline_job_id, output_ref: `final-export-e2e-${suffix}`, error_message: null, started_at: "now", finished_at: "now" });
+  if (!isGapOnly) jobs.jobs.push(...outputJobsForCurrentLineage());
   return latestBundle;
 }
 
@@ -131,6 +164,19 @@ createServer(async (request, response) => {
   if (url.pathname === "/__e2e/reset-review" && request.method === "POST") { resetReviewScenario(); return sendJson(response, 200, { status: "reset" }); }
   if (url.pathname === "/__e2e/reset-media" && request.method === "POST") { resetMediaScenario(); return sendJson(response, 200, { status: "reset" }); }
   if (url.pathname === "/__e2e/reset-jobs" && request.method === "POST") { resetJobScenario(); return sendJson(response, 200, { status: "reset" }); }
+  if (url.pathname === "/__e2e/mark-outputs-stale" && request.method === "POST") {
+    atomicSession.session_revision += 1;
+    outputsCurrent = false;
+    return sendJson(response, 200, { status: "stale", session_revision: atomicSession.session_revision });
+  }
+  if (url.pathname === "/__e2e/mark-outputs-current" && request.method === "POST") {
+    outputArtifactRevision = atomicSession.session_revision;
+    outputLineage += 1;
+    outputsCurrent = true;
+    capcutHandoffStatus = "not_started";
+    jobs.jobs.unshift(...outputJobsForCurrentLineage());
+    return sendJson(response, 200, { status: "current", artifact_revision: outputArtifactRevision, output_ids: currentOutputIds() });
+  }
   if (url.pathname === "/__e2e/media-state" && request.method === "GET") return sendJson(response, 200, mediaState);
   if (url.pathname === "/__e2e/job-state" && request.method === "GET") {
     return sendJson(response, 200, { ...jobRecoveryState, global_jobs: globalRecoveryJobs });
@@ -191,26 +237,49 @@ createServer(async (request, response) => {
     const activeSessionId = latestBundle?.session_id ?? atomicSession.session_id;
     const activeTimelineId = latestBundle?.timeline_id ?? atomicSession.timeline_id;
     if (sessionId !== activeSessionId) return sendJson(response, 404, { detail: "session_not_found" });
-    const isCurrent = !latestBundle?.output_blocked;
+    const isCurrent = !latestBundle?.output_blocked && outputsCurrent;
     const reviewSegmentId = latestBundle?.segment_ids[0] ?? "segment-e2e";
     return sendJson(response, 200, {
-      project_id: "local-draft", session_id: activeSessionId, timeline_id: activeTimelineId, session_revision: 1, timeline_version: "v1",
+      project_id: "local-draft", session_id: activeSessionId, timeline_id: activeTimelineId, session_revision: atomicSession.session_revision, timeline_version: `v${atomicSession.session_revision}`,
       timebase: "seconds", fps: { num: 30, den: 1 }, output: { width: 1080, height: 1920, sample_aspect_ratio: "1:1", rotation: 0, duration_sec: 1 },
       tracks: latestBundle ? [] : [{ track_id: "narration", track_type: "narration", clips: [{ clip_id: "narration-e2e", segment_id: reviewSegmentId, clip_type: "narration", asset_id: null, asset_uri: null, start_sec: 0, end_sec: 1, media_controls: {} }] }],
       captions: [], gap_slots: (latestBundle?.gap_slots ?? []).map((gap) => ({ gap_id: gap.gap_slot_id, segment_id: reviewSegmentId, start_sec: 0, end_sec: 1, reason: gap.reason })),
-      source_status: { status: "current", source_session_id: activeSessionId, source_session_revision: 1 }, audition: { asset_urls: {} },
+      source_status: { status: "current", source_session_id: activeSessionId, source_session_revision: atomicSession.session_revision }, audition: { asset_urls: {} },
       exact_preview: isCurrent && latestBundle
-        ? { status: "current", url: `/api/projects/local-draft/final-renders/final-e2e-${bundleSequence}/content`, source_session_id: activeSessionId, source_session_revision: 1, artifact_revision: 1 }
-        : { status: "unavailable", url: null, source_session_id: activeSessionId, source_session_revision: 1 },
+        ? { status: "succeeded", url: `/api/projects/local-draft/exact-previews/${currentOutputIds().exact}/content`, source_session_id: activeSessionId, source_session_revision: outputArtifactRevision, artifact_revision: outputArtifactRevision }
+        : latestBundle
+          ? { status: "stale", url: null, source_session_id: activeSessionId, source_session_revision: outputArtifactRevision, artifact_revision: outputArtifactRevision }
+          : { status: "unavailable", url: null, source_session_id: activeSessionId, source_session_revision: atomicSession.session_revision },
     });
   }
-  if (url.pathname.startsWith("/api/projects/local-draft/editing-sessions/") && request.method === "GET") return sendJson(response, 200, atomicSession);
   if (url.pathname === "/api/projects/local-draft/editing-sessions/latest" && request.method === "GET") return sendJson(response, 200, atomicSession);
+  if (/^\/api\/projects\/local-draft\/editing-sessions\/[^/]+$/.test(url.pathname) && request.method === "GET") {
+    const sessionId = url.pathname.split("/")[5];
+    return sessionId === atomicSession.session_id
+      ? sendJson(response, 200, atomicSession)
+      : sendJson(response, 404, { detail: "session_not_found" });
+  }
   if (url.pathname.startsWith("/api/projects/local-draft/timelines/") && request.method === "GET") return sendJson(response, 200, { job_id: latestBundle?.timeline_job_id ?? "timeline_build_e2e", status: "succeeded", timeline: { timeline_id: latestBundle?.timeline_id ?? "timeline_e2e", project_id: "local-draft", version: "v1", output_mode: "review", review_status: latestBundle?.output_blocked ? "blocked" : "draft", tracks: [], applied_recommendations: [], review_flags: latestBundle?.output_blocked ? [{ code: "draft_gap_placeholder", segment_id: latestBundle.segment_ids[0], message: "장면 영상을 확인해 주세요." }] : [], pending_recommendations: [] } });
   if (url.pathname.startsWith("/api/projects/local-draft/review-snapshots/") && request.method === "GET") return sendJson(response, 200, { project_id: "local-draft", timeline_id: latestBundle?.timeline_id ?? "timeline_e2e", review_status: latestBundle?.output_blocked ? "blocked" : "draft", segments: latestBundle ? [] : [{ segment_id: "segment-e2e", text: "여름 여행을 소개합니다.", start_sec: 0, end_sec: 1, confidence: 1, review_required: false, cleanup_decision: "keep" }], applied_recommendations: [], pending_recommendations: [], review_flags: [] });
   if (/^\/api\/projects\/local-draft\/review-approvals\/timelines\/[^/]+$/.test(url.pathname) && request.method === "GET") return sendJson(response, 200, { project_id: "local-draft", timeline_id: latestBundle?.timeline_id ?? "timeline_e2e", review_status: "draft", approved_at: null, updated_at: "now", source_session_revision: 1, is_current: true, invalidated_at: null, invalidated_reason: null });
+  if (url.pathname.startsWith("/api/projects/local-draft/exact-previews/") && url.pathname.endsWith("/content") && request.method === "GET") { response.writeHead(200, { "content-type": "video/mp4", "accept-ranges": "bytes", "content-length": validTinyPlayableMp4.length }); return response.end(validTinyPlayableMp4); }
   if (url.pathname.startsWith("/api/projects/local-draft/final-renders/") && url.pathname.endsWith("/content") && request.method === "GET") { response.writeHead(200, { "content-type": "video/mp4", "accept-ranges": "bytes", "content-length": validTinyPlayableMp4.length }); return response.end(validTinyPlayableMp4); }
-  if (url.pathname.startsWith("/api/projects/local-draft/final-renders/") && request.method === "GET") return sendJson(response, latestBundle?.output_blocked ? 400 : 200, latestBundle?.output_blocked ? { detail: "gap_blocks_final_output" } : { job_id: `final-e2e-${bundleSequence}`, status: "succeeded", render: { export_id: `final-export-e2e-${bundleSequence}`, timeline_id: latestBundle?.timeline_id, export_type: "final_render", file_uri: "local://final-e2e.mp4", status: "succeeded", source_session_revision: 1, is_current: true } });
+  if (url.pathname.startsWith("/api/projects/local-draft/subtitles/") && request.method === "GET") {
+    const jobId = url.pathname.split("/").at(-1);
+    const isCurrentJob = outputsCurrent && jobId === currentOutputIds().subtitle;
+    return sendJson(response, 200, { job_id: jobId, status: "succeeded", subtitle: { subtitle_id: `subtitle-export-${jobId}`, project_id: "local-draft", timeline_id: latestBundle?.timeline_id, format: "srt", file_uri: `local://${jobId}.srt`, status: "succeeded", notes: [], source_session_revision: isCurrentJob ? outputArtifactRevision : 1, is_current: isCurrentJob } });
+  }
+  if (url.pathname.startsWith("/api/projects/local-draft/final-renders/") && request.method === "GET") {
+    const jobId = url.pathname.split("/").at(-1);
+    const isCurrentJob = outputsCurrent && jobId === currentOutputIds().final;
+    return sendJson(response, latestBundle?.output_blocked ? 400 : 200, latestBundle?.output_blocked ? { detail: "gap_blocks_final_output" } : { job_id: jobId, status: "succeeded", render: { export_id: `final-export-${jobId}`, timeline_id: latestBundle?.timeline_id, export_type: "final_render", file_uri: `local://${jobId}.mp4`, status: "succeeded", source_session_revision: isCurrentJob ? outputArtifactRevision : 1, is_current: isCurrentJob } });
+  }
+  if (url.pathname.startsWith("/api/projects/local-draft/capcut-draft-exports/") && request.method === "GET") {
+    const jobId = url.pathname.split("/").at(-1);
+    const isCurrentJob = outputsCurrent && jobId === currentOutputIds().capcut;
+    return sendJson(response, 200, { job_id: jobId, status: "succeeded", export: { export_id: `capcut-export-${jobId}`, timeline_id: latestBundle?.timeline_id, export_type: "capcut_draft", file_uri: `local://${jobId}`, status: "succeeded", notes: [], source_session_revision: isCurrentJob ? outputArtifactRevision : 1, is_current: isCurrentJob, handoff: { status: isCurrentJob ? capcutHandoffStatus : "not_started", source_file_uri: `local://${jobId}`, registered_project_path: isCurrentJob && capcutHandoffStatus === "ready" ? "C:/mock/draft" : null, error_message: null, registered_at: isCurrentJob && capcutHandoffStatus === "ready" ? "now" : null, reused: false } } });
+  }
+  if (url.pathname === "/api/capcut/handoff-diagnostics" && request.method === "GET") return sendJson(response, 200, { status: "ready", is_supported: true, project_root_path: "C:/mock/capcut", project_root_exists: true, write_access: true, checked_at: "now" });
   if (url.pathname === "/api/projects/local-draft/creation-briefs/brief-e2e" && request.method === "GET") return sendJson(response, 200, approvedBrief);
   if (url.pathname === "/api/projects/local-draft/draft-readiness/narration-options" && request.method === "GET") return sendJson(response, 200, { assets: [] });
   if (url.pathname === "/api/projects/local-draft/draft-readiness" && request.method === "POST") return sendJson(response, 201, readiness);
@@ -221,7 +290,10 @@ createServer(async (request, response) => {
   if (url.pathname === "/api/projects/local-draft/draft-bundles" && request.method === "POST") return sendJson(response, 201, createBundle());
   if (url.pathname === "/api/projects/local-draft/jobs/final-render" && request.method === "POST") return sendJson(response, latestBundle?.output_blocked ? 400 : 201, latestBundle?.output_blocked ? { detail: "gap_blocks_final_output" } : { job_id: `final-e2e-${bundleSequence}`, status: "succeeded" });
   if (url.pathname === "/api/projects/local-draft/jobs/capcut-draft-export" && request.method === "POST") return sendJson(response, latestBundle?.output_blocked ? 400 : 201, latestBundle?.output_blocked ? { detail: "gap_blocks_capcut_output" } : { job_id: `capcut-e2e-${bundleSequence}`, status: "succeeded" });
-  if (url.pathname === "/api/projects/local-draft/capcut-draft-exports/capcut-e2e/handoff" && request.method === "POST") return sendJson(response, 200, { handoff: { status: "registered", source_file_uri: "local://draft", registered_project_path: "C:/mock/draft", error_message: null, registered_at: "now", reused: false } });
+  if (/^\/api\/projects\/local-draft\/capcut-draft-exports\/[^/]+\/handoff$/.test(url.pathname) && request.method === "POST") {
+    capcutHandoffStatus = "ready";
+    return sendJson(response, 200, { handoff: { status: "ready", source_file_uri: "local://capcut-e2e", registered_project_path: "C:/mock/draft", error_message: null, registered_at: "now", reused: false } });
+  }
   return sendJson(response, 404, { detail: "The local E2E server only provides deterministic project catalog data." });
 }).listen(port, host, () => {
   console.log(`VideoBox E2E fake API listening at http://${host}:${port}`);

@@ -43,6 +43,20 @@ test("an empty local catalog leads to the single project-start action", async ({
   await expect(page.getByRole("button", { name: "프로젝트 만들고 소스 등록" })).toBeVisible();
 });
 
+test("unknown project route offers canonical recovery without a project-scoped request", async ({ page }) => {
+  const projectScopedRequests = [];
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname.startsWith("/api/projects/missing-project/")) projectScopedRequests.push(request.url());
+  });
+
+  await page.goto("/projects/missing-project/home");
+
+  await expect(page.getByRole("heading", { name: "프로젝트를 찾을 수 없어요" })).toBeVisible();
+  await page.getByRole("button", { name: "여름 여행 영상" }).click();
+  await expect(page).toHaveURL(/\/projects\/local-draft\/home$/);
+  expect(projectScopedRequests).toEqual([]);
+});
+
 test("mobile menu exposes the same creator navigation", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/projects/local-draft/home");
@@ -79,7 +93,7 @@ test("Home empty-state actions and settings tabs follow their visible routes", a
   await expect(page).toHaveURL(/\/projects\/local-draft\/media$/);
   await page.goto("/settings/general");
   await page.getByRole("button", { name: "화면" }).click();
-  await expect(page).toHaveURL(/\/settings\/appearance$/);
+  await expect(page).toHaveURL(/\/settings\/appearance\?project_id=local-draft$/);
 });
 
 test("approved brief prepares a local draft without an editing-session mutation", async ({ page }) => {
