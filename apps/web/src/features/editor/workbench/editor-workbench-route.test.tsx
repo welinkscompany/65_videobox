@@ -17,7 +17,7 @@ const editingSession = (projectId: string, sessionId: string, revision = 1) => (
   history: [],
   undo_count: 0,
   redo_count: 0,
-  updated_at: "2026-07-23T00:00:00Z",
+  updated_at: `2026-07-23T00:00:${String(revision).padStart(2, "0")}Z`,
 });
 
 function mockEditingSessionRevisions(...revisions: number[]) {
@@ -73,6 +73,115 @@ const captionManifest = (revision: number, text = "원래 자막") => ({
   }],
 });
 
+const inspectorStyle = {
+  font_family: "Pretendard",
+  font_size_px: 28,
+  text_color: "#ffffff",
+  outline_color: "#000000",
+  outline_width_px: 2,
+  background_color: "#00000000",
+  position_x_percent: 50,
+  position_y_percent: 90,
+  horizontal_align: "center" as const,
+  safe_area_enabled: true,
+  shadow_blur_px: 0,
+};
+
+const inspectorSession = (revision: number) => ({
+  ...editingSession("project-a", "session-a", revision),
+  undo_count: 1,
+  redo_count: 1,
+  segments: [
+    {
+      segment_id: "segment-1", start_sec: 0, end_sec: 1, caption_text: "연결 자막",
+      cut_action: "keep", review_required: false, broll_override: null, visual_overlays: [],
+      music_override: null, sfx_override: null, tts_replacement: null, caption_style: inspectorStyle,
+    },
+    {
+      segment_id: "segment-2", start_sec: 1, end_sec: 2, caption_text: "다음 자막",
+      cut_action: "keep", review_required: false, broll_override: null, visual_overlays: [],
+      music_override: null, sfx_override: null, tts_replacement: null, caption_style: inspectorStyle,
+    },
+  ],
+});
+
+type InspectorFixture = "narration" | "broll" | "bgm" | "sfx" | "caption" | "explanation" | "image" | "table";
+
+function inspectorManifest(revision: number, fixture: InspectorFixture = "narration") {
+  const base = twoNarrationManifest(revision);
+  const mediaKind = fixture === "broll" || fixture === "bgm" || fixture === "sfx" ? fixture : null;
+  const overlayType = fixture === "explanation"
+    ? "explanation_card"
+    : fixture === "image"
+      ? "image_overlay"
+      : fixture === "table"
+        ? "table_overlay"
+        : null;
+  return {
+    ...base,
+    tracks: [
+      ...base.tracks,
+      ...(mediaKind ? [{
+        track_id: mediaKind,
+        track_type: mediaKind,
+        clips: [{
+          clip_id: `${mediaKind}-1`, segment_id: "segment-1", clip_type: mediaKind,
+          asset_id: `asset-${mediaKind}`, asset_uri: `file:///asset-${mediaKind}`,
+          start_sec: 0, end_sec: 1,
+          media_controls: { gain_db: -8, fade_in_sec: 0.5, fade_out_sec: 1, ducking: true },
+        }],
+      }] : []),
+      ...(overlayType ? [{
+        track_id: "overlay",
+        track_type: "overlay" as const,
+        clips: [{
+          clip_id: `${fixture}-1`, segment_id: "segment-1", clip_type: "overlay" as const,
+          asset_id: fixture === "image" ? "asset-image" : null,
+          asset_uri: fixture === "image" ? "file:///asset-image.png" : null,
+          start_sec: 0, end_sec: 1, media_controls: {}, overlay_type: overlayType,
+          overlay_payload: fixture === "explanation"
+            ? { title: "제목", body: "본문", text: "설명" }
+            : fixture === "image"
+              ? { asset_id: "asset-image", text: "이미지 설명" }
+              : { columns: ["항목", "값"], rows: [["길이", "10초"]], text: "요약표" },
+        }],
+      }] : []),
+    ],
+    captions: fixture === "caption" ? [{
+      segment_id: "segment-1", caption_id: "caption-1", placement_id: "caption:segment-1",
+      text: "연결 자막", start_sec: 0, end_sec: 1, style: inspectorStyle,
+    }] : [],
+  };
+}
+
+const partialPreflight = {
+  session_id: "session-a",
+  segment_ids: ["segment-1"],
+  fields: ["caption", "music"],
+  downstream_steps: ["segment_refresh", "music_refresh", "timeline_build"],
+  targeted_segments: [{ segment_id: "segment-1" }],
+  affected_output_areas: ["segment copy", "music track", "timeline preview"],
+  predicted_review_status_after_rerun: "draft",
+  prediction_reasons: [],
+};
+
+const partialRun = {
+  ...partialPreflight,
+  job_id: "partial-job-1",
+  status: "succeeded",
+  delta: { regenerated_segments: [{ segment_id: "segment-1" }], timeline_id: "timeline-partial-1" },
+};
+
+const partialJob = (sessionUpdatedAt: string) => ({
+  job_id: "partial-job-1", status: "succeeded", partial_regeneration_id: "partial-run-1",
+  session_id: "session-a", session_updated_at: sessionUpdatedAt,
+  source_timeline_id: "timeline-session-a", timeline_id: "timeline-partial-1",
+  segment_ids: ["segment-1"], fields: ["caption", "music"],
+  downstream_steps: partialPreflight.downstream_steps,
+  regenerated_segments: [{ segment_id: "segment-1" }],
+  timeline: {},
+});
+
 const broll = {
   asset_id: "broll-1",
   asset_type: "broll_video",
@@ -121,6 +230,14 @@ async function openAssetBrowser() {
   return screen.findByRole("dialog", { name: "자산과 대본" });
 }
 
+async function openInspector() {
+  fireEvent.click(await screen.findByRole("button", { name: "n-1 클립 선택" }));
+  fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+  await screen.findByRole("dialog", { name: "유진과 편집 항목" });
+  fireEvent.click(screen.getByRole("button", { name: "편집 항목 열기" }));
+  return screen.findByRole("region", { name: "편집 항목" });
+}
+
 describe("EditorWorkbenchRoute", () => {
   beforeEach(() => {
     vi.spyOn(api, "getEditorPlaybackManifest").mockResolvedValue(narrationManifest(1) as never);
@@ -129,6 +246,7 @@ describe("EditorWorkbenchRoute", () => {
     );
     vi.spyOn(api, "listBrollAssets").mockResolvedValue([] as never);
     vi.spyOn(api, "listMediaLibraryAssets").mockResolvedValue({ assets: [] } as never);
+    vi.spyOn(api, "listJobs").mockResolvedValue([]);
   });
 
   it("publishes nothing until the matching manifest and session arrive together", async () => {
@@ -551,6 +669,740 @@ describe("EditorWorkbenchRoute", () => {
     expect(update).toHaveBeenCalledTimes(1);
   });
 
+  it("routes toolbar undo and redo through the current revision and refreshes after each command", async () => {
+    const manifestLoad = vi.mocked(api.getEditorPlaybackManifest);
+    manifestLoad.mockReset()
+      .mockResolvedValueOnce(inspectorManifest(7) as never)
+      .mockResolvedValueOnce(inspectorManifest(8) as never)
+      .mockResolvedValueOnce(inspectorManifest(9) as never);
+    const sessionLoad = vi.mocked(api.getEditingSession);
+    sessionLoad.mockReset()
+      .mockResolvedValueOnce(inspectorSession(7) as never)
+      .mockResolvedValueOnce(inspectorSession(8) as never)
+      .mockResolvedValueOnce(inspectorSession(9) as never);
+    const undo = vi.spyOn(api, "undoEditingSession").mockResolvedValue({} as never);
+    const redo = vi.spyOn(api, "redoEditingSession").mockResolvedValue({} as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(7);
+    fireEvent.click(screen.getByRole("button", { name: "실행 취소" }));
+    await waitFor(() => expect(undo).toHaveBeenCalledWith("project-a", "session-a", 7));
+    await expectEditorRevision(8);
+
+    fireEvent.click(screen.getByRole("button", { name: "다시 실행" }));
+    await waitFor(() => expect(redo).toHaveBeenCalledWith("project-a", "session-a", 8));
+    await expectEditorRevision(9);
+    expect(manifestLoad).toHaveBeenCalledTimes(3);
+    expect(sessionLoad).toHaveBeenCalledTimes(3);
+  });
+
+  it("keeps toolbar history commands single-flight across undo and redo", async () => {
+    let resolveUndo!: (value: unknown) => void;
+    vi.mocked(api.getEditorPlaybackManifest)
+      .mockResolvedValueOnce(inspectorManifest(7) as never)
+      .mockResolvedValueOnce(inspectorManifest(8) as never);
+    vi.mocked(api.getEditingSession)
+      .mockResolvedValueOnce(inspectorSession(7) as never)
+      .mockResolvedValueOnce(inspectorSession(8) as never);
+    const undo = vi.spyOn(api, "undoEditingSession")
+      .mockImplementation(() => new Promise((resolve) => { resolveUndo = resolve; }) as never);
+    const redo = vi.spyOn(api, "redoEditingSession");
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(7);
+    const undoButton = screen.getByRole("button", { name: "실행 취소" });
+    const redoButton = screen.getByRole("button", { name: "다시 실행" });
+    fireEvent.click(undoButton);
+    fireEvent.click(undoButton);
+    fireEvent.click(redoButton);
+
+    await waitFor(() => expect(undo).toHaveBeenCalledTimes(1));
+    expect(redo).not.toHaveBeenCalled();
+    expect(undoButton).toBeDisabled();
+    expect(redoButton).toBeDisabled();
+    await act(async () => { resolveUndo({}); });
+    await expectEditorRevision(8);
+  });
+
+  it("routes split, merge, and explicit keep/remove cut actions through one revisioned Inspector lane", async () => {
+    const manifestLoad = vi.mocked(api.getEditorPlaybackManifest);
+    manifestLoad.mockReset();
+    const sessionLoad = vi.mocked(api.getEditingSession);
+    sessionLoad.mockReset();
+    for (const revision of [7, 8, 9, 10, 11]) {
+      manifestLoad.mockResolvedValueOnce(inspectorManifest(revision) as never);
+      sessionLoad.mockResolvedValueOnce(inspectorSession(revision) as never);
+    }
+    const split = vi.spyOn(api, "splitEditingSessionSegment").mockResolvedValue({} as never);
+    const merge = vi.spyOn(api, "mergeEditingSessionSegments").mockResolvedValue({} as never);
+    const cut = vi.spyOn(api, "updateEditingSessionCutAction").mockResolvedValue({} as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(7);
+    await openInspector();
+
+    fireEvent.click(screen.getByRole("button", { name: "구간 중간에서 나누기" }));
+    await waitFor(() => expect(split).toHaveBeenCalledWith("project-a", "session-a", "segment-1", {
+      expected_revision: 7,
+      split_sec: 0.5,
+    }));
+    await expectEditorRevision(8);
+
+    fireEvent.click(screen.getByRole("button", { name: "다음 구간과 합치기" }));
+    await waitFor(() => expect(merge).toHaveBeenCalledWith("project-a", "session-a", {
+      expected_revision: 8,
+      left_segment_id: "segment-1",
+      right_segment_id: "segment-2",
+    }));
+    await expectEditorRevision(9);
+
+    fireEvent.change(screen.getByLabelText("선택 구간 처리"), { target: { value: "remove" } });
+    fireEvent.click(screen.getByRole("button", { name: "컷 저장" }));
+    await waitFor(() => expect(cut).toHaveBeenNthCalledWith(1, "project-a", "session-a", "segment-1", {
+      cut_action: "remove",
+      expected_revision: 9,
+    }));
+    await expectEditorRevision(10);
+
+    fireEvent.change(screen.getByLabelText("선택 구간 처리"), { target: { value: "keep" } });
+    fireEvent.click(screen.getByRole("button", { name: "컷 저장" }));
+    await waitFor(() => expect(cut).toHaveBeenNthCalledWith(2, "project-a", "session-a", "segment-1", {
+      cut_action: "keep",
+      expected_revision: 10,
+    }));
+    await expectEditorRevision(11);
+  });
+
+  it.each([
+    { fixture: "broll" as const, label: "B-roll 지우기", endpoint: "broll" as const },
+    { fixture: "bgm" as const, label: "배경 음악 지우기", endpoint: "bgm" as const },
+    { fixture: "sfx" as const, label: "효과음 지우기", endpoint: "sfx" as const },
+  ])("clears the selected $fixture target with the current revision", async ({ endpoint, fixture, label }) => {
+    vi.mocked(api.getEditorPlaybackManifest)
+      .mockResolvedValueOnce(inspectorManifest(7, fixture) as never)
+      .mockResolvedValueOnce(inspectorManifest(8, fixture) as never);
+    vi.mocked(api.getEditingSession)
+      .mockResolvedValueOnce(inspectorSession(7) as never)
+      .mockResolvedValueOnce(inspectorSession(8) as never);
+    const clearBroll = vi.spyOn(api, "clearEditingSessionBrollOverride").mockResolvedValue({} as never);
+    const clearBgm = vi.spyOn(api, "clearEditingSessionMusicOverride").mockResolvedValue({} as never);
+    const clearSfx = vi.spyOn(api, "clearEditingSessionSfxOverride").mockResolvedValue({} as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(7);
+    await openInspector();
+    fireEvent.click(screen.getByRole("button", { name: label }));
+
+    const expected = endpoint === "broll" ? clearBroll : endpoint === "bgm" ? clearBgm : clearSfx;
+    await waitFor(() => expect(expected).toHaveBeenCalledWith("project-a", "session-a", "segment-1", 7));
+    expect(clearBroll.mock.calls.length + clearBgm.mock.calls.length + clearSfx.mock.calls.length).toBe(1);
+    await expectEditorRevision(8);
+  });
+
+  it.each([
+    {
+      fixture: "bgm" as const,
+      label: "배경 음악",
+      saveEndpoint: "bgm" as const,
+    },
+    {
+      fixture: "sfx" as const,
+      label: "효과음",
+      saveEndpoint: "sfx" as const,
+    },
+  ])("preserves hidden $fixture controls while routing visible fade edits through the current revision", async ({ fixture, label, saveEndpoint }) => {
+    vi.mocked(api.getEditorPlaybackManifest)
+      .mockResolvedValueOnce(inspectorManifest(7, fixture) as never)
+      .mockResolvedValueOnce(inspectorManifest(8, fixture) as never);
+    vi.mocked(api.getEditingSession)
+      .mockResolvedValueOnce(inspectorSession(7) as never)
+      .mockResolvedValueOnce(inspectorSession(8) as never);
+    const saveBgm = vi.spyOn(api, "updateEditingSessionMusicOverride").mockResolvedValue({} as never);
+    const saveSfx = vi.spyOn(api, "updateEditingSessionSfxOverride").mockResolvedValue({} as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(7);
+    await openInspector();
+    fireEvent.change(screen.getByLabelText(`${label} 페이드 인`), { target: { value: "1.25" } });
+    fireEvent.change(screen.getByLabelText(`${label} 페이드 아웃`), { target: { value: "0.75" } });
+    fireEvent.click(screen.getByRole("button", { name: `${label} 설정 저장` }));
+
+    const save = saveEndpoint === "bgm" ? saveBgm : saveSfx;
+    await waitFor(() => expect(save).toHaveBeenCalledWith("project-a", "session-a", "segment-1", {
+      asset_id: `asset-${fixture}`,
+      expected_revision: 7,
+      media_controls: { ducking: true, fade_in_sec: 1.25, fade_out_sec: 0.75, gain_db: -8 },
+    }));
+    expect(saveBgm.mock.calls.length + saveSfx.mock.calls.length).toBe(1);
+    await expectEditorRevision(8);
+  });
+
+  it("routes a complete caption style edit without exposing independent caption timing", async () => {
+    vi.mocked(api.getEditorPlaybackManifest)
+      .mockResolvedValueOnce(inspectorManifest(7, "caption") as never)
+      .mockResolvedValueOnce(inspectorManifest(8, "caption") as never);
+    vi.mocked(api.getEditingSession)
+      .mockResolvedValueOnce(inspectorSession(7) as never)
+      .mockResolvedValueOnce(inspectorSession(8) as never);
+    const save = vi.spyOn(api, "updateEditingSessionCaptionStyle").mockResolvedValue({} as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(7);
+    await openInspector();
+    expect(screen.queryByLabelText(/자막 시작|자막 종료/)).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("글자 크기"), { target: { value: "32" } });
+    fireEvent.change(screen.getByLabelText("가로 정렬"), { target: { value: "left" } });
+    fireEvent.click(screen.getByRole("button", { name: "자막 스타일 저장" }));
+
+    await waitFor(() => expect(save).toHaveBeenCalledWith("project-a", "session-a", {
+      expected_revision: 7,
+      scope: "current_caption",
+      segment_ids: ["segment-1"],
+      style: { ...inspectorStyle, font_size_px: 32, horizontal_align: "left" },
+    }));
+    await expectEditorRevision(8);
+  });
+
+  it.each([
+    { fixture: "explanation" as const, label: "설명 카드" },
+    { fixture: "image" as const, label: "이미지" },
+    { fixture: "table" as const, label: "표" },
+  ])("routes supported $label overlay save and clear through consecutive revisions", async ({ fixture, label }) => {
+    const manifestLoad = vi.mocked(api.getEditorPlaybackManifest);
+    manifestLoad.mockReset()
+      .mockResolvedValueOnce(inspectorManifest(7, fixture) as never)
+      .mockResolvedValueOnce(inspectorManifest(8, fixture) as never)
+      .mockResolvedValueOnce(inspectorManifest(9, fixture) as never);
+    const sessionLoad = vi.mocked(api.getEditingSession);
+    sessionLoad.mockReset()
+      .mockResolvedValueOnce(inspectorSession(7) as never)
+      .mockResolvedValueOnce(inspectorSession(8) as never)
+      .mockResolvedValueOnce(inspectorSession(9) as never);
+    const saveExplanation = vi.spyOn(api, "updateEditingSessionExplanationCard").mockResolvedValue({} as never);
+    const clearExplanation = vi.spyOn(api, "removeEditingSessionExplanationCard").mockResolvedValue({} as never);
+    const saveImage = vi.spyOn(api, "updateEditingSessionImageOverlay").mockResolvedValue({} as never);
+    const clearImage = vi.spyOn(api, "removeEditingSessionImageOverlay").mockResolvedValue({} as never);
+    const saveTable = vi.spyOn(api, "updateEditingSessionTableOverlay").mockResolvedValue({} as never);
+    const clearTable = vi.spyOn(api, "removeEditingSessionTableOverlay").mockResolvedValue({} as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(7);
+    await openInspector();
+    fireEvent.click(screen.getByRole("button", { name: `${label} 저장` }));
+
+    if (fixture === "explanation") {
+      await waitFor(() => expect(saveExplanation).toHaveBeenCalledWith("project-a", "session-a", "segment-1", {
+        body: "본문", expected_revision: 7, text: "설명", title: "제목",
+      }));
+    } else if (fixture === "image") {
+      await waitFor(() => expect(saveImage).toHaveBeenCalledWith("project-a", "session-a", "segment-1", {
+        asset_id: "asset-image", expected_revision: 7, text: "이미지 설명",
+      }));
+    } else {
+      await waitFor(() => expect(saveTable).toHaveBeenCalledWith("project-a", "session-a", "segment-1", {
+        columns: ["항목", "값"], expected_revision: 7, rows: [["길이", "10초"]], text: "요약표",
+      }));
+    }
+    await expectEditorRevision(8);
+    fireEvent.click(screen.getByRole("button", { name: `${label} 지우기` }));
+
+    const clear = fixture === "explanation" ? clearExplanation : fixture === "image" ? clearImage : clearTable;
+    await waitFor(() => expect(clear).toHaveBeenCalledWith("project-a", "session-a", "segment-1", 8));
+    await expectEditorRevision(9);
+  });
+
+  it("requires impact preflight before one explicit partial run, then resumes only from an explicit result read", async () => {
+    let resolveRun!: (value: typeof partialRun) => void;
+    vi.mocked(api.getEditorPlaybackManifest)
+      .mockResolvedValueOnce(inspectorManifest(7) as never)
+      .mockResolvedValueOnce(inspectorManifest(8) as never);
+    vi.mocked(api.getEditingSession)
+      .mockResolvedValueOnce(inspectorSession(7) as never)
+      .mockResolvedValueOnce(inspectorSession(8) as never);
+    vi.mocked(api.listJobs).mockResolvedValue([{
+      job_id: "partial-job-1",
+      project_id: "project-a",
+      job_type: "partial_regeneration",
+      status: "succeeded",
+      input_ref: "session-a",
+      output_ref: "partial-run-1",
+      error_message: null,
+      started_at: "2026-07-24T00:00:00Z",
+      finished_at: "2026-07-24T00:00:01Z",
+    }]);
+    const preflight = vi.spyOn(api, "previewPartialRegeneration").mockResolvedValue(partialPreflight as never);
+    const run = vi.spyOn(api, "runPartialRegeneration")
+      .mockImplementation(() => new Promise((resolve) => { resolveRun = resolve; }) as never);
+    const resume = vi.spyOn(api, "getPartialRegenerationResult")
+      .mockResolvedValue(partialJob(inspectorSession(8).updated_at) as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(7);
+    await openInspector();
+    const runButton = screen.getByRole("button", { name: "부분 재생성 실행" });
+    expect(runButton).toBeDisabled();
+    fireEvent.click(runButton);
+    expect(run).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "재생성 범위 미리보기" }));
+    await waitFor(() => expect(preflight).toHaveBeenCalledWith("project-a", "session-a", {
+      fields: ["caption", "music"],
+      segment_ids: ["segment-1"],
+    }));
+    await waitFor(() => expect(runButton).toBeEnabled());
+    fireEvent.click(runButton);
+    fireEvent.click(runButton);
+    await waitFor(() => expect(run).toHaveBeenCalledWith("project-a", "session-a", {
+      expected_revision: 7,
+      fields: ["caption", "music"],
+      segment_ids: ["segment-1"],
+    }));
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("다시 만든 항목")).toBeNull();
+
+    await act(async () => { resolveRun(partialRun); });
+    await expectEditorRevision(8);
+    const openResult = screen.getByRole("button", { name: "이전 결과 열기" });
+    await waitFor(() => expect(openResult).toBeEnabled());
+    const readsBeforeOpen = resume.mock.calls.length;
+    fireEvent.click(openResult);
+    await waitFor(() => expect(resume.mock.calls.length).toBeGreaterThan(readsBeforeOpen));
+    expect(await screen.findByText("현재 편집본과 맞는 이전 결과를 열었어요.")).toBeVisible();
+    const result = screen.getByText("다시 만든 항목").closest("dl");
+    expect(result).toHaveTextContent("succeeded");
+    expect(result).toHaveTextContent("caption, music");
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it("recovers the latest succeeded same-session result after a fresh route mount", async () => {
+    vi.mocked(api.getEditorPlaybackManifest)
+      .mockResolvedValueOnce(inspectorManifest(7) as never)
+      .mockResolvedValueOnce(inspectorManifest(8) as never);
+    vi.mocked(api.getEditingSession)
+      .mockResolvedValueOnce(inspectorSession(7) as never)
+      .mockResolvedValueOnce(inspectorSession(8) as never);
+    vi.mocked(api.listJobs).mockResolvedValue([{
+      job_id: "partial-job-1",
+      project_id: "project-a",
+      job_type: "partial_regeneration",
+      status: "succeeded",
+      input_ref: "session-a",
+      output_ref: "partial-run-1",
+      error_message: null,
+      started_at: "2026-07-24T00:00:00Z",
+      finished_at: "2026-07-24T00:00:01Z",
+    }]);
+    const read = vi.spyOn(api, "getPartialRegenerationResult")
+      .mockResolvedValue(partialJob(inspectorSession(7).updated_at) as never);
+    vi.spyOn(api, "undoEditingSession").mockResolvedValue({} as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(7);
+    await openInspector();
+    const openResult = screen.getByRole("button", { name: "이전 결과 열기" });
+    await waitFor(() => expect(openResult).toBeEnabled());
+    fireEvent.click(openResult);
+
+    await waitFor(() => expect(read).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("현재 편집본과 맞는 이전 결과를 열었어요.")).toBeVisible();
+    expect(screen.getByText("다시 만든 항목").closest("dl")).toHaveTextContent("caption, music");
+
+    fireEvent.click(screen.getByRole("button", { name: "실행 취소" }));
+    await expectEditorRevision(8);
+    expect(await screen.findByText("현재 편집본과 맞지 않는 이전 결과를 닫았어요.")).toBeVisible();
+    expect(screen.queryByText("다시 만든 항목")).toBeNull();
+  });
+
+  it("disables a recovered but unopened result only after an authoritative revision advance", async () => {
+    vi.mocked(api.getEditorPlaybackManifest)
+      .mockResolvedValueOnce(inspectorManifest(7) as never)
+      .mockResolvedValueOnce(inspectorManifest(8) as never);
+    vi.mocked(api.getEditingSession)
+      .mockResolvedValueOnce(inspectorSession(7) as never)
+      .mockResolvedValueOnce(inspectorSession(8) as never);
+    vi.mocked(api.listJobs).mockResolvedValue([{
+      job_id: "partial-job-1",
+      project_id: "project-a",
+      job_type: "partial_regeneration",
+      status: "succeeded",
+      input_ref: "session-a",
+      output_ref: "partial-run-1",
+      error_message: null,
+      started_at: "2026-07-24T00:00:00Z",
+      finished_at: "2026-07-24T00:00:01Z",
+    }]);
+    vi.spyOn(api, "getPartialRegenerationResult")
+      .mockResolvedValue(partialJob(inspectorSession(7).updated_at) as never);
+    vi.spyOn(api, "undoEditingSession").mockResolvedValue({} as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(7);
+    await openInspector();
+    const openResult = screen.getByRole("button", { name: "이전 결과 열기" });
+    await waitFor(() => expect(openResult).toBeEnabled());
+
+    fireEvent.click(screen.getByRole("button", { name: "실행 취소" }));
+    await expectEditorRevision(8);
+    await waitFor(() => expect(openResult).toBeDisabled());
+    expect(await screen.findByText("현재 편집본과 맞지 않는 이전 결과를 닫았어요.")).toBeVisible();
+  });
+
+  it("does not recover a latest-job response carrying a different job identity", async () => {
+    vi.mocked(api.getEditorPlaybackManifest).mockResolvedValue(inspectorManifest(7) as never);
+    vi.mocked(api.getEditingSession).mockResolvedValue(inspectorSession(7) as never);
+    vi.mocked(api.listJobs).mockResolvedValue([{
+      job_id: "partial-job-1",
+      project_id: "project-a",
+      job_type: "partial_regeneration",
+      status: "succeeded",
+      input_ref: "session-a",
+      output_ref: "partial-run-1",
+      error_message: null,
+      started_at: "2026-07-24T00:00:00Z",
+      finished_at: "2026-07-24T00:00:01Z",
+    }]);
+    const read = vi.spyOn(api, "getPartialRegenerationResult").mockResolvedValue({
+      ...partialJob(inspectorSession(7).updated_at),
+      job_id: "partial-job-other",
+    } as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(7);
+    await openInspector();
+    await waitFor(() => expect(read).toHaveBeenCalledWith("project-a", "partial-job-1"));
+
+    expect(screen.getByRole("button", { name: "이전 결과 열기" })).toBeDisabled();
+    expect(screen.queryByText("다시 만든 항목")).toBeNull();
+  });
+
+  it("keeps manual editing available and retries a failed historical result discovery in the same mount", async () => {
+    vi.mocked(api.getEditorPlaybackManifest).mockResolvedValue(inspectorManifest(7) as never);
+    vi.mocked(api.getEditingSession).mockResolvedValue(inspectorSession(7) as never);
+    vi.mocked(api.listJobs)
+      .mockRejectedValueOnce(new Error("temporary recovery failure"))
+      .mockResolvedValue([{
+        job_id: "partial-job-1",
+        project_id: "project-a",
+        job_type: "partial_regeneration",
+        status: "succeeded",
+        input_ref: "session-a",
+        output_ref: "partial-run-1",
+        error_message: null,
+        started_at: "2026-07-24T00:00:00Z",
+        finished_at: "2026-07-24T00:00:01Z",
+      }]);
+    vi.spyOn(api, "getPartialRegenerationResult")
+      .mockResolvedValue(partialJob(inspectorSession(7).updated_at) as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(7);
+    expect(await screen.findByText("이전 재생성 결과를 찾지 못했어요. 직접 편집은 계속할 수 있어요.")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "이전 결과 다시 찾기" }));
+    await openInspector();
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "이전 결과 열기" })).toBeEnabled());
+    expect(screen.queryByRole("button", { name: "이전 결과 다시 찾기" })).toBeNull();
+    expect(screen.queryByText("이전 재생성 결과를 찾지 못했어요. 직접 편집은 계속할 수 있어요.")).toBeNull();
+    expect(screen.getByText("이전 재생성 결과를 다시 찾았어요.")).toBeVisible();
+  });
+
+  it("clears a recovery error when an explicit retry confirms there is no historical result", async () => {
+    vi.mocked(api.getEditorPlaybackManifest).mockResolvedValue(inspectorManifest(7) as never);
+    vi.mocked(api.getEditingSession).mockResolvedValue(inspectorSession(7) as never);
+    vi.mocked(api.listJobs)
+      .mockRejectedValueOnce(new Error("temporary recovery failure"))
+      .mockResolvedValue([]);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(7);
+    expect(await screen.findByText("이전 재생성 결과를 찾지 못했어요. 직접 편집은 계속할 수 있어요.")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "이전 결과 다시 찾기" }));
+
+    expect(await screen.findByText("저장된 이전 재생성 결과가 없어요.")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "이전 결과 다시 찾기" })).toBeNull();
+  });
+
+  it("keeps the same current result open after a failed mutation and same-timestamp refresh", async () => {
+    vi.mocked(api.getEditorPlaybackManifest)
+      .mockResolvedValueOnce(inspectorManifest(7) as never)
+      .mockResolvedValueOnce(inspectorManifest(7) as never);
+    vi.mocked(api.getEditingSession)
+      .mockResolvedValueOnce(inspectorSession(7) as never)
+      .mockResolvedValueOnce(inspectorSession(7) as never);
+    vi.mocked(api.listJobs).mockResolvedValue([{
+      job_id: "partial-job-1",
+      project_id: "project-a",
+      job_type: "partial_regeneration",
+      status: "succeeded",
+      input_ref: "session-a",
+      output_ref: "partial-run-1",
+      error_message: null,
+      started_at: "2026-07-24T00:00:00Z",
+      finished_at: "2026-07-24T00:00:01Z",
+    }]);
+    vi.spyOn(api, "getPartialRegenerationResult")
+      .mockResolvedValue(partialJob(inspectorSession(7).updated_at) as never);
+    vi.spyOn(api, "undoEditingSession").mockRejectedValue(new Error("offline"));
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(7);
+    await openInspector();
+    const openResult = screen.getByRole("button", { name: "이전 결과 열기" });
+    await waitFor(() => expect(openResult).toBeEnabled());
+    fireEvent.click(openResult);
+    expect(await screen.findByText("다시 만든 항목")).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "실행 취소" }));
+    expect(await screen.findByText("변경 내용을 저장하지 못했어요. 최신 내용을 확인한 뒤 다시 시도해 주세요.")).toBeVisible();
+    await waitFor(() => expect(screen.getByText("다시 만든 항목")).toBeVisible());
+    expect(openResult).toBeEnabled();
+  });
+
+  it("fails closed when a preflight response does not match the prepared segment", async () => {
+    vi.mocked(api.getEditorPlaybackManifest).mockResolvedValue(inspectorManifest(7) as never);
+    vi.mocked(api.getEditingSession).mockResolvedValue(inspectorSession(7) as never);
+    vi.spyOn(api, "previewPartialRegeneration").mockResolvedValue({
+      ...partialPreflight,
+      segment_ids: ["segment-2"],
+    } as never);
+    const run = vi.spyOn(api, "runPartialRegeneration");
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(7);
+    await openInspector();
+    fireEvent.click(screen.getByRole("button", { name: "재생성 범위 미리보기" }));
+
+    expect(await screen.findByText("영향 범위를 확인하지 못했어요. 직접 편집은 계속할 수 있어요.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "부분 재생성 실행" })).toBeDisabled();
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it("ignores an old result read after a manual mutation advances the session", async () => {
+    let resolveResume!: (value: ReturnType<typeof partialJob>) => void;
+    vi.mocked(api.getEditorPlaybackManifest)
+      .mockResolvedValueOnce(inspectorManifest(7) as never)
+      .mockResolvedValueOnce(inspectorManifest(8) as never);
+    vi.mocked(api.getEditingSession)
+      .mockResolvedValueOnce(inspectorSession(7) as never)
+      .mockResolvedValueOnce(inspectorSession(8) as never);
+    vi.mocked(api.listJobs).mockResolvedValue([{
+      job_id: "partial-job-1",
+      project_id: "project-a",
+      job_type: "partial_regeneration",
+      status: "succeeded",
+      input_ref: "session-a",
+      output_ref: "partial-run-1",
+      error_message: null,
+      started_at: "2026-07-24T00:00:00Z",
+      finished_at: "2026-07-24T00:00:01Z",
+    }]);
+    vi.spyOn(api, "getPartialRegenerationResult")
+      .mockResolvedValueOnce(partialJob(inspectorSession(7).updated_at) as never)
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveResume = resolve; }) as never)
+      .mockResolvedValue(partialJob(inspectorSession(7).updated_at) as never);
+    vi.spyOn(api, "undoEditingSession").mockResolvedValue({} as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(7);
+    await openInspector();
+    const openResult = screen.getByRole("button", { name: "이전 결과 열기" });
+    await waitFor(() => expect(openResult).toBeEnabled());
+    fireEvent.click(openResult);
+    fireEvent.click(screen.getByRole("button", { name: "실행 취소" }));
+    await expectEditorRevision(8);
+    await act(async () => { resolveResume(partialJob(inspectorSession(7).updated_at)); });
+
+    expect(screen.queryByText("현재 편집본과 맞는 이전 결과를 열었어요.")).toBeNull();
+    expect(screen.queryByText("다시 만든 항목")).toBeNull();
+  });
+
+  it.each([
+    {
+      label: "conflict",
+      error: new ApiConflictError({}, "/api/projects/project-a/editing-sessions/session-a/partial-regeneration"),
+      message: "다른 변경이 먼저 저장됐어요. 최신 내용을 확인한 뒤 다시 시도해 주세요.",
+    },
+    {
+      label: "failure",
+      error: new Error("partial failed"),
+      message: "변경 내용을 저장하지 못했어요. 최신 내용을 확인한 뒤 다시 시도해 주세요.",
+    },
+  ])("authoritatively refreshes manifest and session after partial run $label", async ({ error, message }) => {
+    const manifestLoad = vi.mocked(api.getEditorPlaybackManifest);
+    manifestLoad.mockReset()
+      .mockResolvedValueOnce(inspectorManifest(7) as never)
+      .mockResolvedValueOnce(inspectorManifest(8) as never);
+    const sessionLoad = vi.mocked(api.getEditingSession);
+    sessionLoad.mockReset()
+      .mockResolvedValueOnce(inspectorSession(7) as never)
+      .mockResolvedValueOnce(inspectorSession(8) as never);
+    vi.spyOn(api, "previewPartialRegeneration").mockResolvedValue(partialPreflight as never);
+    const run = vi.spyOn(api, "runPartialRegeneration").mockRejectedValue(error);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(7);
+    await openInspector();
+    fireEvent.click(screen.getByRole("button", { name: "재생성 범위 미리보기" }));
+    const runButton = screen.getByRole("button", { name: "부분 재생성 실행" });
+    await waitFor(() => expect(runButton).toBeEnabled());
+    fireEvent.click(runButton);
+
+    expect(await screen.findByText(message)).toBeVisible();
+    expect(screen.getByText("부분 재생성을 완료하지 못했어요. 영향 범위를 다시 확인해 주세요.")).toBeVisible();
+    expect(screen.queryByText("선택한 범위를 다시 만들고 있어요.")).toBeNull();
+    expect(run).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(manifestLoad).toHaveBeenCalledTimes(2));
+    expect(sessionLoad).toHaveBeenCalledTimes(2);
+    await expectEditorRevision(8);
+  });
+
+  it("invalidates an unresolved A partial preflight after route navigation to B", async () => {
+    let resolvePreflight!: (value: typeof partialPreflight) => void;
+    vi.mocked(api.getEditorPlaybackManifest).mockImplementation(
+      (projectId, sessionId) => Promise.resolve(
+        projectId === "project-a" ? inspectorManifest(7) : {
+          ...inspectorManifest(3),
+          project_id: projectId,
+          session_id: sessionId,
+          timeline_id: `timeline-${sessionId}`,
+          source_status: { status: "current", source_session_id: sessionId, source_session_revision: 3 },
+        },
+      ) as never,
+    );
+    vi.mocked(api.getEditingSession).mockImplementation(
+      (projectId, sessionId) => Promise.resolve({
+        ...inspectorSession(projectId === "project-a" ? 7 : 3),
+        project_id: projectId,
+        session_id: sessionId,
+        timeline_id: `timeline-${sessionId}`,
+      }) as never,
+    );
+    const preflight = vi.spyOn(api, "previewPartialRegeneration")
+      .mockImplementation(() => new Promise((resolve) => { resolvePreflight = resolve; }) as never);
+    const run = vi.spyOn(api, "runPartialRegeneration");
+
+    const rendered = render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(7);
+    await openInspector();
+    fireEvent.click(screen.getByRole("button", { name: "재생성 범위 미리보기" }));
+    await waitFor(() => expect(preflight).toHaveBeenCalledTimes(1));
+
+    rendered.rerender(<EditorWorkbenchRoute projectId="project-b" sessionId="session-b" />);
+    await expectEditorRevision(3);
+    await act(async () => { resolvePreflight(partialPreflight); });
+
+    fireEvent.click(screen.getByRole("button", { name: "편집 항목 열기" }));
+    const runButton = screen.getByRole("button", { name: "부분 재생성 실행" });
+    expect(runButton).toBeDisabled();
+    fireEvent.click(runButton);
+    expect(run).not.toHaveBeenCalled();
+    await expectEditorRevision(3);
+  });
+
+  it("ignores an old A partial run completion after route navigation to B", async () => {
+    let resolveRun!: (value: typeof partialRun) => void;
+    const manifestLoad = vi.mocked(api.getEditorPlaybackManifest);
+    manifestLoad.mockReset().mockImplementation(
+      (projectId, sessionId) => Promise.resolve(
+        projectId === "project-a" ? inspectorManifest(7) : {
+          ...inspectorManifest(3),
+          project_id: projectId,
+          session_id: sessionId,
+          timeline_id: `timeline-${sessionId}`,
+          source_status: { status: "current", source_session_id: sessionId, source_session_revision: 3 },
+        },
+      ) as never,
+    );
+    vi.mocked(api.getEditingSession).mockImplementation(
+      (projectId, sessionId) => Promise.resolve({
+        ...inspectorSession(projectId === "project-a" ? 7 : 3),
+        project_id: projectId,
+        session_id: sessionId,
+        timeline_id: `timeline-${sessionId}`,
+      }) as never,
+    );
+    vi.spyOn(api, "previewPartialRegeneration").mockResolvedValue(partialPreflight as never);
+    const run = vi.spyOn(api, "runPartialRegeneration")
+      .mockImplementation(() => new Promise((resolve) => { resolveRun = resolve; }) as never);
+    const resume = vi.spyOn(api, "getPartialRegenerationResult");
+
+    const rendered = render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(7);
+    await openInspector();
+    fireEvent.click(screen.getByRole("button", { name: "재생성 범위 미리보기" }));
+    const runButton = screen.getByRole("button", { name: "부분 재생성 실행" });
+    await waitFor(() => expect(runButton).toBeEnabled());
+    fireEvent.click(runButton);
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+
+    rendered.rerender(<EditorWorkbenchRoute projectId="project-b" sessionId="session-b" />);
+    await expectEditorRevision(3);
+    await act(async () => { resolveRun(partialRun); });
+
+    expect(manifestLoad).toHaveBeenCalledTimes(2);
+    expect(resume).not.toHaveBeenCalled();
+    await expectEditorRevision(3);
+  });
+
+  it("blocks editor history mutation while a Director batch apply lane is in flight", async () => {
+    let resolveDirectorPreflight!: (value: { status: string }) => void;
+    vi.mocked(api.getEditorPlaybackManifest).mockResolvedValue(inspectorManifest(7) as never);
+    vi.mocked(api.getEditingSession).mockResolvedValue(inspectorSession(7) as never);
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
+      conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },
+      messages: [], proposal: directorProposal(), references: [],
+    } as never);
+    vi.spyOn(api, "preflightDirectorProposal")
+      .mockImplementation(() => new Promise((resolve) => { resolveDirectorPreflight = resolve; }) as never);
+    const batchApply = vi.spyOn(api, "batchApplyDirectorProposal");
+    const undo = vi.spyOn(api, "undoEditingSession");
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(7);
+    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+    fireEvent.click(await screen.findByRole("button", { name: "선택한 추천 적용" }));
+    await waitFor(() => expect(api.preflightDirectorProposal).toHaveBeenCalledTimes(1));
+
+    const undoButton = screen.getByRole("button", { name: "실행 취소" });
+    expect(undoButton).toBeDisabled();
+    fireEvent.click(undoButton);
+    expect(undo).not.toHaveBeenCalled();
+    expect(batchApply).not.toHaveBeenCalled();
+    await act(async () => { resolveDirectorPreflight({ status: "ready" }); });
+  });
+
+  it("blocks Director apply while an editor history mutation lane is in flight", async () => {
+    let resolveUndo!: (value: unknown) => void;
+    vi.mocked(api.getEditorPlaybackManifest)
+      .mockResolvedValueOnce(inspectorManifest(7) as never)
+      .mockResolvedValueOnce(inspectorManifest(8) as never);
+    vi.mocked(api.getEditingSession)
+      .mockResolvedValueOnce(inspectorSession(7) as never)
+      .mockResolvedValueOnce(inspectorSession(8) as never);
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
+      conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },
+      messages: [], proposal: directorProposal(), references: [],
+    } as never);
+    vi.spyOn(api, "undoEditingSession")
+      .mockImplementation(() => new Promise((resolve) => { resolveUndo = resolve; }) as never);
+    const directorPreflight = vi.spyOn(api, "preflightDirectorProposal");
+    const batchApply = vi.spyOn(api, "batchApplyDirectorProposal");
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(7);
+    fireEvent.click(screen.getByRole("button", { name: "실행 취소" }));
+    await waitFor(() => expect(api.undoEditingSession).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+    const apply = await screen.findByRole("button", { name: "선택한 추천 적용" });
+
+    expect(apply).toBeDisabled();
+    fireEvent.click(apply);
+    expect(directorPreflight).not.toHaveBeenCalled();
+    expect(batchApply).not.toHaveBeenCalled();
+    await act(async () => { resolveUndo({}); });
+    await expectEditorRevision(8);
+  });
+
   it("ignores an old A mutation after navigating A to B to A while a new A mutation is saving", async () => {
     let resolveOldUpdate!: (value: unknown) => void;
     let resolveNewUpdate!: (value: unknown) => void;
@@ -890,7 +1742,7 @@ describe("EditorWorkbenchRoute", () => {
     await waitFor(() => expect(manifestLoad).toHaveBeenCalledTimes(2));
     expect(sessionLoad).toHaveBeenCalledTimes(2);
     expect(await screen.findByRole("button", { name: "직접 편집하기" })).toBeVisible();
-    expect(screen.getByText("재생 내용을 불러오지 못했어요. 새로고침 후 다시 확인해 주세요.")).toBeVisible();
+    expect(screen.getByText("최신 편집 내용을 불러오지 못했어요. 새로고침한 뒤 다시 시도해 주세요.")).toBeVisible();
     expect(screen.getByRole("region", { name: "편집 작업판" })).toBe(workbench);
     await expectEditorRevision(1);
   });

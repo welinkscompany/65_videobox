@@ -79,6 +79,8 @@ Every row must have a canonical route, component test, and E2E owner before 22D.
 
 ### 22C1 — Supported editor commands and partial regeneration
 
+**Status (2026-07-24): complete.** Canonical Inspector/command-port owners now cover the supported editor mutations and exact, persisted partial-regeneration preflight/run/result recovery. Unsupported effects and automatic apply remain absent.
+
 **RED**
 
 - Extend command-port, Inspector, route, and workbench tests for split/merge, undo/redo, cut action, clear B-roll/BGM/SFX, caption style, supported overlay edit/clear, and partial-regeneration preflight/run/resume.

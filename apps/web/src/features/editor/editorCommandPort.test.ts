@@ -4,6 +4,7 @@ import { createEditorCommandPort } from "./editorCommandPort";
 
 const api = {
   splitEditingSessionSegment: vi.fn(), mergeEditingSessionSegments: vi.fn(), updateEditingSessionSegmentBounds: vi.fn(), reorderEditingSessionSegments: vi.fn(), updateEditingSessionTimelinePlacements: vi.fn(),
+  undoEditingSession: vi.fn(), redoEditingSession: vi.fn(), updateEditingSessionCutAction: vi.fn(),
   updateEditingSessionBroll: vi.fn(), clearEditingSessionBrollOverride: vi.fn(), updateEditingSessionMusicOverride: vi.fn(), clearEditingSessionMusicOverride: vi.fn(), updateEditingSessionSfxOverride: vi.fn(), clearEditingSessionSfxOverride: vi.fn(),
   updateEditingSessionExplanationCard: vi.fn(), removeEditingSessionExplanationCard: vi.fn(), updateEditingSessionImageOverlay: vi.fn(), removeEditingSessionImageOverlay: vi.fn(), updateEditingSessionTableOverlay: vi.fn(), removeEditingSessionTableOverlay: vi.fn(),
   updateEditingSessionCaption: vi.fn(), updateEditingSessionCaptionStyle: vi.fn(),
@@ -63,6 +64,32 @@ describe("EditorCommandPort", () => {
     expect(api.updateEditingSessionBroll).toHaveBeenCalledWith("p", "s", "seg", { asset_id: "asset-b", media_controls: { volume: 0.6 }, expected_revision: 7 });
     expect(api.updateEditingSessionMusicOverride).toHaveBeenCalledWith("p", "s", "seg", { asset_id: "asset-m", media_controls: { fade_in_sec: 1 }, expected_revision: 7 });
     expect(api.clearEditingSessionSfxOverride).toHaveBeenCalledWith("p", "s", "seg", 7);
+  });
+
+  it("passes the current expected revision to undo, redo, and explicit cut actions", async () => {
+    const port = createEditorCommandPort({ projectId: "p", sessionId: "s", expectedRevision: 11 }, api);
+
+    await port.undo();
+    await port.redo();
+    await port.setCutAction({ segmentId: "seg-keep", cutAction: "keep" });
+    await port.setCutAction({ segmentId: "seg-remove", cutAction: "remove" });
+
+    expect(api.undoEditingSession).toHaveBeenCalledWith("p", "s", 11);
+    expect(api.redoEditingSession).toHaveBeenCalledWith("p", "s", 11);
+    expect(api.updateEditingSessionCutAction).toHaveBeenNthCalledWith(
+      1,
+      "p",
+      "s",
+      "seg-keep",
+      { cut_action: "keep", expected_revision: 11 },
+    );
+    expect(api.updateEditingSessionCutAction).toHaveBeenNthCalledWith(
+      2,
+      "p",
+      "s",
+      "seg-remove",
+      { cut_action: "remove", expected_revision: 11 },
+    );
   });
 
   it("serializes authoritative BGM and SFX fade controls without replacing hidden gain or ducking", async () => {

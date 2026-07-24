@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 
-import { ApiConflictError, api, type BrollAsset, type DirectorMessage, type DirectorMessageExchange, type DirectorProposal, type MediaLibraryAsset } from "../../../api";
+import { ApiConflictError, api, type BrollAsset, type DirectorMessage, type DirectorMessageExchange, type DirectorProposal, type MediaLibraryAsset, type PartialRegenerationJob, type PartialRegenerationPreflight, type PartialRegenerationRun } from "../../../api";
+import { findLatestSucceededJob } from "../../../lib/formatters";
 import { projectEditorAssets, type EditorAssetCard } from "../assets/editorAssetProjection";
 import { createEditorCommandPort, type EditorCommandPort } from "../editorCommandPort";
 import { joinEditorSnapshot, type EditorSessionSnapshot } from "../editorSnapshot";
 import type { EditorViewModel } from "../editorViewModel";
+import type { InspectorAction } from "../inspector/InspectorControls";
+import { canRestorePartialRegenerationResult, canRunPartialRegeneration, createPartialRegenerationTicket, PARTIAL_REGENERATION_FIELDS, preflightMatchesPartialRegenerationTicket, runMatchesPartialRegenerationTicket, type PartialRegenerationTicket } from "../partialRegenerationController";
 import { EditorWorkbench } from "./EditorWorkbench";
 import type { RightDockDirector, RightDockMessage, RightDockProposal } from "./rightDockTypes";
 
@@ -24,6 +27,16 @@ type DirectorState = Readonly<{
   isSending?: boolean;
   retryAfterSeconds?: number | null;
 }>;
+type PartialState = Readonly<{
+  key: string;
+  ticket: PartialRegenerationTicket | null;
+  preflight: PartialRegenerationPreflight | null;
+  run: PartialRegenerationRun | null;
+  jobId: string | null;
+  result: PartialRegenerationJob | null;
+  isResultOpen: boolean;
+  message: string | null;
+}>;
 
 const assetLoadError = "일부 자산을 불러오지 못했어요. 편집은 계속할 수 있어요. 잠시 후 다시 확인해 주세요.";
 
@@ -34,6 +47,9 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
   const [assets, setAssets] = useState<AssetState>({ key: requestKey, brollAssets: [], libraryAssets: [], error: null });
   const [mutation, setMutation] = useState<MutationState>({ isSaving: false });
   const [director, setDirector] = useState<DirectorState>({ key: requestKey, state: sessionId ? "analysis_running" : "script_required", conversationId: null, messages: [], proposal: null });
+  const [partial, setPartial] = useState<PartialState>({ key: requestKey, ticket: null, preflight: null, run: null, jobId: null, result: null, isResultOpen: false, message: null });
+  const [partialRecoveryRetryToken, setPartialRecoveryRetryToken] = useState(0);
+  const [partialRecoveryError, setPartialRecoveryError] = useState(false);
   const mutationInFlight = useRef(false);
   const routeEpoch = useRef({ key: requestKey, value: 0 });
   const manifestOperationId = useRef(0);
@@ -41,22 +57,29 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
   const previewOperationId = useRef(0);
   const pollOperationId = useRef(0);
   const directorOperationId = useRef(0);
+  const partialOperationId = useRef(0);
+  const partialRecoveryOperationId = useRef(0);
   const stableDirectorMessageId = useRef<string | null>(null);
   const directorMutationInFlight = useRef(false);
   const directorMessageInFlight = useRef(false);
+  const partialInFlight = useRef(false);
   const directorRetry = useRef<Readonly<{ text: string; retry: () => Promise<{ kind: "exchange"; exchange: DirectorMessageExchange } | { kind: "in_progress"; retryAfterSeconds: number }> }> | null>(null);
   useEffect(() => {
     if (routeEpoch.current.key === requestKey) return;
     routeEpoch.current = { key: requestKey, value: routeEpoch.current.value + 1 };
     mutationOperationId.current += 1;
     directorOperationId.current += 1;
+    partialOperationId.current += 1;
     stableDirectorMessageId.current = null;
     directorMutationInFlight.current = false;
     directorMessageInFlight.current = false;
+    partialInFlight.current = false;
     directorRetry.current = null;
     mutationInFlight.current = false;
     setMutation({ isSaving: false });
     setDirector({ key: requestKey, state: sessionId ? "analysis_running" : "script_required", conversationId: null, messages: [], proposal: null });
+    setPartial({ key: requestKey, ticket: null, preflight: null, run: null, jobId: null, result: null, isResultOpen: false, message: null });
+    setPartialRecoveryError(false);
   }, [requestKey]);
   useEffect(() => {
     if (!sessionId) return;
@@ -103,6 +126,81 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     });
     return () => { active = false; };
   }, [projectId, requestKey, refreshToken, sessionId]);
+  useEffect(() => {
+    if (!sessionId || !state.session?.updatedAt) return;
+    const epoch = routeEpoch.current.value;
+    const operationId = partialRecoveryOperationId.current + 1;
+    partialRecoveryOperationId.current = operationId;
+    const mutationGeneration = mutationOperationId.current;
+    let active = true;
+    const isCurrent = () => (
+      active
+      && routeEpoch.current.value === epoch
+      && partialRecoveryOperationId.current === operationId
+      && mutationOperationId.current === mutationGeneration
+    );
+    void api.listJobs(projectId).then(async (jobs) => {
+      const latest = findLatestSucceededJob(jobs, "partial_regeneration", sessionId);
+      if (!latest) return null;
+      return {
+        expectedJobId: latest.job_id,
+        result: await api.getPartialRegenerationResult(projectId, latest.job_id),
+      };
+    }).then((recovered) => {
+      if (!isCurrent()) return;
+      if (!recovered) {
+        setPartialRecoveryError(false);
+        setPartial((current) => current.key === requestKey
+          && current.message === "이전 재생성 결과를 찾지 못했어요. 직접 편집은 계속할 수 있어요."
+          ? { ...current, message: "저장된 이전 재생성 결과가 없어요." }
+          : current);
+        return;
+      }
+      const { expectedJobId, result } = recovered;
+      const recoveredSegmentId = result.segment_ids.length === 1 ? result.segment_ids[0] : "";
+      const canRecover = canRestorePartialRegenerationResult({
+        sessionId,
+        sessionUpdatedAt: state.session?.updatedAt ?? "",
+        jobId: expectedJobId,
+        segmentId: recoveredSegmentId,
+        fields: result.fields,
+      }, result) && state.session!.segments.some((segment) => segment.segmentId === recoveredSegmentId);
+      if (!canRecover) {
+        setPartialRecoveryError(false);
+        setPartial((current) => current.key === requestKey && current.jobId !== null
+          ? {
+            ...current,
+            jobId: null,
+            result: null,
+            isResultOpen: false,
+            message: "현재 편집본과 맞지 않는 이전 결과를 닫았어요.",
+          }
+          : current);
+        return;
+      }
+      setPartialRecoveryError(false);
+      setPartial((current) => (
+        current.key === requestKey && current.ticket === null && !partialInFlight.current
+          ? {
+            ...current,
+            jobId: result.job_id,
+            result,
+            isResultOpen: current.isResultOpen && current.jobId === result.job_id,
+            message: current.message === "이전 재생성 결과를 찾지 못했어요. 직접 편집은 계속할 수 있어요."
+              ? "이전 재생성 결과를 다시 찾았어요."
+              : current.message,
+          }
+          : current
+      ));
+    }).catch(() => {
+      if (!isCurrent()) return;
+      setPartialRecoveryError(true);
+      setPartial((current) => current.key === requestKey
+        ? { ...current, message: "이전 재생성 결과를 찾지 못했어요. 직접 편집은 계속할 수 있어요." }
+        : current);
+    });
+    return () => { active = false; };
+  }, [partialRecoveryRetryToken, projectId, requestKey, sessionId, state.session?.updatedAt]);
   useEffect(() => {
     if (!sessionId) {
       setAssets({ key: requestKey, brollAssets: [], libraryAssets: [], error: null });
@@ -203,6 +301,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       if (isCurrent()) {
         mutationInFlight.current = false;
         setMutation({ isSaving: false, message: resultMessage });
+        setPartialRecoveryRetryToken((current) => current + 1);
       }
     }
   };
@@ -214,9 +313,176 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       if (!isCurrent()) return;
       return port.applyMedia({ kind: card.kind, segmentId, assetId: materialized.asset_id });
     });
+  const activePartial = partial.key === requestKey
+    ? partial
+    : { key: requestKey, ticket: null, preflight: null, run: null, jobId: null, result: null, isResultOpen: false, message: null };
+  const partialScope = (action: Extract<InspectorAction, { kind: "partial-preflight" | "partial-run" | "partial-resume" }>) => {
+    if (!sessionId || !state.view || action.segmentIds.length !== 1) return null;
+    return {
+      projectId,
+      sessionId,
+      routeEpoch: routeEpoch.current.value,
+      revision: state.view.expectedRevision,
+      segmentId: action.segmentIds[0],
+      fields: action.fields,
+    };
+  };
+  const preflightPartialRegeneration = async (action: Extract<InspectorAction, { kind: "partial-preflight" }>) => {
+    const scope = partialScope(action);
+    const ticket = scope ? createPartialRegenerationTicket(scope) : null;
+    if (!scope || !ticket || partialInFlight.current || mutationInFlight.current) return;
+    const epoch = routeEpoch.current.value;
+    const operationId = partialOperationId.current + 1;
+    partialOperationId.current = operationId;
+    const isCurrent = () => routeEpoch.current.value === epoch && partialOperationId.current === operationId;
+    partialInFlight.current = true;
+    setPartial({ key: requestKey, ticket: null, preflight: null, run: null, jobId: null, result: null, isResultOpen: false, message: "바뀌는 범위를 확인하고 있어요." });
+    try {
+      const preflight = await api.previewPartialRegeneration(projectId, sessionId!, {
+        segment_ids: [ticket.segmentId],
+        fields: [...ticket.fields],
+      });
+      if (!preflightMatchesPartialRegenerationTicket(ticket, preflight)) {
+        throw new Error("partial_regeneration_preflight_identity_mismatch");
+      }
+      if (isCurrent()) {
+        setPartial({ key: requestKey, ticket, preflight, run: null, jobId: null, result: null, isResultOpen: false, message: "영향 범위를 확인했어요. 실행 버튼을 눌러야 실제로 다시 만듭니다." });
+      }
+    } catch {
+      if (isCurrent()) setPartial({ key: requestKey, ticket: null, preflight: null, run: null, jobId: null, result: null, isResultOpen: false, message: "영향 범위를 확인하지 못했어요. 직접 편집은 계속할 수 있어요." });
+    } finally {
+      if (isCurrent()) partialInFlight.current = false;
+    }
+  };
+  const runPartialRegeneration = async (action: Extract<InspectorAction, { kind: "partial-run" }>) => {
+    const scope = partialScope(action);
+    if (!scope || !canRunPartialRegeneration(activePartial.ticket, scope) || partialInFlight.current || mutationInFlight.current) return;
+    partialInFlight.current = true;
+    setPartial((current) => current.key === requestKey ? { ...current, message: "선택한 범위를 다시 만들고 있어요." } : current);
+    try {
+      await commitTimelineMutation(async (_port, isCurrent) => {
+        try {
+          const ticket = activePartial.ticket!;
+          const result = await api.runPartialRegeneration(projectId, sessionId!, {
+            expected_revision: scope.revision,
+            segment_ids: [scope.segmentId],
+            fields: [...ticket.fields],
+          });
+          if (!runMatchesPartialRegenerationTicket(ticket, result)) {
+            throw new Error("partial_regeneration_run_identity_mismatch");
+          }
+          if (isCurrent()) {
+            setPartial({
+              key: requestKey,
+              ticket: null,
+              preflight: null,
+              run: result,
+              jobId: result.job_id!.trim(),
+              result: null,
+              isResultOpen: false,
+              message: "부분 재생성을 마쳤어요. 이전 결과 열기에서 결과 범위를 확인할 수 있어요.",
+            });
+          }
+        } catch (error) {
+          if (isCurrent()) {
+            setPartial({
+              key: requestKey,
+              ticket: null,
+              preflight: null,
+              run: null,
+              jobId: null,
+              result: null,
+              isResultOpen: false,
+              message: "부분 재생성을 완료하지 못했어요. 영향 범위를 다시 확인해 주세요.",
+            });
+          }
+          throw error;
+        }
+      });
+    } finally {
+      if (routeEpoch.current.value === scope.routeEpoch) partialInFlight.current = false;
+    }
+  };
+  const resumePartialRegeneration = async (action: Extract<InspectorAction, { kind: "partial-resume" }>) => {
+    const scope = partialScope(action);
+    const jobId = activePartial.jobId;
+    if (!scope || !jobId || !state.session || partialInFlight.current || mutationInFlight.current) return;
+    const epoch = routeEpoch.current.value;
+    const mutationGeneration = mutationOperationId.current;
+    const operationId = partialOperationId.current + 1;
+    partialOperationId.current = operationId;
+    const ownsOperation = () => routeEpoch.current.value === epoch && partialOperationId.current === operationId;
+    const isCurrent = () => (
+      ownsOperation()
+      && mutationOperationId.current === mutationGeneration
+    );
+    partialInFlight.current = true;
+    try {
+      const result = await api.getPartialRegenerationResult(projectId, jobId);
+      if (!isCurrent()) return;
+      const canRestore = canRestorePartialRegenerationResult({
+        sessionId: state.session.sessionId,
+        sessionUpdatedAt: state.session.updatedAt ?? "",
+        jobId,
+        segmentId: scope.segmentId,
+        fields: scope.fields,
+      }, result);
+      setPartial((current) => current.key === requestKey
+        ? {
+          ...current,
+          result: canRestore ? result : current.result,
+          isResultOpen: canRestore,
+          message: canRestore ? "현재 편집본과 맞는 이전 결과를 열었어요." : "현재 편집본의 구간·항목과 맞지 않는 이전 결과는 열지 않았어요.",
+        }
+        : current);
+    } catch {
+      if (isCurrent()) setPartial((current) => current.key === requestKey ? { ...current, message: "이전 결과를 확인하지 못했어요. 직접 편집은 계속할 수 있어요." } : current);
+    } finally {
+      if (ownsOperation()) partialInFlight.current = false;
+    }
+  };
+  const handleInspectorAction = (action: InspectorAction) => {
+    if (action.kind === "partial-preflight") return preflightPartialRegeneration(action);
+    if (action.kind === "partial-run") return runPartialRegeneration(action);
+    if (action.kind === "partial-resume") return resumePartialRegeneration(action);
+    return commitTimelineMutation((port) => {
+      if (action.kind === "split-narration") return port.splitNarration({ segmentId: action.segmentId, splitSec: action.splitSec });
+      if (action.kind === "merge-narration") return port.mergeNarration({ leftSegmentId: action.leftSegmentId, rightSegmentId: action.rightSegmentId });
+      if (action.kind === "set-cut-action") return port.setCutAction({ segmentId: action.segmentId, cutAction: action.cutAction });
+      if (action.kind === "save-media") return port.updateMediaControls({ kind: action.mediaKind, segmentId: action.segmentId, assetId: action.assetId, controls: action.controls });
+      if (action.kind === "clear-media") return port.clearMedia({ kind: action.mediaKind, segmentId: action.segmentId });
+      if (action.kind === "save-caption-style") return port.setCaptionStyle({ segmentIds: action.segmentIds, scope: action.scope, style: action.style });
+      if (action.kind === "clear-overlay") return port.clearOverlay({ kind: action.overlayKind, segmentId: action.segmentId });
+      if (action.overlayKind === "explanation-card") return port.applyOverlay({ kind: action.overlayKind, segmentId: action.segmentId, title: action.title, body: action.body, text: action.text });
+      if (action.overlayKind === "image") return port.applyOverlay({ kind: action.overlayKind, segmentId: action.segmentId, assetId: action.assetId, text: action.text });
+      return port.applyOverlay({ kind: action.overlayKind, segmentId: action.segmentId, columns: action.columns, rows: action.rows, text: action.text });
+    });
+  };
   const assetCards = assets.key === requestKey
     ? projectEditorAssets({ projectId, brollAssets: assets.brollAssets, libraryAssets: assets.libraryAssets })
     : [];
+  const partialTicketIsCurrent = activePartial.ticket !== null && canRunPartialRegeneration(activePartial.ticket, {
+    projectId,
+    sessionId: sessionId ?? "",
+    routeEpoch: routeEpoch.current.value,
+    revision: state.view.expectedRevision,
+    segmentId: activePartial.ticket.segmentId,
+    fields: activePartial.ticket.fields,
+  });
+  const partialResultIsCurrent = Boolean(
+    activePartial.jobId
+    && activePartial.result
+    && state.session
+    && activePartial.result.segment_ids.length === 1
+    && state.session.segments.some((segment) => segment.segmentId === activePartial.result!.segment_ids[0])
+    && canRestorePartialRegenerationResult({
+      sessionId: state.session.sessionId,
+      sessionUpdatedAt: state.session.updatedAt ?? "",
+      jobId: activePartial.jobId,
+      segmentId: activePartial.result.segment_ids[0],
+      fields: activePartial.result.fields,
+    }, activePartial.result),
+  );
   const activeDirector = director.key === requestKey ? director : { key: requestKey, state: "analysis_running" as const, conversationId: null, messages: [], proposal: null };
   const isCurrentDirector = (epoch: number, operationId: number) => routeEpoch.current.value === epoch && directorOperationId.current === operationId;
   const sendDirectorMessage = async (text: string, retryRequested = false) => {
@@ -285,7 +551,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     }
   };
   const applyDirectorProposal = async (proposalId: string, candidateIds: readonly string[]) => {
-    if (!sessionId || !state.view || activeDirector.proposal?.proposal_id !== proposalId || !candidateIds.length || directorMutationInFlight.current) return;
+    if (!sessionId || !state.view || activeDirector.proposal?.proposal_id !== proposalId || !candidateIds.length || directorMutationInFlight.current || mutationInFlight.current) return;
     const epoch = routeEpoch.current.value;
     const operationId = directorOperationId.current + 1;
     directorOperationId.current = operationId;
@@ -293,27 +559,32 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     const currentRevision = state.view.expectedRevision;
     setDirector({ ...activeDirector, state: "applying" });
     try {
-      const preflight = await api.preflightDirectorProposal(projectId, proposalId);
-      if (!isCurrentDirector(epoch, operationId)) return;
-      if (preflight.status === "stale" || preflight.code === "stale_proposal") { setDirector({ ...activeDirector, state: "blocked" }); return; }
-      await api.batchApplyDirectorProposal(projectId, proposalId, { candidate_ids: [...candidateIds], expected_revision: currentRevision });
-      if (!isCurrentDirector(epoch, operationId)) return;
-      setDirector({ ...activeDirector, state: "proposal_ready" });
-      setRefreshToken((current) => current + 1);
-    } catch {
-      if (isCurrentDirector(epoch, operationId)) {
-        setDirector({ ...activeDirector, state: "blocked" });
-        setRefreshToken((current) => current + 1);
-      }
+      await commitTimelineMutation(async (_port, isCurrentMutation) => {
+        try {
+          const preflight = await api.preflightDirectorProposal(projectId, proposalId);
+          if (!isCurrentMutation() || !isCurrentDirector(epoch, operationId)) return;
+          if (preflight.status === "stale" || preflight.code === "stale_proposal") {
+            setDirector({ ...activeDirector, state: "blocked" });
+            throw new Error("stale director proposal");
+          }
+          await api.batchApplyDirectorProposal(projectId, proposalId, { candidate_ids: [...candidateIds], expected_revision: currentRevision });
+          if (isCurrentMutation() && isCurrentDirector(epoch, operationId)) setDirector({ ...activeDirector, state: "proposal_ready" });
+        } catch (error) {
+          if (isCurrentMutation() && isCurrentDirector(epoch, operationId)) setDirector({ ...activeDirector, state: "blocked" });
+          throw error;
+        }
+      });
     } finally {
-      if (isCurrentDirector(epoch, operationId)) directorMutationInFlight.current = false;
+      if (isCurrentDirector(epoch, operationId)) {
+        directorMutationInFlight.current = false;
+      }
     }
   };
   const rightDock: RightDockDirector = {
-    state: activeDirector.state,
+    state: mutation.isSaving ? "applying" : activeDirector.state,
     messages: activeDirector.messages,
     proposal: projectDirectorProposal(activeDirector.proposal),
-    composerDisabled: !activeDirector.conversationId || activeDirector.isSending === true || activeDirector.state === "analysis_running" || activeDirector.state === "applying",
+    composerDisabled: mutation.isSaving || !activeDirector.conversationId || activeDirector.isSending === true || activeDirector.state === "analysis_running" || activeDirector.state === "applying",
     onSendMessage: sendDirectorMessage,
     onApplyProposal: applyDirectorProposal,
     onManualEdit: () => setDirector((current) => current.key === requestKey ? { ...current, state: "idle" } : current),
@@ -325,15 +596,35 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
   return <>
     {state.error ? <p role="status">{state.error}</p> : null}
     {assets.key === requestKey && assets.error ? <p role="status">{assets.error}</p> : null}
+    {activePartial.message ? <p role="status">{activePartial.message}</p> : null}
+    {partialRecoveryError ? <button onClick={() => setPartialRecoveryRetryToken((current) => current + 1)} type="button">이전 결과 다시 찾기</button> : null}
+    {activePartial.preflight?.affected_output_areas.length ? <ul aria-label="부분 재생성 영향 범위">{activePartial.preflight.affected_output_areas.map((area) => <li key={area}>{area}</li>)}</ul> : null}
+    {activePartial.isResultOpen && activePartial.result && partialResultIsCurrent ? <dl aria-label="부분 재생성 결과">
+      <dt>상태</dt><dd>{activePartial.result.status}</dd>
+      <dt>대상 구간 수</dt><dd>{activePartial.result.segment_ids.length}</dd>
+      <dt>다시 만든 항목</dt><dd>{activePartial.result.fields.join(", ")}</dd>
+    </dl> : null}
     <EditorWorkbench
     assetCards={assetCards}
     isSavingTimeline={mutation.isSaving}
     onApplyAssetCard={applyAssetCard}
+    onInspectorAction={handleInspectorAction}
     onPreviewRefresh={refreshPreview}
     onReorderNarration={(input) => commitTimelineMutation((port) => port.reorderNarration(input))}
+    onRedo={() => commitTimelineMutation((port) => port.redo())}
     onTrimNarration={(input) => commitTimelineMutation((port) => port.setNarrationBounds(input))}
+    onUndo={() => commitTimelineMutation((port) => port.undo())}
     onUpdateCaption={(input) => commitTimelineMutation((port) => port.setCaptionText(input))}
     onUpdatePlacements={(input) => commitTimelineMutation((port) => port.setTimelinePlacements(input))}
+    partialRegeneration={{
+      fields: PARTIAL_REGENERATION_FIELDS,
+      defaultFields: ["caption", "music"],
+      preparedFields: activePartial.ticket?.fields,
+      preparedSegmentId: activePartial.ticket?.segmentId,
+      canRun: partialTicketIsCurrent,
+      canResume: partialResultIsCurrent,
+    }}
+    session={state.session}
     timelineMutationMessage={mutation.message}
     director={rightDock}
     requestedSegmentId={requestedSegmentId}

@@ -12,7 +12,7 @@ type OverlayClear = Readonly<{ kind: OverlayApply["kind"]; segmentId: string }>;
 
 export type EditorCommandApi = Pick<typeof api,
   "splitEditingSessionSegment" | "mergeEditingSessionSegments" | "updateEditingSessionSegmentBounds" | "reorderEditingSessionSegments" |
-  "updateEditingSessionTimelinePlacements" |
+  "updateEditingSessionTimelinePlacements" | "undoEditingSession" | "redoEditingSession" | "updateEditingSessionCutAction" |
   "updateEditingSessionBroll" | "clearEditingSessionBrollOverride" | "updateEditingSessionMusicOverride" | "clearEditingSessionMusicOverride" |
   "updateEditingSessionSfxOverride" | "clearEditingSessionSfxOverride" | "updateEditingSessionExplanationCard" | "removeEditingSessionExplanationCard" |
   "updateEditingSessionImageOverlay" | "removeEditingSessionImageOverlay" | "updateEditingSessionTableOverlay" | "removeEditingSessionTableOverlay" |
@@ -20,6 +20,9 @@ export type EditorCommandApi = Pick<typeof api,
 >;
 
 export type EditorCommandPort = Readonly<{
+  undo(): Promise<EditingSession>;
+  redo(): Promise<EditingSession>;
+  setCutAction(input: { segmentId: string; cutAction: "keep" | "remove" }): Promise<EditingSession>;
   splitNarration(input: { segmentId: string; splitSec: number }): Promise<EditingSession>;
   mergeNarration(input: { leftSegmentId: string; rightSegmentId: string }): Promise<EditingSession>;
   setNarrationBounds(input: { segmentId: string; startSec: number; endSec: number }): Promise<EditingSession>;
@@ -60,6 +63,14 @@ export function createEditorCommandPort(context: Context, commandApi: EditorComm
     return commandApi.updateEditingSessionSfxOverride(projectId, sessionId, input.segmentId, payload);
   };
   return {
+    undo: () => commandApi.undoEditingSession(projectId, sessionId, expectedRevision),
+    redo: () => commandApi.redoEditingSession(projectId, sessionId, expectedRevision),
+    setCutAction: ({ segmentId, cutAction }) => commandApi.updateEditingSessionCutAction(
+      projectId,
+      sessionId,
+      segmentId,
+      { cut_action: cutAction, ...revise },
+    ),
     splitNarration: ({ segmentId, splitSec }) => commandApi.splitEditingSessionSegment(projectId, sessionId, segmentId, { split_sec: splitSec, ...revise }),
     mergeNarration: ({ leftSegmentId, rightSegmentId }) => commandApi.mergeEditingSessionSegments(projectId, sessionId, { left_segment_id: leftSegmentId, right_segment_id: rightSegmentId, ...revise }),
     setNarrationBounds: ({ segmentId, startSec, endSec }) => commandApi.updateEditingSessionSegmentBounds(projectId, sessionId, segmentId, { start_sec: startSec, end_sec: endSec, ...revise }),

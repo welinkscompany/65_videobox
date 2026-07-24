@@ -1,6 +1,19 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 296. 2026-07-24 Task 22C2 canonical voice/TTS closeout`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 297. 2026-07-24 Task 22C1 supported editor commands/partial regeneration closeout`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+
+## 297. 2026-07-24 Task 22C1 supported editor commands/partial regeneration closeout
+
+- `[x] canonical editor commands`: split/merge, undo/redo, keep/remove cut, B-roll/BGM/SFX clear, BGM/SFX fade edit, caption style, explanation/image/table overlay edit/clear를 typed Inspector→current-revision `EditorCommandPort`→실제 editing-session API로 연결했다.
+- `[x] 지원 범위 고정`: backend/runtime이 실제 지원하지 않는 effect, transition, keyframe, mask, 독립 caption timing, B-roll 세부 control, 자동 apply는 Inspector에 노출하지 않는다. B-roll은 clear-only이며 BGM/SFX는 authoritative `gain_db/fade_in_sec/fade_out_sec/ducking`을 보존한다.
+- `[x] 부분 재생성 안전성`: 7개 canonical field를 preflight 뒤 명시적으로 run한다. preflight/run/resume 응답은 session/job/segment/fields를 exact 검증하고, latest succeeded same-session job은 새 route mount에서도 복구한다. 결과 열기는 authoritative `updated_at`과 current segment membership이 맞을 때만 가능하며 mutation/recovery는 route epoch·operation ID·mutation generation으로 stale completion을 버린다.
+- `[x] 편집 lane`: 일반 Inspector mutation, undo/redo, Director batch apply, partial run은 한 mutation single-flight lane을 공유한다. 성공·409 conflict·일반 실패 뒤 manifest와 editing session을 함께 다시 읽고 manual fallback을 유지한다.
+- `검증`: TDD RED→GREEN, focused frontend `7 files / 141 passed`, full frontend `62 files / 698 passed`, editor Playwright E2E `8 passed`와 snapshot manifest verifier, production build, Editor UI OSS provenance/UI-system verifier, external-runtime/network guard `2 files / 6 passed`, `git diff --check` 통과. independent spec/quality/gap/reverse review는 Critical/Important 0이다. recovery 실패는 안내와 same-mount 명시적 재시도를 제공하고, mutation 실패 뒤 같은 authoritative 결과를 보존한다. 전체 Python regression은 실행하지 않았다.
+- 실제 사용자 샘플 dogfood의 BGM 220 Hz/SFX 880 Hz 구간별 exact AAC 역방향 증거는 §295를 따른다. 자동 검증은 사람 청취 판단이나 실제 CapCut Desktop 실증을 대체하지 않는다.
+- `다음 goal`: Task 22C3에서 legacy `preview_render`/`exportCapcut` UI reachability를 제거하고 canonical exact preview/final/CapCut draft/handoff output owner와 E2E를 닫는다. 이어서 22D legacy owner removal을 진행한다.
+- `?? .tmp-final-fence-debug/`, `?? .tmp-real-video-dogfood/`, `?? apps/web/.tmp-real-video-dogfood/`와 사용자 원본 샘플은 stage/remove/delete하지 않았다.
+- Task 9 사람/환경 acceptance와 실제 CapCut Desktop 실증은 계속 별도다. 공식 누적은 사용자 지시대로 **9/22 (40.9%)**, 잔여 **59.1%**를 유지한다.
+- handoff: `docs/handoffs/2026-07-24-videobox-task22c1-editor-commands-partial-regeneration-closeout.ko.md`.
 
 ## 296. 2026-07-24 Task 22C2 canonical voice/TTS closeout
 

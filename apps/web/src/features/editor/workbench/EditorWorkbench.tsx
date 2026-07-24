@@ -3,7 +3,9 @@ import { type KeyboardEvent, useEffect, useLayoutEffect, useRef, useState } from
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "../../../components/ui/resizable";
 import type { PanelImperativeHandle, PanelSize } from "react-resizable-panels";
 import type { EditorViewModel } from "../editorViewModel";
+import type { EditorSessionSnapshot } from "../editorSnapshot";
 import type { EditorAssetCard } from "../assets/editorAssetProjection";
+import type { InspectorAction, PartialRegenerationControls } from "../inspector/InspectorControls";
 import { PreviewStage, type AuditionRequest, type AuditionSource } from "../preview/preview-stage";
 import { TimelineDock } from "../timeline/TimelineDock";
 import { activeSegmentIdAt, clampPlaybackSeconds } from "../transcript/playbackNavigation";
@@ -30,11 +32,16 @@ type TimelinePlacements = Readonly<{ changes: Array<{ placementId: string; kind:
 type CaptionText = Readonly<{ segmentId: string; text: string }>;
 type EditorWorkbenchProps = Readonly<{
   view: EditorViewModel;
+  session?: EditorSessionSnapshot | null;
   onPreviewRefresh?: () => void | Promise<void>;
+  onUndo?: () => void | Promise<void>;
+  onRedo?: () => void | Promise<void>;
   onTrimNarration?: (input: NarrationTrim) => void | Promise<void>;
   onReorderNarration?: (input: NarrationReorder) => void | Promise<void>;
   onUpdatePlacements?: (input: TimelinePlacements) => void | Promise<void>;
   onUpdateCaption?: (input: CaptionText) => void | Promise<void>;
+  onInspectorAction?: (action: InspectorAction) => void | Promise<void>;
+  partialRegeneration?: PartialRegenerationControls;
   assetCards?: readonly EditorAssetCard[];
   onApplyAssetCard?: (card: EditorAssetCard, segmentId: string) => void | Promise<void>;
   isSavingTimeline?: boolean;
@@ -45,11 +52,16 @@ type EditorWorkbenchProps = Readonly<{
 
 export function EditorWorkbench({
   view,
+  session,
   onPreviewRefresh,
+  onUndo,
+  onRedo,
   onTrimNarration,
   onReorderNarration,
   onUpdatePlacements,
   onUpdateCaption,
+  onInspectorAction,
+  partialRegeneration,
   assetCards = [],
   onApplyAssetCard,
   isSavingTimeline = false,
@@ -156,7 +168,7 @@ export function EditorWorkbench({
   };
   const openManualEditing = () => setUi((current) => layout.mode === "drawer" ? { ...current, activeDrawer: "left" } : { ...current, leftOpen: true });
   const rightDirector = director ? { ...director, onManualEdit: () => { director.onManualEdit(); openManualEditing(); }, onPreviewCandidate: previewDirectorCandidate } : undefined;
-  const dock = (side: "left" | "right") => <aside aria-label={side === "left" ? "자산과 대본" : "유진과 편집 항목"} className={`vb-editor-workbench__dock vb-editor-workbench__dock--${side}`}><EditorWorkbenchReadOnlyAdapters assetCards={assetCards} assetTarget={assetTarget} director={rightDirector} dock={side} eugeneDraft={eugeneDraft} isSavingCaption={isSavingTimeline} onApplyAssetCard={onApplyAssetCard} onEugeneDraftChange={setEugeneDraft} onPreviewAsset={previewAssetCard} onSaveCaption={onUpdateCaption} onSeek={seekPlayback} onSelectSegment={selectSegment} playbackSec={playbackSec} selectedSegmentId={selectedSegmentId} view={view} /></aside>;
+  const dock = (side: "left" | "right") => <aside aria-label={side === "left" ? "자산과 대본" : "유진과 편집 항목"} className={`vb-editor-workbench__dock vb-editor-workbench__dock--${side}`}><EditorWorkbenchReadOnlyAdapters assetCards={assetCards} assetTarget={assetTarget} director={rightDirector} dock={side} eugeneDraft={eugeneDraft} isSavingCaption={isSavingTimeline} onApplyAssetCard={onApplyAssetCard} onEugeneDraftChange={setEugeneDraft} onInspectorAction={onInspectorAction} onPreviewAsset={previewAssetCard} onSaveCaption={onUpdateCaption} onSeek={seekPlayback} onSelectSegment={selectSegment} partialRegeneration={partialRegeneration} playbackSec={playbackSec} selectedSegmentId={selectedSegmentId} session={session} view={view} /></aside>;
   const resize = (side: "left" | "right", delta: number) => setUi((current) => { const key = side === "left" ? "leftSize" : "rightSize"; const value = Math.max(side === "left" ? 220 : 260, current[key] + delta); (side === "left" ? leftPanelRef : rightPanelRef).current?.resize(`${value}px`); return { ...current, [key]: value }; });
   const handleKey = (event: KeyboardEvent<HTMLDivElement>, side: "left" | "right") => { if (event.key === "ArrowLeft" || event.key === "ArrowRight") { event.preventDefault(); event.stopPropagation(); resize(side, event.key === "ArrowRight" ? 20 : -20); } };
   const trapDrawerFocus = (event: KeyboardEvent<HTMLDivElement>) => { if (event.key === "Escape") { closeAndRestore(); return; } if (event.key !== "Tab") return; const focusable = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('button:not([disabled]), [tabindex="0"]')); if (!focusable.length) { event.preventDefault(); return; } const first = focusable[0]; const last = focusable[focusable.length - 1]; if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); } };
@@ -172,7 +184,7 @@ export function EditorWorkbench({
   }));
   const stage = <PreviewStage auditionRequest={auditionRequest} expectedRevision={view.expectedRevision} exactPreview={view.playback.exactPreview} captions={view.captions} onPlaybackTimeChange={seekPlayback} playbackSec={playbackSec} sources={sources} onRefresh={onPreviewRefresh} />;
   return <section className="vb-editor-workbench" aria-label="편집 작업판" data-project-id={view.projectId} data-session-id={view.sessionId} data-editor-revision={view.expectedRevision} data-editor-density={layout.mode} data-available-workbench-width={Math.round(availableWorkbenchWidth)}>
-    <header className="vb-editor-workbench__toolbar"><strong>편집 작업판</strong><span>현재 편집본</span><div><button ref={leftTriggerRef} type="button" onClick={() => layout.mode === "drawer" ? openDrawer("left") : setUi((current) => ({ ...current, leftOpen: !current.leftOpen }))}>자산과 대본</button><button ref={rightTriggerRef} type="button" onClick={() => layout.mode === "drawer" ? openDrawer("right") : setUi((current) => ({ ...current, rightOpen: !current.rightOpen }))}>유진과 편집 항목</button></div></header>
+    <header className="vb-editor-workbench__toolbar"><strong>편집 작업판</strong><span>현재 편집본</span><div><button type="button" disabled={isSavingTimeline || !onUndo || !session?.undoCount} onClick={() => void onUndo?.()}>실행 취소</button><button type="button" disabled={isSavingTimeline || !onRedo || !session?.redoCount} onClick={() => void onRedo?.()}>다시 실행</button><button ref={leftTriggerRef} type="button" onClick={() => layout.mode === "drawer" ? openDrawer("left") : setUi((current) => ({ ...current, leftOpen: !current.leftOpen }))}>자산과 대본</button><button ref={rightTriggerRef} type="button" onClick={() => layout.mode === "drawer" ? openDrawer("right") : setUi((current) => ({ ...current, rightOpen: !current.rightOpen }))}>유진과 편집 항목</button></div></header>
     <div ref={bodyRef} className="vb-editor-workbench__body">
       {layout.mode !== "drawer" ? <ResizablePanelGroup orientation="horizontal" className="vb-editor-workbench__panels">
         {leftVisible && <><ResizablePanel panelRef={leftPanelRef} defaultSize={`${ui.leftSize}px`} minSize="220px" onResize={(size) => setUi((current) => ({ ...current, leftSize: persistedPanelPixels(size, 220, current.leftSize) }))}>{dock("left")}</ResizablePanel><ResizableHandle aria-label="왼쪽 패널 크기 조절" onKeyDown={(event) => handleKey(event, "left")} /></>}

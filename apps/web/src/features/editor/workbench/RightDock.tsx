@@ -1,11 +1,19 @@
 import { useEffect, useState } from "react";
 
+import { InspectorControls, type InspectorAction, type PartialRegenerationControls } from "../inspector/InspectorControls";
 import type { InspectorTarget } from "../inspector/inspectorRegistry";
 import type { RightDockCandidate, RightDockMessage, RightDockProposal } from "./rightDockTypes";
 
 export type { InspectorTarget } from "../inspector/inspectorRegistry";
 
-type SelectedSegment = Readonly<{ segmentId: string; startSec: number; endSec: number; draftApplied: boolean }>;
+type SelectedSegment = Readonly<{
+  segmentId: string;
+  startSec: number;
+  endSec: number;
+  nextSegmentId: string | null;
+  cutAction: string;
+  draftApplied: boolean;
+}>;
 
 export type RightDockProps = Readonly<{
   state?: "script_required" | "idle" | "analysis_running" | "proposal_ready" | "applying" | "blocked" | "error";
@@ -15,6 +23,9 @@ export type RightDockProps = Readonly<{
   proposal?: RightDockProposal | null;
   selectedSegment?: SelectedSegment;
   inspectorTargets?: readonly InspectorTarget[];
+  inspectorDisabled?: boolean;
+  partialRegeneration?: PartialRegenerationControls;
+  onInspectorAction?: (action: InspectorAction) => void | Promise<void>;
   composerDisabled?: boolean;
   onSendMessage?: (draft: string) => void | Promise<void>;
   onApplyProposal?: (proposalId: string, candidateIds: readonly string[]) => void | Promise<void>;
@@ -33,6 +44,9 @@ export function RightDock({
   proposal = null,
   selectedSegment,
   inspectorTargets = [],
+  inspectorDisabled = false,
+  partialRegeneration,
+  onInspectorAction,
   composerDisabled = false,
   onSendMessage,
   onApplyProposal,
@@ -43,13 +57,20 @@ export function RightDock({
   retryAfterSeconds = null,
 }: RightDockProps) {
   const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [selectedInspectorTargetId, setSelectedInspectorTargetId] = useState<string | null>(null);
   const [selectedCandidateIds, setSelectedCandidateIds] = useState<readonly string[]>(() => proposal?.candidates[0] ? [proposal.candidates[0].candidateId] : []);
   const candidateIdentity = proposal?.candidates.map((candidate) => candidate.candidateId).join("|") ?? "";
+  const inspectorTargetIdentity = inspectorTargets.map((target) => target.id).join("|");
   const [retryRemaining, setRetryRemaining] = useState(0);
 
   useEffect(() => {
     setSelectedCandidateIds(proposal?.candidates[0] ? [proposal.candidates[0].candidateId] : []);
   }, [proposal?.proposalId, candidateIdentity]);
+  useEffect(() => {
+    setSelectedInspectorTargetId((current) => inspectorTargets.some((target) => target.id === current)
+      ? current
+      : inspectorTargets[0]?.id ?? null);
+  }, [inspectorTargetIdentity, inspectorTargets]);
   useEffect(() => {
     setRetryRemaining(Math.max(0, retryAfterSeconds ?? 0));
   }, [retryAfterSeconds]);
@@ -60,6 +81,7 @@ export function RightDock({
   }, [retryRemaining]);
 
   const proposalIsReady = proposal?.status === "ready";
+  const selectedInspectorTarget = inspectorTargets.find((target) => target.id === selectedInspectorTargetId) ?? null;
   const canSend = Boolean(!composerDisabled && onSendMessage && draft.trim());
   const submit = () => { if (canSend) void onSendMessage?.(draft.trim()); };
 
@@ -87,7 +109,19 @@ export function RightDock({
 
     <section className="vb-editor-workbench__summary">
       <button type="button" aria-expanded={inspectorOpen} onClick={() => setInspectorOpen((open) => !open)}>{inspectorOpen ? "편집 항목 닫기" : "편집 항목 열기"}</button>
-      {inspectorOpen ? <div role="region" aria-label="편집 항목" className="vb-editor-right-dock__inspector"><h2>편집 항목</h2>{selectedSegment ? <p>선택 구간: {selectedSegment.segmentId} · {selectedSegment.startSec.toFixed(2)}–{selectedSegment.endSec.toFixed(2)}초</p> : <p>선택한 구간이 없어요.</p>}{inspectorTargets.length ? <ul>{inspectorTargets.map((target) => <li key={target.id}>{target.label} · {target.kind}</li>)}</ul> : <p>현재 편집 명령이 지원하는 항목만 표시됩니다.</p>}</div> : null}
+      {inspectorOpen ? <div role="region" aria-label="편집 항목" className="vb-editor-right-dock__inspector">
+        <h2>편집 항목</h2>
+        {selectedSegment ? <p>{selectedSegment.startSec.toFixed(2)}–{selectedSegment.endSec.toFixed(2)}초 구간</p> : <p>선택한 구간이 없어요.</p>}
+        {inspectorTargets.length > 1 ? <label>편집 대상<select aria-label="편집 대상" value={selectedInspectorTargetId ?? ""} onChange={(event) => setSelectedInspectorTargetId(event.target.value)}>{inspectorTargets.map((target) => <option key={target.id} value={target.id}>{target.label}</option>)}</select></label> : null}
+        {!inspectorTargets.length ? <p>현재 편집 명령이 지원하는 항목만 표시됩니다.</p> : null}
+        {onInspectorAction ? <InspectorControls
+          disabled={inspectorDisabled}
+          onAction={onInspectorAction}
+          partialRegeneration={partialRegeneration}
+          selectedSegment={selectedSegment ?? null}
+          target={selectedInspectorTarget}
+        /> : null}
+      </div> : null}
     </section>
   </div>;
 }
