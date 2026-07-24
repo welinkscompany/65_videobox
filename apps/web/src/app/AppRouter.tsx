@@ -274,7 +274,7 @@ function SettingsRoutePage() {
   const { section } = settingsRoute.useParams();
   const projects = rootRoute.useLoaderData() as Project[];
   const navigate = useNavigate();
-  const validSections = ["general", "appearance", "ai-privacy", "storage", "output"] as const;
+  const validSections = ["general", "appearance", "ai-privacy", "voice", "storage", "output"] as const;
   if (!validSections.includes(section as typeof validSections[number])) return <RecoveryPage />;
   const projectId = resolveLastValidProjectId(window.localStorage.getItem(lastProjectKey), projects) ?? projects[0]?.project_id;
   if (!projectId) return <ProjectsPage />;

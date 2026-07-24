@@ -4,6 +4,7 @@ import { createMemoryHistory } from "@tanstack/react-router";
 
 import { api } from "../api";
 import { AppRouter, createAppRouter, ProjectCatalog } from "./AppRouter";
+import { SettingsPage } from "./ProductShell";
 
 beforeEach(() => { vi.stubGlobal("scrollTo", vi.fn()); vi.stubGlobal("PointerEvent", MouseEvent); vi.stubGlobal("matchMedia", (query: string) => ({ matches: false, media: query, onchange: null, addEventListener: () => {}, removeEventListener: () => {}, addListener: () => {}, removeListener: () => {}, dispatchEvent: () => false })); vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} }); });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); window.localStorage.clear(); });
@@ -155,45 +156,50 @@ describe("product shell", () => {
     expect(screen.queryByText(/billing|team|account/i)).toBeNull();
   });
 
-  it("shows the latest local voice readiness without offering a mutation", async () => {
+  it("keeps AI privacy separate and opens the canonical voice settings owner", async () => {
     vi.spyOn(api, "listProjects").mockResolvedValue(projects);
-    vi.spyOn(api, "listVoiceSamples").mockResolvedValue([
-      { asset_id: "voice_001", asset_type: "voice_sample_audio", storage_uri: "local://voice_001.wav" },
-    ]);
-    vi.spyOn(api, "getLatestEditingSession").mockResolvedValue({
-      session_id: "session_001", project_id: "first", timeline_id: "timeline_001", session_revision: 1, history: [],
-      segments: [{ segment_id: "segment_001", caption_text: "안녕하세요", start_sec: 0, end_sec: 1, cut_action: "keep", review_required: false, broll_override: null, visual_overlays: [], music_override: null, tts_replacement: null }],
-    });
-    vi.spyOn(api, "listTtsCandidates").mockResolvedValue({ candidates: [
-      { candidate_id: "candidate_approved", project_id: "first", segment_id: "segment_001", asset_id: "tts_001", source_text: "안녕하세요", technical_status: "accepted", operator_review_status: "approved", created_at: "2026-07-23T00:00:00Z" },
-      { candidate_id: "candidate_pending", project_id: "first", segment_id: "segment_001", asset_id: "tts_002", source_text: "안녕하세요", technical_status: "accepted", operator_review_status: "pending", created_at: "2026-07-23T00:00:00Z" },
-    ] });
-    const register = vi.spyOn(api, "registerVoiceSample");
-    const upload = vi.spyOn(api, "uploadVoiceSample");
-    const generate = vi.spyOn(api, "generateTtsCandidate");
-    const review = vi.spyOn(api, "reviewTtsCandidate");
     const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/settings/ai-privacy"] }));
     render(<AppRouter router={router} />);
 
-    expect(await screen.findByRole("region", { name: "내 목소리 준비 상태" })).toBeTruthy();
-    expect(screen.getByText("저장한 내 목소리 1개")).toBeTruthy();
-    expect(screen.getByText("들어 보고 승인한 후보 1개")).toBeTruthy();
-    expect(screen.getByText("듣기 검수가 필요한 후보 1개")).toBeTruthy();
-    expect(screen.getByText("음성 샘플 추가, 후보 만들기, 듣기 검수는 이 화면에서 변경할 수 없어요.")).toBeTruthy();
-    expect(register).not.toHaveBeenCalled();
-    expect(upload).not.toHaveBeenCalled();
-    expect(generate).not.toHaveBeenCalled();
-    expect(review).not.toHaveBeenCalled();
+    expect(await screen.findByRole("button", { name: "이 기기에서만 처리: 켜짐" })).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "내 목소리 준비 상태" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "내 목소리" }));
+    await waitFor(() => expect(router.state.location.pathname).toBe("/settings/voice"));
   });
 
-  it("keeps the settings page usable when local voice readiness cannot be read", async () => {
-    vi.spyOn(api, "listProjects").mockResolvedValue(projects);
-    vi.spyOn(api, "listVoiceSamples").mockRejectedValue(new Error("local read failed"));
-    vi.spyOn(api, "getLatestEditingSession").mockResolvedValue(null);
-    const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/settings/ai-privacy"] }));
-    render(<AppRouter router={router} />);
+  it("synchronously replaces project A voice controls before project B passive loading", async () => {
+    const samplesB = new Promise<Awaited<ReturnType<typeof api.listVoiceSamples>>>(() => {});
+    const sessionB = new Promise<Awaited<ReturnType<typeof api.getLatestEditingSession>>>(() => {});
+    vi.spyOn(api, "listVoiceSamples").mockImplementation((projectId) => (
+      projectId === "first"
+        ? Promise.resolve([{ asset_id: "sample-a", asset_type: "voice_sample_audio", storage_uri: "local://voice/a.wav" }])
+        : samplesB
+    ));
+    vi.spyOn(api, "getLatestEditingSession").mockImplementation((projectId) => (
+      projectId === "first"
+        ? Promise.resolve({
+          session_id: "session-a",
+          project_id: "first",
+          timeline_id: "timeline-a",
+          session_revision: 1,
+          history: [],
+          segments: [{ segment_id: "segment-a", caption_text: "A 프로젝트 문장", start_sec: 0, end_sec: 1, cut_action: "keep", review_required: false, broll_override: null, visual_overlays: [], music_override: null, tts_replacement: null }],
+        })
+        : sessionB
+    ));
+    const view = render(<SettingsPage projectId="first" section="voice" onNavigate={vi.fn()} />);
+    await screen.findByText("저장한 내 목소리 1개");
+    const pathA = screen.getByLabelText("음성 파일의 로컬 경로");
+    fireEvent.change(pathA, { target: { value: "D:\\voices\\project-a.wav" } });
 
-    expect(await screen.findByText("음성 준비 상태를 불러오지 못했어요. 편집 화면에서 다시 확인해 주세요.")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "이 기기에서만 처리: 켜짐" })).toBeTruthy();
+    view.rerender(<SettingsPage projectId="second" section="voice" onNavigate={vi.fn()} />);
+
+    const pathB = screen.getByLabelText("음성 파일의 로컬 경로");
+    expect(pathA).not.toBeInTheDocument();
+    expect(pathB).not.toBe(pathA);
+    expect(pathB).toHaveValue("");
+    expect(pathB).toBeDisabled();
+    expect(screen.queryByText("A 프로젝트 문장")).not.toBeInTheDocument();
+    expect(screen.queryByText("저장한 내 목소리 1개")).not.toBeInTheDocument();
   });
 });

@@ -98,6 +98,8 @@ Every row must have a canonical route, component test, and E2E owner before 22D.
 
 Voice/TTS parity is mandatory because the parent Task 22 requires `settings/voice` and the existing local API supports it.
 
+**Status (2026-07-24): complete.** `/settings/voice`, `VoiceTtsSettings`, component/route tests, and `voice-tts-settings.spec.mjs` now own the local manual-review flow. Listening review remains separate from explicit revisioned editor apply.
+
 **RED**
 
 - Add tests for voice sample local-path registration, file upload, list/reload, candidate creation for an explicit segment, candidate list, listening approve/reject, loading/error/retry, A→B project fence, and zero automatic apply.

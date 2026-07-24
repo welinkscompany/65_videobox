@@ -470,4 +470,20 @@ describe("AppRouter URL ownership", () => {
     fireEvent.click(await screen.findByRole("button", { name: "A" }));
     await waitFor(() => expect(recoveryRouter.state.location.pathname).toBe("/projects/project_a/home"));
   });
+
+  it("owns voice and TTS review at the canonical voice settings route", async () => {
+    vi.spyOn(api, "listProjects").mockResolvedValue([
+      { project_id: "project_a", name: "A", status: "active", root_storage_uri: "local://a" },
+    ]);
+    vi.spyOn(api, "listVoiceSamples").mockResolvedValue([]);
+    vi.spyOn(api, "getLatestEditingSession").mockResolvedValue(null);
+    const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/settings/voice"] }));
+
+    render(<AppRouter router={router} />);
+
+    expect(await screen.findByRole("heading", { name: "내 목소리" })).toBeVisible();
+    expect(screen.getByRole("region", { name: "내 목소리와 읽어보기 후보" })).toBeVisible();
+    expect(router.state.location.pathname).toBe("/settings/voice");
+    expect(screen.queryByTestId("project-recovery")).not.toBeInTheDocument();
+  });
 });

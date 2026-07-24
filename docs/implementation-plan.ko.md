@@ -1,6 +1,6 @@
 # VideoBox 실행용 구현 계획서
 
-> 현재 worktree 기준 next implementation 판단은 `### 8.4.2 2026-07-17 OSS 앱 셸·편집기 재분석 결정`과 연결된 22-Task 실행 계획을 우선 적용한다. 완료된 Local Media Director 상태는 `## 22`가 authoritative closeout이다. 그 외 상위 milestone/범위/순서 섹션은 제품·구현 계획의 기준을 설명한다.
+> 현재 worktree 기준 next implementation 판단은 `docs/superpowers/plans/2026-07-23-videobox-task22-release-parity.md`를 우선 적용한다. 2026-07-24에 22C2 canonical voice/TTS manual-review owner를 닫았으며, 다음 구현 단위는 22C1 supported editor commands/partial regeneration과 22C3 superseded output contracts다. 완료된 Local Media Director 상태는 `## 22`가 authoritative closeout이다. 그 외 상위 milestone/범위/순서 섹션은 제품·구현 계획의 기준을 설명한다.
 > 개발 운영 상위 규칙은 저장소 루트 `AGENTS.md`와 `docs/development-fast-path.ko.md`의 `## 10. 고정 운영 규정`을 프로젝트 전역 기본값으로 적용한다. 즉, 이 계획서를 실행할 때의 작업 우선순위, 선택적 TDD/서브에이전트/리뷰 사용, 표준 검증 경로, hot path 구분, 커밋/푸시, 진행률 보고, turn closeout 형식은 해당 규정을 따른다.
 
 ## 1. 목적

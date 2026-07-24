@@ -1,6 +1,25 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 294. 2026-07-23 Task 21 release-hardening closeout`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 296. 2026-07-24 Task 22C2 canonical voice/TTS closeout`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+
+## 296. 2026-07-24 Task 22C2 canonical voice/TTS closeout
+
+- `[x] canonical owner`: `/settings/voice`와 `VoiceTtsSettings`가 로컬 경로 등록, 파일 업로드, 샘플 목록/새로고침, active segment 선택, TTS 후보 생성·목록·청취, 승인/거부를 소유한다. `ai-privacy`의 중복 read-only voice surface는 제거했다.
+- `[x] 실패 안전성`: removed segment는 생성 대상에서 제외한다. project key/epoch와 request token이 A→B 및 A→B→A 응답을 막고, 초기 read 중 mutation을 차단한다. POST 실패는 입력을 보존하지만 POST 성공 뒤 목록 refresh만 실패하면 저장 성공으로 유지해 중복 등록을 유도하지 않는다.
+- `[x] 수동 검수 경계`: 청취 승인/거부는 candidate 상태만 저장하며 editing-session TTS replacement를 자동 적용하지 않는다. canonical E2E는 브라우저 직접 외부/provider 요청 0과 editing-session apply 0을 증명한다. 명시적 후보 생성 backend가 설정된 TTS provider를 호출할 수 있다는 별도 경계는 확대 해석하지 않는다.
+- `검증`: TDD RED→GREEN, focused frontend `3 files / 43 passed`, full frontend `60 files / 618 passed`, voice/TTS E2E `1 passed`와 snapshot manifest verifier, production build, Editor UI OSS provenance/UI-system verifier, external-runtime/network guard, `git diff --check` 통과. independent spec/quality/gap/reverse review는 Critical/Important/Minor 0이다. 전체 Python regression은 실행하지 않았다.
+- `다음 goal`: Task 22C1 supported editor commands/partial regeneration을 current-revision/route-epoch/manual-fallback 계약으로 닫고, 이어서 22C3 output reachability와 22D legacy owner removal을 진행한다.
+- Task 9 사람/환경 acceptance와 실제 CapCut Desktop 실증은 계속 별도다. 공식 누적은 사용자 지시대로 **9/22 (40.9%)**, 잔여 **59.1%**를 유지한다.
+- handoff: `docs/handoffs/2026-07-24-videobox-task22c2-voice-tts-closeout.ko.md`.
+
+## 295. 2026-07-24 real editor dogfood alignment closeout
+
+- 실제 사용자 샘플로 B-roll을 두 번째 5초 구간에 적용하고, 로컬 합성 BGM/SFX를 서로 다른 구간에 적용해 exact preview MP4의 H.264/AAC와 220 Hz/880 Hz 구간별 혼합을 역방향 확인했다. 브라우저 console error/failed response/external request는 0이었다.
+- one-narration/multi-caption atomic draft는 초기 20초 내레이션을 보존하고, remove/reorder 시 caption source slice와 같은 음성 조각을 materialize한다. exact/final과 실제 PyCapCut source timerange가 일치하며, malformed narration source bounds는 fail-closed다.
+- exact-preview Windows long-path staging, repeated pending polling, Director reload dict reference, gap/track/caption materialization도 회귀로 고정했다. 독립 최종 리뷰는 Critical/Important/Minor 0이었다.
+- 검증: focused backend `167 passed`(기존 Starlette multipart PendingDeprecationWarning 1), focused frontend `7 files / 84 passed`, 당시 full frontend `59 files / 605 passed`, production build, provenance verifier, `git diff --check` 통과. 전체 Python regression은 실행하지 않았다. 코드 commit/push는 `7579d7765`다.
+- `?? .tmp-final-fence-debug/`, `?? .tmp-real-video-dogfood/`, `?? apps/web/.tmp-real-video-dogfood/`는 stage/remove/delete하지 않고 보존한다.
+- 실제 voice/TTS 수동 검수 UI와 후보 흐름은 §296에서 별도로 닫았다. Task 9 사람/환경 acceptance와 실제 CapCut Desktop 실증은 이 자동/로컬 증거로 대체하지 않는다.
 
 ## 294. 2026-07-23 Task 21 release-hardening closeout
 
