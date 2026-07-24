@@ -453,11 +453,25 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       if (action.kind === "save-media") return port.updateMediaControls({ kind: action.mediaKind, segmentId: action.segmentId, assetId: action.assetId, controls: action.controls });
       if (action.kind === "clear-media") return port.clearMedia({ kind: action.mediaKind, segmentId: action.segmentId });
       if (action.kind === "save-caption-style") return port.setCaptionStyle({ segmentIds: action.segmentIds, scope: action.scope, style: action.style });
+      if (action.kind === "apply-tts-candidate") return port.applyTtsCandidate({ segmentId: action.segmentId, candidateId: action.candidateId, assetId: action.assetId });
+      if (action.kind === "clear-tts-candidate") return port.clearTtsCandidate({ segmentId: action.segmentId });
       if (action.kind === "clear-overlay") return port.clearOverlay({ kind: action.overlayKind, segmentId: action.segmentId });
       if (action.overlayKind === "explanation-card") return port.applyOverlay({ kind: action.overlayKind, segmentId: action.segmentId, title: action.title, body: action.body, text: action.text });
       if (action.overlayKind === "image") return port.applyOverlay({ kind: action.overlayKind, segmentId: action.segmentId, assetId: action.assetId, text: action.text });
       return port.applyOverlay({ kind: action.overlayKind, segmentId: action.segmentId, columns: action.columns, rows: action.rows, text: action.text });
     });
+  };
+  const loadApprovedTtsCandidates = async (segmentId: string) => {
+    const epoch = routeEpoch.current.value;
+    const result = await api.listTtsCandidates(projectId, segmentId);
+    if (routeEpoch.current.value !== epoch) return [];
+    return result.candidates
+      .filter((candidate) => candidate.technical_status === "accepted" && candidate.operator_review_status === "approved")
+      .map((candidate) => ({
+        assetId: candidate.asset_id,
+        candidateId: candidate.candidate_id,
+        sourceText: candidate.source_text,
+      }));
   };
   const assetCards = assets.key === requestKey
     ? projectEditorAssets({ projectId, brollAssets: assets.brollAssets, libraryAssets: assets.libraryAssets })
@@ -608,6 +622,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     <EditorWorkbench
     assetCards={assetCards}
     isSavingTimeline={mutation.isSaving}
+    loadApprovedTtsCandidates={loadApprovedTtsCandidates}
     onApplyAssetCard={applyAssetCard}
     onInspectorAction={handleInspectorAction}
     onPreviewRefresh={refreshPreview}
@@ -626,6 +641,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       canResume: partialResultIsCurrent,
     }}
     session={state.session}
+    ttsCandidateScopeKey={requestKey}
     timelineMutationMessage={mutation.message}
     director={rightDock}
     requestedSegmentId={requestedSegmentId}

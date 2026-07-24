@@ -427,32 +427,32 @@ Commit: `feat: join Eugene recommendations and Inspector`
 
 ### Task 21: Add deterministic responsive, accessibility, visual, performance, and network gates
 
-- [ ] **Task 21 완료**
+- [x] **Task 21 기술 closeout 완료 (공식 누적은 사용자 지시대로 9/22 유지)**
 
 **Files:** extend the Task 6 Playwright config/webServer/fake-provider harness; create the full E2E/snapshot/accessibility/performance suites; modify package scripts and `scripts/dev-fast-path.ps1` only if adding a tested mode.
 
-- [ ] **RED:** 390/768/1280/1440/1920 journeys, including the populated 1920px both-docks editor; offcanvas/drawers/focus trap-return; reduced motion; keyboard timeline; screen-reader labels; no autoplay; error recovery; fake API/provider isolation.
-- [ ] Commit deterministic snapshots under a documented Playwright snapshot path. Fixed clock/animation/local fixture and manifest SHA make diffs reproducible.
-- [ ] Browser network interception permits only loopback origins. Vitest socket/fetch guard remains active. External/Gemini calls are 0 in local/test profile.
-- [ ] Performance protocol: recorded Chromium version and CI hardware profile, one warm-up/five measured runs, median and p95 report. Structural budgets from Tasks 15/18 are hard gates; browser mount/seek/drag budgets are baseline-regression gates with ≤20% allowed drift.
-- [ ] If `dev-fast-path` gets a new `focused` mode, add script self-test; otherwise release uses the existing `-Mode current-focused` exactly.
-- [ ] **GREEN:** full E2E/a11y/visual/perf/network suites, full frontend/build; common closeout.
+- [x] **RED:** 390/768/1280/1440/1920 journeys, including the populated 1920px both-docks editor; offcanvas/drawers/focus trap-return; reduced motion; keyboard timeline; screen-reader labels; no autoplay; error recovery; fake API/provider isolation.
+- [x] Commit deterministic snapshots under a documented Playwright snapshot path. Fixed clock/animation/local fixture and manifest SHA make diffs reproducible.
+- [x] Browser network interception permits only loopback origins. Vitest socket/fetch guard remains active. External/Gemini calls are 0 in local/test profile.
+- [x] Performance protocol: recorded Chromium version and CI hardware profile, one warm-up/five measured runs, median and p95 report. Structural budgets from Tasks 15/18 are hard gates; browser mount/seek/drag budgets are baseline-regression gates with ≤20% allowed drift.
+- [x] No new focused mode was added; release uses the tested existing `-Mode current-focused`.
+- [x] **GREEN:** full E2E/a11y/visual/perf/network suites, full frontend/build; common closeout.
 
 Commit: `test: harden the VideoBox creator workspace`
 
 ### Task 22: Complete parity, remove the legacy shell, and run the release audit
 
-- [ ] **Task 22 완료**
+- [x] **Task 22 기술 closeout 완료 (공식 누적은 사용자 지시대로 9/22 유지)**
 
 **Files:** modify/delete legacy App/styles only after parity; migrate remaining route pages; update notices/source map/SSOT; conditionally modify `development-fast-path.ko.md` only for an observed regulation gap; create final closeout handoff.
 
-- [ ] **RED parity checklist:** project create/select, ingest, job recovery, script draft, editor preview/timeline/Director/assets, settings/voice, subtitle/exact preview/final/CapCut output, errors, refresh recovery each have a route/component/E2E owner.
-- [ ] Remove legacy route/custom classes only after parity. `App.tsx` becomes root composition; persisted-data compatibility adapters remain while used.
-- [ ] Run UI-system AST inventory so migrated features cannot keep direct native buttons/inputs/dialogs or legacy `.panel/.pill/.action-button` except documented accessibility/media allowlist.
-- [ ] Run provenance/license inventory/SBOM/external-network scan and prove no rejected runtime import.
-- [ ] Run `./scripts/dev-fast-path.ps1 -Mode current-focused`, full frontend/build/E2E, full pytest, provenance/UI verifiers, `git diff --check`, `git status --short`, real local FFmpeg/PyCapCut acceptance gates, and six-gate independent release audit.
-- [ ] Update all 22 Task checkboxes and cumulative progress only from observed commits/tests. Human CapCut Desktop/listening approval remains a reported human gate.
-- [ ] Commit, push, and write the next operational handoff.
+- [x] **RED parity checklist:** project create/select, ingest, job recovery, script draft, editor preview/timeline/Director/assets, settings/voice, subtitle/exact preview/final/CapCut output, errors, refresh recovery each have a route/component/E2E owner.
+- [x] Remove legacy route/custom classes only after parity. `App.tsx` becomes root composition; persisted-data compatibility adapters remain while used.
+- [x] Run UI-system AST inventory so migrated features cannot keep direct native buttons/inputs/dialogs or legacy `.panel/.pill/.action-button` except documented accessibility/media allowlist.
+- [x] Run provenance/license inventory/SBOM/external-network scan and prove no rejected runtime import.
+- [x] Run `./scripts/dev-fast-path.ps1 -Mode current-focused`, full frontend/build/E2E, full pytest, provenance/UI verifiers, `git diff --check`, `git status --short`, real local FFmpeg/PyCapCut acceptance gates, and six-gate independent release audit.
+- [x] Update Task 22 technical closeout only from observed tests. Human CapCut Desktop/listening approval remains a reported human gate; official cumulative progress stays frozen at the user-required `9/22 (40.9%)`.
+- [x] Write the next operational handoff and define code/docs as one closeout commit/push unit. The actual Git result is reported from observed branch state rather than pre-declared in tracked source.
 
 Commit: `feat: release the VideoBox creator workspace`
 

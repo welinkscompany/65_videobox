@@ -25,15 +25,65 @@ def test_output_verifier_rejects_stale_revision_review_and_subtitle_then_accepts
     asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.NARRATION_AUDIO, source_path=source)
     sha = sha256(store.resolve_storage_uri(project_id=project.project_id, storage_uri=asset.storage_uri).read_bytes()).hexdigest()
     registered_revision = store.get_asset(project_id=project.project_id, asset_id=asset.asset_id)["created_at"]
-    timeline = {"source_session_revision": 2, "tracks": [{"track_type": "narration", "clips": [{"asset_id": asset.asset_id, "asset_uri": asset.storage_uri, "expected_content_sha256": sha, "media_revision": registered_revision, "media_controls": {"trim_start_sec": 0.1, "loop": False, "fit": "crop"}}]}]}
+    timeline = {"source_session_id": "session-current", "source_session_revision": 2, "tracks": [{"track_type": "narration", "clips": [{"asset_id": asset.asset_id, "asset_uri": asset.storage_uri, "expected_content_sha256": sha, "media_revision": registered_revision, "media_controls": {"trim_start_sec": 0.1, "loop": False, "fit": "crop"}}]}]}
     verify_output_sources(store=store, project_id=project.project_id, timeline=timeline)
     with pytest.raises(OutputSourceStaleError, match="stale_output_asset: editing session revision changed"):
-        verify_output_freshness(editing_session={"session_revision": 3}, timeline=timeline, review={"is_current": False, "source_session_revision": 2}, subtitle={"is_current": False, "source_session_revision": 2})
+        verify_output_freshness(editing_session={"session_id": "session-current", "session_revision": 3}, timeline=timeline, review={"is_current": False, "source_session_id": "session-current", "source_session_revision": 2}, subtitle={"is_current": False, "source_session_id": "session-current", "source_session_revision": 2})
     with pytest.raises(OutputSourceStaleError, match="review freshness changed"):
-        verify_output_freshness(editing_session={"session_revision": 2}, timeline=timeline, review={"is_current": False, "source_session_revision": 2}, subtitle={"is_current": False, "source_session_revision": 2})
+        verify_output_freshness(editing_session={"session_id": "session-current", "session_revision": 2}, timeline=timeline, review={"is_current": False, "source_session_id": "session-current", "source_session_revision": 2}, subtitle={"is_current": False, "source_session_id": "session-current", "source_session_revision": 2})
     with pytest.raises(OutputSourceStaleError, match="subtitle freshness changed"):
-        verify_output_freshness(editing_session={"session_revision": 2}, timeline=timeline, review={"is_current": True, "source_session_revision": 2}, subtitle={"is_current": False, "source_session_revision": 2})
-    verify_output_freshness(editing_session={"session_revision": 2}, timeline=timeline, review={"is_current": True, "source_session_revision": 2}, subtitle={"is_current": True, "source_session_revision": 2})
+        verify_output_freshness(editing_session={"session_id": "session-current", "session_revision": 2}, timeline=timeline, review={"is_current": True, "source_session_id": "session-current", "source_session_revision": 2}, subtitle={"is_current": False, "source_session_id": "session-current", "source_session_revision": 2})
+    verify_output_freshness(editing_session={"session_id": "session-current", "session_revision": 2}, timeline=timeline, review={"is_current": True, "source_session_id": "session-current", "source_session_revision": 2}, subtitle={"is_current": True, "source_session_id": "session-current", "source_session_revision": 2})
+
+
+def test_output_verifier_rejects_unstamped_timeline_identity_for_current_session() -> None:
+    with pytest.raises(
+        OutputSourceStaleError,
+        match="stale_output_asset: editing session identity is unstamped",
+    ):
+        verify_output_freshness(
+            editing_session={"session_id": "session-current", "session_revision": 1},
+            timeline={"source_session_revision": 1},
+        )
+
+
+@pytest.mark.parametrize("artifact_name", ("review", "subtitle"))
+def test_output_verifier_rejects_unstamped_artifact_identity_for_current_session(
+    artifact_name: str,
+) -> None:
+    dependencies = {
+        artifact_name: {
+            "is_current": True,
+            "source_session_revision": 1,
+        }
+    }
+
+    with pytest.raises(
+        OutputSourceStaleError,
+        match=rf"stale_output_asset: {artifact_name} session identity is unstamped",
+    ):
+        verify_output_freshness(
+            editing_session={"session_id": "session-current", "session_revision": 1},
+            timeline={
+                "source_session_id": "session-current",
+                "source_session_revision": 1,
+            },
+            **dependencies,
+        )
+
+
+def test_output_verifier_rejects_same_revision_session_replacement() -> None:
+    with pytest.raises(
+        OutputSourceStaleError,
+        match="stale_output_asset: editing session changed",
+    ):
+        verify_output_freshness(
+            editing_session={"session_id": "session-new", "session_revision": 1},
+            timeline={
+                "source_session_id": "session-old",
+                "source_session_revision": 1,
+            },
+        )
 
 
 def test_output_verifier_rejects_asset_id_uri_identity_mismatch(tmp_path: Path) -> None:

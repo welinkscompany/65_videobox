@@ -186,6 +186,58 @@ def test_final_render_does_not_publish_when_session_changes_after_last_pipeline_
     assert store.get_editing_session(project_id=project.project_id, session_id=session["session_id"])["session_revision"] == 2
 
 
+def test_final_render_does_not_publish_when_review_reopens_after_last_pipeline_check(
+    tmp_path: Path,
+) -> None:
+    """The publish transaction must reject a post-render review reopen."""
+
+    class _ReviewReopeningPublishStore(LocalProjectStore):
+        def save_final_render(self, **kwargs: Any) -> dict[str, Any]:
+            self.save_review_state(
+                project_id=str(kwargs["project_id"]),
+                timeline_id=str(kwargs["timeline_id"]),
+                status="draft",
+            )
+            return super().save_final_render(**kwargs)
+
+    raw_audio = tmp_path / "narration.wav"
+    raw_audio.write_bytes(b"fake wav data")
+    store = _ReviewReopeningPublishStore(tmp_path)
+    project = store.bootstrap_project(name="Final render publish review fence")
+    renderer = _FakeFinalRenderer()
+    runner = LocalPipelineRunner(store, final_renderer=renderer)
+    narration = runner.register_narration_asset(
+        project_id=project.project_id,
+        source_path=raw_audio,
+    )
+    timeline_job = _build_approved_timeline_job(
+        store,
+        runner,
+        project.project_id,
+        narration,
+    )
+
+    with pytest.raises(RuntimeError, match="final_render_source_fence_failed"):
+        runner.start_final_render(
+            project_id=project.project_id,
+            timeline_job_id=timeline_job["job_id"],
+        )
+
+    assert len(renderer.received_calls) == 1
+    assert (
+        list(
+            (store.project_root(project.project_id) / "exports" / "final_render").glob(
+                "export_*"
+            )
+        )
+        == []
+    )
+    assert store.get_review_state(
+        project_id=project.project_id,
+        timeline_id=timeline_job["timeline_id"],
+    )["status"] == "draft"
+
+
 def test_final_render_rechecks_materialized_source_inside_publish_fence(tmp_path: Path) -> None:
     """A byte replacement after pipeline validation cannot gain an export pointer."""
     class _SourceMutatingPublishStore(LocalProjectStore):
@@ -440,5 +492,7 @@ def test_final_render_keeps_windowed_right_caption_style_after_merge(tmp_path: P
     runner.start_final_render(project_id=project.project_id, timeline_job_id=timeline_job["job_id"])
 
     ass = str(fake_renderer.received_calls[0]["subtitle_ass_text"])
-    assert "Style: Segment1,Arial,36,&H000000FF" in ass
+    # The default 54 px logical style scales to 96 px at the 1920 px ASS
+    # play resolution; keep the right caption's red color after the merge.
+    assert "Style: Segment1,Arial,96,&H000000FF" in ass
     assert "Dialogue: 0,0:00:01.00,0:00:02.00,Segment1,,0,0,0,,right" in ass

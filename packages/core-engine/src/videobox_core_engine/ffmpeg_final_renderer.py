@@ -251,7 +251,10 @@ class FfmpegFinalRenderer:
                     labels.append(f"[{ducked}]")
                 else:
                     labels.append(f"[{label}]")
-        filters.append(f"{''.join(labels)}amix=inputs={len(labels)}:duration=longest,atrim=duration={duration},asetpts=PTS-STARTPTS[aout]")
+        filters.append(
+            f"{''.join(labels)}amix=inputs={len(labels)}:duration=longest,"
+            f"apad=whole_dur={duration},atrim=duration={duration},asetpts=PTS-STARTPTS[aout]"
+        )
         return ";".join(filters)
 
     @staticmethod
@@ -726,7 +729,14 @@ class FfmpegFinalRenderer:
         proxy_profile: bool = False,
     ) -> Path:
         if composition_plan is not None:
-            return self._render_composition_plan_to_mp4(
+            plan_renderer = self if proxy_profile else replace(
+                self,
+                video_width=composition_plan.width,
+                video_height=composition_plan.height,
+                video_fps=f"{composition_plan.fps_num}/{composition_plan.fps_den}",
+                video_sar=composition_plan.sample_aspect_ratio,
+            )
+            return plan_renderer._render_composition_plan_to_mp4(
                 project_id=project_id, composition_plan=composition_plan, timeline_context=timeline,
                 output_path=output_path, subtitle_file_path=subtitle_file_path,
                 subtitle_ass_path=subtitle_ass_path, proxy_profile=proxy_profile,

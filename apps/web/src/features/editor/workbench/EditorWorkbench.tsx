@@ -6,7 +6,7 @@ import type { PanelImperativeHandle, PanelSize } from "react-resizable-panels";
 import type { EditorViewModel } from "../editorViewModel";
 import type { EditorSessionSnapshot } from "../editorSnapshot";
 import type { EditorAssetCard } from "../assets/editorAssetProjection";
-import type { InspectorAction, PartialRegenerationControls } from "../inspector/InspectorControls";
+import type { ApprovedTtsCandidate, InspectorAction, PartialRegenerationControls } from "../inspector/InspectorControls";
 import { PreviewStage, type AuditionRequest, type AuditionSource } from "../preview/preview-stage";
 import { TimelineDock } from "../timeline/TimelineDock";
 import { activeSegmentIdAt, clampPlaybackSeconds } from "../transcript/playbackNavigation";
@@ -42,6 +42,8 @@ type EditorWorkbenchProps = Readonly<{
   onUpdatePlacements?: (input: TimelinePlacements) => void | Promise<void>;
   onUpdateCaption?: (input: CaptionText) => void | Promise<void>;
   onInspectorAction?: (action: InspectorAction) => void | Promise<void>;
+  loadApprovedTtsCandidates?: (segmentId: string) => Promise<readonly ApprovedTtsCandidate[]>;
+  ttsCandidateScopeKey?: string;
   partialRegeneration?: PartialRegenerationControls;
   assetCards?: readonly EditorAssetCard[];
   onApplyAssetCard?: (card: EditorAssetCard, segmentId: string) => void | Promise<void>;
@@ -62,6 +64,8 @@ export function EditorWorkbench({
   onUpdatePlacements,
   onUpdateCaption,
   onInspectorAction,
+  loadApprovedTtsCandidates,
+  ttsCandidateScopeKey,
   partialRegeneration,
   assetCards = [],
   onApplyAssetCard,
@@ -169,7 +173,7 @@ export function EditorWorkbench({
   };
   const openManualEditing = () => setUi((current) => layout.mode === "drawer" ? { ...current, activeDrawer: "left" } : { ...current, leftOpen: true });
   const rightDirector = director ? { ...director, onManualEdit: () => { director.onManualEdit(); openManualEditing(); }, onPreviewCandidate: previewDirectorCandidate } : undefined;
-  const dock = (side: "left" | "right") => <aside aria-label={side === "left" ? "자산과 대본" : "유진과 편집 항목"} className={`vb-editor-workbench__dock vb-editor-workbench__dock--${side}`}><EditorWorkbenchReadOnlyAdapters assetCards={assetCards} assetTarget={assetTarget} director={rightDirector} dock={side} eugeneDraft={eugeneDraft} isSavingCaption={isSavingTimeline} onApplyAssetCard={onApplyAssetCard} onEugeneDraftChange={setEugeneDraft} onInspectorAction={onInspectorAction} onPreviewAsset={previewAssetCard} onSaveCaption={onUpdateCaption} onSeek={seekPlayback} onSelectSegment={selectSegment} partialRegeneration={partialRegeneration} playbackSec={playbackSec} selectedSegmentId={selectedSegmentId} session={session} view={view} /></aside>;
+  const dock = (side: "left" | "right") => <aside aria-label={side === "left" ? "자산과 대본" : "유진과 편집 항목"} className={`vb-editor-workbench__dock vb-editor-workbench__dock--${side}`}><EditorWorkbenchReadOnlyAdapters assetCards={assetCards} assetTarget={assetTarget} director={rightDirector} dock={side} eugeneDraft={eugeneDraft} isSavingCaption={isSavingTimeline} loadApprovedTtsCandidates={loadApprovedTtsCandidates} onApplyAssetCard={onApplyAssetCard} onEugeneDraftChange={setEugeneDraft} onInspectorAction={onInspectorAction} onPreviewAsset={previewAssetCard} onSaveCaption={onUpdateCaption} onSeek={seekPlayback} onSelectSegment={selectSegment} partialRegeneration={partialRegeneration} playbackSec={playbackSec} selectedSegmentId={selectedSegmentId} session={session} ttsCandidateScopeKey={ttsCandidateScopeKey} view={view} /></aside>;
   const resize = (side: "left" | "right", delta: number) => setUi((current) => { const key = side === "left" ? "leftSize" : "rightSize"; const value = Math.max(side === "left" ? 220 : 260, current[key] + delta); (side === "left" ? leftPanelRef : rightPanelRef).current?.resize(`${value}px`); return { ...current, [key]: value }; });
   const handleKey = (event: KeyboardEvent<HTMLDivElement>, side: "left" | "right") => { if (event.key === "ArrowLeft" || event.key === "ArrowRight") { event.preventDefault(); event.stopPropagation(); resize(side, event.key === "ArrowRight" ? 20 : -20); } };
   const trapDrawerFocus = (event: KeyboardEvent<HTMLDivElement>) => { if (event.key === "Escape") { closeAndRestore(); return; } if (event.key !== "Tab") return; const focusable = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('button:not([disabled]), [tabindex="0"]')); if (!focusable.length) { event.preventDefault(); return; } const first = focusable[0]; const last = focusable[focusable.length - 1]; if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); } };

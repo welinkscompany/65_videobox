@@ -959,6 +959,12 @@ class ApiOrchestrator:
     def run_final_render_job(self, *, project_id: str, timeline_job_id: str, job: dict[str, Any]) -> None:
         self.pipeline.run_final_render_job(project_id=project_id, timeline_job_id=timeline_job_id, job=job)
 
+    def release_final_render_worker(self, *, project_id: str, job_id: str) -> None:
+        self.pipeline.release_final_render_worker(
+            project_id=project_id,
+            job_id=job_id,
+        )
+
     def get_final_render_result(self, *, project_id: str, job_id: str) -> dict[str, Any]:
         return self.pipeline.get_final_render_result(project_id=project_id, job_id=job_id)
 
@@ -973,6 +979,12 @@ class ApiOrchestrator:
     ) -> None:
         self.pipeline.run_capcut_draft_export_job(
             project_id=project_id, timeline_job_id=timeline_job_id, job=job
+        )
+
+    def release_capcut_draft_export_worker(self, *, project_id: str, job_id: str) -> None:
+        self.pipeline.release_capcut_draft_export_worker(
+            project_id=project_id,
+            job_id=job_id,
         )
 
     def get_capcut_draft_export_result(self, *, project_id: str, job_id: str) -> dict[str, Any]:

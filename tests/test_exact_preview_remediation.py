@@ -50,6 +50,179 @@ def test_current_session_materializes_overrides_cut_and_source_bounds_once() -> 
     assert "old-b" not in [clip["clip_id"] for track in materialized["tracks"] for clip in track["clips"]]
 
 
+def test_rejected_sfx_action_is_not_materialized_but_unrelated_manual_audio_survives() -> None:
+    rejected_action_id = "action:sfx_override:rejected"
+    timeline = {
+        "project_id": "p",
+        "tracks": [{
+            "track_id": "narration",
+            "track_type": "narration",
+            "clips": [{
+                "clip_id": "n",
+                "segment_id": "s1",
+                "asset_uri": "local://projects/p/segments/s1",
+                "start_sec": 0,
+                "end_sec": 2,
+            }],
+        }],
+        "recommendation_decisions": {"manual_sfx_s1": "rejected"},
+        "rejected_recommendations": [{
+            "recommendation_id": "manual_sfx_s1",
+            "recommendation_type": "sfx",
+            "target_segment_id": "s1",
+            "selected_asset_id": "rejected-sfx",
+            "decision_state": "rejected",
+            "payload": {
+                "selected_asset_uri": "local://projects/p/assets/rejected-sfx",
+                "source_override_action_id": rejected_action_id,
+            },
+        }],
+    }
+    session = {
+        "segments": [
+            {
+                "segment_id": "s1",
+                "start_sec": 0,
+                "end_sec": 2,
+                "cut_action": "keep",
+                "music_override": {
+                    "asset_id": "manual-bgm",
+                    "asset_uri": "local://projects/p/assets/manual-bgm",
+                },
+                "visual_overlays": [{
+                    "overlay_type": "image_overlay",
+                    "asset_id": "manual-overlay",
+                    "asset_uri": "local://projects/p/assets/manual-overlay",
+                }],
+                "sfx_override": {
+                    "asset_id": "rejected-sfx",
+                    "asset_uri": "local://projects/p/assets/rejected-sfx",
+                    "source_action_id": rejected_action_id,
+                },
+            },
+            {
+                "segment_id": "s2",
+                "start_sec": 2,
+                "end_sec": 4,
+                "cut_action": "keep",
+                "sfx_override": {
+                    "asset_id": "manual-sfx",
+                    "asset_uri": "local://projects/p/assets/manual-sfx",
+                    "source_action_id": "action:sfx_override:unrelated",
+                },
+            },
+        ],
+    }
+
+    plan = CompositionPlan.from_timeline(
+        timeline=materialize_editing_session_timeline(
+            timeline=timeline,
+            editing_session=session,
+            project_id="p",
+        )
+    )
+
+    assert [
+        item.asset_uri
+        for item in plan.items
+        if item.track_type == "sfx"
+    ] == ["local://projects/p/assets/manual-sfx"]
+    assert [
+        item.asset_uri
+        for item in plan.items
+        if item.track_type == "bgm"
+    ] == ["local://projects/p/assets/manual-bgm"]
+    assert [
+        item.asset_uri
+        for item in plan.items
+        if item.track_type == "overlay"
+    ] == ["local://projects/p/assets/manual-overlay"]
+
+
+def test_reselecting_same_sfx_with_a_new_action_identity_is_not_suppressed() -> None:
+    timeline = {
+        "project_id": "p",
+        "tracks": [],
+        "recommendation_decisions": {"manual_sfx_s1": "rejected"},
+        "rejected_recommendations": [{
+            "recommendation_id": "manual_sfx_s1",
+            "recommendation_type": "sfx",
+            "target_segment_id": "s1",
+            "selected_asset_id": "same-sfx",
+            "decision_state": "rejected",
+            "payload": {
+                "selected_asset_uri": "local://projects/p/assets/same-sfx",
+                "source_override_action_id": "action:sfx_override:old",
+            },
+        }],
+    }
+    session = {
+        "segments": [{
+            "segment_id": "s1",
+            "start_sec": 0,
+            "end_sec": 2,
+            "cut_action": "keep",
+            "sfx_override": {
+                "asset_id": "same-sfx",
+                "asset_uri": "local://projects/p/assets/same-sfx",
+                "source_action_id": "action:sfx_override:new",
+            },
+        }],
+    }
+
+    plan = CompositionPlan.from_timeline(
+        timeline=materialize_editing_session_timeline(
+            timeline=timeline,
+            editing_session=session,
+            project_id="p",
+        )
+    )
+
+    assert [
+        item.asset_uri
+        for item in plan.items
+        if item.track_type == "sfx"
+    ] == ["local://projects/p/assets/same-sfx"]
+
+
+def test_materializing_an_already_projected_text_overlay_does_not_duplicate_it() -> None:
+    overlay = {
+        "overlay_type": "explanation_card",
+        "title": "Smoke overlay",
+        "body": "Final output contract",
+        "text": "SMOKE OVERLAY",
+        "segment_id": "seg_002",
+        "start_sec": 300.0,
+        "end_sec": 600.0,
+    }
+    timeline = {"tracks": [], "export_overlays": [overlay]}
+    session = {
+        "segments": [{
+            "segment_id": "seg_002",
+            "start_sec": 300.0,
+            "end_sec": 600.0,
+            "cut_action": "keep",
+            "visual_overlays": [{
+                key: value
+                for key, value in overlay.items()
+                if key not in {"segment_id", "start_sec", "end_sec"}
+            }],
+        }],
+    }
+
+    materialized = materialize_editing_session_timeline(
+        timeline=timeline,
+        editing_session=session,
+    )
+
+    assert len(materialized["export_overlays"]) == 1
+    assert {
+        key: value
+        for key, value in materialized["export_overlays"][0].items()
+        if key != "clip_id"
+    } == overlay
+
+
 def test_atomic_broll_source_window_is_promoted_once_before_composition() -> None:
     timeline = {
         "tracks": [{
@@ -1360,3 +1533,35 @@ def test_session_only_track_fallback_id_is_unique_against_source_track_ids() -> 
         "track_broll",
         "track_broll_2",
     ]
+
+
+def test_legacy_timeline_without_output_uses_one_canvas_contract_for_editor_and_renderer() -> None:
+    timeline = {
+        "project_id": "project-canvas",
+        "timeline_id": "timeline-canvas",
+        "video_width": 640,
+        "video_height": 360,
+        "sample_aspect_ratio": "4:3",
+        "rotation": 90,
+        "tracks": [],
+    }
+    session = {
+        "project_id": "project-canvas",
+        "session_id": "session-canvas",
+        "timeline_id": "timeline-canvas",
+        "session_revision": 1,
+        "segments": [],
+    }
+
+    manifest = build_editor_playback_manifest(
+        project_id="project-canvas",
+        session=session,
+        timeline=timeline,
+        asset_content_url_prefix="/api/projects/project-canvas/assets",
+    )
+    plan = CompositionPlan.from_timeline(timeline=timeline)
+
+    assert (manifest["output"]["width"], manifest["output"]["height"]) == (plan.width, plan.height)
+    assert (plan.width, plan.height) == (640, 360)
+    assert manifest["output"]["sample_aspect_ratio"] == plan.sample_aspect_ratio == "4:3"
+    assert manifest["output"]["rotation"] == plan.rotation == 90

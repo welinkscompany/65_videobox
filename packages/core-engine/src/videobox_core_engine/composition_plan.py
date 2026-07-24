@@ -15,6 +15,8 @@ from videobox_core_engine.media_controls import normalize_media_controls
 
 
 COMPOSITION_VERSION = "videobox_composition_v1"
+DEFAULT_OUTPUT_WIDTH = 1080
+DEFAULT_OUTPUT_HEIGHT = 1920
 _SUPPORTED_TRACKS = frozenset({"narration", "broll", "bgm", "sfx", "overlay"})
 
 
@@ -86,7 +88,12 @@ def _session_source_slices(*, editing_session: dict[str, Any], segment: dict[str
     return output
 
 
-def _session_override_windows(*, segment: dict[str, Any], override_field: str) -> list[tuple[float, float]]:
+def _session_override_windows(
+    *,
+    segment: dict[str, Any],
+    override_field: str,
+    suppressed_action_ids: frozenset[str] = frozenset(),
+) -> list[tuple[float, float]]:
     """Return the placed intervals where a session override replaces base media."""
     start, end = _number(segment.get("start_sec")), _number(segment.get("end_sec"))
     direct_override = segment.get(override_field)
@@ -102,7 +109,10 @@ def _session_override_windows(*, segment: dict[str, Any], override_field: str) -
     }]
     intervals: list[tuple[float, float]] = []
     for window in windows:
-        if not isinstance(window, dict) or not isinstance(window.get(override_field), dict):
+        override = window.get(override_field) if isinstance(window, dict) else None
+        if not isinstance(override, dict):
+            continue
+        if str(override.get("source_action_id") or "").strip() in suppressed_action_ids:
             continue
         window_start = max(start, start + _number(window.get("start_offset_sec")))
         window_end = min(end, window_start + _number(window.get("duration_sec")))
@@ -147,6 +157,31 @@ def materialize_editing_session_timeline(
     if not isinstance(editing_session, dict):
         return materialized
     project = str(project_id or timeline.get("project_id") or "").strip()
+    recommendation_decisions = (
+        timeline.get("recommendation_decisions")
+        if isinstance(timeline.get("recommendation_decisions"), dict)
+        else {}
+    )
+    rejected_sfx_action_ids_by_segment: dict[str, set[str]] = {}
+    for recommendation in timeline.get("rejected_recommendations", []):
+        if not isinstance(recommendation, dict):
+            continue
+        recommendation_id = str(recommendation.get("recommendation_id") or "").strip()
+        if (
+            str(recommendation.get("recommendation_type") or "").strip().lower() != "sfx"
+            or str(recommendation.get("decision_state") or "").strip().lower() != "rejected"
+            or recommendation_decisions.get(recommendation_id) != "rejected"
+        ):
+            continue
+        payload = recommendation.get("payload")
+        action_id = (
+            str(payload.get("source_override_action_id") or "").strip()
+            if isinstance(payload, dict)
+            else ""
+        )
+        segment_id = str(recommendation.get("target_segment_id") or "").strip()
+        if action_id and segment_id:
+            rejected_sfx_action_ids_by_segment.setdefault(segment_id, set()).add(action_id)
     segments = {
         str(segment.get("segment_id")): segment
         for segment in editing_session.get("segments", [])
@@ -342,7 +377,20 @@ def materialize_editing_session_timeline(
                 if source_slice.get("legacy_timeline_anchor"):
                     offset -= original_start
                 source_in = original_source_in + offset
-                covered = _session_override_windows(segment=segment, override_field=override_field) if override_field else []
+                suppressed_action_ids = (
+                    frozenset(rejected_sfx_action_ids_by_segment.get(str(segment.get("segment_id") or ""), set()))
+                    if track_type == "sfx"
+                    else frozenset()
+                )
+                covered = (
+                    _session_override_windows(
+                        segment=segment,
+                        override_field=override_field,
+                        suppressed_action_ids=suppressed_action_ids,
+                    )
+                    if override_field
+                    else []
+                )
                 for interval_start, interval_end in _uncovered_intervals(start=placement, end=placement + duration, covered=covered):
                     clip = deepcopy(raw)
                     source_piece_start = source_in + interval_start - placement
@@ -408,6 +456,12 @@ def materialize_editing_session_timeline(
                 override = window.get(field)
                 if not isinstance(override, dict) or not str(override.get("asset_id") or override.get("asset_uri") or "").strip():
                     continue
+                if (
+                    track_type == "sfx"
+                    and str(override.get("source_action_id") or "").strip()
+                    in rejected_sfx_action_ids_by_segment.get(segment_id, set())
+                ):
+                    continue
                 asset_id = str(override.get("asset_id") or "").strip() or None
                 asset_uri = str(override.get("asset_uri") or "").strip()
                 if not asset_uri and asset_id and project:
@@ -442,7 +496,34 @@ def materialize_editing_session_timeline(
                             clip[key] = payload[key]
                     tracks.setdefault("overlay", []).append(clip)
                 else:
-                    export_overlays.append({**payload, "clip_id": str(payload.get("clip_id") or f"session-overlay-{segment_id}-{window_index}-{ordinal}"), "segment_id": segment_id, "start_sec": window_start, "end_sec": window_end})
+                    candidate = {
+                        **payload,
+                        "clip_id": str(
+                            payload.get("clip_id")
+                            or f"session-overlay-{segment_id}-{window_index}-{ordinal}"
+                        ),
+                        "segment_id": segment_id,
+                        "start_sec": window_start,
+                        "end_sec": window_end,
+                    }
+                    identity_keys = (
+                        "overlay_type",
+                        "asset_id",
+                        "asset_uri",
+                        "text",
+                        "title",
+                        "body",
+                        "segment_id",
+                        "start_sec",
+                        "end_sec",
+                    )
+                    candidate_identity = tuple(candidate.get(key) for key in identity_keys)
+                    if not any(
+                        tuple(existing.get(key) for key in identity_keys)
+                        == candidate_identity
+                        for existing in export_overlays
+                    ):
+                        export_overlays.append(candidate)
     materialized_gaps: list[dict[str, Any]] = []
     for raw_gap in timeline.get("gap_slots", []):
         if not isinstance(raw_gap, dict):
@@ -658,8 +739,8 @@ class CompositionPlan:
             if isinstance(overlay, dict) and _number(overlay.get("end_sec"), _number(overlay.get("start_sec"))) > _number(overlay.get("start_sec"))
         )
         return cls(
-            width=max(1, int(_number(output.get("width") or timeline.get("video_width") or 1280))),
-            height=max(1, int(_number(output.get("height") or timeline.get("video_height") or 720))),
+            width=max(1, int(_number(output.get("width") or timeline.get("video_width") or DEFAULT_OUTPUT_WIDTH))),
+            height=max(1, int(_number(output.get("height") or timeline.get("video_height") or DEFAULT_OUTPUT_HEIGHT))),
             fps_num=max(1, int(_number(output.get("fps_num") or timeline.get("fps_num") or 30))),
             fps_den=max(1, int(_number(output.get("fps_den") or timeline.get("fps_den") or 1))),
             sample_aspect_ratio=str(output.get("sample_aspect_ratio") or timeline.get("sample_aspect_ratio") or "1:1"),
@@ -688,4 +769,12 @@ class CompositionPlan:
         return {"version": self.version, "canvas": {"width": self.width, "height": self.height, "fps_num": self.fps_num, "fps_den": self.fps_den, "sample_aspect_ratio": self.sample_aspect_ratio, "rotation": self.rotation}, "items": [asdict(item) for item in self.items], "captions": [asdict(cue) for cue in self.captions], "export_overlays": list(self.export_overlays)}
 
 
-__all__ = ["COMPOSITION_VERSION", "CaptionCue", "CompositionItem", "CompositionPlan", "materialize_editing_session_timeline"]
+__all__ = [
+    "COMPOSITION_VERSION",
+    "DEFAULT_OUTPUT_HEIGHT",
+    "DEFAULT_OUTPUT_WIDTH",
+    "CaptionCue",
+    "CompositionItem",
+    "CompositionPlan",
+    "materialize_editing_session_timeline",
+]

@@ -21,6 +21,16 @@ def test_long_form_qa_declares_three_deterministic_profiles_without_desktop_capc
     qa = _load_qa_module()
 
     assert tuple(qa.PROFILE_NAMES) == ("loop", "crop_pad_overlay", "audio_ducking")
+    assert qa.PROFILE_DIRECTORIES == {
+        "loop": "loop",
+        "crop_pad_overlay": "crop",
+        "audio_ducking": "audio",
+    }
+    assert qa.PROFILE_PROJECT_NAMES == {
+        "loop": "QA loop",
+        "crop_pad_overlay": "QA crop",
+        "audio_ducking": "QA audio",
+    }
     assert qa.DESKTOP_CAPCUT_AUTOMATION is False
 
 
@@ -62,5 +72,5 @@ def test_long_form_qa_runs_every_profile_in_an_isolated_artifact_root(
     )
 
     assert [name for name, _path in calls] == list(qa.PROFILE_NAMES)
-    assert [path.name for _name, path in calls] == list(qa.PROFILE_NAMES)
+    assert [path.name for _name, path in calls] == ["loop", "crop", "audio"]
     assert set(manifest["profiles"]) == set(qa.PROFILE_NAMES)

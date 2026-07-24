@@ -8372,11 +8372,19 @@ def test_output_jobs_ignore_approved_decision_state_entries_left_in_pending_reco
 ) -> None:
     store = LocalProjectStore(tmp_path)
     project = store.bootstrap_project(name="Approved State Stale Pending Decision Project")
+    narration_source = tmp_path / "approved-state-stale-pending-decision.wav"
+    narration_source.write_bytes(b"narration")
+    narration_asset = store.register_asset(
+        project_id=project.project_id,
+        asset_type=AssetType.NARRATION_AUDIO,
+        source_path=narration_source,
+    )
     timeline = store.save_timeline_run(
         project_id=project.project_id,
         output_mode="review",
         timeline_payload={
             "project_id": project.project_id,
+            "narration_source_uri": narration_asset.storage_uri,
             "tracks": [
                 {
                     "track_id": "narration_primary",
@@ -8483,11 +8491,19 @@ def test_output_jobs_ignore_legacy_applied_like_entries_left_in_pending_recommen
 ) -> None:
     store = LocalProjectStore(tmp_path)
     project = store.bootstrap_project(name="Legacy Applied Like Pending Recommendation Output Project")
+    narration_source = tmp_path / "legacy-applied-like-pending-recommendation.wav"
+    narration_source.write_bytes(b"narration")
+    narration_asset = store.register_asset(
+        project_id=project.project_id,
+        asset_type=AssetType.NARRATION_AUDIO,
+        source_path=narration_source,
+    )
     timeline = store.save_timeline_run(
         project_id=project.project_id,
         output_mode="review",
         timeline_payload={
             "project_id": project.project_id,
+            "narration_source_uri": narration_asset.storage_uri,
             "tracks": [
                 {
                     "track_id": "narration_primary",
@@ -9025,12 +9041,19 @@ def test_preview_render_accepts_mixed_case_review_approval_state_without_blocker
 ) -> None:
     store = LocalProjectStore(tmp_path)
     project = store.bootstrap_project(name="Mixed Case Review Approval Output Project")
+    narration_source = tmp_path / "mixed-case-review-approval.wav"
+    narration_source.write_bytes(b"narration")
+    narration_asset = store.register_asset(
+        project_id=project.project_id,
+        asset_type=AssetType.NARRATION_AUDIO,
+        source_path=narration_source,
+    )
     timeline = store.save_timeline_run(
         project_id=project.project_id,
         output_mode="review",
         timeline_payload={
             "project_id": project.project_id,
-            "narration_source_uri": f"local://projects/{project.project_id}/inputs/narration/source.wav",
+            "narration_source_uri": narration_asset.storage_uri,
             "tracks": [
                 {
                     "track_id": "narration_primary",
@@ -26316,3 +26339,32 @@ def test_voice_sample_upload_registers_project_owned_audio_and_rejects_empty_fil
     assert "empty" in empty.json()["detail"].lower()
     assert restored.status_code == 200
     assert [asset["asset_id"] for asset in restored.json()["assets"]] == [uploaded.json()["asset_id"]]
+
+
+def test_voice_sample_upload_uses_a_bounded_project_temp_name(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = TestClient(create_app(projects_root=tmp_path))
+    project_id = client.post(
+        "/api/projects", json={"name": "Bounded voice upload"}
+    ).json()["project_id"]
+    observed_names: list[str] = []
+    original_open = Path.open
+
+    def record_open(path: Path, *args: object, **kwargs: object):
+        if path.parent.name == "voice_sample_uploads":
+            observed_names.append(path.name)
+        return original_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", record_open)
+
+    uploaded = client.post(
+        f"/api/projects/{project_id}/assets/voice-sample/upload",
+        files={"file": ("my voice.wav", b"RIFFvoice-sample", "audio/wav")},
+    )
+
+    assert uploaded.status_code == 201
+    assert len(observed_names) == 1
+    assert observed_names[0].startswith(".v")
+    assert len(observed_names[0]) <= 16

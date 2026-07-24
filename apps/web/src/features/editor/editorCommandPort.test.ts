@@ -7,6 +7,7 @@ const api = {
   undoEditingSession: vi.fn(), redoEditingSession: vi.fn(), updateEditingSessionCutAction: vi.fn(),
   updateEditingSessionBroll: vi.fn(), clearEditingSessionBrollOverride: vi.fn(), updateEditingSessionMusicOverride: vi.fn(), clearEditingSessionMusicOverride: vi.fn(), updateEditingSessionSfxOverride: vi.fn(), clearEditingSessionSfxOverride: vi.fn(),
   updateEditingSessionExplanationCard: vi.fn(), removeEditingSessionExplanationCard: vi.fn(), updateEditingSessionImageOverlay: vi.fn(), removeEditingSessionImageOverlay: vi.fn(), updateEditingSessionTableOverlay: vi.fn(), removeEditingSessionTableOverlay: vi.fn(),
+  updateEditingSessionTtsReplacement: vi.fn(), clearEditingSessionTtsReplacement: vi.fn(),
   updateEditingSessionCaption: vi.fn(), updateEditingSessionCaptionStyle: vi.fn(),
 } satisfies EditorCommandApi;
 
@@ -130,6 +131,24 @@ describe("EditorCommandPort", () => {
     expect(api.removeEditingSessionTableOverlay).toHaveBeenCalledWith("p", "s", "seg", 7);
     expect(api.updateEditingSessionCaption).toHaveBeenCalledWith("p", "s", "seg", { caption_text: "새 자막", expected_revision: 7 });
     expect(api.updateEditingSessionCaptionStyle).toHaveBeenCalledWith("p", "s", expect.objectContaining({ expected_revision: 7, segment_ids: ["seg"] }));
+  });
+
+  it("applies and clears an approved TTS candidate through revisioned endpoints", async () => {
+    const port = createEditorCommandPort({ projectId: "p", sessionId: "s", expectedRevision: 7 }, api);
+
+    await port.applyTtsCandidate({
+      assetId: "asset-approved",
+      candidateId: "tts_candidate_approved",
+      segmentId: "seg",
+    });
+    await port.clearTtsCandidate({ segmentId: "seg" });
+
+    expect(api.updateEditingSessionTtsReplacement).toHaveBeenCalledWith("p", "s", "seg", {
+      asset_id: "asset-approved",
+      expected_revision: 7,
+      recommendation_id: "tts_candidate_approved",
+    });
+    expect(api.clearEditingSessionTtsReplacement).toHaveBeenCalledWith("p", "s", "seg", 7);
   });
 });
 

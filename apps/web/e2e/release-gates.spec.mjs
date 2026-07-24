@@ -12,10 +12,25 @@ const manifest = {
   tracks: [], captions: [], gap_slots: [], source_status: { status: "current", source_session_id: "release-gates-e2e", source_session_revision: 7 },
   audition: { asset_urls: {} }, exact_preview: { status: "unavailable", url: null, source_session_id: "release-gates-e2e", source_session_revision: 7 },
 };
+const editingSession = {
+  project_id: "local-draft",
+  session_id: "release-gates-e2e",
+  timeline_id: "timeline-release-gates",
+  session_revision: 7,
+  undo_count: 0,
+  redo_count: 0,
+  updated_at: "2026-07-24T00:00:00Z",
+  history: [],
+  segments: [],
+};
 
 async function openWorkbench(page) {
   await page.route("**/api/projects", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ projects: [project] }) }));
   await page.route("**/playback-manifest", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(manifest) }));
+  await page.route(
+    "**/api/projects/local-draft/editing-sessions/release-gates-e2e",
+    (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(editingSession) }),
+  );
   await page.setViewportSize({ width: 1920, height: 1080 });
   await page.goto("/projects/local-draft/editor?session_id=release-gates-e2e");
   await expect(page.getByRole("region", { name: "편집 작업판" })).toBeVisible();

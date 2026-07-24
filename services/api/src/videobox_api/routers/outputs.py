@@ -160,7 +160,7 @@ def build_outputs_router(orchestrator: ApiOrchestrator) -> APIRouter:
         except Exception as exc:
             raise _http_error(exc) from exc
         if result.pop("should_start", True):
-            threading.Thread(
+            worker = threading.Thread(
                 target=orchestrator.run_final_render_job,
                 kwargs={
                     "project_id": project_id,
@@ -168,7 +168,15 @@ def build_outputs_router(orchestrator: ApiOrchestrator) -> APIRouter:
                     "job": {"job_id": result["job_id"]},
                 },
                 daemon=True,
-            ).start()
+            )
+            try:
+                worker.start()
+            except Exception:
+                orchestrator.release_final_render_worker(
+                    project_id=project_id,
+                    job_id=str(result["job_id"]),
+                )
+                raise
         return StartJobResponse(**result)
 
     @router.get("/api/projects/{project_id}/final-renders/{job_id}")
@@ -209,15 +217,24 @@ def build_outputs_router(orchestrator: ApiOrchestrator) -> APIRouter:
             )
         except Exception as exc:
             raise _http_error(exc) from exc
-        threading.Thread(
-            target=orchestrator.run_capcut_draft_export_job,
-            kwargs={
-                "project_id": project_id,
-                "timeline_job_id": payload.timeline_job_id,
-                "job": {"job_id": result["job_id"]},
-            },
-            daemon=True,
-        ).start()
+        if result.pop("should_start", True):
+            worker = threading.Thread(
+                target=orchestrator.run_capcut_draft_export_job,
+                kwargs={
+                    "project_id": project_id,
+                    "timeline_job_id": payload.timeline_job_id,
+                    "job": {"job_id": result["job_id"]},
+                },
+                daemon=True,
+            )
+            try:
+                worker.start()
+            except Exception:
+                orchestrator.release_capcut_draft_export_worker(
+                    project_id=project_id,
+                    job_id=str(result["job_id"]),
+                )
+                raise
         return StartJobResponse(**result)
 
     @router.get("/api/projects/{project_id}/capcut-draft-exports/{job_id}")

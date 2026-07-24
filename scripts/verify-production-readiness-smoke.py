@@ -247,7 +247,24 @@ def _short_broll_is_observably_looped(*, final_path: Path, work_root: Path, ffmp
 
 def _extract_corner_pixel(path: Path, *, second: float, ffmpeg_binary: str) -> bytes:
     result = subprocess.run(
-        [ffmpeg_binary, "-v", "error", "-ss", str(second), "-i", str(path), "-vf", "crop=2:2:8:8", "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"],
+        [
+            ffmpeg_binary,
+            "-v",
+            "error",
+            "-ss",
+            str(second),
+            "-i",
+            str(path),
+            "-vf",
+            "crop=2:2:8:(ih-2)/2",
+            "-frames:v",
+            "1",
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "rgb24",
+            "pipe:1",
+        ],
         check=True,
         capture_output=True,
         timeout=120,
@@ -264,6 +281,7 @@ def run_smoke(
     ffmpeg_binary: str,
     ffprobe_binary: str,
     fixture_name: str = "loop",
+    project_name: str | None = None,
 ) -> dict[str, object]:
     fixture = get_long_form_fixture(fixture_name)
     narration = narration.resolve()
@@ -308,7 +326,16 @@ def run_smoke(
     )
     checks: dict[str, bool] = {}
     with TestClient(app) as client:
-        project = _assert_status(client.post("/api/projects", json={"name": f"Production readiness Korean smoke {fixture_name}"}), 201)
+        project = _assert_status(
+            client.post(
+                "/api/projects",
+                json={
+                    "name": project_name
+                    or f"Production readiness Korean smoke {fixture_name}"
+                },
+            ),
+            201,
+        )
         project_id = project["project_id"]
         narration_asset = _assert_status(client.post(
             f"/api/projects/{project_id}/assets/narration-audio", json={"source_path": str(narration)}), 201)

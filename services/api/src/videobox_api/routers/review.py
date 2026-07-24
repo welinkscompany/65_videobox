@@ -58,6 +58,7 @@ def build_review_router(orchestrator: ApiOrchestrator) -> APIRouter:
         return ReviewApprovalResponse(
             timeline_id=result["timeline_id"], project_id=result["project_id"], review_status=result["status"],
             approved_at=result.get("approved_at"), updated_at=result["updated_at"],
+            source_session_id=result.get("source_session_id"),
             source_session_revision=result.get("source_session_revision"), is_current=result.get("is_current", True),
             invalidated_at=result.get("invalidated_at"), invalidated_reason=result.get("invalidated_reason"),
         )
@@ -114,6 +115,7 @@ def build_review_router(orchestrator: ApiOrchestrator) -> APIRouter:
             review_status=result["status"],
             approved_at=result["approved_at"],
             updated_at=result["updated_at"],
+            source_session_id=result.get("source_session_id"),
             source_session_revision=result.get("source_session_revision"), is_current=result.get("is_current", True),
             invalidated_at=result.get("invalidated_at"), invalidated_reason=result.get("invalidated_reason"),
         )
@@ -130,6 +132,7 @@ def build_review_router(orchestrator: ApiOrchestrator) -> APIRouter:
             review_status=result["status"],
             approved_at=result["approved_at"],
             updated_at=result["updated_at"],
+            source_session_id=result.get("source_session_id"),
             source_session_revision=result.get("source_session_revision"), is_current=result.get("is_current", True),
             invalidated_at=result.get("invalidated_at"), invalidated_reason=result.get("invalidated_reason"),
         )

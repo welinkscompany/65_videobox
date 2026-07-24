@@ -90,6 +90,7 @@ def test_smoke_harness_observes_broll_loop_and_muxed_subtitle_instead_of_marking
     source = SCRIPT_PATH.read_text(encoding="utf-8")
 
     assert 'checks["short_broll_loops"] = True' not in source
+    assert '"crop=2:2:8:(ih-2)/2"' in source
     assert "_extract_subtitle_stream" in source
     assert 'checks["revised_caption_in_final_mp4"]' in source
 

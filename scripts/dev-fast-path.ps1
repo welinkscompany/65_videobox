@@ -286,7 +286,7 @@ switch ($Mode) {
             -Command "try { `$env:VIDEOBOX_RUN_REAL_STARTER_PACK_E2E='1'; $pytestCommand tests/test_real_starter_media_pack_e2e.py -q } finally { Remove-Item Env:VIDEOBOX_RUN_REAL_STARTER_PACK_E2E -ErrorAction SilentlyContinue }" `
             -WorkingDirectory $repoRoot
         Invoke-Step -Label "600-second Korean production readiness smoke" -Command "& `"$backendPython`" scripts/verify-production-readiness-smoke.py --narration artifacts/task5-korean-600.wav --work-root artifacts/task5-smoke" -WorkingDirectory $repoRoot
-        Invoke-Step -Label "Three-fixture long-form CapCut draft QA" -Command "& `"$backendPython`" scripts/verify-long-form-capcut-draft-qa.py --narration artifacts/task5-korean-600.wav --work-root artifacts/long-form-capcut-qa" -WorkingDirectory $repoRoot
+        Invoke-Step -Label "Three-fixture long-form CapCut draft QA" -Command "& `"$backendPython`" scripts/verify-long-form-capcut-draft-qa.py --narration artifacts/task5-korean-600.wav --work-root artifacts/lfqa" -WorkingDirectory $repoRoot
     }
     "smoke" {
         $artifactRoot = Join-Path $repoRoot "artifacts"
@@ -315,7 +315,7 @@ switch ($Mode) {
         }
         Invoke-Step `
             -Label "Three-fixture long-form CapCut draft QA" `
-            -Command "& `"$backendPython`" scripts/verify-long-form-capcut-draft-qa.py --narration `"$samplePath`" --work-root artifacts/long-form-capcut-qa" `
+            -Command "& `"$backendPython`" scripts/verify-long-form-capcut-draft-qa.py --narration `"$samplePath`" --work-root artifacts/lfqa" `
             -WorkingDirectory $repoRoot
     }
     "status" {

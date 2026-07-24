@@ -123,6 +123,13 @@ def test_timeline_builder_carries_manual_broll_identity_to_the_output_source_ver
     source.write_bytes(b"placed-broll")
     store = LocalProjectStore(tmp_path / "projects")
     project = store.bootstrap_project(name="manual provenance")
+    narration_source = tmp_path / "narration.wav"
+    narration_source.write_bytes(b"narration")
+    narration_asset = store.register_asset(
+        project_id=project.project_id,
+        asset_type=AssetType.NARRATION_AUDIO,
+        source_path=narration_source,
+    )
     asset = store.register_asset(
         project_id=project.project_id,
         asset_type=AssetType.BROLL_VIDEO,
@@ -132,6 +139,7 @@ def test_timeline_builder_carries_manual_broll_identity_to_the_output_source_ver
     expected_revision = store.get_asset(project_id=project.project_id, asset_id=asset.asset_id)["created_at"]
     timeline = TimelineBuilder().build(
         project_id=project.project_id,
+        narration_source_uri=narration_asset.storage_uri,
         segments=[{"segment_id": "seg_001", "text": "caption", "start_sec": 0.0, "end_sec": 2.0}],
         recommendations=[{
             "recommendation_id": "manual_broll_seg_001",

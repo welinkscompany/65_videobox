@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 
 from videobox_api.main import create_app
 from videobox_capcut_export.adapter import CapCutExportAdapter
+from videobox_core_engine.composition_plan import CompositionPlan, materialize_editing_session_timeline
 from videobox_core_engine.ffmpeg_final_renderer import FfmpegFinalRenderer
 from videobox_core_engine.output_source_verifier import OutputSourceStaleError, verify_output_freshness
 from videobox_core_engine.media_pack_service import MediaPackService, compute_pack_integrity
@@ -468,10 +469,12 @@ def test_partial_regeneration_stamps_output_provenance_with_final_session_revisi
     partial_job_id = partial.json()["job_id"]
     timeline = client.get(f"/api/projects/{project_id}/partial-regenerations/{partial_job_id}").json()["timeline"]
     refreshed = client.get(f"/api/projects/{project_id}/editing-sessions/{session_id}").json()
+    assert timeline["source_session_id"] == refreshed["session_id"]
     assert timeline["source_session_revision"] == refreshed["session_revision"]
 
     store = LocalProjectStore(tmp_path / "projects")
     review = store.get_review_state(project_id=project_id, timeline_id=timeline["timeline_id"])
+    assert review["source_session_id"] == refreshed["session_id"]
     assert review["source_session_revision"] == refreshed["session_revision"]
     assert review["is_current"] is True
     verify_output_freshness(editing_session=refreshed, timeline=timeline, review=review)
@@ -577,6 +580,94 @@ def test_only_materialized_matching_project_audio_assets_can_override_and_build_
     assert bgm_payload["segments"][0]["source_uri"] == bgm["storage_uri"]
     sfx_payload = next(track for track in capcut_payload["capcut_tracks"] if track["track_name"] == "sfx")
     assert sfx_payload["segments"][0]["source_uri"] == sfx["storage_uri"]
+
+
+def test_rejected_manual_sfx_stays_absent_after_timeline_review_approval(tmp_path: Path) -> None:
+    library = _indexed_library(tmp_path)
+    projects_root = tmp_path / "projects"
+    client = TestClient(create_app(projects_root=projects_root, media_library_store=library))
+    project_id, session_id = _create_timeline_session(client, tmp_path)
+    session = client.get(f"/api/projects/{project_id}/editing-sessions/{session_id}").json()
+    sfx = client.post(
+        "/api/media-library/assets/pack:starter-001:sfx-001/materialize",
+        json={"project_id": project_id},
+    ).json()
+    selected = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/sfx",
+        json={"asset_id": sfx["asset_id"], "expected_revision": session["session_revision"]},
+    )
+    assert selected.status_code == 200, selected.text
+    selected_override = selected.json()["segments"][0]["sfx_override"]
+    assert selected_override["source_action_id"]
+
+    partial = client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/partial-regeneration",
+        json={
+            "segment_ids": ["seg_001"],
+            "fields": ["sfx"],
+            "expected_revision": selected.json()["session_revision"],
+        },
+    )
+    assert partial.status_code == 202, partial.text
+    job_id = partial.json()["job_id"]
+    rejected = client.post(
+        f"/api/projects/{project_id}/review-snapshots/{job_id}/recommendations/manual_sfx_seg_001/reject",
+    )
+    assert rejected.status_code == 200, rejected.text
+    store = LocalProjectStore(projects_root)
+    partial_result = client.get(
+        f"/api/projects/{project_id}/partial-regenerations/{job_id}",
+    ).json()
+    timeline = store.get_timeline_run(
+        project_id=project_id,
+        timeline_id=partial_result["timeline_id"],
+    )
+    # This test isolates the SFX decision. The fixture's synthetic narration
+    # creates unrelated segment-review flags, so resolve only those before the
+    # normal timeline approval endpoint is exercised.
+    timeline["review_flags"] = [
+        flag
+        for flag in timeline.get("review_flags", [])
+        if flag.get("code") != "segment_review_required"
+    ]
+    for segment in timeline.get("caption_segments", []):
+        segment["review_required"] = False
+        segment["cleanup_decision"] = "keep"
+    store.update_timeline_run(
+        project_id=project_id,
+        timeline_id=timeline["timeline_id"],
+        timeline_payload=timeline,
+    )
+    store.update_partial_regeneration_run(
+        project_id=project_id,
+        partial_regeneration_id=partial_result["partial_regeneration_id"],
+        payload={"timeline": timeline},
+    )
+    approved = client.post(
+        f"/api/projects/{project_id}/review-approvals/{job_id}/approve",
+    )
+    assert approved.status_code == 202, approved.text
+    assert approved.json()["review_status"] == "approved"
+
+    current_session = store.get_editing_session(project_id=project_id, session_id=session_id)
+    timeline_id = current_session["timeline_id"]
+    timeline = store.get_timeline_run(project_id=project_id, timeline_id=timeline_id)
+    rejected_records = timeline["rejected_recommendations"]
+    assert rejected_records[0]["payload"]["source_override_action_id"] == selected_override["source_action_id"]
+
+    plan = CompositionPlan.from_timeline(
+        timeline=materialize_editing_session_timeline(
+            timeline=timeline,
+            editing_session=current_session,
+            project_id=project_id,
+        )
+    )
+
+    assert [
+        item.asset_uri
+        for item in plan.items
+        if item.track_type == "sfx" and item.asset_uri == sfx["storage_uri"]
+    ] == []
 
 
 @pytest.mark.parametrize(

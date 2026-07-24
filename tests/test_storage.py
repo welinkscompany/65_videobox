@@ -59,6 +59,18 @@ def test_bootstrap_project_creates_sqlite_tables(tmp_path: Path) -> None:
     }.issubset(table_names)
 
 
+def test_list_projects_skips_a_database_file_observed_before_schema_commit(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    incomplete = tmp_path / "projects" / "initializing" / "db" / "project.sqlite"
+    incomplete.parent.mkdir(parents=True)
+    sqlite3.connect(incomplete).close()
+    project = store.bootstrap_project(name="Ready Project")
+
+    projects = store.list_projects()
+
+    assert [item["project_id"] for item in projects] == [project.project_id]
+
+
 def test_connection_initialization_failure_closes_the_open_sqlite_handle(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     store = LocalProjectStore(tmp_path)
     project = store.bootstrap_project(name="Connection Cleanup")

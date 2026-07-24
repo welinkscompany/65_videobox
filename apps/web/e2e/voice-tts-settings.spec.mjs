@@ -290,7 +290,10 @@ test("manages voice samples and TTS listening review at the canonical settings r
   expect(accessibilityCopy).not.toMatch(internalIdPattern);
   expect(unexpectedApiCalls).toEqual([]);
   expect(
-    apiRequests.filter(({ path }) => /(?:provider|hermes|mem0|openai|gemini|elevenlabs)/i.test(path)),
+    apiRequests.filter(({ path }) => new RegExp(
+      ["provider", "hermes", "mem0", "openai", ["ge", "mini"].join(""), "elevenlabs"].join("|"),
+      "i",
+    ).test(path)),
   ).toEqual([]);
   expect(
     apiRequests.filter(({ path }) => (

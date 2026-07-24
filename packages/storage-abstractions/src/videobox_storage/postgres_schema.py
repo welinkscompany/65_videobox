@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import re
 
-from videobox_storage.sqlite_schema import PROJECT_SCHEMA_STATEMENTS
+from videobox_storage.sqlite_schema import (
+    ARTIFACT_SOURCE_SESSION_BACKFILL_STATEMENTS,
+    PROJECT_SCHEMA_STATEMENTS,
+)
 
 
 _PROJECT_SCOPED_IDENTIFIERS = {
@@ -71,6 +74,7 @@ POSTGRES_MIGRATION_STATEMENTS = (
             ("invalidated_reason", "TEXT"),
         )
     ),
+    *ARTIFACT_SOURCE_SESSION_BACKFILL_STATEMENTS,
     "ALTER TABLE exports ADD COLUMN IF NOT EXISTS handoff_claim_token TEXT",
     "ALTER TABLE exports ADD COLUMN IF NOT EXISTS handoff_claim_job_id TEXT",
     "ALTER TABLE exports ADD COLUMN IF NOT EXISTS handoff_claimed_at TEXT",

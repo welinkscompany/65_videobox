@@ -247,6 +247,7 @@ describe("EditorWorkbenchRoute", () => {
     vi.spyOn(api, "listBrollAssets").mockResolvedValue([] as never);
     vi.spyOn(api, "listMediaLibraryAssets").mockResolvedValue({ assets: [] } as never);
     vi.spyOn(api, "listJobs").mockResolvedValue([]);
+    vi.spyOn(api, "listTtsCandidates").mockResolvedValue({ candidates: [] });
   });
 
   it("publishes nothing until the matching manifest and session arrive together", async () => {
@@ -771,6 +772,78 @@ describe("EditorWorkbenchRoute", () => {
       expected_revision: 10,
     }));
     await expectEditorRevision(11);
+  });
+
+  it("applies and clears only an approved TTS candidate through the revisioned single-flight Inspector lane", async () => {
+    vi.mocked(api.getEditorPlaybackManifest)
+      .mockResolvedValueOnce(inspectorManifest(7) as never)
+      .mockResolvedValueOnce(inspectorManifest(8) as never)
+      .mockResolvedValueOnce(inspectorManifest(9) as never);
+    vi.mocked(api.getEditingSession)
+      .mockResolvedValueOnce(inspectorSession(7) as never)
+      .mockResolvedValueOnce({
+        ...inspectorSession(8),
+        segments: inspectorSession(8).segments.map((segment, index) => index === 0
+          ? { ...segment, tts_replacement: { recommendation_id: "tts_candidate_approved", asset_id: "asset-approved" } }
+          : segment),
+      } as never)
+      .mockResolvedValueOnce(inspectorSession(9) as never);
+    vi.mocked(api.listTtsCandidates).mockResolvedValue({
+      candidates: [
+        {
+          actual_duration_sec: 1,
+          asset_id: "asset-approved",
+          candidate_id: "tts_candidate_approved",
+          created_at: "2026-07-24T00:00:00Z",
+          failure_code: null,
+          operator_review_status: "approved",
+          project_id: "project-a",
+          segment_id: "segment-1",
+          source_text: "승인된 음성",
+          target_duration_sec: 1,
+          technical_status: "accepted",
+        },
+        {
+          actual_duration_sec: 1,
+          asset_id: "asset-pending",
+          candidate_id: "tts_candidate_pending",
+          created_at: "2026-07-24T00:00:00Z",
+          failure_code: null,
+          operator_review_status: "pending",
+          project_id: "project-a",
+          segment_id: "segment-1",
+          source_text: "승인 전 음성",
+          target_duration_sec: 1,
+          technical_status: "accepted",
+        },
+      ],
+    });
+    let resolveApply!: (value: unknown) => void;
+    const apply = vi.spyOn(api, "updateEditingSessionTtsReplacement")
+      .mockImplementation(() => new Promise((resolve) => { resolveApply = resolve; }) as never);
+    const clear = vi.spyOn(api, "clearEditingSessionTtsReplacement").mockResolvedValue({} as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(7);
+    await openInspector();
+    expect(await screen.findByRole("option", { name: "승인 후보 1 · 승인된 음성" })).toBeVisible();
+    expect(screen.queryByText("승인 전 음성")).toBeNull();
+
+    const applyButton = screen.getByRole("button", { name: "승인한 음성 적용" });
+    fireEvent.click(applyButton);
+    fireEvent.click(applyButton);
+    await waitFor(() => expect(apply).toHaveBeenCalledTimes(1));
+    expect(apply).toHaveBeenCalledWith("project-a", "session-a", "segment-1", {
+      asset_id: "asset-approved",
+      expected_revision: 7,
+      recommendation_id: "tts_candidate_approved",
+    });
+    await act(async () => { resolveApply({}); });
+    await expectEditorRevision(8);
+
+    fireEvent.click(await screen.findByRole("button", { name: "적용한 음성 해제" }));
+    await waitFor(() => expect(clear).toHaveBeenCalledWith("project-a", "session-a", "segment-1", 8));
+    await expectEditorRevision(9);
   });
 
   it.each([

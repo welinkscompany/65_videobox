@@ -89,6 +89,7 @@ describe("joinEditorSnapshot", () => {
           mediaRevision: null,
           controls: { gainDb: -3, fadeInSec: 0.1, fadeOutSec: 0.2, ducking: false },
         },
+        ttsReplacement: null,
       }],
     });
   });

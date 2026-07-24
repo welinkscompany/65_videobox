@@ -291,12 +291,6 @@ describe("Task 22 canonical production owners", () => {
         componentEvidence: [["app/OutputsPage.test.tsx", "owns the current exact-preview reference"]],
         e2eEvidence: ["z-script-first-vertical.spec.mjs", "current-revision playback and CapCut smoke"],
       },
-      {
-        capability: "route recovery",
-        ownerSource: router, owner: /notFoundComponent: RecoveryPage/,
-        componentEvidence: [["app/AppRouter.test.tsx", "renders recovery for an unknown project"]],
-        e2eEvidence: ["product-shell.spec.mjs", "unknown project route offers canonical recovery"],
-      },
     ] as const;
 
     for (const row of rows) {
@@ -310,6 +304,102 @@ describe("Task 22 canonical production owners", () => {
       const e2ePath = resolve(webRoot, "e2e", e2eFile);
       expect(existsSync(e2ePath), `${row.capability} E2E owner ${e2eFile}`).toBe(true);
       expect(readFileSync(e2ePath, "utf8"), `${row.capability} E2E assertion ${e2eMarker}`).toContain(e2eMarker);
+    }
+
+    const recoveryRows = [
+      {
+        route: "project create and source ingest",
+        ownerSource: router,
+        owner: /normalizedSection === "create"[\s\S]{0,240}<CreationInterview\b/,
+        componentEvidence: [
+          ["project-onboarding.test.tsx", "keeps the created project and retries only the failed narration ingest"],
+          ["features/creation/CreationInterview.test.tsx", "keeps a failed durable answer on the same question with an actionable retry"],
+          ["app/AppRouter.test.tsx", "does not let a late A workspace response overwrite the currently routed B workspace"],
+        ],
+        e2eEvidence: ["product-shell.spec.mjs", "다시 준비"],
+      },
+      {
+        route: "media",
+        ownerSource: router,
+        owner: /normalizedSection === "media"[\s\S]{0,800}<MediaWorkspacePage\b/,
+        componentEvidence: [
+          ["features/media/MediaWorkspacePage.test.tsx", "shows loading, empty, failure, and refresh recovery"],
+          ["features/media/MediaWorkspacePage.test.tsx", "discards late project A results after switching to project B"],
+        ],
+        e2eEvidence: ["media-recovery.spec.mjs", "recovers local analysis with authoritative refreshes"],
+      },
+      {
+        route: "current and global jobs",
+        ownerSource: shell,
+        owner: /<JobRecovery projectId=\{projectId\}/,
+        componentEvidence: [
+          ["features/jobs/JobRecovery.test.tsx", "recovers list errors"],
+          ["features/jobs/JobRecovery.test.tsx", "discards a late current-project response after A changes to B"],
+        ],
+        e2eEvidence: ["job-recovery.spec.mjs", "refreshes global truth"],
+      },
+      {
+        route: "timeline and review",
+        ownerSource: router,
+        owner: /normalizedSection === "timeline" \|\| normalizedSection === "review"[\s\S]{0,500}<TimelineReviewPage\b/,
+        componentEvidence: [
+          ["features/review/TimelineReviewPage.test.tsx", "shows no-session, no-exact-match, load error, and an explicit successful refresh"],
+          ["features/review/TimelineReviewPage.test.tsx", "fences a late project A detail response after switching to B"],
+        ],
+        e2eEvidence: ["review-to-editor.spec.mjs", "review route recovers an initial load error with an explicit authoritative refresh"],
+      },
+      {
+        route: "editor",
+        ownerSource: router,
+        owner: /section === "editor"[\s\S]{0,300}<EditorWorkbenchRoute\b/,
+        componentEvidence: [
+          ["features/editor/workbench/editor-workbench-route.test.tsx", "publishes nothing until the matching manifest and session arrive together"],
+          ["features/editor/workbench/editor-workbench-route.test.tsx", "keeps the manifest editor usable when an asset list fails and gives contained retry-safe guidance"],
+          ["features/editor/workbench/editor-workbench-route.test.tsx", "ignores a stale A asset load after route navigation to B"],
+        ],
+        e2eEvidence: ["exact-preview.spec.mjs", "failed proxy retry requests the current revision and refreshes the surfaced status"],
+      },
+      {
+        route: "voice settings",
+        ownerSource: router,
+        owner: /path: "\/settings\/\$section"[\s\S]{0,180}component: SettingsRoutePage/,
+        componentEvidence: [
+          ["features/settings/VoiceTtsSettings.test.tsx", "shows recoverable load errors and keeps list requests single-flight"],
+          ["features/settings/VoiceTtsSettings.test.tsx", "fences late project A responses after switching to project B"],
+        ],
+        e2eEvidence: ["voice-tts-settings.spec.mjs", "목소리 목록을 새로 불러왔어요."],
+      },
+      {
+        route: "outputs",
+        ownerSource: router,
+        owner: /normalizedSection === "outputs"[\s\S]{0,240}<OutputsPage\b/,
+        componentEvidence: [
+          ["app/OutputsPage.test.tsx", "keeps a failed status read recoverable without offering output mutations"],
+          ["app/OutputsPage.test.tsx", "does not let a delayed project A status response replace project B"],
+        ],
+        e2eEvidence: ["z-script-first-vertical.spec.mjs", "__e2e/mark-outputs-stale"],
+      },
+      {
+        route: "unknown project",
+        ownerSource: router,
+        owner: /notFoundComponent: RecoveryPage/,
+        componentEvidence: [["app/AppRouter.test.tsx", "renders recovery for an unknown project"]],
+        e2eEvidence: ["product-shell.spec.mjs", "unknown project route offers canonical recovery"],
+      },
+    ] as const;
+
+    expect(recoveryRows).toHaveLength(8);
+    for (const recovery of recoveryRows) {
+      expect(recovery.ownerSource, `${recovery.route} recovery owner`).toMatch(recovery.owner);
+      for (const [componentTest, marker] of recovery.componentEvidence) {
+        const componentPath = resolve(sourceRoot, componentTest);
+        expect(existsSync(componentPath), `${recovery.route} recovery component ${componentTest}`).toBe(true);
+        expect(readFileSync(componentPath, "utf8"), `${recovery.route} recovery assertion ${marker}`).toContain(marker);
+      }
+      const [e2eFile, e2eMarker] = recovery.e2eEvidence;
+      const e2ePath = resolve(webRoot, "e2e", e2eFile);
+      expect(existsSync(e2ePath), `${recovery.route} recovery E2E ${e2eFile}`).toBe(true);
+      expect(readFileSync(e2ePath, "utf8"), `${recovery.route} recovery E2E assertion ${e2eMarker}`).toContain(e2eMarker);
     }
   });
 });

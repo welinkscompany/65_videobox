@@ -177,7 +177,14 @@ def build_assets_router(orchestrator: ApiOrchestrator, store: LocalProjectStore)
         suffix = Path(filename).suffix.lower()
         if not filename or suffix not in {".wav", ".mp3", ".m4a", ".webm", ".ogg", ".flac"}:
             raise _http_error(ValueError("Voice sample must be an audio file with a supported extension."))
-        staged_path = store.project_root(project_id) / "tmp" / "voice_sample_uploads" / f"{uuid4().hex}{suffix}"
+        # Keep the project-owned upload component short so long Windows
+        # work/artifact roots do not exceed MAX_PATH.
+        staged_path = (
+            store.project_root(project_id)
+            / "tmp"
+            / "voice_sample_uploads"
+            / f".v{uuid4().hex[:8]}{suffix}"
+        )
         try:
             staged_path.parent.mkdir(parents=True, exist_ok=True)
             total_bytes = 0

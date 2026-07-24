@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   api,
-  CapcutDraftHandoffInProgressError,
   type CapCutDraftExportJob,
   type CapCutHandoffDiagnostics,
   type EditingSession,
@@ -92,6 +91,193 @@ function exactPreviewDescription(state: ExactPreviewState | undefined) {
   }
 }
 
+function isSameTimelineLineage(state: OutputState, projectId: string, timelineJobId: string) {
+  return state.projectId === projectId && state.timelineJob?.job_id === timelineJobId;
+}
+
+type OutputRecoverySnapshot = {
+  jobStates: string[];
+  artifactState: string | null;
+};
+
+function jobIdentityStatus(jobId: string, status: string) {
+  return `${jobId}\u0000${status}`;
+}
+
+function captureSubtitleRecoverySnapshot(state: OutputState | null): OutputRecoverySnapshot {
+  const subtitle = state?.subtitle;
+  return {
+    jobStates: subtitle ? [jobIdentityStatus(subtitle.job_id, subtitle.status)] : [],
+    artifactState: subtitle?.subtitle ? [
+      subtitle.job_id,
+      subtitle.status,
+      subtitle.subtitle.subtitle_id,
+      subtitle.subtitle.status,
+      subtitle.subtitle.timeline_id,
+      subtitle.subtitle.source_session_id ?? "",
+      subtitle.subtitle.source_session_revision ?? "",
+      subtitle.subtitle.is_current ?? "",
+    ].join("\u0000") : null,
+  };
+}
+
+function captureFinalRecoverySnapshot(state: OutputState | null): OutputRecoverySnapshot {
+  const finalRender = state?.finalRender;
+  return {
+    jobStates: (state?.finalJobs ?? []).map((job) => jobIdentityStatus(job.job_id, job.status)),
+    artifactState: finalRender?.render ? [
+      finalRender.job_id,
+      finalRender.status,
+      finalRender.render.export_id,
+      finalRender.render.status,
+      finalRender.render.timeline_id,
+      finalRender.render.source_session_id ?? "",
+      finalRender.render.source_session_revision ?? "",
+      finalRender.render.is_current ?? "",
+    ].join("\u0000") : null,
+  };
+}
+
+function captureCapcutRecoverySnapshot(state: OutputState | null): OutputRecoverySnapshot {
+  const capcutDraft = state?.capcutDraft;
+  return {
+    jobStates: (state?.capcutJobs ?? []).map((job) => jobIdentityStatus(job.job_id, job.status)),
+    artifactState: capcutDraft?.export ? [
+      capcutDraft.job_id,
+      capcutDraft.status,
+      capcutDraft.export.export_id,
+      capcutDraft.export.status,
+      capcutDraft.export.timeline_id,
+      capcutDraft.export.source_session_id ?? "",
+      capcutDraft.export.source_session_revision ?? "",
+      capcutDraft.export.is_current,
+    ].join("\u0000") : null,
+  };
+}
+
+function captureCapcutHandoffRecoverySnapshot(state: OutputState | null) {
+  const capcutDraft = state?.capcutDraft;
+  const handoff = capcutDraft?.export?.handoff;
+  return handoff ? [
+    capcutDraft.job_id,
+    capcutDraft.export?.export_id ?? "",
+    capcutDraft.export?.source_session_id ?? "",
+    capcutDraft.export?.source_session_revision ?? "",
+    handoff.status,
+    handoff.registered_project_path ?? "",
+    handoff.error_message ?? "",
+    handoff.registered_at ?? "",
+    handoff.reused,
+    handoff.recoverable ?? "",
+    handoff.recoverable_at ?? "",
+  ].join("\u0000") : null;
+}
+
+function hasNewInFlightJob(jobs: JobRecord[], previous: OutputRecoverySnapshot) {
+  const previousJobStates = new Set(previous.jobStates);
+  return jobs.some((job) => (
+    (job.status === "pending" || job.status === "running") &&
+    !previousJobStates.has(jobIdentityStatus(job.job_id, job.status))
+  ));
+}
+
+function needsSubtitleFailureFallback(
+  state: OutputState,
+  projectId: string,
+  timelineJobId: string,
+  previous: OutputRecoverySnapshot,
+) {
+  if (!isSameTimelineLineage(state, projectId, timelineJobId)) return false;
+  const subtitle = state.subtitle;
+  const next = captureSubtitleRecoverySnapshot(state);
+  const hasNewInFlight = (
+    (subtitle?.status === "pending" || subtitle?.status === "running") &&
+    !previous.jobStates.includes(jobIdentityStatus(subtitle.job_id, subtitle.status))
+  );
+  const hasNewCurrentArtifact = (
+    subtitle?.status === "succeeded" &&
+    subtitle.subtitle?.status === "succeeded" &&
+    state.session?.project_id === projectId &&
+    subtitle.subtitle.project_id === projectId &&
+    subtitle.subtitle.timeline_id === state.session.timeline_id &&
+    subtitle.subtitle.source_session_id === state.session.session_id &&
+    subtitle.subtitle.source_session_revision === state.session.session_revision &&
+    subtitle.subtitle.is_current === true &&
+    next.artifactState !== previous.artifactState
+  );
+  return !(hasNewInFlight || hasNewCurrentArtifact);
+}
+
+function needsFinalFailureFallback(
+  state: OutputState,
+  projectId: string,
+  timelineJobId: string,
+  previous: OutputRecoverySnapshot,
+) {
+  if (!isSameTimelineLineage(state, projectId, timelineJobId)) return false;
+  const next = captureFinalRecoverySnapshot(state);
+  const hasNewCurrentArtifact = (
+    state.finalRender?.status === "succeeded" &&
+    state.finalRender.render?.is_current === true &&
+    state.session?.project_id === projectId &&
+    state.finalRender.render.timeline_id === state.session.timeline_id &&
+    state.finalRender.render.source_session_id === state.session.session_id &&
+    state.finalRender.render.source_session_revision === state.session.session_revision &&
+    next.artifactState !== previous.artifactState
+  );
+  return !(hasNewInFlightJob(state.finalJobs, previous) || hasNewCurrentArtifact);
+}
+
+function needsCapcutFailureFallback(
+  state: OutputState,
+  projectId: string,
+  timelineJobId: string,
+  previous: OutputRecoverySnapshot,
+) {
+  if (!isSameTimelineLineage(state, projectId, timelineJobId)) return false;
+  const next = captureCapcutRecoverySnapshot(state);
+  const hasNewCurrentArtifact = (
+    state.capcutDraft?.status === "succeeded" &&
+    state.capcutDraft.export?.status === "succeeded" &&
+    state.capcutDraft.export.is_current === true &&
+    state.session?.project_id === projectId &&
+    state.capcutDraft.export.timeline_id === state.session.timeline_id &&
+    state.capcutDraft.export.source_session_id === state.session.session_id &&
+    state.capcutDraft.export.source_session_revision === state.session.session_revision &&
+    next.artifactState !== previous.artifactState
+  );
+  return !(hasNewInFlightJob(state.capcutJobs, previous) || hasNewCurrentArtifact);
+}
+
+function needsCapcutHandoffFailureFallback(
+  state: OutputState,
+  projectId: string,
+  timelineJobId: string,
+  draftJobId: string,
+  previousHandoffState: string | null,
+) {
+  if (!isSameTimelineLineage(state, projectId, timelineJobId)) return false;
+  if (state.capcutDraft?.job_id !== draftJobId) return false;
+  const currentSession = state.session;
+  const currentExport = state.capcutDraft.export;
+  if (
+    !currentSession ||
+    currentSession.project_id !== projectId ||
+    currentExport?.timeline_id !== currentSession.timeline_id ||
+    currentExport.source_session_id !== currentSession.session_id ||
+    currentExport.source_session_revision !== currentSession.session_revision ||
+    currentExport.is_current !== true
+  ) return true;
+  const handoffStatus = state.capcutDraft.export?.handoff?.status;
+  const hasDurableProgress = (
+    handoffStatus != null &&
+    handoffStatus !== "pending" &&
+    handoffStatus !== "not_started" &&
+    captureCapcutHandoffRecoverySnapshot(state) !== previousHandoffState
+  );
+  return !hasDurableProgress;
+}
+
 export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; onOpenEditor: () => void }) {
   const [state, setState] = useState<OutputState | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -124,7 +310,7 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
     const epoch = requestEpoch.current + 1;
     requestEpoch.current = epoch;
     const isCurrentRequest = () => epoch === requestEpoch.current && currentProjectId.current === refreshProjectId;
-    if (!isCurrentRequest()) return;
+    if (!isCurrentRequest()) return null;
     setIsLoading(true);
     setErrorProjectId(null);
     try {
@@ -168,7 +354,7 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
       setFinalErrorProjectId(null);
       setCapcutErrorProjectId(null);
       setCapcutHandoffErrorProjectId(null);
-      setState({
+      const nextState: OutputState = {
         projectId: refreshProjectId,
         session,
         timelineJob,
@@ -183,11 +369,14 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
         capcutDraft,
         diagnostics,
         exactPreviewState: deriveExactPreviewState(refreshProjectId, session, playbackManifest, exactPreviewReadFailed),
-      });
+      };
+      setState(nextState);
+      return nextState;
     } catch {
-      if (!isCurrentRequest()) return;
+      if (!isCurrentRequest()) return null;
       setState(null);
       setErrorProjectId(refreshProjectId);
+      return null;
     } finally {
       if (isCurrentRequest()) setIsLoading(false);
     }
@@ -243,10 +432,13 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
     currentSession.project_id === projectId &&
     currentState.timeline.timeline.project_id === projectId &&
     currentState.timeline.timeline.timeline_id === currentSession.timeline_id &&
+    currentState.timeline.timeline.source_session_id === currentSession.session_id &&
+    currentState.timeline.timeline.source_session_revision === currentSession.session_revision &&
     currentState.review.project_id === projectId &&
     currentState.review.timeline_id === currentSession.timeline_id &&
     currentState.approval.project_id === projectId &&
     currentState.approval.timeline_id === currentSession.timeline_id &&
+    currentState.approval.source_session_id === currentSession.session_id &&
     currentState.approval.source_session_revision === currentSession.session_revision &&
     currentState.approval.is_current === true &&
     currentState.review.review_status === "approved" &&
@@ -264,6 +456,7 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
     currentSession.project_id === projectId &&
     subtitle.subtitle.project_id === projectId &&
     subtitle.subtitle.timeline_id === currentSession.timeline_id &&
+    subtitle.subtitle.source_session_id === currentSession.session_id &&
     subtitle.subtitle.source_session_revision === currentSession.session_revision &&
     subtitle.subtitle.is_current === true
   );
@@ -272,6 +465,7 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
   const currentFinal = finalRender?.status === "succeeded" && finalRender.render?.is_current === true && currentSession != null && (
     currentSession.project_id === projectId &&
       finalRender.render.timeline_id === currentSession.timeline_id &&
+      finalRender.render.source_session_id === currentSession.session_id &&
       finalRender.render.source_session_revision === currentSession.session_revision
   );
   const staleFinal = finalRender?.status === "succeeded" && Boolean(finalRender.render) && !currentFinal;
@@ -282,6 +476,7 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
   const currentCapcutDraft = capcutDraft?.status === "succeeded" && capcutDraft.export?.status === "succeeded" && capcutDraft.export.is_current === true && currentSession != null && (
     currentSession.project_id === projectId &&
       capcutDraft.export.timeline_id === currentSession.timeline_id &&
+      capcutDraft.export.source_session_id === currentSession.session_id &&
       capcutDraft.export.source_session_revision === currentSession.session_revision
   );
   const staleCapcutDraft = capcutDraft?.status === "succeeded" && Boolean(capcutDraft.export) && !currentCapcutDraft;
@@ -293,6 +488,7 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
   const handleRenderSubtitle = async () => {
     const submissionProjectId = projectId;
     if (currentProjectId.current !== submissionProjectId || !timelineJob || !canRenderSubtitle || isRenderingCurrentSubtitle) return;
+    const recoverySnapshot = captureSubtitleRecoverySnapshot(currentState);
     const submissionEpoch = subtitleSubmissionEpoch.current + 1;
     const requestEpochAtSubmission = requestEpoch.current;
     subtitleSubmissionEpoch.current = submissionEpoch;
@@ -316,11 +512,13 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
       }
     } catch {
       if (submissionEpoch !== subtitleSubmissionEpoch.current || currentProjectId.current !== submissionProjectId) return;
-      if (requestEpochAtSubmission !== requestEpoch.current) {
-        await refresh();
-        return;
-      }
-      setSubtitleErrorProjectId(submissionProjectId);
+      const latestState = await refresh();
+      if (
+        submissionEpoch === subtitleSubmissionEpoch.current &&
+        currentProjectId.current === submissionProjectId &&
+        latestState &&
+        needsSubtitleFailureFallback(latestState, submissionProjectId, timelineJob.job_id, recoverySnapshot)
+      ) setSubtitleErrorProjectId(submissionProjectId);
     } finally {
       if (submissionEpoch === subtitleSubmissionEpoch.current && currentProjectId.current === submissionProjectId) setIsRenderingSubtitle(false);
     }
@@ -329,6 +527,7 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
     const submissionProjectId = projectId;
     const timelineKey = timelineJob ? `${submissionProjectId}:${timelineJob.job_id}` : null;
     if (currentProjectId.current !== submissionProjectId || !timelineJob || !timelineKey || !canRenderFinal || isRenderingCurrentFinal || finalInFlightTimelineKey.current === timelineKey) return;
+    const recoverySnapshot = captureFinalRecoverySnapshot(currentState);
     const submissionEpoch = finalSubmissionEpoch.current + 1;
     const requestEpochAtSubmission = requestEpoch.current;
     finalSubmissionEpoch.current = submissionEpoch;
@@ -353,11 +552,13 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
       }
     } catch {
       if (submissionEpoch !== finalSubmissionEpoch.current || currentProjectId.current !== submissionProjectId) return;
-      if (requestEpochAtSubmission !== requestEpoch.current) {
-        await refresh();
-        return;
-      }
-      setFinalErrorProjectId(submissionProjectId);
+      const latestState = await refresh();
+      if (
+        submissionEpoch === finalSubmissionEpoch.current &&
+        currentProjectId.current === submissionProjectId &&
+        latestState &&
+        needsFinalFailureFallback(latestState, submissionProjectId, timelineJob.job_id, recoverySnapshot)
+      ) setFinalErrorProjectId(submissionProjectId);
     } finally {
       if (finalInFlightTimelineKey.current === timelineKey) finalInFlightTimelineKey.current = null;
       if (submissionEpoch === finalSubmissionEpoch.current && currentProjectId.current === submissionProjectId) setIsRenderingFinal(false);
@@ -367,6 +568,7 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
     const submissionProjectId = projectId;
     const timelineKey = timelineJob ? `${submissionProjectId}:${timelineJob.job_id}` : null;
     if (currentProjectId.current !== submissionProjectId || !timelineJob || !timelineKey || !canExportCapcutDraft || isExportingCurrentCapcutDraft || capcutInFlightTimelineKey.current === timelineKey) return;
+    const recoverySnapshot = captureCapcutRecoverySnapshot(currentState);
     const submissionEpoch = capcutSubmissionEpoch.current + 1;
     const requestEpochAtSubmission = requestEpoch.current;
     capcutSubmissionEpoch.current = submissionEpoch;
@@ -391,11 +593,13 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
       }
     } catch {
       if (submissionEpoch !== capcutSubmissionEpoch.current || currentProjectId.current !== submissionProjectId) return;
-      if (requestEpochAtSubmission !== requestEpoch.current) {
-        await refresh();
-        return;
-      }
-      setCapcutErrorProjectId(submissionProjectId);
+      const latestState = await refresh();
+      if (
+        submissionEpoch === capcutSubmissionEpoch.current &&
+        currentProjectId.current === submissionProjectId &&
+        latestState &&
+        needsCapcutFailureFallback(latestState, submissionProjectId, timelineJob.job_id, recoverySnapshot)
+      ) setCapcutErrorProjectId(submissionProjectId);
     } finally {
       if (capcutInFlightTimelineKey.current === timelineKey) capcutInFlightTimelineKey.current = null;
       if (submissionEpoch === capcutSubmissionEpoch.current && currentProjectId.current === submissionProjectId) setIsExportingCapcutDraft(false);
@@ -406,6 +610,7 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
     const capcutDraftJobId = capcutDraft?.job_id;
     const handoffJobKey = capcutDraftJobId ? `${submissionProjectId}:${capcutDraftJobId}` : null;
     if (currentProjectId.current !== submissionProjectId || !capcutDraftJobId || !handoffJobKey || !currentCapcutDraft || !canRegisterCapcutHandoff || isRegisteringCurrentCapcutHandoff || capcutHandoffInFlightJobKey.current === handoffJobKey) return;
+    const recoverySnapshot = captureCapcutHandoffRecoverySnapshot(currentState);
     const submissionEpoch = capcutHandoffSubmissionEpoch.current + 1;
     const requestEpochAtSubmission = requestEpoch.current;
     capcutHandoffSubmissionEpoch.current = submissionEpoch;
@@ -425,25 +630,16 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
         if (submissionEpoch !== capcutHandoffSubmissionEpoch.current || currentProjectId.current !== submissionProjectId) return;
         await refresh();
       }
-    } catch (error) {
+    } catch {
       if (submissionEpoch !== capcutHandoffSubmissionEpoch.current || currentProjectId.current !== submissionProjectId) return;
-      if (requestEpochAtSubmission !== requestEpoch.current) {
-        await refresh();
-        return;
-      }
-      if (error instanceof CapcutDraftHandoffInProgressError || (typeof error === "object" && error !== null && "code" in error && error.code === "capcut_draft_handoff_in_progress")) {
-        try {
-          const nextCapcutDraft = await api.getCapcutDraftExport(submissionProjectId, capcutDraftJobId);
-          if (submissionEpoch !== capcutHandoffSubmissionEpoch.current || currentProjectId.current !== submissionProjectId) return;
-          await (requestEpochAtSubmission === requestEpoch.current
-            ? refresh({ capcutDraft: nextCapcutDraft })
-            : refresh());
-        } catch {
-          if (submissionEpoch === capcutHandoffSubmissionEpoch.current && currentProjectId.current === submissionProjectId) setCapcutHandoffErrorProjectId(submissionProjectId);
-        }
-      } else if (submissionEpoch === capcutHandoffSubmissionEpoch.current && currentProjectId.current === submissionProjectId) {
-        setCapcutHandoffErrorProjectId(submissionProjectId);
-      }
+      const latestState = await refresh();
+      if (
+        submissionEpoch === capcutHandoffSubmissionEpoch.current &&
+        currentProjectId.current === submissionProjectId &&
+        latestState &&
+        timelineJob &&
+        needsCapcutHandoffFailureFallback(latestState, submissionProjectId, timelineJob.job_id, capcutDraftJobId, recoverySnapshot)
+      ) setCapcutHandoffErrorProjectId(submissionProjectId);
     } finally {
       if (capcutHandoffInFlightJobKey.current === handoffJobKey) capcutHandoffInFlightJobKey.current = null;
       if (submissionEpoch === capcutHandoffSubmissionEpoch.current && currentProjectId.current === submissionProjectId) setIsRegisteringCapcutHandoff(false);

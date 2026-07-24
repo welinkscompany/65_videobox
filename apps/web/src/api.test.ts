@@ -1,5 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
-import { ApiConflictError, api, type DirectorProposal } from "./api";
+import {
+  ApiConflictError,
+  api,
+  type CapCutDraftExportArtifact,
+  type CapCutDraftHandoff,
+  type DirectorProposal,
+  type FinalRenderArtifact,
+  type ReviewApproval,
+  type SubtitleArtifact,
+  type TimelinePayload,
+} from "./api";
 
 describe("caption style API conflicts", () => {
   it("loads the editor manifest from the explicit project and session boundary", async () => {
@@ -133,6 +143,38 @@ describe("caption style API conflicts", () => {
       }],
     } satisfies import("./api").EditingSession;
     expect(session.history[0]).toMatchObject({ action_id: "action-1", label: "자막 변경", reversible: true });
+  });
+
+  it("preserves source session identity on output and approval API types", () => {
+    const lineage = { source_session_id: "session-a", source_session_revision: 7 };
+    const timeline = {
+      timeline_id: "timeline-a", project_id: "project_a", version: "v7", output_mode: "short",
+      review_status: "approved", tracks: [], review_flags: [], applied_recommendations: [],
+      pending_recommendations: [], ...lineage,
+    } satisfies TimelinePayload;
+    const subtitle = {
+      subtitle_id: "subtitle-a", project_id: "project_a", timeline_id: "timeline-a", format: "srt",
+      file_uri: "local://subtitle.srt", status: "succeeded", notes: [], is_current: true, ...lineage,
+    } satisfies SubtitleArtifact;
+    const finalRender = {
+      export_id: "final-a", timeline_id: "timeline-a", export_type: "final_render",
+      file_uri: "local://final.mp4", status: "succeeded", is_current: true, ...lineage,
+    } satisfies FinalRenderArtifact;
+    const handoff = {
+      status: "ready", source_file_uri: "local://draft.zip", reused: false, ...lineage,
+    } satisfies CapCutDraftHandoff;
+    const capcut = {
+      export_id: "capcut-a", timeline_id: "timeline-a", export_type: "capcut_draft",
+      file_uri: "local://draft.zip", status: "succeeded", notes: [], handoff, is_current: true, ...lineage,
+    } satisfies CapCutDraftExportArtifact;
+    const approval = {
+      timeline_id: "timeline-a", project_id: "project_a", review_status: "approved",
+      approved_at: "now", updated_at: "now", is_current: true, invalidated_at: null,
+      invalidated_reason: null, ...lineage,
+    } satisfies ReviewApproval;
+
+    expect([timeline, subtitle, finalRender, capcut, capcut.handoff, approval])
+      .toSatisfy((items) => items.every((item) => item.source_session_id === "session-a"));
   });
 
   it("returns a completed exchange without applying or mutating an editing session", async () => {

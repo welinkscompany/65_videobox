@@ -179,7 +179,15 @@ def _sha256_streaming(path: Path, digests_by_path: dict[Path, str]) -> str:
 def verify_output_freshness(*, editing_session: dict[str, Any] | None, timeline: dict[str, Any], subtitle: dict[str, Any] | None = None, review: dict[str, Any] | None = None) -> None:
     """Reject stale output dependencies before an artifact is reused/exported."""
     if editing_session is not None:
+        current_session_id = str(editing_session.get("session_id") or "")
+        if not current_session_id:
+            raise OutputSourceStaleError("editing session identity is unstamped")
         current_revision = int(editing_session.get("session_revision") or 0)
+        expected_session_id = str(timeline.get("source_session_id") or "")
+        if not expected_session_id:
+            raise OutputSourceStaleError("editing session identity is unstamped")
+        if expected_session_id != current_session_id:
+            raise OutputSourceStaleError("editing session changed")
         expected_revision = timeline.get("source_session_revision")
         if expected_revision is None:
             raise OutputSourceStaleError("editing session revision is unstamped")
@@ -190,6 +198,13 @@ def verify_output_freshness(*, editing_session: dict[str, Any] | None, timeline:
             if not bool(artifact.get("is_current", True)):
                 raise OutputSourceStaleError(f"{name} freshness changed")
             if editing_session is not None:
+                artifact_session_id = str(artifact.get("source_session_id") or "")
+                if not artifact_session_id:
+                    raise OutputSourceStaleError(
+                        f"{name} session identity is unstamped"
+                    )
+                if artifact_session_id != current_session_id:
+                    raise OutputSourceStaleError(f"{name} session changed")
                 artifact_revision = artifact.get("source_session_revision")
                 if artifact_revision is None or int(artifact_revision) != current_revision:
                     raise OutputSourceStaleError(f"{name} session revision changed")

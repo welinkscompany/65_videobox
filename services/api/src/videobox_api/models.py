@@ -903,6 +903,7 @@ class TimelinePayloadResponse(BaseModel):
     applied_recommendations: list[RecommendationItemResponse] = Field(default_factory=list)
     pending_recommendations: list[RecommendationItemResponse] = Field(default_factory=list)
     created_at: str | None = None
+    source_session_id: str | None = None
     source_session_revision: int | None = None
 
 
@@ -933,6 +934,7 @@ class ReviewApprovalResponse(BaseModel):
     review_status: str
     approved_at: str | None = None
     updated_at: str
+    source_session_id: str | None = None
     source_session_revision: int | None = None
     is_current: bool = True
     invalidated_at: str | None = None
@@ -950,6 +952,7 @@ class PreviewArtifactResponse(BaseModel):
     notes: list[str] = Field(default_factory=list)
     provider_trace: ProviderTraceResponse
     created_at: str | None = None
+    source_session_id: str | None = None
     source_session_revision: int | None = None
     is_current: bool = True
     invalidated_at: str | None = None
@@ -973,6 +976,7 @@ class ExportArtifactResponse(BaseModel):
     notes: list[str] = Field(default_factory=list)
     provider_trace: ProviderTraceResponse
     created_at: str | None = None
+    source_session_id: str | None = None
     source_session_revision: int | None = None
     is_current: bool = True
     invalidated_at: str | None = None
@@ -990,6 +994,7 @@ class FinalRenderArtifactResponse(BaseModel):
     file_uri: str
     status: str
     created_at: str | None = None
+    source_session_id: str | None = None
     source_session_revision: int | None = None
     is_current: bool = True
     invalidated_at: str | None = None
@@ -1009,6 +1014,7 @@ class CapCutDraftExportArtifactResponse(BaseModel):
     created_at: str | None = None
     notes: list[str] = Field(default_factory=list)
     handoff: "CapCutDraftHandoffResponse | None" = None
+    source_session_id: str | None = None
     source_session_revision: int | None = None
     is_current: bool = True
     invalidated_at: str | None = None
@@ -1081,6 +1087,7 @@ class SubtitleArtifactResponse(BaseModel):
     status: str
     notes: list[str] = Field(default_factory=list)
     created_at: str | None = None
+    source_session_id: str | None = None
     source_session_revision: int | None = None
     is_current: bool = True
     invalidated_at: str | None = None

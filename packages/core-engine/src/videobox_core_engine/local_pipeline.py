@@ -173,6 +173,10 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         # aren't installed by default, so this stays unset unless the caller
         # (create_app, when CapCutDraftExportConfig.enabled) explicitly injects one.
         self.pycapcut_exporter = pycapcut_exporter
+        self._final_render_worker_claim_lock = threading.Lock()
+        self._final_render_worker_claims: set[tuple[str, str]] = set()
+        self._capcut_worker_claim_lock = threading.Lock()
+        self._capcut_worker_claims: set[tuple[str, str]] = set()
         self.capcut_handoff_service = capcut_handoff_service or CapCutHandoffService()
         # No eager default: gtts needs network access, elevenlabs needs an API
         # key, and local_xtts needs a heavy optional install — none of these
@@ -1344,6 +1348,9 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
             project_id=project_id,
             timeline_id=str(timeline["timeline_id"]),
             status="approved",
+            source_session_id=(
+                str(session["session_id"]) if session is not None else None
+            ),
             source_session_revision=source_session_revision,
         )
 
@@ -1367,7 +1374,33 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         try:
             timeline = self.get_timeline_result(project_id=project_id, job_id=timeline_job_id)["timeline"]
             self._ensure_timeline_ready_for_output(timeline)
-            segments = self._segments_for_timeline(project_id=project_id, timeline=timeline)
+            editing_session = self._editing_session_for_output_timeline(
+                project_id=project_id,
+                timeline=timeline,
+            )
+            if editing_session is None:
+                segments = self._segments_for_timeline(
+                    project_id=project_id,
+                    timeline=timeline,
+                )
+            else:
+                materialized_timeline = materialize_editing_session_timeline(
+                    timeline=timeline,
+                    editing_session=editing_session,
+                    project_id=project_id,
+                )
+                segments = [
+                    {
+                        **caption,
+                        "text": str(
+                            caption.get("caption_text")
+                            if caption.get("caption_text") is not None
+                            else caption.get("text") or ""
+                        ),
+                    }
+                    for caption in materialized_timeline.get("session_captions", [])
+                    if isinstance(caption, dict)
+                ]
             subtitle_payload = {
                 "format": "srt",
                 "entries": [
@@ -1381,10 +1414,47 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 ],
                 "notes": ["Subtitle file generated from approved review timeline."],
             }
+            self._ensure_timeline_ready_for_output(timeline)
+
+            def subtitle_source_fence(connection: Any) -> bool:
+                review = connection.execute(
+                    """SELECT status, is_current, source_session_id, source_session_revision
+                       FROM review_approvals
+                       WHERE project_id = ? AND timeline_id = ?""",
+                    (project_id, str(timeline["timeline_id"])),
+                ).fetchone()
+                if (
+                    review is None
+                    or str(review["status"]) != "approved"
+                    or not bool(review["is_current"])
+                ):
+                    return False
+                if editing_session is None:
+                    return True
+                return (
+                    str(review["source_session_id"] or "")
+                    == str(editing_session["session_id"])
+                    and review["source_session_revision"] is not None
+                    and int(review["source_session_revision"])
+                    == int(editing_session["session_revision"])
+                )
+
             persisted = self.store.save_subtitle_run(
                 project_id=project_id,
                 timeline_id=str(timeline["timeline_id"]),
                 subtitle_payload=subtitle_payload,
+                source_session_id=(
+                    str(editing_session["session_id"])
+                    if editing_session is not None
+                    else None
+                ),
+                source_session_revision=(
+                    int(editing_session["session_revision"])
+                    if editing_session is not None
+                    else None
+                ),
+                source_session_absent=editing_session is None,
+                source_fence=subtitle_source_fence,
             )
             self.store.update_job(
                 project_id=project_id,
@@ -1579,13 +1649,17 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         inline. Used by direct pipeline callers/tests. Real API usage should prefer
         start_final_render_job + run_final_render_job so the HTTP request does not
         block for the full render duration."""
-        self.assert_timeline_output_allowed(project_id=project_id, timeline_job_id=timeline_job_id)
-        job, should_start = self.store.create_or_reuse_active_final_render_job(
-            project_id=project_id, timeline_job_id=timeline_job_id
+        job = self.start_final_render_job(
+            project_id=project_id,
+            timeline_job_id=timeline_job_id,
         )
-        if not should_start:
+        if not bool(job.get("should_start", True)):
             return {"job_id": job["job_id"], "status": job["status"]}
-        self.run_final_render_job(project_id=project_id, timeline_job_id=timeline_job_id, job=job)
+        self.run_final_render_job(
+            project_id=project_id,
+            timeline_job_id=timeline_job_id,
+            job={"job_id": job["job_id"]},
+        )
         refreshed_job = self.store.get_job(project_id=project_id, job_id=job["job_id"])
         if refreshed_job["status"] == JobStatus.FAILED.value:
             raise RuntimeError(refreshed_job["error_message"])
@@ -1596,16 +1670,49 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         (the API layer) is responsible for invoking run_final_render_job in the
         background so the HTTP request does not block for the render duration."""
         self.assert_timeline_output_allowed(project_id=project_id, timeline_job_id=timeline_job_id)
-        job, should_start = self.store.create_or_reuse_active_final_render_job(
+        job, _created = self.store.create_or_reuse_active_final_render_job(
             project_id=project_id, timeline_job_id=timeline_job_id
         )
+        worker_key = (project_id, str(job["job_id"]))
+        with self._final_render_worker_claim_lock:
+            should_start = worker_key not in self._final_render_worker_claims
+            if should_start:
+                self._final_render_worker_claims.add(worker_key)
         return {"job_id": job["job_id"], "status": job["status"], "should_start": should_start}
+
+    def release_final_render_worker(
+        self,
+        *,
+        project_id: str,
+        job_id: str,
+    ) -> None:
+        with self._final_render_worker_claim_lock:
+            self._final_render_worker_claims.discard((project_id, job_id))
 
     def run_final_render_job(self, *, project_id: str, timeline_job_id: str, job: dict[str, Any]) -> None:
         try:
             self.assert_timeline_output_allowed(project_id=project_id, timeline_job_id=timeline_job_id)
             timeline = self.get_timeline_result(project_id=project_id, job_id=timeline_job_id)["timeline"]
             self._ensure_timeline_ready_for_output(timeline)
+            expected_review = self.store.get_review_state(
+                project_id=project_id,
+                timeline_id=str(timeline["timeline_id"]),
+            )
+            expected_review_source_session_id = (
+                str(expected_review["source_session_id"])
+                if expected_review.get("source_session_id") is not None
+                else None
+            )
+            expected_review_source_session_revision = (
+                int(expected_review["source_session_revision"])
+                if expected_review.get("source_session_revision") is not None
+                else None
+            )
+            expected_review_approved_at = (
+                str(expected_review["approved_at"])
+                if expected_review.get("approved_at") is not None
+                else None
+            )
             self._ensure_output_dependencies_fresh(project_id=project_id, timeline=timeline)
             latest_subtitle = self.store.get_latest_subtitle_for_timeline(
                 project_id=project_id,
@@ -1673,8 +1780,40 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                     # this check at the storage publish boundary closes the
                     # post-render source TOCTOU window.
                     # The session revision is checked by save_final_render's
-                    # transaction.  This deliberately has no store/database
-                    # reads: the storage writer lock is already held here.
+                    # transaction.  All remaining checks use that transaction's
+                    # connection so they observe one locked database state.
+                    review = connection.execute(
+                        """SELECT status, approved_at, is_current,
+                                  source_session_id, source_session_revision
+                           FROM review_approvals
+                           WHERE project_id = ? AND timeline_id = ?""",
+                        (project_id, str(timeline["timeline_id"])),
+                    ).fetchone()
+                    if (
+                        review is None
+                        or str(review["status"] or "").strip().lower() != "approved"
+                        or not bool(review["is_current"])
+                        or (
+                            str(review["source_session_id"])
+                            if review["source_session_id"] is not None
+                            else None
+                        )
+                        != expected_review_source_session_id
+                        or (
+                            int(review["source_session_revision"])
+                            if review["source_session_revision"] is not None
+                            else None
+                        )
+                        != expected_review_source_session_revision
+                        or (
+                            str(review["approved_at"])
+                            if review["approved_at"] is not None
+                            else None
+                        )
+                        != expected_review_approved_at
+                    ):
+                        return False
+
                     def current_media_revision(asset_id: str) -> str | None:
                         row = connection.execute(
                             """SELECT created_at FROM assets
@@ -1695,8 +1834,15 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                     source_output_path=render_output_path,
                     source_session_id=str(editing_session["session_id"]) if editing_session is not None else None,
                     source_session_revision=int(editing_session["session_revision"]) if editing_session is not None else None,
+                    source_session_absent=editing_session is None,
                     source_fence=final_source_fence,
                 )
+            self.store.update_job(
+                project_id=project_id,
+                job_id=job["job_id"],
+                status=JobStatus.SUCCEEDED,
+                output_ref=persisted["export_id"],
+            )
         except Exception as exc:
             failed_job = self.store.update_job(
                 project_id=project_id,
@@ -1711,12 +1857,11 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 exc=exc,
             )
             return
-        self.store.update_job(
-            project_id=project_id,
-            job_id=job["job_id"],
-            status=JobStatus.SUCCEEDED,
-            output_ref=persisted["export_id"],
-        )
+        finally:
+            self.release_final_render_worker(
+                project_id=project_id,
+                job_id=str(job["job_id"]),
+            )
 
     def get_final_render_result(self, *, project_id: str, job_id: str) -> dict[str, Any]:
         job = self.store.get_job(project_id=project_id, job_id=job_id)
@@ -1731,7 +1876,12 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         start_capcut_draft_export_job + run_capcut_draft_export_job so the HTTP
         request does not block for the full export duration."""
         self.assert_timeline_output_allowed(project_id=project_id, timeline_job_id=timeline_job_id)
-        job = self.start_capcut_draft_export_job(project_id=project_id, timeline_job_id=timeline_job_id)
+        job = self.start_capcut_draft_export_job(
+            project_id=project_id,
+            timeline_job_id=timeline_job_id,
+        )
+        if not bool(job.get("should_start", True)):
+            return {"job_id": job["job_id"], "status": job["status"]}
         self.run_capcut_draft_export_job(
             project_id=project_id,
             timeline_job_id=timeline_job_id,
@@ -1752,13 +1902,29 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 "Real CapCut draft export is not configured. Enable CapCutDraftExportConfig "
                 "and install the 'pycapcut' package (see requirements-runtime.txt)."
             )
-        job = self.store.create_job(
+        job, _created = self.store.create_or_reuse_active_capcut_draft_export_job(
             project_id=project_id,
-            job_type=JobType.CAPCUT_DRAFT_EXPORT,
-            input_ref=timeline_job_id,
-            status=JobStatus.RUNNING,
+            timeline_job_id=timeline_job_id,
         )
-        return {"job_id": job["job_id"], "status": job["status"]}
+        worker_key = (project_id, str(job["job_id"]))
+        with self._capcut_worker_claim_lock:
+            should_start = worker_key not in self._capcut_worker_claims
+            if should_start:
+                self._capcut_worker_claims.add(worker_key)
+        return {
+            "job_id": job["job_id"],
+            "status": job["status"],
+            "should_start": should_start,
+        }
+
+    def release_capcut_draft_export_worker(
+        self,
+        *,
+        project_id: str,
+        job_id: str,
+    ) -> None:
+        with self._capcut_worker_claim_lock:
+            self._capcut_worker_claims.discard((project_id, job_id))
 
     def run_capcut_draft_export_job(
         self, *, project_id: str, timeline_job_id: str, job: dict[str, Any]
@@ -1798,6 +1964,11 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 if editing_session is not None
                 else None
             )
+            source_snapshots = capture_output_source_snapshots(
+                store=self.store,
+                project_id=project_id,
+                timeline=materialized_timeline,
+            )
             with tempfile.TemporaryDirectory(prefix="videobox_capcut_draft_") as raw_drafts_root:
                 draft_path = self.pycapcut_exporter.export_timeline(
                     project_id=project_id,
@@ -1807,12 +1978,92 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                     subtitle_file_path=subtitle_file_path,
                     editing_session=capcut_editing_session,
                 )
+                self._ensure_output_dependencies_fresh(
+                    project_id=project_id,
+                    timeline=timeline,
+                )
+
+                def capcut_source_fence(connection: Any) -> bool:
+                    review = connection.execute(
+                        """SELECT status, is_current, source_session_id, source_session_revision
+                           FROM review_approvals
+                           WHERE project_id = ? AND timeline_id = ?""",
+                        (project_id, str(timeline["timeline_id"])),
+                    ).fetchone()
+                    if (
+                        review is None
+                        or str(review["status"]) != "approved"
+                        or not bool(review["is_current"])
+                    ):
+                        return False
+                    if editing_session is not None and (
+                        str(review["source_session_id"] or "")
+                        != str(editing_session["session_id"])
+                        or review["source_session_revision"] is None
+                        or int(review["source_session_revision"])
+                        != int(editing_session["session_revision"])
+                    ):
+                        return False
+                    if latest_subtitle is not None:
+                        subtitle = connection.execute(
+                            """SELECT file_uri, is_current, source_session_id, source_session_revision
+                               FROM subtitle_renders
+                               WHERE project_id = ? AND subtitle_id = ?""",
+                            (project_id, str(latest_subtitle["subtitle_id"])),
+                        ).fetchone()
+                        if (
+                            subtitle is None
+                            or str(subtitle["file_uri"]) != str(latest_subtitle["file_uri"])
+                            or not bool(subtitle["is_current"])
+                        ):
+                            return False
+                        if editing_session is not None and (
+                            str(subtitle["source_session_id"] or "")
+                            != str(editing_session["session_id"])
+                            or subtitle["source_session_revision"] is None
+                            or int(subtitle["source_session_revision"])
+                            != int(editing_session["session_revision"])
+                        ):
+                            return False
+
+                    def current_media_revision(asset_id: str) -> str | None:
+                        row = connection.execute(
+                            """SELECT created_at FROM assets
+                               WHERE project_id = ? AND asset_id = ?""",
+                            (project_id, asset_id),
+                        ).fetchone()
+                        return str(row["created_at"]) if row is not None else None
+
+                    verify_output_source_snapshots(
+                        source_snapshots,
+                        media_revision_lookup=current_media_revision,
+                    )
+                    return True
+
                 persisted = self.store.save_capcut_draft_export(
                     project_id=project_id,
                     timeline_id=str(timeline["timeline_id"]),
                     source_draft_path=getattr(draft_path, "draft_path", draft_path),
                     notes=list(getattr(draft_path, "capcut_compatibility_warnings", [])),
+                    source_session_id=(
+                        str(editing_session["session_id"])
+                        if editing_session is not None
+                        else None
+                    ),
+                    source_session_revision=(
+                        int(editing_session["session_revision"])
+                        if editing_session is not None
+                        else None
+                    ),
+                    source_session_absent=editing_session is None,
+                    source_fence=capcut_source_fence,
                 )
+            self.store.update_job(
+                project_id=project_id,
+                job_id=job["job_id"],
+                status=JobStatus.SUCCEEDED,
+                output_ref=persisted["export_id"],
+            )
         except Exception as exc:
             failed_job = self.store.update_job(
                 project_id=project_id,
@@ -1827,12 +2078,11 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 exc=exc,
             )
             return
-        self.store.update_job(
-            project_id=project_id,
-            job_id=job["job_id"],
-            status=JobStatus.SUCCEEDED,
-            output_ref=persisted["export_id"],
-        )
+        finally:
+            self.release_capcut_draft_export_worker(
+                project_id=project_id,
+                job_id=str(job["job_id"]),
+            )
 
     def create_script_draft_editing_session(self, *, project_id: str, script_asset_id: str) -> dict[str, Any]:
         asset = self.store.get_asset(project_id=project_id, asset_id=script_asset_id)

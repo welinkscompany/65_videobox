@@ -37,9 +37,42 @@ function manifest({
   };
 }
 
+function editingSession(playbackManifest) {
+  const segmentIds = new Set(
+    playbackManifest.tracks.flatMap((track) => track.clips.map((clip) => clip.segment_id)),
+  );
+  return {
+    project_id: playbackManifest.project_id,
+    session_id: playbackManifest.session_id,
+    timeline_id: playbackManifest.timeline_id,
+    session_revision: playbackManifest.session_revision,
+    undo_count: 0,
+    redo_count: 0,
+    updated_at: "2026-07-24T00:00:00Z",
+    history: [],
+    segments: [...segmentIds].map((segmentId) => ({
+      segment_id: segmentId,
+      start_sec: 0,
+      end_sec: playbackManifest.output.duration_sec,
+      caption_text: "",
+      cut_action: "keep",
+      review_required: false,
+      broll_override: null,
+      music_override: null,
+      sfx_override: null,
+      tts_replacement: null,
+      visual_overlays: [],
+    })),
+  };
+}
+
 async function installEditorRoutes(page, state) {
   await page.route("**/api/projects", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ projects: [project] }) }));
   await page.route("**/playback-manifest", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(state.current) }));
+  await page.route(
+    "**/api/projects/local-draft/editing-sessions/exact-preview-e2e",
+    (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(editingSession(state.current)) }),
+  );
   await page.route("**/exact-preview", async (route) => {
     state.retryBodies.push(route.request().postDataJSON());
     state.current = state.afterRetry ?? state.current;
@@ -72,9 +105,14 @@ test("current exact proxy plays a valid local MP4, requests bytes, and maps a na
   await expect.poll(() => video.evaluate((node) => node.duration)).toBeGreaterThan(1);
   // A real user gesture calls the component's native HTMLMediaElement.play()
   // path, avoiding an autoplay-policy bypass in the test harness.
-  await page.getByRole("button", { name: "재생 또는 일시정지" }).click();
+  const playbackButton = page.getByRole("button", { name: "재생 또는 일시정지" });
+  await playbackButton.scrollIntoViewIfNeeded();
+  await expect.poll(() => page.evaluate(() => new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve(window.scrollY)));
+  }))).toBeGreaterThanOrEqual(0);
+  await playbackButton.click();
   await expect.poll(() => video.evaluate((node) => !node.paused && node.currentTime > 0.05)).toBe(true);
-  await page.getByRole("button", { name: "재생 또는 일시정지" }).click();
+  await playbackButton.click();
   await expect.poll(() => video.evaluate((node) => node.paused)).toBe(true);
   await expect.poll(() => state.rangeRequests.length).toBeGreaterThan(0);
   expect(state.rangeRequests).toContainEqual(expect.stringMatching(/^bytes=\d+-/));

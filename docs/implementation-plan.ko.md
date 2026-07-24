@@ -1,6 +1,6 @@
 # VideoBox 실행용 구현 계획서
 
-> 현재 worktree 기준 next implementation 판단은 `docs/superpowers/plans/2026-07-23-videobox-task22-release-parity.md`를 우선 적용한다. 2026-07-24에 22C1 supported editor commands/partial regeneration, 22C2 canonical voice/TTS manual-review owner, 22C3 canonical output ownership, 22D legacy owner removal을 닫았다. 다음 구현 단위는 22E six-gate independent release audit와 22F full release gate다. 완료된 Local Media Director 상태는 `## 22`가 authoritative closeout이다. 그 외 상위 milestone/범위/순서 섹션은 제품·구현 계획의 기준을 설명한다.
+> 현재 worktree 기준 Task 22A–F release parity 기술 closeout은 `docs/superpowers/plans/2026-07-23-videobox-task22-release-parity.md`와 최신 status/handoff를 우선 적용한다. 다음 operational goal은 새 기능 확대가 아니라 사용자 원본 샘플 기반 owner dogfood다. 원본을 read-only로 보존한 복사본 프로젝트에서 B-roll/BGM/SFX/TTS/caption을 직접 적용·재생·청취 승인하고, 같은 revision을 실제 CapCut Desktop에서 열어 import 결과를 기록한다. Task 9 사람/환경 acceptance 전까지 공식 누적은 **9/22 (40.9%)**, 잔여 **59.1%**로 고정한다. 완료된 Local Media Director 상태는 `## 22`가 authoritative closeout이다. 그 외 상위 milestone/범위/순서 섹션은 제품·구현 계획의 기준을 설명한다.
 > 개발 운영 상위 규칙은 저장소 루트 `AGENTS.md`와 `docs/development-fast-path.ko.md`의 `## 10. 고정 운영 규정`을 프로젝트 전역 기본값으로 적용한다. 즉, 이 계획서를 실행할 때의 작업 우선순위, 선택적 TDD/서브에이전트/리뷰 사용, 표준 검증 경로, hot path 구분, 커밋/푸시, 진행률 보고, turn closeout 형식은 해당 규정을 따른다.
 
 ## 1. 목적
@@ -366,7 +366,7 @@ Local Media Director 18개 Task와 editing-session revision, source provenance, 
 
 OpenCut EditorCore, IndexedDB/OPFS, browser renderer/export, WASM, browser STT와 Opencast Redux/MUI/full snapshot API/player fork/browser waveform decode는 반입하지 않는다. Supabase source도 직접 복사하지 않는다. editing-session, revision, FFmpeg, PyCapCut, output-source verifier는 계속 authoritative하다.
 
-새 shell은 local/cloud capability slot을 갖지만 실제 SaaS auth/team/billing과 Hermes agent/container는 이번 22개 Task에 넣지 않는다. Slice 0 Task 1은 기존 Yujin copy를 closeout하고 project/section 선택, Director 수동 fallback, current/stale preview·output, settings의 legacy baseline을 고정했다. Task 11의 다섯 viewport 시각 prototype은 2026-07-22 사용자 승인을 받았다. Task 14 pure time-scale/geometry/snapping/hit-test, Task 15 read-only UI navigation/performance, Task 16 narration trim/reorder mutation, Task 17 독립 multi-lane placement 편집, Task 18 segment-linked 대본/자막·실제 player 동기화와 caption 시간 권한 보완, Task 19 editor asset browser/safe preview/apply는 closeout했다. Task 19는 Route-owned asset truth, PreviewStage 단일 surface, materialize-before-current-revision command fence만 사용하며 source copy/API expansion 없이 구현했다. 다음 편집기 goal은 Task 20의 별도 written spec이다. browser source audition은 실제 합성 preview가 아니며, current revision의 정확한 미리보기는 기존 FFmpeg composition path를 재사용한 freshness-bound proxy artifact로 고정한다. caption timing은 현 backend 권한에 맞춰 segment-linked로 제한한다.
+새 shell은 local/cloud capability slot을 갖지만 실제 SaaS auth/team/billing과 Hermes agent/container는 이번 22개 Task에 넣지 않는다. Slice 0 Task 1은 기존 Yujin copy를 closeout하고 project/section 선택, Director 수동 fallback, current/stale preview·output, settings의 legacy baseline을 고정했다. Task 11의 다섯 viewport 시각 prototype은 2026-07-22 사용자 승인을 받았다. Task 14 pure time-scale/geometry/snapping/hit-test, Task 15 read-only UI navigation/performance, Task 16 narration trim/reorder mutation, Task 17 독립 multi-lane placement 편집, Task 18 segment-linked 대본/자막·실제 player 동기화와 caption 시간 권한 보완, Task 19 editor asset browser/safe preview/apply, Task 20 persistent Eugene/typed Inspector, Task 21 release hardening, Task 22 parity/legacy removal/release audit은 기술 closeout했다. Task 19 이후에도 Route-owned truth, PreviewStage 단일 surface, current-revision command fence, manual fallback을 유지하며 source copy/API expansion은 하지 않았다. 다음 goal은 사용자 원본 샘플을 이용한 owner dogfood와 별도 Task 9 사람/환경 acceptance다. browser source audition은 실제 합성 preview가 아니며, current revision의 정확한 미리보기는 기존 FFmpeg composition path를 재사용한 freshness-bound proxy artifact로 고정한다. caption timing은 현 backend 권한에 맞춰 segment-linked로 제한한다.
 
 ## 8.3 구현 완료 시 적용 여부 보고
 
@@ -1034,7 +1034,7 @@ production-readiness blocker slice 1의 9개 Task는 구현·회귀·600초 smok
 
 - `loop`, `crop_pad_overlay`, `audio_ducking` 3개 deterministic 600초 fixture가 ingest → editing session → partial regeneration → SRT → styled MP4 → real CapCut `draft_content.json`을 반복 실행한다.
 - auto QA는 B-roll loop/crop/pad/trim, image/text overlay, BGM/SFX gain/fade/ducking, 승인 개인 음성 TTS와 persisted ducking warning을 확인한다.
-- 실행 명령은 `./scripts/dev-fast-path.ps1 -Mode long-form-capcut-qa`다. 생성 artifact는 `artifacts/long-form-capcut-qa/`에만 두고 Git에는 넣지 않는다.
+- 실행 명령은 `./scripts/dev-fast-path.ps1 -Mode long-form-capcut-qa`다. 현재 Windows 긴 경로 회피용 생성 artifact는 짧은 `artifacts/lfqa/`에 두고 Git에는 넣지 않는다.
 - 이는 desktop CapCut 사용성 검증이 아니다. manifest의 `desktop_capcut_opened: false`와 같이 명시하며, 실제 CapCut 3건의 open/edit/export QA는 다음 사람 검증으로 남긴다.
 
 ## 17. 2026-07-12 CapCut output observability and recovery UX closeout

@@ -10,7 +10,11 @@ from math import floor
 from typing import Any
 
 from videobox_domain_models.caption_style import CaptionStyle
-from videobox_core_engine.composition_plan import materialize_editing_session_timeline
+from videobox_core_engine.composition_plan import (
+    DEFAULT_OUTPUT_HEIGHT,
+    DEFAULT_OUTPUT_WIDTH,
+    materialize_editing_session_timeline,
+)
 from videobox_core_engine.timeline_placements import placement_id
 
 
@@ -82,10 +86,12 @@ def build_editor_playback_manifest(
         "timebase": "seconds",
         "fps": {"num": fps_num, "den": fps_den},
         "output": {
-            "width": _positive_int(output.get("width"), 1080),
-            "height": _positive_int(output.get("height"), 1920),
-            "sample_aspect_ratio": str(output.get("sample_aspect_ratio") or "1:1"),
-            "rotation": int(output.get("rotation") or 0),
+            "width": _positive_int(output.get("width") or materialized.get("video_width"), DEFAULT_OUTPUT_WIDTH),
+            "height": _positive_int(output.get("height") or materialized.get("video_height"), DEFAULT_OUTPUT_HEIGHT),
+            "sample_aspect_ratio": str(
+                output.get("sample_aspect_ratio") or materialized.get("sample_aspect_ratio") or "1:1"
+            ),
+            "rotation": int(output.get("rotation") or materialized.get("rotation") or 0),
             "duration_sec": _duration_seconds(output, tracks, segments),
         },
         "tracks": tracks,

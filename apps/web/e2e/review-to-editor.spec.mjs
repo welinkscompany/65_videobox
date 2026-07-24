@@ -2,6 +2,30 @@ import { expect, test } from "./support/test-fixtures.mjs";
 
 const fakeApiBaseUrl = `http://127.0.0.1:${Number(process.env.PLAYWRIGHT_FAKE_API_PORT ?? 8000)}`;
 
+test("review route recovers an initial load error with an explicit authoritative refresh", async ({ page }) => {
+  expect((await page.request.post(`${fakeApiBaseUrl}/__e2e/reset-review`)).status()).toBe(200);
+  let jobsReadCount = 0;
+  await page.route("**/api/projects/local-draft/jobs", async (route) => {
+    jobsReadCount += 1;
+    if (jobsReadCount === 1) {
+      await route.fulfill({
+        body: JSON.stringify({ detail: "temporary review read failure" }),
+        contentType: "application/json",
+        status: 500,
+      });
+      return;
+    }
+    await route.continue();
+  });
+
+  await page.goto("/projects/local-draft/review");
+
+  await expect(page.getByText("검토 내용을 불러오지 못했어요.")).toBeVisible();
+  await page.getByRole("button", { name: "다시 확인" }).click();
+  await expect(page.getByRole("heading", { name: "영상 검토" })).toBeVisible();
+  expect(jobsReadCount).toBe(2);
+});
+
 test("a review segment opens the pinned editor and selects that exact narration segment", async ({ page }) => {
   expect((await page.request.post(`${fakeApiBaseUrl}/api/projects/local-draft/draft-readiness/broll/upload`)).status()).toBe(201);
   expect((await page.request.post(`${fakeApiBaseUrl}/api/projects/local-draft/draft-readiness/readiness_e2e/complete`)).status()).toBe(200);

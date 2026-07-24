@@ -861,6 +861,9 @@ def update_segment_sfx_override(*, session: dict[str, Any], segment_id: str, ass
         next_override = deepcopy(existing) if same_asset else {}
         _clear_windowed_media_override(segment=segment, field="sfx_override")
         next_override["asset_id"] = normalized_asset_id
+        # A review decision must bind to this exact user action, not merely to
+        # a segment or asset that the user may intentionally select again.
+        next_override["source_action_id"] = f"action:sfx_override:{uuid.uuid4().hex}"
         if asset_uri:
             next_override["asset_uri"] = asset_uri
         if media_controls is not None:

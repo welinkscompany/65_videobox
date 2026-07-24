@@ -1,3 +1,48 @@
+ARTIFACT_FRESHNESS_TABLES = (
+    "review_approvals",
+    "preview_renders",
+    "subtitle_renders",
+    "exports",
+)
+
+
+def _artifact_source_session_backfill_statement(table: str) -> str:
+    if table not in ARTIFACT_FRESHNESS_TABLES:
+        raise ValueError(f"Unsupported artifact freshness table: {table}")
+    return f"""
+        UPDATE {table}
+        SET source_session_id = (
+            SELECT candidate.session_id
+            FROM editing_sessions AS candidate
+            WHERE candidate.project_id = {table}.project_id
+              AND candidate.timeline_id = {table}.timeline_id
+              AND candidate.session_revision = {table}.source_session_revision
+            LIMIT 1
+        )
+        WHERE source_session_id IS NULL
+          AND source_session_revision IS NOT NULL
+          AND 1 = (
+              SELECT COUNT(*)
+              FROM editing_sessions AS candidate
+              WHERE candidate.project_id = {table}.project_id
+                AND candidate.timeline_id = {table}.timeline_id
+          )
+          AND EXISTS (
+              SELECT 1
+              FROM editing_sessions AS candidate
+              WHERE candidate.project_id = {table}.project_id
+                AND candidate.timeline_id = {table}.timeline_id
+                AND candidate.session_revision = {table}.source_session_revision
+          )
+    """
+
+
+ARTIFACT_SOURCE_SESSION_BACKFILL_STATEMENTS = tuple(
+    _artifact_source_session_backfill_statement(table)
+    for table in ARTIFACT_FRESHNESS_TABLES
+)
+
+
 PROJECT_SCHEMA_STATEMENTS = (
     """
     CREATE TABLE IF NOT EXISTS atomic_draft_bundles (

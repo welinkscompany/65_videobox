@@ -14,6 +14,16 @@ from typing import Any
 
 
 PROFILE_NAMES = ("loop", "crop_pad_overlay", "audio_ducking")
+PROFILE_DIRECTORIES = {
+    "loop": "loop",
+    "crop_pad_overlay": "crop",
+    "audio_ducking": "audio",
+}
+PROFILE_PROJECT_NAMES = {
+    "loop": "QA loop",
+    "crop_pad_overlay": "QA crop",
+    "audio_ducking": "QA audio",
+}
 DESKTOP_CAPCUT_AUTOMATION = False
 _SMOKE_SCRIPT = Path(__file__).with_name("verify-production-readiness-smoke.py")
 
@@ -41,6 +51,7 @@ def _run_profile(
         ffmpeg_binary=ffmpeg_binary,
         ffprobe_binary=ffprobe_binary,
         fixture_name=profile_name,
+        project_name=PROFILE_PROJECT_NAMES[profile_name],
     )
 
 
@@ -56,7 +67,7 @@ def run_all_profiles(
         profiles[profile_name] = _run_profile(
             profile_name=profile_name,
             narration=narration,
-            work_root=work_root / profile_name,
+            work_root=work_root / PROFILE_DIRECTORIES[profile_name],
             ffmpeg_binary=ffmpeg_binary,
             ffprobe_binary=ffprobe_binary,
         )

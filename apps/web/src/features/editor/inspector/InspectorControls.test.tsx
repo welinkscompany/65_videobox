@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import type { EditorCaptionStyle } from "../editorViewModel";
 import { InspectorControls, type InspectorAction } from "./InspectorControls";
@@ -224,6 +224,82 @@ describe("InspectorControls", () => {
       segmentIds: ["segment-internal-current"],
       style: { ...style, fontSizePx: 32, horizontalAlign: "left" },
     });
+  });
+
+  it("loads approved TTS choices without auto-applying and exposes explicit apply and clear actions", async () => {
+    const onAction = vi.fn();
+    const loadApprovedTtsCandidates = vi.fn().mockResolvedValue([
+      {
+        assetId: "asset-approved",
+        candidateId: "tts_candidate_approved",
+        sourceText: "승인된 음성",
+      },
+    ]);
+
+    render(
+      <InspectorControls
+        loadApprovedTtsCandidates={loadApprovedTtsCandidates}
+        onAction={onAction}
+        selectedSegment={{
+          cutAction: "keep",
+          endSec: 5,
+          nextSegmentId: null,
+          segmentId: "segment-internal-current",
+          startSec: 1,
+          ttsReplacement: {
+            assetId: "asset-current",
+            candidateId: "tts_candidate_current",
+          },
+        }}
+        target={null}
+        ttsCandidateScopeKey="project-a:session-a"
+      />,
+    );
+
+    expect(await screen.findByRole("option", { name: "승인 후보 1 · 승인된 음성" })).toBeVisible();
+    expect(loadApprovedTtsCandidates).toHaveBeenCalledWith("segment-internal-current");
+    expect(onAction).not.toHaveBeenCalled();
+    expect(document.body).not.toHaveTextContent(/asset-approved|tts_candidate_approved/);
+
+    fireEvent.click(screen.getByRole("button", { name: "승인한 음성 적용" }));
+    expect(onAction).toHaveBeenLastCalledWith({
+      assetId: "asset-approved",
+      candidateId: "tts_candidate_approved",
+      kind: "apply-tts-candidate",
+      segmentId: "segment-internal-current",
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "적용한 음성 해제" }));
+    expect(onAction).toHaveBeenLastCalledWith({
+      kind: "clear-tts-candidate",
+      segmentId: "segment-internal-current",
+    });
+    await waitFor(() => expect(onAction).toHaveBeenCalledTimes(2));
+  });
+
+  it("keeps manual editing available when approved TTS choices cannot be loaded", async () => {
+    const onAction = vi.fn();
+    render(
+      <InspectorControls
+        loadApprovedTtsCandidates={vi.fn().mockRejectedValue(new Error("offline"))}
+        onAction={onAction}
+        selectedSegment={{
+          cutAction: "keep",
+          endSec: 5,
+          nextSegmentId: null,
+          segmentId: "segment-internal-current",
+          startSec: 1,
+          ttsReplacement: null,
+        }}
+        target={null}
+        ttsCandidateScopeKey="project-a:session-a"
+      />,
+    );
+
+    expect(await screen.findByText("승인한 음성을 불러오지 못했어요. 직접 편집은 계속할 수 있어요.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "컷 저장" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "승인한 음성 다시 불러오기" })).toBeEnabled();
+    expect(onAction).not.toHaveBeenCalled();
   });
 
   it.each([

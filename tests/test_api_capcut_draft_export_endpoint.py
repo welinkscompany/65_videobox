@@ -322,7 +322,7 @@ def test_capcut_handoff_claim_uses_an_explicit_postgres_row_lock_contract() -> N
 
     assert statements == [
         "BEGIN",
-        "LOCK TABLE jobs, exports, editing_sessions IN SHARE ROW EXCLUSIVE MODE",
+        "LOCK TABLE editing_sessions, jobs, exports IN SHARE ROW EXCLUSIVE MODE",
     ]
 
 

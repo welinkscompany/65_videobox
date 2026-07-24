@@ -86,6 +86,30 @@ def test_exact_proxy_and_final_commands_share_the_same_composition_plan_and_capt
     assert proxy.composition_plan.captions is proxy.captions
 
 
+def test_final_plan_render_uses_plan_canvas_instead_of_renderer_defaults(tmp_path: Path) -> None:
+    captured: dict[str, object] = {}
+
+    class _CapturePlanRenderer(FfmpegFinalRenderer):
+        def _render_composition_plan_to_mp4(self, **kwargs):  # type: ignore[no-untyped-def]
+            captured["canvas"] = (self.video_width, self.video_height)
+            captured["fps"] = self.video_fps
+            captured["sar"] = self.video_sar
+            return kwargs["output_path"]
+
+    plan = CompositionPlan.from_timeline(timeline=_timeline())
+    output = tmp_path / "final.mp4"
+
+    result = _CapturePlanRenderer(store=LocalProjectStore(tmp_path)).render_timeline_to_mp4(
+        project_id="project-canvas",
+        timeline=_timeline(),
+        output_path=output,
+        composition_plan=plan,
+    )
+
+    assert result == output
+    assert captured == {"canvas": (1080, 1920), "fps": "30/1", "sar": "1:1"}
+
+
 def test_exact_proxy_uses_timeline_context_only_for_source_resolution_after_plan_extraction(tmp_path: Path) -> None:
     plan = CompositionPlan.from_timeline(timeline=_timeline(), captions=[{"start_sec": 0, "end_sec": 2, "caption_text": "canonical"}])
     renderer = FfmpegFinalRenderer(store=LocalProjectStore(tmp_path))
@@ -291,6 +315,7 @@ def test_plan_audio_graph_preserves_broll_and_music_controls(tmp_path: Path) -> 
     assert "volume=-9.0dB" in graph and "afade=t=in:st=0:d=0.2" in graph
     assert "sidechaincompress" in graph
     assert "volume=3.0dB" in graph and "adelay=1000|1000" in graph
+    assert "apad=whole_dur=2.0,atrim=duration=2.0" in graph
 
 
 def test_plan_audio_ducks_bgm_against_the_mixed_full_narration_track(tmp_path: Path) -> None:
@@ -324,6 +349,67 @@ def test_plan_audio_ducking_splits_the_single_narration_mix_before_final_mix(tmp
     assert "[narration_mix]asplit=2[narration_final][narration_sidechain]" in graph
     assert "[a_bgm][narration_sidechain]sidechaincompress=threshold=0.05:ratio=8[duck_bgm]" in graph
     assert "[narration_final][duck_bgm]amix=inputs=2:duration=longest" in graph
+
+
+@pytest.mark.skipif(
+    shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None,
+    reason="ffmpeg fixture required",
+)
+def test_short_sfx_real_render_keeps_audio_stream_for_full_plan_duration(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="short sfx duration")
+    source = tmp_path / "short-sfx.wav"
+    subprocess.run(
+        [
+            "ffmpeg", "-y", "-f", "lavfi", "-i",
+            "sine=frequency=880:sample_rate=48000:duration=0.2",
+            str(source),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    asset = store.register_asset(
+        project_id=project.project_id,
+        asset_type=AssetType.SFX,
+        source_path=source,
+    )
+    uri = f"local://projects/{project.project_id}/assets/{asset.asset_id}"
+    timeline = {
+        "output": {"width": 160, "height": 90, "fps_num": 30, "fps_den": 1},
+        "tracks": [{
+            "track_type": "sfx",
+            "clips": [{
+                "clip_id": "short-sfx",
+                "asset_id": asset.asset_id,
+                "asset_uri": uri,
+                "start_sec": 0,
+                "end_sec": 1,
+                "source_in_sec": 0,
+                "source_out_sec": 0.2,
+            }],
+        }],
+    }
+    output = tmp_path / "short-sfx-final.mp4"
+
+    FfmpegFinalRenderer(store=store).render_timeline_to_mp4(
+        project_id=project.project_id,
+        timeline=timeline,
+        output_path=output,
+        composition_plan=CompositionPlan.from_timeline(timeline=timeline),
+    )
+
+    probe = json.loads(subprocess.run(
+        [
+            "ffprobe", "-v", "error", "-show_entries",
+            "format=duration:stream=codec_type,duration", "-of", "json", str(output),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout)
+    audio = next(stream for stream in probe["streams"] if stream["codec_type"] == "audio")
+    assert float(probe["format"]["duration"]) >= 0.99
+    assert float(audio["duration"]) >= 0.99
 
 
 def test_plan_broll_pad_uses_legacy_black_tpad_not_frame_clone(tmp_path: Path) -> None:

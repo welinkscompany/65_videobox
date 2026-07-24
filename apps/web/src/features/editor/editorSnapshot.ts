@@ -9,6 +9,11 @@ export type EditorSessionMedia = Readonly<{
   controls: EditorControls;
 }>;
 
+export type EditorSessionTtsReplacement = Readonly<{
+  candidateId: string;
+  assetId: string;
+}>;
+
 export type EditorSessionSnapshot = Readonly<{
   projectId: string;
   sessionId: string;
@@ -22,6 +27,7 @@ export type EditorSessionSnapshot = Readonly<{
     cutAction: string;
     bgm: EditorSessionMedia | null;
     sfx: EditorSessionMedia | null;
+    ttsReplacement: EditorSessionTtsReplacement | null;
   }>>;
 }>;
 
@@ -54,6 +60,13 @@ function media(value: Record<string, unknown> | null | undefined): EditorSession
       ducking: typeof controls.ducking === "boolean" ? controls.ducking : undefined,
     },
   };
+}
+
+function ttsReplacement(value: Record<string, unknown> | null | undefined): EditorSessionTtsReplacement | null {
+  if (!value) return null;
+  const candidateId = stringOrNull(value.recommendation_id);
+  const assetId = stringOrNull(value.asset_id);
+  return candidateId && assetId ? { candidateId, assetId } : null;
 }
 
 export function joinEditorSnapshot(
@@ -89,6 +102,7 @@ export function joinEditorSnapshot(
         cutAction: segment.cut_action,
         bgm: media(segment.music_override),
         sfx: media(segment.sfx_override),
+        ttsReplacement: ttsReplacement(segment.tts_replacement),
       })),
     },
   };

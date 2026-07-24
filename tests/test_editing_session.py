@@ -42,7 +42,11 @@ def test_sqlite_session_truth_recovers_after_sidecar_replace_failure(tmp_path: P
     original_replace = Path.replace
     failed = {"value": False}
     def fail_sidecar(path: Path, target: Path):
-        if not failed["value"] and "editing_session" in path.name and path.suffix == ".tmp":
+        if (
+            not failed["value"]
+            and path.parent.name == "editing_sessions"
+            and path.suffix == ".tmp"
+        ):
             failed["value"] = True
             raise OSError("injected sidecar replace failure")
         return original_replace(path, target)
@@ -344,6 +348,38 @@ def test_editing_session_recovers_canonical_db_snapshot_when_json_replace_fails(
     recovered = store.get_editing_session(project_id=project.project_id, session_id=saved["session_id"])
     assert recovered["session_revision"] == saved["session_revision"] + 1
     assert recovered["segments"][0]["caption_text"] == "new"
+
+
+def test_editing_session_update_uses_a_bounded_atomic_mirror_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Bounded Editing Session Mirror")
+    saved = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id="timeline_001",
+        session_payload={"segments": [], "history": []},
+    )
+    observed_temporary_names: list[str] = []
+    original_write_text = Path.write_text
+
+    def record_write_text(path: Path, *args: object, **kwargs: object) -> int:
+        if path.parent.name == "editing_sessions" and path.name.endswith(".tmp"):
+            observed_temporary_names.append(path.name)
+        return original_write_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", record_write_text)
+
+    store.update_editing_session(
+        project_id=project.project_id,
+        session_id=saved["session_id"],
+        expected_revision=saved["session_revision"],
+        session_payload={**saved, "history": [{"mutation_type": "bounded_mirror"}]},
+    )
+
+    assert len(observed_temporary_names) == 1
+    assert observed_temporary_names[0].startswith(".es-")
+    assert len(observed_temporary_names[0]) <= 20
 
 
 def test_generic_editing_session_mutation_increments_revision(tmp_path: Path) -> None:
@@ -697,7 +733,10 @@ def test_update_segment_sfx_override_records_history() -> None:
 
     updated = update_segment_sfx_override(session=session, segment_id="seg_001", asset_id="asset_sfx_001")
 
-    assert updated["segments"][0]["sfx_override"] == {"asset_id": "asset_sfx_001"}
+    assert updated["segments"][0]["sfx_override"]["asset_id"] == "asset_sfx_001"
+    assert updated["segments"][0]["sfx_override"]["source_action_id"].startswith(
+        "action:sfx_override:"
+    )
     assert updated["history"][-1]["mutation_type"] == "sfx_override_update"
 
 
@@ -918,7 +957,9 @@ def test_partial_music_and_sfx_fade_updates_preserve_audio_controls_and_asset_id
         "media_revision": "music-r2",
         "media_controls": {"gain_db": -8.0, "fade_in_sec": 1.0, "fade_out_sec": 0.75, "ducking": True},
     }
-    assert updated["segments"][0]["sfx_override"] == {
+    sfx_override = dict(updated["segments"][0]["sfx_override"])
+    assert sfx_override.pop("source_action_id").startswith("action:sfx_override:")
+    assert sfx_override == {
         "asset_id": "sfx_001",
         "asset_uri": "local://projects/project_001/assets/sfx_001",
         "expected_content_sha256": "b" * 64,

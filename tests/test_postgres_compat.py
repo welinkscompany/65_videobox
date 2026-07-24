@@ -1,5 +1,6 @@
 from videobox_storage.postgres_compat import translate_sql
 from videobox_storage.postgres_schema import POSTGRES_MIGRATION_STATEMENTS, POSTGRES_SCHEMA_STATEMENTS
+from videobox_storage.local_project_store import LocalProjectStore
 
 
 def test_translate_sql_preserves_postgres_upsert_and_converts_sqlite_placeholders() -> None:
@@ -69,3 +70,44 @@ def test_postgres_migrations_add_durable_capcut_handoff_claim_columns() -> None:
 
     assert "ALTER TABLE exports ADD COLUMN IF NOT EXISTS handoff_claim_token TEXT" in statements
     assert "ALTER TABLE exports ADD COLUMN IF NOT EXISTS handoff_claim_job_id TEXT" in statements
+
+
+def test_output_publish_transaction_explicitly_serializes_postgres_lineage_and_paths() -> None:
+    class RecordingPostgresConnection:
+        def __init__(self) -> None:
+            self.statements: list[str] = []
+
+        def execute(self, statement: str):
+            self.statements.append(statement)
+
+    connection = RecordingPostgresConnection()
+
+    LocalProjectStore._begin_output_publish_transaction(connection)
+
+    assert connection.statements == [
+        "BEGIN",
+        (
+            "LOCK TABLE editing_sessions, assets, review_approvals, "
+            "subtitle_renders, preview_renders, exports "
+            "IN SHARE ROW EXCLUSIVE MODE"
+        ),
+    ]
+
+
+def test_postgres_output_and_handoff_transactions_share_the_same_lock_order() -> None:
+    class RecordingPostgresConnection:
+        def __init__(self) -> None:
+            self.statements: list[str] = []
+
+        def execute(self, statement: str) -> None:
+            self.statements.append(statement)
+
+    output = RecordingPostgresConnection()
+    handoff = RecordingPostgresConnection()
+
+    LocalProjectStore._begin_output_publish_transaction(output)
+    LocalProjectStore._begin_capcut_draft_handoff_transaction(handoff)
+
+    for statements in (output.statements, handoff.statements):
+        lock = statements[1]
+        assert lock.index("editing_sessions") < lock.index("exports")

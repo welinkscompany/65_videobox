@@ -185,6 +185,8 @@ export type TimelinePayload = {
   review_flags: ReviewFlag[];
   applied_recommendations: RecommendationItem[];
   pending_recommendations: RecommendationItem[];
+  source_session_id?: string | null;
+  source_session_revision?: number | null;
 };
 
 export type TimelineJob = {
@@ -520,6 +522,7 @@ export type SubtitleArtifact = {
   status: string;
   notes: string[];
   created_at?: string | null;
+  source_session_id?: string | null;
   source_session_revision?: number | null;
   is_current?: boolean;
   invalidated_at?: string | null;
@@ -538,6 +541,7 @@ export type ReviewApproval = {
   review_status: string;
   approved_at: string | null;
   updated_at: string;
+  source_session_id: string | null;
   source_session_revision: number | null;
   is_current: boolean;
   invalidated_at: string | null;
@@ -615,6 +619,7 @@ export type FinalRenderArtifact = {
   file_uri: string;
   status: string;
   created_at?: string | null;
+  source_session_id?: string | null;
   source_session_revision?: number | null;
   is_current?: boolean;
 };
@@ -641,6 +646,7 @@ export type CapCutDraftExportArtifact = {
   created_at?: string | null;
   notes: string[];
   handoff?: CapCutDraftHandoff | null;
+  source_session_id?: string | null;
   source_session_revision?: number | null;
   is_current: boolean;
   invalidated_at?: string | null;
@@ -656,6 +662,8 @@ export type CapCutDraftHandoff = {
   reused: boolean;
   recoverable?: boolean;
   recoverable_at?: string | null;
+  source_session_id?: string | null;
+  source_session_revision?: number | null;
 };
 
 export type CapCutHandoffDiagnostics = {

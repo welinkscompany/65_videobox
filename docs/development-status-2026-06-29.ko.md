@@ -1,6 +1,21 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 299. 2026-07-24 Task 22D legacy owner removal closeout`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 300. 2026-07-24 Task 22 release parity closeout`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+
+## 300. 2026-07-24 Task 22 release parity closeout
+
+- `[x] canonical 제품 경로`: project/create/media/timeline/review/editor/settings/outputs의 route·component·E2E owner를 유지한 채 legacy shell 제거 이후 전체 parity를 재검증했다. source copy, OpenCut runtime, provider/API 확장, Hermes, Mem0, cloud, 자동 apply는 추가하지 않았고 local/test external provider call 0 경계를 유지했다.
+- `[x] editor/output 안전성`: 수동 TTS apply/clear, BGM/SFX edit·clear, rejected SFX action identity, exact preview/final/subtitle/CapCut의 `source_session_id + revision + current review` fence, route epoch, refresh-after-conflict, one-player ownership을 닫았다. 오래된 산출물·승인·session 부재/생성 race는 current로 승격되지 않는다.
+- `[x] 저장·복구 안전성`: SQLite/PostgreSQL output publish lock order, interrupted final-render/CapCut worker recovery, API thread-start 실패 뒤 claim 해제, incomplete-schema bootstrap, source-session lineage migration/backfill, atomic staging cleanup을 회귀로 고정했다. 긴 Windows 경로에서도 editing-session mirror, voice upload, final/CapCut publish의 private temp component를 짧게 유지한다. worker claim은 현재 local single-API-process 범위이며 multi-process durable lease를 지원한다고 주장하지 않는다.
+- `[x] 실제 600초 산출물`: `./scripts/dev-fast-path.ps1 -Mode smoke`가 voice/TTS, B-roll, SFX, caption, final MP4, SRT, PyCapCut draft를 모두 통과했다. final은 1080×1920 H.264/AAC 600초이며 SHA-256은 `a0d7d4ae5f2ef768b7e58385bb6b88086c68bc9141d69758eb1a27632e5007d9`다.
+- `[x] 3프로필 장편 QA`: `loop`, `crop_pad_overlay`, `audio_ducking`이 `artifacts/lfqa/`에서 모두 통과했다. 각 final MP4는 1080×1920, video/audio 600초이고 각 current subtitle/final/CapCut row가 같은 `editing_session_001`, `timeline_002`, revision(8 또는 9)을 역방향으로 가리켰다. BGM `gain_db/fade_in/fade_out/ducking`, approved SFX/TTS, B-roll loop/crop/pad, image overlay와 CapCut draft mapping을 확인했다. CapCut이 native ducking을 지원하지 않는 한계는 가져온 뒤 수동 적용 경고로 보존한다.
+- `검증`: current-focused backend output `24 passed`, backend preflight `59 passed`, frontend preflight `5 passed`; full frontend `49 files / 581 passed`; production build 통과(기존 500 kB bundle warning); full Playwright E2E `34 passed`와 snapshot manifest verifier; Editor UI OSS provenance/UI-system verifier; external-runtime/network guard `2 files / 6 passed`; CycloneDX SBOM `272 components`; 최종 full Python `1559 passed, 20 skipped`, final-render worker 복구 RED→GREEN/wiring `4 passed`와 관련 회귀 `34 passed`; 최종 600초 smoke와 3프로필 장편 QA 통과. 기존 React `act(...)`, jsdom navigation, intentional ErrorBoundary stderr, multipart deprecation과 bundle warning은 exit 0인 비실패 출력이다.
+- `독립 감사`: Task 22 전체 diff의 spec/quality/gap/reverse 검토에서 확인된 output/review/session fence, PostgreSQL lock order, rejected SFX 재등장, duplicate overlay, Windows path-length, final-render orphan/restart/thread-start claim recovery 문제를 수정하고 관련 gate를 재실행했다. 최종 read-only review는 Critical/Important/Moderate 0이며 결과를 handoff에도 기록한다.
+- `사람이 남은 일`: 자동 테스트는 사람의 실제 청취·영상 판단이나 실제 CapCut Desktop open/import/edit/export 증거를 대신하지 않는다. Task 9 사람/환경 acceptance, 사용자 원본 영상의 current-revision 승인, 권리 확인은 계속 별도다.
+- `다음 goal`: 새 기능을 넓히지 말고 사용자 원본 샘플로 owner dogfood를 실행한다. 원본은 read-only로 두고 복사본 프로젝트에서 B-roll/BGM/SFX/TTS/caption을 직접 적용해 재생·청취 승인하고, 같은 revision을 실제 CapCut Desktop에서 열어 import 결과를 기록한다.
+- 보호된 `?? .tmp-final-fence-debug/`, `?? .tmp-real-video-dogfood/`, `?? apps/web/.tmp-real-video-dogfood/`, 기존 QA artifacts와 사용자 원본 샘플은 stage/remove/delete하지 않는다.
+- 공식 누적은 사용자 지시대로 **9/22 (40.9%)**, 잔여 **59.1%**를 유지한다.
+- handoff: `docs/handoffs/2026-07-24-videobox-task22-release-parity-closeout.ko.md`.
 
 ## 299. 2026-07-24 Task 22D legacy owner removal closeout
 
@@ -8,7 +23,7 @@
 - `[x] canonical owner 보존`: `main.tsx → AppRoot → AppRouter/ProductShell → canonical page` 그래프와 Task 22의 9-row route/component/E2E owner를 유지했다. canonical creation이 사용하는 `AssetPreviewPlayer`/`MediaReferenceBadge`, 기존 저장 산출물을 읽는 `getPreview/getExport`와 backend/storage reader, `/editing` 입력 redirect는 삭제하지 않았다.
 - `[x] UI/운영 이관`: ProjectOnboarding, ErrorBoundary, Voice/TTS의 legacy CSS class를 canonical Button/Tailwind로 옮겼다. 일반 button/input/select/textarea는 canonical UI primitive로 모았고, unused ProjectWorkspaceProvider는 route-owned pure project selection으로 축소했다. package/script/fast-path/사용자 copy inventory가 삭제된 `app.test.tsx`를 가리키지 않으며 사용자 copy AST 검사는 모든 canonical page/editor surface까지 확장했다.
 - `[x] 재도입 방지`: parity inventory가 삭제 대상 파일, production import graph의 legacy output mutation, retired class owner를 검사한다. reachable production TSX에서 직접 쓰는 native control은 media/pointer ownership 3개 파일만 허용하며, 각 control의 안정적인 `data-native-control` ID·이유·정확한 AST 목록이 모두 일치해야 한다. production bundle에서 `renderPreview`, `exportCapcut`, old endpoint, `vb-legacy`, `action-button`, `legacy.css`는 모두 0건이다.
-- `검증`: Task 22/canonical editor focused `2 files / 67 passed`, full frontend `49 files / 557 passed`, canonical output/product-shell Playwright E2E `14 passed`와 snapshot manifest verifier, production build, bundle legacy-string inventory, Editor UI OSS provenance/UI-system verifier, external-runtime/network guard `2 files / 6 passed`, package-lock 기반 CycloneDX SBOM 생성(`--omit=optional`), `git diff --check` 통과. canonical review/preflight fast-path는 각각 실제 test를 선택해 `2 passed`, `5 passed`, review helper `2 passed`였다. 독립 spec/quality/gap/reverse 재검토의 Critical/Important/Moderate는 0이다. 전체 Python regression은 실행하지 않았다.
+- `검증`: Task 22/canonical editor focused `2 files / 67 passed`, full frontend `49 files / 557 passed`, canonical output/product-shell Playwright E2E `14 passed`와 snapshot manifest verifier, production build, bundle legacy-string inventory, Editor UI OSS provenance/UI-system verifier, external-runtime/network guard `2 files / 6 passed`, package-lock 기반 CycloneDX SBOM 생성(`--omit=optional`), `git diff --check` 통과. canonical review/preflight fast-path는 각각 실제 test를 선택해 `2 passed`, `5 passed`, review helper `2 passed`였다. Task 22D legacy-removal 범위의 독립 spec/quality/gap/reverse 재검토 Critical/Important/Moderate는 0이다. 전체 Python regression은 실행하지 않았다.
 - BGM/SFX library preview/materialize/apply와 typed Inspector edit/clear 검증은 canonical EditorAssetBrowser/EditorWorkbench/command-port 테스트로 유지된다. 실제 사용자 샘플의 구간별 exact AAC 역방향 증거는 §295/§297을 따르며 사람 청취 품질 판단은 별도다.
 - `다음 goal`: Task 22E six-gate independent release audit와 22F full release gate를 현재 canonical baseline에서 실행한다. 실제 CapCut Desktop 실증과 Task 9 사람/환경 acceptance는 별도다.
 - 보호된 `?? .tmp-final-fence-debug/`, `?? .tmp-real-video-dogfood/`, `?? apps/web/.tmp-real-video-dogfood/`와 사용자 원본 샘플은 stage/remove/delete하지 않았다.
@@ -308,7 +323,7 @@
 - Task 9은 기존 사람/환경 acceptance 기록을 그대로 유지한다. 누적은 Task 9과 무관하게 기존 **9/22 (40.9%)**, 잔여 **59.1%**다.
 - 검증은 container/PostgreSQL focused suite, renderer/playback suite, web production build, Docker runtime verifier까지 통과했다. Python full suite 첫 실행은 `1129 passed, 7 skipped, 4 failed`; source-audio expectation 2건은 바로 수정·focused green으로 재확인했고, 남은 editor UI source-provenance hash drift 2건은 이번 container diff와 무관한 기존 registry mismatch다. 전면 rerun 전에는 full green이라고 주장하지 않는다.
 
-> 현재 authoritative 상태/next slice 판단은 `## 263. 2026-07-18 OSS Slice 2/3 commit and creator-flow recovery handoff`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 아래 포인터는 2026-07-18 당시의 historical snapshot이다. 현재 authoritative 상태는 문서 최상단의 최신 번호 섹션을 따른다.
 
 ## 263. 2026-07-18 OSS Slice 2/3 commit and creator-flow recovery handoff
 

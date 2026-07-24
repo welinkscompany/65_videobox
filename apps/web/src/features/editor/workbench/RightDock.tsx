@@ -4,7 +4,7 @@ import { Button } from "../../../components/ui/button";
 import { Input } from "../../../components/ui/input";
 import { NativeSelect } from "../../../components/ui/native-select";
 import { Textarea } from "../../../components/ui/textarea";
-import { InspectorControls, type InspectorAction, type PartialRegenerationControls } from "../inspector/InspectorControls";
+import { InspectorControls, type ApprovedTtsCandidate, type InspectorAction, type PartialRegenerationControls } from "../inspector/InspectorControls";
 import type { InspectorTarget } from "../inspector/inspectorRegistry";
 import type { RightDockCandidate, RightDockMessage, RightDockProposal } from "./rightDockTypes";
 
@@ -17,6 +17,7 @@ type SelectedSegment = Readonly<{
   nextSegmentId: string | null;
   cutAction: string;
   draftApplied: boolean;
+  ttsReplacement?: Readonly<{ candidateId: string; assetId: string }> | null;
 }>;
 
 export type RightDockProps = Readonly<{
@@ -29,6 +30,8 @@ export type RightDockProps = Readonly<{
   inspectorTargets?: readonly InspectorTarget[];
   inspectorDisabled?: boolean;
   partialRegeneration?: PartialRegenerationControls;
+  loadApprovedTtsCandidates?: (segmentId: string) => Promise<readonly ApprovedTtsCandidate[]>;
+  ttsCandidateScopeKey?: string;
   onInspectorAction?: (action: InspectorAction) => void | Promise<void>;
   composerDisabled?: boolean;
   onSendMessage?: (draft: string) => void | Promise<void>;
@@ -50,6 +53,8 @@ export function RightDock({
   inspectorTargets = [],
   inspectorDisabled = false,
   partialRegeneration,
+  loadApprovedTtsCandidates,
+  ttsCandidateScopeKey,
   onInspectorAction,
   composerDisabled = false,
   onSendMessage,
@@ -120,10 +125,12 @@ export function RightDock({
         {!inspectorTargets.length ? <p>현재 편집 명령이 지원하는 항목만 표시됩니다.</p> : null}
         {onInspectorAction ? <InspectorControls
           disabled={inspectorDisabled}
+          loadApprovedTtsCandidates={loadApprovedTtsCandidates}
           onAction={onInspectorAction}
           partialRegeneration={partialRegeneration}
           selectedSegment={selectedSegment ?? null}
           target={selectedInspectorTarget}
+          ttsCandidateScopeKey={ttsCandidateScopeKey}
         /> : null}
       </div> : null}
     </section>

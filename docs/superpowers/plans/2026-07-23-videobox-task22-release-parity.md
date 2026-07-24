@@ -6,7 +6,7 @@
 
 ## Fixed boundaries
 
-- Work only in `videobox-container-compatibility`; preserve `?? .tmp-final-fence-debug/`.
+- Work only in `videobox-container-compatibility`; preserve `?? .tmp-final-fence-debug/`, `?? .tmp-real-video-dogfood/`, and `?? apps/web/.tmp-real-video-dogfood/`.
 - Keep FastAPI editing-session/timeline/review, FFmpeg and PyCapCut authoritative.
 - Use the current editing session's `timeline_id`; never fall back to an unrelated latest timeline.
 - Do not add source copy, OpenCut runtime, provider/API expansion, Hermes, Mem0, cloud, billing, automatic apply, or external local/test calls.
@@ -157,6 +157,8 @@ After every row in the parity owner matrix is GREEN and 22A–22C evidence is co
 
 ## 22E — Six-gate independent release audit
 
+**Status (2026-07-24): complete.** Independent spec/quality/gap/reverse reviews found and closed output/session/review fences, PostgreSQL lock ordering, rejected-SFX identity, overlay duplication, Windows path-length, and final-render orphan/restart/thread-start claim recovery blockers. Current FFmpeg/SRT/PyCapCut artifacts were traced back to current editing-session/timeline/revision rows.
+
 Execute and record all six gates from `docs/superpowers/plans/2026-07-13-release-audit-protocol.ko.md` against the current Task 22 baseline:
 
 1. Independent code-quality review of the complete Task 22 diff.
@@ -164,11 +166,13 @@ Execute and record all six gates from `docs/superpowers/plans/2026-07-13-release
 3. Source-to-runtime reverse trace from current local FFmpeg/PyCapCut artifacts back to editing session, timeline, source and subtitle contracts.
 4. Full-system verification commands from 22F.
 5. Document/instruction review covering `AGENTS.md`, fast-path, implementation plan, status pointer, and handoff consistency.
-6. Residue inventory/classification as preserve-evidence, tracked-source, historical-reference, or safe-to-delete. Never delete `?? .tmp-final-fence-debug/`.
+6. Residue inventory/classification as preserve-evidence, tracked-source, historical-reference, or safe-to-delete. Never delete `?? .tmp-final-fence-debug/`, `?? .tmp-real-video-dogfood/`, or `?? apps/web/.tmp-real-video-dogfood/`.
 
 Close every Critical/Important finding and re-run the affected gate. Human CapCut Desktop/listening approval remains explicitly pending when not observed.
 
 ## 22F — Release verification and closeout
+
+**Status (2026-07-24): complete.** Current-focused, full frontend, build, full E2E, final Python regression, provenance/UI/network/SBOM, 600-second smoke and three-profile long-form QA were executed; this plan, SSOT and handoff form the single closeout commit/push unit. Human listening and real CapCut Desktop proof remain separate.
 
 Run fresh:
 

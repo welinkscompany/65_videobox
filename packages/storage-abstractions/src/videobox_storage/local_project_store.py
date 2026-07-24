@@ -21,7 +21,10 @@ from videobox_domain_models.recommendations import RecommendationRecord, Recomme
 from videobox_domain_models.transcripts import TranscriptRecord
 from videobox_core_engine.provider_trace import build_provider_trace
 from videobox_core_engine.exact_preview import ExactPreviewRequest
-from videobox_storage.sqlite_schema import PROJECT_SCHEMA_STATEMENTS
+from videobox_storage.sqlite_schema import (
+    ARTIFACT_SOURCE_SESSION_BACKFILL_STATEMENTS,
+    PROJECT_SCHEMA_STATEMENTS,
+)
 from videobox_domain_models.director_proposals import DirectorProposal
 from videobox_core_engine.director_proposals import proposal_from_payload, proposal_to_payload
 from videobox_core_engine.creation_interview import (
@@ -276,6 +279,15 @@ class LocalProjectStore:
             connection = sqlite3.connect(database_path)
             connection.row_factory = sqlite3.Row
             try:
+                schema_ready = connection.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'projects'"
+                ).fetchone()
+                if schema_ready is None:
+                    # bootstrap_project creates the file before its schema is
+                    # committed. Background catalog polling may observe that
+                    # short window; it should retry on the next poll rather
+                    # than treating an initializing project as corruption.
+                    continue
                 row = connection.execute(
                     """
                     SELECT project_id, name, status, root_storage_uri, created_at, updated_at
@@ -2019,6 +2031,7 @@ class LocalProjectStore:
         project_id: str,
         output_mode: str,
         timeline_payload: dict[str, Any],
+        source_session_id: str | None = None,
         source_session_revision: int | None = None,
     ) -> dict[str, Any]:
         sequence = self._next_sequence(
@@ -2037,6 +2050,8 @@ class LocalProjectStore:
             "created_at": self._now_iso(),
             **timeline_payload,
         }
+        if source_session_id is not None:
+            payload["source_session_id"] = str(source_session_id)
         if source_session_revision is not None:
             payload["source_session_revision"] = int(source_session_revision)
         timeline_path.write_text(json.dumps(payload, indent=2, ensure_ascii=True), encoding="utf-8")
@@ -2088,6 +2103,7 @@ class LocalProjectStore:
             project_id=project_id,
             timeline_id=timeline_id,
             status=initial_review_status,
+            source_session_id=source_session_id,
             source_session_revision=source_session_revision,
         )
         return {"timeline_id": timeline_id, "file_uri": file_uri, "timeline": payload}
@@ -2145,6 +2161,7 @@ class LocalProjectStore:
             project_id=project_id,
             timeline_id=timeline_id,
             status=str(review["status"]),
+            source_session_id=str(session_id),
             source_session_revision=int(session_revision),
         )
         return updated
@@ -2348,10 +2365,37 @@ class LocalProjectStore:
         project_id: str,
         timeline_id: str,
         status: str,
+        source_session_id: str | None = None,
         source_session_revision: int | None = None,
     ) -> dict[str, Any]:
         if status not in {"draft", "blocked", "approved"}:
             raise ValueError(f"Unsupported review status: {status}")
+        if source_session_id is None:
+            session = self._fetchone(
+                project_id,
+                """
+                SELECT session_id, session_revision
+                FROM editing_sessions
+                WHERE project_id = ? AND timeline_id = ?
+                ORDER BY updated_at DESC
+                LIMIT 1
+                """,
+                (project_id, timeline_id),
+            )
+        else:
+            session = self._fetchone(
+                project_id,
+                """
+                SELECT session_id, session_revision
+                FROM editing_sessions
+                WHERE project_id = ? AND timeline_id = ? AND session_id = ?
+                """,
+                (project_id, timeline_id, source_session_id),
+            )
+        if session is not None:
+            source_session_id = str(session["session_id"])
+            if source_session_revision is None:
+                source_session_revision = int(session["session_revision"])
         approved_at = self._now_iso() if status == "approved" else None
         updated_at = self._now_iso()
         self._execute(
@@ -2363,18 +2407,28 @@ class LocalProjectStore:
                 status,
                 approved_at,
                 updated_at,
+                source_session_id,
                 source_session_revision
-            ) VALUES (?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(timeline_id) DO UPDATE SET
                 status = excluded.status,
                 approved_at = excluded.approved_at,
                 updated_at = excluded.updated_at,
-                source_session_revision = COALESCE(excluded.source_session_revision, (SELECT session_revision FROM editing_sessions WHERE project_id = excluded.project_id AND timeline_id = excluded.timeline_id ORDER BY updated_at DESC LIMIT 1)),
+                source_session_id = excluded.source_session_id,
+                source_session_revision = excluded.source_session_revision,
                 is_current = 1,
                 invalidated_at = NULL,
                 invalidated_reason = NULL
             """,
-            (timeline_id, project_id, status, approved_at, updated_at, source_session_revision),
+            (
+                timeline_id,
+                project_id,
+                status,
+                approved_at,
+                updated_at,
+                source_session_id,
+                source_session_revision,
+            ),
         )
         self.clear_operator_guidance(project_id=project_id, timeline_id=timeline_id)
         return self.get_review_state(project_id=project_id, timeline_id=timeline_id)
@@ -3197,7 +3251,7 @@ class LocalProjectStore:
         row = self._fetchone(
             project_id,
             """
-            SELECT timeline_id, project_id, status, approved_at, updated_at, source_session_revision, is_current, invalidated_at, invalidated_reason
+            SELECT timeline_id, project_id, status, approved_at, updated_at, source_session_id, source_session_revision, is_current, invalidated_at, invalidated_reason
             FROM review_approvals
             WHERE project_id = ? AND timeline_id = ?
             """,
@@ -3216,27 +3270,26 @@ class LocalProjectStore:
         project_id: str,
         timeline_id: str,
         subtitle_payload: dict[str, Any],
+        source_session_id: str | None = None,
+        source_session_revision: int | None = None,
+        source_session_absent: bool = False,
+        source_fence: Callable[[Any], bool] | None = None,
     ) -> dict[str, Any]:
-        sequence = self._next_sequence(
-            self.project_root(project_id) / "subtitles",
-            "subtitle_*.srt",
-        )
-        subtitle_id = f"subtitle_{sequence:03d}"
-        subtitle_path = self.project_root(project_id) / "subtitles" / f"{subtitle_id}.srt"
-        file_uri = self._path_to_uri(project_id, subtitle_path)
+        if source_session_absent and (
+            source_session_id is not None or source_session_revision is not None
+        ):
+            raise ValueError("subtitle_render_session_lineage_is_ambiguous")
+        subtitle_root = self.project_root(project_id) / "subtitles"
+        subtitle_root.mkdir(parents=True, exist_ok=True)
+        staging_path = subtitle_root / f".{uuid.uuid4().hex}.staging.srt"
         entries = subtitle_payload.get("entries", [])
-        subtitle_path.write_text(
-            self._serialize_srt(entries),
-            encoding="utf-8",
-        )
+        created_at = self._now_iso()
         payload = {
-            "subtitle_id": subtitle_id,
             "project_id": project_id,
             "timeline_id": timeline_id,
             "format": subtitle_payload.get("format", "srt"),
-            "file_uri": file_uri,
             "status": "succeeded",
-            "created_at": self._now_iso(),
+            "created_at": created_at,
             "notes": subtitle_payload.get("notes", []),
         }
         summary_json = json.dumps(
@@ -3246,31 +3299,95 @@ class LocalProjectStore:
             },
             ensure_ascii=True,
         )
-        self._execute(
-            project_id,
-            """
-            INSERT INTO subtitle_renders (
-                subtitle_id,
-                project_id,
-                timeline_id,
-                format,
-                file_uri,
-                status,
-                summary_json,
-                created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                subtitle_id,
-                project_id,
-                timeline_id,
-                payload["format"],
-                file_uri,
-                payload["status"],
-                summary_json,
-                payload["created_at"],
-            ),
-        )
+        connection: Any | None = None
+        subtitle_path: Path | None = None
+        published_path_owned = False
+        try:
+            staging_path.write_text(
+                self._serialize_srt(entries),
+                encoding="utf-8",
+            )
+            connection = self._connection(project_id)
+            self._begin_output_publish_transaction(connection)
+            sequence = self._next_sequence(subtitle_root, "subtitle_*.srt")
+            subtitle_id = f"subtitle_{sequence:03d}"
+            subtitle_path = subtitle_root / f"{subtitle_id}.srt"
+            if source_session_id is not None:
+                session = connection.execute(
+                    """SELECT timeline_id, session_revision FROM editing_sessions
+                       WHERE project_id = ? AND session_id = ?""",
+                    (project_id, source_session_id),
+                ).fetchone()
+                if (
+                    session is None
+                    or str(session["timeline_id"]) != timeline_id
+                    or source_session_revision is None
+                    or int(session["session_revision"]) != int(source_session_revision)
+                ):
+                    raise EditingSessionRevisionConflict(
+                        "subtitle_render_session_revision_changed"
+                    )
+            elif source_session_revision is not None:
+                raise EditingSessionRevisionConflict(
+                    "subtitle_render_session_lineage_required"
+                )
+            elif source_session_absent:
+                session = connection.execute(
+                    """SELECT session_id FROM editing_sessions
+                       WHERE project_id = ? AND timeline_id = ?
+                       ORDER BY updated_at DESC LIMIT 1""",
+                    (project_id, timeline_id),
+                ).fetchone()
+                if session is not None:
+                    raise EditingSessionRevisionConflict(
+                        "subtitle_render_session_presence_changed"
+                    )
+            if source_fence is not None and not bool(source_fence(connection)):
+                raise EditingSessionRevisionConflict(
+                    "subtitle_render_source_fence_failed"
+                )
+            staging_path.replace(subtitle_path)
+            published_path_owned = True
+            file_uri = self._path_to_uri(project_id, subtitle_path)
+            connection.execute(
+                """
+                INSERT INTO subtitle_renders (
+                    subtitle_id,
+                    project_id,
+                    timeline_id,
+                    format,
+                    file_uri,
+                    status,
+                    summary_json,
+                    created_at,
+                    source_session_id,
+                    source_session_revision
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    subtitle_id,
+                    project_id,
+                    timeline_id,
+                    payload["format"],
+                    file_uri,
+                    payload["status"],
+                    summary_json,
+                    created_at,
+                    source_session_id,
+                    source_session_revision,
+                ),
+            )
+            connection.commit()
+        except Exception:
+            if connection is not None and connection.in_transaction:
+                connection.rollback()
+            if published_path_owned and subtitle_path is not None:
+                subtitle_path.unlink(missing_ok=True)
+            raise
+        finally:
+            if connection is not None:
+                connection.close()
+            staging_path.unlink(missing_ok=True)
         return {"subtitle_id": subtitle_id, "file_uri": file_uri, "subtitle": self.get_subtitle_run(project_id=project_id, subtitle_id=subtitle_id)}
 
     def save_preview_run(
@@ -3368,6 +3485,28 @@ class LocalProjectStore:
             if match:
                 highest = max(highest, int(match.group(1)))
         return highest + 1
+
+    @staticmethod
+    def _begin_output_publish_transaction(connection: Any) -> None:
+        """Serialize output lineage checks and filesystem path allocation.
+
+        SQLite's immediate transaction provides the project-wide writer lock.
+        PostgreSQL needs an explicit table lock because its translated plain
+        ``BEGIN`` does not prevent two publishers from selecting the same next
+        sequence or validating the same source lineage concurrently.
+        """
+        if isinstance(connection, sqlite3.Connection):
+            connection.execute("BEGIN IMMEDIATE")
+            return
+        connection.execute("BEGIN")
+        # Match editing-session mutation order: session CAS, optional asset
+        # materialization, then dependent-artifact invalidation.  Acquiring the
+        # same tables in the reverse order lets a publisher and editor deadlock.
+        connection.execute(
+            "LOCK TABLE editing_sessions, assets, review_approvals, "
+            "subtitle_renders, preview_renders, exports "
+            "IN SHARE ROW EXCLUSIVE MODE"
+        )
 
     def _prune_old_exports(
         self,
@@ -3482,6 +3621,7 @@ class LocalProjectStore:
         source_output_path: Path,
         source_session_id: str | None = None,
         source_session_revision: int | None = None,
+        source_session_absent: bool = False,
         source_fence: Callable[[sqlite3.Connection], bool] | None = None,
     ) -> dict[str, Any]:
         """Publish a final MP4 only while its durable source lineage is current.
@@ -3495,12 +3635,18 @@ class LocalProjectStore:
         pointer), or waits and invalidates the just-published export as part of
         its own mutation transaction.
         """
+        if source_session_absent and (
+            source_session_id is not None or source_session_revision is not None
+        ):
+            raise ValueError("final_render_session_lineage_is_ambiguous")
         source_output_path = Path(source_output_path)
         if not source_output_path.is_file():
             raise FileNotFoundError(source_output_path)
         export_root = self.project_root(project_id) / "exports" / "final_render"
         export_directory: Path | None = None
-        staging_directory = export_root / f".{uuid.uuid4().hex}.staging"
+        # A short private component keeps long Windows project roots below
+        # MAX_PATH while retaining an unguessable per-publish staging owner.
+        staging_directory = export_root / f".s{uuid.uuid4().hex[:8]}"
         try:
             staging_directory.mkdir(parents=True, exist_ok=False)
             staged_path = staging_directory / f"output{source_output_path.suffix or '.mp4'}"
@@ -3512,7 +3658,7 @@ class LocalProjectStore:
         connection = self._connection(project_id)
         published = False
         try:
-            connection.execute("BEGIN IMMEDIATE")
+            self._begin_output_publish_transaction(connection)
             sequence = self._next_export_sequence_in_connection(project_id=project_id, connection=connection)
             export_id = f"export_{sequence:03d}"
             export_directory = export_root / export_id
@@ -3538,6 +3684,17 @@ class LocalProjectStore:
                     raise EditingSessionRevisionConflict("final_render_session_revision_changed")
             elif source_session_revision is not None:
                 raise EditingSessionRevisionConflict("final_render_session_lineage_required")
+            elif source_session_absent:
+                session = connection.execute(
+                    """SELECT session_id FROM editing_sessions
+                       WHERE project_id = ? AND timeline_id = ?
+                       ORDER BY updated_at DESC LIMIT 1""",
+                    (project_id, timeline_id),
+                ).fetchone()
+                if session is not None:
+                    raise EditingSessionRevisionConflict(
+                        "final_render_session_presence_changed"
+                    )
             if source_fence is not None and not bool(source_fence(connection)):
                 raise EditingSessionRevisionConflict("final_render_source_fence_failed")
             export_directory.mkdir(parents=False, exist_ok=False)
@@ -3623,18 +3780,79 @@ class LocalProjectStore:
         timeline_id: str,
         source_draft_path: Path,
         notes: list[str] | None = None,
+        source_session_id: str | None = None,
+        source_session_revision: int | None = None,
+        source_session_absent: bool = False,
+        source_fence: Callable[[Any], bool] | None = None,
     ) -> dict[str, Any]:
-        sequence = self._next_export_sequence(project_id)
-        export_id = f"export_{sequence:03d}"
-        export_directory = self.project_root(project_id) / "exports" / "capcut_draft" / export_id
-        export_directory.parent.mkdir(parents=True, exist_ok=True)
-        destination_path = export_directory / source_draft_path.name
-        shutil.copytree(source_draft_path, destination_path)
-        file_uri = self._path_to_uri(project_id, destination_path)
+        if source_session_absent and (
+            source_session_id is not None or source_session_revision is not None
+        ):
+            raise ValueError("capcut_draft_export_session_lineage_is_ambiguous")
+        source_draft_path = Path(source_draft_path)
+        if not source_draft_path.is_dir():
+            raise FileNotFoundError(source_draft_path)
+        export_root = self.project_root(project_id) / "exports" / "capcut_draft"
+        export_root.mkdir(parents=True, exist_ok=True)
+        # CapCut draft trees contain deeply nested, vendor-owned filenames.
+        # Keep the private staging component short so Windows MAX_PATH does
+        # not reject an otherwise valid project-local draft during copy.
+        staging_directory = export_root / f".s{uuid.uuid4().hex[:8]}"
+        staged_path = staging_directory / source_draft_path.name
         created_at = self._now_iso()
+        connection: Any | None = None
+        export_directory: Path | None = None
+        export_directory_owned = False
         try:
-            self._execute(
-                project_id,
+            shutil.copytree(source_draft_path, staged_path)
+            connection = self._connection(project_id)
+            self._begin_output_publish_transaction(connection)
+            sequence = self._next_export_sequence_in_connection(
+                project_id=project_id,
+                connection=connection,
+            )
+            export_id = f"export_{sequence:03d}"
+            export_directory = export_root / export_id
+            if source_session_id is not None:
+                session = connection.execute(
+                    """SELECT timeline_id, session_revision FROM editing_sessions
+                       WHERE project_id = ? AND session_id = ?""",
+                    (project_id, source_session_id),
+                ).fetchone()
+                if (
+                    session is None
+                    or str(session["timeline_id"]) != timeline_id
+                    or source_session_revision is None
+                    or int(session["session_revision"]) != int(source_session_revision)
+                ):
+                    raise EditingSessionRevisionConflict(
+                        "capcut_draft_export_session_revision_changed"
+                    )
+            elif source_session_revision is not None:
+                raise EditingSessionRevisionConflict(
+                    "capcut_draft_export_session_lineage_required"
+                )
+            elif source_session_absent:
+                session = connection.execute(
+                    """SELECT session_id FROM editing_sessions
+                       WHERE project_id = ? AND timeline_id = ?
+                       ORDER BY updated_at DESC LIMIT 1""",
+                    (project_id, timeline_id),
+                ).fetchone()
+                if session is not None:
+                    raise EditingSessionRevisionConflict(
+                        "capcut_draft_export_session_presence_changed"
+                    )
+            if source_fence is not None and not bool(source_fence(connection)):
+                raise EditingSessionRevisionConflict(
+                    "capcut_draft_export_source_fence_failed"
+                )
+            export_directory.mkdir(parents=False, exist_ok=False)
+            export_directory_owned = True
+            destination_path = export_directory / staged_path.name
+            staged_path.replace(destination_path)
+            file_uri = self._path_to_uri(project_id, destination_path)
+            connection.execute(
                 """
                 INSERT INTO exports (
                     export_id,
@@ -3644,8 +3862,10 @@ class LocalProjectStore:
                     file_uri,
                     status,
                     metadata_json,
-                    created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    created_at,
+                    source_session_id,
+                    source_session_revision
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     export_id,
@@ -3656,11 +3876,21 @@ class LocalProjectStore:
                     "succeeded",
                     json.dumps({"notes": notes or []}, ensure_ascii=True),
                     created_at,
+                    source_session_id,
+                    source_session_revision,
                 ),
             )
+            connection.commit()
         except Exception:
-            shutil.rmtree(export_directory, ignore_errors=True)
+            if connection is not None and connection.in_transaction:
+                connection.rollback()
+            if export_directory_owned and export_directory is not None:
+                shutil.rmtree(export_directory, ignore_errors=True)
             raise
+        finally:
+            if connection is not None:
+                connection.close()
+            shutil.rmtree(staging_directory, ignore_errors=True)
         self._prune_old_exports(project_id=project_id, export_type="capcut_draft_export")
         return {"export_id": export_id, "file_uri": file_uri, "created_at": created_at}
 
@@ -3668,7 +3898,7 @@ class LocalProjectStore:
         row = self._fetchone(
             project_id,
             """
-            SELECT export_id, project_id, timeline_id, export_type, file_uri, status, metadata_json, created_at, source_session_revision, is_current, invalidated_at, invalidated_reason,
+            SELECT export_id, project_id, timeline_id, export_type, file_uri, status, metadata_json, created_at, source_session_id, source_session_revision, is_current, invalidated_at, invalidated_reason,
                    handoff_claim_token, handoff_claimed_at, handoff_claim_expires_at
             FROM exports
             WHERE project_id = ? AND export_id = ?
@@ -3713,6 +3943,7 @@ class LocalProjectStore:
             "notes": list(metadata.get("notes") or []),
             "handoff": handoff,
             "created_at": row["created_at"],
+            "source_session_id": row["source_session_id"],
             "source_session_revision": row["source_session_revision"],
             "is_current": bool(row["is_current"]),
             "invalidated_at": row["invalidated_at"],
@@ -4553,7 +4784,34 @@ class LocalProjectStore:
         project_id: str,
         timeline_job_id: str,
     ) -> tuple[dict[str, Any], bool]:
-        """Atomically claim the one active final render for a timeline job.
+        """Atomically claim the one active final render for a timeline job."""
+        return self._create_or_reuse_active_output_job(
+            project_id=project_id,
+            timeline_job_id=timeline_job_id,
+            job_type=JobType.FINAL_RENDER,
+        )
+
+    def create_or_reuse_active_capcut_draft_export_job(
+        self,
+        *,
+        project_id: str,
+        timeline_job_id: str,
+    ) -> tuple[dict[str, Any], bool]:
+        """Atomically claim the one active CapCut draft export for a timeline job."""
+        return self._create_or_reuse_active_output_job(
+            project_id=project_id,
+            timeline_job_id=timeline_job_id,
+            job_type=JobType.CAPCUT_DRAFT_EXPORT,
+        )
+
+    def _create_or_reuse_active_output_job(
+        self,
+        *,
+        project_id: str,
+        timeline_job_id: str,
+        job_type: JobType,
+    ) -> tuple[dict[str, Any], bool]:
+        """Atomically claim one active output job for a timeline job.
 
         A terminal job deliberately is not reusable: a person may explicitly
         start a new render after a failure or after a completed export.  Only
@@ -4582,7 +4840,7 @@ class LocalProjectStore:
                 """,
                 (
                     project_id,
-                    JobType.FINAL_RENDER.value,
+                    job_type.value,
                     timeline_job_id,
                     JobStatus.PENDING.value,
                     JobStatus.RUNNING.value,
@@ -4596,12 +4854,12 @@ class LocalProjectStore:
                 "SELECT COUNT(*) AS count FROM jobs WHERE project_id = ?", (project_id,)
             ).fetchone()
             sequence = int(sequence_row["count"]) + 1
-            job_id = f"{JobType.FINAL_RENDER.value}_job_{sequence:03d}"
+            job_id = f"{job_type.value}_job_{sequence:03d}"
             started_at = self._now_iso()
             payload = {
                 "job_id": job_id,
                 "project_id": project_id,
-                "job_type": JobType.FINAL_RENDER.value,
+                "job_type": job_type.value,
                 "status": JobStatus.RUNNING.value,
                 "input_ref": timeline_job_id,
                 "output_ref": None,
@@ -5037,7 +5295,7 @@ class LocalProjectStore:
         row = self._fetchone(
             project_id,
             """
-            SELECT preview_id, project_id, timeline_id, file_uri, status, summary_json, created_at, source_session_revision, is_current, invalidated_at, invalidated_reason
+            SELECT preview_id, project_id, timeline_id, file_uri, status, summary_json, created_at, source_session_id, source_session_revision, is_current, invalidated_at, invalidated_reason
             FROM preview_renders
             WHERE project_id = ? AND preview_id = ?
             """,
@@ -5052,6 +5310,7 @@ class LocalProjectStore:
         payload["provider_trace"] = payload.get("provider_trace") or build_provider_trace(final_provider="static_fallback")
         payload["summary"] = json.loads(row["summary_json"] or "{}")
         payload["created_at"] = row["created_at"]
+        payload["source_session_id"] = row["source_session_id"]
         payload["source_session_revision"] = row["source_session_revision"]
         payload["is_current"] = bool(row["is_current"])
         payload["invalidated_at"] = row["invalidated_at"]
@@ -5062,7 +5321,7 @@ class LocalProjectStore:
         row = self._fetchone(
             project_id,
             """
-            SELECT subtitle_id, project_id, timeline_id, format, file_uri, status, summary_json, created_at, source_session_revision, is_current, invalidated_at, invalidated_reason
+            SELECT subtitle_id, project_id, timeline_id, format, file_uri, status, summary_json, created_at, source_session_id, source_session_revision, is_current, invalidated_at, invalidated_reason
             FROM subtitle_renders
             WHERE project_id = ? AND subtitle_id = ?
             """,
@@ -5081,7 +5340,7 @@ class LocalProjectStore:
         row = self._fetchone(
             project_id,
             """
-            SELECT export_id, project_id, timeline_id, export_type, file_uri, status, metadata_json, created_at, source_session_revision, is_current, invalidated_at, invalidated_reason
+            SELECT export_id, project_id, timeline_id, export_type, file_uri, status, metadata_json, created_at, source_session_id, source_session_revision, is_current, invalidated_at, invalidated_reason
             FROM exports
             WHERE project_id = ? AND export_id = ?
             """,
@@ -5096,6 +5355,7 @@ class LocalProjectStore:
         payload["provider_trace"] = payload.get("provider_trace") or build_provider_trace(final_provider="static_fallback")
         payload["metadata"] = json.loads(row["metadata_json"] or "{}")
         payload["created_at"] = row["created_at"]
+        payload["source_session_id"] = row["source_session_id"]
         payload["source_session_revision"] = row["source_session_revision"]
         payload["is_current"] = bool(row["is_current"])
         payload["invalidated_at"] = row["invalidated_at"]
@@ -5901,6 +6161,8 @@ class LocalProjectStore:
                 ):
                     if column not in existing:
                         connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
+            for statement in ARTIFACT_SOURCE_SESSION_BACKFILL_STATEMENTS:
+                connection.execute(statement)
             if owns_transaction:
                 connection.commit()
         except Exception:
@@ -5936,7 +6198,7 @@ class LocalProjectStore:
             connection.execute("BEGIN IMMEDIATE")
             return
         connection.execute("BEGIN")
-        connection.execute("LOCK TABLE jobs, exports, editing_sessions IN SHARE ROW EXCLUSIVE MODE")
+        connection.execute("LOCK TABLE editing_sessions, jobs, exports IN SHARE ROW EXCLUSIVE MODE")
 
     def _ensure_artifact_freshness_triggers(self, connection: sqlite3.Connection) -> None:
         # This migration deliberately replaces an earlier trigger definition so
@@ -5951,7 +6213,7 @@ class LocalProjectStore:
                 connection.execute(f"DROP TRIGGER IF EXISTS {trigger}")
                 connection.execute(
                     f"CREATE TRIGGER {trigger} AFTER INSERT ON {table} BEGIN "
-                    f"UPDATE {table} SET source_session_id = COALESCE(NEW.source_session_id, (SELECT session_id FROM editing_sessions WHERE project_id = NEW.project_id AND timeline_id = NEW.timeline_id ORDER BY updated_at DESC LIMIT 1)), source_session_revision = COALESCE(NEW.source_session_revision, (SELECT session_revision FROM editing_sessions WHERE project_id = NEW.project_id AND timeline_id = NEW.timeline_id AND (NEW.source_session_id IS NULL OR session_id = NEW.source_session_id) ORDER BY updated_at DESC LIMIT 1), 1), is_current = 1 WHERE {identifier} = NEW.{identifier}; END"
+                    f"UPDATE {table} SET source_session_id = COALESCE(NEW.source_session_id, CASE WHEN (SELECT COUNT(*) FROM editing_sessions WHERE project_id = NEW.project_id AND timeline_id = NEW.timeline_id) = 1 THEN (SELECT session_id FROM editing_sessions WHERE project_id = NEW.project_id AND timeline_id = NEW.timeline_id AND (NEW.source_session_revision IS NULL OR session_revision = NEW.source_session_revision) LIMIT 1) END), source_session_revision = COALESCE(NEW.source_session_revision, CASE WHEN (SELECT COUNT(*) FROM editing_sessions WHERE project_id = NEW.project_id AND timeline_id = NEW.timeline_id) = 1 THEN (SELECT session_revision FROM editing_sessions WHERE project_id = NEW.project_id AND timeline_id = NEW.timeline_id LIMIT 1) END, 1), is_current = 1 WHERE {identifier} = NEW.{identifier}; END"
                 )
             connection.commit()
         except Exception:
@@ -6158,7 +6420,10 @@ class LocalProjectStore:
             )
         else:
             connection = self._connection(project_id)
-            temporary_path = session_path.with_name(f".{session_path.name}.{uuid.uuid4().hex}.tmp")
+            # Keep the atomic mirror name independent of the session filename.
+            # Long project roots can otherwise cross the Windows MAX_PATH limit
+            # even though the canonical JSON path itself remains valid.
+            temporary_path = session_path.with_name(f".es-{uuid.uuid4().hex[:12]}.tmp")
             try:
                 connection.execute("BEGIN IMMEDIATE")
                 cursor = connection.execute(

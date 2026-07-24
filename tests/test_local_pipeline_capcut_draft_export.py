@@ -249,6 +249,13 @@ def test_capcut_draft_export_maps_materialized_broll_source_window_to_adapter_co
     project = store.bootstrap_project(name="CapCut materialized B-roll source window")
     fake_exporter = _FakePyCapCutExporter()
     runner = LocalPipelineRunner(store, pycapcut_exporter=fake_exporter)
+    broll_source = tmp_path / "materialized-broll.mp4"
+    broll_source.write_bytes(b"materialized broll source")
+    broll_asset = store.register_asset(
+        project_id=project.project_id,
+        asset_type=AssetType.BROLL_VIDEO,
+        source_path=broll_source,
+    )
     timeline_job_id = _build_approved_timeline_job(
         store,
         runner,
@@ -261,7 +268,8 @@ def test_capcut_draft_export_maps_materialized_broll_source_window_to_adapter_co
                     {
                         "clip_id": "clip_broll_001",
                         "segment_id": "seg_001",
-                        "asset_uri": f"local://projects/{project.project_id}/assets/asset_broll_001",
+                        "asset_id": broll_asset.asset_id,
+                        "asset_uri": broll_asset.storage_uri,
                         "start_sec": 0.0,
                         "end_sec": 2.0,
                         "media_controls": {

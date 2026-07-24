@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { CaptionStyleScope } from "../../../api";
 import { Button } from "../../../components/ui/button";
@@ -21,6 +21,8 @@ export type InspectorAction =
   | Readonly<{ kind: "save-overlay"; overlayKind: "image"; segmentId: string; assetId: string; text: string }>
   | Readonly<{ kind: "save-overlay"; overlayKind: "table"; segmentId: string; columns: string[]; rows: string[][]; text: string }>
   | Readonly<{ kind: "clear-overlay"; overlayKind: "explanation-card" | "image" | "table"; segmentId: string }>
+  | Readonly<{ kind: "apply-tts-candidate"; segmentId: string; candidateId: string; assetId: string }>
+  | Readonly<{ kind: "clear-tts-candidate"; segmentId: string }>
   | Readonly<{ kind: "partial-preflight"; segmentIds: string[]; fields: string[] }>
   | Readonly<{ kind: "partial-run"; segmentIds: string[]; fields: string[] }>
   | Readonly<{ kind: "partial-resume"; segmentIds: string[]; fields: string[] }>;
@@ -31,6 +33,13 @@ type SelectedSegment = Readonly<{
   endSec: number;
   nextSegmentId: string | null;
   cutAction: string;
+  ttsReplacement?: Readonly<{ candidateId: string; assetId: string }> | null;
+}>;
+
+export type ApprovedTtsCandidate = Readonly<{
+  candidateId: string;
+  assetId: string;
+  sourceText: string;
 }>;
 
 export type PartialRegenerationControls = Readonly<{
@@ -46,6 +55,8 @@ type Props = Readonly<{
   target: InspectorTarget | null;
   selectedSegment: SelectedSegment | null;
   partialRegeneration?: PartialRegenerationControls;
+  loadApprovedTtsCandidates?: (segmentId: string) => Promise<readonly ApprovedTtsCandidate[]>;
+  ttsCandidateScopeKey?: string;
   disabled?: boolean;
   onAction: (action: InspectorAction) => void | Promise<void>;
 }>;
@@ -94,6 +105,8 @@ export function InspectorControls({
   target,
   selectedSegment,
   partialRegeneration,
+  loadApprovedTtsCandidates,
+  ttsCandidateScopeKey = "",
   disabled = false,
   onAction,
 }: Props) {
@@ -109,6 +122,13 @@ export function InspectorControls({
   const [selectedPartialFields, setSelectedPartialFields] = useState<readonly string[]>(() =>
     partialRegeneration?.defaultFields ?? partialRegeneration?.fields ?? [],
   );
+  const [ttsCandidates, setTtsCandidates] = useState<readonly ApprovedTtsCandidate[]>([]);
+  const [selectedTtsCandidateId, setSelectedTtsCandidateId] = useState("");
+  const [ttsLoadState, setTtsLoadState] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [ttsRetryToken, setTtsRetryToken] = useState(0);
+  const ttsLoadOperation = useRef(0);
+  const ttsLoaderRef = useRef(loadApprovedTtsCandidates);
+  ttsLoaderRef.current = loadApprovedTtsCandidates;
   const targetIdentity = target ? JSON.stringify(target) : "";
   const partialFieldIdentity = partialRegeneration?.fields.join("|") ?? "";
   const defaultPartialFieldIdentity = partialRegeneration?.defaultFields?.join("|") ?? "";
@@ -142,6 +162,38 @@ export function InspectorControls({
       return (partialRegeneration?.defaultFields ?? partialRegeneration?.fields ?? []).filter((field) => available.has(field));
     });
   }, [defaultPartialFieldIdentity, partialFieldIdentity]);
+  useEffect(() => {
+    const loader = ttsLoaderRef.current;
+    const segmentId = selectedSegment?.segmentId;
+    const operationId = ttsLoadOperation.current + 1;
+    ttsLoadOperation.current = operationId;
+    if (!loader || !segmentId) {
+      setTtsCandidates([]);
+      setSelectedTtsCandidateId("");
+      setTtsLoadState("idle");
+      return;
+    }
+    setTtsLoadState("loading");
+    void loader(segmentId).then((candidates) => {
+      if (ttsLoadOperation.current !== operationId) return;
+      setTtsCandidates(candidates);
+      setSelectedTtsCandidateId((current) => {
+        const applied = selectedSegment.ttsReplacement?.candidateId;
+        if (applied && candidates.some((candidate) => candidate.candidateId === applied)) return applied;
+        if (candidates.some((candidate) => candidate.candidateId === current)) return current;
+        return candidates[0]?.candidateId ?? "";
+      });
+      setTtsLoadState("ready");
+    }).catch(() => {
+      if (ttsLoadOperation.current !== operationId) return;
+      setTtsCandidates([]);
+      setSelectedTtsCandidateId("");
+      setTtsLoadState("error");
+    });
+    return () => {
+      if (ttsLoadOperation.current === operationId) ttsLoadOperation.current += 1;
+    };
+  }, [selectedSegment?.segmentId, ttsCandidateScopeKey, ttsRetryToken]);
 
   const emit = (action: InspectorAction) => {
     void onAction(action);
@@ -200,6 +252,39 @@ export function InspectorControls({
           <Button disabled={disabled} onClick={() => emit({ kind: "set-cut-action", segmentId: selectedSegment.segmentId, cutAction })} type="button">
             컷 저장
           </Button>
+          {loadApprovedTtsCandidates ? (
+            <fieldset>
+              <legend>내레이션 음성</legend>
+              {selectedSegment.ttsReplacement ? <p>청취 승인한 음성이 적용되어 있어요.</p> : <p>청취 승인한 후보를 골라 명시적으로 적용할 수 있어요.</p>}
+              {ttsLoadState === "loading" ? <p>승인한 음성을 불러오는 중이에요.</p> : null}
+              {ttsLoadState === "error" ? (
+                <>
+                  <p>승인한 음성을 불러오지 못했어요. 직접 편집은 계속할 수 있어요.</p>
+                  <Button disabled={disabled} onClick={() => setTtsRetryToken((current) => current + 1)} type="button">승인한 음성 다시 불러오기</Button>
+                </>
+              ) : null}
+              {ttsLoadState === "ready" && !ttsCandidates.length ? <p>이 구간에는 청취 승인된 음성이 없어요.</p> : null}
+              {ttsCandidates.length ? (
+                <label>
+                  승인한 음성
+                  <NativeSelect aria-label="승인한 음성" disabled={disabled} onChange={(event) => setSelectedTtsCandidateId(event.target.value)} value={selectedTtsCandidateId}>
+                    {ttsCandidates.map((candidate, index) => <option key={candidate.candidateId} value={candidate.candidateId}>{`승인 후보 ${index + 1} · ${candidate.sourceText}`}</option>)}
+                  </NativeSelect>
+                </label>
+              ) : null}
+              <Button
+                disabled={disabled || !selectedTtsCandidateId}
+                onClick={() => {
+                  const candidate = ttsCandidates.find((item) => item.candidateId === selectedTtsCandidateId);
+                  if (candidate) emit({ kind: "apply-tts-candidate", segmentId: selectedSegment.segmentId, candidateId: candidate.candidateId, assetId: candidate.assetId });
+                }}
+                type="button"
+              >
+                승인한 음성 적용
+              </Button>
+              {selectedSegment.ttsReplacement ? <Button disabled={disabled} onClick={() => emit({ kind: "clear-tts-candidate", segmentId: selectedSegment.segmentId })} type="button">적용한 음성 해제</Button> : null}
+            </fieldset>
+          ) : null}
         </>
       ) : <p>먼저 편집할 구간을 선택해 주세요.</p>}
 

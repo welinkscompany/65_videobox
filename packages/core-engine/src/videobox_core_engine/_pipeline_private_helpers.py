@@ -377,6 +377,20 @@ class _PipelinePrivateHelpersMixin:
             recommendation_id=recommendation_id,
             decision=decision,
         )
+        rejected_recommendations = [
+            deepcopy(item)
+            for item in timeline.get("rejected_recommendations", [])
+            if isinstance(item, dict)
+            and str(item.get("recommendation_id") or "").strip() != recommendation_id
+        ]
+        if decision == "rejected":
+            rejected_recommendations.append(
+                {
+                    **deepcopy(decided_recommendation),
+                    "decision_state": "rejected",
+                }
+            )
+        timeline["rejected_recommendations"] = rejected_recommendations
         timeline["review_flags"] = filtered_review_flags_after_recommendation_decision(
             timeline=timeline,
             decided_recommendation=decided_recommendation,
@@ -812,6 +826,7 @@ class _PipelinePrivateHelpersMixin:
             project_id=project_id,
             output_mode=timeline.output_mode,
             timeline_payload=timeline_payload,
+            source_session_id=str(session["session_id"]),
             source_session_revision=output_session_revision,
         )
         return {
@@ -1027,6 +1042,11 @@ class _PipelinePrivateHelpersMixin:
                 media_revision=override.get("media_revision"),
                 warning_provenance=override.get("warning_provenance"),
             )
+            payload = recommendation.get("payload")
+            if isinstance(payload, dict):
+                payload["source_override_action_id"] = str(
+                    override.get("source_action_id") or ""
+                ).strip()
             recommendation["auto_apply_allowed"] = False
             recommendation["review_required"] = True
             state["recommendations"].append(recommendation)
