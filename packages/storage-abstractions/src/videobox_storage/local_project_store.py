@@ -1147,9 +1147,9 @@ class LocalProjectStore:
             self.delete_asset(project_id=project_id, asset_id=str(row["script_asset_id"]))
 
     def _materialize_creation_brief_script(self, *, project_id: str, script_filename: str, script_text: str) -> str:
-        directory = self.project_root(project_id) / "inputs" / "scripts"
+        directory = self.project_root(project_id) / "staging" / "creation_briefs"
         directory.mkdir(parents=True, exist_ok=True)
-        staging = directory / f".creation-brief-{uuid.uuid4().hex}-{Path(script_filename).name}"
+        staging = directory / f"{uuid.uuid4().hex}{Path(script_filename).suffix.lower()}"
         try:
             staging.write_text(script_text, encoding="utf-8")
             asset = self.register_asset(

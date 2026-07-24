@@ -98,6 +98,44 @@ def test_creation_brief_api_accepts_utf8_script_upload_only(tmp_path: Path) -> N
     assert rejected.status_code == 400
 
 
+def test_creation_brief_upload_retains_script_under_a_long_windows_project_path(tmp_path: Path) -> None:
+    # Keep the first temporary file below MAX_PATH while making the old
+    # destination-collision UUID prefix cross it on Windows.
+    target_root_length = 125
+    padding_length = max(1, target_root_length - len(str(tmp_path)) - 1)
+    projects_root = tmp_path / ("p" * padding_length)
+    client = TestClient(create_app(projects_root=projects_root))
+    project_id = client.post("/api/projects", json={"name": "Long path upload"}).json()["project_id"]
+    path = f"/api/projects/{project_id}/creation-briefs/upload"
+    request = {
+        "data": {"idempotency_key": "long-path-upload", "capability_profile_json": "{}"},
+        "files": {"script_file": ("owner-script.md", "# 직접 만든 영상".encode("utf-8"), "text/markdown")},
+    }
+
+    created = client.post(path, **request)
+
+    assert created.status_code == 201, created.json()
+    brief = created.json()
+    assert brief["script_filename"] == "owner-script.md"
+    store = LocalProjectStore(projects_root)
+    asset = store.get_asset(project_id=project_id, asset_id=brief["script_asset_id"])
+    retained_path = store.resolve_storage_uri(project_id=project_id, storage_uri=asset["storage_uri"])
+    assert retained_path.suffix == ".md"
+    assert retained_path.read_text(encoding="utf-8") == "# 직접 만든 영상"
+    assert list((store.project_root(project_id) / "staging" / "creation_briefs").iterdir()) == []
+
+    repeated = client.post(path, **request)
+    assert repeated.status_code == 201
+    assert repeated.json()["brief_id"] == brief["brief_id"]
+    assert len(store.list_assets(project_id=project_id)) == 1
+
+    assert client.delete(
+        f"/api/projects/{project_id}/creation-briefs/{brief['brief_id']}"
+    ).status_code == 204
+    assert not retained_path.exists()
+    assert store.list_assets(project_id=project_id) == []
+
+
 def test_creation_brief_api_streaming_upload_rejects_over_one_mebibyte(tmp_path: Path) -> None:
     client = TestClient(create_app(projects_root=tmp_path))
     project_id = client.post("/api/projects", json={"name": "Too large"}).json()["project_id"]
