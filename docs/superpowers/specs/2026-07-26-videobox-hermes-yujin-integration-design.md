@@ -13,6 +13,8 @@ VideoBox 편집기 오른쪽 대화창에서 Hermes 유진과 실제로 대화�
 
 Mem0는 Hermes 유진의 보조 기억장치로만 사용한다. VideoBox 프로젝트·편집 session·timeline·media·review·output 데이터의 기준은 계속 VideoBox DB와 기존 runtime이다.
 
+이 설계의 첫 번째 최적화 목표는 보안 기능의 완결성이 아니라 **사용자가 유튜브 영상 한 편을 더 빨리 완성하는 것**이다. 첫 usable checkpoint에서 실제 Hermes 유진이 RightDock에 답해야 하고, 두 번째 checkpoint에서 현재 영상에 대한 편집 제안을 적용·미리보기 할 수 있어야 한다. 기억, 운영 진단, 고급 hardening은 이 경로를 막지 않는 범위에서 뒤로 배치한다.
+
 ## 2. 현재 확인된 상태
 
 현재 checkout과 로컬 runtime 조사에서 다음 상태를 확인했다.
@@ -30,6 +32,18 @@ Mem0는 Hermes 유진의 보조 기억장치로만 사용한다. VideoBox 프로
 
 따라서 이 작업은 기존 대화창을 새로 만드는 일이 아니라, 이미 영속화된 Director conversation과 안전한 편집 경계를 실제 Hermes 유진에 연결하는 작업이다.
 
+### 2.1 속도 우선 재검토 결과
+
+설계 초안은 다음 세 관점에서 다시 검토했다.
+
+| 관점 | 발견한 갭 | 설계 수정 |
+| --- | --- | --- |
+| 영상 제작자 | 유진과 실제 영상을 편집하는 기능이 마지막 Phase에 있었다. | 첫 Phase에서 실제 대화를 만들고 두 번째 Phase에서 creator tools와 적용을 닫는다. |
+| 빠른 delivery | 전체 baseline과 capability hardening이 첫 대화의 선행 조건이었다. | Phase 0을 접촉 경계 focused audit로 줄이고 고급 reliability를 Phase C로 이동한다. |
+| output-to-source reverse trace | Mem0는 최종 영상 생성 경로에 없는데 creator tools보다 먼저였다. | creator tools를 Phase B, Mem0를 Phase D로 이동한다. |
+
+직접 DB/media 접근 금지, secret 보호, 자동 apply 금지, current-revision 적용, manual fallback은 속도와 교환하지 않는 최소 안전선으로 유지한다.
+
 ## 3. 범위
 
 ### 3.1 포함
@@ -45,6 +59,7 @@ Mem0는 Hermes 유진의 보조 기억장치로만 사용한다. VideoBox 프로
 - 현재 프로젝트를 읽는 최소 allowlist tools
 - B-roll/BGM/SFX/TTS/caption/검수 제안 skills
 - 기존 EditorCommandPort와 current-revision 적용 경계 재사용
+- 작동하는 기능을 먼저 닫는 vertical-slice delivery
 - 자동화된 코드리뷰, 계획 갭 검증, source-to-runtime 역방향 검증
 - local/test 외부 provider call 0
 
@@ -167,6 +182,8 @@ SSE를 선택하는 이유는 다음과 같다.
 
 Agent Gateway는 Hermes와 VideoBox 사이의 유일한 연결이다.
 
+첫 usable checkpoint에서는 tool access가 없는 최소 transport로 시작할 수 있다. 이 단계의 Gateway는 user text와 response event만 중계하며 VideoBox DB나 project context를 읽지 않는다. Phase B에서 creator tool을 연결할 때 short-lived read capability와 allowlisted context를 추가한다. 이렇게 하면 capability hardening 때문에 첫 대화를 늦추지 않으면서, 임시 direct DB/media 접근도 만들지 않는다.
+
 ### 8.1 첫 allowlist
 
 첫 단계에서 허용하는 도구는 읽기 또는 실행 없는 제안에 한정한다.
@@ -238,7 +255,7 @@ Hermes는 mutation tool을 직접 호출하지 않는다.
 
 ## 10. 영상 제작 skills
 
-Phase D의 유진 skills는 기존 backend와 EditorCommandPort가 실제 지원하는 범위만 노출한다.
+Phase B의 유진 skills는 기존 backend와 EditorCommandPort가 실제 지원하는 범위만 노출한다.
 
 - 장면과 media 상태 설명
 - B-roll 후보 비교와 추천 이유
@@ -291,10 +308,10 @@ backend가 지원하지 않는 effect, independent caption timing, advanced keyf
 
 ### 12.2 하위 계획서
 
-1. `2026-07-26-videobox-hermes-yujin-runtime-dashboard.md`
-2. `2026-07-26-videobox-hermes-yujin-realtime-chat.md`
-3. `2026-07-26-videobox-hermes-yujin-mem0-memory.md`
-4. `2026-07-26-videobox-hermes-yujin-creator-tools.md`
+1. `2026-07-26-videobox-hermes-yujin-runtime-chat-vertical-slice.md`
+2. `2026-07-26-videobox-hermes-yujin-creator-tools.md`
+3. `2026-07-26-videobox-hermes-yujin-realtime-reliability.md`
+4. `2026-07-26-videobox-hermes-yujin-mem0-memory.md`
 
 각 하위 계획서는 부모 링크, 선행 gate, 입력/출력 계약, TDD task, 검증 명령, closeout evidence, 다음 phase handoff를 갖는다. 하위 계획은 총괄 범위를 다시 정의하지 않는다.
 
@@ -327,49 +344,112 @@ backend가 지원하지 않는 effect, independent caption timing, advanced keyf
 - 기존 VideoBox MVP: 기술 상태와 Task 9 사람 acceptance를 별도로 보고한다.
 - 새 Hermes 유진 통합: 총괄 계획서의 고정 Task 수로 별도 보고한다.
 
-## 14. 실행 순서와 gate
+## 14. 사용자 결과에서 역방향으로 정한 실행 순서
 
-### Phase 0 — 기준선 감사
+### 14.1 최종 사용자 결과
 
-production code를 바꾸기 전에 현재 HEAD를 기준으로 다음을 기록한다.
+사용자가 원하는 결과는 다음 한 문장으로 고정한다.
+
+> 내 영상을 열고 유진에게 편집을 요청하면, 유진이 현재 영상을 보고 B-roll·음악·효과음·TTS·자막 수정안을 제안하고, 내가 선택한 변경을 적용해 미리 본 뒤 유튜브용 MP4 또는 CapCut 초안으로 내보낼 수 있다.
+
+이 결과에서 source 방향으로 거꾸로 추적하면 필요한 연결은 다음 순서다.
+
+```text
+유튜브용 MP4 / CapCut 초안
+← current exact/final output
+← current editing session과 EditorCommandPort
+← 사용자가 승인한 typed proposal
+← 현재 project/timeline/media를 읽은 creator tools
+← Hermes 유진 응답
+← RightDock 대화
+← 실행 중인 Hermes agent + Soul + provider 설정
+```
+
+Mem0, 고급 Dashboard 진단, 분산 runtime, 완전한 capability lifecycle은 이 첫 편집 경로의 선행 조건이 아니다.
+
+### 14.2 속도와 안전의 우선순위
+
+첫 작동을 늦추더라도 반드시 지킬 안전장치는 다섯 개다.
+
+1. secret, OAuth state, raw memory를 source·로그·UI에 노출하지 않는다.
+2. Hermes에 VideoBox DB와 media mount를 주지 않는다.
+3. Hermes가 편집 mutation·render·export를 직접 실행하지 않는다.
+4. 적용은 사용자가 고른 proposal과 current-revision EditorCommandPort를 통한다.
+5. Hermes가 막혀도 수동 편집이 계속된다.
+
+다음 항목은 첫 usable checkpoint 뒤로 미룰 수 있다.
+
+- reconnect 이후 token 단위 stream resume
+- cancel과 복수 in-flight run 관리
+- capability issuer/revoke 운영 UI
+- 상세 agent observability와 장기 audit 조회
+- Mem0 memory 관리 화면
+- 모든 Phase에서의 full release audit 반복
+- 영상 경로를 건드리지 않은 chat-only slice의 600초 FFmpeg/PyCapCut 재실행
+
+### Phase 0 — 짧은 기준선 감사
+
+production code를 바꾸기 전에 현재 HEAD를 기준으로 새 통합이 접촉하는 경계만 기록한다.
 
 - Compose/source/live container drift
 - Dashboard/OAuth/model/memory 경계
 - Soul/package/runtime 설치 gap
 - 현재 RightDock→Director API→LocalOnlyRuntimeService reverse trace
 - capability/gateway 배포 gap
-- full Python/frontend/E2E/build baseline
+- Hermes/Director/Compose focused test baseline
 - 보호된 임시 폴더와 QA artifact 분류
 
-Task 22 전체를 처음부터 다시 리뷰하지 않는다. Task 22에서 검증하지 않았고 새 통합이 실제로 접촉하는 Hermes, conversation, gateway, network, memory 경계를 집중 감사한다.
+Task 22 전체를 처음부터 다시 리뷰하지 않는다. 전체 Python/frontend/E2E/build는 첫 usable checkpoint인 Phase A closeout에서 한 번 실행한다. Phase 0은 문서만 길어지지 않도록 finding, severity, owner, 영향을 받는 Phase만 남긴다.
 
-### Phase A — Hermes 유진 runtime, Soul, Dashboard
+### Phase A — 작동하는 유진 vertical slice
 
 Phase A 종료 조건:
 
 - 하나의 pinned runtime image
-- current Compose와 live service 정합성
-- 유진 Agent Package runtime 설치·digest 검증
+- current Compose와 실제 agent service 정합성
+- 최소 유진 Soul/profile runtime 설치·로드 검증
 - owner-operated OAuth/model 설정 경로
-- Dashboard와 agent의 건강 상태 분리
-- restart와 fail-closed 복구
+- Dashboard에서 agent readiness 확인
+- RightDock→VideoBox API→최소 Gateway→Hermes→SSE text 응답 1회
+- assistant 최종 문장의 기존 Director conversation 저장·새로고침 복구
+- agent 장애 시 수동 편집 유지
 - VideoBox DB/media/internal network 비접속
+- focused RED/GREEN 뒤 full Python/frontend/E2E/build baseline
 
-### Phase B — Agent Gateway와 실시간 대화
+Phase A에서는 creator tool과 Mem0를 연결하지 않는다. 첫 성공 기준은 “RightDock에서 실제 유진과 대화된다”다. SSE는 `run_started`, `text_delta`, `run_completed`, `blocked`의 최소 event만 지원하고 고급 reconnect/cancel은 Phase C로 남긴다.
+
+### Phase B — 실제 영상 편집 creator tools
 
 Phase B 종료 조건:
 
-- gateway-only transport
-- POST+SSE 대화
-- durable transcript/retry/reload
-- project/session/route epoch fence
-- manual fallback
-- local/test external provider call 0
-- 실제 owner-operated Hermes canary는 자동 test와 별도 증거로 기록
+- selected-project/session/timeline/media allowlist read tools
+- B-roll/BGM/SFX/TTS/caption/검수 skills
+- 현재 project/session/revision을 포함한 typed proposal
+- 사용자가 고른 proposal의 기존 EditorCommandPort 적용
+- stale proposal과 project/session 전환 차단
+- 적용 후 authoritative refresh와 exact preview
+- current final/CapCut output까지 reverse trace
+- backend가 지원하지 않는 control 0
+- 관련 focused/full regression, build, 실제 짧은 FFmpeg output smoke
 
-### Phase C — Mem0 보조 기억
+Phase B가 끝나면 Mem0가 없어도 사용자가 유진과 실제 영상을 편집할 수 있어야 한다.
+
+### Phase C — 실시간 대화 신뢰성과 운영 정리
 
 Phase C 종료 조건:
+
+- SSE reconnect/resume, retry, cancel, duplicate, terminal event
+- project/session/route epoch와 stream ownership 보강
+- short-lived read capability issuer/consume/replay/revoke
+- Agent Package 전체 digest/tamper verifier
+- Dashboard와 agent 건강 상태·재시작·복구 분리
+- provider timeout과 agent restart 뒤 manual fallback
+- local/test external provider call 0
+- 전체 conversation/gateway/network regression
+
+### Phase D — Mem0 보조 기억
+
+Phase D 종료 조건:
 
 - Dashboard에서 owner-operated Mem0 Platform 설정
 - memory candidate 승인
@@ -377,17 +457,6 @@ Phase C 종료 조건:
 - 대화 retrieval 반영
 - SSOT·권한·민감정보 분리
 - memory 장애 시 대화와 편집 지속
-
-### Phase D — 영상 제작 skills/tools
-
-Phase D 종료 조건:
-
-- 지원되는 read tools와 typed proposals
-- B-roll/BGM/SFX/TTS/caption/검수 skills
-- explicit apply를 기존 EditorCommandPort에 연결
-- unsupported control 0
-- revision conflict와 stale proposal 복구
-- exact/final/CapCut 역방향 trace
 
 ### 최종 통합 gate
 
@@ -405,6 +474,17 @@ Phase D 종료 조건:
 ### 15.1 TDD
 
 각 하위 Task는 RED를 먼저 관찰하고 GREEN 뒤 관련 회귀를 실행한다. live provider가 필요한 계약도 fake transport와 fixed event fixture로 RED/GREEN을 고정한다.
+
+속도를 위해 모든 작은 Task마다 전체 suite를 반복하지 않는다.
+
+- Task 진행 중: 해당 contract focused test
+- Phase A closeout: full Python/frontend/E2E/build
+- Phase B closeout: full regression, build, 실제 짧은 edit→preview→output smoke
+- Phase C closeout: conversation/gateway/network full regression
+- Phase D closeout: memory focused/full regression
+- 최종 closeout: 전체 release audit와 필요한 long-form smoke
+
+영상 renderer를 건드리지 않은 Phase A/C/D에서는 600초 FFmpeg/PyCapCut QA를 기계적으로 반복하지 않는다.
 
 ### 15.2 자동 검증
 
@@ -435,9 +515,9 @@ live 검증은 자동 test와 섞지 않는다.
 
 이 통합은 다음 조건을 모두 만족할 때 완료다.
 
-1. 유진 Agent Package의 Soul/profile/skills가 실제 Hermes runtime에서 검증된다.
-2. VideoBox RightDock에서 실제 유진 응답을 stream으로 받는다.
-3. 새로고침과 재시도 뒤에도 conversation이 복구된다.
+1. Phase A에서 VideoBox RightDock가 실제 유진 응답을 stream으로 받고 새로고침으로 복구한다.
+2. Phase B에서 유진의 제안으로 B-roll/BGM/SFX/TTS/caption 중 지원되는 변경을 적용하고 exact preview와 output을 만든다.
+3. 유진 Agent Package의 Soul/profile/skills가 실제 Hermes runtime에서 검증된다.
 4. 프로젝트 전환 뒤 오래된 응답이 표시되거나 적용되지 않는다.
 5. 유진이 막혀도 사용자는 수동으로 편집할 수 있다.
 6. Mem0는 승인된 보조 기억만 저장·검색·삭제한다.
@@ -465,3 +545,7 @@ Task 22는 이미 editor/output release audit을 통과했다. 전체를 다시 
 ### Mem0에 프로젝트 정보를 넣으면 더 똑똑하지 않은가?
 
 단기 응답은 좋아질 수 있지만 오래된 revision과 잘못된 승인 상태가 기억으로 남아 편집 사실과 충돌한다. 프로젝트 상태는 매번 VideoBox에서 읽고, Mem0에는 장기 선호만 보관한다.
+
+### 안전 기능을 뒤로 미루면 위험하지 않은가?
+
+직접 DB/media 접근, secret 노출, 자동 apply, stale mutation, 수동 fallback 부재는 첫 대화 전에도 허용하지 않는다. 반면 stream resume, 장기 audit UI, memory 관리, 모든 Phase의 long-form QA는 첫 편집을 막는 핵심 안전장치가 아니다. 전자는 즉시 지키고 후자는 작동하는 vertical slice 뒤에 닫는다.
