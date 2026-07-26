@@ -1,6 +1,13 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 301. 2026-07-26 Hermes Yujin A2 profile closeout`을 우선 적용한다. Task 22 기술 closeout 근거는 `## 300`을 유지하며, 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 302. 2026-07-26 Hermes Yujin Phase A non-live technical closeout`을 우선 적용한다. Task 22 기술 closeout 근거는 `## 300`을 유지하며, 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+
+## 302. 2026-07-26 Hermes Yujin Phase A non-live technical closeout
+
+- `[x] A4 승인`: persistent RightDock chat, durable reload, route-owned draft/history/run/candidate/scroll, stale route fence, manual fallback, one-player preview 경계를 비라이브 기술 checkpoint로 승인했다. Phase A는 **4/4 (100.0%)**, runtime/chat child는 **6/6 (100.0%)**, initiative는 **6/20 (30.0%)**, 잔여 **70.0%**다.
+- `검증`: focused frontend **5 files / 146 passed**, 전체 frontend **50 files / 622 passed**, editor E2E **8 passed**, production build, focused backend **133 passed**, Python 수집 **1845**, runtime/profile/plan-state/zero-tool/provenance verifier와 network-free canary가 통과했다. 전체 Python은 Python 변경이 없어서 재실행하지 않았으며 직전 `4dc6d8c22`의 **1824 passed, 21 skipped, warning 1건**을 별도 근거로 유지한다.
+- `운영 증거 분리`: live provider canary와 실제 `videobox-hermes-yujin` service-stop/manual environment proof는 **실행하지 않았고 통과로 간주하지 않는다**. fake unavailable·dock close/reopen·manual control 테스트는 기술 fallback을 증명하지만 실제 환경 drill을 대체하지 않는다. 따라서 이는 별도 runtime/provider 구성이 있을 때 사용할 첫 useful checkpoint의 코드 완료이지 live 실증 완료가 아니다.
+- `다음 작업`: **B1만** 진행한다. Task 9 사람/환경 acceptance와 기존 공식 누적 **9/22 (40.9%)**, 잔여 **59.1%**는 변경하지 않는다.
 
 ## 301. 2026-07-26 Hermes Yujin A2 profile closeout
 

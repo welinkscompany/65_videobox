@@ -4,7 +4,7 @@
 
 A4의 RightDock 유진 대화 구현과 비라이브 검증은 끝났다. 사용자가 보낸 말과 유진의 최종 응답은 기존 Director conversation 저장소에서 다시 불러오며, 스트리밍 중에는 하나의 임시 assistant bubble만 갱신한다. Inspector를 닫아도 대화와 실행이 끊기지 않고, project/session route가 바뀌면 이전 route의 늦은 응답은 화면과 저장 상태를 바꾸지 못한다. 유진이 unavailable이어도 입력 초안과 기존 수동 편집 기능은 유지한다.
 
-다만 실제 인증 정보와 승인된 provider/runtime/project/session이 없어 live canary와 실제 Hermes service stop 검증은 실행하지 않았다. 따라서 이 문서는 **구현·비라이브 gate·독립 재검토 완료, owner/상위 작업 승인 대기** 상태다. A4 체크박스와 공식 진행률은 아직 변경하지 않았다.
+실제 인증 정보와 승인된 provider/runtime/project/session이 없어 live canary와 실제 Hermes service stop 검증은 실행하지 않았다. 이 운영 증거를 통과로 간주하지 않는 조건으로 **A4 비라이브 기술 closeout은 승인됐다**. 이는 별도 환경이 구성되면 사용할 첫 useful checkpoint의 코드 완료이지 live 실증 완료가 아니다.
 
 ## 작업 위치와 보호 상태
 
@@ -110,20 +110,20 @@ Python warning 1건은 기존 Starlette `multipart` pending deprecation이다. f
 
 - live canary: **미실행, 통과로 간주하지 않음**
   - 이유: 승인된 인증 정보, provider/runtime, test project/session이 제공되지 않았다.
-- 실제 `videobox-hermes-yujin` service stop/fallback: **미실행**
+- 실제 `videobox-hermes-yujin` service-stop/manual environment proof: **미실행, 통과로 간주하지 않음**
   - 이유: 이번 turn에서 실제 서비스를 시작하지 않았고 외부 runtime mutation 권한도 확대하지 않았다.
-  - 대신 fake unavailable 응답과 스트리밍 중 dock close/reopen 역방향 테스트로 수동 편집 control 유지와 route ownership을 검증했다.
+  - fake unavailable 응답과 스트리밍 중 dock close/reopen 역방향 테스트로 기술 fallback과 수동 편집 control 유지를 검증했지만 실제 환경 drill을 대체하지 않는다.
 
-## 진행률과 승인 대기
+## 진행률과 승인 완료
 
-- A4 master/child checkbox: **`[ ]` 유지**
-- Phase A: **3/4 유지**
-- Hermes Yujin initiative: **5/20 (25.0%), 잔여 75.0% 유지**
-- runtime/chat child: **5/6 (83.3%), 잔여 16.7% 유지**
+- A4 master/child checkbox: **`[x]`**
+- Phase A: **4/4 (100.0%)**
+- Hermes Yujin initiative: **6/20 (30.0%), 잔여 70.0%**
+- runtime/chat child: **6/6 (100.0%), 잔여 0.0%**
 - 기존 VideoBox 공식 누적: **9/22 (40.9%), 잔여 59.1% 유지**
 
-owner/상위 작업이 비라이브 증거와 live canary 미실행을 수용해 A4 closeout을 승인하면, master/child/status의 A4와 진행률을 같은 후속 commit에서 동기화해야 한다. 승인 전에는 B1을 시작하지 않는다.
+owner/상위 작업은 비라이브 기술 증거와 운영 증거 미실행의 분리를 수용해 A4 closeout을 승인했다. live provider canary와 실제 service-stop/manual environment proof는 별도 미실행 상태로 남는다.
 
 ## 다음 goal
 
-**A4 closeout 승인 여부만 결정한다.** 승인 시 A4 master/child/status를 동기화하고 Phase A를 4/4, initiative를 6/20, runtime/chat child를 6/6으로 갱신한다. 승인하지 않으면 필요한 live runtime/credential/project/session을 별도 권한으로 준비해 `scripts/smoke-hermes-yujin-chat.ps1 -Live`와 실제 service-stop fallback 증거를 추가한다. 어느 경우에도 승인 전 B1이나 자동 proposal/apply를 시작하지 않는다.
+**B1만 시작한다.** allowlisted current-revision creator context와 typed read DTO 범위를 먼저 확인하고, 자동 proposal/apply로 확대하지 않는다. live provider canary와 실제 service-stop/manual environment proof는 별도 운영 증거로 추적하며 완료로 오인하지 않는다.

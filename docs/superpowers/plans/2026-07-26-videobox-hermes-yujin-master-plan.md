@@ -69,7 +69,7 @@ Status symbols:
 
 Only `[x]` counts as complete. Reopen `[x]` to `[~]` if later evidence finds a regression. The child task and this mirror must be updated in the same closeout commit.
 
-Current initiative progress: **5/20 (25.0%), remaining 75.0%**.
+Current initiative progress: **6/20 (30.0%), remaining 70.0%**.
 
 The existing VideoBox official cumulative status remains separately fixed at **9/22 (40.9%), remaining 59.1%** until Task 9 human/environment acceptance. Do not combine that denominator with this initiative.
 
@@ -80,12 +80,12 @@ The existing VideoBox official cumulative status remains separately fixed at **9
 - [x] **P0-1** Confirm live/source drift, official Hermes CLI/wire contracts, branch/upstream, protected paths, and current dependency pins.
 - [x] **P0-2** Record reverse runtime trace and focused baseline; add the plan-state consistency verifier.
 
-### Phase A — working Yujin chat vertical slice (3/4)
+### Phase A — working Yujin chat vertical slice (4/4)
 
 - [x] **A1** Add the isolated official Hermes Yujin runtime topology and deterministic startup verification.
 - [x] **A2** Install the versioned Yujin Soul/profile/skills package and verify ownership plus secret-free contents.
 - [x] **A3** Implement the minimal authenticated Hermes JSON-RPC/WebSocket client and API SSE run boundary.
-- [ ] **A4** Connect persistent RightDock chat, manual fallback, reload proof, live canary, and Phase A closeout.
+- [x] **A4** Connect persistent RightDock chat, manual fallback, reload proof, the bounded live-canary script, and the Phase A non-live technical closeout.
 
 ### Phase B — creator tools and explicit apply (0/5)
 
@@ -126,7 +126,7 @@ P0-1 → P0-2
 → F1
 ```
 
-The first useful-owner checkpoint is **A4**: the user can hold a real Yujin conversation inside RightDock and can still edit manually if Yujin is down.
+The first useful-owner checkpoint is **A4**. Its non-live technical code and gates are complete: when the separately configured runtime/provider environment is available, RightDock has the conversation path and manual fallback. This closeout does not claim that a live provider conversation or an actual Hermes service-stop drill was executed.
 
 The first end-to-end creator checkpoint is **B5**: the user can request an edit, inspect a typed candidate, explicitly apply it, preview it, and reach the existing output path.
 
@@ -169,8 +169,8 @@ External canaries are separate named commands. Unit, integration, frontend, and 
 - focused Director conversation persistence tests
 - focused RightDock/route tests
 - Compose/profile verifiers
-- one explicit local live chat canary, only after runtime credentials are configured
-- manual editor fallback while Hermes is stopped
+- one explicit local live chat canary, only after runtime credentials are configured; this remains operationally unrun in the approved non-live technical closeout
+- manual editor fallback while Hermes is actually stopped; deterministic fallback tests passed, while the real service-stop/manual environment drill remains operationally unrun
 - `git diff --check`
 
 ### Phase B gate

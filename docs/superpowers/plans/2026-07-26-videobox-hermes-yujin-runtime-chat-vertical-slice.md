@@ -13,7 +13,7 @@
 Parent: `docs/superpowers/plans/2026-07-26-videobox-hermes-yujin-master-plan.md`
 Design: `docs/superpowers/specs/2026-07-26-videobox-hermes-yujin-integration-design.md`
 
-Child progress: **5/6 tasks (83.3%), remaining 16.7%**. These six tasks are master IDs P0-1, P0-2, A1, A2, A3, and A4.
+Child progress: **6/6 tasks (100.0%), remaining 0.0%**. These six tasks are master IDs P0-1, P0-2, A1, A2, A3, and A4.
 
 ## P0-1 — Confirm drift and official runtime contracts
 
@@ -376,7 +376,9 @@ under Phase C task C1. A3 does not claim that broader restart recovery.
 
 ## A4 — Connect persistent RightDock chat and close Phase A
 
-- [ ] **A4** Connect persistent RightDock chat, manual fallback, reload proof, live canary, and Phase A closeout.
+- [x] **A4** Connect persistent RightDock chat, manual fallback, reload proof, the bounded live-canary script, and the Phase A non-live technical closeout.
+
+**Approved closeout basis:** A4 is complete as a non-live technical checkpoint. Persistent chat, durable reload, route ownership, manual fallback tests, full frontend/build/E2E, focused backend, and static verifiers passed. The live provider canary and an actual `videobox-hermes-yujin` service-stop/manual environment drill were not executed and are not recorded as passed.
 
 **Files:**
 
@@ -473,4 +475,4 @@ export type YujinRunState =
    git push origin codex/videobox-container-compatibility
    ```
 
-Expected Phase A outcome: real Yujin chat works in RightDock when configured; final messages survive reload; closing the Inspector does not lose route-owned state; stopping Hermes does not block manual editing.
+Expected Phase A outcome when separately configured: real Yujin chat works in RightDock; final messages survive reload; closing the Inspector does not lose route-owned state; stopping Hermes does not block manual editing. This approved closeout establishes the code-complete non-live checkpoint, not live provider or actual service-stop proof.
