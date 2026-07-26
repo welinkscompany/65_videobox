@@ -210,6 +210,217 @@ def test_split_sensitive_markers_are_blocked_before_any_marker_bytes_escape(
     assert chunks[1] not in published
 
 
+def _stream_events_for_chunks(chunks: tuple[str, ...], final_text: str) -> list[dict]:
+    class ChunkedHermes:
+        async def stream_prompt(self, *, text: str):
+            for chunk in chunks:
+                yield HermesRpcEvent("message.delta", chunk)
+            yield HermesRpcEvent("message.complete", final_text)
+
+    async def scenario() -> list[dict]:
+        return [
+            json.loads(line.decode())
+            async for line in _stream_public_lines(ChunkedHermes(), text="hello")
+        ]
+
+    return asyncio.run(scenario())
+
+
+def _published_text(events: list[dict]) -> str:
+    return "".join(
+        event["text"]
+        for event in events
+        if event["event_type"] == "text_delta"
+    )
+
+
+def test_sensitive_assignment_with_whitespace_longer_than_rolling_window_is_blocked() -> None:
+    sentinel = "PRIVATE"
+    chunks = (
+        "token",
+        " " * 300,
+        f"={sentinel}",
+        "z" * 300,
+    )
+
+    events = _stream_events_for_chunks(chunks, "".join(chunks))
+
+    assert events[-1] == {
+        "event_type": "blocked",
+        "text": "",
+        "retryable": True,
+    }
+    assert sentinel not in _published_text(events)
+
+
+@pytest.mark.parametrize(
+    ("label", "separator"),
+    [
+        ("authorization", ":"),
+        ("proxy-authorization", ":"),
+        ("cookie", ":"),
+        ("set-cookie", ":"),
+        ("token", "="),
+        ("password", "="),
+        ("passwd", "="),
+        ("secret", "="),
+        ("api key", "="),
+        ("api_key", "="),
+        ("api-key", "="),
+        ("provider", "="),
+        ("oauth", "="),
+        ("oauth token", "="),
+        ("access token", "="),
+        ("refresh token", "="),
+        ("client secret", "="),
+        ("mem0", "="),
+        ("mem0 api key", "="),
+    ],
+)
+def test_sensitive_label_quarantine_survives_arbitrary_whitespace(
+    label: str,
+    separator: str,
+) -> None:
+    sentinel = "PRIVATE"
+    safe_prefix = ("s" * 300) + "\n"
+    chunks = (
+        safe_prefix + label,
+        " \t" * 150,
+        separator,
+        sentinel,
+        "z" * 300,
+    )
+
+    events = _stream_events_for_chunks(chunks, "".join(chunks))
+
+    assert events[-1]["event_type"] == "blocked"
+    assert sentinel not in _published_text(events)
+
+
+def test_bearer_quarantine_survives_arbitrary_whitespace() -> None:
+    sentinel = "PRIVATE"
+    safe_prefix = ("s" * 300) + "\n"
+    chunks = (
+        safe_prefix + "bearer",
+        " \t" * 150,
+        sentinel,
+        "z" * 300,
+    )
+
+    events = _stream_events_for_chunks(chunks, "".join(chunks))
+
+    assert events[-1]["event_type"] == "blocked"
+    assert sentinel not in _published_text(events)
+
+
+@pytest.mark.parametrize(
+    "label_chunks",
+    [
+        ("api", "key"),
+        ("oauth", "token"),
+        ("access", "token"),
+        ("refresh", "token"),
+        ("client", "secret"),
+        ("mem0", "api", "key"),
+    ],
+)
+def test_compound_sensitive_prefix_quarantine_survives_long_internal_gaps(
+    label_chunks: tuple[str, ...],
+) -> None:
+    sentinel = "PRIVATE"
+    safe_prefix = ("s" * 300) + "\n"
+    chunks: list[str] = [safe_prefix + label_chunks[0]]
+    for label_chunk in label_chunks[1:]:
+        chunks.extend((" \t" * 150, label_chunk))
+    chunks.extend((" \t" * 150, "=", sentinel, "z" * 300))
+    chunk_tuple = tuple(chunks)
+
+    events = _stream_events_for_chunks(chunk_tuple, "".join(chunk_tuple))
+
+    assert events[-1]["event_type"] == "blocked"
+    assert sentinel not in _published_text(events)
+
+
+@pytest.mark.parametrize(
+    "unsafe_text",
+    [
+        "authorization : PRIVATE",
+        "cookie\t:\tPRIVATE",
+        "bearer PRIVATE",
+        "api key = PRIVATE",
+        "oauth token = PRIVATE",
+        "mem0 api key = PRIVATE",
+        "/opt/data/PRIVATE",
+        "/videobox-data/PRIVATE",
+        "/etc/PRIVATE",
+        "/home/PRIVATE",
+        "C:\\PRIVATE",
+    ],
+)
+def test_sensitive_syntax_fuzz_like_split_points_never_publish_sentinel(
+    unsafe_text: str,
+) -> None:
+    sentinel = "PRIVATE"
+    safe_prefix = ("s" * 300) + "\n"
+    for split_at in range(1, len(unsafe_text)):
+        chunks = (
+            safe_prefix + unsafe_text[:split_at],
+            unsafe_text[split_at:],
+            "z" * 300,
+        )
+        events = _stream_events_for_chunks(chunks, "".join(chunks))
+        assert events[-1]["event_type"] == "blocked"
+        assert sentinel not in _published_text(events)
+
+
+def test_unresolved_sensitive_quarantine_has_a_fail_closed_memory_cap() -> None:
+    safe_prefix = ("s" * 300) + "\n"
+    chunks = (safe_prefix + "token", " " * 5_000)
+
+    events = _stream_events_for_chunks(chunks, "".join(chunks))
+
+    assert events[-1]["event_type"] == "blocked"
+    published = _published_text(events)
+    assert published
+    assert "token" not in published
+
+
+@pytest.mark.parametrize(
+    "safe_text",
+    [
+        ("ordinary " * 2_000),
+        ("authorization is required. " * 600),
+        ("cookie preferences are optional. " * 500),
+        ("a token bucket controls throughput. " * 600),
+    ],
+)
+def test_long_non_sensitive_prose_still_streams_incrementally(
+    safe_text: str,
+) -> None:
+    class BarrierHermes:
+        def __init__(self) -> None:
+            self.release_completion = asyncio.Event()
+
+        async def stream_prompt(self, *, text: str):
+            yield HermesRpcEvent("message.delta", safe_text)
+            await self.release_completion.wait()
+            yield HermesRpcEvent("message.complete", safe_text)
+
+    async def scenario() -> tuple[dict, list[dict]]:
+        hermes = BarrierHermes()
+        lines = _stream_public_lines(hermes, text="hello")
+        first = json.loads((await asyncio.wait_for(anext(lines), timeout=1)).decode())
+        assert not hermes.release_completion.is_set()
+        hermes.release_completion.set()
+        rest = [json.loads(line.decode()) async for line in lines]
+        return first, rest
+
+    first, rest = asyncio.run(scenario())
+    assert first["event_type"] == "text_delta"
+    assert _published_text([first, *rest]) == safe_text
+    assert rest[-1] == {"event_type": "run_completed", "text": safe_text}
+
+
 def test_single_oversized_hermes_chunk_fails_closed() -> None:
     class OversizedHermes:
         async def stream_prompt(self, *, text: str):

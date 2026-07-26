@@ -24,16 +24,36 @@ class GatewayRunRequest(BaseModel):
     text: str = Field(min_length=1, max_length=20_000)
 
 
+_ASSIGNMENT_LABEL = (
+    r"(?:authorization|proxy-authorization|cookie|set-cookie"
+    r"|password|passwd|token|secret|provider"
+    r"|api(?:[\s_-]*key)"
+    r"|oauth(?:[\s_-]+token)?"
+    r"|(?:access|refresh)[\s_-]+token"
+    r"|client[\s_-]+secret"
+    r"|mem0(?:[\s_-]+api[\s_-]*key)?)"
+)
 _UNSAFE_OUTPUT = re.compile(
-    r"(?i)(?:authorization|proxy-authorization|cookie|set-cookie)\s*:"
+    rf"(?i){_ASSIGNMENT_LABEL}\s*[:=]"
     r"|\bbearer\s+[^\s]+"
-    r"|(?:password|passwd|token|secret|api[_-]?key|provider)\s*[:=]"
     r"|/(?:opt/data|videobox-data|etc)(?:/|\\|\b)"
     r"|(?:^|\s)[a-z]:[\\/]|/home/",
+)
+_SENSITIVE_START = re.compile(
+    r"(?i)(?:proxy-authorization|authorization|set-cookie|cookie|bearer"
+    r"|password|passwd|provider|token|secret"
+    r"|api[_-]?key|api"
+    r"|oauth[_-]token|oauth"
+    r"|access[_-]token|access"
+    r"|refresh[_-]token|refresh"
+    r"|client[_-]secret|client"
+    r"|mem0[_-]api[_-]?key|mem0)"
+    r"(?![a-z0-9_])"
 )
 _MAX_PUBLIC_TEXT_BYTES = 200_000
 _MAX_PUBLIC_EVENTS = 512
 _QUARANTINE_CHARS = 256
+_MAX_UNRESOLVED_QUARANTINE_BYTES = 4_096
 _MAX_PUBLIC_DELTA_BYTES = 32_000
 
 
@@ -80,7 +100,16 @@ async def _stream_public_lines(hermes_client, *, text: str) -> AsyncIterator[byt
                     raise ValueError("gateway_output_unsafe")
                 assembled += event.text
                 assembled_bytes += chunk_bytes
-                safe_count = max(0, len(candidate) - _QUARANTINE_CHARS)
+                unresolved_at = _earliest_unresolved_sensitive_start(candidate)
+                if unresolved_at is None:
+                    safe_count = max(0, len(candidate) - _QUARANTINE_CHARS)
+                else:
+                    safe_count = unresolved_at
+                    if (
+                        len(candidate[unresolved_at:].encode("utf-8"))
+                        > _MAX_UNRESOLVED_QUARANTINE_BYTES
+                    ):
+                        raise ValueError("gateway_output_unsafe")
                 safe_prefix = candidate[:safe_count]
                 quarantine = candidate[safe_count:]
                 if safe_prefix:
@@ -110,6 +139,130 @@ async def _stream_public_lines(hermes_client, *, text: str) -> AsyncIterator[byt
             raise ValueError("gateway_completion_missing")
     except Exception:
         yield b'{"event_type":"blocked","text":"","retryable":true}\n'
+
+
+def _earliest_unresolved_sensitive_start(text: str) -> int | None:
+    """Find content that must stay private until its syntax is resolved."""
+
+    for match in _SENSITIVE_START.finditer(text):
+        label = match.group(0).lower()
+        label_end = match.end()
+
+        if label == "bearer":
+            if label_end == len(text):
+                return match.start()
+            if text[label_end].isspace():
+                next_nonspace = _skip_whitespace(text, label_end)
+                if next_nonspace == len(text):
+                    return match.start()
+            continue
+
+        if label == "api":
+            state, label_end = _scan_label_extension(
+                text,
+                label_end,
+                expected="key",
+            )
+            if state == "unresolved":
+                return match.start()
+            if state == "resolved":
+                continue
+        elif label in {"access", "refresh"}:
+            state, label_end = _scan_label_extension(
+                text,
+                label_end,
+                expected="token",
+            )
+            if state == "unresolved":
+                return match.start()
+            if state == "resolved":
+                continue
+        elif label == "client":
+            state, label_end = _scan_label_extension(
+                text,
+                label_end,
+                expected="secret",
+            )
+            if state == "unresolved":
+                return match.start()
+            if state == "resolved":
+                continue
+        elif label == "oauth":
+            state, extension_end = _scan_label_extension(
+                text,
+                label_end,
+                expected="token",
+            )
+            if state == "unresolved":
+                return match.start()
+            if state == "complete":
+                label_end = extension_end
+        elif label == "mem0":
+            state, extension_end = _scan_mem0_extension(text, label_end)
+            if state == "unresolved":
+                return match.start()
+            if state == "complete":
+                label_end = extension_end
+
+        delimiter_at = _skip_whitespace(text, label_end)
+        if delimiter_at == len(text):
+            return match.start()
+    return None
+
+
+def _scan_label_extension(
+    text: str,
+    start: int,
+    *,
+    expected: str,
+) -> tuple[str, int]:
+    if start == len(text):
+        return ("unresolved", start)
+    if text[start] in ":=":
+        return ("resolved", start)
+    if not (text[start].isspace() or text[start] in "_-"):
+        return ("resolved", start)
+
+    word_at = start
+    while word_at < len(text) and (
+        text[word_at].isspace() or text[word_at] in "_-"
+    ):
+        word_at += 1
+    if word_at == len(text):
+        return ("unresolved", word_at)
+
+    available = text[word_at : word_at + len(expected)].lower()
+    if expected.startswith(available) and len(available) < len(expected):
+        return ("unresolved", len(text))
+    if available != expected:
+        return ("resolved", start)
+    word_end = word_at + len(expected)
+    if word_end < len(text) and (
+        text[word_end].isalnum() or text[word_end] == "_"
+    ):
+        return ("resolved", start)
+    return ("complete", word_end)
+
+
+def _scan_mem0_extension(text: str, start: int) -> tuple[str, int]:
+    state, api_end = _scan_label_extension(
+        text,
+        start,
+        expected="api",
+    )
+    if state != "complete":
+        return (state, api_end)
+    return _scan_label_extension(
+        text,
+        api_end,
+        expected="key",
+    )
+
+
+def _skip_whitespace(text: str, start: int) -> int:
+    while start < len(text) and text[start].isspace():
+        start += 1
+    return start
 
 
 def _encode_public(event_type: str, text: str) -> bytes:
