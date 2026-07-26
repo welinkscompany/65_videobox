@@ -1,5 +1,8 @@
 [CmdletBinding()]
-param()
+param(
+    [string]$DockerExecutable = "docker",
+    [string[]]$DockerPrefixArguments = @()
+)
 
 $ErrorActionPreference = "Stop"
 
@@ -22,19 +25,65 @@ print("hermes_yujin_zero_tools=verified")
 $prior = $env:HERMES_TUI_TOOLSETS
 try {
     $env:HERMES_TUI_TOOLSETS = "context_engine"
-    $output = @(
-        & docker run --rm --network none `
-            --env HERMES_TUI_TOOLSETS=context_engine `
-            --entrypoint python `
-            $image -c $proof 2>&1
+    $processInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $processInfo.FileName = $DockerExecutable
+    $processInfo.UseShellExecute = $false
+    $processInfo.CreateNoWindow = $true
+    $processInfo.RedirectStandardInput = $true
+    $processInfo.RedirectStandardOutput = $true
+    $processInfo.RedirectStandardError = $true
+    $arguments = @($DockerPrefixArguments) + @(
+        "run",
+        "--rm",
+        "--interactive",
+        "--network",
+        "none",
+        "--env",
+        "HERMES_TUI_TOOLSETS=context_engine",
+        "--entrypoint",
+        "python",
+        $image,
+        "-"
     )
-    if ($LASTEXITCODE -ne 0) {
+    if ($null -ne $processInfo.ArgumentList) {
+        foreach ($argument in $arguments) {
+            [void]$processInfo.ArgumentList.Add($argument)
+        }
+    }
+    else {
+        if ($DockerPrefixArguments.Count -ne 0 -or $DockerExecutable -ne "docker") {
+            throw "Pinned Hermes zero-tool proof test seam requires ArgumentList."
+        }
+        # Windows PowerShell 5.1 has no ArgumentList.  Every value here is a
+        # fixed, non-secret literal; the Python proof still travels via stdin.
+        $processInfo.Arguments = (
+            'run --rm --interactive --network none ' +
+            '--env HERMES_TUI_TOOLSETS=context_engine ' +
+            '--entrypoint python "' + $image + '" -'
+        )
+    }
+
+    $process = [System.Diagnostics.Process]::new()
+    $process.StartInfo = $processInfo
+    if (-not $process.Start()) {
         throw "Pinned Hermes zero-tool proof failed."
     }
-    if (($output -join "`n") -notmatch "hermes_yujin_zero_tools=verified") {
+    $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+    $stderrTask = $process.StandardError.ReadToEndAsync()
+    $process.StandardInput.Write($proof)
+    $process.StandardInput.Close()
+    $process.WaitForExit()
+    [System.Threading.Tasks.Task]::WaitAll(
+        [System.Threading.Tasks.Task[]]@($stdoutTask, $stderrTask)
+    )
+    $captured = $stdoutTask.Result + "`n" + $stderrTask.Result
+    if ($process.ExitCode -ne 0) {
+        throw "Pinned Hermes zero-tool proof failed."
+    }
+    if ($captured -notmatch "hermes_yujin_zero_tools=verified") {
         throw "Pinned Hermes zero-tool proof did not emit its success marker."
     }
-    $output
+    "hermes_yujin_zero_tools=verified"
 }
 finally {
     if ($null -eq $prior) {

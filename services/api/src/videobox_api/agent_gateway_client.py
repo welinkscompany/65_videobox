@@ -29,8 +29,9 @@ class _GatewayFrame(BaseModel):
     retryable: bool = False
 
 
-_MAX_LINE_BYTES = 64_000
-_MAX_TEXT_BYTES = 32_000
+_MAX_LINE_BYTES = 256_000
+_MAX_DELTA_TEXT_BYTES = 32_000
+_MAX_ASSEMBLED_TEXT_BYTES = 200_000
 
 
 def _default_http_client_factory(*, base_url: str, timeout: float):
@@ -68,6 +69,8 @@ class AgentGatewayClient:
         lowered_token = service_token.strip().lower()
         if (
             len(service_token.encode("utf-8")) < 32
+            or service_token != service_token.strip()
+            or len(set(service_token)) < 8
             or "changeme" in lowered_token
             or "replace_me" in lowered_token
             or "placeholder" in lowered_token
@@ -81,6 +84,8 @@ class AgentGatewayClient:
     async def stream_run(
         self, *, session_id: str, client_message_id: str, text: str
     ) -> AsyncIterator[AgentGatewayEvent]:
+        assembled = ""
+        assembled_bytes = 0
         try:
             async with self._factory(
                 base_url=self._base_url, timeout=self._timeout
@@ -102,9 +107,25 @@ class AgentGatewayClient:
                         if len(line.encode("utf-8")) > _MAX_LINE_BYTES:
                             raise AgentGatewayUnavailable("agent_gateway_unavailable")
                         payload = _GatewayFrame.model_validate_json(line)
-                        if len(payload.text.encode("utf-8")) > _MAX_TEXT_BYTES:
+                        payload_bytes = len(payload.text.encode("utf-8"))
+                        if (
+                            payload.event_type == "text_delta"
+                            and (
+                                payload_bytes > _MAX_DELTA_TEXT_BYTES
+                                or assembled_bytes + payload_bytes
+                                > _MAX_ASSEMBLED_TEXT_BYTES
+                            )
+                        ):
                             raise AgentGatewayUnavailable("agent_gateway_unavailable")
                         if payload.event_type == "blocked" and payload.text:
+                            raise AgentGatewayUnavailable("agent_gateway_unavailable")
+                        if payload.event_type == "text_delta":
+                            assembled += payload.text
+                            assembled_bytes += payload_bytes
+                        elif payload.event_type == "run_completed" and (
+                            payload_bytes > _MAX_ASSEMBLED_TEXT_BYTES
+                            or payload.text != assembled
+                        ):
                             raise AgentGatewayUnavailable("agent_gateway_unavailable")
                         yield AgentGatewayEvent(
                             event_type=payload.event_type,

@@ -169,6 +169,7 @@ if ($gatewayPassword.Length -lt 12) {
 }
 if (
     $gatewayServiceToken.Length -lt 32 -or
+    @($gatewayServiceToken.ToCharArray() | Select-Object -Unique).Count -lt 8 -or
     $gatewayServiceToken -match '(?i)changeme|replace_me|placeholder'
 ) {
     throw "Resolved container credential 'VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN' is invalid."

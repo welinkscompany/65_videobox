@@ -92,6 +92,7 @@ def _rendered_model(
     gateway_username: str = "valid-dummy-user",
     gateway_password: str = VALID_PASSWORD,
     password_hash: str = VALID_HASH,
+    gateway_service_token: str = VALID_SERVICE_TOKEN,
 ) -> dict[str, object]:
     return {
         "services": {
@@ -100,7 +101,7 @@ def _rendered_model(
                     "HERMES_YUJIN_GATEWAY_PASSWORD": gateway_password,
                     "HERMES_YUJIN_GATEWAY_USERNAME": gateway_username,
                     "HERMES_YUJIN_URL": "http://videobox-hermes-yujin:9120",
-                    "VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN": VALID_SERVICE_TOKEN,
+                    "VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN": gateway_service_token,
                 }
             },
             "videobox-hermes-yujin": {
@@ -114,7 +115,7 @@ def _rendered_model(
                 "environment": {
                     "POSTGRES_PASSWORD": "static-value",
                     "VIDEOBOX_AGENT_GATEWAY_URL": "http://videobox-agent-gateway:8081",
-                    "VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN": VALID_SERVICE_TOKEN,
+                    "VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN": gateway_service_token,
                     **(workspace_environment or {}),
                 }
             },
@@ -170,6 +171,7 @@ def _run_fake_start(
     gateway_username: str = "valid-dummy-user",
     gateway_password: str = VALID_PASSWORD,
     password_hash: str = VALID_HASH,
+    gateway_service_token: str = VALID_SERVICE_TOKEN,
     validate_only: bool = False,
     config_stderr: str = "quiet",
     hermes_up_exit_code: int = 0,
@@ -189,6 +191,7 @@ def _run_fake_start(
                 gateway_username,
                 gateway_password,
                 password_hash,
+                gateway_service_token,
             )
         ),
         encoding="utf-8",
@@ -712,6 +715,22 @@ def test_validate_only_accepts_resolved_values_and_duplicate_last_wins(
 
     assert result.returncode == 0, "validation failed without safe diagnostics"
     _assert_no_values_leaked(result)
+
+
+@pytest.mark.parametrize("token", ["a" * 32, "abcd" * 8])
+def test_validate_only_rejects_low_entropy_service_token_without_leaking_it(
+    tmp_path: Path,
+    token: str,
+) -> None:
+    result, invocations = _run_fake_start(
+        tmp_path,
+        gateway_service_token=token,
+        validate_only=True,
+    )
+
+    assert result.returncode != 0
+    assert len(invocations) == 1
+    assert token not in f"{result.stdout}\n{result.stderr}"
 
 
 def test_start_script_uses_compose_and_pinned_hermes_as_validation_authorities() -> None:

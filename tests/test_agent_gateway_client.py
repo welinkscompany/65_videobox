@@ -14,7 +14,7 @@ SERVICE_TOKEN = "workspace-service-token-that-is-at-least-32"
 class _Response:
     def __init__(self) -> None:
         self.lines = [
-            '{"event_type":"text_delta","text":"a"}',
+            '{"event_type":"text_delta","text":"answer"}',
             '{"event_type":"run_completed","text":"answer"}',
         ]
 
@@ -71,7 +71,7 @@ def test_internal_url_and_service_credential_only() -> None:
 
     events = asyncio.run(collect())
     assert [(item.event_type, item.text) for item in events] == [
-        ("text_delta", "a"),
+        ("text_delta", "answer"),
         ("run_completed", "answer"),
     ]
     assert factory_calls == [
@@ -160,6 +160,68 @@ def test_oversized_upstream_line_fails_closed() -> None:
         return [event async for event in client.stream_run(
             session_id="s", client_message_id="c", text="hello"
         )]
+
+    with pytest.raises(AgentGatewayUnavailable):
+        asyncio.run(collect())
+
+
+@pytest.mark.parametrize("token", ["a" * 32, "abcd" * 8])
+def test_low_entropy_service_token_is_rejected_before_transport(token: str) -> None:
+    with pytest.raises(ValueError, match="service_token"):
+        AgentGatewayClient(
+            base_url="http://videobox-agent-gateway:8081",
+            service_token=token,
+            http_client_factory=lambda **_: pytest.fail("transport called"),
+        )
+
+
+def test_cumulative_delta_text_is_bounded_even_when_each_frame_is_small() -> None:
+    response = _Response()
+    response.lines = [
+        '{"event_type":"text_delta","text":"' + ("x" * 31_000) + '"}'
+        for _ in range(7)
+    ]
+    http = _Http()
+    http.stream = lambda *_args, **_kwargs: response
+    client = AgentGatewayClient(
+        base_url="http://videobox-agent-gateway:8081",
+        service_token=SERVICE_TOKEN,
+        http_client_factory=lambda **_: http,
+    )
+
+    async def collect():
+        return [
+            event
+            async for event in client.stream_run(
+                session_id="s", client_message_id="c", text="hello"
+            )
+        ]
+
+    with pytest.raises(AgentGatewayUnavailable):
+        asyncio.run(collect())
+
+
+def test_completion_text_must_equal_the_assembled_delta_truth() -> None:
+    response = _Response()
+    response.lines = [
+        '{"event_type":"text_delta","text":"safe"}',
+        '{"event_type":"run_completed","text":"different"}',
+    ]
+    http = _Http()
+    http.stream = lambda *_args, **_kwargs: response
+    client = AgentGatewayClient(
+        base_url="http://videobox-agent-gateway:8081",
+        service_token=SERVICE_TOKEN,
+        http_client_factory=lambda **_: http,
+    )
+
+    async def collect():
+        return [
+            event
+            async for event in client.stream_run(
+                session_id="s", client_message_id="c", text="hello"
+            )
+        ]
 
     with pytest.raises(AgentGatewayUnavailable):
         asyncio.run(collect())
