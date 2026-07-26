@@ -2740,6 +2740,48 @@ class LocalProjectStore:
             raise KeyError("director_conversation_missing")
         if str(conversation["session_id"]) != session_id:
             raise ValueError("conversation_scope_mismatch")
+        hermes_run = self._fetchone(
+            project_id,
+            """
+            SELECT user_text, user_message_id, assistant_message_id
+            FROM director_hermes_runs
+            WHERE project_id = ? AND session_id = ? AND conversation_id = ?
+              AND client_message_id = ?
+            """,
+            (project_id, session_id, conversation_id, client_message_id),
+        )
+        if hermes_run is not None:
+            if str(hermes_run["user_text"]) != user_text:
+                raise ValueError("client_message_id_reused_with_different_content")
+            assistant_message_id = hermes_run["assistant_message_id"]
+            if assistant_message_id is None:
+                raise ValueError("incomplete persisted director exchange")
+            user_row = self._fetchone(
+                project_id,
+                """
+                SELECT message_id, conversation_id, project_id, session_id, role,
+                       text, proposal_id, metadata_json, client_message_id, created_at
+                FROM director_messages
+                WHERE project_id = ? AND conversation_id = ? AND message_id = ?
+                """,
+                (project_id, conversation_id, str(hermes_run["user_message_id"])),
+            )
+            assistant_row = self._fetchone(
+                project_id,
+                """
+                SELECT message_id, conversation_id, project_id, session_id, role,
+                       text, proposal_id, metadata_json, client_message_id, created_at
+                FROM director_messages
+                WHERE project_id = ? AND conversation_id = ? AND message_id = ?
+                """,
+                (project_id, conversation_id, str(assistant_message_id)),
+            )
+            if user_row is None or assistant_row is None:
+                raise ValueError("incomplete persisted director exchange")
+            return {
+                "user_message": self._director_message_payload(user_row),
+                "assistant_message": self._director_message_payload(assistant_row),
+            }
         rows = self.list_director_messages(project_id=project_id, conversation_id=conversation_id)
         for index, item in enumerate(rows):
             if item.get("client_message_id") != client_message_id:
@@ -4199,32 +4241,21 @@ class LocalProjectStore:
             result = dict(row)
             result["dispatch"] = False
             result["owner_token"] = None
-            if str(row["status"]) == "pending":
-                heartbeat = datetime.fromisoformat(str(row["heartbeat_at"]))
-                cutoff = self._clock().astimezone(UTC) - timedelta(
-                    seconds=stale_after_seconds
+            if row["assistant_message_id"] is not None:
+                assistant = connection.execute(
+                    """
+                    SELECT text FROM director_messages
+                    WHERE project_id = ? AND conversation_id = ? AND message_id = ?
+                    """,
+                    (
+                        project_id,
+                        conversation_id,
+                        str(row["assistant_message_id"]),
+                    ),
+                ).fetchone()
+                result["assistant_text"] = (
+                    str(assistant["text"]) if assistant is not None else ""
                 )
-                if heartbeat.astimezone(UTC) <= cutoff:
-                    reclaimed_token = uuid.uuid4().hex
-                    cursor = connection.execute(
-                        """
-                        UPDATE director_hermes_runs
-                        SET owner_token = ?, heartbeat_at = ?, updated_at = ?
-                        WHERE run_id = ? AND status = 'pending'
-                          AND owner_token = ? AND heartbeat_at = ?
-                        """,
-                        (
-                            reclaimed_token,
-                            now,
-                            now,
-                            str(row["run_id"]),
-                            str(row["owner_token"]),
-                            str(row["heartbeat_at"]),
-                        ),
-                    )
-                    if cursor.rowcount == 1:
-                        result["dispatch"] = True
-                        result["owner_token"] = reclaimed_token
             connection.commit()
             return result
         except Exception:

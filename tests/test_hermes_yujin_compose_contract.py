@@ -47,7 +47,9 @@ def _render_compose(*, include_yujin: bool) -> dict:
                 "HERMES_YUJIN_GATEWAY_USERNAME": "static-gateway-user",
                 "HERMES_YUJIN_GATEWAY_PASSWORD": "static-gateway-password",
                 "HERMES_YUJIN_GATEWAY_PASSWORD_HASH": "static-gateway-password-hash",
-                "VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN": "static-service-token",
+                "VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN": (
+                    "static-service-token-at-least-32-bytes"
+                ),
             }
         )
     command.extend(["config", "--format", "json"])
@@ -157,6 +159,7 @@ def test_hermes_yujin_receives_only_hashed_auth_and_has_honest_http_health() -> 
         "HERMES_DASHBOARD_BASIC_AUTH_PASSWORD_HASH": (
             "${HERMES_YUJIN_GATEWAY_PASSWORD_HASH:?set in .env.container}"
         ),
+        "HERMES_TUI_TOOLSETS": "context_engine",
     }
     assert "HERMES_YUJIN_GATEWAY_PASSWORD" not in hermes["environment"]
     health_command = " ".join(hermes["healthcheck"]["test"])
@@ -241,6 +244,25 @@ def test_gateway_gets_plaintext_auth_but_workspace_never_gets_hermes_secrets() -
     assert gateway["mem_limit"] == "256m"
     assert gateway["cpus"] == 0.5
     assert gateway["logging"]["driver"] == "local"
+
+
+def test_hermes_runtime_is_pinned_to_the_zero_schema_context_engine() -> None:
+    compose = _overlay()
+    hermes = compose["services"]["videobox-hermes-yujin"]
+    profile = yaml.safe_load(
+        (ROOT / "config" / "hermes" / "yujin" / "config.yaml").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert hermes["environment"]["HERMES_TUI_TOOLSETS"] == "context_engine"
+    assert profile == {
+        "platform_toolsets": {"cli": []},
+        "known_plugin_toolsets": {"cli": ["kanban"]},
+        "agent": {"disabled_toolsets": ["kanban"]},
+        "context": {"engine": "compressor"},
+        "mcp_servers": {},
+    }
 
 
 def test_agent_gateway_dockerfile_is_minimal_non_root_and_read_only_compatible() -> None:

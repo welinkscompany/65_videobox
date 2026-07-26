@@ -75,15 +75,6 @@ def test_official_password_cookie_ticket_and_rpc_order_are_allowlisted() -> None
                 "jsonrpc": "2.0",
                 "method": "event",
                 "params": {
-                    "type": "tool.complete",
-                    "session_id": "sid-1",
-                    "payload": {"provider": "secret", "path": "C:/private"},
-                },
-            },
-            {
-                "jsonrpc": "2.0",
-                "method": "event",
-                "params": {
                     "type": "message.delta",
                     "session_id": "sid-1",
                     "payload": {"text": "안녕"},
@@ -95,7 +86,7 @@ def test_official_password_cookie_ticket_and_rpc_order_are_allowlisted() -> None
                 "params": {
                     "type": "message.complete",
                     "session_id": "sid-1",
-                    "payload": {"text": "안녕하세요"},
+                    "payload": {"status": "complete", "text": "안녕하세요"},
                 },
             },
         ]
@@ -166,3 +157,129 @@ def test_protocol_error_is_redacted() -> None:
     with pytest.raises(HermesTransportError, match="hermes_protocol_invalid") as exc:
         asyncio.run(collect())
     assert "leak" not in str(exc.value)
+
+
+def test_oversized_rpc_frame_is_rejected_before_json_decode() -> None:
+    http = _Http()
+    websocket = _WebSocket([])
+    websocket.messages = ['{"jsonrpc":"2.0","padding":"' + ("x" * 64_000) + '"}']
+    client = HermesRpcClient(
+        base_url="http://videobox-hermes-yujin:9120",
+        username="u",
+        password="p",
+        http_client_factory=lambda **_: http,
+        websocket_factory=lambda *_args, **_kwargs: websocket,
+    )
+
+    async def collect():
+        return [event async for event in client.stream_prompt(text="x")]
+
+    with pytest.raises(HermesTransportError, match="protocol_invalid"):
+        asyncio.run(collect())
+
+
+def test_tool_event_before_session_creation_is_rejected() -> None:
+    http = _Http()
+    websocket = _WebSocket(
+        [
+            {
+                "jsonrpc": "2.0",
+                "method": "event",
+                "params": {
+                    "type": "tool.start",
+                    "payload": {"provider": "secret"},
+                },
+            }
+        ]
+    )
+    client = HermesRpcClient(
+        base_url="http://videobox-hermes-yujin:9120",
+        username="u",
+        password="p",
+        http_client_factory=lambda **_: http,
+        websocket_factory=lambda *_args, **_kwargs: websocket,
+    )
+
+    async def collect():
+        return [event async for event in client.stream_prompt(text="x")]
+
+    with pytest.raises(HermesTransportError, match="tool_event_forbidden") as exc:
+        asyncio.run(collect())
+    assert "secret" not in str(exc.value)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://videobox-hermes-yujin:9120",
+        "http://evil.example:9120",
+        "http://user:pass@videobox-hermes-yujin:9120",
+        "http://videobox-hermes-yujin:9121",
+        "http://videobox-hermes-yujin:9120/path",
+        "http://videobox-hermes-yujin:9120?next=http://evil",
+        "http://videobox-hermes-yujin:9120#fragment",
+    ],
+)
+def test_hermes_ssrf_matrix_is_rejected_before_transport(url: str) -> None:
+    calls = []
+    with pytest.raises(ValueError, match="internal"):
+        HermesRpcClient(
+            base_url=url,
+            username="u",
+            password="p",
+            http_client_factory=lambda **kwargs: calls.append(kwargs),
+        )
+    assert calls == []
+
+
+@pytest.mark.parametrize(
+    "event",
+    [
+        {
+            "type": "message.delta",
+            "payload": {"text": "wrong session"},
+        },
+        {
+            "type": "message.complete",
+            "payload": {"status": "complete", "text": "wrong session"},
+        },
+        {
+            "type": "tool.complete",
+            "session_id": "sid-1",
+            "payload": {"provider": "secret", "path": "C:/private"},
+        },
+        {
+            "type": "message.complete",
+            "session_id": "sid-1",
+            "payload": {"status": "interrupted", "text": "partial"},
+        },
+        {
+            "type": "message.complete",
+            "session_id": "sid-1",
+            "payload": {"status": "complete", "text": ""},
+        },
+    ],
+)
+def test_unsafe_or_non_success_prompt_events_fail_closed_and_redacted(event: dict) -> None:
+    http = _Http()
+    websocket = _WebSocket(
+        [
+            {"jsonrpc": "2.0", "id": 1, "result": {"session_id": "sid-1"}},
+            {"jsonrpc": "2.0", "method": "event", "params": event},
+        ]
+    )
+    client = HermesRpcClient(
+        base_url="http://videobox-hermes-yujin:9120",
+        username="u",
+        password="p",
+        http_client_factory=lambda **_: http,
+        websocket_factory=lambda *_args, **_kwargs: websocket,
+    )
+
+    async def collect():
+        return [item async for item in client.stream_prompt(text="x")]
+
+    with pytest.raises(HermesTransportError) as exc:
+        asyncio.run(collect())
+    assert "secret" not in str(exc.value)
+    assert "C:/private" not in str(exc.value)

@@ -1,1 +1,11 @@
-{}
+platform_toolsets:
+  cli: []
+known_plugin_toolsets:
+  cli:
+    - kanban
+agent:
+  disabled_toolsets:
+    - kanban
+context:
+  engine: compressor
+mcp_servers: {}

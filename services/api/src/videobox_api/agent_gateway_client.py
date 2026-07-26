@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
-import json
+from typing import Literal
 from urllib.parse import urlsplit
+
+from pydantic import BaseModel, ConfigDict
 
 
 class AgentGatewayUnavailable(RuntimeError):
@@ -17,6 +19,18 @@ class AgentGatewayEvent:
     event_type: str
     text: str = ""
     retryable: bool = False
+
+
+class _GatewayFrame(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    event_type: Literal["text_delta", "run_completed", "blocked"]
+    text: str = ""
+    retryable: bool = False
+
+
+_MAX_LINE_BYTES = 64_000
+_MAX_TEXT_BYTES = 32_000
 
 
 def _default_http_client_factory(*, base_url: str, timeout: float):
@@ -51,8 +65,14 @@ class AgentGatewayClient:
             or parsed.fragment
         ):
             raise ValueError("agent_gateway_url_must_be_internal")
-        if not service_token:
-            raise ValueError("agent_gateway_service_token_required")
+        lowered_token = service_token.strip().lower()
+        if (
+            len(service_token.encode("utf-8")) < 32
+            or "changeme" in lowered_token
+            or "replace_me" in lowered_token
+            or "placeholder" in lowered_token
+        ):
+            raise ValueError("agent_gateway_service_token_invalid")
         self._base_url = base_url.rstrip("/")
         self._token = service_token
         self._factory = http_client_factory
@@ -79,19 +99,20 @@ class AgentGatewayClient:
                     async for line in response.aiter_lines():
                         if not line:
                             continue
-                        payload = json.loads(line)
-                        event_type = payload.get("event_type")
-                        if event_type not in {
-                            "text_delta",
-                            "run_completed",
-                            "blocked",
-                        }:
-                            continue
+                        if len(line.encode("utf-8")) > _MAX_LINE_BYTES:
+                            raise AgentGatewayUnavailable("agent_gateway_unavailable")
+                        payload = _GatewayFrame.model_validate_json(line)
+                        if len(payload.text.encode("utf-8")) > _MAX_TEXT_BYTES:
+                            raise AgentGatewayUnavailable("agent_gateway_unavailable")
+                        if payload.event_type == "blocked" and payload.text:
+                            raise AgentGatewayUnavailable("agent_gateway_unavailable")
                         yield AgentGatewayEvent(
-                            event_type=event_type,
-                            text=str(payload.get("text") or ""),
-                            retryable=bool(payload.get("retryable", False)),
+                            event_type=payload.event_type,
+                            text=payload.text,
+                            retryable=payload.retryable,
                         )
+                        if payload.event_type in {"run_completed", "blocked"}:
+                            return
         except AgentGatewayUnavailable:
             raise
         except Exception as error:

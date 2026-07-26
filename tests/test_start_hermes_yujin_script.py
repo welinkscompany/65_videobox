@@ -14,6 +14,7 @@ ROOT = Path(__file__).parents[1]
 SCRIPT = ROOT / "scripts" / "start-hermes-yujin.ps1"
 PROFILE_ROOT = ROOT / "config" / "hermes" / "yujin"
 VALID_PASSWORD = "valid-dummy-password"
+VALID_SERVICE_TOKEN = "valid-service-token-that-is-at-least-32"
 VALID_HASH = (
     "scrypt$16384$8$1$iMe7ySNXHHKwvzoVKA3TJw==$"
     "kS4ekg9YeJwxO84hL0GQ/gaj4dMfUKWPJFmhwSFuaUQ="
@@ -42,7 +43,7 @@ def _env_text(*extra_lines: str) -> str:
         "HERMES_YUJIN_GATEWAY_USERNAME=${BASE_GATEWAY_USERNAME}",
         f"HERMES_YUJIN_GATEWAY_PASSWORD={VALID_PASSWORD}",
         f"HERMES_YUJIN_GATEWAY_PASSWORD_HASH='{VALID_HASH}'",
-        "VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN=valid-service-token",
+        f"VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN={VALID_SERVICE_TOKEN}",
     ]
     lines.extend(extra_lines)
     return "\n".join(lines) + "\n"
@@ -99,20 +100,21 @@ def _rendered_model(
                     "HERMES_YUJIN_GATEWAY_PASSWORD": gateway_password,
                     "HERMES_YUJIN_GATEWAY_USERNAME": gateway_username,
                     "HERMES_YUJIN_URL": "http://videobox-hermes-yujin:9120",
-                    "VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN": "valid-service-token",
+                    "VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN": VALID_SERVICE_TOKEN,
                 }
             },
             "videobox-hermes-yujin": {
                 "environment": {
                     "HERMES_DASHBOARD_BASIC_AUTH_PASSWORD_HASH": password_hash,
                     "HERMES_DASHBOARD_BASIC_AUTH_USERNAME": gateway_username,
+                    "HERMES_TUI_TOOLSETS": "context_engine",
                 }
             },
             "videobox-workspace": {
                 "environment": {
                     "POSTGRES_PASSWORD": "static-value",
                     "VIDEOBOX_AGENT_GATEWAY_URL": "http://videobox-agent-gateway:8081",
-                    "VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN": "valid-service-token",
+                    "VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN": VALID_SERVICE_TOKEN,
                     **(workspace_environment or {}),
                 }
             },

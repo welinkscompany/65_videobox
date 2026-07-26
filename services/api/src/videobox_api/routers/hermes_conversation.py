@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from videobox_api.models import HermesRunCreateRequest, HermesRunCreateResponse
+from videobox_api.hermes_run_service import HermesCapacityUnavailable
 
 
 def build_hermes_conversation_router(run_service) -> APIRouter:
@@ -35,6 +36,8 @@ def build_hermes_conversation_router(run_service) -> APIRouter:
             raise HTTPException(status_code=404, detail=str(error.args[0])) from error
         except ValueError as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
+        except HermesCapacityUnavailable as error:
+            raise HTTPException(status_code=503, detail=str(error)) from error
         events_url = (
             f"/api/projects/{project_id}/director/conversations/"
             f"{conversation_id}/hermes-runs/{run.run_id}/events"
@@ -60,10 +63,14 @@ def build_hermes_conversation_router(run_service) -> APIRouter:
             raise HTTPException(status_code=404, detail=str(error.args[0])) from error
         if run.project_id != project_id or run.conversation_id != conversation_id:
             raise HTTPException(status_code=404, detail="director_hermes_run_missing")
+        try:
+            await run_service.reserve_subscriber(run_id)
+        except ValueError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
 
         async def stream() -> AsyncIterator[str]:
             try:
-                async for event in run_service.subscribe(run_id):
+                async for event in run_service.subscribe(run_id, reserved=True):
                     if await request.is_disconnected():
                         await run_service.cancel(run_id)
                         return

@@ -136,7 +136,7 @@ $dummyEnvironment = @{
     "HERMES_YUJIN_GATEWAY_USERNAME" = "static-gateway-user"
     "HERMES_YUJIN_GATEWAY_PASSWORD" = "static-gateway-password"
     "HERMES_YUJIN_GATEWAY_PASSWORD_HASH" = "static-gateway-password-hash"
-    "VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN" = "static-service-token"
+    "VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN" = "static-service-token-at-least-32-bytes"
 }
 foreach ($name in $dummyEnvironment.Keys) {
     $processInfo.EnvironmentVariables[$name] = $dummyEnvironment[$name]
@@ -160,6 +160,9 @@ Assert-True ($hermes.container_name -ceq "videobox-hermes-yujin") "Hermes contai
 Assert-True (
     (($hermes.command -join "|") -ceq "-p|videobox-yujin|serve|--host|0.0.0.0|--port|9120")
 ) "Hermes serve command does not match the pinned CLI contract."
+Assert-True (
+    $hermes.environment.HERMES_TUI_TOOLSETS -ceq "context_engine"
+) "Hermes must use the pinned zero-schema context_engine toolset."
 Assert-Networks $hermes @($hermesNetwork, $providerNetwork) "videobox-hermes-yujin"
 Assert-Networks $gateway @($gatewayApiNetwork, $hermesNetwork) "videobox-agent-gateway"
 Assert-Networks $workspace @("videobox-edge", "videobox-internal", $gatewayApiNetwork) "videobox-workspace"

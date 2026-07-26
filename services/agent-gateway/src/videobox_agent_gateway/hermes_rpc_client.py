@@ -7,10 +7,14 @@ from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 import json
 from urllib.parse import quote
+from urllib.parse import urlsplit
 
 
 class HermesTransportError(RuntimeError):
     """A deliberately redacted Hermes transport failure."""
+
+
+_MAX_RPC_FRAME_BYTES = 64_000
 
 
 @dataclass(frozen=True)
@@ -49,6 +53,18 @@ class HermesRpcClient:
         websocket_factory: Callable = _default_websocket_factory,
         timeout_seconds: float = 30.0,
     ) -> None:
+        parsed = urlsplit(base_url)
+        if (
+            parsed.scheme != "http"
+            or parsed.hostname != "videobox-hermes-yujin"
+            or parsed.port != 9120
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.path not in {"", "/"}
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError("hermes_url_must_be_internal")
         if not username or not password:
             raise ValueError("hermes_credentials_required")
         self._base_url = base_url.rstrip("/")
@@ -153,25 +169,46 @@ class HermesRpcClient:
             if not isinstance(params, dict):
                 continue
             event_type = params.get("type")
+            if isinstance(event_type, str) and (
+                event_type.startswith("tool.")
+                or event_type.startswith("approval.")
+                or event_type.startswith("terminal.")
+                or event_type.startswith("file.")
+            ):
+                raise HermesTransportError("hermes_tool_event_forbidden")
             if event_type not in {"gateway.ready", "message.delta", "message.complete"}:
                 continue
             event_session = params.get("session_id")
-            if event_session and event_session != session_id:
-                continue
+            if event_type != "gateway.ready" and event_session != session_id:
+                raise HermesTransportError("hermes_event_session_invalid")
             payload = params.get("payload")
             payload = payload if isinstance(payload, dict) else {}
             if event_type == "gateway.ready":
                 yield HermesRpcEvent("gateway.ready")
             elif event_type == "message.delta":
-                yield HermesRpcEvent("message.delta", str(payload.get("text") or ""))
+                text = payload.get("text", "")
+                if not isinstance(text, str):
+                    raise HermesTransportError("hermes_protocol_invalid")
+                yield HermesRpcEvent("message.delta", text)
             else:
+                if payload.get("status") != "complete":
+                    raise HermesTransportError("hermes_completion_blocked")
+                text = payload.get("text", "")
+                if not isinstance(text, str):
+                    raise HermesTransportError("hermes_protocol_invalid")
+                if not text.strip():
+                    raise HermesTransportError("hermes_completion_blocked")
                 yield HermesRpcEvent(
-                    "message.complete", str(payload.get("text") or "")
+                    "message.complete", text
                 )
                 return
 
     @staticmethod
     def _decode(raw: object) -> dict:
+        if not isinstance(raw, (str, bytes)):
+            raise HermesTransportError("hermes_protocol_invalid")
+        if len(raw.encode("utf-8") if isinstance(raw, str) else raw) > _MAX_RPC_FRAME_BYTES:
+            raise HermesTransportError("hermes_protocol_invalid")
         try:
             message = json.loads(raw)
         except Exception as error:
@@ -184,12 +221,18 @@ class HermesRpcClient:
     def _validate_ignored_message(message: dict) -> None:
         if message.get("method") == "event":
             params = message.get("params")
-            if isinstance(params, dict) and params.get("type") in {
-                "gateway.ready",
-                "message.delta",
-                "message.complete",
-            }:
+            event_type = params.get("type") if isinstance(params, dict) else None
+            if event_type == "gateway.ready":
                 return
+            if isinstance(event_type, str) and (
+                event_type.startswith("tool.")
+                or event_type.startswith("approval.")
+                or event_type.startswith("terminal.")
+                or event_type.startswith("file.")
+            ):
+                raise HermesTransportError("hermes_tool_event_forbidden")
+            if event_type in {"message.delta", "message.complete"}:
+                raise HermesTransportError("hermes_event_session_invalid")
 
     @staticmethod
     async def _interrupt_best_effort(websocket, session_id: str) -> None:

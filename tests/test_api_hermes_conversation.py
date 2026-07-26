@@ -9,6 +9,9 @@ from videobox_api.agent_gateway_client import AgentGatewayEvent
 from videobox_api.main import create_app
 
 
+SERVICE_TOKEN = "service-token-that-is-at-least-thirty-two"
+
+
 class _Gateway:
     calls = 0
 
@@ -22,7 +25,7 @@ def _configured_app(tmp_path: Path):
     app = create_app(
         projects_root=tmp_path / "projects",
         agent_gateway_url="http://videobox-agent-gateway:8081",
-        agent_gateway_service_token="service-token",
+        agent_gateway_service_token=SERVICE_TOKEN,
         agent_gateway_http_client_factory=lambda **_: None,
     )
     gateway = _Gateway()
@@ -39,7 +42,7 @@ def test_router_is_absent_without_config_and_external_url_is_rejected(
         create_app(
             projects_root=tmp_path / "external",
             agent_gateway_url="http://evil.example:8081",
-            agent_gateway_service_token="token",
+            agent_gateway_service_token=SERVICE_TOKEN,
         )
 
 
@@ -81,6 +84,7 @@ def test_create_and_sse_preserve_manual_conversation_and_headers(
         assert "event: run_started" in response.text
         assert "event: text_delta" in response.text
         assert "event: run_completed" in response.text
+        assert client.get(created.json()["events_url"]).status_code == 409
         assert gateway.calls == 1
         manual = client.post(
             f"/api/projects/{project_id}/director/conversations/"
@@ -92,3 +96,23 @@ def test_create_and_sse_preserve_manual_conversation_and_headers(
             },
         )
         assert manual.status_code == 200
+
+
+def test_hermes_request_validation_does_not_reflect_rejected_input(
+    tmp_path: Path,
+) -> None:
+    app, _gateway = _configured_app(tmp_path)
+    sentinel = "do-not-reflect-hermes-secret"
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/projects/p/director/conversations/c/hermes-runs",
+            json={
+                "session_id": "s",
+                "client_message_id": "m",
+                "text": "hello",
+                "provider_secret": sentinel,
+            },
+        )
+    assert response.status_code == 422
+    assert response.json() == {"detail": "hermes_run_request_invalid"}
+    assert sentinel not in response.text

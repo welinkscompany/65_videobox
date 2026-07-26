@@ -3,7 +3,7 @@ from __future__ import annotations
 from math import isfinite
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class CreateProjectRequest(BaseModel):
@@ -104,6 +104,8 @@ class DirectorMessageSubmitRequest(BaseModel):
 
 
 class HermesRunCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     session_id: str = Field(min_length=1, max_length=128)
     client_message_id: str = Field(min_length=1, max_length=128)
     text: str = Field(min_length=1, max_length=20_000)

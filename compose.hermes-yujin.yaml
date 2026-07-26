@@ -46,6 +46,7 @@ services:
     environment:
       HERMES_DASHBOARD_BASIC_AUTH_USERNAME: ${HERMES_YUJIN_GATEWAY_USERNAME:?set in .env.container}
       HERMES_DASHBOARD_BASIC_AUTH_PASSWORD_HASH: ${HERMES_YUJIN_GATEWAY_PASSWORD_HASH:?set in .env.container}
+      HERMES_TUI_TOOLSETS: context_engine
     volumes:
       - videobox_hermes_oauth_state:/opt/data
       - ./config/hermes/yujin:/opt/videobox-yujin-profile:ro

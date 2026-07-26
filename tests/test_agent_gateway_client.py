@@ -5,13 +5,16 @@ import asyncio
 import pytest
 
 from videobox_api.agent_gateway_client import AgentGatewayClient
+from videobox_api.agent_gateway_client import AgentGatewayUnavailable
+
+
+SERVICE_TOKEN = "workspace-service-token-that-is-at-least-32"
 
 
 class _Response:
     def __init__(self) -> None:
         self.lines = [
             '{"event_type":"text_delta","text":"a"}',
-            '{"event_type":"tool.complete","provider":"leak"}',
             '{"event_type":"run_completed","text":"answer"}',
         ]
 
@@ -54,7 +57,7 @@ def test_internal_url_and_service_credential_only() -> None:
 
     client = AgentGatewayClient(
         base_url="http://videobox-agent-gateway:8081",
-        service_token="workspace-service-token",
+        service_token=SERVICE_TOKEN,
         http_client_factory=factory,
     )
 
@@ -75,7 +78,7 @@ def test_internal_url_and_service_credential_only() -> None:
         {"base_url": "http://videobox-agent-gateway:8081", "timeout": 35.0}
     ]
     assert http.calls[0][2]["headers"] == {
-        "Authorization": "Bearer workspace-service-token"
+        "Authorization": f"Bearer {SERVICE_TOKEN}"
     }
     assert set(http.calls[0][2]["json"]) == {
         "session_id",
@@ -101,7 +104,62 @@ def test_ssrf_matrix_rejected_before_transport(url: str) -> None:
     with pytest.raises(ValueError, match="internal"):
         AgentGatewayClient(
             base_url=url,
-            service_token="token",
+            service_token=SERVICE_TOKEN,
             http_client_factory=lambda **kwargs: calls.append(kwargs),
         )
     assert calls == []
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        '{"event_type":"text_delta","text":"ok","provider":"leak"}',
+        '{"event_type":"unknown","text":"ignored"}',
+        '{"event_type":"blocked","text":"must-be-empty","retryable":true}',
+        '{"event_type":"blocked","text":"","retryable":"true"}',
+        "not-json",
+    ],
+)
+def test_malformed_or_extra_upstream_frames_fail_closed(line: str) -> None:
+    response = _Response()
+    response.lines = [line]
+    http = _Http()
+    http.stream = lambda *_args, **_kwargs: response
+    client = AgentGatewayClient(
+        base_url="http://videobox-agent-gateway:8081",
+        service_token=SERVICE_TOKEN,
+        http_client_factory=lambda **_: http,
+    )
+
+    async def collect():
+        return [
+            event
+            async for event in client.stream_run(
+                session_id="s", client_message_id="c", text="hello"
+            )
+        ]
+
+    with pytest.raises(AgentGatewayUnavailable, match="unavailable"):
+        asyncio.run(collect())
+
+
+def test_oversized_upstream_line_fails_closed() -> None:
+    response = _Response()
+    response.lines = [
+        '{"event_type":"text_delta","text":"' + ("x" * 70_000) + '"}'
+    ]
+    http = _Http()
+    http.stream = lambda *_args, **_kwargs: response
+    client = AgentGatewayClient(
+        base_url="http://videobox-agent-gateway:8081",
+        service_token=SERVICE_TOKEN,
+        http_client_factory=lambda **_: http,
+    )
+
+    async def collect():
+        return [event async for event in client.stream_run(
+            session_id="s", client_message_id="c", text="hello"
+        )]
+
+    with pytest.raises(AgentGatewayUnavailable):
+        asyncio.run(collect())

@@ -143,6 +143,7 @@ $hermesEnvironmentNames = @($hermes.environment.PSObject.Properties.Name | Sort-
 $expectedHermesEnvironmentNames = @(
     "HERMES_DASHBOARD_BASIC_AUTH_PASSWORD_HASH"
     "HERMES_DASHBOARD_BASIC_AUTH_USERNAME"
+    "HERMES_TUI_TOOLSETS"
 )
 if (($hermesEnvironmentNames -join "|") -cne ($expectedHermesEnvironmentNames -join "|")) {
     throw "Hermes environment contract is invalid."
@@ -165,6 +166,15 @@ $gatewayServiceToken = Assert-ResolvedCredential `
     $gateway.environment.VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN
 if ($gatewayPassword.Length -lt 12) {
     throw "Resolved container credential 'HERMES_YUJIN_GATEWAY_PASSWORD' is invalid."
+}
+if (
+    $gatewayServiceToken.Length -lt 32 -or
+    $gatewayServiceToken -match '(?i)changeme|replace_me|placeholder'
+) {
+    throw "Resolved container credential 'VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN' is invalid."
+}
+if ($hermes.environment.HERMES_TUI_TOOLSETS -cne "context_engine") {
+    throw "Hermes toolset contract is invalid."
 }
 if ($gatewayUsername -cne $hermesUsername) {
     throw "Gateway and Hermes usernames do not match."

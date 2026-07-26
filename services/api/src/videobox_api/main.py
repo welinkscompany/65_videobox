@@ -142,6 +142,9 @@ async def _media_analysis_lifespan(app: FastAPI):
             await task
         except asyncio.CancelledError:
             pass
+        hermes_run_service = getattr(app.state, "hermes_run_service", None)
+        if hermes_run_service is not None:
+            await hermes_run_service.shutdown()
 
 
 class _UnavailableMediaAnalysisService:
@@ -212,7 +215,12 @@ def create_app(
     app = FastAPI(title="VideoBox API", version="0.1.0", lifespan=_media_analysis_lifespan)
 
     @app.exception_handler(RequestValidationError)
-    async def request_validation_error_handler(_request: Request, exc: RequestValidationError) -> JSONResponse:
+    async def request_validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+        if "/hermes-runs" in request.url.path:
+            return JSONResponse(
+                status_code=422,
+                content={"detail": "hermes_run_request_invalid"},
+            )
         return JSONResponse(
             status_code=422,
             content={"detail": _json_safe_validation_value(jsonable_encoder(exc.errors()))},
