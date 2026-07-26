@@ -1,0 +1,8 @@
+**
+!docker/
+!docker/agent-gateway.Dockerfile
+!requirements-agent-gateway.txt
+!services/
+!services/agent-gateway/
+!services/agent-gateway/src/
+!services/agent-gateway/src/**

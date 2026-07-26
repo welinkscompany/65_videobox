@@ -138,6 +138,7 @@ Expected: evidence distinguishes source configuration, container state, HTTP rea
 - Modify: `compose.yaml`
 - Modify: `.env.container.example`
 - Create: `docker/agent-gateway.Dockerfile`
+- Create: `docker/agent-gateway.Dockerfile.dockerignore`
 - Create: `requirements-agent-gateway.txt`
 - Create: `services/agent-gateway/src/videobox_agent_gateway/__init__.py`
 - Create: `services/agent-gateway/src/videobox_agent_gateway/main.py`
@@ -158,6 +159,7 @@ Expected: evidence distinguishes source configuration, container state, HTTP rea
    - have no dependency on workspace, API, renderer, or edge services.
 2. Require service `videobox-agent-gateway` to:
    - use a minimal dedicated Dockerfile and health-only FastAPI app at first;
+   - use a Dockerfile-specific deny-all build-context allowlist that admits only its Dockerfile, requirements file, and gateway source tree;
    - join only the workspace-facing internal `videobox-agent-gateway-api-network` and Hermes-facing internal `videobox-agent-gateway-network`;
    - mount neither VideoBox DB/media nor Hermes home;
    - have no provider-egress network;
@@ -176,14 +178,15 @@ Expected: evidence distinguishes source configuration, container state, HTTP rea
 
    The agent-gateway receives the matching username and plaintext password through its own local-only container environment so it can obtain the authenticated session/ticket. VideoBox workspace/browser receives neither password nor hash. Never print any of these values in scripts or test output.
 
-6. Add healthchecks that prove both HTTP services respond, explicitly naming Hermes HTTP readiness—not provider success.
-7. `start-hermes-yujin.ps1` must:
+6. Add `docker/agent-gateway.Dockerfile.dockerignore` using Docker's Dockerfile-specific convention. Deny the repository root by default and allow only the exact gateway Dockerfile, `requirements-agent-gateway.txt`, required parent traversal directories, and `services/agent-gateway/src/**`.
+7. Add healthchecks that prove both HTTP services respond, explicitly naming Hermes HTTP readiness—not provider success.
+8. `start-hermes-yujin.ps1` must:
    - verify required local variables are nonempty without echoing values;
    - start only the named Yujin and agent-gateway services;
    - refuse to remove old containers or volumes.
-8. A2 will extend the startup flow with Yujin profile installation; A1 must not reference a file that does not yet exist.
-9. `verify-hermes-yujin-runtime.ps1` must prove container image digest, command, networks, mounts, health, and absence of DB/media mounts.
-10. Run:
+9. A2 will extend the startup flow with Yujin profile installation; A1 must not reference a file that does not yet exist.
+10. `verify-hermes-yujin-runtime.ps1` must prove container image digest, command, networks, mounts, health, and absence of DB/media mounts.
+11. Run:
 
    ```powershell
    .\.venv\Scripts\python.exe -m pytest tests/test_hermes_yujin_compose_contract.py tests/test_compose_contract.py -q
@@ -193,7 +196,7 @@ Expected: evidence distinguishes source configuration, container state, HTTP rea
    git diff --check
    ```
 
-11. Mark A1 `[x]`, synchronize progress, and commit:
+12. Mark A1 `[x]`, synchronize progress, and commit:
 
    ```powershell
    git add compose.yaml .env.container.example docker/agent-gateway.Dockerfile requirements-agent-gateway.txt services/agent-gateway scripts tests docs/superpowers/plans

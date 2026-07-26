@@ -174,6 +174,71 @@ def test_agent_gateway_dockerfile_is_minimal_non_root_and_read_only_compatible()
     assert requirements.splitlines() == ["fastapi==0.115.0", "uvicorn==0.30.6"]
 
 
+def test_agent_gateway_build_context_uses_a_deny_all_dockerfile_allowlist() -> None:
+    ignore_path = ROOT / "docker" / "agent-gateway.Dockerfile.dockerignore"
+    patterns = ignore_path.read_text(encoding="utf-8").splitlines()
+    assert patterns == [
+        "**",
+        "!docker/",
+        "!docker/agent-gateway.Dockerfile",
+        "!requirements-agent-gateway.txt",
+        "!services/",
+        "!services/agent-gateway/",
+        "!services/agent-gateway/src/",
+        "!services/agent-gateway/src/**",
+    ]
+
+    def is_included(relative_path: str) -> bool:
+        normalized = relative_path.replace("\\", "/").strip("/")
+        included = True
+        for raw_pattern in patterns:
+            negated = raw_pattern.startswith("!")
+            pattern = raw_pattern.removeprefix("!")
+            directory_only = pattern.endswith("/")
+            pattern = pattern.strip("/")
+            if pattern == "**":
+                matches = True
+            elif pattern.endswith("/**"):
+                prefix = pattern.removesuffix("/**")
+                matches = normalized == prefix or normalized.startswith(f"{prefix}/")
+            elif directory_only:
+                matches = normalized == pattern
+            else:
+                matches = normalized == pattern
+            if matches:
+                included = negated
+        return included
+
+    allowed = (
+        "docker/agent-gateway.Dockerfile",
+        "requirements-agent-gateway.txt",
+        "services/agent-gateway/src/videobox_agent_gateway/__init__.py",
+        "services/agent-gateway/src/videobox_agent_gateway/main.py",
+        "services/agent-gateway/src/videobox_agent_gateway/nested/module.py",
+    )
+    rejected = (
+        ".env",
+        ".env.container",
+        ".env.container.example",
+        ".tmp-final-fence-debug/private.txt",
+        ".tmp-real-video-dogfood/sample.json",
+        "apps/web/.tmp-real-video-dogfood/sample.mp4",
+        "apps/web/src/main.tsx",
+        "services/api/src/videobox_api/main.py",
+        "services/agent-gateway/README.md",
+        "packages/core-engine/src/videobox_core_engine/__init__.py",
+        "docs/implementation-plan.ko.md",
+        "runtime.sqlite",
+        "sample.mp4",
+        "sample.wav",
+        "sample.mp3",
+        "sample.mov",
+        "docker/workspace.Dockerfile",
+    )
+    assert all(is_included(path) for path in allowed)
+    assert not any(is_included(path) for path in rejected)
+
+
 def test_gateway_health_is_http_process_readiness_only_and_reads_no_auth_env(
     monkeypatch,
 ) -> None:
