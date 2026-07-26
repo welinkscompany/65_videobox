@@ -38,6 +38,8 @@
 - A1 startup validation: Compose rendered model의 정확한 resolved env만 신뢰하고, 고정 Hermes 이미지의 공식 `_verify_password`를 network none으로 실행해 plaintext/hash 관계를 검증
 - A1 startup streaming: captured config/password 검사는 stdout/stderr를 비동기로 동시에 drain하고 실제 targeted `up`은 native argument array와 inherited streaming을 사용
 - workspace secret boundary: environment key뿐 아니라 전체 resolved value에서 gateway username/plaintext/hash가 0회인지 start/static verifier가 검사
+- workspace alias semantics: 공용 helper가 key를 제외한 scalar value만 ordinal-exact 비교해 exact username/plaintext/hash alias는 거부하고 정상 substring은 허용하며 non-scalar map은 fail-closed
+- alias false-positive RED/GREEN: start/static benign key·substring 각 **1 failed** → exact alias 3종 포함 각 **4 passed**; 최종 관련 gate **62 passed**
 - capability authority: A1 topology/health-only gateway 배치와 issuance·signer·revocation writer·capability route 미배치를 별도 상태로 고정
 - Phase 0: **2/2 완료**
 - Phase A: **1/4 완료**

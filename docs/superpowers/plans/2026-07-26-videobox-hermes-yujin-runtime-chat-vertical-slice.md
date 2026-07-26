@@ -144,6 +144,7 @@ Expected: evidence distinguishes source configuration, container state, HTTP rea
 - Create: `services/agent-gateway/src/videobox_agent_gateway/__init__.py`
 - Create: `services/agent-gateway/src/videobox_agent_gateway/main.py`
 - Create: `scripts/start-hermes-yujin.ps1`
+- Create: `scripts/hermes-yujin-environment-contract.ps1`
 - Create: `scripts/verify-hermes-yujin-runtime.ps1`
 - Create: `tests/test_hermes_yujin_compose_contract.py`
 - Create: `tests/test_start_hermes_yujin_script.py`
@@ -186,7 +187,7 @@ Expected: evidence distinguishes source configuration, container state, HTTP rea
 8. `start-hermes-yujin.ps1` must:
    - use the rendered Compose model—not a second raw `.env` parser—as the authority for the exact resolved credential environment;
    - reject missing, empty, unresolved, placeholder, mismatched username, or invalid URL values without echoing values;
-   - reject any resolved workspace environment whose key or serialized value contains the resolved gateway username, plaintext password, or Hermes password hash;
+   - validate the resolved workspace environment as a scalar map, exclude property keys, and reject only a scalar value that is ordinal-exact equal to the resolved gateway username, plaintext password, or Hermes password hash; benign substrings remain allowed;
    - verify the plaintext/password-hash relationship with the pinned Hermes image's canonical `plugins.dashboard_auth.basic._verify_password` under `--network none`;
    - drain captured config/password-check stdout and stderr concurrently, but run the actual targeted `up` through the native argument array with inherited streaming output;
    - offer `-ValidateOnly` so configuration and credential relationship can be checked without starting the services;

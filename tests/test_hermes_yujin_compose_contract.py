@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+import pytest
 import yaml
 
 
@@ -434,8 +435,17 @@ def test_static_verifier_uses_child_dummy_env_and_checks_the_source_topology() -
     )
 
 
+@pytest.mark.parametrize(
+    "secret_expression",
+    (
+        "${HERMES_YUJIN_GATEWAY_USERNAME}",
+        "${HERMES_YUJIN_GATEWAY_PASSWORD}",
+        "${HERMES_YUJIN_GATEWAY_PASSWORD_HASH}",
+    ),
+)
 def test_static_verifier_rejects_workspace_alias_of_a_dummy_secret(
     tmp_path: Path,
+    secret_expression: str,
 ) -> None:
     repository = tmp_path / "repository"
     repository.mkdir()
@@ -448,7 +458,7 @@ def test_static_verifier_rejects_workspace_alias_of_a_dummy_secret(
         "    networks: [videobox-agent-gateway-api-network]\n",
         "  videobox-workspace:\n"
         "    environment:\n"
-        "      SAFE_ALIAS: ${HERMES_YUJIN_GATEWAY_PASSWORD}\n"
+        f"      SAFE_ALIAS: {secret_expression}\n"
         "    networks: [videobox-agent-gateway-api-network]\n",
         1,
     )
@@ -479,6 +489,61 @@ def test_static_verifier_rejects_workspace_alias_of_a_dummy_secret(
     )
 
     assert result.returncode != 0
+    output = f"{result.stdout}\n{result.stderr}"
+    for forbidden in (
+        "static-gateway-user",
+        "static-gateway-password",
+        "static-gateway-password-hash",
+    ):
+        assert forbidden not in output
+
+
+def test_static_verifier_allows_a_benign_dummy_username_substring(
+    tmp_path: Path,
+) -> None:
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    (repository / "compose.yaml").write_text(
+        COMPOSE_PATH.read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    overlay_source = OVERLAY_PATH.read_text(encoding="utf-8").replace(
+        "  videobox-workspace:\n"
+        "    networks: [videobox-agent-gateway-api-network]\n",
+        "  videobox-workspace:\n"
+        "    environment:\n"
+        "      static-gateway-user: benign-key-value\n"
+        "      DATABASE_URL: postgresql://static-gateway-user-suffix@postgres/db\n"
+        "    networks: [videobox-agent-gateway-api-network]\n",
+        1,
+    )
+    (repository / "compose.hermes-yujin.yaml").write_text(
+        overlay_source,
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(ROOT / "scripts" / "verify-hermes-yujin-runtime.ps1"),
+            "-StaticOnly",
+            "-RepositoryRoot",
+            str(repository),
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=30,
+        check=False,
+    )
+
+    assert result.returncode == 0
     output = f"{result.stdout}\n{result.stderr}"
     for forbidden in (
         "static-gateway-user",

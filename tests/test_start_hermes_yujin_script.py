@@ -68,20 +68,21 @@ def _assert_no_values_leaked(result: subprocess.CompletedProcess[str]) -> None:
 
 def _rendered_model(
     workspace_environment: dict[str, str] | None = None,
+    gateway_username: str = "valid-dummy-user",
 ) -> dict[str, object]:
     return {
         "services": {
             "videobox-agent-gateway": {
                 "environment": {
                     "HERMES_YUJIN_GATEWAY_PASSWORD": VALID_PASSWORD,
-                    "HERMES_YUJIN_GATEWAY_USERNAME": "valid-dummy-user",
+                    "HERMES_YUJIN_GATEWAY_USERNAME": gateway_username,
                     "HERMES_YUJIN_URL": "http://videobox-hermes-yujin:9120",
                 }
             },
             "videobox-hermes-yujin": {
                 "environment": {
                     "HERMES_DASHBOARD_BASIC_AUTH_PASSWORD_HASH": VALID_HASH,
-                    "HERMES_DASHBOARD_BASIC_AUTH_USERNAME": "valid-dummy-user",
+                    "HERMES_DASHBOARD_BASIC_AUTH_USERNAME": gateway_username,
                 }
             },
             "videobox-workspace": {
@@ -122,6 +123,7 @@ def _run_fake_start(
     tmp_path: Path,
     *,
     workspace_environment: dict[str, str] | None = None,
+    gateway_username: str = "valid-dummy-user",
     validate_only: bool = False,
     config_stderr: str = "quiet",
     up_exit_code: int = 0,
@@ -131,7 +133,7 @@ def _run_fake_start(
     env_file.write_text(_env_text(), encoding="utf-8")
     fake_config = tmp_path / "config.json"
     fake_config.write_text(
-        json.dumps(_rendered_model(workspace_environment)),
+        json.dumps(_rendered_model(workspace_environment, gateway_username)),
         encoding="utf-8",
     )
     fake_log = tmp_path / "docker.log"
@@ -252,6 +254,25 @@ def test_workspace_alias_of_any_resolved_credential_fails_closed(
     assert result.returncode != 0
     assert len(invocations) == 1
     assert "config" in invocations[0]
+    _assert_no_values_leaked(result)
+
+
+def test_workspace_allows_a_benign_username_substring(
+    tmp_path: Path,
+) -> None:
+    result, invocations = _run_fake_start(
+        tmp_path,
+        gateway_username="videobox",
+        workspace_environment={
+            "videobox": "benign-key-value",
+            "DATABASE_URL": "postgresql://videobox:database-password@postgres/db",
+        },
+        validate_only=True,
+    )
+
+    assert result.returncode == 0
+    assert len(invocations) == 2
+    assert "videobox" not in f"{result.stdout}\n{result.stderr}"
     _assert_no_values_leaked(result)
 
 

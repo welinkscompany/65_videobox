@@ -9,6 +9,7 @@ $ErrorActionPreference = "Stop"
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $composeFile = Join-Path $repositoryRoot "compose.yaml"
 $overlayFile = Join-Path $repositoryRoot "compose.hermes-yujin.yaml"
+. (Join-Path $PSScriptRoot "hermes-yujin-environment-contract.ps1")
 $pinnedHermesImage = "nousresearch/hermes-agent@sha256:ad79951c26b7707c8c651f30780338d4f9bb17ddca19f6ea78eb27cbf83a3787"
 $credentialNames = @(
     "HERMES_YUJIN_GATEWAY_USERNAME"
@@ -162,18 +163,14 @@ foreach ($name in @($workspace.environment.PSObject.Properties.Name)) {
         throw "Workspace received a forbidden Hermes credential."
     }
 }
-$workspaceEnvironmentJson = (
-    $workspace.environment | ConvertTo-Json -Depth 20 -Compress
-).Replace('$$', '$')
-foreach ($credentialValue in @(
-    $gatewayUsername
-    $gatewayPassword
-    $hermesPasswordHash
-)) {
-    if ($workspaceEnvironmentJson.Contains([string]$credentialValue)) {
-        throw "Workspace received a forbidden Hermes credential."
-    }
-}
+Assert-NoHermesYujinCredentialValueAliases `
+    -Environment $workspace.environment `
+    -CredentialValues @(
+        $gatewayUsername
+        $gatewayPassword
+        $hermesPasswordHash
+    ) `
+    -FailureMessage "Workspace received a forbidden Hermes credential."
 
 $passwordCheckCode = (
     "import os; from plugins.dashboard_auth.basic import _verify_password; " +

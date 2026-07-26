@@ -14,6 +14,7 @@ if ([string]::IsNullOrWhiteSpace($RepositoryRoot)) {
 
 $composePath = Join-Path $RepositoryRoot "compose.yaml"
 $overlayPath = Join-Path $RepositoryRoot "compose.hermes-yujin.yaml"
+. (Join-Path $PSScriptRoot "hermes-yujin-environment-contract.ps1")
 $expectedImage = "nousresearch/hermes-agent@sha256:ad79951c26b7707c8c651f30780338d4f9bb17ddca19f6ea78eb27cbf83a3787"
 $gatewayApiNetwork = "videobox-agent-gateway-api-network"
 $hermesNetwork = "videobox-agent-gateway-network"
@@ -177,20 +178,14 @@ foreach ($name in @($workspace.environment.PSObject.Properties.Name)) {
         $name -notmatch '^HERMES(?:_YUJIN|_DASHBOARD)'
     ) "Workspace received a forbidden Hermes environment value."
 }
-$workspaceEnvironmentJson = (
-    $workspace.environment | ConvertTo-Json -Depth 20 -Compress
-).Replace('$$', '$')
-foreach ($name in @(
-    "HERMES_YUJIN_GATEWAY_USERNAME"
-    "HERMES_YUJIN_GATEWAY_PASSWORD"
-    "HERMES_YUJIN_GATEWAY_PASSWORD_HASH"
-)) {
-    Assert-True (
-        -not $workspaceEnvironmentJson.Contains(
-            [string]$dummyEnvironment[$name]
-        )
-    ) "Workspace resolved environment contains a forbidden dummy Hermes credential value."
-}
+Assert-NoHermesYujinCredentialValueAliases `
+    -Environment $workspace.environment `
+    -CredentialValues @(
+        $dummyEnvironment["HERMES_YUJIN_GATEWAY_USERNAME"]
+        $dummyEnvironment["HERMES_YUJIN_GATEWAY_PASSWORD"]
+        $dummyEnvironment["HERMES_YUJIN_GATEWAY_PASSWORD_HASH"]
+    ) `
+    -FailureMessage "Workspace resolved environment contains a forbidden dummy Hermes credential value."
 
 $hermesMounts = @($hermes.volumes)
 Assert-True ($hermesMounts.Count -eq 1) "Hermes must have exactly one mount in A1."
