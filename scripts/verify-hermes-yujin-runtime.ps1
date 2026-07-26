@@ -58,6 +58,8 @@ function Assert-NoProperty {
 
 Assert-True (Test-Path -LiteralPath $composePath -PathType Leaf) "compose.yaml is missing."
 Assert-True (Test-Path -LiteralPath $overlayPath -PathType Leaf) "Yujin Compose overlay is missing."
+$baseSource = [IO.File]::ReadAllText($composePath)
+Assert-True (-not $baseSource.Contains("HERMES_YUJIN")) "Base Compose must not contain Yujin services."
 $source = [IO.File]::ReadAllText($overlayPath)
 foreach ($requiredTemplate in @(
     '${HERMES_YUJIN_GATEWAY_USERNAME:?set in .env.container}'
@@ -66,6 +68,40 @@ foreach ($requiredTemplate in @(
 )) {
     Assert-True ($source.Contains($requiredTemplate)) "A required secret template is missing."
 }
+
+$baseProcessInfo = New-Object System.Diagnostics.ProcessStartInfo
+$baseProcessInfo.FileName = "docker"
+$baseProcessInfo.Arguments = "compose -f `"$composePath`" config --format json"
+$baseProcessInfo.WorkingDirectory = $RepositoryRoot
+$baseProcessInfo.UseShellExecute = $false
+$baseProcessInfo.RedirectStandardOutput = $true
+$baseProcessInfo.RedirectStandardError = $true
+$baseProcessInfo.CreateNoWindow = $true
+$baseProcessInfo.EnvironmentVariables["POSTGRES_PASSWORD"] = "static-postgres-value"
+$baseProcessInfo.EnvironmentVariables["VIDEOBOX_CONTAINER_DATA_ROOT"] = "D:/videobox-static-data"
+foreach ($name in @(
+    "HERMES_YUJIN_GATEWAY_USERNAME"
+    "HERMES_YUJIN_GATEWAY_PASSWORD"
+    "HERMES_YUJIN_GATEWAY_PASSWORD_HASH"
+)) {
+    [void]$baseProcessInfo.EnvironmentVariables.Remove($name)
+}
+$baseProcess = New-Object System.Diagnostics.Process
+$baseProcess.StartInfo = $baseProcessInfo
+[void]$baseProcess.Start()
+$baseJson = $baseProcess.StandardOutput.ReadToEnd()
+[void]$baseProcess.StandardError.ReadToEnd()
+$baseProcess.WaitForExit()
+Assert-True ($baseProcess.ExitCode -eq 0) "Base Compose static render failed."
+$baseRendered = $baseJson | ConvertFrom-Json
+Assert-True (
+    $null -eq $baseRendered.services.PSObject.Properties["videobox-agent-gateway"] -and
+    $null -eq $baseRendered.services.PSObject.Properties["videobox-hermes-yujin"]
+) "Base Compose must not contain Yujin services."
+Assert-Networks $baseRendered.services.'videobox-workspace' @(
+    "videobox-edge"
+    "videobox-internal"
+) "base videobox-workspace"
 
 $processInfo = New-Object System.Diagnostics.ProcessStartInfo
 $processInfo.FileName = "docker"
@@ -103,6 +139,8 @@ $gateway = $rendered.services.'videobox-agent-gateway'
 $workspace = $rendered.services.'videobox-workspace'
 Assert-True ($null -ne $hermes) "Rendered Hermes Yujin service is missing."
 Assert-True ($null -ne $gateway) "Rendered agent gateway service is missing."
+Assert-True (($hermes.profiles -join "|") -ceq "hermes-yujin") "Hermes profile is invalid."
+Assert-True (($gateway.profiles -join "|") -ceq "hermes-yujin") "Gateway profile is invalid."
 
 Assert-True ($hermes.image -ceq $expectedImage) "Hermes image digest does not match the pin."
 Assert-True (
@@ -117,6 +155,28 @@ Assert-True ($rendered.networks.$hermesNetwork.internal -eq $true) "Hermes-facin
 Assert-NoProperty $hermes "ports" "Hermes must not publish a host port."
 Assert-NoProperty $gateway "ports" "Agent gateway must not publish a host port."
 Assert-NoProperty $gateway "volumes" "Agent gateway must not have mounts."
+foreach ($service in @($gateway, $hermes)) {
+    Assert-NoProperty $service "privileged" "A1 services must not be privileged."
+    Assert-NoProperty $service "extra_hosts" "A1 services must not have extra hosts."
+    Assert-NoProperty $service "dns" "A1 services must not override DNS."
+}
+Assert-NoProperty $gateway "cap_add" "Agent gateway must not add capabilities."
+
+$gatewayEnvironmentNames = @($gateway.environment.PSObject.Properties.Name | Sort-Object)
+Assert-True (
+    ($gatewayEnvironmentNames -join "|") -ceq (
+        @(
+            "HERMES_YUJIN_GATEWAY_PASSWORD"
+            "HERMES_YUJIN_GATEWAY_USERNAME"
+            "HERMES_YUJIN_URL"
+        ) -join "|"
+    )
+) "Gateway environment contract is invalid."
+foreach ($name in @($workspace.environment.PSObject.Properties.Name)) {
+    Assert-True (
+        $name -notmatch '^HERMES(?:_YUJIN|_DASHBOARD)'
+    ) "Workspace received a forbidden Hermes environment value."
+}
 
 $hermesMounts = @($hermes.volumes)
 Assert-True ($hermesMounts.Count -eq 1) "Hermes must have exactly one mount in A1."

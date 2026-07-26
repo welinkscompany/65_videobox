@@ -358,19 +358,24 @@ def test_start_script_validates_a_real_env_file_and_is_nondestructive() -> None:
     assert "replace-before-starting" in script
     for name in required_names:
         assert name in script
-    assert re.search(
-        r"docker compose .*--env-file .* up -d --build "
-        r"videobox-hermes-yujin videobox-agent-gateway",
-        script,
-    )
+    for argument in (
+        '"compose"',
+        '"-f", $composeFile',
+        '"-f", $overlayFile',
+        '"--profile", "hermes-yujin"',
+        '"--env-file", $resolvedEnvFile',
+        '"up"',
+        '"-d"',
+        '"--build"',
+        '"videobox-hermes-yujin"',
+        '"videobox-agent-gateway"',
+    ):
+        assert argument in script
     assert "Write-Output $value" not in script
     assert "Write-Host $value" not in script
     assert "install-hermes-yujin-profile" not in script
-    assert not re.search(
-        r"docker compose[^\r\n]*(?:\bdown\b|\brm\b|--remove-orphans|-v\b)",
-        script,
-        flags=re.IGNORECASE,
-    )
+    for destructive_argument in ('"down"', '"rm"', '"--remove-orphans"', '"-v"'):
+        assert destructive_argument not in script
 
 
 def test_static_verifier_uses_child_dummy_env_and_checks_the_source_topology() -> None:
@@ -383,6 +388,14 @@ def test_static_verifier_uses_child_dummy_env_and_checks_the_source_topology() -
     assert "ProcessStartInfo" in script
     assert "compose.hermes-yujin.yaml" in script
     assert "--profile hermes-yujin" in script
+    assert "Base Compose must not contain Yujin services." in script
+    assert "profiles" in script
+    assert "privileged" in script
+    assert "extra_hosts" in script
+    assert "dns" in script
+    assert "cap_add" in script
+    assert "Gateway environment contract is invalid." in script
+    assert "Workspace received a forbidden Hermes environment value." in script
     assert "config --format json" in script
     assert "ConvertFrom-Json" in script
     assert ".env.container" not in re.sub(

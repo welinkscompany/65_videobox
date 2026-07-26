@@ -146,6 +146,7 @@ Expected: evidence distinguishes source configuration, container state, HTTP rea
 - Create: `scripts/start-hermes-yujin.ps1`
 - Create: `scripts/verify-hermes-yujin-runtime.ps1`
 - Create: `tests/test_hermes_yujin_compose_contract.py`
+- Create: `tests/test_start_hermes_yujin_script.py`
 - Modify: `tests/test_compose_contract.py`
 
 **RED:**
@@ -183,7 +184,10 @@ Expected: evidence distinguishes source configuration, container state, HTTP rea
 6. Add `docker/agent-gateway.Dockerfile.dockerignore` using Docker's Dockerfile-specific convention. Deny the repository root by default and allow only the exact gateway Dockerfile, `requirements-agent-gateway.txt`, required parent traversal directories, and `services/agent-gateway/src/**`.
 7. Add healthchecks that prove both HTTP services respond, explicitly naming Hermes HTTP readiness—not provider success.
 8. `start-hermes-yujin.ps1` must:
-   - verify required local variables are nonempty without echoing values;
+   - use the rendered Compose model—not a second raw `.env` parser—as the authority for the exact resolved credential environment;
+   - reject missing, empty, unresolved, placeholder, mismatched username, or invalid URL values without echoing values;
+   - verify the plaintext/password-hash relationship with the pinned Hermes image's canonical `plugins.dashboard_auth.basic._verify_password` under `--network none`;
+   - offer `-ValidateOnly` so configuration and credential relationship can be checked without starting the services;
    - start only the named Yujin and agent-gateway services;
    - refuse to remove old containers or volumes.
 9. A2 will extend the startup flow with Yujin profile installation; A1 must not reference a file that does not yet exist.
@@ -191,7 +195,7 @@ Expected: evidence distinguishes source configuration, container state, HTTP rea
 11. Run:
 
    ```powershell
-   .\.venv\Scripts\python.exe -m pytest tests/test_hermes_yujin_compose_contract.py tests/test_compose_contract.py -q
+   .\.venv\Scripts\python.exe -m pytest tests/test_hermes_yujin_compose_contract.py tests/test_start_hermes_yujin_script.py tests/test_compose_contract.py -q
    powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-hermes-yujin-runtime.ps1 -StaticOnly
    # Run through the static verifier, or inject non-secret dummy required values
    # into a child process before docker compose config --quiet.

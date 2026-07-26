@@ -35,6 +35,7 @@
 - A1 isolated Hermes/gateway topology와 deterministic static verifier: 완료
 - A1 Compose activation: base는 기존 호환, `compose.hermes-yujin.yaml` + `hermes-yujin` profile만 opt-in
 - A1 gateway build context: Dockerfile 전용 deny-all allowlist로 Dockerfile·requirements·gateway source만 허용
+- A1 startup validation: Compose rendered model의 정확한 resolved env만 신뢰하고, 고정 Hermes 이미지의 공식 `_verify_password`를 network none으로 실행해 plaintext/hash 관계를 검증
 - capability authority: A1 topology/health-only gateway 배치와 issuance·signer·revocation writer·capability route 미배치를 별도 상태로 고정
 - Phase 0: **2/2 완료**
 - Phase A: **1/4 완료**
@@ -45,7 +46,9 @@
 - 기존 공식 누적: **9/22 (40.9%), 잔여 59.1%**
 - Task 9 사람/환경 acceptance와 실제 CapCut Desktop 실증: 별도
 - A1 RED/GREEN: 서비스·파일 부재 **10 failed, 6 passed** → **16 passed**; build-context follow-up **1 failed, 16 passed** → **17 passed**
-- static verification: child-process dummy env의 Compose config와 A1 verifier 통과
+- review follow-up RED/GREEN: opt-in topology **8 failed, 10 passed** → **18 passed**; capability authority **2 failed, 3 passed** → **5 passed**
+- credential RED/GREEN: malformed/resolved env **3 failed, 8 passed**; 기존 raw parser가 unresolved value를 fake Docker까지 넘겨 exit 0인 characterization RED → Compose rendered model/고정 Hermes verifier 적용 뒤 **12 passed**
+- final verification: A1 focused **23 passed**, Compose/plan-state 포함 관련 gate **45 passed**, 전체 Python **1597 passed, 20 skipped**; child-process dummy env의 Compose config, A1 static verifier, plan-state verifier, `git diff --check` 통과
 - live service start/HTTP/OAuth/provider/chat/Mem0: real auth env 부재로 미실행
 
 ## 보호 대상
