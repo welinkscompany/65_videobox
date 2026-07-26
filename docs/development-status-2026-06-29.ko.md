@@ -9,7 +9,8 @@
 - `[x] 속도·안전 경계 재검토`: SaaS, OpenCut source/runtime, generic provider/API 확대, 자동 apply를 제외했다. 첫 대화와 creator flow 뒤로 고급 reconnect/audit/memory UI를 미뤘지만 secret/OAuth/raw memory 비노출, Hermes DB/media mount 금지, gateway-only transport, current-revision 명시적 apply, manual fallback, local/test external provider call 0은 선행 필수로 유지했다.
 - `[x] Mem0 소유권`: Mem0는 Hermes/Yujin의 승인 기반 보조기억이다. VideoBox DB/project/session/timeline/media/review/output SSOT나 권한·승인 근거로 쓰지 않는다.
 - `[x] P0-1 감사`: branch/HEAD/upstream, 보호 경로, source Compose와 현재 컨테이너 drift, 고정 Hermes image/CLI/transport 계약, 제안 dependency wheel을 확인해 `docs/handoffs/2026-07-26-videobox-hermes-yujin-audit-baseline.ko.md`에 기록했다. HTTP 200은 readiness일 뿐이며 OAuth/provider/chat/Mem0 live proof로 간주하지 않는다.
-- `[ ] production 구현`: 아직 시작하지 않았다. 새 initiative 진행률은 **1/20 (5.0%)**, 잔여 **95.0%**다. 다음 task는 `P0-2` reverse runtime trace와 plan-state verifier 기준선이다.
+- `[x] P0-2 기준선`: current RightDock → local-only Director → durable exchange → explicit apply → one-player preview → 별도 output 경로를 실제 source에서 역추적했다. 현재 Director proposal apply가 명시적/current-revision backend CAS를 사용하지만 실제 `EditorCommandPort` 인자를 호출하지 않는 계획-코드 gap도 숨기지 않고 audit handoff에 기록했다. master와 네 child의 20개 ID·상태·진행률·placeholder를 검사하는 verifier와 contract test를 RED→GREEN으로 추가했다.
+- `[ ] production 구현`: 아직 시작하지 않았다. Phase 0은 **2/2 완료**, 새 initiative 진행률은 **2/20 (10.0%)**, 잔여 **90.0%**다. 다음 task는 **`A1`만**, 격리된 공식 Hermes Yujin runtime topology와 deterministic startup 검증이다.
 - `사람/환경 별도`: 모바일 원격 환경에서는 owner dogfood와 실제 CapCut Desktop acceptance를 수행하지 않는다. Task 9 사람/환경 acceptance 전까지 기존 공식 누적은 **9/22 (40.9%)**, 잔여 **59.1%**를 유지한다.
 - `보호 범위`: `?? .tmp-final-fence-debug/`, `?? .tmp-real-video-dogfood/`, `?? apps/web/.tmp-real-video-dogfood/`는 stage/remove/delete하지 않는다.
 

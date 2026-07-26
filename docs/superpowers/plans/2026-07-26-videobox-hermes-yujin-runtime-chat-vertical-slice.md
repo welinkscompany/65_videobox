@@ -13,7 +13,7 @@
 Parent: `docs/superpowers/plans/2026-07-26-videobox-hermes-yujin-master-plan.md`
 Design: `docs/superpowers/specs/2026-07-26-videobox-hermes-yujin-integration-design.md`
 
-Child progress: **1/6 tasks (16.7%), remaining 83.3%**. These six tasks are master IDs P0-1, P0-2, A1, A2, A3, and A4.
+Child progress: **2/6 tasks (33.3%), remaining 66.7%**. These six tasks are master IDs P0-1, P0-2, A1, A2, A3, and A4.
 
 ## P0-1 — Confirm drift and official runtime contracts
 
@@ -76,7 +76,7 @@ Expected: evidence distinguishes source configuration, container state, HTTP rea
 
 ## P0-2 — Add baseline reverse trace and plan-state verifier
 
-- [ ] **P0-2** Record reverse runtime trace and focused baseline; add the plan-state consistency verifier.
+- [x] **P0-2** Record reverse runtime trace and focused baseline; add the plan-state consistency verifier.
 
 **Files:**
 
