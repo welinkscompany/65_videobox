@@ -245,13 +245,17 @@ def test_start_streams_large_stderr_without_pipe_deadlock(
     )
 
     assert result.returncode == expected_returncode
-    assert len(invocations) == 3
-    assert " up " in f" {invocations[2]} "
+    assert len(invocations) == (5 if expected_returncode == 0 else 4)
+    assert "run --rm --no-deps" in invocations[2]
+    assert "profile install /opt/videobox-yujin-profile" in invocations[2]
+    assert " up " in f" {invocations[3]} "
     assert "u" * 65536 in result.stderr
     if expected_returncode == 0:
+        assert "videobox-hermes-yujin" in invocations[3]
+        assert "videobox-agent-gateway" in invocations[4]
         assert "targeted for startup" in result.stdout
     else:
-        assert "Targeted Hermes Yujin startup failed." in result.stderr
+        assert "Targeted Hermes Yujin runtime startup failed." in result.stderr
     _assert_no_values_leaked(result)
 
 

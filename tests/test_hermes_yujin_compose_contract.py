@@ -111,9 +111,20 @@ def test_hermes_yujin_uses_the_pinned_serve_contract_and_isolated_oauth_state() 
     hermes = compose["services"]["videobox-hermes-yujin"]
 
     assert hermes["image"] == PINNED_HERMES_IMAGE
-    assert hermes["command"] == ["serve", "--host", "0.0.0.0", "--port", "9120"]
+    assert hermes["command"] == [
+        "-p",
+        "videobox-yujin",
+        "serve",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "9120",
+    ]
     assert hermes["networks"] == [HERMES_NETWORK, PROVIDER_EGRESS_NETWORK]
-    assert hermes["volumes"] == ["videobox_hermes_oauth_state:/opt/data"]
+    assert hermes["volumes"] == [
+        "videobox_hermes_oauth_state:/opt/data",
+        "./config/hermes/yujin:/opt/videobox-yujin-profile:ro",
+    ]
     assert "ports" not in hermes
     assert "expose" not in hermes
     assert "depends_on" not in hermes
@@ -387,7 +398,8 @@ def test_start_script_validates_a_real_env_file_and_is_nondestructive() -> None:
         assert argument in script
     assert "Write-Output $value" not in script
     assert "Write-Host $value" not in script
-    assert "install-hermes-yujin-profile" not in script
+    assert "verify-hermes-yujin-profile" in script
+    assert "install-hermes-yujin-profile" in script
     for destructive_argument in ('"down"', '"rm"', '"--remove-orphans"', '"-v"'):
         assert destructive_argument not in script
 

@@ -69,7 +69,7 @@ Status symbols:
 
 Only `[x]` counts as complete. Reopen `[x]` to `[~]` if later evidence finds a regression. The child task and this mirror must be updated in the same closeout commit.
 
-Current initiative progress: **3/20 (15.0%), remaining 85.0%**.
+Current initiative progress: **4/20 (20.0%), remaining 80.0%**.
 
 The existing VideoBox official cumulative status remains separately fixed at **9/22 (40.9%), remaining 59.1%** until Task 9 human/environment acceptance. Do not combine that denominator with this initiative.
 
@@ -80,10 +80,10 @@ The existing VideoBox official cumulative status remains separately fixed at **9
 - [x] **P0-1** Confirm live/source drift, official Hermes CLI/wire contracts, branch/upstream, protected paths, and current dependency pins.
 - [x] **P0-2** Record reverse runtime trace and focused baseline; add the plan-state consistency verifier.
 
-### Phase A — working Yujin chat vertical slice (1/4)
+### Phase A — working Yujin chat vertical slice (2/4)
 
 - [x] **A1** Add the isolated official Hermes Yujin runtime topology and deterministic startup verification.
-- [ ] **A2** Install the versioned Yujin Soul/profile/skills package and verify ownership plus secret-free contents.
+- [x] **A2** Install the versioned Yujin Soul/profile/skills package and verify ownership plus secret-free contents.
 - [ ] **A3** Implement the minimal authenticated Hermes JSON-RPC/WebSocket client and API SSE run boundary.
 - [ ] **A4** Connect persistent RightDock chat, manual fallback, reload proof, live canary, and Phase A closeout.
 

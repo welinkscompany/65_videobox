@@ -1,8 +1,8 @@
-# VideoBox Hermes Yujin planning closeout
+# VideoBox Hermes Yujin A2 profile closeout
 
 ## 쉬운 말 요약
 
-유진을 VideoBox에 붙이는 설계 승인과 Phase 0 감사·기준선 뒤 첫 production 작업 A1을 완료했다. 공식 Hermes runtime과 아주 좁은 gateway가 Compose에 들어갔지만, 실제 계정 정보가 없으므로 컨테이너나 대화는 시작하지 않았다. 다음 A2에서 유진의 versioned Soul/profile/skills package만 설치·검증하고, 실제 통신과 대화는 A3/A4까지 열지 않는다.
+Phase 0과 A1 격리 runtime 위에 A2의 versioned Yujin Soul/profile/skills package를 추가했다. package source는 opt-in overlay에서 read-only로만 보이고, 설치는 named Hermes container 안에서만 수행한다. 실제 계정 정보가 없으므로 컨테이너·profile install·대화는 시작하지 않았다. 다음 A3에서만 gateway의 인증 Hermes transport와 API SSE 경계를 구현하며 RightDock live chat은 A4까지 열지 않는다.
 
 ## 계획 문서
 
@@ -37,6 +37,11 @@
 - A1 gateway build context: Dockerfile 전용 deny-all allowlist로 Dockerfile·requirements·gateway source만 허용
 - A1 startup validation: Compose rendered model의 정확한 resolved env만 신뢰하고, 고정 Hermes 이미지의 공식 `_verify_password`를 network none으로 실행해 plaintext/hash 관계를 검증
 - A1 startup streaming: captured config/password 검사는 stdout/stderr를 비동기로 동시에 drain하고 실제 targeted `up`은 native argument array와 inherited streaming을 사용
+- A2 profile package: exact `videobox-yujin` 1.0.0 manifest, 한국어 우선 Soul, 대화·확인 질문·수동 fallback 전용 첫 skill
+- A2 package honesty: 자동 적용, VideoBox 근거 없는 preview/export 성공 주장, 미지원 effect의 실행 가능 제안, Phase B creator proposal을 열지 않음
+- A2 mount/install: profile source는 `/opt/videobox-yujin-profile:ro`, OAuth state는 별도 `/opt/data`; host profile이 아닌 named one-off installer container 안에서 `--force -y` 설치 후 runtime은 `-p videobox-yujin`을 명시
+- A2 fail-closed verifier: exact ownership, undeclared executable, secret/API/OAuth/password/Mem0/local absolute user path, traversal·reparse point 검사
+- A2 start order: `ValidateOnly`는 mutation 0, 실제 경로는 static verify → one-off container install → Yujin profile Hermes 시작 → gateway 시작
 - workspace secret boundary: environment key뿐 아니라 전체 resolved value에서 gateway username/plaintext/hash가 0회인지 start/static verifier가 검사
 - workspace alias semantics: 공용 helper가 key를 제외한 scalar value만 ordinal-exact 비교해 exact username/plaintext/hash alias는 거부하고 정상 substring은 허용하며 non-scalar map은 fail-closed
 - alias false-positive RED/GREEN: start/static benign key·substring 각 **1 failed** → exact alias 3종 포함 각 **4 passed**; 최종 관련 gate **62 passed**
@@ -44,10 +49,10 @@
 - composite secret/length RED-GREEN: start password/hash prefix·suffix **4 failed**, 길이 1–11 **11 failed**, static composite **4 failed** → username exact/password·hash substring 분리와 최소 12자 강제; static 두 capture 동시 async drain; 최종 관련 gate **93 passed**
 - capability authority: A1 topology/health-only gateway 배치와 issuance·signer·revocation writer·capability route 미배치를 별도 상태로 고정
 - Phase 0: **2/2 완료**
-- Phase A: **1/4 완료**
+- Phase A: **2/4 완료**
 - production implementation: A1부터 시작
-- Hermes Yujin initiative: **3/20 (15.0%), 잔여 85.0%**
-- runtime/chat child: **3/6 (50.0%), 잔여 50.0%**
+- Hermes Yujin initiative: **4/20 (20.0%), 잔여 80.0%**
+- runtime/chat child: **4/6 (66.7%), 잔여 33.3%**
 - creator child: **0/5**, reliability child: **0/4**, memory/final child: **0/5**
 - 기존 공식 누적: **9/22 (40.9%), 잔여 59.1%**
 - Task 9 사람/환경 acceptance와 실제 CapCut Desktop 실증: 별도
@@ -58,7 +63,9 @@
 - quality follow-up RED: 1 MiB stderr captured/정상 start/실패 start **3 timeout**, workspace credential alias **3 fail-open**, capability 주석/static alias **2 failed**
 - quality follow-up GREEN: startup/alias **6 passed**, capability 주석/static alias **2 passed**, capability authority 포함 최종 관련 gate **58 passed**; 이번 follow-up 전체 Python suite는 미실행이며 기존 **1597 passed, 20 skipped**는 직전 commit 근거
 - supply-chain future: gateway `python:3.12-slim` base digest pin과 A1 전용 Python SBOM은 이번 fix 범위 밖의 비차단 후속이며 완료로 주장하지 않음
-- live service start/HTTP/OAuth/provider/chat/Mem0: real auth env 부재로 미실행
+- A2 RED/GREEN: package·mount·verifier·installer·start ordering 부재 **17 failed**; 대문자 executable 우회와 install 뒤 profile 미선택 RED 2건 → A2와 기존 Yujin contract **99 passed, 1 skipped**
+- A2 final verification: A1 topology/start/authority/plan 회귀 포함 **193 passed, 1 skipped**, profile/runtime/plan-state static verifier와 `git diff --check` 통과
+- live service start/profile install/HTTP/OAuth/provider/chat/Mem0: real auth env 부재로 미실행
 
 ## 보호 대상
 
@@ -70,14 +77,14 @@
 
 ## 다음 goal
 
-**`A2`만** 실행한다. versioned Yujin Soul/profile/skills package를 기존 OAuth state와 격리 경계 안에 설치하고 ownership·digest·secret-free contents를 TDD로 검증한다. A3 gateway/RPC/SSE와 A4 RightDock live chat을 미리 시작하지 않는다.
+**`A3`만** 실행한다. 전용 gateway가 소유하는 최소 인증 Hermes JSON-RPC/WebSocket client와 VideoBox API의 좁은 SSE run boundary를 fake HTTP/WebSocket 기반 TDD로 구현한다. A4 RightDock live chat과 Phase B creator proposal/apply를 미리 시작하지 않는다.
 
 ## 다음 세션용 prompt
 
 ```text
-VideoBox worktree에서 Hermes Yujin master plan의 A2만 실행해.
-A1의 두 internal network와 provider-egress 분리, 기존 OAuth state 단일 mount, gateway-only transport ownership을 유지하면서 versioned Yujin Soul/profile/skills package와 installer/verifier를 strict RED-GREEN TDD로 구현해.
-profile artifact의 ownership·digest·secret-free contents를 검증하고 VideoBox DB/media mount 금지와 local/test external provider call 0을 유지해.
+VideoBox worktree에서 Hermes Yujin master plan의 A3만 실행해.
+A1의 두 internal network와 provider-egress 분리, A2의 read-only profile/container-only install, gateway-only transport ownership을 유지하면서 인증 Hermes JSON-RPC/WebSocket client와 VideoBox API SSE run boundary를 strict RED-GREEN TDD로 구현해.
+fake HTTP/WebSocket만 사용하고 실제 service/provider를 시작하지 말며, caller-supplied credential/tool/path/provider field를 fail-closed 해. VideoBox DB/media mount 금지와 local/test external provider call 0을 유지해.
 보호된 임시 폴더 3개는 건드리지 마.
-검증 뒤 A2만 [x]로 동기화하고 A3를 next goal로 남겨. A3/A4 production task는 미리 시작하지 마.
+검증 뒤 A3만 [x]로 동기화하고 A4를 next goal로 남겨. A4/Phase B production task는 미리 시작하지 마.
 ```

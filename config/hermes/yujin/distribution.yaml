@@ -1,0 +1,7 @@
+name: videobox-yujin
+version: 1.0.0
+hermes_requires: ">=0.18.0"
+distribution_owned:
+  - SOUL.md
+  - config.yaml
+  - skills/

@@ -13,7 +13,7 @@
 Parent: `docs/superpowers/plans/2026-07-26-videobox-hermes-yujin-master-plan.md`
 Design: `docs/superpowers/specs/2026-07-26-videobox-hermes-yujin-integration-design.md`
 
-Child progress: **3/6 tasks (50.0%), remaining 50.0%**. These six tasks are master IDs P0-1, P0-2, A1, A2, A3, and A4.
+Child progress: **4/6 tasks (66.7%), remaining 33.3%**. These six tasks are master IDs P0-1, P0-2, A1, A2, A3, and A4.
 
 ## P0-1 — Confirm drift and official runtime contracts
 
@@ -215,7 +215,7 @@ Expected: evidence distinguishes source configuration, container state, HTTP rea
 
 ## A2 — Install the Yujin Soul/profile package
 
-- [ ] **A2** Install the versioned Yujin Soul/profile/skills package and verify ownership plus secret-free contents.
+- [x] **A2** Install the versioned Yujin Soul/profile/skills package and verify ownership plus secret-free contents.
 
 **Files:**
 
@@ -226,7 +226,7 @@ Expected: evidence distinguishes source configuration, container state, HTTP rea
 - Create: `scripts/install-hermes-yujin-profile.ps1`
 - Create: `scripts/verify-hermes-yujin-profile.ps1`
 - Modify: `scripts/start-hermes-yujin.ps1`
-- Modify: `compose.yaml`
+- Modify: `compose.hermes-yujin.yaml`
 - Create: `tests/test_hermes_yujin_profile_distribution.py`
 - Inspect/reuse: `packages/core-engine/src/videobox_core_engine/yujin_profile_contract.py`
 - Inspect/reuse: `packages/core-engine/src/videobox_core_engine/yujin_agent_package_contract.py`
@@ -277,7 +277,7 @@ Expected: evidence distinguishes source configuration, container state, HTTP rea
 10. Mark A2 `[x]`, synchronize progress, and commit:
 
    ```powershell
-   git add config/hermes/yujin compose.yaml scripts tests docs/superpowers/plans
+   git add config/hermes/yujin compose.hermes-yujin.yaml scripts tests docs/superpowers/plans
    git commit -m "feat: install VideoBox Yujin profile"
    ```
 

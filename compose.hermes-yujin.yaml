@@ -36,13 +36,15 @@ services:
 
   videobox-hermes-yujin:
     profiles: [hermes-yujin]
+    container_name: videobox-hermes-yujin
     image: nousresearch/hermes-agent@sha256:ad79951c26b7707c8c651f30780338d4f9bb17ddca19f6ea78eb27cbf83a3787
-    command: ["serve", "--host", "0.0.0.0", "--port", "9120"]
+    command: ["-p", "videobox-yujin", "serve", "--host", "0.0.0.0", "--port", "9120"]
     environment:
       HERMES_DASHBOARD_BASIC_AUTH_USERNAME: ${HERMES_YUJIN_GATEWAY_USERNAME:?set in .env.container}
       HERMES_DASHBOARD_BASIC_AUTH_PASSWORD_HASH: ${HERMES_YUJIN_GATEWAY_PASSWORD_HASH:?set in .env.container}
     volumes:
       - videobox_hermes_oauth_state:/opt/data
+      - ./config/hermes/yujin:/opt/videobox-yujin-profile:ro
     networks: [videobox-agent-gateway-network, videobox-hermes-provider-egress]
     read_only: true
     tmpfs:

@@ -205,32 +205,57 @@ if ($ValidateOnly) {
     exit 0
 }
 
-$upArguments = @(
-    "compose"
-    "-f", $composeFile
-    "-f", $overlayFile
-    "--profile", "hermes-yujin"
-    "--env-file", $resolvedEnvFile
-    "up"
-    "-d"
-    "--build"
-    "videobox-hermes-yujin"
-    "videobox-agent-gateway"
-)
-$upExitCode = 1
-Push-Location $repositoryRoot
-try {
-    & $DockerExecutable @upArguments
-    $upExitCode = $LASTEXITCODE
+& (Join-Path $PSScriptRoot "verify-hermes-yujin-profile.ps1") `
+    -StaticOnly `
+    -ProfileRoot (Join-Path $repositoryRoot "config/hermes/yujin")
+
+function Invoke-TargetedComposeUp {
+    param(
+        [string]$ServiceName,
+        [string]$FailureMessage
+    )
+
+    $upArguments = @(
+        "compose"
+        "-f", $composeFile
+        "-f", $overlayFile
+        "--profile", "hermes-yujin"
+        "--env-file", $resolvedEnvFile
+        "up"
+        "-d"
+        "--build"
+        $ServiceName
+    )
+    $upExitCode = 1
+    Push-Location $repositoryRoot
+    try {
+        & $DockerExecutable @upArguments
+        $upExitCode = $LASTEXITCODE
+    }
+    catch {
+        throw $FailureMessage
+    }
+    finally {
+        Pop-Location
+    }
+    if ($upExitCode -ne 0) {
+        throw $FailureMessage
+    }
 }
-catch {
-    throw "Targeted Hermes Yujin startup could not be executed."
-}
-finally {
-    Pop-Location
-}
-if ($upExitCode -ne 0) {
-    throw "Targeted Hermes Yujin startup failed."
-}
+
+& (Join-Path $PSScriptRoot "install-hermes-yujin-profile.ps1") `
+    -EnvFile $resolvedEnvFile `
+    -ComposeFile $composeFile `
+    -OverlayFile $overlayFile `
+    -DockerExecutable $DockerExecutable `
+    -InstallerContainerName "videobox-hermes-yujin-profile-installer"
+
+Invoke-TargetedComposeUp `
+    -ServiceName "videobox-hermes-yujin" `
+    -FailureMessage "Targeted Hermes Yujin runtime startup failed."
+
+Invoke-TargetedComposeUp `
+    -ServiceName "videobox-agent-gateway" `
+    -FailureMessage "Targeted Hermes Yujin gateway startup failed."
 
 Write-Output "Hermes Yujin and its agent gateway were targeted for startup."

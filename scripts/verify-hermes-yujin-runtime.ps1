@@ -153,8 +153,9 @@ Assert-True (($hermes.profiles -join "|") -ceq "hermes-yujin") "Hermes profile i
 Assert-True (($gateway.profiles -join "|") -ceq "hermes-yujin") "Gateway profile is invalid."
 
 Assert-True ($hermes.image -ceq $expectedImage) "Hermes image digest does not match the pin."
+Assert-True ($hermes.container_name -ceq "videobox-hermes-yujin") "Hermes container name must match the container-only installer target."
 Assert-True (
-    (($hermes.command -join "|") -ceq "serve|--host|0.0.0.0|--port|9120")
+    (($hermes.command -join "|") -ceq "-p|videobox-yujin|serve|--host|0.0.0.0|--port|9120")
 ) "Hermes serve command does not match the pinned CLI contract."
 Assert-Networks $hermes @($hermesNetwork, $providerNetwork) "videobox-hermes-yujin"
 Assert-Networks $gateway @($gatewayApiNetwork, $hermesNetwork) "videobox-agent-gateway"
@@ -199,11 +200,27 @@ Assert-NoHermesYujinCredentialValueAliases `
     -FailureMessage "Workspace resolved environment contains a forbidden dummy Hermes credential value."
 
 $hermesMounts = @($hermes.volumes)
-Assert-True ($hermesMounts.Count -eq 1) "Hermes must have exactly one mount in A1."
+Assert-True ($hermesMounts.Count -eq 2) "Hermes must have exactly the OAuth state and read-only Yujin profile mounts."
 Assert-True (
-    $hermesMounts[0].source -ceq "videobox_hermes_oauth_state" -and
-    $hermesMounts[0].target -ceq "/opt/data"
-) "Hermes A1 mount must be only the isolated OAuth state at /opt/data."
+    @(
+        $hermesMounts | Where-Object {
+            $_.source -ceq "videobox_hermes_oauth_state" -and
+            $_.target -ceq "/opt/data" -and
+            $_.type -ceq "volume"
+        }
+    ).Count -eq 1
+) "Hermes must retain the isolated OAuth state at /opt/data."
+$profileSource = [IO.Path]::GetFullPath((Join-Path $RepositoryRoot "config/hermes/yujin"))
+Assert-True (
+    @(
+        $hermesMounts | Where-Object {
+            $_.source -ceq $profileSource -and
+            $_.target -ceq "/opt/videobox-yujin-profile" -and
+            $_.type -ceq "bind" -and
+            $_.read_only -eq $true
+        }
+    ).Count -eq 1
+) "Hermes must mount only the versioned Yujin profile source read-only."
 
 $hermesHealth = $hermes.healthcheck.test -join " "
 $gatewayHealth = $gateway.healthcheck.test -join " "
@@ -225,4 +242,4 @@ foreach ($forbidden in @(
     Assert-True (-not $forbiddenHermesText.Contains($forbidden)) "Hermes contains a forbidden A1 boundary."
 }
 
-Write-Output "Hermes Yujin A1 static topology verified: rendered config, exact networks, mounts, and HTTP-only readiness."
+Write-Output "Hermes Yujin A2 static topology verified: rendered config, exact networks, mounts, and HTTP-only readiness."
