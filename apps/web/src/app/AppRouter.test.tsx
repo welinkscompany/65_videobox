@@ -377,7 +377,7 @@ describe("AppRouter URL ownership", () => {
     expect(screen.getByRole("region", { name: "미리보기" }).parentElement).toHaveAttribute("data-preview-min-width", "720");
     expect(screen.getByLabelText("편집본 미리보기")).toHaveAttribute("src", "/api/projects/project_a/exact-previews/generation-1/content");
     expect(document.querySelectorAll("audio,video")).toHaveLength(1);
-    expect(screen.getByLabelText("유진에게 요청하기")).toBeDisabled();
+    expect(screen.getByLabelText("유진에게 요청하기")).toBeEnabled();
     expect(screen.getByRole("button", { name: "요청 보내기" })).toBeDisabled();
     expect(screen.getByText("아직 추천이 없어요. 직접 편집을 계속하거나 유진에게 요청할 수 있어요.")).toBeVisible();
     expect(loadManifest).toHaveBeenCalledTimes(1);

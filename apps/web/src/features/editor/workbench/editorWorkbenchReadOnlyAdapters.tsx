@@ -26,16 +26,21 @@ export function EditorWorkbenchReadOnlyAdapters({ view, session, dock, director,
   return <RightDock
     draft={eugeneDraft}
     composerDisabled={director?.composerDisabled ?? true}
+    conversationScroll={director?.conversationScroll}
     messages={director?.messages}
     onApplyProposal={director?.onApplyProposal}
     onDraftChange={onEugeneDraftChange}
+    onConversationScrollChange={director?.onConversationScrollChange}
     onManualEdit={director?.onManualEdit}
     onPreviewCandidate={director?.onPreviewCandidate}
     onRetryMessage={director?.onRetryMessage}
+    onSelectedCandidateIdsChange={director?.onSelectedCandidateIdsChange}
     onSendMessage={director?.onSendMessage}
     onStart={director?.onStart}
     proposal={director?.proposal}
     retryAfterSeconds={director?.retryAfterSeconds}
+    runState={director?.runState}
+    selectedCandidateIds={director?.selectedCandidateIds}
     state={director?.state}
     inspectorDisabled={isSavingCaption}
     loadApprovedTtsCandidates={loadApprovedTtsCandidates}

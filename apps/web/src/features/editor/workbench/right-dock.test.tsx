@@ -18,11 +18,20 @@ const proposal: RightDockProposal = {
 
 function PersistentDock() {
   const [draft, setDraft] = useState("");
+  const [selectedCandidateIds, setSelectedCandidateIds] = useState<readonly string[]>(["candidate-1"]);
+  const [conversationScroll, setConversationScroll] = useState({ key: "route-a", top: 0, pinnedToBottom: true });
   return <RightDock
     draft={draft}
     onDraftChange={setDraft}
     proposal={proposal}
-    messages={[{ id: "assistant-1", userText: "B-roll을 추천해 줘", assistantText: "두 가지를 준비했어요." }]}
+    messages={[
+      { id: "user-1", role: "user", text: "B-roll을 추천해 줘" },
+      { id: "assistant-1", role: "assistant", text: "두 가지를 준비했어요." },
+    ]}
+    selectedCandidateIds={selectedCandidateIds}
+    onSelectedCandidateIdsChange={setSelectedCandidateIds}
+    conversationScroll={conversationScroll}
+    onConversationScrollChange={setConversationScroll}
     inspectorTargets={[{ id: "segment-1", label: "세그먼트 1", kind: "caption" }]}
   />;
 }
@@ -45,18 +54,67 @@ describe("RightDock", () => {
     expect(screen.getByRole("log", { name: "유진 대화" }).scrollTop).toBe(72);
   });
 
-  it("keeps manual editing available with creator-safe copy when Eugene is blocked", () => {
-    const onManualEdit = vi.fn();
-    render(<RightDock state="blocked" draft="" onDraftChange={vi.fn()} onManualEdit={onManualEdit} />);
+  it("is a controlled adapter for candidate selection and restored conversation scroll", () => {
+    const onSelectedCandidateIdsChange = vi.fn();
+    const onConversationScrollChange = vi.fn();
+    const rendered = render(<RightDock
+      draft=""
+      onDraftChange={vi.fn()}
+      proposal={proposal}
+      selectedCandidateIds={["candidate-2"]}
+      onSelectedCandidateIdsChange={onSelectedCandidateIdsChange}
+      conversationScroll={{ key: "route-a", top: 83, pinnedToBottom: false }}
+      onConversationScrollChange={onConversationScrollChange}
+    />);
 
-    expect(screen.getByText("유진이 지금 추천을 만들 수 없어요. 직접 골라 계속 편집할 수 있어요.")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "직접 편집하기" }));
+    expect(screen.getByRole("radio", { name: "B-002 선택" })).toBeChecked();
+    expect(screen.getByRole("log", { name: "유진 대화" }).scrollTop).toBe(83);
+    fireEvent.click(screen.getByRole("radio", { name: "B-001 선택" }));
+    expect(onSelectedCandidateIdsChange).toHaveBeenCalledWith(["candidate-1"]);
+    expect(screen.getByRole("radio", { name: "B-002 선택" })).toBeChecked();
+
+    rendered.rerender(<RightDock
+      draft=""
+      onDraftChange={vi.fn()}
+      proposal={proposal}
+      selectedCandidateIds={["candidate-1"]}
+      onSelectedCandidateIdsChange={onSelectedCandidateIdsChange}
+      conversationScroll={{ key: "route-a", top: 12, pinnedToBottom: false }}
+      onConversationScrollChange={onConversationScrollChange}
+    />);
+    expect(screen.getByRole("radio", { name: "B-001 선택" })).toBeChecked();
+    expect(screen.getByRole("log", { name: "유진 대화" }).scrollTop).toBe(12);
+  });
+
+  it("keeps manual editing available without clearing unavailable history", () => {
+    const onManualEdit = vi.fn();
+    render(<RightDock
+      state="blocked"
+      runState={{ kind: "unavailable", message: "유진의 답을 받지 못했어요." }}
+      draft=""
+      onDraftChange={vi.fn()}
+      onManualEdit={onManualEdit}
+      messages={[{ id: "user-1", role: "user", text: "요청 내용" }]}
+    />);
+
+    expect(screen.getByText("유진의 답을 받지 못했어요.")).toBeInTheDocument();
+    expect(screen.getByText("요청 내용")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Yujin 없이 계속 편집" }));
     expect(onManualEdit).toHaveBeenCalledOnce();
+    expect(screen.getByText("유진의 답을 받지 못했어요.")).toBeInTheDocument();
+    expect(screen.getByText("요청 내용")).toBeInTheDocument();
   });
 
   it("never mounts an audio or video player and only exposes explicit apply for a ready proposal", () => {
     const onApplyProposal = vi.fn();
-    const { container } = render(<RightDock draft="" onDraftChange={vi.fn()} proposal={proposal} onApplyProposal={onApplyProposal} />);
+    const { container } = render(<RightDock
+      draft=""
+      onDraftChange={vi.fn()}
+      proposal={proposal}
+      selectedCandidateIds={["candidate-1"]}
+      onSelectedCandidateIdsChange={vi.fn()}
+      onApplyProposal={onApplyProposal}
+    />);
 
     expect(container.querySelectorAll("audio, video")).toHaveLength(0);
     fireEvent.click(screen.getByRole("button", { name: "선택한 추천 적용" }));

@@ -13,15 +13,34 @@ export type RightDockProposal = Readonly<{
 
 export type RightDockMessage = Readonly<{
   id: string;
-  userText: string;
-  assistantText: string;
+  role: "user" | "assistant";
+  text: string;
+}>;
+
+export type YujinRunState =
+  | { kind: "idle" }
+  | { kind: "streaming"; runId: string; routeEpoch: number; text: string }
+  | { kind: "complete"; runId: string }
+  | { kind: "unavailable"; message: string };
+
+export type RightDockConversationScroll = Readonly<{
+  key: string;
+  top: number;
+  pinnedToBottom: boolean;
 }>;
 
 export type RightDockDirector = Readonly<{
   state: "script_required" | "idle" | "analysis_running" | "proposal_ready" | "applying" | "blocked" | "error";
   messages: readonly RightDockMessage[];
   proposal: RightDockProposal | null;
+  draft: string;
+  runState: YujinRunState;
+  selectedCandidateIds: readonly string[];
+  conversationScroll: RightDockConversationScroll;
   composerDisabled?: boolean;
+  onDraftChange: (draft: string) => void;
+  onSelectedCandidateIdsChange: (candidateIds: readonly string[]) => void;
+  onConversationScrollChange: (scroll: RightDockConversationScroll) => void;
   onSendMessage: (draft: string) => void | Promise<void>;
   onApplyProposal: (proposalId: string, candidateIds: readonly string[]) => void | Promise<void>;
   onManualEdit: () => void;

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-import { ApiConflictError, api, type BrollAsset, type DirectorMessage, type DirectorMessageExchange, type DirectorProposal, type MediaLibraryAsset, type PartialRegenerationJob, type PartialRegenerationPreflight, type PartialRegenerationRun } from "../../../api";
+import { ApiConflictError, api, type BrollAsset, type DirectorMessage, type DirectorProposal, type MediaLibraryAsset, type PartialRegenerationJob, type PartialRegenerationPreflight, type PartialRegenerationRun } from "../../../api";
 import { Button } from "../../../components/ui/button";
 import { findLatestSucceededJob } from "../../../lib/formatters";
 import { projectEditorAssets, type EditorAssetCard } from "../assets/editorAssetProjection";
@@ -10,6 +10,7 @@ import type { EditorViewModel } from "../editorViewModel";
 import type { InspectorAction } from "../inspector/InspectorControls";
 import { canRestorePartialRegenerationResult, canRunPartialRegeneration, createPartialRegenerationTicket, PARTIAL_REGENERATION_FIELDS, preflightMatchesPartialRegenerationTicket, runMatchesPartialRegenerationTicket, type PartialRegenerationTicket } from "../partialRegenerationController";
 import { EditorWorkbench } from "./EditorWorkbench";
+import { parseHermesSse, type HermesSseEvent } from "./hermesSseClient";
 import type { RightDockDirector, RightDockMessage, RightDockProposal } from "./rightDockTypes";
 
 type MutationState = Readonly<{ isSaving: boolean; message?: string }>;
@@ -25,8 +26,11 @@ type DirectorState = Readonly<{
   conversationId: string | null;
   messages: readonly RightDockMessage[];
   proposal: DirectorProposal | null;
+  draft: string;
+  runState: RightDockDirector["runState"];
+  selectedCandidateIds: readonly string[];
+  conversationScroll: RightDockDirector["conversationScroll"];
   isSending?: boolean;
-  retryAfterSeconds?: number | null;
 }>;
 type PartialState = Readonly<{
   key: string;
@@ -40,6 +44,34 @@ type PartialState = Readonly<{
 }>;
 
 const assetLoadError = "일부 자산을 불러오지 못했어요. 편집은 계속할 수 있어요. 잠시 후 다시 확인해 주세요.";
+const yujinUnavailableMessage = "유진의 답을 받지 못했어요.";
+const maxDirectorMessages = 200;
+
+function directorDraftStorageKey(requestKey: string) {
+  return `videobox.editor-workbench.eugene-draft:${encodeURIComponent(requestKey)}`;
+}
+
+function readDirectorDraft(requestKey: string) {
+  try { return window.localStorage.getItem(directorDraftStorageKey(requestKey)) ?? ""; } catch { return ""; }
+}
+
+function createDirectorState(requestKey: string, sessionId: string | null): DirectorState {
+  return {
+    key: requestKey,
+    state: sessionId ? "analysis_running" : "script_required",
+    conversationId: null,
+    messages: [],
+    proposal: null,
+    draft: readDirectorDraft(requestKey),
+    runState: { kind: "idle" },
+    selectedCandidateIds: [],
+    conversationScroll: { key: requestKey, top: 0, pinnedToBottom: true },
+  };
+}
+
+function capDirectorMessages(messages: readonly RightDockMessage[]) {
+  return messages.slice(-maxDirectorMessages);
+}
 
 export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId = null }: { projectId: string; sessionId: string | null; requestedSegmentId?: string | null }) {
   const requestKey = `${projectId}:${sessionId ?? "missing"}`;
@@ -47,7 +79,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
   const [state, setState] = useState<Readonly<{ key: string; view: EditorViewModel | null; session: EditorSessionSnapshot | null; error: string | null }>>({ key: requestKey, view: null, session: null, error: sessionId ? null : "편집 세션을 찾을 수 없어요. 다시 열어 주세요." });
   const [assets, setAssets] = useState<AssetState>({ key: requestKey, brollAssets: [], libraryAssets: [], error: null });
   const [mutation, setMutation] = useState<MutationState>({ isSaving: false });
-  const [director, setDirector] = useState<DirectorState>({ key: requestKey, state: sessionId ? "analysis_running" : "script_required", conversationId: null, messages: [], proposal: null });
+  const [director, setDirector] = useState<DirectorState>(() => createDirectorState(requestKey, sessionId));
   const [partial, setPartial] = useState<PartialState>({ key: requestKey, ticket: null, preflight: null, run: null, jobId: null, result: null, isResultOpen: false, message: null });
   const [partialRecoveryRetryToken, setPartialRecoveryRetryToken] = useState(0);
   const [partialRecoveryError, setPartialRecoveryError] = useState(false);
@@ -60,28 +92,39 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
   const directorOperationId = useRef(0);
   const partialOperationId = useRef(0);
   const partialRecoveryOperationId = useRef(0);
-  const stableDirectorMessageId = useRef<string | null>(null);
   const directorMutationInFlight = useRef(false);
-  const directorMessageInFlight = useRef(false);
+  const hermesRunInFlight = useRef(false);
+  const hermesAbort = useRef<AbortController | null>(null);
+  const hermesOperationId = useRef(0);
   const partialInFlight = useRef(false);
-  const directorRetry = useRef<Readonly<{ text: string; retry: () => Promise<{ kind: "exchange"; exchange: DirectorMessageExchange } | { kind: "in_progress"; retryAfterSeconds: number }> }> | null>(null);
   useEffect(() => {
     if (routeEpoch.current.key === requestKey) return;
+    hermesOperationId.current += 1;
+    hermesRunInFlight.current = false;
+    hermesAbort.current?.abort();
+    hermesAbort.current = null;
     routeEpoch.current = { key: requestKey, value: routeEpoch.current.value + 1 };
     mutationOperationId.current += 1;
     directorOperationId.current += 1;
     partialOperationId.current += 1;
-    stableDirectorMessageId.current = null;
     directorMutationInFlight.current = false;
-    directorMessageInFlight.current = false;
     partialInFlight.current = false;
-    directorRetry.current = null;
     mutationInFlight.current = false;
     setMutation({ isSaving: false });
-    setDirector({ key: requestKey, state: sessionId ? "analysis_running" : "script_required", conversationId: null, messages: [], proposal: null });
+    setDirector(createDirectorState(requestKey, sessionId));
     setPartial({ key: requestKey, ticket: null, preflight: null, run: null, jobId: null, result: null, isResultOpen: false, message: null });
     setPartialRecoveryError(false);
   }, [requestKey]);
+  useEffect(() => () => {
+    hermesOperationId.current += 1;
+    hermesRunInFlight.current = false;
+    hermesAbort.current?.abort();
+    hermesAbort.current = null;
+  }, []);
+  useEffect(() => {
+    if (director.key !== requestKey) return;
+    try { window.localStorage.setItem(directorDraftStorageKey(requestKey), director.draft); } catch { /* best effort only */ }
+  }, [director.draft, director.key, requestKey]);
   useEffect(() => {
     if (!sessionId) return;
     const epoch = routeEpoch.current.value;
@@ -89,12 +132,20 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     directorOperationId.current = operationId;
     let active = true;
     const isCurrent = () => active && routeEpoch.current.value === epoch && directorOperationId.current === operationId;
-    setDirector({ key: requestKey, state: "analysis_running", conversationId: null, messages: [], proposal: null });
+    setDirector((current) => current.key === requestKey ? { ...current, state: "analysis_running", conversationId: null, messages: [], proposal: null, runState: { kind: "idle" } } : current);
     void api.reloadDirectorSession(projectId, sessionId).then((recovered) => {
       if (!isCurrent()) return;
-      setDirector({ key: requestKey, state: recovered.proposal ? "proposal_ready" : "idle", conversationId: recovered.conversation?.conversation_id ?? null, messages: projectDirectorMessages(recovered.messages), proposal: recovered.proposal });
+      setDirector((current) => current.key === requestKey ? {
+        ...current,
+        state: recovered.proposal ? "proposal_ready" : "idle",
+        conversationId: recovered.conversation?.conversation_id ?? null,
+        messages: projectDirectorMessages(recovered.messages),
+        proposal: recovered.proposal,
+        runState: { kind: "idle" },
+        selectedCandidateIds: recovered.proposal?.candidates[0]?.candidate_id ? [recovered.proposal.candidates[0].candidate_id] : [],
+      } : current);
     }).catch((error: unknown) => {
-      if (isCurrent()) setDirector({ key: requestKey, state: error instanceof SyntaxError || error instanceof TypeError ? "error" : "blocked", conversationId: null, messages: [], proposal: null });
+      if (isCurrent()) setDirector((current) => current.key === requestKey ? { ...current, state: error instanceof SyntaxError || error instanceof TypeError ? "error" : "blocked", conversationId: null, messages: [], proposal: null } : current);
     });
     return () => { active = false; };
   }, [projectId, requestKey, sessionId]);
@@ -498,50 +549,130 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       fields: activePartial.result.fields,
     }, activePartial.result),
   );
-  const activeDirector = director.key === requestKey ? director : { key: requestKey, state: "analysis_running" as const, conversationId: null, messages: [], proposal: null };
+  const activeDirector = director.key === requestKey ? director : createDirectorState(requestKey, sessionId);
   const isCurrentDirector = (epoch: number, operationId: number) => routeEpoch.current.value === epoch && directorOperationId.current === operationId;
-  const sendDirectorMessage = async (text: string, retryRequested = false) => {
-    if (!sessionId || !activeDirector.conversationId || !text.trim() || directorMessageInFlight.current) return;
+  const sendDirectorMessage = async (text: string) => {
+    const submittedDraft = text.trim();
+    if (!sessionId || !submittedDraft || hermesRunInFlight.current) return;
+    const clientMessageId = globalThis.crypto?.randomUUID?.();
+    if (!clientMessageId) {
+      setDirector((current) => current.key === requestKey ? { ...current, runState: { kind: "unavailable", message: yujinUnavailableMessage } } : current);
+      return;
+    }
     const epoch = routeEpoch.current.value;
-    const operationId = directorOperationId.current + 1;
-    directorOperationId.current = operationId;
-    const retry = retryRequested ? directorRetry.current : null;
-    if (retryRequested && (!retry || retry.text !== text)) return;
-    let clientMessageId: string | null = null;
-    if (!retry) {
-      clientMessageId = globalThis.crypto?.randomUUID?.() ?? `director-${Date.now()}`;
-      stableDirectorMessageId.current = clientMessageId;
-      directorRetry.current = null;
-    }
-    const prepared = retry ? null : api.prepareDirectorMessage(projectId, activeDirector.conversationId, { session_id: sessionId, client_message_id: clientMessageId!, text: text.trim() });
-    directorMessageInFlight.current = true;
-    setDirector({ ...activeDirector, isSending: true, retryAfterSeconds: null });
+    const operationId = hermesOperationId.current + 1;
+    hermesOperationId.current = operationId;
+    hermesRunInFlight.current = true;
+    const controller = new AbortController();
+    hermesAbort.current = controller;
+    const optimisticUserId = `hermes-user:${clientMessageId}`;
+    let runId: string | null = null;
+    let createdRun = false;
+    const terminal = { eventType: null as HermesSseEvent["event_type"] | null };
+    const isCurrentHermes = () => (
+      routeEpoch.current.value === epoch
+      && hermesOperationId.current === operationId
+      && !controller.signal.aborted
+    );
+    setDirector((current) => current.key === requestKey ? {
+      ...current,
+      isSending: true,
+      runState: { kind: "idle" },
+      messages: capDirectorMessages([...current.messages, { id: optimisticUserId, role: "user", text: submittedDraft }]),
+    } : current);
     try {
-      const result = retry ? await retry.retry() : await prepared!.send();
-      if (!isCurrentDirector(epoch, operationId)) return;
-      if (result.kind === "in_progress") {
-        directorRetry.current = { text: text.trim(), retry: prepared?.retry ?? retry!.retry };
-        setDirector({ ...activeDirector, state: "idle", isSending: false, retryAfterSeconds: result.retryAfterSeconds });
-        return;
+      let conversationId = activeDirector.conversationId;
+      if (!conversationId) {
+        const conversation = await api.createDirectorConversation(projectId, { session_id: sessionId });
+        if (!isCurrentHermes()) return;
+        conversationId = conversation.conversation_id;
       }
-      stableDirectorMessageId.current = null;
-      directorRetry.current = null;
-      const proposalId = result.exchange.assistant_message.proposal_id ?? (typeof result.exchange.action_intent?.proposal_preflight?.proposal_id === "string" ? result.exchange.action_intent.proposal_preflight.proposal_id : null);
-      const messages = [...activeDirector.messages, projectDirectorExchange(result.exchange)];
-      if (!proposalId) { setDirector({ ...activeDirector, messages, isSending: false, retryAfterSeconds: null }); return; }
-      const proposal = await api.getDirectorProposal(projectId, proposalId);
-      if (isCurrentDirector(epoch, operationId)) setDirector({ ...activeDirector, state: "proposal_ready", messages, proposal, isSending: false, retryAfterSeconds: null });
-    } catch {
-      stableDirectorMessageId.current = null;
-      directorRetry.current = null;
-      if (isCurrentDirector(epoch, operationId)) setDirector({ ...activeDirector, state: "blocked", isSending: false, retryAfterSeconds: null });
+      const run = await api.createHermesRun(projectId, conversationId, {
+        session_id: sessionId,
+        client_message_id: clientMessageId,
+        text: submittedDraft,
+      }, controller.signal);
+      if (!isCurrentHermes()) return;
+      createdRun = true;
+      runId = run.run_id;
+      const assistantMessageId = `hermes-run:${run.run_id}`;
+      setDirector((current) => current.key === requestKey ? {
+        ...current,
+        conversationId,
+        draft: current.draft === submittedDraft ? "" : current.draft,
+        messages: capDirectorMessages([...current.messages, { id: assistantMessageId, role: "assistant", text: "" }]),
+        runState: { kind: "streaming", runId: run.run_id, routeEpoch: epoch, text: "" },
+      } : current);
+      const response = await api.openHermesRunEvents(projectId, conversationId, run, controller.signal);
+      if (!isCurrentHermes()) return;
+      await parseHermesSse(response, {
+        signal: controller.signal,
+        onEvent: (event) => {
+          if (!isCurrentHermes() || runId !== run.run_id) return;
+          if (event.event_type === "blocked" || event.event_type === "run_completed") terminal.eventType = event.event_type;
+          setDirector((current) => {
+            if (current.key !== requestKey) return current;
+            if (event.event_type === "text_delta") {
+              const nextText = current.runState.kind === "streaming" && current.runState.runId === run.run_id
+                ? `${current.runState.text}${event.text}`
+                : event.text;
+              return {
+                ...current,
+                messages: replaceDirectorMessageText(current.messages, assistantMessageId, nextText),
+                runState: { kind: "streaming", runId: run.run_id, routeEpoch: epoch, text: nextText },
+              };
+            }
+            if (event.event_type === "blocked") {
+              return {
+                ...current,
+                messages: replaceDirectorMessageText(current.messages, assistantMessageId, yujinUnavailableMessage),
+                runState: { kind: "unavailable", message: yujinUnavailableMessage },
+              };
+            }
+            if (event.event_type === "run_completed") {
+              return {
+                ...current,
+                messages: replaceDirectorMessageText(current.messages, assistantMessageId, event.text),
+                runState: { kind: "complete", runId: run.run_id },
+              };
+            }
+            return current;
+          });
+        },
+      });
+      if (!isCurrentHermes()) return;
+      if (terminal.eventType !== null) {
+        const persisted = await api.listDirectorMessages(projectId, conversationId, sessionId);
+        if (!isCurrentHermes()) return;
+        setDirector((current) => current.key === requestKey ? {
+          ...current,
+          messages: projectDirectorMessages(persisted),
+          runState: terminal.eventType === "run_completed"
+            ? { kind: "complete", runId: run.run_id }
+            : { kind: "unavailable", message: yujinUnavailableMessage },
+        } : current);
+      }
+    } catch (error) {
+      if (isAbortError(error) || !isCurrentHermes()) return;
+      setDirector((current) => {
+        if (current.key !== requestKey) return current;
+        const failedMessages = createdRun && runId
+          ? replaceDirectorMessageText(current.messages, `hermes-run:${runId}`, yujinUnavailableMessage)
+          : current.messages.filter((message) => message.id !== optimisticUserId);
+        return {
+          ...current,
+          messages: failedMessages,
+          runState: { kind: "unavailable", message: yujinUnavailableMessage },
+          isSending: false,
+        };
+      });
     } finally {
-      if (isCurrentDirector(epoch, operationId)) directorMessageInFlight.current = false;
+      if (routeEpoch.current.value === epoch && hermesOperationId.current === operationId) {
+        hermesRunInFlight.current = false;
+        if (hermesAbort.current === controller) hermesAbort.current = null;
+        setDirector((current) => current.key === requestKey ? { ...current, isSending: false } : current);
+      }
     }
-  };
-  const retryDirectorMessage = async () => {
-    const retry = directorRetry.current;
-    if (retry) await sendDirectorMessage(retry.text, true);
   };
   const startDirector = async () => {
     if (!sessionId || activeDirector.proposal || activeDirector.state !== "idle" || directorMutationInFlight.current) return;
@@ -558,7 +689,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
         conversationId = conversation.conversation_id;
       }
       const proposal = await api.createDirectorProposal(projectId, { session_id: sessionId });
-      if (isCurrentDirector(epoch, operationId)) setDirector({ ...activeDirector, state: "proposal_ready", conversationId, proposal });
+      if (isCurrentDirector(epoch, operationId)) setDirector((current) => current.key === requestKey ? { ...current, state: "proposal_ready", conversationId, proposal, selectedCandidateIds: proposal.candidates[0]?.candidate_id ? [proposal.candidates[0].candidate_id] : [] } : current);
     } catch {
       if (isCurrentDirector(epoch, operationId)) setDirector({ ...activeDirector, state: "idle" });
     } finally {
@@ -599,14 +730,19 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     state: mutation.isSaving ? "applying" : activeDirector.state,
     messages: activeDirector.messages,
     proposal: projectDirectorProposal(activeDirector.proposal),
-    composerDisabled: mutation.isSaving || !activeDirector.conversationId || activeDirector.isSending === true || activeDirector.state === "analysis_running" || activeDirector.state === "applying",
+    draft: activeDirector.draft,
+    runState: activeDirector.runState,
+    selectedCandidateIds: activeDirector.selectedCandidateIds,
+    conversationScroll: activeDirector.conversationScroll,
+    composerDisabled: mutation.isSaving || activeDirector.isSending === true || activeDirector.state === "analysis_running" || activeDirector.state === "applying",
+    onDraftChange: (draft) => setDirector((current) => current.key === requestKey ? { ...current, draft } : current),
+    onSelectedCandidateIdsChange: (selectedCandidateIds) => setDirector((current) => current.key === requestKey ? { ...current, selectedCandidateIds } : current),
+    onConversationScrollChange: (conversationScroll) => setDirector((current) => current.key === requestKey ? { ...current, conversationScroll } : current),
     onSendMessage: sendDirectorMessage,
     onApplyProposal: applyDirectorProposal,
     onManualEdit: () => setDirector((current) => current.key === requestKey ? { ...current, state: "idle" } : current),
     onPreviewCandidate: () => undefined,
     onStart: activeDirector.state === "idle" && !activeDirector.proposal ? startDirector : undefined,
-    onRetryMessage: activeDirector.retryAfterSeconds !== null && activeDirector.retryAfterSeconds !== undefined ? retryDirectorMessage : undefined,
-    retryAfterSeconds: activeDirector.retryAfterSeconds,
   };
   return <>
     {state.error ? <p role="status">{state.error}</p> : null}
@@ -654,19 +790,24 @@ function projectDirectorProposal(proposal: DirectorProposal | null): RightDockPr
   return proposal ? { proposalId: proposal.proposal_id, status: proposal.status, candidates: proposal.candidates.map((candidate) => ({ candidateId: candidate.candidate_id, visibleReferenceCode: candidate.visible_reference_code, mediaType: candidate.media_type, previewUrl: candidate.preview_uri })) } : null;
 }
 
-function projectDirectorExchange(exchange: DirectorMessageExchange): RightDockMessage {
-  return { id: exchange.assistant_message.message_id, userText: exchange.user_message.text, assistantText: exchange.assistant_message.text };
+function projectDirectorMessages(messages: readonly DirectorMessage[]): readonly RightDockMessage[] {
+  return capDirectorMessages(messages.flatMap((message) => message.role === "user" || message.role === "assistant"
+    ? [{
+      id: message.message_id,
+      role: message.role,
+      text: message.role === "assistant" && message.text === "Hermes is temporarily unavailable. Manual Director remains available."
+        ? yujinUnavailableMessage
+        : message.text,
+    }]
+    : []));
 }
 
-function projectDirectorMessages(messages: readonly DirectorMessage[]): readonly RightDockMessage[] {
-  const exchanges: RightDockMessage[] = [];
-  let pendingUser: DirectorMessage | null = null;
-  for (const message of messages) {
-    if (message.role === "user") { pendingUser = message; continue; }
-    if (message.role === "assistant" && pendingUser) {
-      exchanges.push({ id: message.message_id, userText: pendingUser.text, assistantText: message.text });
-      pendingUser = null;
-    }
-  }
-  return exchanges;
+function replaceDirectorMessageText(messages: readonly RightDockMessage[], id: string, text: string) {
+  return messages.map((message) => message.id === id ? { ...message, text } : message);
+}
+
+function isAbortError(error: unknown) {
+  return error instanceof DOMException
+    ? error.name === "AbortError"
+    : error instanceof Error && error.name === "AbortError";
 }

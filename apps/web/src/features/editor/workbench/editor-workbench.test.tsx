@@ -113,15 +113,31 @@ describe("EditorWorkbench", () => {
     expect(onApplyAssetCard).toHaveBeenCalledWith(assetCards[0], "visible-2");
   });
 
-  it("keeps the disabled Eugene draft in browser-local UI state without enabling any request", () => {
-    window.localStorage.setItem("videobox.editor-workbench.eugene-draft", "다음에 확인할 추천 초안");
+  it("renders the disabled Eugene draft from the route-owned Director control", () => {
     window.localStorage.setItem("videobox.editor-workbench.ui", JSON.stringify({ leftOpen: false, rightOpen: true, activeDrawer: null, leftSize: 280, rightSize: 320 }));
-    const rendered = render(<EditorWorkbench view={view} />);
+    const director = {
+      state: "idle",
+      messages: [],
+      proposal: null,
+      draft: "다음에 확인할 추천 초안",
+      runState: { kind: "idle" },
+      selectedCandidateIds: [],
+      conversationScroll: { key: "project-a:session-a", top: 0, pinnedToBottom: true },
+      composerDisabled: true,
+      onDraftChange: vi.fn(),
+      onSelectedCandidateIdsChange: vi.fn(),
+      onConversationScrollChange: vi.fn(),
+      onSendMessage: vi.fn(),
+      onApplyProposal: vi.fn(),
+      onManualEdit: vi.fn(),
+      onPreviewCandidate: vi.fn(),
+    } as const;
+    const rendered = render(<EditorWorkbench director={director} view={view} />);
     const composer = screen.getByLabelText("유진에게 요청하기");
     expect(composer).toHaveValue("다음에 확인할 추천 초안");
     expect(composer).toBeDisabled();
     rendered.unmount();
-    render(<EditorWorkbench view={view} />);
+    render(<EditorWorkbench director={director} view={view} />);
     expect(screen.getByLabelText("유진에게 요청하기")).toHaveValue("다음에 확인할 추천 초안");
   });
 
@@ -197,6 +213,34 @@ describe("EditorWorkbench", () => {
     expect(screen.getByLabelText("NARRATION · segment-n 소스 미리보기").tagName).toBe("AUDIO");
     expect(screen.getByLabelText("NARRATION · segment-n 소스 미리보기")).not.toHaveAttribute("autoplay");
     expect(container.querySelectorAll("audio, video")).toHaveLength(1);
+  });
+
+  it("resets selection, seek, and audition media when a different route reuses the same segment id", () => {
+    const routeA = {
+      ...view,
+      output: { ...view.output, durationSec: 2 },
+      playback: { auditionUrls: { "asset-shared": "/api/projects/project-a/assets/asset-shared/content" }, exactPreview: { status: "unavailable" as const } },
+      local: { selectedSegmentId: null, seekSec: 0 },
+      tracks: [{ trackId: "narration", role: "narration" as const, clips: [{ clipId: "clip-a", segmentId: "segment-shared", type: "narration", assetId: "asset-shared", assetUri: null, startSec: 1, endSec: 2, controls: {} }] }],
+    };
+    const rendered = render(<EditorWorkbench view={routeA as never} />);
+    fireEvent.click(screen.getByRole("button", { name: "NARRATION · segment-shared 원본 열기" }));
+    expect(screen.getByLabelText("NARRATION · segment-shared 소스 미리보기")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "clip-a 클립 선택" }));
+    expect(screen.getByLabelText("재생 위치")).toHaveAttribute("data-seconds", "1");
+
+    rendered.rerender(<EditorWorkbench view={{
+      ...routeA,
+      projectId: "project-b",
+      sessionId: "session-b",
+      timelineId: "timeline-b",
+      playback: { auditionUrls: { "asset-shared": "/api/projects/project-b/assets/asset-shared/content" }, exactPreview: { status: "unavailable" as const } },
+      tracks: [{ ...routeA.tracks[0], clips: [{ ...routeA.tracks[0].clips[0], clipId: "clip-b" }] }],
+    } as never} />);
+
+    expect(screen.queryByLabelText("NARRATION · segment-shared 소스 미리보기")).toBeNull();
+    expect(screen.getByRole("button", { name: "clip-b 클립 선택" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByLabelText("재생 위치")).toHaveAttribute("data-seconds", "0");
   });
 
   it("uses a video element for a source-backed visual overlay audition rather than treating it as audio", () => {

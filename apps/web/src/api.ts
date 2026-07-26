@@ -137,6 +137,8 @@ export type DirectorMessageExchange = { user_message: DirectorMessage; assistant
 export type DirectorMessageSubmitRequest = { session_id: string; client_message_id: string; text: string };
 export type DirectorMessageSendResult = { kind: "exchange"; exchange: DirectorMessageExchange } | { kind: "in_progress"; retryAfterSeconds: number };
 export type DirectorReloadState = { conversation: DirectorConversation | null; messages: DirectorMessage[]; proposal: DirectorProposal | null; references: DirectorReference[] };
+export type HermesRunCreateRequest = { session_id: string; client_message_id: string; text: string };
+export type HermesRunCreateResponse = { run_id: string; conversation_id: string; events_url: string };
 export type ArtifactFreshness = { source_session_revision: number; is_current?: boolean; invalidated_at?: string | null; invalidated_reason?: string | null };
 
 export type TimelineClip = {
@@ -743,6 +745,93 @@ async function preflightDirectorProposalRequest(path: string): Promise<DirectorP
   return payload;
 }
 
+async function openHermesRunEventsRequest(
+  projectId: string,
+  conversationId: string,
+  run: HermesRunCreateResponse,
+  signal: AbortSignal,
+): Promise<Response> {
+  const path = run.events_url;
+  const expectedPath = `/api/projects/${encodeURIComponent(projectId)}/director/conversations/${encodeURIComponent(conversationId)}/hermes-runs/${encodeURIComponent(run.run_id)}/events`;
+  let parsed: URL;
+  try {
+    parsed = new URL(path, window.location.origin);
+  } catch {
+    throw new Error("유진 응답을 시작하지 못했어요.");
+  }
+  if (
+    run.conversation_id !== conversationId
+    || !path.startsWith("/")
+    || parsed.origin !== window.location.origin
+    || parsed.search
+    || parsed.hash
+    || parsed.pathname !== expectedPath
+    || path !== expectedPath
+  ) {
+    throw new Error("유진 응답을 시작하지 못했어요.");
+  }
+  const response = await fetch(path, {
+    method: "GET",
+    headers: { Accept: "text/event-stream" },
+    credentials: "same-origin",
+    redirect: "error",
+    signal,
+  });
+  if (!response.ok || response.redirected) {
+    throw new Error("유진 응답을 시작하지 못했어요.");
+  }
+  return response;
+}
+
+async function createHermesRunRequest(
+  projectId: string,
+  conversationId: string,
+  payload: HermesRunCreateRequest,
+  signal?: AbortSignal,
+): Promise<HermesRunCreateResponse> {
+  const path = `/api/projects/${encodeURIComponent(projectId)}/director/conversations/${encodeURIComponent(conversationId)}/hermes-runs`;
+  const response = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
+    redirect: "error",
+    signal,
+    body: JSON.stringify(payload),
+  });
+  if (response.status !== 201 || response.redirected) {
+    throw new Error("유진 응답을 시작하지 못했어요.");
+  }
+  let candidate: unknown;
+  try {
+    candidate = await response.json();
+  } catch {
+    throw new Error("유진 응답을 시작하지 못했어요.");
+  }
+  if (
+    !candidate
+    || typeof candidate !== "object"
+    || Array.isArray(candidate)
+    || Object.keys(candidate).length !== 3
+  ) {
+    throw new Error("유진 응답을 시작하지 못했어요.");
+  }
+  const run = candidate as Record<string, unknown>;
+  if (
+    typeof run.run_id !== "string"
+    || !run.run_id
+    || typeof run.conversation_id !== "string"
+    || run.conversation_id !== conversationId
+    || typeof run.events_url !== "string"
+  ) {
+    throw new Error("유진 응답을 시작하지 못했어요.");
+  }
+  const expectedEventsUrl = `${path}/${encodeURIComponent(run.run_id)}/events`;
+  if (run.events_url !== expectedEventsUrl) {
+    throw new Error("유진 응답을 시작하지 못했어요.");
+  }
+  return run as HermesRunCreateResponse;
+}
+
 export const api = {
   createCreationBrief: (projectId: string, payload: CreateCreationBriefRequest) =>
     request<CreationBrief>(`/api/projects/${encodeURIComponent(projectId)}/creation-briefs`, {
@@ -817,6 +906,14 @@ export const api = {
     const submit = () => sendDirectorMessageRequest(`/api/projects/${projectId}/director/conversations/${conversationId}/messages`, payload);
     return { clientMessageId: payload.client_message_id, send: submit, retry: submit };
   },
+  createHermesRun: (projectId: string, conversationId: string, payload: HermesRunCreateRequest, signal?: AbortSignal) =>
+    createHermesRunRequest(projectId, conversationId, payload, signal),
+  openHermesRunEvents: (
+    projectId: string,
+    conversationId: string,
+    run: HermesRunCreateResponse,
+    signal: AbortSignal,
+  ) => openHermesRunEventsRequest(projectId, conversationId, run, signal),
   applyDirectorProposal: (projectId: string, proposalId: string, payload: { candidate_ids: string[]; expected_revision: number }) =>
     request<ApplyDirectorProposalResponse>(`/api/projects/${projectId}/director/proposals/${proposalId}/apply`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ candidate_ids: payload.candidate_ids, expected_revision: payload.expected_revision }) }),
   batchApplyDirectorProposal: (projectId: string, proposalId: string, payload: { candidate_ids: string[]; expected_revision: number }) =>
