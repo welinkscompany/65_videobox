@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -10,6 +11,7 @@ import pytest
 
 ROOT = Path(__file__).parents[1]
 SCRIPT = ROOT / "scripts" / "start-hermes-yujin.ps1"
+PROFILE_ROOT = ROOT / "config" / "hermes" / "yujin"
 VALID_PASSWORD = "valid-dummy-password"
 VALID_HASH = (
     "scrypt$16384$8$1$iMe7ySNXHHKwvzoVKA3TJw==$"
@@ -117,12 +119,27 @@ def _write_fake_docker(tmp_path: Path) -> Path:
         '  type "%FAKE_DOCKER_CONFIG%"\r\n'
         "  exit /b 0\r\n"
         ")\r\n"
+        'echo %* | findstr /c:"ps" >nul\r\n'
+        "if not errorlevel 1 (\r\n"
+        '  if /I "%FAKE_DOCKER_PREEXISTING%"=="true" '
+        "echo videobox-hermes-yujin\r\n"
+        "  exit /b 0\r\n"
+        ")\r\n"
+        'echo %* | findstr /c:"stop" >nul\r\n'
+        "if not errorlevel 1 exit /b %FAKE_DOCKER_STOP_EXIT%\r\n"
         'echo %* | findstr /c:"run" >nul\r\n'
         "if not errorlevel 1 exit /b 0\r\n"
+        'echo %* | findstr /c:"videobox-agent-gateway" >nul\r\n'
+        "if not errorlevel 1 (\r\n"
+        '  powershell -NoProfile -Command "[Console]::Error.Write(('
+        "'u' * 1048576))"
+        '"\r\n'
+        "  exit /b %FAKE_DOCKER_GATEWAY_UP_EXIT%\r\n"
+        ")\r\n"
         'powershell -NoProfile -Command "[Console]::Error.Write(('
         "'u' * 1048576))"
         '"\r\n'
-        "exit /b %FAKE_DOCKER_UP_EXIT%\r\n",
+        "exit /b %FAKE_DOCKER_HERMES_UP_EXIT%\r\n",
         encoding="utf-8",
     )
     return fake_docker
@@ -137,7 +154,11 @@ def _run_fake_start(
     password_hash: str = VALID_HASH,
     validate_only: bool = False,
     config_stderr: str = "quiet",
-    up_exit_code: int = 0,
+    hermes_up_exit_code: int = 0,
+    gateway_up_exit_code: int = 0,
+    stop_exit_code: int = 0,
+    preexisting_hermes: bool = False,
+    profile_root: Path | None = None,
     timeout_seconds: float = 8,
 ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
     env_file = tmp_path / "container.env"
@@ -170,6 +191,8 @@ def _run_fake_start(
     ]
     if validate_only:
         command.append("-ValidateOnly")
+    if profile_root is not None:
+        command.extend(["-ProfileRoot", str(profile_root)])
     process = subprocess.Popen(
         command,
         cwd=ROOT,
@@ -178,7 +201,10 @@ def _run_fake_start(
             "FAKE_DOCKER_CONFIG": str(fake_config),
             "FAKE_DOCKER_CONFIG_STDERR": config_stderr,
             "FAKE_DOCKER_LOG": str(fake_log),
-            "FAKE_DOCKER_UP_EXIT": str(up_exit_code),
+            "FAKE_DOCKER_HERMES_UP_EXIT": str(hermes_up_exit_code),
+            "FAKE_DOCKER_GATEWAY_UP_EXIT": str(gateway_up_exit_code),
+            "FAKE_DOCKER_STOP_EXIT": str(stop_exit_code),
+            "FAKE_DOCKER_PREEXISTING": str(preexisting_hermes).lower(),
         },
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -230,33 +256,108 @@ def test_captured_validation_drains_large_stderr_without_deadlock(
     _assert_no_values_leaked(result)
 
 
+def test_validate_only_runs_profile_static_verification_without_install_or_up(
+    tmp_path: Path,
+) -> None:
+    copied = tmp_path / "yujin"
+    shutil.copytree(PROFILE_ROOT, copied)
+    valid_runtime = tmp_path / "valid-runtime"
+    invalid_runtime = tmp_path / "invalid-runtime"
+    valid_runtime.mkdir()
+    invalid_runtime.mkdir()
+
+    valid, valid_invocations = _run_fake_start(
+        valid_runtime,
+        validate_only=True,
+        profile_root=copied,
+    )
+    assert valid.returncode == 0, valid.stderr
+    assert len(valid_invocations) == 2
+
+    (copied / "config.yaml").write_text(
+        "nested:\n  client_secret: generated-runtime-value\n",
+        encoding="utf-8",
+    )
+    invalid, invalid_invocations = _run_fake_start(
+        invalid_runtime,
+        validate_only=True,
+        profile_root=copied,
+    )
+    assert invalid.returncode != 0
+    assert len(invalid_invocations) == 2
+    assert all("profile install" not in call for call in invalid_invocations)
+    assert all(" up " not in f" {call} " for call in invalid_invocations)
+    assert "generated-runtime-value" not in f"{invalid.stdout}\n{invalid.stderr}"
+
+
 @pytest.mark.parametrize(
-    ("up_exit_code", "expected_returncode"),
+    ("hermes_up_exit_code", "expected_returncode"),
     ((0, 0), (23, 1)),
 )
 def test_start_streams_large_stderr_without_pipe_deadlock(
     tmp_path: Path,
-    up_exit_code: int,
+    hermes_up_exit_code: int,
     expected_returncode: int,
 ) -> None:
     result, invocations = _run_fake_start(
         tmp_path,
-        up_exit_code=up_exit_code,
+        hermes_up_exit_code=hermes_up_exit_code,
     )
 
     assert result.returncode == expected_returncode
-    assert len(invocations) == (5 if expected_returncode == 0 else 4)
-    assert "run --rm --no-deps" in invocations[2]
-    assert "profile install /opt/videobox-yujin-profile" in invocations[2]
-    assert " up " in f" {invocations[3]} "
+    assert len(invocations) == (6 if expected_returncode == 0 else 5)
+    assert '"ps"' in invocations[2]
+    assert "run --rm --no-deps" in invocations[3]
+    assert "profile install /opt/videobox-yujin-profile" in invocations[3]
+    assert " up " in f" {invocations[4]} "
     assert "u" * 65536 in result.stderr
     if expected_returncode == 0:
-        assert "videobox-hermes-yujin" in invocations[3]
-        assert "videobox-agent-gateway" in invocations[4]
+        assert "videobox-hermes-yujin" in invocations[4]
+        assert "videobox-agent-gateway" in invocations[5]
         assert "targeted for startup" in result.stdout
     else:
         assert "Targeted Hermes Yujin runtime startup failed." in result.stderr
     _assert_no_values_leaked(result)
+
+
+@pytest.mark.parametrize(
+    ("preexisting_hermes", "stop_exit_code", "expected_phrase"),
+    (
+        (False, 0, "newly started Hermes service was stopped"),
+        (False, 41, "automatic stop failed"),
+        (True, 0, "Pre-existing Hermes service was left running"),
+    ),
+)
+def test_gateway_failure_preserves_or_recovers_hermes_by_prior_state(
+    tmp_path: Path,
+    preexisting_hermes: bool,
+    stop_exit_code: int,
+    expected_phrase: str,
+) -> None:
+    result, invocations = _run_fake_start(
+        tmp_path,
+        preexisting_hermes=preexisting_hermes,
+        gateway_up_exit_code=29,
+        stop_exit_code=stop_exit_code,
+    )
+
+    assert result.returncode != 0
+    assert "gateway startup failed" in result.stderr
+    assert expected_phrase in result.stderr
+    assert "generated-runtime-value" not in result.stderr
+    stop_calls = [call for call in invocations if '"stop"' in call]
+    hermes_up_calls = [
+        call
+        for call in invocations
+        if " up " in f" {call} " and "videobox-hermes-yujin" in call
+    ]
+    if preexisting_hermes:
+        assert stop_calls == []
+        assert hermes_up_calls == []
+    else:
+        assert len(stop_calls) == 1
+        assert '"stop" "videobox-hermes-yujin"' in stop_calls[0]
+        assert len(hermes_up_calls) == 1
 
 
 @pytest.mark.parametrize(

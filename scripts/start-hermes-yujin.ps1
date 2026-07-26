@@ -2,13 +2,18 @@
 param(
     [string]$EnvFile = (Join-Path (Split-Path -Parent $PSScriptRoot) ".env.container"),
     [switch]$ValidateOnly,
-    [string]$DockerExecutable = "docker"
+    [string]$DockerExecutable = "docker",
+    [string]$ProfileRoot
 )
 
 $ErrorActionPreference = "Stop"
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $composeFile = Join-Path $repositoryRoot "compose.yaml"
 $overlayFile = Join-Path $repositoryRoot "compose.hermes-yujin.yaml"
+$canonicalProfileRoot = Join-Path $repositoryRoot "config/hermes/yujin"
+if ([string]::IsNullOrWhiteSpace($ProfileRoot)) {
+    $ProfileRoot = $canonicalProfileRoot
+}
 . (Join-Path $PSScriptRoot "hermes-yujin-environment-contract.ps1")
 $pinnedHermesImage = "nousresearch/hermes-agent@sha256:ad79951c26b7707c8c651f30780338d4f9bb17ddca19f6ea78eb27cbf83a3787"
 $credentialNames = @(
@@ -200,14 +205,29 @@ if ($passwordCheck.ExitCode -ne 0) {
     throw "Hermes gateway password and hash validation failed."
 }
 
+& (Join-Path $PSScriptRoot "verify-hermes-yujin-profile.ps1") `
+    -StaticOnly `
+    -ProfileRoot $ProfileRoot
+
 if ($ValidateOnly) {
-    Write-Output "Hermes Yujin container configuration and credential relationship verified."
+    Write-Output (
+        "Hermes Yujin container configuration, credential relationship, " +
+        "and static profile contents verified."
+    )
     exit 0
 }
 
-& (Join-Path $PSScriptRoot "verify-hermes-yujin-profile.ps1") `
-    -StaticOnly `
-    -ProfileRoot (Join-Path $repositoryRoot "config/hermes/yujin")
+$resolvedProfileRoot = (Resolve-Path -LiteralPath $ProfileRoot).Path
+$resolvedCanonicalProfileRoot = (Resolve-Path -LiteralPath $canonicalProfileRoot).Path
+if (
+    -not [string]::Equals(
+        $resolvedProfileRoot,
+        $resolvedCanonicalProfileRoot,
+        [StringComparison]::OrdinalIgnoreCase
+    )
+) {
+    throw "Runtime startup requires the canonical mounted Yujin profile source."
+}
 
 function Invoke-TargetedComposeUp {
     param(
@@ -243,19 +263,80 @@ function Invoke-TargetedComposeUp {
     }
 }
 
+$stateArguments = @(
+    "compose"
+    "-f", $composeFile
+    "-f", $overlayFile
+    "--profile", "hermes-yujin"
+    "--env-file", $resolvedEnvFile
+    "ps"
+    "--status", "running"
+    "--services"
+    "videobox-hermes-yujin"
+)
+$stateResult = Invoke-CapturedDocker -DockerArguments $stateArguments
+if ($stateResult.ExitCode -ne 0) {
+    throw "Existing Hermes Yujin runtime state could not be determined."
+}
+$hermesWasRunning = @(
+    $stateResult.StdOut -split "`r?`n" |
+        Where-Object { $_.Trim() -ceq "videobox-hermes-yujin" }
+).Count -gt 0
+
 & (Join-Path $PSScriptRoot "install-hermes-yujin-profile.ps1") `
     -EnvFile $resolvedEnvFile `
     -ComposeFile $composeFile `
     -OverlayFile $overlayFile `
-    -DockerExecutable $DockerExecutable `
-    -InstallerContainerName "videobox-hermes-yujin-profile-installer"
+    -DockerExecutable $DockerExecutable
 
-Invoke-TargetedComposeUp `
-    -ServiceName "videobox-hermes-yujin" `
-    -FailureMessage "Targeted Hermes Yujin runtime startup failed."
+if (-not $hermesWasRunning) {
+    Invoke-TargetedComposeUp `
+        -ServiceName "videobox-hermes-yujin" `
+        -FailureMessage "Targeted Hermes Yujin runtime startup failed."
+}
 
-Invoke-TargetedComposeUp `
-    -ServiceName "videobox-agent-gateway" `
-    -FailureMessage "Targeted Hermes Yujin gateway startup failed."
+try {
+    Invoke-TargetedComposeUp `
+        -ServiceName "videobox-agent-gateway" `
+        -FailureMessage "Targeted Hermes Yujin gateway startup failed."
+}
+catch {
+    if ($hermesWasRunning) {
+        throw (
+            "Targeted Hermes Yujin gateway startup failed. " +
+            "Pre-existing Hermes service was left running."
+        )
+    }
+
+    $stopArguments = @(
+        "compose"
+        "-f", $composeFile
+        "-f", $overlayFile
+        "--profile", "hermes-yujin"
+        "--env-file", $resolvedEnvFile
+        "stop"
+        "videobox-hermes-yujin"
+    )
+    $stopSucceeded = $false
+    try {
+        $stopResult = Invoke-CapturedDocker -DockerArguments $stopArguments
+        $stopSucceeded = $stopResult.ExitCode -eq 0
+    }
+    catch {
+        $stopSucceeded = $false
+    }
+    if ($stopSucceeded) {
+        throw (
+            "Targeted Hermes Yujin gateway startup failed. " +
+            "The newly started Hermes service was stopped."
+        )
+    }
+    throw (
+        "Targeted Hermes Yujin gateway startup failed and automatic stop failed. " +
+        "Recovery: docker compose -f compose.yaml -f compose.hermes-yujin.yaml " +
+        "--profile hermes-yujin --env-file <approved-env-file> " +
+        "stop videobox-hermes-yujin"
+    )
+}
 
 Write-Output "Hermes Yujin and its agent gateway were targeted for startup."

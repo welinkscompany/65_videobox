@@ -28,6 +28,20 @@ foreach ($item in $items) {
     }
 }
 
+$repositoryRoot = Split-Path -Parent $PSScriptRoot
+$pythonExecutable = Join-Path $repositoryRoot ".venv/Scripts/python.exe"
+$contentVerifier = Join-Path $PSScriptRoot "verify_hermes_yujin_profile_content.py"
+if (
+    -not (Test-Path -LiteralPath $pythonExecutable -PathType Leaf) -or
+    -not (Test-Path -LiteralPath $contentVerifier -PathType Leaf)
+) {
+    throw "The canonical Yujin profile content verifier is unavailable."
+}
+& $pythonExecutable $contentVerifier $resolvedRoot
+if ($LASTEXITCODE -ne 0) {
+    throw "The Yujin distribution content failed strict static verification."
+}
+
 $manifestPath = Join-Path $resolvedRoot "distribution.yaml"
 if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
     throw "The Yujin distribution manifest is missing."
@@ -99,16 +113,6 @@ function Test-IsDisallowedContentPayload {
     return $false
 }
 
-$secretPatterns = @(
-    '(?i)[A-Z]:[\\/](?:Users|Documents[ ]and[ ]Settings)[\\/]'
-    '(?i)/(?:home|users)/'
-    '(?i)\bgh[pousr]_[A-Za-z0-9]{20,255}\b'
-    '(?i)\bgithub_pat_[A-Za-z0-9_]{20,255}\b'
-    '(?i)\bsk-[A-Za-z0-9_-]{16,255}\b'
-    '(?i)\bbearer[ ]+[A-Za-z0-9._~+/-]{16,255}={0,2}\b'
-    '(?im)\b(?:api[\s_-]*key|oauth(?:[\s_-]*(?:token|access|refresh))?|access[\s_-]*token|refresh[\s_-]*token|password|passwd|mem0(?:[\s_-]*(?:api[\s_-]*key|token|credential))?)\b[\s]*[:=][\s]*["'']?[^\s"''#]{4,}'
-)
-
 $files = @($items | Where-Object { -not $_.PSIsContainer })
 foreach ($file in $files) {
     $relativePath = $file.FullName.Substring($resolvedRoot.Length).TrimStart('\', '/').Replace('\', '/')
@@ -124,13 +128,6 @@ foreach ($file in $files) {
     $bytes = [IO.File]::ReadAllBytes($file.FullName)
     if (Test-IsDisallowedContentPayload -File $file -Bytes $bytes) {
         throw "The Yujin distribution contains a disallowed content type or executable payload."
-    }
-
-    $content = [IO.File]::ReadAllText($file.FullName)
-    foreach ($pattern in $secretPatterns) {
-        if ($content -match $pattern) {
-            throw "The Yujin distribution contains forbidden sensitive or local-path material."
-        }
     }
 }
 

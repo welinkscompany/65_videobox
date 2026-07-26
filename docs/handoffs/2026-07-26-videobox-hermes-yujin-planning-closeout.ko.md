@@ -65,6 +65,7 @@ Phase 0과 A1 격리 runtime 위에 A2의 versioned Yujin Soul/profile/skills pa
 - supply-chain future: gateway `python:3.12-slim` base digest pin과 A1 전용 Python SBOM은 이번 fix 범위 밖의 비차단 후속이며 완료로 주장하지 않음
 - A2 RED/GREEN: package·mount·verifier·installer·start ordering 부재 **17 failed**; profile 선택·확장자 우회 RED 2건; scanner 후속 **9 failed**와 binary magic **2 failed**; denylist 구조 gap **7 failed** → `.md/.yaml/.yml` content-type allowlist 뒤 profile **34 passed, 1 skipped**, A2와 기존 Yujin contract **116 passed, 1 skipped**
 - A2 final verification: 기존 재현 불가능한 **193** 표기는 고유 8파일 baseline **192 passed, 1 skipped**로 교정했다. content-type 보완 뒤 아래 exact command는 **203 passed, 1 skipped**이며 profile/runtime/plan-state static verifier와 `git diff --check`도 통과했다.
+- A2 quality fail-closed RED/GREEN: content/YAML/ordering **12 failed**, startup/state **6 failed** → strict UTF-8(BOM 허용)·control/archive 거부, PyYAML 구조 검사, ValidateOnly 전 profile static, GUID one-off installer/exact residue cleanup, 기존 Hermes 상태별 gateway 실패 recovery를 구현했다. profile **49 passed, 1 skipped**, 핵심 두 파일 **99 passed, 1 skipped**, 아래 exact 8파일 command **222 passed, 1 skipped**다. profile/runtime/plan-state verifier, Python compile, PowerShell parse, `git diff --check` 통과; Ruff는 canonical `.venv` 미설치로 미실행했다.
 - live service start/profile install/HTTP/OAuth/provider/chat/Mem0: real auth env 부재로 미실행
 
 ```powershell

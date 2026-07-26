@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -279,6 +280,100 @@ def test_static_verifier_rejects_binary_magic_even_with_a_markdown_name(
     assert result.returncode != 0
 
 
+@pytest.mark.parametrize(
+    "payload",
+    (
+        b"\xff\xfeinvalid-utf8",
+        b"ordinary text\x00with nul",
+        b"ordinary text\x01with control",
+        b"PK\x03\x04renamed zip payload",
+    ),
+)
+def test_static_verifier_rejects_nontext_payloads_with_markdown_names(
+    tmp_path: Path,
+    payload: bytes,
+) -> None:
+    copied = _copy_profile(tmp_path)
+    disguised = copied / "skills" / "videobox-editor" / "payload.md"
+    disguised.write_bytes(payload)
+
+    result = _run_powershell(
+        VERIFY_SCRIPT,
+        "-StaticOnly",
+        "-ProfileRoot",
+        str(copied),
+    )
+
+    assert result.returncode != 0
+
+
+def test_static_verifier_accepts_utf8_bom_text(tmp_path: Path) -> None:
+    copied = _copy_profile(tmp_path)
+    soul = copied / "SOUL.md"
+    soul.write_bytes(b"\xef\xbb\xbf" + soul.read_bytes())
+
+    result = _run_powershell(
+        VERIFY_SCRIPT,
+        "-StaticOnly",
+        "-ProfileRoot",
+        str(copied),
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize(
+    "yaml_text",
+    (
+        "password: |\n  generated-runtime-value\n",
+        "outer:\n  client_secret: generated-runtime-value\n",
+        "items:\n  - api_key: generated-runtime-value\n",
+        (
+            "defaults: &defaults\n"
+            "  oauth_token: generated-runtime-value\n"
+            "copy: *defaults\n"
+        ),
+        "outer: [unterminated\n",
+        "password: one\npassword: two\n",
+        "name: one\nname: two\n",
+        "value: !!python/object/apply:os.system []\n",
+    ),
+)
+def test_static_verifier_fails_closed_on_unsafe_yaml_shapes(
+    tmp_path: Path,
+    yaml_text: str,
+) -> None:
+    copied = _copy_profile(tmp_path)
+    (copied / "config.yaml").write_text(yaml_text, encoding="utf-8")
+
+    result = _run_powershell(
+        VERIFY_SCRIPT,
+        "-StaticOnly",
+        "-ProfileRoot",
+        str(copied),
+    )
+
+    assert result.returncode != 0
+    assert "generated-runtime-value" not in f"{result.stdout}\n{result.stderr}"
+
+
+def test_static_verifier_accepts_safe_nested_yaml_aliases(tmp_path: Path) -> None:
+    copied = _copy_profile(tmp_path)
+    (copied / "config.yaml").write_text(
+        "defaults: &defaults\n  language: ko\nitems:\n  - *defaults\n",
+        encoding="utf-8",
+    )
+
+    result = _run_powershell(
+        VERIFY_SCRIPT,
+        "-StaticOnly",
+        "-ProfileRoot",
+        str(copied),
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
 def test_static_verifier_allows_ordinary_security_policy_prose(
     tmp_path: Path,
 ) -> None:
@@ -395,9 +490,53 @@ def test_installer_fails_closed_without_host_install_or_secret_output(
     assert '"run"' in source
     assert "profile install" in source
     assert "Start-Process" not in source
+    invocations = log.read_text(encoding="utf-8").splitlines()
+    assert len(invocations) == 2
+    generated_name = re.search(
+        r"--name (videobox-hermes-yujin-profile-installer-[a-f0-9]{32})",
+        invocations[0],
+    ).group(1)
+    assert invocations[1] == f"rm -f {generated_name}"
 
 
-def test_start_verifies_and_installs_before_gateway_and_validate_only_exits_first() -> None:
+def test_installer_uses_a_unique_one_off_name_when_name_is_omitted(
+    tmp_path: Path,
+) -> None:
+    fake_docker, log = _write_fake_docker(tmp_path)
+    env_file = tmp_path / "container.env"
+    env_file.write_text("SAFE=value\n", encoding="utf-8")
+    arguments = (
+        "-DockerExecutable",
+        str(fake_docker),
+        "-EnvFile",
+        str(env_file),
+    )
+
+    first = _run_powershell(
+        INSTALL_SCRIPT,
+        *arguments,
+        environment={"FAKE_DOCKER_LOG": str(log)},
+    )
+    second = _run_powershell(
+        INSTALL_SCRIPT,
+        *arguments,
+        environment={"FAKE_DOCKER_LOG": str(log)},
+    )
+
+    assert first.returncode == 0
+    assert second.returncode == 0
+    invocations = log.read_text(encoding="utf-8").splitlines()
+    names = [
+        re.search(
+            r"--name (videobox-hermes-yujin-profile-installer-[a-f0-9]{32})",
+            invocation,
+        ).group(1)
+        for invocation in invocations
+    ]
+    assert len(set(names)) == 2
+
+
+def test_start_verifies_before_validate_only_exit_and_installs_before_gateway() -> None:
     source = START_SCRIPT.read_text(encoding="utf-8")
 
     validate_exit = source.index("if ($ValidateOnly)")
@@ -406,6 +545,6 @@ def test_start_verifies_and_installs_before_gateway_and_validate_only_exits_firs
     hermes_start = source.index('"videobox-hermes-yujin"', installer)
     gateway_start = source.index('"videobox-agent-gateway"', installer)
 
-    assert validate_exit < verifier < installer < hermes_start < gateway_start
+    assert verifier < validate_exit < installer < hermes_start < gateway_start
     assert "compose.yaml" in source
     assert "compose.hermes-yujin.yaml" in source
