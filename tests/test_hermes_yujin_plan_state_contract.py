@@ -154,6 +154,46 @@ def test_verifier_requires_every_task_exactly_once_across_children(
     assert "child" in output.lower()
 
 
+def test_verifier_rejects_a_task_moved_between_fixed_child_partitions(
+    tmp_path: Path,
+) -> None:
+    fixture = _plan_fixture(tmp_path)
+    creator_child = fixture / PLAN_PATHS[2]
+    reliability_child = fixture / PLAN_PATHS[3]
+    moved_task = (
+        "- [ ] **B1** Build the allowlisted current-revision creator context "
+        "and typed read DTOs."
+    )
+    creator_text = creator_child.read_text(encoding="utf-8")
+    assert creator_text.count(moved_task) == 1
+    creator_child.write_text(
+        creator_text.replace(f"{moved_task}\n", "", 1).replace(
+            "Child progress: **0/5 tasks (0.0%), remaining 100.0%**.",
+            "Child progress: **0/4 tasks (0.0%), remaining 100.0%**.",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    reliability_child.write_text(
+        reliability_child.read_text(encoding="utf-8").replace(
+            "Child progress: **0/4 tasks (0.0%), remaining 100.0%**.",
+            "Child progress: **0/5 tasks (0.0%), remaining 100.0%**.",
+            1,
+        )
+        + f"\n{moved_task}\n",
+        encoding="utf-8",
+    )
+
+    result = _run_verifier(fixture)
+    output = _combined_output(result)
+
+    assert result.returncode != 0, "verifier accepted an invalid fixed child partition"
+    assert "creator-tools" in output
+    assert "expected 5" in output
+    assert "realtime-reliability" in output
+    assert "expected 4" in output
+
+
 def test_status_mismatch_names_task_and_both_statuses(tmp_path: Path) -> None:
     fixture = _plan_fixture(tmp_path)
     runtime_child = fixture / PLAN_PATHS[1]

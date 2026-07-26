@@ -15,6 +15,12 @@ $childPlans = @(
     "docs/superpowers/plans/2026-07-26-videobox-hermes-yujin-realtime-reliability.md"
     "docs/superpowers/plans/2026-07-26-videobox-hermes-yujin-mem0-memory.md"
 )
+$expectedChildDenominators = @{
+    "docs/superpowers/plans/2026-07-26-videobox-hermes-yujin-runtime-chat-vertical-slice.md" = 6
+    "docs/superpowers/plans/2026-07-26-videobox-hermes-yujin-creator-tools.md" = 5
+    "docs/superpowers/plans/2026-07-26-videobox-hermes-yujin-realtime-reliability.md" = 4
+    "docs/superpowers/plans/2026-07-26-videobox-hermes-yujin-mem0-memory.md" = 5
+}
 $planPaths = @($masterPlan) + $childPlans
 $expectedTaskIds = @(
     "P0-1", "P0-2",
@@ -52,7 +58,8 @@ function Test-ReportedProgress {
         [string]$RelativePath,
         [string[]]$Lines,
         [object[]]$Tasks,
-        [bool]$IsMaster
+        [bool]$IsMaster,
+        [int]$ExpectedDenominator
     )
 
     $progressPattern = if ($IsMaster) {
@@ -79,25 +86,29 @@ function Test-ReportedProgress {
         [Globalization.CultureInfo]::InvariantCulture
     )
     $completedCount = @($Tasks | Where-Object { $_.Status -eq "x" }).Count
-    $expectedDenominator = if ($IsMaster) { 20 } else { $Tasks.Count }
-
     if ($reportedNumerator -ne $completedCount) {
         Add-VerificationError (
             "$RelativePath completed numerator is $reportedNumerator; " +
             "[x] count is $completedCount."
         )
     }
-    if ($reportedDenominator -ne $expectedDenominator) {
+    if ($reportedDenominator -ne $ExpectedDenominator) {
         Add-VerificationError (
             "$RelativePath denominator is $reportedDenominator; " +
-            "expected $expectedDenominator."
+            "expected $ExpectedDenominator."
         )
     }
-    if ($expectedDenominator -gt 0) {
-        $expectedPercent = Get-ExpectedPercent $completedCount $expectedDenominator
+    if (-not $IsMaster -and $Tasks.Count -ne $ExpectedDenominator) {
+        Add-VerificationError (
+            "$RelativePath task count is $($Tasks.Count); " +
+            "expected $ExpectedDenominator for this fixed child partition."
+        )
+    }
+    if ($ExpectedDenominator -gt 0) {
+        $expectedPercent = Get-ExpectedPercent $completedCount $ExpectedDenominator
         $expectedRemaining = Get-ExpectedPercent (
-            $expectedDenominator - $completedCount
-        ) $expectedDenominator
+            $ExpectedDenominator - $completedCount
+        ) $ExpectedDenominator
         if ([math]::Abs($reportedPercent - $expectedPercent) -gt 0.001) {
             Add-VerificationError (
                 "$RelativePath completed percentage is $reportedPercent%; " +
@@ -213,13 +224,15 @@ Test-ReportedProgress `
     -RelativePath $masterPlan `
     -Lines $states[$masterPlan].Lines `
     -Tasks $masterTasks `
-    -IsMaster $true
+    -IsMaster $true `
+    -ExpectedDenominator 20
 foreach ($childPlan in $childPlans) {
     Test-ReportedProgress `
         -RelativePath $childPlan `
         -Lines $states[$childPlan].Lines `
         -Tasks @($states[$childPlan].Tasks) `
-        -IsMaster $false
+        -IsMaster $false `
+        -ExpectedDenominator $expectedChildDenominators[$childPlan]
 }
 
 if ($errors.Count -gt 0) {
