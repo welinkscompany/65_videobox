@@ -281,8 +281,31 @@ def test_capcut_draft_handoff_renews_its_durable_lease_during_a_slow_registratio
             assert self.release.wait(timeout=5)
             return super().register(**kwargs)
 
+    class ObservedStore(LocalProjectStore):
+        def __init__(self, root: Path) -> None:
+            super().__init__(root)
+            self.renewal_condition = threading.Condition()
+            self.successful_renewals = 0
+
+        def renew_capcut_draft_handoff_claim(self, **kwargs):  # type: ignore[no-untyped-def]
+            renewed = super().renew_capcut_draft_handoff_claim(**kwargs)
+            if renewed:
+                with self.renewal_condition:
+                    self.successful_renewals += 1
+                    self.renewal_condition.notify_all()
+            return renewed
+
+        def wait_for_periodic_renewal(self, timeout: float) -> bool:
+            # One renewal is synchronous before the heartbeat starts. The
+            # second proves the periodic worker actually extended the lease.
+            with self.renewal_condition:
+                return self.renewal_condition.wait_for(
+                    lambda: self.successful_renewals >= 2,
+                    timeout=timeout,
+                )
+
     service = BlockingHandoffService()
-    store = LocalProjectStore(tmp_path)
+    store = ObservedStore(tmp_path)
     project = store.bootstrap_project(name="CapCut lease renewal")
     job, _ = _save_current_capcut_draft_export_job(store, project_id=project.project_id)
     runner = LocalPipelineRunner(store, capcut_handoff_service=service)
@@ -297,7 +320,7 @@ def test_capcut_draft_handoff_renews_its_durable_lease_during_a_slow_registratio
     owner = threading.Thread(target=register_first)
     owner.start()
     assert service.started.wait(timeout=5)
-    time.sleep(0.18)
+    assert store.wait_for_periodic_renewal(timeout=5)
 
     with pytest.raises(ValueError, match="capcut_draft_handoff_in_progress"):
         runner.register_capcut_draft_handoff(project_id=project.project_id, job_id=job["job_id"])
