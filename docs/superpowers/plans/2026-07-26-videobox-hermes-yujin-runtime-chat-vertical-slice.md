@@ -368,6 +368,12 @@ GET  /api/projects/{project_id}/director/conversations/{conversation_id}/hermes-
    git commit -m "feat: stream Hermes runs through VideoBox API"
    ```
 
+**Known Phase A restart limit:** A3 never redispatches a stale durable pending
+run and converts a locally observed non-dispatchable row to a blocked result.
+Process-start recovery that marks every orphaned `pending/streaming` run
+`interrupted`, plus persistent event-cursor replay, remains explicitly pending
+under Phase C task C1. A3 does not claim that broader restart recovery.
+
 ## A4 — Connect persistent RightDock chat and close Phase A
 
 - [ ] **A4** Connect persistent RightDock chat, manual fallback, reload proof, live canary, and Phase A closeout.
