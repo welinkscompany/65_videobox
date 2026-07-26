@@ -137,7 +137,13 @@ export type DirectorMessageExchange = { user_message: DirectorMessage; assistant
 export type DirectorMessageSubmitRequest = { session_id: string; client_message_id: string; text: string };
 export type DirectorMessageSendResult = { kind: "exchange"; exchange: DirectorMessageExchange } | { kind: "in_progress"; retryAfterSeconds: number };
 export type DirectorReloadState = { conversation: DirectorConversation | null; messages: DirectorMessage[]; proposal: DirectorProposal | null; references: DirectorReference[] };
-export type HermesRunCreateRequest = { session_id: string; client_message_id: string; text: string };
+export type HermesRunCreateRequest = {
+  session_id: string;
+  client_message_id: string;
+  text: string;
+  expected_session_revision: number;
+  selected_segment_id?: string | null;
+};
 export type HermesRunCreateResponse = { run_id: string; conversation_id: string; events_url: string };
 export type ArtifactFreshness = { source_session_revision: number; is_current?: boolean; invalidated_at?: string | null; invalidated_reason?: string | null };
 

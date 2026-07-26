@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -14,6 +15,10 @@ SERVICE_TOKEN = "service-token-that-is-at-least-thirty-two"
 
 class _Gateway:
     calls = 0
+    preparations = 0
+
+    async def prepare_run(self, **_):
+        self.preparations += 1
 
     async def stream_run(self, **_):
         self.calls += 1
@@ -30,6 +35,17 @@ def _configured_app(tmp_path: Path):
     )
     gateway = _Gateway()
     app.state.hermes_run_service.gateway_client = gateway
+    app.state.hermes_run_service._context_builder = lambda **kwargs: SimpleNamespace(
+        session_revision=kwargs["expected_session_revision"],
+        asset_index_revision=0,
+        model_dump=lambda **_: {
+            "schema_version": "videobox.yujin-context.v1",
+            "project_id": kwargs["project_id"],
+            "session_id": kwargs["session_id"],
+            "session_revision": kwargs["expected_session_revision"],
+            "asset_index_revision": 0,
+        },
+    )
     return app, gateway
 
 
@@ -71,6 +87,7 @@ def test_create_and_sse_preserve_manual_conversation_and_headers(
             "session_id": session["session_id"],
             "client_message_id": "client-1",
             "text": "hello",
+            "expected_session_revision": session["session_revision"],
         }
         created = client.post(create_url, json=payload)
         assert created.status_code == 201

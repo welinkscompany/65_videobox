@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from videobox_api.models import HermesRunCreateRequest, HermesRunCreateResponse
+from videobox_api.agent_gateway_client import AgentGatewayUnavailable
 from videobox_api.hermes_run_service import HermesCapacityUnavailable
 
 
@@ -31,6 +32,8 @@ def build_hermes_conversation_router(run_service) -> APIRouter:
                 conversation_id=conversation_id,
                 client_message_id=body.client_message_id,
                 text=body.text,
+                expected_session_revision=body.expected_session_revision,
+                selected_segment_id=body.selected_segment_id,
             )
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error.args[0])) from error
@@ -38,6 +41,10 @@ def build_hermes_conversation_router(run_service) -> APIRouter:
             raise HTTPException(status_code=409, detail=str(error)) from error
         except HermesCapacityUnavailable as error:
             raise HTTPException(status_code=503, detail=str(error)) from error
+        except AgentGatewayUnavailable as error:
+            raise HTTPException(
+                status_code=503, detail="hermes_context_preparation_unavailable"
+            ) from error
         events_url = (
             f"/api/projects/{project_id}/director/conversations/"
             f"{conversation_id}/hermes-runs/{run.run_id}/events"

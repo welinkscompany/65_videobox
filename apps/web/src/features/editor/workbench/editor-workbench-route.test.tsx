@@ -1872,6 +1872,8 @@ describe("EditorWorkbenchRoute", () => {
       session_id: "session-a",
       client_message_id: "00000000-0000-4000-8000-000000000001",
       text: "장면을 설명해 줘",
+      expected_session_revision: 1,
+      selected_segment_id: null,
     }, expect.any(AbortSignal));
     expect(composer).toHaveValue("");
     expect(composer).toBeDisabled();

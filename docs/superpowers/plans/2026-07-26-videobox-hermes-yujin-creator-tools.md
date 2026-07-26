@@ -13,7 +13,7 @@
 Parent: `docs/superpowers/plans/2026-07-26-videobox-hermes-yujin-master-plan.md`
 Requires: Phase A task A4 complete.
 
-Child progress: **0/5 tasks (0.0%), remaining 100.0%**.
+Child progress: **1/5 tasks (20.0%), remaining 80.0%**.
 
 ## Supported-control rule
 
@@ -35,18 +35,25 @@ A kind may remain in the domain union only when a current backend/command implem
 
 ## B1 — Build current-revision creator context
 
-- [ ] **B1** Build the allowlisted current-revision creator context and typed read DTOs.
+- [x] **B1** Build the allowlisted current-revision creator context and typed read DTOs.
 
 **Files:**
 
 - Create: `packages/domain-models/src/videobox_domain_models/yujin_creator_context.py`
 - Create: `packages/core-engine/src/videobox_core_engine/yujin_creator_context.py`
-- Create: `services/agent-gateway/src/videobox_agent_gateway/context_capabilities.py`
 - Create: `services/agent-gateway/src/videobox_agent_gateway/creator_context.py`
 - Modify: `services/agent-gateway/src/videobox_agent_gateway/main.py`
 - Modify: `services/api/src/videobox_api/models.py`
 - Modify: `services/api/src/videobox_api/agent_gateway_client.py`
 - Modify: `services/api/src/videobox_api/hermes_run_service.py`
+- Modify: `services/api/src/videobox_api/routers/hermes_conversation.py`
+- Modify: `services/api/src/videobox_api/main.py` only if dependency wiring requires it
+- Modify: `packages/storage-abstractions/src/videobox_storage/sqlite_schema.py`
+- Modify: `packages/storage-abstractions/src/videobox_storage/postgres_schema.py`
+- Modify: `packages/storage-abstractions/src/videobox_storage/local_project_store.py`
+- Modify: `apps/web/src/api.ts`
+- Modify: `apps/web/src/features/editor/workbench/EditorWorkbenchRoute.tsx`
+- Modify: matching existing gateway/API/frontend tests
 - Create: `tests/test_yujin_creator_context.py`
 - Create: `tests/test_agent_gateway_creator_context.py`
 - Create: `tests/test_api_yujin_creator_context.py`
@@ -57,7 +64,11 @@ A kind may remain in the domain union only when a current backend/command implem
 class YujinCreatorContext(BaseModel):
     schema_version: Literal["videobox.yujin-context.v1"]
     project_id: str
-    revision: str
+    session_id: str
+    session_revision: int
+    asset_index_revision: int
+    timeline_id: str
+    timeline_version: str
     selected_script_id: str | None
     selected_segment_id: str | None
     segment_summaries: tuple[SegmentSummary, ...]
@@ -69,19 +80,34 @@ class YujinCreatorContext(BaseModel):
 Forbidden fields:
 
 - host paths
-- raw media bytes or signed URLs
+- `storage_uri`, `asset_uri`, URL, path, raw media bytes, or full metadata
 - provider credentials
 - OAuth state
 - full database records
 - raw Mem0 records
-- internal capability token
+- internal gateway ticket
+
+Builder and bound rules:
+
+- backend-only builder reads only the `LocalProjectStore` selected project/session/timeline, project-materialized assets, and pure playback manifest; it must not import frontend projection or the global `MediaLibraryStore`
+- caller supplies `expected_session_revision: int` and optional `selected_segment_id`; selection must belong to that exact session revision
+- read session and asset-index revision before collection and re-read both after collection; mismatch fails before gateway reservation, context attach, or Hermes prompt
+- playback source must be `current` and match the selected session/revision
+- deterministic order is segments `(start_sec, segment_id)`, media `(kind, asset_id)`, controls `kind`
+- at most 32 segment summaries and 48 project media candidates
+- segment text is at most 256 UTF-8 bytes, media title 128 UTF-8 bytes, and at most 8 tags of 64 UTF-8 bytes each
+- canonical context JSON is at most 48,000 bytes; collection/text truncation is deterministic and the strict final payload is rejected if still oversized
+- `selected_script_id` comes only from `session.script_asset_id`
+- B1 controls are discovery metadata only: `broll/bgm/sfx/caption/voice/overlay` use `recommendation_only`, while `output_check` is `read_only`; they grant no Apply authority and do not define B4's apply matrix
 
 **RED:**
 
-1. Add tests for deterministic ordering, bounded counts/text lengths, stable schema version, real current revision, and explicit field denial.
-2. Add a stale revision test: a context requested for revision N must fail if the store is already N+1.
-3. Add an external-network spy and require call count `0`.
-4. Run:
+1. Add tests for strict nested DTOs, deterministic ordering/truncation, separate session/asset revisions, stable schema version, current playback fence, and forbidden field denial.
+2. Add stale and TOCTOU tests: expected revision mismatch, selected-segment mismatch, or pre/post session/asset-index change must fail before gateway reservation/attach/prompt.
+3. Add an external/provider-network spy and require call count `0`.
+4. Add gateway state-machine tests for reservation, one attach, one stream, replay/expiry/mismatch/schema/size rejection, bounded ledger, and concurrent atomic ownership. Every invalid path must keep `HermesRpcClient.stream_prompt` call count `0`.
+5. Add API/frontend tests for exact expected revision/selection request, idempotency identity, stale `409`, redacted preparation failure, and draft/manual editor preservation.
+6. Run:
 
    ```powershell
    .\.venv\Scripts\python.exe -m pytest tests/test_yujin_creator_context.py tests/test_api_yujin_creator_context.py -q
@@ -91,19 +117,24 @@ Forbidden fields:
 
 **GREEN:**
 
-5. Build context only inside VideoBox from existing project store, playback manifest, asset projection, and EditorCommandPort support metadata.
-6. Use a two-step gateway exchange:
-   - create the run and receive a short-lived opaque `attach_context` capability bound to project/conversation/run/revision;
-   - attach exactly one context with that capability;
-   - gateway verifies and consumes it before prompt submission.
-7. Keep the signing secret gateway-only. Phase B may use a bounded in-memory consume ledger; C3 replaces it with the complete durable issue/consume/revoke lifecycle.
-8. Inject the gateway-validated serialized context into the Hermes prompt envelope; do not add a Hermes DB/media mount or browser-facing raw endpoint.
-9. Reject replay, revision mismatch, or over-limit context deterministically with a user-safe error and preserve the text draft/manual editor.
-10. Run focused tests and `git diff --check`.
-11. Mark B1 `[x]`, synchronize progress, and commit:
+7. Build the bounded context only inside VideoBox from the allowed local snapshot sources.
+8. Add a gateway-only opaque attach-ticket state machine without touching `hermes_capability_authority`, Ed25519 issuance, public capability routes, durable revoke/audit, or key rotation:
+   - authenticated `POST /internal/hermes/runs` creates a reservation and returns a 30-second high-entropy opaque `attach_context` ticket bound to exact project/conversation/run/session/session-revision/asset-index-revision identity
+   - authenticated `POST /internal/hermes/runs/{run_id}/context` receives the ticket only in a private header, validates identity/schema/revisions/48,000-byte limit, consumes it exactly once, and stores validated canonical context
+   - authenticated `POST /internal/hermes/runs/{run_id}/stream` streams exactly once only after attach
+   - the raw attach ticket expires after 30 seconds; a successfully attached context gets a separate 300-second queue TTL
+   - authenticated idempotent `DELETE /internal/hermes/runs/{run_id}` releases rejected/cancelled prepared state
+   - ledger holds at most 64 entries, compares a ticket digest instead of raw ticket, and removes consumed/released/expired state
+   - retire the context-free `/internal/hermes/stream` production bypass
+9. Put the gateway-validated canonical context and user text inside one escaped, delimited JSON data block labeled `untrusted_creator_context`, preceded by a fixed trusted instruction that forbids following embedded instructions, requesting credentials, or invoking tools. Neither data field is a system/tool instruction and B1 returns recommendation-only free text.
+10. Require `expected_session_revision >= 1` and optional `selected_segment_id` in public run creation. Same `client_message_id` is idempotent only when session, text, expected revision, and selection all match.
+11. After local durable begin, API creates the gateway reservation and attaches the already-built context before prompt dispatch. Ticket data is never returned to the browser or stored in Director metadata/DB. Preparation failure settles the owned durable run blocked and returns a redacted error before `201`.
+12. A non-legacy stale durable `pending` row is owner-token CAS reclaimed after 300 seconds and re-prepared with the same exact context identity. A live pending owner returns an in-progress failure instead of a false local terminal. Migrated legacy terminal rows replay without dispatch; migrated legacy pending rows are atomically settled blocked with manual fallback.
+13. Run focused tests and `git diff --check`.
+14. Leave B1 `[~]` for controller review; do not update progress or SSOT closeout. Commit only explicitly staged files:
 
    ```powershell
-   git add packages services/agent-gateway services/api tests docs/superpowers/plans
+   git add <only-the-files-actually-modified-for-B1>
    git commit -m "feat: provide bounded Yujin creator context"
    ```
 

@@ -1,0 +1,358 @@
+"""Build one bounded, current-revision creator context from local project data."""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+import json
+from math import isfinite
+from typing import Any
+
+from videobox_core_engine.editor_playback_manifest import (
+    build_editor_playback_manifest,
+)
+from videobox_domain_models.yujin_creator_context import (
+    MediaCandidateSummary,
+    SegmentSummary,
+    SupportedControl,
+    TimelineSummary,
+    YujinCreatorContext,
+)
+
+
+MAX_CONTEXT_BYTES = 48_000
+MAX_SEGMENTS = 32
+MAX_MEDIA_CANDIDATES = 48
+MAX_SEGMENT_TEXT_BYTES = 256
+MAX_MEDIA_TITLE_BYTES = 128
+MAX_TAGS = 8
+MAX_TAG_BYTES = 64
+
+_ASSET_KINDS = frozenset(
+    {
+        "narration_audio",
+        "raw_video",
+        "broll_video",
+        "image",
+        "bgm",
+        "sfx",
+        "script_document",
+        "voice_sample_audio",
+        "generated_tts_audio",
+    }
+)
+_CONTROLS = (
+    SupportedControl(kind="bgm", mode="recommendation_only"),
+    SupportedControl(kind="broll", mode="recommendation_only"),
+    SupportedControl(kind="caption", mode="recommendation_only"),
+    SupportedControl(kind="output_check", mode="read_only"),
+    SupportedControl(kind="overlay", mode="recommendation_only"),
+    SupportedControl(kind="sfx", mode="recommendation_only"),
+    SupportedControl(kind="voice", mode="recommendation_only"),
+)
+
+
+class YujinCreatorContextError(ValueError):
+    """A safe deterministic creator-context fence failure."""
+
+
+def canonical_creator_context_json(context: YujinCreatorContext) -> str:
+    return json.dumps(
+        context.model_dump(mode="json"),
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+        allow_nan=False,
+    )
+
+
+def build_yujin_creator_context(
+    *,
+    store: object,
+    project_id: str,
+    session_id: str,
+    expected_session_revision: int,
+    selected_segment_id: str | None = None,
+    playback_builder: Callable[..., dict[str, Any]] = build_editor_playback_manifest,
+) -> YujinCreatorContext:
+    """Read a project-scoped snapshot and return only allowlisted scalar data."""
+
+    store.get_project(project_id=project_id)  # type: ignore[attr-defined]
+    session_before = store.get_editing_session(  # type: ignore[attr-defined]
+        project_id=project_id,
+        session_id=session_id,
+    )
+    session_revision = _positive_revision(session_before.get("session_revision"))
+    if session_revision != expected_session_revision:
+        raise YujinCreatorContextError(
+            "creator_context_session_revision_mismatch"
+        )
+    if (
+        str(session_before.get("project_id") or "") != project_id
+        or str(session_before.get("session_id") or "") != session_id
+    ):
+        raise YujinCreatorContextError("creator_context_session_identity_mismatch")
+
+    raw_segments = [
+        item
+        for item in session_before.get("segments", [])
+        if isinstance(item, dict) and str(item.get("segment_id") or "").strip()
+    ]
+    segment_ids = {str(item["segment_id"]) for item in raw_segments}
+    normalized_selection = (
+        str(selected_segment_id).strip() if selected_segment_id is not None else None
+    )
+    if normalized_selection == "":
+        normalized_selection = None
+    if normalized_selection is not None and normalized_selection not in segment_ids:
+        raise YujinCreatorContextError("creator_context_segment_mismatch")
+
+    asset_revision_before = int(  # type: ignore[attr-defined]
+        store.get_asset_index_revision(project_id)
+    )
+    timeline_id = str(session_before.get("timeline_id") or "")
+    if not timeline_id:
+        raise YujinCreatorContextError("creator_context_timeline_identity_mismatch")
+    timeline = store.get_timeline_run(  # type: ignore[attr-defined]
+        project_id=project_id,
+        timeline_id=timeline_id,
+    )
+    if (
+        str(timeline.get("project_id") or "") != project_id
+        or str(timeline.get("timeline_id") or "") != timeline_id
+    ):
+        raise YujinCreatorContextError("creator_context_timeline_identity_mismatch")
+
+    manifest = playback_builder(
+        project_id=project_id,
+        session=session_before,
+        timeline=timeline,
+        asset_content_url_prefix="",
+    )
+    _validate_current_playback(
+        manifest=manifest,
+        project_id=project_id,
+        session_id=session_id,
+        session_revision=session_revision,
+        timeline_id=timeline_id,
+        timeline_version=str(timeline.get("version") or "v001"),
+    )
+    assets = store.list_assets(project_id=project_id)  # type: ignore[attr-defined]
+
+    session_after = store.get_editing_session(  # type: ignore[attr-defined]
+        project_id=project_id,
+        session_id=session_id,
+    )
+    asset_revision_after = int(  # type: ignore[attr-defined]
+        store.get_asset_index_revision(project_id)
+    )
+    if (
+        _positive_revision(session_after.get("session_revision"))
+        != session_revision
+        or str(session_after.get("session_id") or "") != session_id
+        or str(session_after.get("timeline_id") or "") != timeline_id
+        or asset_revision_after != asset_revision_before
+    ):
+        raise YujinCreatorContextError("creator_context_snapshot_changed")
+
+    segments = tuple(
+        SegmentSummary(
+            segment_id=str(item["segment_id"]),
+            start_sec=_nonnegative_float(item.get("start_sec")),
+            end_sec=_nonnegative_float(item.get("end_sec")),
+            text=_truncate_utf8(
+                str(item.get("caption_text") or item.get("text") or ""),
+                MAX_SEGMENT_TEXT_BYTES,
+            ),
+        )
+        for item in _bounded_segments(
+            raw_segments,
+            selected_segment_id=normalized_selection,
+        )
+    )
+    candidates = tuple(
+        candidate
+        for candidate in (
+            _media_candidate(item, project_id=project_id)
+            for item in sorted(
+                (item for item in assets if isinstance(item, dict)),
+                key=lambda item: (
+                    str(item.get("asset_type") or ""),
+                    str(item.get("asset_id") or ""),
+                ),
+            )
+        )
+        if candidate is not None
+    )[:MAX_MEDIA_CANDIDATES]
+    timeline_summary = _timeline_summary(manifest)
+    context = YujinCreatorContext(
+        schema_version="videobox.yujin-context.v1",
+        project_id=project_id,
+        session_id=session_id,
+        session_revision=session_revision,
+        asset_index_revision=asset_revision_before,
+        timeline_id=timeline_id,
+        timeline_version=str(manifest["timeline_version"]),
+        selected_script_id=(
+            str(session_before["script_asset_id"])
+            if session_before.get("script_asset_id")
+            else None
+        ),
+        selected_segment_id=normalized_selection,
+        segment_summaries=segments,
+        media_candidates=candidates,
+        timeline_summary=timeline_summary,
+        supported_controls=_CONTROLS,
+    )
+    return _fit_context(context)
+
+
+def _fit_context(context: YujinCreatorContext) -> YujinCreatorContext:
+    segments = context.segment_summaries
+    candidates = context.media_candidates
+    while len(canonical_creator_context_json(context).encode("utf-8")) > MAX_CONTEXT_BYTES:
+        if candidates:
+            candidates = candidates[:-1]
+        elif segments:
+            segments = segments[:-1]
+        else:
+            raise YujinCreatorContextError("creator_context_size_limit")
+        context = context.model_copy(
+            update={
+                "segment_summaries": segments,
+                "media_candidates": candidates,
+            }
+        )
+    return context
+
+
+def _bounded_segments(
+    segments: list[dict[str, Any]],
+    *,
+    selected_segment_id: str | None,
+) -> tuple[dict[str, Any], ...]:
+    key = lambda item: (  # noqa: E731 - shared deterministic ordering key
+        _nonnegative_float(item.get("start_sec")),
+        str(item["segment_id"]),
+    )
+    ordered = sorted(segments, key=key)
+    bounded = ordered[:MAX_SEGMENTS]
+    if (
+        selected_segment_id is not None
+        and all(str(item["segment_id"]) != selected_segment_id for item in bounded)
+    ):
+        selected = next(
+            item
+            for item in ordered
+            if str(item["segment_id"]) == selected_segment_id
+        )
+        bounded[-1] = selected
+        bounded.sort(key=key)
+    return tuple(bounded)
+
+
+def _validate_current_playback(
+    *,
+    manifest: dict[str, Any],
+    project_id: str,
+    session_id: str,
+    session_revision: int,
+    timeline_id: str,
+    timeline_version: str,
+) -> None:
+    source = manifest.get("source_status")
+    if not isinstance(source, dict):
+        raise YujinCreatorContextError("creator_context_playback_stale")
+    if (
+        str(manifest.get("project_id") or "") != project_id
+        or str(manifest.get("session_id") or "") != session_id
+        or int(manifest.get("session_revision") or 0) != session_revision
+        or str(manifest.get("timeline_id") or "") != timeline_id
+        or str(manifest.get("timeline_version") or "") != timeline_version
+        or source.get("status") != "current"
+        or str(source.get("source_session_id") or "") != session_id
+        or int(source.get("source_session_revision") or 0) != session_revision
+    ):
+        raise YujinCreatorContextError("creator_context_playback_stale")
+
+
+def _media_candidate(
+    item: dict[str, Any], *, project_id: str
+) -> MediaCandidateSummary | None:
+    kind = str(item.get("asset_type") or "")
+    asset_id = str(item.get("asset_id") or "").strip()
+    if (
+        str(item.get("project_id") or "") != project_id
+        or not asset_id
+        or kind not in _ASSET_KINDS
+    ):
+        return None
+    metadata = item.get("metadata")
+    safe_metadata = metadata if isinstance(metadata, dict) else {}
+    raw_tags = safe_metadata.get("tags")
+    tags = tuple(
+        _truncate_utf8(str(tag), MAX_TAG_BYTES)
+        for tag in (raw_tags if isinstance(raw_tags, (list, tuple)) else ())
+        if str(tag).strip()
+    )[:MAX_TAGS]
+    raw_duration = item.get("duration_sec")
+    duration = (
+        _nonnegative_float(raw_duration) if raw_duration is not None else None
+    )
+    return MediaCandidateSummary(
+        asset_id=asset_id,
+        kind=kind,  # type: ignore[arg-type]
+        title=_truncate_utf8(
+            str(safe_metadata.get("title") or asset_id),
+            MAX_MEDIA_TITLE_BYTES,
+        ),
+        duration_sec=duration,
+        tags=tags,
+    )
+
+
+def _timeline_summary(manifest: dict[str, Any]) -> TimelineSummary:
+    tracks = manifest.get("tracks")
+    safe_tracks = tracks if isinstance(tracks, list) else []
+    clip_count = sum(
+        len(track.get("clips", []))
+        for track in safe_tracks
+        if isinstance(track, dict) and isinstance(track.get("clips"), list)
+    )
+    gaps = manifest.get("gap_slots")
+    output = manifest.get("output")
+    safe_output = output if isinstance(output, dict) else {}
+    return TimelineSummary(
+        duration_sec=_nonnegative_float(safe_output.get("duration_sec")),
+        track_count=len(safe_tracks),
+        clip_count=clip_count,
+        gap_count=len(gaps) if isinstance(gaps, list) else 0,
+    )
+
+
+def _truncate_utf8(value: str, max_bytes: int) -> str:
+    encoded = value.encode("utf-8")
+    if len(encoded) <= max_bytes:
+        return value
+    return encoded[:max_bytes].decode("utf-8", errors="ignore")
+
+
+def _positive_revision(value: object) -> int:
+    try:
+        revision = int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        raise YujinCreatorContextError(
+            "creator_context_session_revision_mismatch"
+        ) from None
+    if revision < 1:
+        raise YujinCreatorContextError(
+            "creator_context_session_revision_mismatch"
+        )
+    return revision
+
+
+def _nonnegative_float(value: object) -> float:
+    try:
+        number = float(value or 0)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 0.0
+    return number if isfinite(number) and number >= 0 else 0.0

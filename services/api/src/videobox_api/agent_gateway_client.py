@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict
@@ -27,6 +28,14 @@ class _GatewayFrame(BaseModel):
     event_type: Literal["text_delta", "run_completed", "blocked"]
     text: str = ""
     retryable: bool = False
+
+
+class _GatewayReservationFrame(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    run_id: str
+    attach_context: str
+    expires_in_seconds: Literal[30]
 
 
 _MAX_LINE_BYTES = 256_000
@@ -81,9 +90,100 @@ class AgentGatewayClient:
         self._factory = http_client_factory
         self._timeout = timeout_seconds
 
+    async def prepare_run(
+        self,
+        *,
+        project_id: str,
+        conversation_id: str,
+        run_id: str,
+        session_id: str,
+        session_revision: int,
+        asset_index_revision: int,
+        context: dict[str, Any],
+    ) -> None:
+        identity = {
+            "project_id": project_id,
+            "conversation_id": conversation_id,
+            "run_id": run_id,
+            "session_id": session_id,
+            "session_revision": session_revision,
+            "asset_index_revision": asset_index_revision,
+        }
+        reservation_created = False
+        try:
+            async with self._factory(
+                base_url=self._base_url, timeout=self._timeout
+            ) as client:
+                reserved = await client.post(
+                    "/internal/hermes/runs",
+                    headers={"Authorization": f"Bearer {self._token}"},
+                    json=identity,
+                )
+                reserved.raise_for_status()
+                reservation_created = True
+                reservation = _GatewayReservationFrame.model_validate(
+                    reserved.json()
+                )
+                if (
+                    reservation.run_id != run_id
+                    or len(reservation.attach_context) != 64
+                    or any(
+                        character not in "0123456789abcdef"
+                        for character in reservation.attach_context
+                    )
+                ):
+                    raise ValueError("agent_gateway_reservation_invalid")
+                attached = await client.post(
+                    f"/internal/hermes/runs/{run_id}/context",
+                    headers={
+                        "Authorization": f"Bearer {self._token}",
+                        "X-VideoBox-Attach-Ticket": reservation.attach_context,
+                    },
+                    json={"identity": identity, "context": context},
+                )
+                attached.raise_for_status()
+        except asyncio.CancelledError:
+            if reservation_created:
+                cleanup = asyncio.create_task(self.release_run(run_id=run_id))
+                try:
+                    await asyncio.shield(cleanup)
+                except asyncio.CancelledError:
+                    # A repeated cancellation may interrupt the waiter, but
+                    # the shielded best-effort release remains independently
+                    # owned until it finishes.
+                    pass
+            raise
+        except Exception as error:
+            if reservation_created:
+                await self.release_run(run_id=run_id)
+            raise AgentGatewayUnavailable("agent_gateway_unavailable") from error
+
+    async def release_run(self, *, run_id: str) -> None:
+        try:
+            async with self._factory(
+                base_url=self._base_url, timeout=self._timeout
+            ) as client:
+                response = await client.delete(
+                    f"/internal/hermes/runs/{run_id}",
+                    headers={"Authorization": f"Bearer {self._token}"},
+                )
+                response.raise_for_status()
+        except Exception:
+            # Cleanup is best effort; the gateway ledger remains bounded and
+            # has its own attached-context expiry fence.
+            return
+
     async def stream_run(
-        self, *, session_id: str, client_message_id: str, text: str
+        self,
+        *,
+        run_id: str | None = None,
+        client_message_id: str,
+        text: str,
+        session_id: str | None = None,
     ) -> AsyncIterator[AgentGatewayEvent]:
+        effective_run_id = run_id or session_id
+        if not effective_run_id:
+            raise AgentGatewayUnavailable("agent_gateway_unavailable")
         assembled = ""
         assembled_bytes = 0
         try:
@@ -92,10 +192,9 @@ class AgentGatewayClient:
             ) as client:
                 async with client.stream(
                     "POST",
-                    "/internal/hermes/stream",
+                    f"/internal/hermes/runs/{effective_run_id}/stream",
                     headers={"Authorization": f"Bearer {self._token}"},
                     json={
-                        "session_id": session_id,
                         "client_message_id": client_message_id,
                         "text": text,
                     },

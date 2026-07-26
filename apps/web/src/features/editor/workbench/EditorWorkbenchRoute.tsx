@@ -553,7 +553,8 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
   const isCurrentDirector = (epoch: number, operationId: number) => routeEpoch.current.value === epoch && directorOperationId.current === operationId;
   const sendDirectorMessage = async (text: string) => {
     const submittedDraft = text.trim();
-    if (!sessionId || !submittedDraft || hermesRunInFlight.current) return;
+    const currentView = state.view;
+    if (!sessionId || !currentView || !submittedDraft || hermesRunInFlight.current) return;
     const clientMessageId = globalThis.crypto?.randomUUID?.();
     if (!clientMessageId) {
       setDirector((current) => current.key === requestKey ? { ...current, runState: { kind: "unavailable", message: yujinUnavailableMessage } } : current);
@@ -591,6 +592,8 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
         session_id: sessionId,
         client_message_id: clientMessageId,
         text: submittedDraft,
+        expected_session_revision: currentView.expectedRevision,
+        selected_segment_id: null,
       }, controller.signal);
       if (!isCurrentHermes()) return;
       createdRun = true;

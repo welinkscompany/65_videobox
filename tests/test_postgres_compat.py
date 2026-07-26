@@ -72,6 +72,23 @@ def test_postgres_migrations_add_durable_capcut_handoff_claim_columns() -> None:
     assert "ALTER TABLE exports ADD COLUMN IF NOT EXISTS handoff_claim_job_id TEXT" in statements
 
 
+def test_postgres_migrations_add_hermes_creator_context_identity_columns() -> None:
+    statements = "\n".join(POSTGRES_MIGRATION_STATEMENTS)
+
+    assert (
+        "ALTER TABLE director_hermes_runs ADD COLUMN IF NOT EXISTS "
+        "expected_session_revision INTEGER NOT NULL DEFAULT 0"
+    ) in statements
+    assert (
+        "ALTER TABLE director_hermes_runs ADD COLUMN IF NOT EXISTS "
+        "expected_asset_index_revision INTEGER NOT NULL DEFAULT -1"
+    ) in statements
+    assert (
+        "ALTER TABLE director_hermes_runs ADD COLUMN IF NOT EXISTS "
+        "selected_segment_id TEXT"
+    ) in statements
+
+
 def test_output_publish_transaction_explicitly_serializes_postgres_lineage_and_paths() -> None:
     class RecordingPostgresConnection:
         def __init__(self) -> None:

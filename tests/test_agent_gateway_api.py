@@ -19,7 +19,60 @@ class _Hermes:
         yield HermesRpcEvent("message.complete", "answer")
 
 
-def test_gateway_has_only_health_and_authenticated_narrow_stream() -> None:
+def _prepare_gateway_run(
+    client: TestClient,
+    *,
+    token: str,
+    run_id: str = "run-a",
+) -> tuple[dict[str, str], str]:
+    headers = {"Authorization": f"Bearer {token}"}
+    identity = {
+        "project_id": "project-a",
+        "conversation_id": "conversation-a",
+        "run_id": run_id,
+        "session_id": "s",
+        "session_revision": 1,
+        "asset_index_revision": 0,
+    }
+    reservation = client.post(
+        "/internal/hermes/runs",
+        headers=headers,
+        json=identity,
+    )
+    assert reservation.status_code == 200
+    context = {
+        "schema_version": "videobox.yujin-context.v1",
+        "project_id": "project-a",
+        "session_id": "s",
+        "session_revision": 1,
+        "asset_index_revision": 0,
+        "timeline_id": "timeline-a",
+        "timeline_version": "v001",
+        "selected_script_id": None,
+        "selected_segment_id": None,
+        "segment_summaries": [],
+        "media_candidates": [],
+        "timeline_summary": {
+            "duration_sec": 0.0,
+            "track_count": 0,
+            "clip_count": 0,
+            "gap_count": 0,
+        },
+        "supported_controls": [],
+    }
+    attached = client.post(
+        f"/internal/hermes/runs/{run_id}/context",
+        headers={
+            **headers,
+            "X-VideoBox-Attach-Ticket": reservation.json()["attach_context"],
+        },
+        json={"identity": identity, "context": context},
+    )
+    assert attached.status_code == 204
+    return headers, f"/internal/hermes/runs/{run_id}/stream"
+
+
+def test_gateway_has_only_health_and_authenticated_bounded_run_flow() -> None:
     hermes = _Hermes()
     token = "service-secret-that-is-at-least-32-bytes"
     app = create_app(hermes_client=hermes, service_token=token)
@@ -27,19 +80,27 @@ def test_gateway_has_only_health_and_authenticated_narrow_stream() -> None:
     assert app.openapi_url is None
     assert client.get("/openapi.json").status_code == 404
     assert client.get("/health").status_code == 200
-    body = {"session_id": "s", "client_message_id": "c", "text": "hello"}
-    assert client.post("/internal/hermes/stream", json=body).status_code == 401
+    body = {"client_message_id": "c", "text": "hello"}
+    assert client.post("/internal/hermes/runs", json={
+        "project_id": "project-a",
+        "conversation_id": "conversation-a",
+        "run_id": "run-a",
+        "session_id": "s",
+        "session_revision": 1,
+        "asset_index_revision": 0,
+    }).status_code == 401
     assert hermes.calls == 0
+    headers, stream_path = _prepare_gateway_run(client, token=token)
     rejected = client.post(
-        "/internal/hermes/stream",
-        headers={"Authorization": f"Bearer {token}"},
+        stream_path,
+        headers=headers,
         json={**body, "tool_name": "shell", "provider": "x", "path": "C:/db"},
     )
     assert rejected.status_code == 422
     assert hermes.calls == 0
     response = client.post(
-        "/internal/hermes/stream",
-        headers={"Authorization": f"Bearer {token}"},
+        stream_path,
+        headers=headers,
         json=body,
     )
     assert response.headers["content-type"].startswith("application/x-ndjson")
@@ -69,12 +130,11 @@ def test_validation_and_unsafe_output_are_redacted() -> None:
 
     token = "service-secret-that-is-at-least-32-bytes"
     client = TestClient(create_app(hermes_client=UnsafeHermes(), service_token=token))
-    headers = {"Authorization": f"Bearer {token}"}
+    headers, stream_path = _prepare_gateway_run(client, token=token)
     invalid = client.post(
-        "/internal/hermes/stream",
+        stream_path,
         headers=headers,
         json={
-            "session_id": "s",
             "client_message_id": "c",
             "text": "hello",
             "secret": sentinel,
@@ -83,9 +143,9 @@ def test_validation_and_unsafe_output_are_redacted() -> None:
     assert invalid.status_code == 422
     assert sentinel not in invalid.text
     response = client.post(
-        "/internal/hermes/stream",
+        stream_path,
         headers=headers,
-        json={"session_id": "s", "client_message_id": "c", "text": "hello"},
+        json={"client_message_id": "c", "text": "hello"},
     )
     assert response.text.splitlines() == [
         '{"event_type":"blocked","text":"","retryable":true}'
@@ -103,10 +163,11 @@ def test_unsafe_output_split_across_events_is_quarantined() -> None:
 
     token = "service-secret-that-is-at-least-32-bytes"
     client = TestClient(create_app(hermes_client=SplitHermes(), service_token=token))
+    headers, stream_path = _prepare_gateway_run(client, token=token)
     response = client.post(
-        "/internal/hermes/stream",
-        headers={"Authorization": f"Bearer {token}"},
-        json={"session_id": "s", "client_message_id": "c", "text": "hello"},
+        stream_path,
+        headers=headers,
+        json={"client_message_id": "c", "text": "hello"},
     )
     assert response.text == '{"event_type":"blocked","text":"","retryable":true}\n'
     assert "private" not in response.text
@@ -121,10 +182,11 @@ def test_excessive_empty_event_stream_is_bounded() -> None:
 
     token = "service-secret-that-is-at-least-32-bytes"
     client = TestClient(create_app(hermes_client=NoisyHermes(), service_token=token))
+    headers, stream_path = _prepare_gateway_run(client, token=token)
     response = client.post(
-        "/internal/hermes/stream",
-        headers={"Authorization": f"Bearer {token}"},
-        json={"session_id": "s", "client_message_id": "c", "text": "hello"},
+        stream_path,
+        headers=headers,
+        json={"client_message_id": "c", "text": "hello"},
     )
     assert response.text == '{"event_type":"blocked","text":"","retryable":true}\n'
 

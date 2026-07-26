@@ -211,9 +211,10 @@ def test_verifier_rejects_a_task_moved_between_fixed_child_partitions(
     fixture = _plan_fixture(tmp_path)
     creator_child = fixture / PLAN_PATHS[2]
     reliability_child = fixture / PLAN_PATHS[3]
-    moved_task = (
-        "- [ ] **B1** Build the allowlisted current-revision creator context "
-        "and typed read DTOs."
+    moved_task = _unique_matching_line(
+        creator_child,
+        r"^- \[(?: |~|x|!)\] \*\*B1\*\* Build the allowlisted current-revision creator context "
+        r"and typed read DTOs\.",
     )
     creator_text = creator_child.read_text(encoding="utf-8")
     assert creator_text.count(moved_task) == 1
@@ -251,9 +252,10 @@ def test_verifier_rejects_equal_cardinality_task_swaps_between_children(
     fixture = _plan_fixture(tmp_path)
     creator_child = fixture / PLAN_PATHS[2]
     reliability_child = fixture / PLAN_PATHS[3]
-    creator_task = (
-        "- [ ] **B1** Build the allowlisted current-revision creator context "
-        "and typed read DTOs."
+    creator_task = _unique_matching_line(
+        creator_child,
+        r"^- \[(?: |~|x|!)\] \*\*B1\*\* Build the allowlisted current-revision creator context "
+        r"and typed read DTOs\.",
     )
     reliability_task = (
         "- [ ] **C1** Persist run/event cursors and restore final or interrupted "

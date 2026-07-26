@@ -10,9 +10,13 @@ import time
 from typing import AsyncIterator, Callable, Coroutine
 
 from videobox_api.models import HermesStreamEvent
+from videobox_core_engine.yujin_creator_context import (
+    build_yujin_creator_context,
+)
 
 
 _BLOCKED_TEXT = "Hermes is temporarily unavailable. Manual Director remains available."
+_GATEWAY_RELEASE_TIMEOUT_SECONDS = 1.0
 
 
 class HermesCapacityUnavailable(RuntimeError):
@@ -35,7 +39,10 @@ class _Run:
     conversation_id: str
     client_message_id: str
     user_text: str
+    expected_session_revision: int
+    selected_segment_id: str | None
     owner_token: str | None
+    gateway_prepared: bool = False
     events: list[HermesStreamEvent] = field(default_factory=list)
     event_bytes: int = 0
     assembled: str = ""
@@ -84,6 +91,7 @@ class HermesRunService:
         timeout_seconds: float = 35.0,
         terminal_ttl_seconds: float = 300.0,
         monotonic: Callable[[], float] = time.monotonic,
+        context_builder: Callable | None = None,
     ) -> None:
         if min(max_active, max_total, max_events, max_event_bytes, max_text_bytes) < 1:
             raise ValueError("hermes_run_limits_invalid")
@@ -100,6 +108,7 @@ class HermesRunService:
         self.timeout_seconds = timeout_seconds
         self.terminal_ttl_seconds = terminal_ttl_seconds
         self._clock = monotonic
+        self._context_builder = context_builder or build_yujin_creator_context
         self._runs: dict[str, _Run] = {}
         self._keys: dict[tuple[str, str, str], str] = {}
         self._admissions: dict[tuple[str, str, str], _Admission] = {}
@@ -120,6 +129,8 @@ class HermesRunService:
         conversation_id: str,
         client_message_id: str,
         text: str,
+        expected_session_revision: int = 1,
+        selected_segment_id: str | None = None,
     ) -> _Run:
         key = (project_id, conversation_id, client_message_id)
         async with self._lock:
@@ -129,7 +140,13 @@ class HermesRunService:
             existing_id = self._keys.get(key)
             if existing_id is not None:
                 existing = self._runs[existing_id]
-                self._validate_duplicate(existing, session_id=session_id, text=text)
+                self._validate_duplicate(
+                    existing,
+                    session_id=session_id,
+                    text=text,
+                    expected_session_revision=expected_session_revision,
+                    selected_segment_id=selected_segment_id,
+                )
                 return existing
             admission = self._admissions.get(key)
             if admission is None:
@@ -151,6 +168,8 @@ class HermesRunService:
                         conversation_id=conversation_id,
                         client_message_id=client_message_id,
                         text=text,
+                        expected_session_revision=expected_session_revision,
+                        selected_segment_id=selected_segment_id,
                     ),
                     self._admission_tasks,
                     name=f"videobox-admit-{client_message_id}",
@@ -316,8 +335,18 @@ class HermesRunService:
         conversation_id: str,
         client_message_id: str,
         text: str,
+        expected_session_revision: int,
+        selected_segment_id: str | None,
     ) -> _Run:
         try:
+            context = await asyncio.to_thread(
+                self._context_builder,
+                store=self.store,
+                project_id=project_id,
+                session_id=session_id,
+                expected_session_revision=expected_session_revision,
+                selected_segment_id=selected_segment_id,
+            )
             durable = await asyncio.to_thread(
                 self.store.begin_director_hermes_run,
                 project_id=project_id,
@@ -325,7 +354,43 @@ class HermesRunService:
                 conversation_id=conversation_id,
                 client_message_id=client_message_id,
                 user_text=text,
+                expected_session_revision=expected_session_revision,
+                expected_asset_index_revision=context.asset_index_revision,
+                selected_segment_id=selected_segment_id,
             )
+            if (
+                str(durable.get("status") or "") == "pending"
+                and not bool(durable.get("dispatch"))
+            ):
+                raise HermesCapacityUnavailable("hermes_run_in_progress")
+            if (
+                str(durable.get("status") or "") == "pending"
+                and bool(durable.get("dispatch"))
+                and durable.get("owner_token") is not None
+            ):
+                try:
+                    await self.gateway_client.prepare_run(
+                        project_id=project_id,
+                        conversation_id=conversation_id,
+                        run_id=str(durable["run_id"]),
+                        session_id=session_id,
+                        session_revision=context.session_revision,
+                        asset_index_revision=context.asset_index_revision,
+                        context=context.model_dump(mode="json"),
+                    )
+                except BaseException:
+                    try:
+                        await asyncio.to_thread(
+                            self.store.complete_director_hermes_run,
+                            project_id=project_id,
+                            run_id=str(durable["run_id"]),
+                            owner_token=str(durable["owner_token"]),
+                            status="blocked",
+                            assistant_text=_BLOCKED_TEXT,
+                            retryable=True,
+                        )
+                    finally:
+                        raise
             run = _Run(
                 run_id=str(durable["run_id"]),
                 project_id=project_id,
@@ -333,7 +398,10 @@ class HermesRunService:
                 conversation_id=conversation_id,
                 client_message_id=client_message_id,
                 user_text=text,
+                expected_session_revision=expected_session_revision,
+                selected_segment_id=selected_segment_id,
                 owner_token=durable.get("owner_token"),
+                gateway_prepared=bool(durable.get("dispatch")),
             )
             terminal: tuple[str, str, bool] | None = None
             async with self._lock:
@@ -386,8 +454,20 @@ class HermesRunService:
             raise
 
     @staticmethod
-    def _validate_duplicate(run: _Run, *, session_id: str, text: str) -> None:
-        if run.user_text != text or run.session_id != session_id:
+    def _validate_duplicate(
+        run: _Run,
+        *,
+        session_id: str,
+        text: str,
+        expected_session_revision: int,
+        selected_segment_id: str | None,
+    ) -> None:
+        if (
+            run.user_text != text
+            or run.session_id != session_id
+            or run.expected_session_revision != expected_session_revision
+            or run.selected_segment_id != selected_segment_id
+        ):
             raise ValueError("client_message_id_reused_with_different_content")
 
     def _activate_locked(self, run: _Run) -> None:
@@ -415,7 +495,7 @@ class HermesRunService:
         try:
             async with asyncio.timeout(self.timeout_seconds):
                 async for upstream in self.gateway_client.stream_run(
-                    session_id=run.session_id,
+                    run_id=run.run_id,
                     client_message_id=run.client_message_id,
                     text=run.user_text,
                 ):
@@ -554,6 +634,25 @@ class HermesRunService:
                     terminal=True,
                 )
             self._release_slot_and_promote_locked(run)
+        if run.gateway_prepared:
+            self._spawn_cleanup(
+                self._release_gateway_run(run.run_id),
+                name=f"videobox-gateway-release-{run.run_id}",
+            )
+
+    async def _release_gateway_run(self, run_id: str) -> None:
+        release_run = getattr(self.gateway_client, "release_run", None)
+        if release_run is None:
+            return
+        try:
+            await asyncio.wait_for(
+                release_run(run_id=run_id),
+                timeout=_GATEWAY_RELEASE_TIMEOUT_SECONDS,
+            )
+        except Exception:
+            # The gateway ledger is bounded and independently expires attached
+            # context. Cleanup must never delay a durable terminal response.
+            return
 
     async def _terminal_done(
         self, run: _Run, completed: asyncio.Task

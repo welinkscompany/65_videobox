@@ -10,18 +10,28 @@ import re
 
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
+from videobox_agent_gateway.creator_context import (
+    CreatorContextLedger,
+    GatewayContextAttachRequest,
+    GatewayRunIdentity,
+    GatewayStreamRequest,
+    prompt_envelope,
+)
 from videobox_agent_gateway.hermes_rpc_client import HermesRpcClient
 
 
-class GatewayRunRequest(BaseModel):
+class GatewayReservationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    session_id: str = Field(min_length=1, max_length=128)
-    client_message_id: str = Field(min_length=1, max_length=128)
-    text: str = Field(min_length=1, max_length=20_000)
+    project_id: str = Field(min_length=1, max_length=256)
+    conversation_id: str = Field(min_length=1, max_length=256)
+    run_id: str = Field(min_length=1, max_length=256)
+    session_id: str = Field(min_length=1, max_length=256)
+    session_revision: int = Field(ge=1, strict=True)
+    asset_index_revision: int = Field(ge=0, strict=True)
 
 
 _ASSIGNMENT_LABEL = (
@@ -290,7 +300,12 @@ def _bounded_text_chunks(text: str, max_bytes: int) -> Iterator[str]:
         yield text[start:]
 
 
-def create_app(*, hermes_client=None, service_token: str | None = None) -> FastAPI:
+def create_app(
+    *,
+    hermes_client=None,
+    service_token: str | None = None,
+    context_ledger: CreatorContextLedger | None = None,
+) -> FastAPI:
     if hermes_client is not None and service_token is not None:
         if not _valid_service_token(service_token):
             raise ValueError("gateway_service_token_invalid")
@@ -321,21 +336,105 @@ def create_app(*, hermes_client=None, service_token: str | None = None) -> FastA
         }
 
     if hermes_client is not None and service_token:
+        ledger = context_ledger or CreatorContextLedger()
 
-        @app.post("/internal/hermes/stream")
-        async def stream(
-            body: GatewayRunRequest, authorization: str | None = Header(default=None)
-        ) -> StreamingResponse:
+        def require_service_token(authorization: str | None) -> None:
             expected = f"Bearer {service_token}"
             if authorization is None or not hmac.compare_digest(
                 authorization, expected
             ):
                 raise HTTPException(status_code=401, detail="gateway_auth_required")
 
+        @app.post("/internal/hermes/runs")
+        async def reserve_run(
+            body: GatewayReservationRequest,
+            authorization: str | None = Header(default=None),
+        ) -> dict[str, str | int]:
+            require_service_token(authorization)
+            identity = GatewayRunIdentity.model_validate(body.model_dump())
+            try:
+                ticket = ledger.reserve(identity)
+            except OverflowError as error:
+                raise HTTPException(
+                    status_code=503, detail="gateway_reservation_unavailable"
+                ) from error
+            except ValueError as error:
+                raise HTTPException(
+                    status_code=409, detail="gateway_reservation_rejected"
+                ) from error
+            return {
+                "run_id": identity.run_id,
+                "attach_context": ticket,
+                "expires_in_seconds": 30,
+            }
+
+        @app.post(
+            "/internal/hermes/runs/{run_id}/context",
+            status_code=204,
+            response_class=Response,
+        )
+        async def attach_context(
+            run_id: str,
+            body: GatewayContextAttachRequest,
+            authorization: str | None = Header(default=None),
+            attach_ticket: str | None = Header(
+                default=None, alias="X-VideoBox-Attach-Ticket"
+            ),
+        ) -> Response:
+            require_service_token(authorization)
+            if not attach_ticket:
+                raise HTTPException(
+                    status_code=401, detail="gateway_attach_ticket_required"
+                )
+            try:
+                ledger.attach(
+                    run_id=run_id,
+                    ticket=attach_ticket,
+                    identity=body.identity,
+                    context=body.context,
+                )
+            except ValueError as error:
+                raise HTTPException(
+                    status_code=409, detail="gateway_context_rejected"
+                ) from error
+            return Response(status_code=204)
+
+        @app.post("/internal/hermes/runs/{run_id}/stream")
+        async def stream(
+            run_id: str,
+            body: GatewayStreamRequest,
+            authorization: str | None = Header(default=None),
+        ) -> StreamingResponse:
+            require_service_token(authorization)
+            try:
+                _identity, context_json = ledger.consume(run_id=run_id)
+            except ValueError as error:
+                raise HTTPException(
+                    status_code=409, detail="gateway_stream_rejected"
+                ) from error
             return StreamingResponse(
-                _stream_public_lines(hermes_client, text=body.text),
+                _stream_public_lines(
+                    hermes_client,
+                    text=prompt_envelope(
+                        user_text=body.text,
+                        context_json=context_json,
+                    ),
+                ),
                 media_type="application/x-ndjson",
             )
+
+        @app.delete(
+            "/internal/hermes/runs/{run_id}",
+            status_code=204,
+            response_class=Response,
+        )
+        async def release_run(
+            run_id: str,
+            authorization: str | None = Header(default=None),
+        ) -> Response:
+            require_service_token(authorization)
+            ledger.release(run_id=run_id)
+            return Response(status_code=204)
 
     return app
 

@@ -4,6 +4,7 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 import threading
+from types import SimpleNamespace
 
 import pytest
 
@@ -11,6 +12,28 @@ from videobox_api.agent_gateway_client import AgentGatewayEvent
 from videobox_api.hermes_run_service import HermesRunService
 from videobox_storage.local_project_store import LocalProjectStore
 from videobox_storage.postgres_compat import translate_sql
+
+
+@pytest.fixture(autouse=True)
+def _bounded_test_context(monkeypatch: pytest.MonkeyPatch) -> None:
+    def build(**kwargs):
+        payload = {
+            "schema_version": "videobox.yujin-context.v1",
+            "project_id": kwargs["project_id"],
+            "session_id": kwargs["session_id"],
+            "session_revision": kwargs["expected_session_revision"],
+            "asset_index_revision": 0,
+        }
+        return SimpleNamespace(
+            session_revision=kwargs["expected_session_revision"],
+            asset_index_revision=0,
+            model_dump=lambda **_: payload,
+        )
+
+    monkeypatch.setattr(
+        "videobox_api.hermes_run_service.build_yujin_creator_context",
+        build,
+    )
 
 
 def _scope(tmp_path: Path, *, now=None):
@@ -36,6 +59,10 @@ class _Gateway:
             AgentGatewayEvent("text_delta", "안녕"),
             AgentGatewayEvent("run_completed", "안녕하세요"),
         ]
+        self.preparations = 0
+
+    async def prepare_run(self, **_):
+        self.preparations += 1
 
     async def stream_run(self, **_):
         self.calls += 1
@@ -48,6 +75,10 @@ class _BlockingGateway:
         self.calls = 0
         self.entered = asyncio.Event()
         self.release = asyncio.Event()
+        self.preparations = 0
+
+    async def prepare_run(self, **_):
+        self.preparations += 1
 
     async def stream_run(self, **_):
         self.calls += 1
@@ -132,12 +163,19 @@ def test_changed_text_conflicts_and_owner_token_fences_stale_finalizer(
 ) -> None:
     clock = [datetime(2026, 7, 26, tzinfo=UTC)]
     store, project_id, session_id = _scope(tmp_path, now=lambda: clock[0])
+    context_identity = {
+        "expected_session_revision": store.get_editing_session(
+            project_id=project_id, session_id=session_id
+        )["session_revision"],
+        "expected_asset_index_revision": store.get_asset_index_revision(project_id),
+    }
     first = store.begin_director_hermes_run(
         project_id=project_id,
         session_id=session_id,
         conversation_id="conv",
         client_message_id="same",
         user_text="one",
+        **context_identity,
     )
     with pytest.raises(
         ValueError, match="client_message_id_reused_with_different_content"
@@ -148,6 +186,7 @@ def test_changed_text_conflicts_and_owner_token_fences_stale_finalizer(
             conversation_id="conv",
             client_message_id="same",
             user_text="changed",
+            **context_identity,
         )
     clock[0] += timedelta(seconds=301)
     restarted = LocalProjectStore(tmp_path / "projects", now=lambda: clock[0])
@@ -157,14 +196,23 @@ def test_changed_text_conflicts_and_owner_token_fences_stale_finalizer(
         conversation_id="conv",
         client_message_id="same",
         user_text="one",
+        **context_identity,
     )
     assert reclaimed["run_id"] == first["run_id"]
-    assert reclaimed["dispatch"] is False
-    assert reclaimed["owner_token"] is None
-    assert restarted.complete_director_hermes_run(
+    assert reclaimed["dispatch"] is True
+    assert reclaimed["owner_token"] != first["owner_token"]
+    assert not restarted.complete_director_hermes_run(
         project_id=project_id,
         run_id=first["run_id"],
         owner_token=first["owner_token"],
+        status="completed",
+        assistant_text="winner",
+        retryable=False,
+    )
+    assert restarted.complete_director_hermes_run(
+        project_id=project_id,
+        run_id=first["run_id"],
+        owner_token=reclaimed["owner_token"],
         status="completed",
         assistant_text="winner",
         retryable=False,
@@ -207,6 +255,46 @@ def test_terminal_cas_failure_still_publishes_one_blocked_terminal(store_result)
     assert events[-1].event_type == "blocked"
     assert sum(event.event_type == "blocked" for event in events) == 1
     assert events[-1].retryable is True
+
+
+def test_gateway_release_cannot_delay_terminal_delivery() -> None:
+    release_entered = asyncio.Event()
+    release_allowed = asyncio.Event()
+
+    class Gateway(_Gateway):
+        async def release_run(self, **_):
+            release_entered.set()
+            await release_allowed.wait()
+
+    service = HermesRunService(
+        store=_ThreadBlockedStore(),
+        gateway_client=Gateway(),
+    )
+    service.store.begin_release.set()
+
+    async def scenario() -> list:
+        run = await service.create_run(
+            project_id="p",
+            session_id="s",
+            conversation_id="c",
+            client_message_id="release-does-not-block-terminal",
+            text="q",
+        )
+        await asyncio.wait_for(release_entered.wait(), timeout=1)
+        events = await asyncio.wait_for(
+            _collect(service.subscribe(run.run_id)),
+            timeout=0.1,
+        )
+        release_allowed.set()
+        await asyncio.wait_for(service.shutdown(), timeout=1)
+        return events
+
+    async def _collect(events):
+        return [event async for event in events]
+
+    events = asyncio.run(scenario())
+    assert events[-1].event_type == "run_completed"
+    assert sum(event.event_type == "run_completed" for event in events) == 1
 
 
 def test_cancellation_during_terminal_store_cannot_leave_subscriber_hanging() -> None:
@@ -536,12 +624,19 @@ def test_reverse_exchange_uses_durable_message_links_not_adjacency(
     tmp_path: Path,
 ) -> None:
     store, project_id, session_id = _scope(tmp_path)
+    context_identity = {
+        "expected_session_revision": store.get_editing_session(
+            project_id=project_id, session_id=session_id
+        )["session_revision"],
+        "expected_asset_index_revision": store.get_asset_index_revision(project_id),
+    }
     durable = store.begin_director_hermes_run(
         project_id=project_id,
         session_id=session_id,
         conversation_id="conv",
         client_message_id="linked",
         user_text="question",
+        **context_identity,
     )
     store.append_director_message(
         project_id=project_id,

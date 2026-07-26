@@ -109,6 +109,8 @@ class HermesRunCreateRequest(BaseModel):
     session_id: str = Field(min_length=1, max_length=128)
     client_message_id: str = Field(min_length=1, max_length=128)
     text: str = Field(min_length=1, max_length=20_000)
+    expected_session_revision: int = Field(ge=1, strict=True)
+    selected_segment_id: str | None = Field(default=None, min_length=1, max_length=256)
 
 
 class HermesRunCreateResponse(BaseModel):

@@ -1,6 +1,16 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 302. 2026-07-26 Hermes Yujin Phase A non-live technical closeout`을 우선 적용한다. Task 22 기술 closeout 근거는 `## 300`을 유지하며, 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 303. 2026-07-27 Hermes Yujin B1 creator context closeout`을 우선 적용한다. Task 22 기술 closeout 근거는 `## 300`을 유지하며, 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+
+## 303. 2026-07-27 Hermes Yujin B1 creator context closeout
+
+- `[x] B1 완료`: VideoBox backend가 정확한 current session revision, asset-index revision, 선택 세그먼트와 current playback을 앞뒤로 다시 확인한 뒤 세그먼트·프로젝트 미디어·타임라인·실제 지원 control의 제한된 typed DTO만 만든다. 경로·URL·원본 미디어·credential·OAuth·Mem0 raw record는 포함하지 않으며, browser는 opaque attach ticket이나 gateway 내부 문맥을 받지 않는다.
+- `전달·복구 경계`: 인증된 gateway reservation은 raw ticket 30초, attach된 문맥 300초, 최대 64개로 제한되고 attach/stream은 각각 한 번만 가능하다. user/context는 고정 trusted instruction 뒤 escaped untrusted JSON data로만 들어간다. durable run은 session/asset revision/selection identity, owner-token CAS, stale pending reclaim, legacy terminal replay, legacy pending 원자적 manual fallback을 사용한다. CAS 패자는 winner assistant를 재사용하며 두 번째 assistant를 만들지 않는다. 취소된 prepare는 reservation을 반환하고, gateway 정리가 느려도 durable/SSE terminal은 먼저 전달한다.
+- `권한 제한`: B1의 `broll/bgm/sfx/caption/voice/overlay`는 `recommendation_only`, `output_check`는 `read_only` discovery 정보일 뿐이다. typed proposal, B2 skill, B3/B4 apply, 자동 apply, EditorCommandPort mutation, OpenCut runtime/source copy, Hermes-owned Mem0, SaaS 확장은 시작하지 않았다. Eugene이 막혀도 기존 manual Director/editor는 유지된다.
+- `검증`: focused Python **148 passed**(기존 Starlette multipart pending deprecation warning 1건), focused frontend **2 files / 95 passed**, production build, Editor UI OSS provenance verifier, Hermes zero-tool verifier, 20-ID plan-state verifier, `git diff --check`가 통과했다. 독립 spec review와 독립 품질·gap·reverse review는 최종 Critical/Important/Minor **0**으로 PASS했다.
+- `미실행`: 전체 Python regression, 전체 frontend suite, live provider canary, 실제 Hermes service-stop/manual environment proof, 실제 PostgreSQL/Docker 동시성 실증은 실행하지 않았고 통과로 간주하지 않는다. PostgreSQL CAS 패자 경로는 호환 SQL과 회귀 테스트로 검증했지만 live DB 증거를 대체하지 않는다.
+- `진행률`: Phase B **1/5 (20.0%)**, creator-tools child **1/5 (20.0%), 잔여 80.0%**, Hermes Yujin initiative **7/20 (35.0%), 잔여 65.0%**다. 기존 VideoBox 공식 누적은 Task 9 사람/환경 acceptance 전까지 **9/22 (40.9%)**, 잔여 **59.1%**로 유지한다.
+- `다음 작업`: **B2만** 진행한다. Yujin creator skill과 typed recommendation/proposal 응답 검증을 추가하되 실제 mutation/apply는 열지 않는다.
 
 ## 302. 2026-07-26 Hermes Yujin Phase A non-live technical closeout
 
