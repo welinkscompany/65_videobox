@@ -30,7 +30,13 @@ def test_workspace_owns_api_and_web_mounts_without_host_or_docker_access() -> No
         "${VIDEOBOX_CONTAINER_DATA_ROOT:?set VIDEOBOX_CONTAINER_DATA_ROOT in .env.container}/runtime:/videobox-data",
         "${VIDEOBOX_CONTAINER_DATA_ROOT:?set VIDEOBOX_CONTAINER_DATA_ROOT in .env.container}/snapshot:/videobox-snapshot:ro",
     ]
-    assert workspace["networks"] == ["videobox-edge", "videobox-internal"]
+    assert workspace["networks"] == [
+        "videobox-edge",
+        "videobox-internal",
+        "videobox-agent-gateway-api-network",
+    ]
+    assert "videobox-agent-gateway-network" not in workspace["networks"]
+    assert "videobox-hermes-provider-egress" not in workspace["networks"]
     assert workspace["read_only"] is True
     assert workspace["cap_drop"] == ["ALL"]
     assert workspace["cap_add"] == ["SETGID", "SETUID"]

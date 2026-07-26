@@ -2,7 +2,7 @@
 
 ## 쉬운 말 요약
 
-유진을 VideoBox에 붙이는 설계 승인과 Phase 0 감사·기준선이 끝났고, 실제 구현 순서를 총 20개 작업으로 고정했다. 먼저 편집기 오른쪽 대화창에서 유진과 실제 대화가 되게 만들고, 다음에 음악·효과음·B-roll·자막·TTS 등 현재 VideoBox가 지원하는 편집만 추천·선택 적용하게 한다. 연결 복구와 Mem0는 작동하는 편집 흐름 뒤에 붙인다.
+유진을 VideoBox에 붙이는 설계 승인과 Phase 0 감사·기준선 뒤 첫 production 작업 A1을 완료했다. 공식 Hermes runtime과 아주 좁은 gateway가 Compose에 들어갔지만, 실제 계정 정보가 없으므로 컨테이너나 대화는 시작하지 않았다. 다음 A2에서 유진의 versioned Soul/profile/skills package만 설치·검증하고, 실제 통신과 대화는 A3/A4까지 열지 않는다.
 
 ## 계획 문서
 
@@ -15,6 +15,8 @@
 ## 고정 경계
 
 - Hermes에 직접 붙는 주체는 전용 `videobox-agent-gateway`다.
+- workspace↔gateway와 gateway↔Hermes는 서로 다른 internal network다. 하나로 합치면 workspace가 Hermes를 우회 호출할 수 있으므로 합치지 않는다.
+- Hermes만 provider egress에 연결하며 Docker forwarding은 사용하지 않는다.
 - Hermes와 Gateway에 VideoBox DB/media mount를 주지 않는다.
 - 사용자가 Apply를 누르기 전에는 편집을 바꾸지 않는다.
 - 실제 적용은 기존 current-revision `EditorCommandPort`만 사용한다.
@@ -30,13 +32,18 @@
 - detailed master/child plans: 작성·자체 검토 완료
 - P0-1 audit: 완료
 - P0-2 reverse trace/plan-state verifier: 완료
+- A1 isolated Hermes/gateway topology와 deterministic static verifier: 완료
 - Phase 0: **2/2 완료**
-- production implementation: 시작 전
-- Hermes Yujin initiative: **2/20 (10.0%), 잔여 90.0%**
-- runtime/chat child: **2/6 (33.3%), 잔여 66.7%**
+- Phase A: **1/4 완료**
+- production implementation: A1부터 시작
+- Hermes Yujin initiative: **3/20 (15.0%), 잔여 85.0%**
+- runtime/chat child: **3/6 (50.0%), 잔여 50.0%**
 - creator child: **0/5**, reliability child: **0/4**, memory/final child: **0/5**
 - 기존 공식 누적: **9/22 (40.9%), 잔여 59.1%**
 - Task 9 사람/환경 acceptance와 실제 CapCut Desktop 실증: 별도
+- A1 RED/GREEN: 서비스·파일 부재 **10 failed, 6 passed** → **16 passed**
+- static verification: child-process dummy env의 Compose config와 A1 verifier 통과
+- live service start/HTTP/OAuth/provider/chat/Mem0: real auth env 부재로 미실행
 
 ## 보호 대상
 
@@ -48,14 +55,14 @@
 
 ## 다음 goal
 
-**`A1`만** 시작한다. 격리된 공식 Hermes Yujin runtime topology와 deterministic startup 검증을 TDD로 구현한다. A2 profile/package, A3 gateway/RPC/SSE, A4 RightDock live chat을 미리 시작하지 않는다. P0-2에서 확인한 conversation persistence/route fence와 Director proposal apply owner gap을 숨기거나 우회하지 않는다.
+**`A2`만** 실행한다. versioned Yujin Soul/profile/skills package를 기존 OAuth state와 격리 경계 안에 설치하고 ownership·digest·secret-free contents를 TDD로 검증한다. A3 gateway/RPC/SSE와 A4 RightDock live chat을 미리 시작하지 않는다.
 
 ## 다음 세션용 prompt
 
 ```text
-VideoBox worktree에서 Hermes Yujin master plan의 A1만 실행해.
-Phase 0 audit baseline과 runtime/chat child plan을 읽고 격리된 공식 Hermes Yujin runtime topology와 deterministic startup verifier를 strict RED-GREEN TDD로 구현해.
-기존 VideoBox DB/media mount 금지, gateway-only transport ownership, local/test external provider call 0을 유지해.
+VideoBox worktree에서 Hermes Yujin master plan의 A2만 실행해.
+A1의 두 internal network와 provider-egress 분리, 기존 OAuth state 단일 mount, gateway-only transport ownership을 유지하면서 versioned Yujin Soul/profile/skills package와 installer/verifier를 strict RED-GREEN TDD로 구현해.
+profile artifact의 ownership·digest·secret-free contents를 검증하고 VideoBox DB/media mount 금지와 local/test external provider call 0을 유지해.
 보호된 임시 폴더 3개는 건드리지 마.
-검증 뒤 A1만 [x]로 동기화하고 A2를 next goal로 남겨. A2/A3/A4 production task는 미리 시작하지 마.
+검증 뒤 A2만 [x]로 동기화하고 A3를 next goal로 남겨. A3/A4 production task는 미리 시작하지 마.
 ```

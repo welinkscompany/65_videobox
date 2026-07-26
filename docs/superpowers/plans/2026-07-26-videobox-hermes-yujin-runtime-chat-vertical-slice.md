@@ -4,7 +4,7 @@
 
 **Goal:** 격리된 공식 Hermes Yujin 런타임을 실제로 구동하고, VideoBox RightDock에서 지속되는 실시간 대화가 작동하며 Hermes 장애 시에도 수동 편집이 유지되게 한다.
 
-**Architecture:** 전용 `videobox-agent-gateway`만 Hermes `serve`의 인증된 JSON-RPC/WebSocket 클라이언트가 되고, VideoBox API는 gateway의 좁은 내부 stream을 브라우저 SSE로 중계한다. Phase A에서는 진행 중 이벤트 큐는 프로세스 메모리에 한정하되 사용자·최종 응답은 기존 Director conversation 저장소에 영속화한다. Gateway와 Hermes에는 VideoBox DB/media mount를 제공하지 않는다.
+**Architecture:** 전용 `videobox-agent-gateway`만 Hermes `serve`의 인증된 JSON-RPC/WebSocket 클라이언트가 되고, VideoBox API는 gateway의 좁은 내부 stream을 브라우저 SSE로 중계한다. workspace↔gateway의 `videobox-agent-gateway-api-network`와 gateway↔Hermes의 `videobox-agent-gateway-network`를 서로 다른 internal network로 유지하고, Hermes만 `videobox-hermes-provider-egress`에 연결한다. 하나의 flat Docker network로는 Gateway-only 도달성을 보장할 수 없으므로 Docker forwarding 없이 gateway process만 application level bridge가 된다. Phase A에서는 진행 중 이벤트 큐는 프로세스 메모리에 한정하되 사용자·최종 응답은 기존 Director conversation 저장소에 영속화한다. Gateway와 Hermes에는 VideoBox DB/media mount를 제공하지 않는다.
 
 **Tech Stack:** Docker Compose, official Hermes Agent v0.18.x pinned image, FastAPI StreamingResponse, Pydantic, httpx, websockets 15.0.1, React, TypeScript, Vitest
 
@@ -13,7 +13,7 @@
 Parent: `docs/superpowers/plans/2026-07-26-videobox-hermes-yujin-master-plan.md`
 Design: `docs/superpowers/specs/2026-07-26-videobox-hermes-yujin-integration-design.md`
 
-Child progress: **2/6 tasks (33.3%), remaining 66.7%**. These six tasks are master IDs P0-1, P0-2, A1, A2, A3, and A4.
+Child progress: **3/6 tasks (50.0%), remaining 50.0%**. These six tasks are master IDs P0-1, P0-2, A1, A2, A3, and A4.
 
 ## P0-1 — Confirm drift and official runtime contracts
 
@@ -131,7 +131,7 @@ Expected: evidence distinguishes source configuration, container state, HTTP rea
 
 ## A1 — Add isolated Yujin Hermes runtime
 
-- [ ] **A1** Add the isolated official Hermes Yujin runtime topology and deterministic startup verification.
+- [x] **A1** Add the isolated official Hermes Yujin runtime topology and deterministic startup verification.
 
 **Files:**
 
@@ -151,18 +151,18 @@ Expected: evidence distinguishes source configuration, container state, HTTP rea
 1. Add tests requiring service `videobox-hermes-yujin` to:
    - use the existing pinned official image digest;
    - run `hermes serve --host 0.0.0.0 --port 9120`;
-   - join only `videobox-hermes-provider-egress` and a dedicated client network;
+   - join only `videobox-hermes-provider-egress` and the Hermes-facing internal `videobox-agent-gateway-network`;
    - expose no host port by default;
-   - mount only isolated Hermes home/profile volumes;
+   - mount only the existing isolated OAuth state at `/opt/data`; A2 adds the versioned profile source later;
    - mount neither VideoBox DB nor media paths;
    - have no dependency on workspace, API, renderer, or edge services.
 2. Require service `videobox-agent-gateway` to:
    - use a minimal dedicated Dockerfile and health-only FastAPI app at first;
-   - join only `videobox-agent-gateway-network`;
+   - join only the workspace-facing internal `videobox-agent-gateway-api-network` and Hermes-facing internal `videobox-agent-gateway-network`;
    - mount neither VideoBox DB/media nor Hermes home;
    - have no provider-egress network;
    - receive Hermes auth only through local container configuration and never print it.
-3. Require `videobox-workspace` to join the gateway network but not the Hermes provider-egress network. Only the gateway can address the Hermes service name.
+3. Require `videobox-workspace` to join `videobox-agent-gateway-api-network`, never the Hermes-facing or provider-egress networks. Require both gateway networks to be `internal: true`. This two-network split is required because one flat client network would let workspace bypass the gateway and address Hermes directly.
 4. Run the focused test and expect failure because the services are absent.
 
 **GREEN:**
@@ -188,7 +188,8 @@ Expected: evidence distinguishes source configuration, container state, HTTP rea
    ```powershell
    .\.venv\Scripts\python.exe -m pytest tests/test_hermes_yujin_compose_contract.py tests/test_compose_contract.py -q
    powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-hermes-yujin-runtime.ps1 -StaticOnly
-   docker compose config --quiet
+   # Run through the static verifier, or inject non-secret dummy required values
+   # into a child process before docker compose config --quiet.
    git diff --check
    ```
 

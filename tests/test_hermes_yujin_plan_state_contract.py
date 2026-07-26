@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -80,6 +81,48 @@ def _replace_once(path: Path, old: str, new: str) -> None:
     path.write_text(original.replace(old, new, 1), encoding="utf-8")
 
 
+def _unique_matching_line(path: Path, pattern: str) -> str:
+    matches = [
+        line
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if re.match(pattern, line)
+    ]
+    assert len(matches) == 1, f"expected one line matching {pattern!r}"
+    return matches[0]
+
+
+def _invalid_progress_line(current: str, *, fault: str, child: bool) -> str:
+    pattern = (
+        r"^Child progress: \*\*(\d+)/(\d+) tasks \((\d+\.\d)%\), "
+        r"remaining (\d+\.\d)%\*\*\."
+        if child
+        else (
+            r"^Current initiative progress: \*\*(\d+)/(\d+) \((\d+\.\d)%\), "
+            r"remaining (\d+\.\d)%\*\*\."
+        )
+    )
+    match = re.match(pattern, current)
+    assert match is not None, f"unexpected progress line: {current!r}"
+    numerator, denominator, percent, remaining = match.groups()
+    if fault == "numerator":
+        numerator = str(int(numerator) + 1)
+    elif fault == "denominator":
+        denominator = str(int(denominator) + 1)
+    elif fault == "remaining":
+        remaining = f"{float(remaining) + 0.1:.1f}"
+    else:
+        raise AssertionError(f"unknown progress fault: {fault}")
+    if child:
+        return (
+            f"Child progress: **{numerator}/{denominator} tasks ({percent}%), "
+            f"remaining {remaining}%**."
+        )
+    return (
+        f"Current initiative progress: **{numerator}/{denominator} ({percent}%), "
+        f"remaining {remaining}%**."
+    )
+
+
 def _combined_output(result: subprocess.CompletedProcess[str]) -> str:
     return f"{result.stdout}\n{result.stderr}"
 
@@ -118,10 +161,14 @@ def test_verifier_rejects_missing_and_unexpected_master_task_ids(
 ) -> None:
     fixture = _plan_fixture(tmp_path)
     master = fixture / PLAN_PATHS[0]
+    a1_line = _unique_matching_line(
+        master,
+        r"^- \[(?: |~|x|!)\] \*\*A1\*\* Add the isolated official Hermes Yujin runtime topology",
+    )
     _replace_once(
         master,
-        "- [ ] **A1** Add the isolated official Hermes Yujin runtime topology",
-        "- [ ] **A5** Add the isolated official Hermes Yujin runtime topology",
+        a1_line,
+        a1_line.replace("**A1**", "**A5**", 1),
     )
 
     result = _run_verifier(fixture)
@@ -139,10 +186,14 @@ def test_verifier_requires_every_task_exactly_once_across_children(
 ) -> None:
     fixture = _plan_fixture(tmp_path)
     runtime_child = fixture / PLAN_PATHS[1]
+    a1_line = _unique_matching_line(
+        runtime_child,
+        r"^- \[(?: |~|x|!)\] \*\*A1\*\* Add the isolated official Hermes Yujin runtime topology",
+    )
     _replace_once(
         runtime_child,
-        "- [ ] **A1** Add the isolated official Hermes Yujin runtime topology",
-        "- [ ] **A2** Add the isolated official Hermes Yujin runtime topology",
+        a1_line,
+        a1_line.replace("**A1**", "**A2**", 1),
     )
 
     result = _run_verifier(fixture)
@@ -242,33 +293,26 @@ def test_status_mismatch_names_task_and_both_statuses(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    ("old", "new", "expected"),
+    ("fault", "expected"),
     (
-        (
-            "Current initiative progress: **2/20 (10.0%), remaining 90.0%**.",
-            "Current initiative progress: **3/20 (15.0%), remaining 85.0%**.",
-            "completed numerator",
-        ),
-        (
-            "Current initiative progress: **2/20 (10.0%), remaining 90.0%**.",
-            "Current initiative progress: **2/21 (9.5%), remaining 90.5%**.",
-            "denominator",
-        ),
-        (
-            "Current initiative progress: **2/20 (10.0%), remaining 90.0%**.",
-            "Current initiative progress: **2/20 (10.0%), remaining 89.9%**.",
-            "remaining",
-        ),
+        ("numerator", "completed numerator"),
+        ("denominator", "denominator"),
+        ("remaining", "remaining"),
     ),
 )
 def test_verifier_rejects_invalid_master_progress(
     tmp_path: Path,
-    old: str,
-    new: str,
+    fault: str,
     expected: str,
 ) -> None:
     fixture = _plan_fixture(tmp_path)
-    _replace_once(fixture / PLAN_PATHS[0], old, new)
+    master = fixture / PLAN_PATHS[0]
+    current = _unique_matching_line(master, r"^Current initiative progress:")
+    _replace_once(
+        master,
+        current,
+        _invalid_progress_line(current, fault=fault, child=False),
+    )
 
     result = _run_verifier(fixture)
 
@@ -277,33 +321,26 @@ def test_verifier_rejects_invalid_master_progress(
 
 
 @pytest.mark.parametrize(
-    ("old", "new", "expected"),
+    ("fault", "expected"),
     (
-        (
-            "Child progress: **2/6 tasks (33.3%), remaining 66.7%**.",
-            "Child progress: **3/6 tasks (50.0%), remaining 50.0%**.",
-            "completed numerator",
-        ),
-        (
-            "Child progress: **2/6 tasks (33.3%), remaining 66.7%**.",
-            "Child progress: **2/5 tasks (40.0%), remaining 60.0%**.",
-            "denominator",
-        ),
-        (
-            "Child progress: **2/6 tasks (33.3%), remaining 66.7%**.",
-            "Child progress: **2/6 tasks (33.3%), remaining 66.6%**.",
-            "remaining",
-        ),
+        ("numerator", "completed numerator"),
+        ("denominator", "denominator"),
+        ("remaining", "remaining"),
     ),
 )
 def test_verifier_rejects_invalid_child_progress(
     tmp_path: Path,
-    old: str,
-    new: str,
+    fault: str,
     expected: str,
 ) -> None:
     fixture = _plan_fixture(tmp_path)
-    _replace_once(fixture / PLAN_PATHS[1], old, new)
+    runtime_child = fixture / PLAN_PATHS[1]
+    current = _unique_matching_line(runtime_child, r"^Child progress:")
+    _replace_once(
+        runtime_child,
+        current,
+        _invalid_progress_line(current, fault=fault, child=True),
+    )
 
     result = _run_verifier(fixture)
 

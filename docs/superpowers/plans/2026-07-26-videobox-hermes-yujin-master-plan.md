@@ -4,7 +4,7 @@
 
 **Goal:** 사용자가 VideoBox 편집기 안에서 Yujin과 실시간으로 대화하고, Yujin의 추천을 검토한 뒤 선택 적용하여 실제 유튜브 영상을 빠르게 완성할 수 있게 한다.
 
-**Architecture:** VideoBox가 프로젝트·타임라인·미디어의 유일한 진실 공급원과 실행 권한을 유지한다. 전용 `videobox-agent-gateway`가 공식 Hermes `serve` 런타임의 유일한 클라이언트가 되고, VideoBox API는 gateway를 거쳐 allowlist 문맥을 전달하며 브라우저에는 SSE만 중계한다. 모든 실제 편집은 기존 `EditorCommandPort`, revision fence, route epoch, one-player preview 경계를 재사용한다. Mem0는 Hermes 소유 보조기억이며 VideoBox 상태 저장소가 아니다.
+**Architecture:** VideoBox가 프로젝트·타임라인·미디어의 유일한 진실 공급원과 실행 권한을 유지한다. 전용 `videobox-agent-gateway`가 공식 Hermes `serve` 런타임의 유일한 클라이언트가 되고, VideoBox API는 gateway를 거쳐 allowlist 문맥을 전달하며 브라우저에는 SSE만 중계한다. Docker topology는 workspace↔gateway API 전용 internal network와 gateway↔Hermes 전용 internal network를 분리하고, Hermes만 별도 provider-egress에 연결한다. 따라서 Docker forwarding 없이 gateway process만 application level에서 두 신뢰 구간을 잇는다. 모든 실제 편집은 기존 `EditorCommandPort`, revision fence, route epoch, one-player preview 경계를 재사용한다. Mem0는 Hermes 소유 보조기억이며 VideoBox 상태 저장소가 아니다.
 
 **Tech Stack:** VideoBox Python 3.12, official Hermes image Python 3.13, FastAPI, Pydantic, httpx, websockets, React 19, TypeScript, Vitest, Docker Compose, Mem0 Platform
 
@@ -69,7 +69,7 @@ Status symbols:
 
 Only `[x]` counts as complete. Reopen `[x]` to `[~]` if later evidence finds a regression. The child task and this mirror must be updated in the same closeout commit.
 
-Current initiative progress: **2/20 (10.0%), remaining 90.0%**.
+Current initiative progress: **3/20 (15.0%), remaining 85.0%**.
 
 The existing VideoBox official cumulative status remains separately fixed at **9/22 (40.9%), remaining 59.1%** until Task 9 human/environment acceptance. Do not combine that denominator with this initiative.
 
@@ -80,9 +80,9 @@ The existing VideoBox official cumulative status remains separately fixed at **9
 - [x] **P0-1** Confirm live/source drift, official Hermes CLI/wire contracts, branch/upstream, protected paths, and current dependency pins.
 - [x] **P0-2** Record reverse runtime trace and focused baseline; add the plan-state consistency verifier.
 
-### Phase A — working Yujin chat vertical slice (0/4)
+### Phase A — working Yujin chat vertical slice (1/4)
 
-- [ ] **A1** Add the isolated official Hermes Yujin runtime topology and deterministic startup verification.
+- [x] **A1** Add the isolated official Hermes Yujin runtime topology and deterministic startup verification.
 - [ ] **A2** Install the versioned Yujin Soul/profile/skills package and verify ownership plus secret-free contents.
 - [ ] **A3** Implement the minimal authenticated Hermes JSON-RPC/WebSocket client and API SSE run boundary.
 - [ ] **A4** Connect persistent RightDock chat, manual fallback, reload proof, live canary, and Phase A closeout.
