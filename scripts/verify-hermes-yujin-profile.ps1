@@ -59,17 +59,59 @@ foreach ($relativePath in $requiredFiles) {
     }
 }
 
-$executableExtensions = @(
-    ".bat", ".cmd", ".com", ".dll", ".exe", ".jar", ".js", ".msi",
-    ".ps1", ".py", ".sh", ".vbs"
+$executableExtensions = [Collections.Generic.HashSet[string]]::new(
+    [StringComparer]::OrdinalIgnoreCase
 )
+foreach ($extension in @(
+    ".ps1", ".psm1", ".psd1",
+    ".py", ".pyw",
+    ".js", ".mjs", ".cjs", ".ts",
+    ".sh", ".bash", ".zsh", ".fish",
+    ".bat", ".cmd", ".com",
+    ".exe", ".msi", ".dll", ".scr",
+    ".vbs", ".vbe", ".wsf", ".wsh",
+    ".jar"
+)) {
+    [void]$executableExtensions.Add($extension)
+}
+
+function Test-IsExecutablePayload {
+    param(
+        [IO.FileInfo]$File,
+        [byte[]]$Bytes
+    )
+
+    if ($executableExtensions.Contains($File.Extension)) {
+        return $true
+    }
+    if ([string]::IsNullOrEmpty($File.Extension) -and $Bytes.Length -ge 2) {
+        if ($Bytes[0] -eq 0x23 -and $Bytes[1] -eq 0x21) {
+            return $true
+        }
+    }
+    if ($Bytes.Length -ge 2 -and $Bytes[0] -eq 0x4D -and $Bytes[1] -eq 0x5A) {
+        return $true
+    }
+    if (
+        $Bytes.Length -ge 4 -and
+        $Bytes[0] -eq 0x7F -and
+        $Bytes[1] -eq 0x45 -and
+        $Bytes[2] -eq 0x4C -and
+        $Bytes[3] -eq 0x46
+    ) {
+        return $true
+    }
+    return $false
+}
+
 $secretPatterns = @(
-    '(?i)\bapi[\s_-]*key\b|\bsk-[A-Za-z0-9_-]{8,}'
-    '(?i)\b(?:oauth|access_token|refresh_token|bearer)\b'
-    '(?i)\b(?:password|passwd|비밀번호)\b'
-    '(?i)\bmem0(?:[\s_-]*api[\s_-]*key)?\b'
-    '(?im)(?:^|[\s"''=:])(?:[A-Za-z]:[\\/]|\\\\)'
-    '(?im)(?:^|[\s"''=:])/(?:home|users)/'
+    '(?i)[A-Z]:[\\/](?:Users|Documents[ ]and[ ]Settings)[\\/]'
+    '(?i)/(?:home|users)/'
+    '(?i)\bgh[pousr]_[A-Za-z0-9]{20,255}\b'
+    '(?i)\bgithub_pat_[A-Za-z0-9_]{20,255}\b'
+    '(?i)\bsk-[A-Za-z0-9_-]{16,255}\b'
+    '(?i)\bbearer[ ]+[A-Za-z0-9._~+/-]{16,255}={0,2}\b'
+    '(?im)\b(?:api[\s_-]*key|oauth(?:[\s_-]*(?:token|access|refresh))?|access[\s_-]*token|refresh[\s_-]*token|password|passwd|mem0(?:[\s_-]*(?:api[\s_-]*key|token|credential))?)\b[\s]*[:=][\s]*["'']?[^\s"''#]{4,}'
 )
 
 $files = @($items | Where-Object { -not $_.PSIsContainer })
@@ -84,7 +126,8 @@ foreach ($file in $files) {
     if (-not $isDeclared -or $relativePath.Contains("../") -or $relativePath.Contains("..\")) {
         throw "The Yujin distribution contains a file outside declared ownership."
     }
-    if ($executableExtensions -contains $file.Extension) {
+    $bytes = [IO.File]::ReadAllBytes($file.FullName)
+    if (Test-IsExecutablePayload -File $file -Bytes $bytes) {
         throw "The Yujin distribution contains an undeclared executable file."
     }
 

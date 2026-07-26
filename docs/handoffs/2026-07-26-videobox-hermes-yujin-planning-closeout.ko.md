@@ -63,9 +63,13 @@ Phase 0과 A1 격리 runtime 위에 A2의 versioned Yujin Soul/profile/skills pa
 - quality follow-up RED: 1 MiB stderr captured/정상 start/실패 start **3 timeout**, workspace credential alias **3 fail-open**, capability 주석/static alias **2 failed**
 - quality follow-up GREEN: startup/alias **6 passed**, capability 주석/static alias **2 passed**, capability authority 포함 최종 관련 gate **58 passed**; 이번 follow-up 전체 Python suite는 미실행이며 기존 **1597 passed, 20 skipped**는 직전 commit 근거
 - supply-chain future: gateway `python:3.12-slim` base digest pin과 A1 전용 Python SBOM은 이번 fix 범위 밖의 비차단 후속이며 완료로 주장하지 않음
-- A2 RED/GREEN: package·mount·verifier·installer·start ordering 부재 **17 failed**; 대문자 executable 우회와 install 뒤 profile 미선택 RED 2건 → A2와 기존 Yujin contract **99 passed, 1 skipped**
-- A2 final verification: A1 topology/start/authority/plan 회귀 포함 **193 passed, 1 skipped**, profile/runtime/plan-state static verifier와 `git diff --check` 통과
+- A2 RED/GREEN: package·mount·verifier·installer·start ordering 부재 **17 failed**; profile 선택·확장자 우회 RED 2건; scanner 후속 **9 failed**와 binary magic **2 failed** → profile **27 passed, 1 skipped**, A2와 기존 Yujin contract **109 passed, 1 skipped**
+- A2 final verification: 기존 재현 불가능한 **193** 표기는 고유 8파일 baseline **192 passed, 1 skipped**로 교정했다. scanner 보완 뒤 아래 exact command는 **196 passed, 1 skipped**이며 profile/runtime/plan-state static verifier와 `git diff --check`도 통과했다.
 - live service start/profile install/HTTP/OAuth/provider/chat/Mem0: real auth env 부재로 미실행
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests/test_hermes_yujin_profile_distribution.py tests/test_yujin_profile_contract.py tests/test_yujin_agent_package_contract.py tests/test_hermes_yujin_compose_contract.py tests/test_start_hermes_yujin_script.py tests/test_hermes_yujin_plan_state_contract.py tests/test_hermes_capability_authority_contract.py tests/test_platform_only_hermes_dashboard_contract.py -q
+```
 
 ## 보호 대상
 

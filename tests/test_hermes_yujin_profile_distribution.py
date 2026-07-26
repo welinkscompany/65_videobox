@@ -62,6 +62,24 @@ def _copy_profile(tmp_path: Path) -> Path:
     return copied
 
 
+def _runtime_sensitive_cases() -> tuple[tuple[str, str], ...]:
+    github_token = "ghp_" + ("x" * 36)
+    api_token = "sk-" + ("a" * 24)
+    bearer_token = "Bearer " + ("b" * 32)
+    return (
+        ("SOUL.md", "(C:\\Users\\runtime-user\\profile)"),
+        ("SOUL.md", "`D:\\Users\\runtime-user\\profile`"),
+        ("SOUL.md", "(/home/runtime-user/profile)"),
+        ("SOUL.md", "(/Users/runtime-user/profile)"),
+        ("config.yaml", f"github_token: {github_token}"),
+        ("config.yaml", f"api_key: {api_token}"),
+        ("config.yaml", f"authorization: {bearer_token}"),
+        ("config.yaml", "oauth_token: runtime-oauth-value"),
+        ("config.yaml", "password = runtime-value"),
+        ("config.yaml", "MEM0_API_KEY: runtime-mem0-value"),
+    )
+
+
 def test_distribution_manifest_and_real_file_ownership_are_exact() -> None:
     manifest = yaml.safe_load(
         (PROFILE_ROOT / "distribution.yaml").read_text(encoding="utf-8")
@@ -143,14 +161,7 @@ def test_static_verifier_accepts_the_canonical_package() -> None:
 
 @pytest.mark.parametrize(
     ("relative_path", "unsafe_text"),
-    (
-        ("SOUL.md", "api_key: sk-test-1234567890"),
-        ("SOUL.md", "oauth_token: bearer-value"),
-        ("SOUL.md", "password: local-value"),
-        ("config.yaml", "source: C:\\Users\\example\\profile"),
-        ("config.yaml", "source: /home/example/profile"),
-        ("config.yaml", "MEM0_API_KEY: mem0-value"),
-    ),
+    _runtime_sensitive_cases(),
 )
 def test_static_verifier_rejects_secrets_and_local_absolute_user_paths(
     tmp_path: Path,
@@ -181,6 +192,8 @@ def test_static_verifier_rejects_secrets_and_local_absolute_user_paths(
         "undeclared.txt",
         "skills/videobox-editor/run.ps1",
         "skills/videobox-editor/run.PS1",
+        "skills/videobox-editor/run.PSM1",
+        "skills/videobox-editor/run.mjs",
     ),
 )
 def test_static_verifier_rejects_undeclared_or_executable_files(
@@ -200,6 +213,64 @@ def test_static_verifier_rejects_undeclared_or_executable_files(
     )
 
     assert result.returncode != 0
+
+
+def test_static_verifier_rejects_an_extensionless_shebang_file(
+    tmp_path: Path,
+) -> None:
+    copied = _copy_profile(tmp_path)
+    executable = copied / "skills" / "videobox-editor" / "run"
+    executable.write_text("#!/usr/bin/env python\nprint('fixture')\n", encoding="utf-8")
+
+    result = _run_powershell(
+        VERIFY_SCRIPT,
+        "-StaticOnly",
+        "-ProfileRoot",
+        str(copied),
+    )
+
+    assert result.returncode != 0
+
+
+@pytest.mark.parametrize("magic", (b"MZ", b"\x7fELF"))
+def test_static_verifier_rejects_binary_magic_even_with_a_markdown_name(
+    tmp_path: Path,
+    magic: bytes,
+) -> None:
+    copied = _copy_profile(tmp_path)
+    disguised = copied / "skills" / "videobox-editor" / "payload.md"
+    disguised.write_bytes(magic + (b"\x00" * 32))
+
+    result = _run_powershell(
+        VERIFY_SCRIPT,
+        "-StaticOnly",
+        "-ProfileRoot",
+        str(copied),
+    )
+
+    assert result.returncode != 0
+
+
+def test_static_verifier_allows_ordinary_security_policy_prose(
+    tmp_path: Path,
+) -> None:
+    copied = _copy_profile(tmp_path)
+    soul = copied / "SOUL.md"
+    soul.write_text(
+        soul.read_text(encoding="utf-8")
+        + "\nAPI key, OAuth token, password, Mem0 credential은 문서에 넣지 않습니다.\n"
+        + "\n```sh\n#!/usr/bin/env bash\necho documentation-example\n```\n",
+        encoding="utf-8",
+    )
+
+    result = _run_powershell(
+        VERIFY_SCRIPT,
+        "-StaticOnly",
+        "-ProfileRoot",
+        str(copied),
+    )
+
+    assert result.returncode == 0
 
 
 def test_static_verifier_rejects_a_reparse_point_when_supported(
