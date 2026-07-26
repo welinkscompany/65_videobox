@@ -72,13 +72,20 @@ export function EditorWorkbench({
   director,
   requestedSegmentId = null,
 }: EditorWorkbenchProps) {
+  const viewRouteKey = `${view.projectId}:${view.sessionId}`;
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
   const [availableWorkbenchWidth, setAvailableWorkbenchWidth] = useState(() => window.innerWidth);
   const [ui, setUi] = useState<EditorWorkbenchPersistedState>(readUi);
   const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(view.local.selectedSegmentId);
   const [playbackSec, setPlaybackSec] = useState(view.local.seekSec);
   const [requestedSegmentFocusEpoch, setRequestedSegmentFocusEpoch] = useState(0);
-  const [auditionRequest, setAuditionRequest] = useState<AuditionRequest | null>(null);
+  const [auditionState, setAuditionState] = useState<Readonly<{
+    routeKey: string;
+    request: AuditionRequest | null;
+  }>>({ routeKey: viewRouteKey, request: null });
+  const auditionRequest = auditionState.routeKey === viewRouteKey
+    ? auditionState.request
+    : null;
   const bodyRef = useRef<HTMLDivElement>(null);
   const drawerRef = useRef<HTMLDivElement>(null);
   const restoreFocusRef = useRef<"left" | "right" | null>(null);
@@ -86,7 +93,7 @@ export function EditorWorkbench({
   const rightPanelRef = useRef<PanelImperativeHandle>(null);
   const leftTriggerRef = useRef<HTMLButtonElement>(null);
   const rightTriggerRef = useRef<HTMLButtonElement>(null);
-  const viewRouteKeyRef = useRef(`${view.projectId}:${view.sessionId}`);
+  const viewRouteKeyRef = useRef(viewRouteKey);
   const activeRequestedSegmentKey = useRef<string | null>(null);
   useEffect(() => { const update = () => setViewportWidth(window.innerWidth); window.addEventListener("resize", update); return () => window.removeEventListener("resize", update); }, []);
   useLayoutEffect(() => {
@@ -97,16 +104,27 @@ export function EditorWorkbench({
     window.addEventListener("resize", measure);
     return () => { observer?.disconnect(); window.removeEventListener("resize", measure); };
   }, []);
-  useEffect(() => { window.localStorage.setItem(storageKey, JSON.stringify({ leftOpen: ui.leftOpen, rightOpen: ui.rightOpen, activeDrawer: ui.activeDrawer, leftSize: ui.leftSize, rightSize: ui.rightSize })); }, [ui]);
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(storageKey, JSON.stringify({
+        leftOpen: ui.leftOpen,
+        rightOpen: ui.rightOpen,
+        activeDrawer: ui.activeDrawer,
+        leftSize: ui.leftSize,
+        rightSize: ui.rightSize,
+      }));
+    } catch {
+      // Panel persistence is best effort; storage denial must not block editing.
+    }
+  }, [ui]);
   useEffect(() => { if (ui.activeDrawer) drawerRef.current?.focus(); }, [ui.activeDrawer]);
   useEffect(() => {
-    const viewRouteKey = `${view.projectId}:${view.sessionId}`;
     if (viewRouteKeyRef.current !== viewRouteKey) {
       viewRouteKeyRef.current = viewRouteKey;
       activeRequestedSegmentKey.current = null;
       setSelectedSegmentId(view.local.selectedSegmentId);
       setPlaybackSec(clampPlaybackSeconds(view.local.seekSec, view.output.durationSec));
-      setAuditionRequest(null);
+      setAuditionState({ routeKey: viewRouteKey, request: null });
       return;
     }
     const segmentIds = new Set([
@@ -115,7 +133,7 @@ export function EditorWorkbench({
     ]);
     setSelectedSegmentId((current) => current && segmentIds.has(current) ? current : segmentIds.has(view.local.selectedSegmentId ?? "") ? view.local.selectedSegmentId : null);
     setPlaybackSec((current) => clampPlaybackSeconds(current, view.output.durationSec));
-  }, [view.captions, view.expectedRevision, view.local.selectedSegmentId, view.output.durationSec, view.projectId, view.sessionId, view.tracks]);
+  }, [view.captions, view.expectedRevision, view.local.selectedSegmentId, view.output.durationSec, view.projectId, view.sessionId, view.tracks, viewRouteKey]);
   useEffect(() => {
     const normalizedRequestedSegmentId = requestedSegmentId?.trim() || null;
     if (!normalizedRequestedSegmentId) {
@@ -164,18 +182,30 @@ export function EditorWorkbench({
   const assetTarget = selectedNarration === null ? null : { segmentId: selectedNarration.segmentId, startSec: selectedNarration.startSec, endSec: selectedNarration.endSec };
   const previewAssetCard = (card: EditorAssetCard) => {
     const mediaKind = card.previewKind ?? (card.kind === "broll" ? "video" : "audio");
-    setAuditionRequest((current) => ({
-      requestId: (current?.requestId ?? 0) + 1,
-      source: { id: card.id, label: card.title, url: card.previewUrl, mediaKind, timelineRange: assetTarget ?? { startSec: 0, endSec: view.output.durationSec } },
-    }));
+    setAuditionState((current) => {
+      const currentRequest = current.routeKey === viewRouteKey ? current.request : null;
+      return {
+        routeKey: viewRouteKey,
+        request: {
+          requestId: (currentRequest?.requestId ?? 0) + 1,
+          source: { id: card.id, label: card.title, url: card.previewUrl, mediaKind, timelineRange: assetTarget ?? { startSec: 0, endSec: view.output.durationSec } },
+        },
+      };
+    });
   };
   const previewDirectorCandidate = (candidate: RightDockCandidate) => {
     const previewUrl = candidate.previewUrl;
     if (!previewUrl) return;
-    setAuditionRequest((current) => ({
-      requestId: (current?.requestId ?? 0) + 1,
-      source: { id: `director:${candidate.candidateId}`, label: candidate.visibleReferenceCode, url: previewUrl, mediaKind: candidate.mediaType === "broll" || candidate.mediaType === "video" ? "video" : "audio", timelineRange: assetTarget ?? { startSec: 0, endSec: view.output.durationSec } },
-    }));
+    setAuditionState((current) => {
+      const currentRequest = current.routeKey === viewRouteKey ? current.request : null;
+      return {
+        routeKey: viewRouteKey,
+        request: {
+          requestId: (currentRequest?.requestId ?? 0) + 1,
+          source: { id: `director:${candidate.candidateId}`, label: candidate.visibleReferenceCode, url: previewUrl, mediaKind: candidate.mediaType === "broll" || candidate.mediaType === "video" ? "video" : "audio", timelineRange: assetTarget ?? { startSec: 0, endSec: view.output.durationSec } },
+        },
+      };
+    });
   };
   const openManualEditing = () => setUi((current) => layout.mode === "drawer" ? { ...current, activeDrawer: "left" } : { ...current, leftOpen: true });
   const rightDirector = director ? { ...director, onManualEdit: () => { director.onManualEdit(); openManualEditing(); }, onPreviewCandidate: previewDirectorCandidate } : undefined;

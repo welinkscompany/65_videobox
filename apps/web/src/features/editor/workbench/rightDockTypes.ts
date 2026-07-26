@@ -20,7 +20,7 @@ export type RightDockMessage = Readonly<{
 export type YujinRunState =
   | { kind: "idle" }
   | { kind: "streaming"; runId: string; routeEpoch: number; text: string }
-  | { kind: "complete"; runId: string }
+  | { kind: "complete"; runId: string; syncWarning?: string }
   | { kind: "unavailable"; message: string };
 
 export type RightDockConversationScroll = Readonly<{

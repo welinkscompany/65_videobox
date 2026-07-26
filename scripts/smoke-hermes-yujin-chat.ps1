@@ -3,7 +3,9 @@ param(
     [switch]$Live,
     [string]$BaseUri = "http://127.0.0.1:8000",
     [string]$ProjectId,
-    [string]$SessionId
+    [string]$SessionId,
+    [ValidateRange(1, 60)]
+    [int]$TimeoutSec = 10
 )
 
 $ErrorActionPreference = "Stop"
@@ -35,6 +37,8 @@ function Invoke-RedactedWebRequest {
         Method = $Method
         Headers = $Headers
         UseBasicParsing = $true
+        MaximumRedirection = 0
+        TimeoutSec = $TimeoutSec
     }
     if (-not [string]::IsNullOrWhiteSpace($ContentType)) {
         $parameters.ContentType = $ContentType
@@ -43,7 +47,11 @@ function Invoke-RedactedWebRequest {
         $parameters.Body = $Body
     }
     try {
-        return Invoke-WebRequest @parameters
+        $response = Invoke-WebRequest @parameters
+        if ([int]$response.StatusCode -ge 300 -and [int]$response.StatusCode -lt 400) {
+            throw "redirect_denied"
+        }
+        return $response
     }
     catch {
         throw "HERMES_YUJIN_CANARY_FAILED:$FailureMarker"
@@ -64,11 +72,17 @@ Assert-True (-not [string]::IsNullOrWhiteSpace($SessionId)) "session_id_required
 $resolvedBaseUri = $null
 Assert-True ([Uri]::TryCreate($BaseUri, [UriKind]::Absolute, [ref]$resolvedBaseUri)) "base_uri_invalid"
 Assert-True ($resolvedBaseUri.Scheme -in @("http", "https")) "base_uri_scheme_invalid"
-Assert-True ([string]::IsNullOrEmpty($resolvedBaseUri.Query) -and [string]::IsNullOrEmpty($resolvedBaseUri.Fragment)) "base_uri_shape_invalid"
+Assert-True (
+    [string]::IsNullOrEmpty($resolvedBaseUri.UserInfo) -and
+    $resolvedBaseUri.AbsolutePath -ceq "/" -and
+    [string]::IsNullOrEmpty($resolvedBaseUri.Query) -and
+    [string]::IsNullOrEmpty($resolvedBaseUri.Fragment)
+) "base_uri_shape_invalid"
 
 $escapedProjectId = [Uri]::EscapeDataString($ProjectId)
 $escapedSessionId = [Uri]::EscapeDataString($SessionId)
-$conversationUri = "$($resolvedBaseUri.AbsoluteUri.TrimEnd('/'))/api/projects/$escapedProjectId/director/conversations"
+$conversationPath = "/api/projects/$escapedProjectId/director/conversations"
+$conversationUri = [Uri]::new($resolvedBaseUri, $conversationPath)
 $conversationBody = @{ session_id = $SessionId } | ConvertTo-Json -Compress
 $networkCalls += 1
 $conversationResponse = Invoke-RedactedWebRequest `
@@ -87,7 +101,10 @@ catch {
 Assert-True (-not [string]::IsNullOrWhiteSpace([string]$conversation.conversation_id)) "conversation_id_missing"
 
 $escapedConversationId = [Uri]::EscapeDataString([string]$conversation.conversation_id)
-$runUri = "$conversationUri/$escapedConversationId/hermes-runs"
+$runUri = [Uri]::new(
+    $resolvedBaseUri,
+    "$conversationPath/$escapedConversationId/hermes-runs"
+)
 $clientMessageId = [guid]::NewGuid().ToString()
 $harmlessKoreanPrompt = [Text.Encoding]::UTF8.GetString(
     [Convert]::FromBase64String(
@@ -125,7 +142,21 @@ $eventsResponse = Invoke-RedactedWebRequest `
     -Headers @{ Accept = "text/event-stream" } `
     -FailureMarker "events_request"
 Assert-True ($eventsResponse.StatusCode -eq 200) "events_status"
-Assert-True ($eventsResponse.Headers["Content-Type"] -like "text/event-stream*") "events_content_type"
+$contentTypeParts = @(
+    ([string]$eventsResponse.Headers["Content-Type"]).Split(";") |
+        ForEach-Object { $_.Trim() }
+)
+Assert-True (
+    $contentTypeParts.Count -ge 1 -and
+    $contentTypeParts[0].ToLowerInvariant() -ceq "text/event-stream"
+) "events_content_type"
+if ($contentTypeParts.Count -gt 1) {
+    foreach ($contentTypeParameter in $contentTypeParts[1..($contentTypeParts.Count - 1)]) {
+        Assert-True (
+            $contentTypeParameter -match '(?i)^charset\s*=\s*"?utf-8"?$'
+        ) "events_content_type"
+    }
+}
 $eventTypes = @(
     [regex]::Matches([string]$eventsResponse.Content, "(?m)^event: (run_started|text_delta|blocked|run_completed)\r?$") |
         ForEach-Object { $_.Groups[1].Value }

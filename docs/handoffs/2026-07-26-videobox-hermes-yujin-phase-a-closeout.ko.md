@@ -10,8 +10,9 @@ A4의 RightDock 유진 대화 구현과 비라이브 검증은 끝났다. 사용
 
 - worktree: `D:\AI_Workspace_louis_office_50\10_workspace\65_videobox\.worktrees\videobox-container-compatibility`
 - branch: `codex/videobox-container-compatibility`
-- 구현 시작 HEAD/upstream: `478b0f65bdccd51d63968cd61e61e1053592baae`
-- 시작 시 ahead/behind: `0/0`
+- 검토 보완 시작 HEAD: `92fd36418015253f90137af4bb509c30572e1a54`
+- upstream: `478b0f65bdccd51d63968cd61e61e1053592baae`
+- 검토 보완 시작 시 ahead/behind: `1/0`
 - 보호된 기존 untracked 경로는 열거나 stage/remove/delete하지 않았다.
   - `.tmp-final-fence-debug/`
   - `.tmp-real-video-dogfood/`
@@ -26,28 +27,37 @@ A4의 RightDock 유진 대화 구현과 비라이브 검증은 끝났다. 사용
   - route abort signal을 run POST와 SSE GET 모두에 전달한다.
 - `apps/web/src/features/editor/workbench/hermesSseClient.ts`
   - 자동 reconnect/retry 없는 bounded fetch stream parser를 추가했다.
-  - 정확한 `text/event-stream` media type, fatal UTF-8, event/line/stream/text 크기 제한, 연속 ID와 허용 event allowlist를 검증한다.
-  - duplicate/older ID는 무시하고 `run_started → text_delta/blocked → run_completed` terminal 규약과 최종 assembled text 일치를 검증한다.
+  - 정확한 `text/event-stream` media type, fatal UTF-8, byte 기준 event/line/stream/text 크기 제한, 연속 ID와 허용 event allowlist를 검증한다.
+  - backend의 2 MB event와 200 kB text 한도, JSON 최악 escape 확장, terminal 전문 중복을 감당하도록 입력을 제한한다.
+  - duplicate/older ID는 무시하고 `run_started → text_delta/blocked → run_completed` terminal 규약을 검증한다.
+  - delta가 하나 이상이면 최종 전문과 정확히 일치해야 하고, durable replay처럼 delta 없이 `run_completed` 전문만 오는 경우도 허용한다.
+  - nonterminal 256개와 terminal 1개까지 허용하고 그 이상은 거부한다.
 - `EditorWorkbenchRoute`
   - draft, conversation, message history, run state, candidate ID, scroll 위치를 route가 소유한다.
   - optimistic user row와 run별 임시 assistant row를 만들고 delta는 같은 bubble에 누적한다.
   - 최종 durable row를 다시 읽어 성공/blocked 결과를 수렴하며 reload 후에도 대화를 복원한다.
+  - 성공 terminal 뒤 durable 목록 재조회만 실패하면 이미 받은 assistant 전문과 complete 상태를 유지하고 저장 확인 경고만 표시한다.
   - route epoch/op fence와 abort로 이전 route의 delta, terminal, 늦은 durable reload를 차단한다.
   - run 생성 실패 전에는 draft를 보존하고, 성공한 정확한 201 뒤에도 사용자가 새로 입력한 draft는 지우지 않는다.
 - `RightDock`
   - controlled view adapter로 유지했다.
-  - streaming 상태에 `aria-busy`, 메시지 영역에 polite live region을 적용했다.
+  - streaming 상태에 `aria-busy`를 적용하되 token 단위 live announcement는 제거했다.
+  - complete/unavailable terminal만 한 번 알리는 별도 `role=status`, polite/atomic 영역을 적용했다.
   - “Yujin 없이 계속 편집” 수동 fallback과 기존 수동 편집 control은 streaming/unavailable 중에도 유지한다.
   - dock close는 run을 중단하지 않으며 reopen 시 route-owned 대화와 scroll 상태를 다시 표시한다.
 - `EditorWorkbench`
+  - localStorage 읽기와 쓰기를 모두 best-effort로 처리해 SecurityError/QuotaExceededError가 나도 수동 편집을 막지 않는다.
   - project/session route identity가 실제로 바뀔 때만 selection/seek/audition을 초기화한다.
-  - 같은 route의 revision 갱신은 로컬 편집 상태를 보존하고, 다른 route로 이동하면 이전 audition state가 새 route로 새지 않는다.
+  - 같은 route의 revision 갱신은 로컬 편집 상태를 보존하고, 다른 route의 첫 render부터 이전 audition source가 새 `PreviewStage`로 새지 않는다.
   - 기존 `PreviewStage` 한 개의 player owner 경계를 유지한다.
 - `scripts/smoke-hermes-yujin-chat.ps1`
   - 기본 실행은 network/provider/proposal/apply 호출 0을 출력하는 non-live gate다.
   - `-Live`는 BaseUri, ProjectId, SessionId를 명시해야 하며 VideoBox API의 conversation POST, run POST, SSE GET 세 호출만 수행한다.
   - harmless UTF-8 한국어 prompt를 보내고 delta와 complete를 요구하되 provider response body를 기록하지 않는다.
   - Windows PowerShell 5.1과 PowerShell 7 양쪽에서 동작하도록 구현했다.
+  - redirect를 따르지 않고 각 요청에 제한 시간을 적용하며, exact SSE MIME과 선택적 UTF-8 charset만 허용한다.
+  - BaseUri는 userinfo/query/fragment/path가 없는 http/https origin만 허용하고 모든 API URL을 그 origin 기준 상대 경로로 만든다.
+  - 요청 실패 출력은 고정 marker로 redaction한다.
 
 ## 지킨 경계
 
@@ -58,22 +68,24 @@ A4의 RightDock 유진 대화 구현과 비라이브 검증은 끝났다. 사용
 - Gateway/Hermes DB/media mount, Mem0, OAuth 확대, SaaS/OpenCut/runtime 변경은 하지 않았다.
 - 실제 service start/stop, live provider call, credential 사용은 하지 않았다.
 
-## TDD와 독립 재검토
+## TDD와 검토 보완
 
 - RED에서 SSE client/run state 부재, persistence/reload, duplicate ID, route stale completion, dock close ownership, unavailable fallback을 먼저 재현했다.
-- 구현 뒤 독립 code review에서 Critical은 없었고 Important 두 건을 발견했다.
+- 첫 구현 뒤 독립 code review에서 Critical은 없었고 Important 두 건을 발견했다.
   - Windows PowerShell 5.1에서 `-SkipHttpErrorCheck`를 사용할 수 있던 문제
   - `text/event-streamx`를 허용할 수 있던 MIME prefix 검사 문제
 - 두 Important를 수정하고 hostile MIME, PS5.1 synthetic live harness, dock-close midstream, route-change 뒤 stale durable reload 역방향 테스트를 추가했다.
-- 재검토 결과 남은 Critical/Important는 0건이다.
+- 후속 검토에서 durable replay, byte/event cap 정합성, terminal 뒤 durable 목록 실패, localStorage 예외, live-region 소음, 새 route 첫 render의 player source 격리, canary redirect/timeout/origin/redaction 경계를 추가로 지적받았다.
+- 각 항목은 실패 테스트를 먼저 확인한 뒤 최소 구현으로 통과시켰다.
+- 보완 전 현재 HEAD의 Python 수집은 **1841 tests collected**, 보완 뒤는 **1845 tests collected**로 확인했다.
 
 ## 최신 검증
 
-- 전체 Python: **1818 passed, 21 skipped, 1 warning**, 794.56초
-- A3/API/smoke 집중 Python: **129 passed, 1 warning**
-- smoke script 집중 Python: **2 passed, 1 warning**
-- 전체 frontend: **50 files, 611 tests passed**
-- SSE + route 집중 frontend: **2 files, 88 tests passed**
+- 전체 Python: **1824 passed, 21 skipped, 1 warning**, 808.47초
+- A3/API/smoke 집중 Python: **133 passed, 1 warning**
+- smoke script 집중 Python: **6 passed, 1 warning**
+- 전체 frontend: **50 files, 620 tests passed**
+- SSE + route + dock + workbench 집중 frontend: **5 files, 144 tests passed**
 - Editor workbench E2E: **8 passed**
 - frontend production build: 통과
 - Hermes runtime verifier `-StaticOnly`: 통과

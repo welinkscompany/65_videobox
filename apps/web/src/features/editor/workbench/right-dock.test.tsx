@@ -105,6 +105,44 @@ describe("RightDock", () => {
     expect(screen.getByText("요청 내용")).toBeInTheDocument();
   });
 
+  it("announces only terminal state and never turns streamed token updates into live announcements", () => {
+    const rendered = render(<RightDock
+      draft=""
+      onDraftChange={vi.fn()}
+      messages={[{ id: "assistant-1", role: "assistant", text: "첫" }]}
+      runState={{ kind: "streaming", runId: "run-1", routeEpoch: 1, text: "첫" }}
+    />);
+
+    expect(screen.getByRole("log", { name: "유진 대화" })).not.toHaveAttribute("aria-live");
+    expect(screen.queryByRole("status")).toBeNull();
+
+    rendered.rerender(<RightDock
+      draft=""
+      onDraftChange={vi.fn()}
+      messages={[{ id: "assistant-1", role: "assistant", text: "첫 답" }]}
+      runState={{ kind: "streaming", runId: "run-1", routeEpoch: 1, text: "첫 답" }}
+    />);
+    expect(screen.queryByRole("status")).toBeNull();
+
+    rendered.rerender(<RightDock
+      draft=""
+      onDraftChange={vi.fn()}
+      messages={[{ id: "assistant-1", role: "assistant", text: "첫 답" }]}
+      runState={{ kind: "complete", runId: "run-1" }}
+    />);
+    expect(screen.getByRole("status")).toHaveTextContent("유진 답변을 받았어요.");
+    expect(screen.getAllByRole("status")).toHaveLength(1);
+
+    rendered.rerender(<RightDock
+      draft=""
+      onDraftChange={vi.fn()}
+      messages={[{ id: "assistant-1", role: "assistant", text: "첫 답" }]}
+      runState={{ kind: "unavailable", message: "유진의 답을 받지 못했어요." }}
+    />);
+    expect(screen.getByRole("status")).toHaveTextContent("유진의 답을 받지 못했어요.");
+    expect(screen.getAllByRole("status")).toHaveLength(1);
+  });
+
   it("never mounts an audio or video player and only exposes explicit apply for a ready proposal", () => {
     const onApplyProposal = vi.fn();
     const { container } = render(<RightDock

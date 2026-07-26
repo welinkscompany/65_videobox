@@ -1900,6 +1900,63 @@ describe("EditorWorkbenchRoute", () => {
     expect(composer).toBeEnabled();
   });
 
+  it("keeps a completed assistant response when terminal durable reconciliation fails", async () => {
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
+      conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },
+      messages: [], proposal: null, references: [],
+    } as never);
+    vi.spyOn(api, "createHermesRun").mockResolvedValue({
+      run_id: "run-1",
+      conversation_id: "conversation-1",
+      events_url: "/api/projects/project-a/director/conversations/conversation-1/hermes-runs/run-1/events",
+    });
+    vi.spyOn(api, "openHermesRunEvents").mockResolvedValue(
+      new Response("", { headers: { "Content-Type": "text/event-stream" } }),
+    );
+    vi.spyOn(api, "listDirectorMessages").mockRejectedValue(
+      new Error("PRIVATE durable storage detail"),
+    );
+    vi.spyOn(hermesSseClient, "parseHermesSse").mockImplementation(
+      async (_response, options) => {
+        options.onEvent({
+          event_id: 1,
+          event_type: "run_started",
+          text: "",
+          retryable: false,
+        });
+        options.onEvent({
+          event_id: 2,
+          event_type: "text_delta",
+          text: "완료된 답",
+          retryable: false,
+        });
+        options.onEvent({
+          event_id: 3,
+          event_type: "run_completed",
+          text: "완료된 답",
+          retryable: false,
+        });
+      },
+    );
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+    fireEvent.change(
+      await screen.findByRole("textbox", { name: "유진에게 요청하기" }),
+      { target: { value: "완료 요청" } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
+
+    expect(await screen.findByText("완료된 답")).toBeVisible();
+    expect(
+      screen.getByRole("status", { name: "대화 저장 상태" }),
+    ).toHaveTextContent("대화 저장 상태를 확인하지 못했어요.");
+    expect(screen.queryByText("유진의 답을 받지 못했어요.")).toBeNull();
+    expect(screen.queryByText(/PRIVATE/)).toBeNull();
+    expect(screen.getByRole("button", { name: "n-1 클립 선택" })).toBeEnabled();
+  });
+
   it("reloads a blocked terminal row and keeps its durable fallback copy redacted", async () => {
     vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
       conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },

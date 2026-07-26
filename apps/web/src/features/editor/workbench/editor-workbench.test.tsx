@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { EditorWorkbench, persistedPanelPixels } from "./EditorWorkbench";
+import * as previewStageModule from "../preview/preview-stage";
 
 const assetCards = [{
   id: "broll:image-1",
@@ -146,6 +147,42 @@ describe("EditorWorkbench", () => {
     expect(persistedPanelPixels({ asPercentage: 30, inPixels: Number.NaN }, 260, 320)).toBe(320);
   });
 
+  it("keeps manual controls available when global localStorage is denied or full", () => {
+    vi.mocked(HTMLElement.prototype.getBoundingClientRect).mockReturnValue({
+      width: 1600,
+    } as DOMRect);
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new DOMException("PRIVATE denied", "SecurityError");
+    });
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("PRIVATE full", "QuotaExceededError");
+    });
+    const onManualEdit = vi.fn();
+    const director = {
+      state: "blocked",
+      messages: [{ id: "user-1", role: "user", text: "남아 있는 요청" }],
+      proposal: null,
+      draft: "보존된 초안",
+      runState: { kind: "unavailable", message: "유진의 답을 받지 못했어요." },
+      selectedCandidateIds: [],
+      conversationScroll: { key: "project-a:session-a", top: 0, pinnedToBottom: true },
+      onDraftChange: vi.fn(),
+      onSelectedCandidateIdsChange: vi.fn(),
+      onConversationScrollChange: vi.fn(),
+      onSendMessage: vi.fn(),
+      onApplyProposal: vi.fn(),
+      onManualEdit,
+      onPreviewCandidate: vi.fn(),
+    } as const;
+
+    render(<EditorWorkbench director={director} view={view} />);
+
+    expect(screen.getByText("남아 있는 요청")).toBeVisible();
+    expect(screen.getByLabelText("유진에게 요청하기")).toHaveValue("보존된 초안");
+    fireEvent.click(screen.getByRole("button", { name: "Yujin 없이 계속 편집" }));
+    expect(onManualEdit).toHaveBeenCalledOnce();
+  });
+
   it("keeps transcript, playback position, and narration clip selection on one segment id", () => {
     const transcriptView = {
       ...view,
@@ -241,6 +278,73 @@ describe("EditorWorkbench", () => {
     expect(screen.queryByLabelText("NARRATION · segment-shared 소스 미리보기")).toBeNull();
     expect(screen.getByRole("button", { name: "clip-b 클립 선택" })).toHaveAttribute("aria-pressed", "false");
     expect(screen.getByLabelText("재생 위치")).toHaveAttribute("data-seconds", "0");
+  });
+
+  it("never passes a previous route audition into the first render of a new route", async () => {
+    vi.mocked(HTMLElement.prototype.getBoundingClientRect).mockReturnValue({
+      width: 1600,
+    } as DOMRect);
+    const observed: Array<previewStageModule.AuditionRequest | null | undefined> = [];
+    vi.spyOn(previewStageModule, "PreviewStage").mockImplementation((props) => {
+      observed.push(props.auditionRequest);
+      return <section aria-label="미리보기" />;
+    });
+    const routeA = {
+      ...view,
+      playback: {
+        auditionUrls: {},
+        exactPreview: { status: "unavailable" as const },
+      },
+    };
+    const director = {
+      state: "proposal_ready",
+      messages: [],
+      proposal: {
+        proposalId: "proposal-a",
+        status: "ready",
+        candidates: [{
+          candidateId: "candidate-a",
+          visibleReferenceCode: "A-01",
+          mediaType: "broll",
+          previewUrl: "/api/projects/project-a/assets/candidate-a/content",
+        }],
+      },
+      draft: "",
+      runState: { kind: "idle" },
+      selectedCandidateIds: ["candidate-a"],
+      conversationScroll: { key: "project-a:session-a", top: 0, pinnedToBottom: true },
+      onDraftChange: vi.fn(),
+      onSelectedCandidateIdsChange: vi.fn(),
+      onConversationScrollChange: vi.fn(),
+      onSendMessage: vi.fn(),
+      onApplyProposal: vi.fn(),
+      onManualEdit: vi.fn(),
+      onPreviewCandidate: vi.fn(),
+    } as const;
+    const rendered = render(<EditorWorkbench director={director} view={routeA} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "추천 미리 듣기" }));
+    await waitFor(() => expect(observed.at(-1)?.source.url).toContain("/project-a/"));
+
+    observed.length = 0;
+    rendered.rerender(<EditorWorkbench
+      director={director}
+      view={{ ...routeA, expectedRevision: 2 }}
+    />);
+    expect(observed.some((request) => request?.source.url.includes("/project-a/"))).toBe(true);
+
+    observed.length = 0;
+    rendered.rerender(<EditorWorkbench
+      director={director}
+      view={{
+        ...routeA,
+        projectId: "project-b",
+        sessionId: "session-b",
+        timelineId: "timeline-b",
+      }}
+    />);
+    expect(observed[0]).toBeNull();
+    expect(observed.every((request) => request == null)).toBe(true);
   });
 
   it("uses a video element for a source-backed visual overlay audition rather than treating it as audio", () => {

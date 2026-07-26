@@ -11,14 +11,20 @@ const allowedEventTypes = new Set<HermesSseEvent["event_type"]>([
   "blocked",
   "run_completed",
 ]);
-const maxLineCharacters = 256_000;
-const maxEventCharacters = 260_000;
-const maxStreamBytes = 600_000;
-const maxEvents = 256;
-const maxDeltaCharacters = 32_000;
-const maxTextCharacters = 200_000;
-const maxBlockedCharacters = 4_096;
+const backendMaxEventBytes = 2_000_000;
+const maxTextBytes = 200_000;
+const maxJsonEscapeExpansion = 6;
+const maxSseFrameOverheadBytes = 512;
+const maxLineBytes = maxTextBytes * maxJsonEscapeExpansion + maxSseFrameOverheadBytes;
+const maxEventBytes = maxLineBytes + maxSseFrameOverheadBytes;
+const maxEvents = 257;
+const maxStreamBytes = backendMaxEventBytes
+  + maxTextBytes * maxJsonEscapeExpansion
+  + maxSseFrameOverheadBytes * maxEvents;
+const maxDeltaBytes = 32_000;
+const maxBlockedBytes = 4_096;
 const protocolErrorMessage = "유진 응답을 이어받지 못했어요.";
+const textEncoder = new TextEncoder();
 
 type ParseHermesSseOptions = Readonly<{
   signal: AbortSignal;
@@ -46,11 +52,13 @@ export async function parseHermesSse(
   const decoder = new TextDecoder("utf-8", { fatal: true });
   let buffered = "";
   let frameLines: string[] = [];
-  let frameCharacters = 0;
+  let frameBytes = 0;
   let streamBytes = 0;
   let eventCount = 0;
   let lastEventId = 0;
   let assembledText = "";
+  let assembledTextBytes = 0;
+  let deltaCount = 0;
   let started = false;
   let terminal = false;
   let readerCancelled = false;
@@ -70,7 +78,7 @@ export async function parseHermesSse(
     if (eventCount > maxEvents) throw protocolError();
     const frame = parseFrame(frameLines);
     frameLines = [];
-    frameCharacters = 0;
+    frameBytes = 0;
     if (frame.eventId <= lastEventId) return;
     if (terminal || frame.eventId !== lastEventId + 1) throw protocolError();
     const payload = parsePayload(frame);
@@ -81,20 +89,24 @@ export async function parseHermesSse(
     } else if (payload.event_type === "run_started") {
       throw protocolError();
     } else if (payload.event_type === "text_delta") {
-      if (!payload.text || payload.text.length > maxDeltaCharacters) throw protocolError();
+      const deltaBytes = utf8ByteLength(payload.text);
+      if (!payload.text || deltaBytes > maxDeltaBytes) throw protocolError();
+      assembledTextBytes += deltaBytes;
+      if (assembledTextBytes > maxTextBytes) throw protocolError();
       assembledText += payload.text;
-      if (assembledText.length > maxTextCharacters) throw protocolError();
+      deltaCount += 1;
     } else if (payload.event_type === "run_completed") {
+      const completedBytes = utf8ByteLength(payload.text);
       if (
         !payload.text
-        || payload.text.length > maxTextCharacters
-        || payload.text !== assembledText
+        || completedBytes > maxTextBytes
+        || (deltaCount > 0 && payload.text !== assembledText)
       ) {
         throw protocolError();
       }
       terminal = true;
     } else {
-      if (payload.text.length > maxBlockedCharacters) throw protocolError();
+      if (utf8ByteLength(payload.text) > maxBlockedBytes) throw protocolError();
       terminal = true;
     }
 
@@ -104,13 +116,14 @@ export async function parseHermesSse(
 
   const acceptLine = (rawLine: string) => {
     const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
-    if (line.length > maxLineCharacters) throw protocolError();
+    const lineBytes = utf8ByteLength(line);
+    if (lineBytes > maxLineBytes) throw protocolError();
     if (!line) {
       dispatchFrame();
       return;
     }
-    frameCharacters += line.length;
-    if (frameCharacters > maxEventCharacters) throw protocolError();
+    frameBytes += lineBytes + 1;
+    if (frameBytes > maxEventBytes) throw protocolError();
     frameLines.push(line);
   };
 
@@ -133,7 +146,7 @@ export async function parseHermesSse(
         buffered = buffered.slice(newlineAt + 1);
         newlineAt = buffered.indexOf("\n");
       }
-      if (buffered.length > maxLineCharacters) throw protocolError();
+      if (utf8ByteLength(buffered) > maxLineBytes) throw protocolError();
     }
     if (!terminal) {
       try {
@@ -204,6 +217,10 @@ function parsePayload(frame: ReturnType<typeof parseFrame>): HermesSseEvent {
 
 function abortIfNeeded(signal: AbortSignal) {
   if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+}
+
+function utf8ByteLength(value: string) {
+  return textEncoder.encode(value).byteLength;
 }
 
 function protocolError() {

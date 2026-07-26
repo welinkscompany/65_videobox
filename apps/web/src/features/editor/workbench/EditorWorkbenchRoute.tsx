@@ -642,15 +642,29 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       });
       if (!isCurrentHermes()) return;
       if (terminal.eventType !== null) {
-        const persisted = await api.listDirectorMessages(projectId, conversationId, sessionId);
-        if (!isCurrentHermes()) return;
-        setDirector((current) => current.key === requestKey ? {
-          ...current,
-          messages: projectDirectorMessages(persisted),
-          runState: terminal.eventType === "run_completed"
-            ? { kind: "complete", runId: run.run_id }
-            : { kind: "unavailable", message: yujinUnavailableMessage },
-        } : current);
+        try {
+          const persisted = await api.listDirectorMessages(projectId, conversationId, sessionId);
+          if (!isCurrentHermes()) return;
+          setDirector((current) => current.key === requestKey ? {
+            ...current,
+            messages: projectDirectorMessages(persisted),
+            runState: terminal.eventType === "run_completed"
+              ? { kind: "complete", runId: run.run_id }
+              : { kind: "unavailable", message: yujinUnavailableMessage },
+          } : current);
+        } catch {
+          if (!isCurrentHermes()) return;
+          if (terminal.eventType === "run_completed") {
+            setDirector((current) => current.key === requestKey ? {
+              ...current,
+              runState: {
+                kind: "complete",
+                runId: run.run_id,
+                syncWarning: "대화 저장 상태를 확인하지 못했어요.",
+              },
+            } : current);
+          }
+        }
       }
     } catch (error) {
       if (isAbortError(error) || !isCurrentHermes()) return;
