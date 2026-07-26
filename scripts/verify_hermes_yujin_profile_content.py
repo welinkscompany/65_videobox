@@ -7,8 +7,6 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-import yaml
-
 
 SENSITIVE_KEY_PARTS = (
     "password",
@@ -38,40 +36,43 @@ FORBIDDEN_TEXT_PATTERNS = (
 ZIP_MAGICS = (b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08")
 
 
-class UniqueKeySafeLoader(yaml.SafeLoader):
-    def construct_mapping(
-        self,
-        node: yaml.nodes.MappingNode,
-        deep: bool = False,
-    ) -> dict[Any, Any]:
-        if not isinstance(node, yaml.nodes.MappingNode):
-            raise yaml.constructor.ConstructorError(
-                None,
-                None,
-                "expected a mapping node",
-                node.start_mark,
-            )
-        mapping: dict[Any, Any] = {}
-        for key_node, value_node in node.value:
-            key = self.construct_object(key_node, deep=deep)
-            try:
-                duplicate = key in mapping
-            except TypeError as error:
-                raise yaml.constructor.ConstructorError(
-                    "while constructing a mapping",
+def _unique_key_safe_loader(yaml_module: Any) -> type[Any]:
+    class UniqueKeySafeLoader(yaml_module.SafeLoader):
+        def construct_mapping(
+            self,
+            node: Any,
+            deep: bool = False,
+        ) -> dict[Any, Any]:
+            if not isinstance(node, yaml_module.nodes.MappingNode):
+                raise yaml_module.constructor.ConstructorError(
+                    None,
+                    None,
+                    "expected a mapping node",
                     node.start_mark,
-                    "found an unhashable key",
-                    key_node.start_mark,
-                ) from error
-            if duplicate:
-                raise yaml.constructor.ConstructorError(
-                    "while constructing a mapping",
-                    node.start_mark,
-                    "found a duplicate key",
-                    key_node.start_mark,
                 )
-            mapping[key] = self.construct_object(value_node, deep=deep)
-        return mapping
+            mapping: dict[Any, Any] = {}
+            for key_node, value_node in node.value:
+                key = self.construct_object(key_node, deep=deep)
+                try:
+                    duplicate = key in mapping
+                except TypeError as error:
+                    raise yaml_module.constructor.ConstructorError(
+                        "while constructing a mapping",
+                        node.start_mark,
+                        "found an unhashable key",
+                        key_node.start_mark,
+                    ) from error
+                if duplicate:
+                    raise yaml_module.constructor.ConstructorError(
+                        "while constructing a mapping",
+                        node.start_mark,
+                        "found a duplicate key",
+                        key_node.start_mark,
+                    )
+                mapping[key] = self.construct_object(value_node, deep=deep)
+            return mapping
+
+    return UniqueKeySafeLoader
 
 
 def _decode_text(path: Path) -> str:
@@ -119,7 +120,8 @@ def _assert_safe_yaml_tree(value: Any, seen: set[int]) -> None:
             _assert_safe_yaml_tree(child, seen)
 
 
-def verify_profile_content(profile_root: Path) -> None:
+def verify_profile_content(profile_root: Path, yaml_module: Any) -> None:
+    unique_key_loader = _unique_key_safe_loader(yaml_module)
     for path in sorted(profile_root.rglob("*")):
         if not path.is_file():
             continue
@@ -127,18 +129,25 @@ def verify_profile_content(profile_root: Path) -> None:
         if any(pattern.search(text) for pattern in FORBIDDEN_TEXT_PATTERNS):
             raise ValueError("forbidden text material")
         if path.suffix.lower() in {".yaml", ".yml"}:
-            parsed = yaml.load(text, Loader=UniqueKeySafeLoader)
+            parsed = yaml_module.load(text, Loader=unique_key_loader)
             _assert_safe_yaml_tree(parsed, set())
 
 
 def main() -> int:
     try:
+        try:
+            import yaml
+        except ImportError:
+            sys.stderr.write(
+                "Yujin profile content verification is unavailable.\n"
+            )
+            return 1
         if len(sys.argv) != 2:
             return 2
         profile_root = Path(sys.argv[1]).resolve(strict=True)
         if not profile_root.is_dir():
             return 1
-        verify_profile_content(profile_root)
+        verify_profile_content(profile_root, yaml)
     except Exception:
         return 1
     return 0

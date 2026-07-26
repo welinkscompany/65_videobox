@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -21,6 +22,15 @@ MINIMUM_PASSWORD = "123456789012"
 MINIMUM_PASSWORD_HASH = (
     "scrypt$16384$8$1$MDEyMzQ1Njc4OWFiY2RlZg==$"
     "ZDdxqiZYgrigmrdTCAdvmXQvbXlKPUOS9oJw2i3yb+A="
+)
+PERSISTENT_PROFILE_STATE = (
+    "Profile install persists in the videobox_hermes_oauth_state named volume "
+    "at /opt/data; service cleanup does not delete that volume. "
+    "Rerun uses --force idempotently."
+)
+SAFE_RERUN_RECOVERY = (
+    "Recovery: powershell -NoProfile -ExecutionPolicy Bypass "
+    "-File scripts/start-hermes-yujin.ps1 -EnvFile <approved-env-file>"
 )
 
 
@@ -344,7 +354,18 @@ def test_gateway_failure_preserves_or_recovers_hermes_by_prior_state(
     assert result.returncode != 0
     assert "gateway startup failed" in result.stderr
     assert expected_phrase in result.stderr
+    compact_stderr = re.sub(r"\s+", "", result.stderr)
+    assert re.sub(r"\s+", "", PERSISTENT_PROFILE_STATE) in compact_stderr
+    assert re.sub(r"\s+", "", SAFE_RERUN_RECOVERY) in compact_stderr
+    source = SCRIPT.read_text(encoding="utf-8")
+    assert SAFE_RERUN_RECOVERY in source
     assert "generated-runtime-value" not in result.stderr
+    assert str(tmp_path) not in result.stderr
+    _assert_no_values_leaked(result)
+    for invocation in invocations:
+        assert '"down"' not in invocation
+        assert '"rm"' not in invocation
+        assert '"-v"' not in invocation
     stop_calls = [call for call in invocations if '"stop"' in call]
     hermes_up_calls = [
         call

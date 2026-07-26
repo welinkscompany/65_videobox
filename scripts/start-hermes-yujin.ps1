@@ -295,6 +295,13 @@ if (-not $hermesWasRunning) {
         -FailureMessage "Targeted Hermes Yujin runtime startup failed."
 }
 
+$persistentProfileState = (
+    "Profile install persists in the videobox_hermes_oauth_state named volume " +
+    "at /opt/data; service cleanup does not delete that volume. " +
+    "Rerun uses --force idempotently."
+)
+$safeRerunRecovery = "Recovery: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-hermes-yujin.ps1 -EnvFile <approved-env-file>"
+
 try {
     Invoke-TargetedComposeUp `
         -ServiceName "videobox-agent-gateway" `
@@ -304,7 +311,9 @@ catch {
     if ($hermesWasRunning) {
         throw (
             "Targeted Hermes Yujin gateway startup failed. " +
-            "Pre-existing Hermes service was left running."
+            "Pre-existing Hermes service was left running. " +
+            $persistentProfileState + " " +
+            $safeRerunRecovery
         )
     }
 
@@ -328,14 +337,18 @@ catch {
     if ($stopSucceeded) {
         throw (
             "Targeted Hermes Yujin gateway startup failed. " +
-            "The newly started Hermes service was stopped."
+            "The newly started Hermes service was stopped. " +
+            $persistentProfileState + " " +
+            $safeRerunRecovery
         )
     }
     throw (
         "Targeted Hermes Yujin gateway startup failed and automatic stop failed. " +
         "Recovery: docker compose -f compose.yaml -f compose.hermes-yujin.yaml " +
         "--profile hermes-yujin --env-file <approved-env-file> " +
-        "stop videobox-hermes-yujin"
+        "stop videobox-hermes-yujin. " +
+        $persistentProfileState + " " +
+        $safeRerunRecovery
     )
 }
 

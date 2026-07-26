@@ -4,6 +4,7 @@ import os
 import re
 import shutil
 import subprocess
+from importlib import metadata
 from pathlib import Path
 
 import pytest
@@ -15,6 +16,15 @@ PROFILE_ROOT = ROOT / "config" / "hermes" / "yujin"
 VERIFY_SCRIPT = ROOT / "scripts" / "verify-hermes-yujin-profile.ps1"
 INSTALL_SCRIPT = ROOT / "scripts" / "install-hermes-yujin-profile.ps1"
 START_SCRIPT = ROOT / "scripts" / "start-hermes-yujin.ps1"
+CONTENT_HELPER = ROOT / "scripts" / "verify_hermes_yujin_profile_content.py"
+REQUIREMENTS_DEV = ROOT / "requirements-dev.txt"
+STATUS_DOC = ROOT / "docs" / "development-status-2026-06-29.ko.md"
+HANDOFF_DOC = (
+    ROOT
+    / "docs"
+    / "handoffs"
+    / "2026-07-26-videobox-hermes-yujin-planning-closeout.ko.md"
+)
 OVERLAY_PATH = ROOT / "compose.hermes-yujin.yaml"
 
 EXPECTED_MANIFEST = {
@@ -158,6 +168,53 @@ def test_static_verifier_accepts_the_canonical_package() -> None:
 
     assert result.returncode == 0, result.stderr
     assert "ownership and secret-free contents verified" in result.stdout
+
+
+def test_profile_content_verifier_declares_the_exact_installed_pyyaml_runtime() -> None:
+    requirement_lines = REQUIREMENTS_DEV.read_text(encoding="utf-8").splitlines()
+
+    assert requirement_lines.count("PyYAML==6.0.3") == 1
+    assert metadata.version("PyYAML") == "6.0.3"
+
+
+def test_profile_content_helper_reports_missing_pyyaml_without_sensitive_context(
+    tmp_path: Path,
+) -> None:
+    sensitive_root = tmp_path / "generated-secret-profile-root"
+    sensitive_root.mkdir()
+
+    result = subprocess.run(
+        [
+            str(ROOT / ".venv" / "Scripts" / "python.exe"),
+            "-S",
+            str(CONTENT_HELPER),
+            str(sensitive_root),
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=10,
+        check=False,
+    )
+    output = f"{result.stdout}\n{result.stderr}"
+
+    assert result.returncode != 0
+    assert "Yujin profile content verification is unavailable." in output
+    assert "Traceback" not in output
+    assert str(ROOT) not in output
+    assert str(sensitive_root) not in output
+    assert "generated-secret-profile-root" not in output
+
+
+def test_a2_closeout_docs_explain_persistent_profile_recovery() -> None:
+    for document in (STATUS_DOC, HANDOFF_DOC):
+        content = document.read_text(encoding="utf-8")
+        assert "videobox_hermes_oauth_state named volume" in content
+        assert "/opt/data" in content
+        assert "rerun uses --force idempotently" in content
+        assert "service cleanup only; the named volume is not deleted" in content
 
 
 @pytest.mark.parametrize(
