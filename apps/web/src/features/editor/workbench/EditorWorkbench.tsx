@@ -51,7 +51,12 @@ type EditorWorkbenchProps = Readonly<{
   requestedSegmentId?: string | null;
 }>;
 
-export function EditorWorkbench({
+export function EditorWorkbench(props: EditorWorkbenchProps) {
+  const routeKey = `${props.view.projectId}:${props.view.sessionId}`;
+  return <EditorWorkbenchInstance key={routeKey} {...props} />;
+}
+
+function EditorWorkbenchInstance({
   view,
   session,
   onPreviewRefresh,

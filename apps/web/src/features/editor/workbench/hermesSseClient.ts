@@ -11,14 +11,16 @@ const allowedEventTypes = new Set<HermesSseEvent["event_type"]>([
   "blocked",
   "run_completed",
 ]);
-const backendMaxEventBytes = 2_000_000;
+const backendMaxNonterminalJsonBytes = 256_000;
 const maxTextBytes = 200_000;
 const maxJsonEscapeExpansion = 6;
 const maxSseFrameOverheadBytes = 512;
 const maxLineBytes = maxTextBytes * maxJsonEscapeExpansion + maxSseFrameOverheadBytes;
 const maxEventBytes = maxLineBytes + maxSseFrameOverheadBytes;
 const maxEvents = 257;
-const maxStreamBytes = backendMaxEventBytes
+// Backend accounting caps cumulative nonterminal JSON. The terminal is exempt,
+// so the browser also reserves one worst-case escaped terminal plus SSE framing.
+const maxStreamBytes = backendMaxNonterminalJsonBytes
   + maxTextBytes * maxJsonEscapeExpansion
   + maxSseFrameOverheadBytes * maxEvents;
 const maxDeltaBytes = 32_000;
@@ -50,7 +52,8 @@ export async function parseHermesSse(
 
   const reader = response.body.getReader();
   const decoder = new TextDecoder("utf-8", { fatal: true });
-  let buffered = "";
+  const lineBuffer = new Uint8Array(maxLineBytes + 1);
+  let lineBytes = 0;
   let frameLines: string[] = [];
   let frameBytes = 0;
   let streamBytes = 0;
@@ -114,17 +117,50 @@ export async function parseHermesSse(
     onEvent(payload);
   };
 
-  const acceptLine = (rawLine: string) => {
-    const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
-    const lineBytes = utf8ByteLength(line);
-    if (lineBytes > maxLineBytes) throw protocolError();
+  const acceptLine = (line: string, contentBytes: number, wireBytes: number) => {
+    if (contentBytes > maxLineBytes) throw protocolError();
     if (!line) {
       dispatchFrame();
       return;
     }
-    frameBytes += lineBytes + 1;
+    frameBytes += wireBytes;
     if (frameBytes > maxEventBytes) throw protocolError();
     frameLines.push(line);
+  };
+
+  const appendLineBytes = (bytes: Uint8Array) => {
+    if (!bytes.byteLength) return;
+    const nextLineBytes = lineBytes + bytes.byteLength;
+    if (nextLineBytes > lineBuffer.byteLength) throw protocolError();
+    lineBuffer.set(bytes, lineBytes);
+    lineBytes = nextLineBytes;
+    const pendingCrBytes = lineBuffer[lineBytes - 1] === 0x0d ? 1 : 0;
+    if (lineBytes - pendingCrBytes > maxLineBytes) throw protocolError();
+  };
+
+  const finishLine = (newlineBytes: number) => {
+    const hasCarriageReturn = lineBytes > 0 && lineBuffer[lineBytes - 1] === 0x0d;
+    const contentBytes = lineBytes - (hasCarriageReturn ? 1 : 0);
+    let line: string;
+    try {
+      line = decoder.decode(lineBuffer.subarray(0, contentBytes));
+    } catch {
+      throw protocolError();
+    }
+    acceptLine(line, contentBytes, lineBytes + newlineBytes);
+    lineBytes = 0;
+  };
+
+  const acceptChunk = (value: Uint8Array) => {
+    let start = 0;
+    let newlineAt = value.indexOf(0x0a, start);
+    while (newlineAt >= 0) {
+      appendLineBytes(value.subarray(start, newlineAt));
+      finishLine(1);
+      start = newlineAt + 1;
+      newlineAt = value.indexOf(0x0a, start);
+    }
+    appendLineBytes(value.subarray(start));
   };
 
   try {
@@ -135,26 +171,10 @@ export async function parseHermesSse(
       if (done) break;
       streamBytes += value.byteLength;
       if (streamBytes > maxStreamBytes) throw protocolError();
-      try {
-        buffered += decoder.decode(value, { stream: true });
-      } catch {
-        throw protocolError();
-      }
-      let newlineAt = buffered.indexOf("\n");
-      while (newlineAt >= 0) {
-        acceptLine(buffered.slice(0, newlineAt));
-        buffered = buffered.slice(newlineAt + 1);
-        newlineAt = buffered.indexOf("\n");
-      }
-      if (utf8ByteLength(buffered) > maxLineBytes) throw protocolError();
+      acceptChunk(value);
     }
     if (!terminal) {
-      try {
-        buffered += decoder.decode();
-      } catch {
-        throw protocolError();
-      }
-      if (buffered) acceptLine(buffered);
+      if (lineBytes) finishLine(0);
       dispatchFrame();
     }
     if (!terminal) throw protocolError();

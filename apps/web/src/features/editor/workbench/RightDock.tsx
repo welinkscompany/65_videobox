@@ -109,18 +109,18 @@ export function RightDock({
   const canSend = Boolean(!composerDisabled && onSendMessage && draft.trim());
   const submit = () => { if (canSend) void onSendMessage?.(draft.trim()); };
   const runStatusAnnouncement = runState.kind === "complete"
-    ? `유진 답변을 받았어요.${runState.syncWarning ? ` ${runState.syncWarning}` : ""}`
+    ? "유진 답변을 받았어요."
     : runState.kind === "unavailable"
     ? `${runState.message} 수동 편집을 계속할 수 있어요.`
     : null;
-  const runStatusLabel = runState.kind === "complete" && runState.syncWarning
-    ? "대화 저장 상태"
-    : "유진 대화 상태";
 
   return <div className="vb-editor-right-dock">
     <section aria-label="유진" className="vb-editor-workbench__summary">
       <h2>유진</h2>
-      {runStatusAnnouncement ? <p role="status" aria-live="polite" aria-atomic="true" aria-label={runStatusLabel} className="sr-only">{runStatusAnnouncement}</p> : null}
+      {runStatusAnnouncement ? <p role="status" aria-live="polite" aria-atomic="true" aria-label="유진 대화 상태" className="sr-only">{runStatusAnnouncement}</p> : null}
+      {runState.kind === "complete" && runState.syncWarning
+        ? <p aria-label="대화 저장 상태" className="vb-editor-right-dock__sync-warning">{runState.syncWarning}</p>
+        : null}
       {state === "blocked" || state === "error" || runState.kind === "unavailable" ? <div className="vb-editor-right-dock__fallback"><p>{runState.kind === "unavailable" ? runState.message : "유진의 답을 받지 못했어요."}</p>{onManualEdit ? <Button type="button" onClick={onManualEdit}>Yujin 없이 계속 편집</Button> : null}</div> : null}
       {state === "idle" && !proposal && onStart ? <Button type="button" onClick={() => void onStart()}>유진에게 추천받기</Button> : null}
       <div

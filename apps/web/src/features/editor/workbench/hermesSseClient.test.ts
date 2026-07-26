@@ -21,6 +21,20 @@ function event(id: number, eventType: HermesSseEvent["event_type"], text = "", r
   return `id: ${id}\nevent: ${eventType}\ndata: ${JSON.stringify({ event_id: id, event_type: eventType, text, retryable })}\n\n`;
 }
 
+function byteFragmentedResponse(encoded: Uint8Array) {
+  let offset = 0;
+  return new Response(new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (offset >= encoded.byteLength) {
+        controller.close();
+        return;
+      }
+      controller.enqueue(encoded.subarray(offset, offset + 1));
+      offset += 1;
+    },
+  }), { headers: { "Content-Type": "text/event-stream" } });
+}
+
 describe("parseHermesSse", () => {
   it("parses split frames, emits only the allowlist, and ignores duplicate or old IDs", async () => {
     const received: HermesSseEvent[] = [];
@@ -108,6 +122,27 @@ describe("parseHermesSse", () => {
 
     expect(received.at(-1)?.text).toBe(escapedText);
     expect(new TextEncoder().encode(received.at(-1)?.text).byteLength).toBe(200_000);
+  });
+
+  it("keeps UTF-8 byte accounting linear under one-byte CRLF fragmentation", async () => {
+    const completedText = "가".repeat(1_024);
+    const wire = (
+      event(1, "run_started")
+      + event(2, "run_completed", completedText)
+    ).replaceAll("\n", "\r\n");
+    const encoded = new TextEncoder().encode(wire);
+    const encodeSpy = vi.spyOn(TextEncoder.prototype, "encode");
+
+    await expect(parseHermesSse(
+      byteFragmentedResponse(encoded),
+      { signal: new AbortController().signal, onEvent: vi.fn() },
+    )).resolves.toBeUndefined();
+
+    const encodedInputCharacters = encodeSpy.mock.calls.reduce(
+      (total, [input]) => total + (input?.length ?? 0),
+      0,
+    );
+    expect(encodedInputCharacters).toBeLessThanOrEqual(encoded.byteLength * 2);
   });
 
   it.each([

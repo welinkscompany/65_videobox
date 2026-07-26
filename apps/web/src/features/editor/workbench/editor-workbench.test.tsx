@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 
 import { EditorWorkbench, persistedPanelPixels } from "./EditorWorkbench";
 import * as previewStageModule from "../preview/preview-stage";
+import * as timelineDockModule from "../timeline/TimelineDock";
 
 const assetCards = [{
   id: "broll:image-1",
@@ -280,17 +281,52 @@ describe("EditorWorkbench", () => {
     expect(screen.getByLabelText("재생 위치")).toHaveAttribute("data-seconds", "0");
   });
 
-  it("never passes a previous route audition into the first render of a new route", async () => {
+  it("keys all route-local player and timeline state before the first render of a new route", async () => {
     vi.mocked(HTMLElement.prototype.getBoundingClientRect).mockReturnValue({
       width: 1600,
     } as DOMRect);
-    const observed: Array<previewStageModule.AuditionRequest | null | undefined> = [];
+    const observedPreview: Array<Readonly<{
+      auditionRequest: previewStageModule.AuditionRequest | null | undefined;
+      playbackSec: number | undefined;
+    }>> = [];
+    const observedTimeline: Array<Readonly<{
+      projectId: string;
+      selectedSegmentId: string | null | undefined;
+      playbackSec: number | undefined;
+    }>> = [];
     vi.spyOn(previewStageModule, "PreviewStage").mockImplementation((props) => {
-      observed.push(props.auditionRequest);
+      observedPreview.push({
+        auditionRequest: props.auditionRequest,
+        playbackSec: props.playbackSec,
+      });
       return <section aria-label="미리보기" />;
+    });
+    vi.spyOn(timelineDockModule, "TimelineDock").mockImplementation((props) => {
+      observedTimeline.push({
+        projectId: props.view.projectId,
+        selectedSegmentId: props.selectedSegmentId,
+        playbackSec: props.playbackSec,
+      });
+      return <section aria-label="타임라인" />;
     });
     const routeA = {
       ...view,
+      output: { ...view.output, durationSec: 3 },
+      local: { selectedSegmentId: "segment-shared", seekSec: 1.25 },
+      tracks: [{
+        trackId: "narration",
+        role: "narration" as const,
+        clips: [{
+          clipId: "clip-a",
+          segmentId: "segment-shared",
+          type: "narration",
+          assetId: null,
+          assetUri: null,
+          startSec: 0,
+          endSec: 2,
+          controls: {},
+        }],
+      }],
       playback: {
         auditionUrls: {},
         exactPreview: { status: "unavailable" as const },
@@ -324,16 +360,30 @@ describe("EditorWorkbench", () => {
     const rendered = render(<EditorWorkbench director={director} view={routeA} />);
 
     fireEvent.click(screen.getByRole("button", { name: "추천 미리 듣기" }));
-    await waitFor(() => expect(observed.at(-1)?.source.url).toContain("/project-a/"));
+    await waitFor(() => expect(
+      observedPreview.at(-1)?.auditionRequest?.source.url,
+    ).toContain("/project-a/"));
 
-    observed.length = 0;
+    observedPreview.length = 0;
+    observedTimeline.length = 0;
     rendered.rerender(<EditorWorkbench
       director={director}
       view={{ ...routeA, expectedRevision: 2 }}
     />);
-    expect(observed.some((request) => request?.source.url.includes("/project-a/"))).toBe(true);
+    expect(observedPreview.at(-1)).toMatchObject({
+      auditionRequest: expect.objectContaining({
+        source: expect.objectContaining({ url: expect.stringContaining("/project-a/") }),
+      }),
+      playbackSec: 1.25,
+    });
+    expect(observedTimeline.at(-1)).toMatchObject({
+      projectId: "project-a",
+      selectedSegmentId: "segment-shared",
+      playbackSec: 1.25,
+    });
 
-    observed.length = 0;
+    observedPreview.length = 0;
+    observedTimeline.length = 0;
     rendered.rerender(<EditorWorkbench
       director={director}
       view={{
@@ -341,10 +391,18 @@ describe("EditorWorkbench", () => {
         projectId: "project-b",
         sessionId: "session-b",
         timelineId: "timeline-b",
+        local: { selectedSegmentId: null, seekSec: 0.25 },
       }}
     />);
-    expect(observed[0]).toBeNull();
-    expect(observed.every((request) => request == null)).toBe(true);
+    expect(observedPreview[0]).toEqual({
+      auditionRequest: null,
+      playbackSec: 0.25,
+    });
+    expect(observedTimeline[0]).toEqual({
+      projectId: "project-b",
+      selectedSegmentId: null,
+      playbackSec: 0.25,
+    });
   });
 
   it("uses a video element for a source-backed visual overlay audition rather than treating it as audio", () => {

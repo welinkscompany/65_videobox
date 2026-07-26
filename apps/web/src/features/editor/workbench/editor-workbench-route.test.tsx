@@ -1950,7 +1950,7 @@ describe("EditorWorkbenchRoute", () => {
 
     expect(await screen.findByText("완료된 답")).toBeVisible();
     expect(
-      screen.getByRole("status", { name: "대화 저장 상태" }),
+      screen.getByLabelText("대화 저장 상태"),
     ).toHaveTextContent("대화 저장 상태를 확인하지 못했어요.");
     expect(screen.queryByText("유진의 답을 받지 못했어요.")).toBeNull();
     expect(screen.queryByText(/PRIVATE/)).toBeNull();

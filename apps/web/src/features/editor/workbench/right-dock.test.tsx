@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { RightDock } from "./RightDock";
 import type { RightDockProposal } from "./rightDockTypes";
@@ -141,6 +141,58 @@ describe("RightDock", () => {
     />);
     expect(screen.getByRole("status")).toHaveTextContent("유진의 답을 받지 못했어요.");
     expect(screen.getAllByRole("status")).toHaveLength(1);
+  });
+
+  it("announces completion once while showing a later durable sync warning outside the live region", async () => {
+    const rendered = render(<RightDock
+      draft=""
+      onDraftChange={vi.fn()}
+      messages={[{ id: "assistant-1", role: "assistant", text: "완료된 답" }]}
+      runState={{ kind: "streaming", runId: "run-1", routeEpoch: 1, text: "완료된 답" }}
+    />);
+    const announcements: string[] = [];
+    let previousAnnouncement = "";
+    const observer = new MutationObserver(() => {
+      const announcement = rendered.container
+        .querySelector('[role="status"]')
+        ?.textContent
+        ?.trim() ?? "";
+      if (announcement && announcement !== previousAnnouncement) {
+        announcements.push(announcement);
+        previousAnnouncement = announcement;
+      }
+    });
+    observer.observe(rendered.container, {
+      childList: true,
+      characterData: true,
+      subtree: true,
+    });
+
+    rendered.rerender(<RightDock
+      draft=""
+      onDraftChange={vi.fn()}
+      messages={[{ id: "assistant-1", role: "assistant", text: "완료된 답" }]}
+      runState={{ kind: "complete", runId: "run-1" }}
+    />);
+    await waitFor(() => expect(announcements).toEqual(["유진 답변을 받았어요."]));
+
+    rendered.rerender(<RightDock
+      draft=""
+      onDraftChange={vi.fn()}
+      messages={[{ id: "assistant-1", role: "assistant", text: "완료된 답" }]}
+      runState={{
+        kind: "complete",
+        runId: "run-1",
+        syncWarning: "대화 저장 상태를 확인하지 못했어요.",
+      }}
+    />);
+
+    expect(screen.getByRole("status")).toHaveTextContent("유진 답변을 받았어요.");
+    expect(screen.getByRole("status")).not.toHaveTextContent("대화 저장 상태");
+    expect(screen.getByText("대화 저장 상태를 확인하지 못했어요.")).toBeVisible();
+    await Promise.resolve();
+    observer.disconnect();
+    expect(announcements).toEqual(["유진 답변을 받았어요."]);
   });
 
   it("never mounts an audio or video player and only exposes explicit apply for a ready proposal", () => {
