@@ -43,6 +43,40 @@ class _Gateway:
             yield event
 
 
+class _BlockingGateway:
+    def __init__(self) -> None:
+        self.calls = 0
+        self.entered = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def stream_run(self, **_):
+        self.calls += 1
+        self.entered.set()
+        await self.release.wait()
+        yield AgentGatewayEvent("run_completed", "answer")
+
+
+class _ThreadBlockedStore:
+    def __init__(self) -> None:
+        self.begin_entered = threading.Event()
+        self.begin_release = threading.Event()
+        self.completions: list[dict] = []
+
+    def begin_director_hermes_run(self, **kwargs):
+        self.begin_entered.set()
+        assert self.begin_release.wait(timeout=3)
+        return {
+            "run_id": str(kwargs["client_message_id"]),
+            "status": "pending",
+            "owner_token": "owner",
+            "dispatch": True,
+        }
+
+    def complete_director_hermes_run(self, **kwargs):
+        self.completions.append(kwargs)
+        return True
+
+
 def test_run_persists_user_before_dispatch_and_final_before_terminal_event(
     tmp_path: Path,
 ) -> None:
@@ -219,6 +253,220 @@ def test_cancellation_during_terminal_store_cannot_leave_subscriber_hanging() ->
     events = asyncio.run(scenario())
     assert events[-1].event_type in {"run_completed", "blocked"}
     assert sum(event.event_type in {"run_completed", "blocked"} for event in events) == 1
+
+
+def test_pre_entry_dispatch_cancel_releases_slot_fifty_times() -> None:
+    async def scenario() -> None:
+        for index in range(50):
+            service = HermesRunService(
+                store=_ThreadBlockedStore(),
+                gateway_client=_Gateway(),
+                max_active=1,
+                max_queue=0,
+            )
+            service.store.begin_release.set()
+            run = await service.create_run(
+                project_id="p",
+                session_id="s",
+                conversation_id="c",
+                client_message_id=f"pre-entry-{index}",
+                text="q",
+            )
+            assert run.task is not None
+            run.task.cancel()
+            await asyncio.gather(run.task, return_exceptions=True)
+            await asyncio.wait_for(service.shutdown(), timeout=1)
+            assert service.diagnostics() == {
+                "closing": True,
+                "active": 0,
+                "waiting": 0,
+                "admissions": 0,
+                "dispatch": 0,
+                "terminal": 0,
+                "cleanup": 0,
+            }
+
+    asyncio.run(scenario())
+
+
+def test_shutdown_active_and_queued_runs_never_promotes_after_close_fifty_times() -> None:
+    async def scenario() -> None:
+        for index in range(50):
+            gateway = _BlockingGateway()
+            store = _ThreadBlockedStore()
+            store.begin_release.set()
+            service = HermesRunService(
+                store=store,
+                gateway_client=gateway,
+                max_active=1,
+                max_queue=1,
+            )
+            first = await service.create_run(
+                project_id="p",
+                session_id="s",
+                conversation_id="c",
+                client_message_id=f"active-{index}",
+                text="q",
+            )
+            await asyncio.wait_for(gateway.entered.wait(), timeout=1)
+            second = await service.create_run(
+                project_id="p",
+                session_id="s",
+                conversation_id="c",
+                client_message_id=f"queued-{index}",
+                text="q",
+            )
+            await asyncio.wait_for(service.shutdown(), timeout=1)
+            assert gateway.calls == 1
+            assert first.terminal is True
+            assert second.terminal is True
+            assert service.diagnostics()["active"] == 0
+            assert service.diagnostics()["waiting"] == 0
+
+    asyncio.run(scenario())
+
+
+def test_shutdown_settles_late_committed_admission_without_dispatch() -> None:
+    store = _ThreadBlockedStore()
+    gateway = _Gateway()
+    service = HermesRunService(store=store, gateway_client=gateway)
+
+    async def scenario() -> None:
+        create = asyncio.create_task(
+            service.create_run(
+                project_id="p",
+                session_id="s",
+                conversation_id="c",
+                client_message_id="late",
+                text="q",
+            )
+        )
+        assert await asyncio.to_thread(store.begin_entered.wait, 1)
+        shutdown = asyncio.create_task(service.shutdown())
+        await asyncio.sleep(0)
+        store.begin_release.set()
+        await asyncio.wait_for(asyncio.gather(create, shutdown), timeout=2)
+        assert gateway.calls == 0
+        assert len(store.completions) == 1
+        assert store.completions[0]["status"] == "blocked"
+        assert service.diagnostics()["active"] == 0
+        assert service.diagnostics()["waiting"] == 0
+
+    asyncio.run(scenario())
+
+
+def test_cancelled_admission_cannot_leave_durable_pending_orphan() -> None:
+    store = _ThreadBlockedStore()
+    gateway = _Gateway()
+    service = HermesRunService(store=store, gateway_client=gateway)
+
+    async def scenario() -> None:
+        create = asyncio.create_task(
+            service.create_run(
+                project_id="p",
+                session_id="s",
+                conversation_id="c",
+                client_message_id="cancelled-admission",
+                text="q",
+            )
+        )
+        assert await asyncio.to_thread(store.begin_entered.wait, 1)
+        create.cancel()
+        store.begin_release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await create
+        await asyncio.wait_for(service.shutdown(), timeout=2)
+        assert gateway.calls == 0
+        assert len(store.completions) == 1
+        assert store.completions[0]["status"] == "blocked"
+        assert service.diagnostics()["admissions"] == 0
+
+    asyncio.run(scenario())
+
+
+def test_one_cancelled_duplicate_waiter_does_not_abort_the_remaining_waiter() -> None:
+    store = _ThreadBlockedStore()
+    gateway = _Gateway()
+    service = HermesRunService(store=store, gateway_client=gateway)
+
+    async def scenario():
+        arguments = {
+            "project_id": "p",
+            "session_id": "s",
+            "conversation_id": "c",
+            "client_message_id": "shared-admission",
+            "text": "q",
+        }
+        cancelled = asyncio.create_task(service.create_run(**arguments))
+        remaining = asyncio.create_task(service.create_run(**arguments))
+        assert await asyncio.to_thread(store.begin_entered.wait, 1)
+        cancelled.cancel()
+        store.begin_release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await cancelled
+        run = await asyncio.wait_for(remaining, timeout=1)
+        assert run.task is not None
+        await run.task
+        events = [event async for event in service.subscribe(run.run_id)]
+        await service.shutdown()
+        return events
+
+    events = asyncio.run(scenario())
+    assert gateway.calls == 1
+    assert store.completions[0]["status"] == "completed"
+    assert events[-1].event_type == "run_completed"
+
+
+def test_repeated_terminal_cancellation_awaits_one_owned_terminal_task() -> None:
+    entered = threading.Event()
+    release = threading.Event()
+
+    class Store:
+        def begin_director_hermes_run(self, **_):
+            return {
+                "run_id": "owned-terminal",
+                "status": "pending",
+                "owner_token": "owner",
+                "dispatch": True,
+            }
+
+        def complete_director_hermes_run(self, **_):
+            entered.set()
+            assert release.wait(timeout=3)
+            return True
+
+    service = HermesRunService(
+        store=Store(),
+        gateway_client=_Gateway(
+            events=[AgentGatewayEvent("run_completed", "answer")]
+        ),
+    )
+
+    async def scenario():
+        run = await service.create_run(
+            project_id="p",
+            session_id="s",
+            conversation_id="c",
+            client_message_id="owned-terminal",
+            text="q",
+        )
+        assert await asyncio.to_thread(entered.wait, 1)
+        cancellers = [
+            asyncio.create_task(service.cancel(run.run_id)) for _ in range(5)
+        ]
+        for task in cancellers:
+            task.cancel()
+        release.set()
+        await asyncio.gather(*cancellers, return_exceptions=True)
+        await asyncio.wait_for(service.shutdown(), timeout=2)
+        events = [event async for event in service.subscribe(run.run_id)]
+        return run, events
+
+    run, events = asyncio.run(scenario())
+    assert run.terminalizing is False
+    assert sum(
+        event.event_type in {"run_completed", "blocked"} for event in events
+    ) == 1
 
 
 def test_postgres_translation_preserves_atomic_upsert_contract() -> None:
