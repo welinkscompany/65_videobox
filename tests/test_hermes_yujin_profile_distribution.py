@@ -39,6 +39,16 @@ EXPECTED_FILES = {
     "config.yaml",
     "skills/videobox-editor/SKILL.md",
 }
+PARTIAL_PROFILE_STATE = (
+    "Profile install may have left a partial profile in the "
+    "videobox_hermes_oauth_state named volume at /opt/data; "
+    "recovery is service-only; do not delete that volume. "
+    "Rerun uses --force idempotently."
+)
+SAFE_RERUN_RECOVERY = (
+    "Recovery: powershell -NoProfile -ExecutionPolicy Bypass "
+    "-File scripts/start-hermes-yujin.ps1 -EnvFile <approved-env-file>"
+)
 
 
 def _run_powershell(
@@ -543,7 +553,12 @@ def test_installer_fails_closed_without_host_install_or_secret_output(
     source = INSTALL_SCRIPT.read_text(encoding="utf-8")
 
     assert result.returncode != 0
-    assert "do-not-leak" not in f"{result.stdout}\n{result.stderr}"
+    output = f"{result.stdout}\n{result.stderr}"
+    compact_output = re.sub(r"\s+", "", output)
+    assert "do-not-leak" not in output
+    assert str(tmp_path) not in output
+    assert re.sub(r"\s+", "", PARTIAL_PROFILE_STATE) in compact_output
+    assert re.sub(r"\s+", "", SAFE_RERUN_RECOVERY) in compact_output
     assert '"run"' in source
     assert "profile install" in source
     assert "Start-Process" not in source
@@ -554,6 +569,9 @@ def test_installer_fails_closed_without_host_install_or_secret_output(
         invocations[0],
     ).group(1)
     assert invocations[1] == f"rm -f {generated_name}"
+    assert all(" down " not in f" {call} " for call in invocations)
+    assert all(" volume " not in f" {call} " for call in invocations)
+    assert all(" -v " not in f" {call} " for call in invocations)
 
 
 def test_installer_uses_a_unique_one_off_name_when_name_is_omitted(
@@ -598,10 +616,18 @@ def test_start_verifies_before_validate_only_exit_and_installs_before_gateway() 
 
     validate_exit = source.index("if ($ValidateOnly)")
     verifier = source.index("verify-hermes-yujin-profile.ps1")
+    recovery_message = source.index("$persistentProfileState")
     installer = source.index("install-hermes-yujin-profile.ps1")
     hermes_start = source.index('"videobox-hermes-yujin"', installer)
     gateway_start = source.index('"videobox-agent-gateway"', installer)
 
-    assert verifier < validate_exit < installer < hermes_start < gateway_start
+    assert (
+        verifier
+        < validate_exit
+        < recovery_message
+        < installer
+        < hermes_start
+        < gateway_start
+    )
     assert "compose.yaml" in source
     assert "compose.hermes-yujin.yaml" in source

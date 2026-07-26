@@ -330,6 +330,27 @@ def test_start_streams_large_stderr_without_pipe_deadlock(
     _assert_no_values_leaked(result)
 
 
+def test_hermes_start_failure_reports_persistent_profile_and_safe_rerun(
+    tmp_path: Path,
+) -> None:
+    result, invocations = _run_fake_start(
+        tmp_path,
+        hermes_up_exit_code=23,
+    )
+    compact_stderr = re.sub(r"\s+", "", result.stderr)
+
+    assert result.returncode != 0
+    assert re.sub(r"\s+", "", PERSISTENT_PROFILE_STATE) in compact_stderr
+    assert re.sub(r"\s+", "", SAFE_RERUN_RECOVERY) in compact_stderr
+    assert "Targeted Hermes Yujin runtime startup failed." in result.stderr
+    assert str(tmp_path) not in result.stderr
+    _assert_no_values_leaked(result)
+    assert any("profile install" in call for call in invocations)
+    assert all('"down"' not in call for call in invocations)
+    assert all('"volume"' not in call for call in invocations)
+    assert all('"-v"' not in call for call in invocations)
+
+
 @pytest.mark.parametrize(
     ("preexisting_hermes", "stop_exit_code", "expected_phrase"),
     (

@@ -59,6 +59,14 @@ $installArguments = @(
     "-y"
 )
 
+$partialProfileState = (
+    "Profile install may have left a partial profile in the " +
+    "videobox_hermes_oauth_state named volume at /opt/data; " +
+    "recovery is service-only; do not delete that volume. " +
+    "Rerun uses --force idempotently."
+)
+$safeRerunRecovery = "Recovery: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-hermes-yujin.ps1 -EnvFile <approved-env-file>"
+
 function Remove-GeneratedInstallerResidue {
     if (-not $usesGeneratedContainerName) {
         return
@@ -71,17 +79,30 @@ function Remove-GeneratedInstallerResidue {
     }
 }
 
+function Stop-InstallerWithRedactedRecovery {
+    param([string]$FailureMessage)
+
+    [Console]::Error.WriteLine(
+        $FailureMessage + " " +
+        $partialProfileState + " " +
+        $safeRerunRecovery
+    )
+    exit 1
+}
+
 try {
     & $DockerExecutable @installArguments
     $installExitCode = $LASTEXITCODE
 }
 catch {
     Remove-GeneratedInstallerResidue
-    throw "The Hermes Yujin profile installer container could not run."
+    Stop-InstallerWithRedactedRecovery `
+        "The Hermes Yujin profile installer container could not run."
 }
 if ($installExitCode -ne 0) {
     Remove-GeneratedInstallerResidue
-    throw "The Hermes Yujin profile installation failed in its container."
+    Stop-InstallerWithRedactedRecovery `
+        "The Hermes Yujin profile installation failed in its container."
 }
 
 Write-Output "Hermes Yujin profile installed in a one-off named installer container."

@@ -283,24 +283,55 @@ $hermesWasRunning = @(
         Where-Object { $_.Trim() -ceq "videobox-hermes-yujin" }
 ).Count -gt 0
 
-& (Join-Path $PSScriptRoot "install-hermes-yujin-profile.ps1") `
-    -EnvFile $resolvedEnvFile `
-    -ComposeFile $composeFile `
-    -OverlayFile $overlayFile `
-    -DockerExecutable $DockerExecutable
-
-if (-not $hermesWasRunning) {
-    Invoke-TargetedComposeUp `
-        -ServiceName "videobox-hermes-yujin" `
-        -FailureMessage "Targeted Hermes Yujin runtime startup failed."
-}
-
 $persistentProfileState = (
     "Profile install persists in the videobox_hermes_oauth_state named volume " +
     "at /opt/data; service cleanup does not delete that volume. " +
     "Rerun uses --force idempotently."
 )
+$partialProfileState = (
+    "Profile install may have left a partial profile in the " +
+    "videobox_hermes_oauth_state named volume at /opt/data; " +
+    "recovery is service-only; do not delete that volume. " +
+    "Rerun uses --force idempotently."
+)
 $safeRerunRecovery = "Recovery: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-hermes-yujin.ps1 -EnvFile <approved-env-file>"
+
+try {
+    & (Join-Path $PSScriptRoot "install-hermes-yujin-profile.ps1") `
+        -EnvFile $resolvedEnvFile `
+        -ComposeFile $composeFile `
+        -OverlayFile $overlayFile `
+        -DockerExecutable $DockerExecutable
+}
+catch {
+    throw (
+        "The Hermes Yujin profile installation failed. " +
+        $partialProfileState + " " +
+        $safeRerunRecovery
+    )
+}
+if ($LASTEXITCODE -ne 0) {
+    throw (
+        "The Hermes Yujin profile installation failed. " +
+        $partialProfileState + " " +
+        $safeRerunRecovery
+    )
+}
+
+if (-not $hermesWasRunning) {
+    try {
+        Invoke-TargetedComposeUp `
+            -ServiceName "videobox-hermes-yujin" `
+            -FailureMessage "Targeted Hermes Yujin runtime startup failed."
+    }
+    catch {
+        throw (
+            "Targeted Hermes Yujin runtime startup failed. " +
+            $persistentProfileState + " " +
+            $safeRerunRecovery
+        )
+    }
+}
 
 try {
     Invoke-TargetedComposeUp `
