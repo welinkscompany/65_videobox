@@ -13,11 +13,11 @@
 Parent: `docs/superpowers/plans/2026-07-26-videobox-hermes-yujin-master-plan.md`
 Design: `docs/superpowers/specs/2026-07-26-videobox-hermes-yujin-integration-design.md`
 
-Child progress: **0/6 tasks (0.0%), remaining 100.0%**. These six tasks are master IDs P0-1, P0-2, A1, A2, A3, and A4.
+Child progress: **1/6 tasks (16.7%), remaining 83.3%**. These six tasks are master IDs P0-1, P0-2, A1, A2, A3, and A4.
 
 ## P0-1 — Confirm drift and official runtime contracts
 
-- [ ] **P0-1** Confirm live/source drift, official Hermes CLI/wire contracts, branch/upstream, protected paths, and current dependency pins.
+- [x] **P0-1** Confirm live/source drift, official Hermes CLI/wire contracts, branch/upstream, protected paths, and current dependency pins.
 
 **Files:**
 

@@ -69,15 +69,15 @@ Status symbols:
 
 Only `[x]` counts as complete. Reopen `[x]` to `[~]` if later evidence finds a regression. The child task and this mirror must be updated in the same closeout commit.
 
-Starting initiative progress: **0/20 (0.0%), remaining 100.0%**.
+Current initiative progress: **1/20 (5.0%), remaining 95.0%**.
 
 The existing VideoBox official cumulative status remains separately fixed at **9/22 (40.9%), remaining 59.1%** until Task 9 human/environment acceptance. Do not combine that denominator with this initiative.
 
 ## 4. Master task mirror
 
-### Phase 0 — bounded audit and baseline (0/2)
+### Phase 0 — bounded audit and baseline (1/2)
 
-- [ ] **P0-1** Confirm live/source drift, official Hermes CLI/wire contracts, branch/upstream, protected paths, and current dependency pins.
+- [x] **P0-1** Confirm live/source drift, official Hermes CLI/wire contracts, branch/upstream, protected paths, and current dependency pins.
 - [ ] **P0-2** Record reverse runtime trace and focused baseline; add the plan-state consistency verifier.
 
 ### Phase A — working Yujin chat vertical slice (0/4)

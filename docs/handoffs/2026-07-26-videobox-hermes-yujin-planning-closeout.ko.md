@@ -28,8 +28,9 @@
 
 - written design: 승인 완료
 - detailed master/child plans: 작성·자체 검토 완료
+- P0-1 audit: 완료
 - production implementation: 시작 전
-- Hermes Yujin initiative: **0/20 (0.0%), 잔여 100.0%**
+- Hermes Yujin initiative: **1/20 (5.0%), 잔여 95.0%**
 - 기존 공식 누적: **9/22 (40.9%), 잔여 59.1%**
 - Task 9 사람/환경 acceptance와 실제 CapCut Desktop 실증: 별도
 
@@ -43,13 +44,14 @@
 
 ## 다음 goal
 
-`P0-1`만 시작한다. 현재 branch/HEAD/upstream/worktree/diff, live container와 source Compose 차이, pinned Hermes CLI/serve/profile/wire 계약, dependency pin을 짧게 재확인한다. 결과를 baseline handoff에 기록하고 master/child의 P0-1을 `[~]`에서 `[x]`로 같은 commit에서 동기화한다. production 기능 구현은 P0-1/P0-2 기준선 뒤 A1부터 시작한다.
+`P0-2`만 시작한다. P0-1 baseline handoff를 바탕으로 RightDock 입력부터 API persistence, Hermes transport, SSE, final persistence, optional proposal, explicit apply, PreviewCoordinator, output까지 reverse runtime trace를 기록한다. master와 네 child의 정확히 20개 task ID·상태·진행률을 검사하는 verifier와 contract test를 TDD로 추가한다. production 기능 구현은 P0-2 기준선 뒤 A1부터 시작한다.
 
 ## 다음 세션용 prompt
 
 ```text
-VideoBox worktree에서 Hermes Yujin master plan의 P0-1을 실행해.
-총괄/하위 계획 상태를 먼저 [~]로 맞추고, live/source drift·공식 Hermes transport·dependency pin만 짧게 감사해.
+VideoBox worktree에서 Hermes Yujin master plan의 P0-2만 실행해.
+P0-1 audit baseline을 읽고 RightDock부터 output까지 reverse runtime trace를 기록해.
+master/children의 정확히 20개 task ID, mirror status, reported progress를 검사하는 verifier와 contract test를 TDD로 추가해.
 보호된 임시 폴더 3개는 건드리지 말고, external provider call은 0으로 유지해.
-검증 뒤 P0-1을 [x]로 동기화하고 commit/push한 다음 P0-2를 next goal로 남겨.
+검증 뒤 P0-2만 [x]로 동기화하고 A1을 next goal로 남겨. production task는 미리 시작하지 마.
 ```
