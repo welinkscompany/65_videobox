@@ -4095,6 +4095,233 @@ class LocalProjectStore:
         finally:
             connection.close()
 
+    def begin_director_hermes_run(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        conversation_id: str,
+        client_message_id: str,
+        user_text: str,
+        stale_after_seconds: int = 300,
+    ) -> dict[str, Any]:
+        """Create a durable pending run and user row, or return its idempotent state."""
+        now = self._now_iso()
+        run_id = f"hermes-run-{uuid.uuid4().hex}"
+        owner_token = uuid.uuid4().hex
+        user_message_id = uuid.uuid4().hex
+        connection = self._connection(project_id)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            session = connection.execute(
+                "SELECT session_id FROM editing_sessions WHERE session_id = ? AND project_id = ?",
+                (session_id, project_id),
+            ).fetchone()
+            if session is None:
+                raise KeyError("editing_session_missing")
+            conversation = connection.execute(
+                "SELECT project_id, session_id FROM director_conversations WHERE conversation_id = ?",
+                (conversation_id,),
+            ).fetchone()
+            if conversation is None:
+                raise KeyError("director_conversation_missing")
+            if (
+                str(conversation["project_id"]) != project_id
+                or str(conversation["session_id"]) != session_id
+            ):
+                raise ValueError("conversation_scope_mismatch")
+            inserted = connection.execute(
+                """
+                INSERT INTO director_hermes_runs (
+                    run_id, conversation_id, client_message_id, project_id,
+                    session_id, user_text, user_message_id, assistant_message_id,
+                    status, owner_token, heartbeat_at, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, 'pending', ?, ?, ?, ?)
+                ON CONFLICT (conversation_id, client_message_id) DO NOTHING
+                """,
+                (
+                    run_id,
+                    conversation_id,
+                    client_message_id,
+                    project_id,
+                    session_id,
+                    user_text,
+                    user_message_id,
+                    owner_token,
+                    now,
+                    now,
+                    now,
+                ),
+            )
+            if inserted.rowcount == 1:
+                connection.execute(
+                    """
+                    INSERT INTO director_messages (
+                        message_id, conversation_id, project_id, session_id,
+                        role, text, proposal_id, metadata_json,
+                        client_message_id, created_at
+                    ) VALUES (?, ?, ?, ?, 'user', ?, NULL, '{}', ?, ?)
+                    """,
+                    (
+                        user_message_id,
+                        conversation_id,
+                        project_id,
+                        session_id,
+                        user_text,
+                        client_message_id,
+                        now,
+                    ),
+                )
+                connection.execute(
+                    "UPDATE director_conversations SET updated_at = ? WHERE conversation_id = ?",
+                    (now, conversation_id),
+                )
+                connection.commit()
+                return {
+                    "run_id": run_id,
+                    "status": "pending",
+                    "owner_token": owner_token,
+                    "dispatch": True,
+                }
+            row = connection.execute(
+                "SELECT * FROM director_hermes_runs WHERE conversation_id = ? AND client_message_id = ?",
+                (conversation_id, client_message_id),
+            ).fetchone()
+            if row is None:
+                raise RuntimeError("director_hermes_run_conflict")
+            if (
+                str(row["project_id"]) != project_id
+                or str(row["session_id"]) != session_id
+            ):
+                raise ValueError("conversation_scope_mismatch")
+            if str(row["user_text"]) != user_text:
+                raise ValueError("client_message_id_reused_with_different_content")
+            result = dict(row)
+            result["dispatch"] = False
+            result["owner_token"] = None
+            if str(row["status"]) == "pending":
+                heartbeat = datetime.fromisoformat(str(row["heartbeat_at"]))
+                cutoff = self._clock().astimezone(UTC) - timedelta(
+                    seconds=stale_after_seconds
+                )
+                if heartbeat.astimezone(UTC) <= cutoff:
+                    reclaimed_token = uuid.uuid4().hex
+                    cursor = connection.execute(
+                        """
+                        UPDATE director_hermes_runs
+                        SET owner_token = ?, heartbeat_at = ?, updated_at = ?
+                        WHERE run_id = ? AND status = 'pending'
+                          AND owner_token = ? AND heartbeat_at = ?
+                        """,
+                        (
+                            reclaimed_token,
+                            now,
+                            now,
+                            str(row["run_id"]),
+                            str(row["owner_token"]),
+                            str(row["heartbeat_at"]),
+                        ),
+                    )
+                    if cursor.rowcount == 1:
+                        result["dispatch"] = True
+                        result["owner_token"] = reclaimed_token
+            connection.commit()
+            return result
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def complete_director_hermes_run(
+        self,
+        *,
+        project_id: str,
+        run_id: str,
+        owner_token: str,
+        status: str,
+        assistant_text: str,
+        retryable: bool,
+    ) -> bool:
+        """Owner-token-fenced pending-to-terminal transition."""
+        if status not in {"completed", "blocked"} or not assistant_text.strip():
+            raise ValueError("director_hermes_terminal_invalid")
+        now = self._now_iso()
+        assistant_message_id = uuid.uuid4().hex
+        connection = self._connection(project_id)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            cursor = connection.execute(
+                """
+                UPDATE director_hermes_runs
+                SET status = ?, assistant_message_id = ?, updated_at = ?
+                WHERE project_id = ? AND run_id = ? AND status = 'pending'
+                  AND owner_token = ?
+                """,
+                (
+                    status,
+                    assistant_message_id,
+                    now,
+                    project_id,
+                    run_id,
+                    owner_token,
+                ),
+            )
+            if cursor.rowcount != 1:
+                connection.rollback()
+                return False
+            row = connection.execute(
+                "SELECT conversation_id, session_id FROM director_hermes_runs WHERE project_id = ? AND run_id = ?",
+                (project_id, run_id),
+            ).fetchone()
+            metadata = {
+                "hermes_run_id": run_id,
+                "hermes_status": status,
+                "retryable": retryable,
+            }
+            connection.execute(
+                """
+                INSERT INTO director_messages (
+                    message_id, conversation_id, project_id, session_id, role,
+                    text, proposal_id, metadata_json, client_message_id, created_at
+                ) VALUES (?, ?, ?, ?, 'assistant', ?, NULL, ?, NULL, ?)
+                """,
+                (
+                    assistant_message_id,
+                    str(row["conversation_id"]),
+                    project_id,
+                    str(row["session_id"]),
+                    assistant_text,
+                    json.dumps(metadata, ensure_ascii=True, sort_keys=True),
+                    now,
+                ),
+            )
+            connection.execute(
+                "UPDATE director_conversations SET updated_at = ? WHERE conversation_id = ?",
+                (now, str(row["conversation_id"])),
+            )
+            connection.commit()
+            return True
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def get_director_hermes_run(
+        self, *, project_id: str, run_id: str
+    ) -> dict[str, Any]:
+        row = self._fetchone(
+            project_id,
+            "SELECT * FROM director_hermes_runs WHERE project_id = ? AND run_id = ?",
+            (project_id, run_id),
+        )
+        if row is None:
+            raise KeyError("director_hermes_run_missing")
+        return dict(row)
+
     @staticmethod
     def capcut_draft_handoff_claim_renewal_interval_seconds() -> float:
         """Renew well before expiry while keeping a crashed owner recoverable."""

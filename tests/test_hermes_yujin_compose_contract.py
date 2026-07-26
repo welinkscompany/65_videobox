@@ -47,6 +47,7 @@ def _render_compose(*, include_yujin: bool) -> dict:
                 "HERMES_YUJIN_GATEWAY_USERNAME": "static-gateway-user",
                 "HERMES_YUJIN_GATEWAY_PASSWORD": "static-gateway-password",
                 "HERMES_YUJIN_GATEWAY_PASSWORD_HASH": "static-gateway-password-hash",
+                "VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN": "static-service-token",
             }
         )
     command.extend(["config", "--format", "json"])
@@ -218,9 +219,17 @@ def test_gateway_gets_plaintext_auth_but_workspace_never_gets_hermes_secrets() -
             "${HERMES_YUJIN_GATEWAY_PASSWORD:?set in .env.container}"
         ),
         "HERMES_YUJIN_URL": "http://videobox-hermes-yujin:9120",
+        "VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN": (
+            "${VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN:?set in .env.container}"
+        ),
     }
     assert "HERMES_YUJIN_GATEWAY_PASSWORD_HASH" not in gateway["environment"]
-    assert all("HERMES" not in name for name in workspace.get("environment", {}))
+    assert workspace["environment"] == {
+        "VIDEOBOX_AGENT_GATEWAY_URL": "http://videobox-agent-gateway:8081",
+        "VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN": (
+            "${VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN:?set in .env.container}"
+        ),
+    }
     assert "HERMES_YUJIN_GATEWAY_PASSWORD" not in str(workspace)
     assert "HERMES_YUJIN_GATEWAY_PASSWORD_HASH" not in str(workspace)
     assert gateway["read_only"] is True
@@ -260,7 +269,12 @@ def test_agent_gateway_dockerfile_is_minimal_non_root_and_read_only_compatible()
         "/opt/data",
     ):
         assert forbidden not in dockerfile.lower()
-    assert requirements.splitlines() == ["fastapi==0.115.0", "uvicorn==0.30.6"]
+    assert requirements.splitlines() == [
+        "fastapi==0.115.0",
+        "uvicorn==0.30.6",
+        "httpx==0.28.1",
+        "websockets==15.0.1",
+    ]
 
 
 def test_agent_gateway_build_context_uses_a_deny_all_dockerfile_allowlist() -> None:
@@ -328,7 +342,7 @@ def test_agent_gateway_build_context_uses_a_deny_all_dockerfile_allowlist() -> N
     assert not any(is_included(path) for path in rejected)
 
 
-def test_gateway_health_is_http_process_readiness_only_and_reads_no_auth_env(
+def test_gateway_health_is_process_readiness_and_never_returns_auth_env(
     monkeypatch,
 ) -> None:
     main_path = (
@@ -340,13 +354,9 @@ def test_gateway_health_is_http_process_readiness_only_and_reads_no_auth_env(
         / "main.py"
     )
     source = main_path.read_text(encoding="utf-8")
-    assert "os.environ" not in source
-    assert "os.getenv" not in source
-    assert "HERMES_YUJIN_GATEWAY_USERNAME" not in source
-    assert "HERMES_YUJIN_GATEWAY_PASSWORD" not in source
-
     monkeypatch.setenv("HERMES_YUJIN_GATEWAY_USERNAME", "must-not-be-returned-user")
     monkeypatch.setenv("HERMES_YUJIN_GATEWAY_PASSWORD", "must-not-be-returned-password")
+    monkeypatch.delenv("VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN", raising=False)
     spec = importlib.util.spec_from_file_location("a1_gateway_main", main_path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -470,11 +480,14 @@ def test_static_verifier_rejects_workspace_alias_of_a_dummy_secret(
     )
     overlay_source = OVERLAY_PATH.read_text(encoding="utf-8").replace(
         "  videobox-workspace:\n"
-        "    networks: [videobox-agent-gateway-api-network]\n",
+        "    environment:\n"
+        "      VIDEOBOX_AGENT_GATEWAY_URL: http://videobox-agent-gateway:8081\n"
+        "      VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN: ${VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN:?set in .env.container}\n",
         "  videobox-workspace:\n"
         "    environment:\n"
-        f"      SAFE_ALIAS: {secret_expression}\n"
-        "    networks: [videobox-agent-gateway-api-network]\n",
+        "      VIDEOBOX_AGENT_GATEWAY_URL: http://videobox-agent-gateway:8081\n"
+        "      VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN: ${VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN:?set in .env.container}\n"
+        f"      SAFE_ALIAS: {secret_expression}\n",
         1,
     )
     (repository / "compose.hermes-yujin.yaml").write_text(
@@ -534,11 +547,14 @@ def test_static_verifier_rejects_composite_dummy_secrets(
     )
     overlay_source = OVERLAY_PATH.read_text(encoding="utf-8").replace(
         "  videobox-workspace:\n"
-        "    networks: [videobox-agent-gateway-api-network]\n",
+        "    environment:\n"
+        "      VIDEOBOX_AGENT_GATEWAY_URL: http://videobox-agent-gateway:8081\n"
+        "      VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN: ${VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN:?set in .env.container}\n",
         "  videobox-workspace:\n"
         "    environment:\n"
-        f"      SAFE_COMPOSITE: {composite_expression}\n"
-        "    networks: [videobox-agent-gateway-api-network]\n",
+        "      VIDEOBOX_AGENT_GATEWAY_URL: http://videobox-agent-gateway:8081\n"
+        "      VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN: ${VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN:?set in .env.container}\n"
+        f"      SAFE_COMPOSITE: {composite_expression}\n",
         1,
     )
     (repository / "compose.hermes-yujin.yaml").write_text(
@@ -586,12 +602,15 @@ def test_static_verifier_allows_a_benign_dummy_username_substring(
     )
     overlay_source = OVERLAY_PATH.read_text(encoding="utf-8").replace(
         "  videobox-workspace:\n"
-        "    networks: [videobox-agent-gateway-api-network]\n",
+        "    environment:\n"
+        "      VIDEOBOX_AGENT_GATEWAY_URL: http://videobox-agent-gateway:8081\n"
+        "      VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN: ${VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN:?set in .env.container}\n",
         "  videobox-workspace:\n"
         "    environment:\n"
+        "      VIDEOBOX_AGENT_GATEWAY_URL: http://videobox-agent-gateway:8081\n"
+        "      VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN: ${VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN:?set in .env.container}\n"
         "      static-gateway-user: benign-key-value\n"
-        "      DATABASE_URL: postgresql://static-gateway-user-suffix@postgres/db\n"
-        "    networks: [videobox-agent-gateway-api-network]\n",
+        "      DATABASE_URL: postgresql://static-gateway-user-suffix@postgres/db\n",
         1,
     )
     (repository / "compose.hermes-yujin.yaml").write_text(

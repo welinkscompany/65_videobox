@@ -13,7 +13,7 @@
 Parent: `docs/superpowers/plans/2026-07-26-videobox-hermes-yujin-master-plan.md`
 Design: `docs/superpowers/specs/2026-07-26-videobox-hermes-yujin-integration-design.md`
 
-Child progress: **4/6 tasks (66.7%), remaining 33.3%**. These six tasks are master IDs P0-1, P0-2, A1, A2, A3, and A4.
+Child progress: **5/6 tasks (83.3%), remaining 16.7%**. These six tasks are master IDs P0-1, P0-2, A1, A2, A3, and A4.
 
 ## P0-1 — Confirm drift and official runtime contracts
 
@@ -283,7 +283,7 @@ Expected: evidence distinguishes source configuration, container state, HTTP rea
 
 ## A3 — Implement Hermes transport and SSE run boundary
 
-- [ ] **A3** Implement the minimal authenticated Hermes JSON-RPC/WebSocket client and API SSE run boundary.
+- [x] **A3** Implement the minimal authenticated Hermes JSON-RPC/WebSocket client and API SSE run boundary.
 
 **Files:**
 

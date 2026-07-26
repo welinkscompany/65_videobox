@@ -42,6 +42,7 @@ def _env_text(*extra_lines: str) -> str:
         "HERMES_YUJIN_GATEWAY_USERNAME=${BASE_GATEWAY_USERNAME}",
         f"HERMES_YUJIN_GATEWAY_PASSWORD={VALID_PASSWORD}",
         f"HERMES_YUJIN_GATEWAY_PASSWORD_HASH='{VALID_HASH}'",
+        "VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN=valid-service-token",
     ]
     lines.extend(extra_lines)
     return "\n".join(lines) + "\n"
@@ -98,6 +99,7 @@ def _rendered_model(
                     "HERMES_YUJIN_GATEWAY_PASSWORD": gateway_password,
                     "HERMES_YUJIN_GATEWAY_USERNAME": gateway_username,
                     "HERMES_YUJIN_URL": "http://videobox-hermes-yujin:9120",
+                    "VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN": "valid-service-token",
                 }
             },
             "videobox-hermes-yujin": {
@@ -107,8 +109,12 @@ def _rendered_model(
                 }
             },
             "videobox-workspace": {
-                "environment": workspace_environment
-                or {"POSTGRES_PASSWORD": "static-value"}
+                "environment": {
+                    "POSTGRES_PASSWORD": "static-value",
+                    "VIDEOBOX_AGENT_GATEWAY_URL": "http://videobox-agent-gateway:8081",
+                    "VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN": "valid-service-token",
+                    **(workspace_environment or {}),
+                }
             },
         }
     }

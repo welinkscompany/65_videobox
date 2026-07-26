@@ -20,6 +20,7 @@ $credentialNames = @(
     "HERMES_YUJIN_GATEWAY_USERNAME"
     "HERMES_YUJIN_GATEWAY_PASSWORD"
     "HERMES_YUJIN_GATEWAY_PASSWORD_HASH"
+    "VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN"
 )
 
 if (-not (Test-Path -LiteralPath $EnvFile -PathType Leaf)) {
@@ -108,6 +109,7 @@ $configResult = Invoke-CapturedDocker `
         "HERMES_YUJIN_GATEWAY_USERNAME"
         "HERMES_YUJIN_GATEWAY_PASSWORD"
         "HERMES_YUJIN_GATEWAY_PASSWORD_HASH"
+        "VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN"
         "MISSING"
     )
 if ($configResult.ExitCode -ne 0) {
@@ -132,6 +134,7 @@ $expectedGatewayEnvironmentNames = @(
     "HERMES_YUJIN_GATEWAY_PASSWORD"
     "HERMES_YUJIN_GATEWAY_USERNAME"
     "HERMES_YUJIN_URL"
+    "VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN"
 )
 if (($gatewayEnvironmentNames -join "|") -cne ($expectedGatewayEnvironmentNames -join "|")) {
     throw "Agent gateway environment contract is invalid."
@@ -157,6 +160,9 @@ $hermesUsername = Assert-ResolvedCredential `
 $hermesPasswordHash = Assert-ResolvedCredential `
     "HERMES_DASHBOARD_BASIC_AUTH_PASSWORD_HASH" `
     $hermes.environment.HERMES_DASHBOARD_BASIC_AUTH_PASSWORD_HASH
+$gatewayServiceToken = Assert-ResolvedCredential `
+    "VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN" `
+    $gateway.environment.VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN
 if ($gatewayPassword.Length -lt 12) {
     throw "Resolved container credential 'HERMES_YUJIN_GATEWAY_PASSWORD' is invalid."
 }
@@ -165,6 +171,14 @@ if ($gatewayUsername -cne $hermesUsername) {
 }
 if ($gateway.environment.HERMES_YUJIN_URL -cne "http://videobox-hermes-yujin:9120") {
     throw "Agent gateway Hermes URL is invalid."
+}
+if (
+    $workspace.environment.VIDEOBOX_AGENT_GATEWAY_URL -cne
+    "http://videobox-agent-gateway:8081" -or
+    $workspace.environment.VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN -cne
+    $gatewayServiceToken
+) {
+    throw "Workspace agent gateway configuration is invalid."
 }
 foreach ($name in @($workspace.environment.PSObject.Properties.Name)) {
     if ($name -match '^HERMES(?:_YUJIN|_DASHBOARD)') {

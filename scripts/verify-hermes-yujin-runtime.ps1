@@ -83,6 +83,7 @@ foreach ($requiredTemplate in @(
     '${HERMES_YUJIN_GATEWAY_USERNAME:?set in .env.container}'
     '${HERMES_YUJIN_GATEWAY_PASSWORD:?set in .env.container}'
     '${HERMES_YUJIN_GATEWAY_PASSWORD_HASH:?set in .env.container}'
+    '${VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN:?set in .env.container}'
 )) {
     Assert-True ($source.Contains($requiredTemplate)) "A required secret template is missing."
 }
@@ -101,6 +102,7 @@ foreach ($name in @(
     "HERMES_YUJIN_GATEWAY_USERNAME"
     "HERMES_YUJIN_GATEWAY_PASSWORD"
     "HERMES_YUJIN_GATEWAY_PASSWORD_HASH"
+    "VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN"
 )) {
     [void]$baseProcessInfo.EnvironmentVariables.Remove($name)
 }
@@ -134,6 +136,7 @@ $dummyEnvironment = @{
     "HERMES_YUJIN_GATEWAY_USERNAME" = "static-gateway-user"
     "HERMES_YUJIN_GATEWAY_PASSWORD" = "static-gateway-password"
     "HERMES_YUJIN_GATEWAY_PASSWORD_HASH" = "static-gateway-password-hash"
+    "VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN" = "static-service-token"
 }
 foreach ($name in $dummyEnvironment.Keys) {
     $processInfo.EnvironmentVariables[$name] = $dummyEnvironment[$name]
@@ -180,9 +183,18 @@ Assert-True (
             "HERMES_YUJIN_GATEWAY_PASSWORD"
             "HERMES_YUJIN_GATEWAY_USERNAME"
             "HERMES_YUJIN_URL"
+            "VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN"
         ) -join "|"
     )
 ) "Gateway environment contract is invalid."
+Assert-True (
+    $workspace.environment.VIDEOBOX_AGENT_GATEWAY_URL -ceq
+    "http://videobox-agent-gateway:8081"
+) "Workspace gateway URL is invalid."
+Assert-True (
+    $workspace.environment.VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN -ceq
+    $dummyEnvironment["VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN"]
+) "Workspace gateway service credential does not match the gateway."
 foreach ($name in @($workspace.environment.PSObject.Properties.Name)) {
     Assert-True (
         $name -notmatch '^HERMES(?:_YUJIN|_DASHBOARD)'

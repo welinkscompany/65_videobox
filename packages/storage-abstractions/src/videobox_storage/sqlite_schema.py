@@ -432,6 +432,24 @@ PROJECT_SCHEMA_STATEMENTS = (
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS director_hermes_runs (
+        run_id TEXT PRIMARY KEY,
+        conversation_id TEXT NOT NULL,
+        client_message_id TEXT NOT NULL,
+        project_id TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        user_text TEXT NOT NULL,
+        user_message_id TEXT NOT NULL,
+        assistant_message_id TEXT,
+        status TEXT NOT NULL,
+        owner_token TEXT NOT NULL,
+        heartbeat_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(conversation_id, client_message_id)
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS exact_preview_renders (
         generation_id TEXT PRIMARY KEY,
         project_id TEXT NOT NULL,

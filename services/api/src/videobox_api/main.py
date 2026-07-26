@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 import asyncio
 import inspect
+import os
 from math import isfinite
 from pathlib import Path
 from urllib.request import urlopen
@@ -36,6 +37,7 @@ from videobox_api.routers.media_library import build_media_library_router
 from videobox_api.routers.media_analysis import build_media_analysis_router
 from videobox_api.routers.outputs import build_outputs_router
 from videobox_api.routers.hermes_internal import build_hermes_internal_router
+from videobox_api.routers.hermes_conversation import build_hermes_conversation_router
 from videobox_api.routers.projects import build_projects_router
 from videobox_api.routers.review import build_review_router
 from videobox_api.routers.timeline import build_timeline_router
@@ -68,6 +70,8 @@ from videobox_storage.media_library_store import MediaLibraryStore
 from videobox_storage.postgres_project_store import PostgresProjectStore
 from videobox_storage.user_library_store import UserLibraryStore
 from videobox_api.hermes_capabilities import HermesCapabilityVerifier
+from videobox_api.agent_gateway_client import AgentGatewayClient
+from videobox_api.hermes_run_service import HermesRunService
 
 # Re-exported for backward compatibility: tests/test_api.py and a few other
 # test modules import these names directly from videobox_api.main rather
@@ -201,6 +205,9 @@ def create_app(
     allow_test_media_analysis_providers: bool = False,
     creation_interview_runtime: CreationInterviewRuntime | None = None,
     hermes_capability_verifier: HermesCapabilityVerifier | None = None,
+    agent_gateway_url: str | None = None,
+    agent_gateway_service_token: str | None = None,
+    agent_gateway_http_client_factory=None,
 ) -> FastAPI:
     app = FastAPI(title="VideoBox API", version="0.1.0", lifespan=_media_analysis_lifespan)
 
@@ -335,6 +342,32 @@ def create_app(
     app.state.final_renderer = pipeline.final_renderer
     app.state.user_library_store = user_library_store
     app.state.media_library_store = resolved_media_library_store
+    resolved_agent_gateway_url = agent_gateway_url
+    resolved_agent_gateway_token = agent_gateway_service_token
+    if projects_root is None:
+        resolved_agent_gateway_url = (
+            resolved_agent_gateway_url
+            or os.environ.get("VIDEOBOX_AGENT_GATEWAY_URL")
+        )
+        resolved_agent_gateway_token = (
+            resolved_agent_gateway_token
+            or os.environ.get("VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN")
+        )
+    if bool(resolved_agent_gateway_url) != bool(resolved_agent_gateway_token):
+        raise ValueError("agent_gateway_config_incomplete")
+    if resolved_agent_gateway_url and resolved_agent_gateway_token:
+        client_kwargs = {
+            "base_url": resolved_agent_gateway_url,
+            "service_token": resolved_agent_gateway_token,
+        }
+        if agent_gateway_http_client_factory is not None:
+            client_kwargs["http_client_factory"] = agent_gateway_http_client_factory
+        agent_gateway_client = AgentGatewayClient(**client_kwargs)
+        app.state.hermes_run_service = HermesRunService(
+            store=store, gateway_client=agent_gateway_client
+        )
+    else:
+        app.state.hermes_run_service = None
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -364,6 +397,10 @@ def create_app(
     app.include_router(build_timeline_router(orchestrator))
     app.include_router(build_editing_session_router(orchestrator, store))
     app.include_router(build_director_proposals_router(store))
+    if app.state.hermes_run_service is not None:
+        app.include_router(
+            build_hermes_conversation_router(app.state.hermes_run_service)
+        )
     app.include_router(build_editor_library_router(user_library_store))
     app.include_router(build_media_library_router(store, resolved_media_library_store))
     app.include_router(build_review_router(orchestrator))

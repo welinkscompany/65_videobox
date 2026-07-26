@@ -103,6 +103,27 @@ class DirectorMessageSubmitRequest(BaseModel):
     text: str = Field(min_length=1)
 
 
+class HermesRunCreateRequest(BaseModel):
+    session_id: str = Field(min_length=1, max_length=128)
+    client_message_id: str = Field(min_length=1, max_length=128)
+    text: str = Field(min_length=1, max_length=20_000)
+
+
+class HermesRunCreateResponse(BaseModel):
+    run_id: str
+    conversation_id: str
+    events_url: str
+
+
+class HermesStreamEvent(BaseModel):
+    event_id: int
+    event_type: Literal[
+        "run_started", "text_delta", "blocked", "run_completed"
+    ]
+    text: str = ""
+    retryable: bool = False
+
+
 class DirectorReferenceResponse(BaseModel):
     reference_code: str
     immutable_id: str | dict[str, str]

@@ -1,5 +1,8 @@
 services:
   videobox-workspace:
+    environment:
+      VIDEOBOX_AGENT_GATEWAY_URL: http://videobox-agent-gateway:8081
+      VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN: ${VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN:?set in .env.container}
     networks: [videobox-agent-gateway-api-network]
 
   videobox-agent-gateway:
@@ -11,6 +14,7 @@ services:
       HERMES_YUJIN_GATEWAY_USERNAME: ${HERMES_YUJIN_GATEWAY_USERNAME:?set in .env.container}
       HERMES_YUJIN_GATEWAY_PASSWORD: ${HERMES_YUJIN_GATEWAY_PASSWORD:?set in .env.container}
       HERMES_YUJIN_URL: http://videobox-hermes-yujin:9120
+      VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN: ${VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN:?set in .env.container}
     depends_on:
       videobox-hermes-yujin:
         condition: service_healthy
