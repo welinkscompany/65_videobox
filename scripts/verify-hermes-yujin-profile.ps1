@@ -59,35 +59,30 @@ foreach ($relativePath in $requiredFiles) {
     }
 }
 
-$executableExtensions = [Collections.Generic.HashSet[string]]::new(
+$allowedContentExtensions = [Collections.Generic.HashSet[string]]::new(
     [StringComparer]::OrdinalIgnoreCase
 )
 foreach ($extension in @(
-    ".ps1", ".psm1", ".psd1",
-    ".py", ".pyw",
-    ".js", ".mjs", ".cjs", ".ts",
-    ".sh", ".bash", ".zsh", ".fish",
-    ".bat", ".cmd", ".com",
-    ".exe", ".msi", ".dll", ".scr",
-    ".vbs", ".vbe", ".wsf", ".wsh",
-    ".jar"
+    ".md", ".yaml", ".yml"
 )) {
-    [void]$executableExtensions.Add($extension)
+    [void]$allowedContentExtensions.Add($extension)
 }
 
-function Test-IsExecutablePayload {
+function Test-IsDisallowedContentPayload {
     param(
         [IO.FileInfo]$File,
         [byte[]]$Bytes
     )
 
-    if ($executableExtensions.Contains($File.Extension)) {
+    if (-not $allowedContentExtensions.Contains($File.Extension)) {
         return $true
     }
-    if ([string]::IsNullOrEmpty($File.Extension) -and $Bytes.Length -ge 2) {
-        if ($Bytes[0] -eq 0x23 -and $Bytes[1] -eq 0x21) {
-            return $true
-        }
+    if (
+        $Bytes.Length -ge 2 -and
+        $Bytes[0] -eq 0x23 -and
+        $Bytes[1] -eq 0x21
+    ) {
+        return $true
     }
     if ($Bytes.Length -ge 2 -and $Bytes[0] -eq 0x4D -and $Bytes[1] -eq 0x5A) {
         return $true
@@ -127,8 +122,8 @@ foreach ($file in $files) {
         throw "The Yujin distribution contains a file outside declared ownership."
     }
     $bytes = [IO.File]::ReadAllBytes($file.FullName)
-    if (Test-IsExecutablePayload -File $file -Bytes $bytes) {
-        throw "The Yujin distribution contains an undeclared executable file."
+    if (Test-IsDisallowedContentPayload -File $file -Bytes $bytes) {
+        throw "The Yujin distribution contains a disallowed content type or executable payload."
     }
 
     $content = [IO.File]::ReadAllText($file.FullName)

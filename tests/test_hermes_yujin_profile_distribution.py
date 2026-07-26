@@ -194,16 +194,27 @@ def test_static_verifier_rejects_secrets_and_local_absolute_user_paths(
         "skills/videobox-editor/run.PS1",
         "skills/videobox-editor/run.PSM1",
         "skills/videobox-editor/run.mjs",
+        "skills/videobox-editor/run.hta",
+        "skills/videobox-editor/run.rb",
+        "skills/videobox-editor/run.pl",
+        "skills/videobox-editor/run.php",
+        "skills/videobox-editor/notes.txt",
+        "skills/videobox-editor/data.json",
     ),
 )
-def test_static_verifier_rejects_undeclared_or_executable_files(
+def test_static_verifier_rejects_outside_ownership_or_disallowed_content_types(
     tmp_path: Path,
     relative_path: str,
 ) -> None:
     copied = _copy_profile(tmp_path)
     target = copied / Path(relative_path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text("safe placeholder", encoding="utf-8")
+    fixture_content = {
+        ".rb": "#!/usr/bin/env ruby\nputs 'fixture'\n",
+        ".pl": "#!/usr/bin/env perl\nprint 'fixture';\n",
+        ".php": "<?php echo 'fixture'; ?>\n",
+    }.get(target.suffix.lower(), "safe placeholder")
+    target.write_text(fixture_content, encoding="utf-8")
 
     result = _run_powershell(
         VERIFY_SCRIPT,
@@ -221,6 +232,23 @@ def test_static_verifier_rejects_an_extensionless_shebang_file(
     copied = _copy_profile(tmp_path)
     executable = copied / "skills" / "videobox-editor" / "run"
     executable.write_text("#!/usr/bin/env python\nprint('fixture')\n", encoding="utf-8")
+
+    result = _run_powershell(
+        VERIFY_SCRIPT,
+        "-StaticOnly",
+        "-ProfileRoot",
+        str(copied),
+    )
+
+    assert result.returncode != 0
+
+
+def test_static_verifier_rejects_a_shebang_in_an_allowed_markdown_file(
+    tmp_path: Path,
+) -> None:
+    copied = _copy_profile(tmp_path)
+    executable = copied / "skills" / "videobox-editor" / "payload.md"
+    executable.write_text("#!/usr/bin/env ruby\nputs 'fixture'\n", encoding="utf-8")
 
     result = _run_powershell(
         VERIFY_SCRIPT,
