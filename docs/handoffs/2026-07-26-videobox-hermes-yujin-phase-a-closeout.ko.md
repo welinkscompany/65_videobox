@@ -92,8 +92,8 @@ A4의 RightDock 유진 대화 구현과 비라이브 검증은 끝났다. 사용
 - smoke script 집중 Python: **6 passed, 1 warning**
 - 전체 frontend: **50 files, 622 tests passed**
 - 첫 검토 보완 focused frontend: **5 files, 144 tests passed**
-  - exact command: `npm exec vitest -- run src/app/AppRouter.test.tsx src/features/editor/workbench/editor-workbench-route.test.tsx src/features/editor/workbench/editor-workbench.test.tsx src/features/editor/workbench/hermesSseClient.test.ts src/features/editor/workbench/right-dock.test.tsx`
-- 최종 품질 보완 focused frontend: 같은 exact command로 **5 files, 146 tests passed**
+- 최종 품질 보완 focused frontend: **5 files, 146 tests passed**
+  - exact command: `npm --prefix apps/web test -- --run src/app/AppRouter.test.tsx src/features/editor/workbench/editor-workbench-route.test.tsx src/features/editor/workbench/editor-workbench.test.tsx src/features/editor/workbench/hermesSseClient.test.ts src/features/editor/workbench/right-dock.test.tsx`
 - Editor workbench E2E: **8 passed**
 - frontend production build: 통과
 - Hermes runtime verifier `-StaticOnly`: 통과
