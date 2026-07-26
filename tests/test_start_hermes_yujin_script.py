@@ -66,6 +66,195 @@ def _assert_no_values_leaked(result: subprocess.CompletedProcess[str]) -> None:
         assert forbidden not in output
 
 
+def _rendered_model(
+    workspace_environment: dict[str, str] | None = None,
+) -> dict[str, object]:
+    return {
+        "services": {
+            "videobox-agent-gateway": {
+                "environment": {
+                    "HERMES_YUJIN_GATEWAY_PASSWORD": VALID_PASSWORD,
+                    "HERMES_YUJIN_GATEWAY_USERNAME": "valid-dummy-user",
+                    "HERMES_YUJIN_URL": "http://videobox-hermes-yujin:9120",
+                }
+            },
+            "videobox-hermes-yujin": {
+                "environment": {
+                    "HERMES_DASHBOARD_BASIC_AUTH_PASSWORD_HASH": VALID_HASH,
+                    "HERMES_DASHBOARD_BASIC_AUTH_USERNAME": "valid-dummy-user",
+                }
+            },
+            "videobox-workspace": {
+                "environment": workspace_environment
+                or {"POSTGRES_PASSWORD": "static-value"}
+            },
+        }
+    }
+
+
+def _write_fake_docker(tmp_path: Path) -> Path:
+    fake_docker = tmp_path / "docker.cmd"
+    fake_docker.write_text(
+        "@echo off\r\n"
+        'echo %*>>"%FAKE_DOCKER_LOG%"\r\n'
+        'echo %* | findstr /c:"config" >nul\r\n'
+        "if not errorlevel 1 (\r\n"
+        '  if /I "%FAKE_DOCKER_CONFIG_STDERR%"=="large" (\r\n'
+        '    powershell -NoProfile -Command "[Console]::Error.Write(('
+        "'c' * 1048576))"
+        '"\r\n'
+        "  )\r\n"
+        '  type "%FAKE_DOCKER_CONFIG%"\r\n'
+        "  exit /b 0\r\n"
+        ")\r\n"
+        'echo %* | findstr /c:"run" >nul\r\n'
+        "if not errorlevel 1 exit /b 0\r\n"
+        'powershell -NoProfile -Command "[Console]::Error.Write(('
+        "'u' * 1048576))"
+        '"\r\n'
+        "exit /b %FAKE_DOCKER_UP_EXIT%\r\n",
+        encoding="utf-8",
+    )
+    return fake_docker
+
+
+def _run_fake_start(
+    tmp_path: Path,
+    *,
+    workspace_environment: dict[str, str] | None = None,
+    validate_only: bool = False,
+    config_stderr: str = "quiet",
+    up_exit_code: int = 0,
+    timeout_seconds: float = 8,
+) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+    env_file = tmp_path / "container.env"
+    env_file.write_text(_env_text(), encoding="utf-8")
+    fake_config = tmp_path / "config.json"
+    fake_config.write_text(
+        json.dumps(_rendered_model(workspace_environment)),
+        encoding="utf-8",
+    )
+    fake_log = tmp_path / "docker.log"
+    fake_docker = _write_fake_docker(tmp_path)
+    command = [
+        "powershell",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        str(SCRIPT),
+        "-EnvFile",
+        str(env_file),
+        "-DockerExecutable",
+        str(fake_docker),
+    ]
+    if validate_only:
+        command.append("-ValidateOnly")
+    process = subprocess.Popen(
+        command,
+        cwd=ROOT,
+        env={
+            **os.environ,
+            "FAKE_DOCKER_CONFIG": str(fake_config),
+            "FAKE_DOCKER_CONFIG_STDERR": config_stderr,
+            "FAKE_DOCKER_LOG": str(fake_log),
+            "FAKE_DOCKER_UP_EXIT": str(up_exit_code),
+        },
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+    )
+    try:
+        stdout, stderr = process.communicate(timeout=timeout_seconds)
+    except subprocess.TimeoutExpired:
+        subprocess.run(
+            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        process.communicate(timeout=5)
+        pytest.fail(
+            f"Hermes Yujin startup exceeded the {timeout_seconds:g}s bound"
+        )
+    result = subprocess.CompletedProcess(
+        command,
+        process.returncode,
+        stdout,
+        stderr,
+    )
+    invocations = (
+        fake_log.read_text(encoding="utf-8").splitlines()
+        if fake_log.exists()
+        else []
+    )
+    return result, invocations
+
+
+def test_captured_validation_drains_large_stderr_without_deadlock(
+    tmp_path: Path,
+) -> None:
+    result, invocations = _run_fake_start(
+        tmp_path,
+        validate_only=True,
+        config_stderr="large",
+    )
+
+    assert result.returncode == 0
+    assert len(invocations) == 2
+    assert "config" in invocations[0]
+    assert "run" in invocations[1]
+    _assert_no_values_leaked(result)
+
+
+@pytest.mark.parametrize(
+    ("up_exit_code", "expected_returncode"),
+    ((0, 0), (23, 1)),
+)
+def test_start_streams_large_stderr_without_pipe_deadlock(
+    tmp_path: Path,
+    up_exit_code: int,
+    expected_returncode: int,
+) -> None:
+    result, invocations = _run_fake_start(
+        tmp_path,
+        up_exit_code=up_exit_code,
+    )
+
+    assert result.returncode == expected_returncode
+    assert len(invocations) == 3
+    assert " up " in f" {invocations[2]} "
+    assert "u" * 65536 in result.stderr
+    if expected_returncode == 0:
+        assert "targeted for startup" in result.stdout
+    else:
+        assert "Targeted Hermes Yujin startup failed." in result.stderr
+    _assert_no_values_leaked(result)
+
+
+@pytest.mark.parametrize(
+    "aliased_secret",
+    ("valid-dummy-user", VALID_PASSWORD, VALID_HASH),
+)
+def test_workspace_alias_of_any_resolved_credential_fails_closed(
+    tmp_path: Path,
+    aliased_secret: str,
+) -> None:
+    result, invocations = _run_fake_start(
+        tmp_path,
+        workspace_environment={"SAFE_ALIAS": aliased_secret},
+        validate_only=True,
+    )
+
+    assert result.returncode != 0
+    assert len(invocations) == 1
+    assert "config" in invocations[0]
+    _assert_no_values_leaked(result)
+
+
 def test_unresolved_value_never_reaches_targeted_up_with_a_fake_executable(
     tmp_path: Path,
 ) -> None:

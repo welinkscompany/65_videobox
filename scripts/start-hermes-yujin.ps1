@@ -54,9 +54,11 @@ function Invoke-CapturedDocker {
         $process = New-Object System.Diagnostics.Process
         $process.StartInfo = $processInfo
         [void]$process.Start()
-        $stdout = $process.StandardOutput.ReadToEnd()
-        [void]$process.StandardError.ReadToEnd()
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
         $process.WaitForExit()
+        $stdout = $stdoutTask.GetAwaiter().GetResult()
+        [void]$stderrTask.GetAwaiter().GetResult()
         return [pscustomobject]@{
             ExitCode = $process.ExitCode
             StdOut = $stdout
@@ -160,6 +162,18 @@ foreach ($name in @($workspace.environment.PSObject.Properties.Name)) {
         throw "Workspace received a forbidden Hermes credential."
     }
 }
+$workspaceEnvironmentJson = (
+    $workspace.environment | ConvertTo-Json -Depth 20 -Compress
+).Replace('$$', '$')
+foreach ($credentialValue in @(
+    $gatewayUsername
+    $gatewayPassword
+    $hermesPasswordHash
+)) {
+    if ($workspaceEnvironmentJson.Contains([string]$credentialValue)) {
+        throw "Workspace received a forbidden Hermes credential."
+    }
+}
 
 $passwordCheckCode = (
     "import os; from plugins.dashboard_auth.basic import _verify_password; " +
@@ -191,7 +205,7 @@ if ($ValidateOnly) {
     exit 0
 }
 
-$upResult = Invoke-CapturedDocker -DockerArguments @(
+$upArguments = @(
     "compose"
     "-f", $composeFile
     "-f", $overlayFile
@@ -203,7 +217,19 @@ $upResult = Invoke-CapturedDocker -DockerArguments @(
     "videobox-hermes-yujin"
     "videobox-agent-gateway"
 )
-if ($upResult.ExitCode -ne 0) {
+$upExitCode = 1
+Push-Location $repositoryRoot
+try {
+    & $DockerExecutable @upArguments
+    $upExitCode = $LASTEXITCODE
+}
+catch {
+    throw "Targeted Hermes Yujin startup could not be executed."
+}
+finally {
+    Pop-Location
+}
+if ($upExitCode -ne 0) {
     throw "Targeted Hermes Yujin startup failed."
 }
 

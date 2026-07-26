@@ -177,6 +177,20 @@ foreach ($name in @($workspace.environment.PSObject.Properties.Name)) {
         $name -notmatch '^HERMES(?:_YUJIN|_DASHBOARD)'
     ) "Workspace received a forbidden Hermes environment value."
 }
+$workspaceEnvironmentJson = (
+    $workspace.environment | ConvertTo-Json -Depth 20 -Compress
+).Replace('$$', '$')
+foreach ($name in @(
+    "HERMES_YUJIN_GATEWAY_USERNAME"
+    "HERMES_YUJIN_GATEWAY_PASSWORD"
+    "HERMES_YUJIN_GATEWAY_PASSWORD_HASH"
+)) {
+    Assert-True (
+        -not $workspaceEnvironmentJson.Contains(
+            [string]$dummyEnvironment[$name]
+        )
+    ) "Workspace resolved environment contains a forbidden dummy Hermes credential value."
+}
 
 $hermesMounts = @($hermes.volumes)
 Assert-True ($hermesMounts.Count -eq 1) "Hermes must have exactly one mount in A1."

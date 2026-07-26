@@ -36,6 +36,8 @@
 - A1 Compose activation: base는 기존 호환, `compose.hermes-yujin.yaml` + `hermes-yujin` profile만 opt-in
 - A1 gateway build context: Dockerfile 전용 deny-all allowlist로 Dockerfile·requirements·gateway source만 허용
 - A1 startup validation: Compose rendered model의 정확한 resolved env만 신뢰하고, 고정 Hermes 이미지의 공식 `_verify_password`를 network none으로 실행해 plaintext/hash 관계를 검증
+- A1 startup streaming: captured config/password 검사는 stdout/stderr를 비동기로 동시에 drain하고 실제 targeted `up`은 native argument array와 inherited streaming을 사용
+- workspace secret boundary: environment key뿐 아니라 전체 resolved value에서 gateway username/plaintext/hash가 0회인지 start/static verifier가 검사
 - capability authority: A1 topology/health-only gateway 배치와 issuance·signer·revocation writer·capability route 미배치를 별도 상태로 고정
 - Phase 0: **2/2 완료**
 - Phase A: **1/4 완료**
@@ -49,6 +51,9 @@
 - review follow-up RED/GREEN: opt-in topology **8 failed, 10 passed** → **18 passed**; capability authority **2 failed, 3 passed** → **5 passed**
 - credential RED/GREEN: malformed/resolved env **3 failed, 8 passed**; 기존 raw parser가 unresolved value를 fake Docker까지 넘겨 exit 0인 characterization RED → Compose rendered model/고정 Hermes verifier 적용 뒤 **12 passed**
 - final verification: A1 focused **23 passed**, Compose/plan-state 포함 관련 gate **45 passed**, 전체 Python **1597 passed, 20 skipped**; child-process dummy env의 Compose config, A1 static verifier, plan-state verifier, `git diff --check` 통과
+- quality follow-up RED: 1 MiB stderr captured/정상 start/실패 start **3 timeout**, workspace credential alias **3 fail-open**, capability 주석/static alias **2 failed**
+- quality follow-up GREEN: startup/alias **6 passed**, capability 주석/static alias **2 passed**, capability authority 포함 최종 관련 gate **58 passed**; 이번 follow-up 전체 Python suite는 미실행이며 기존 **1597 passed, 20 skipped**는 직전 commit 근거
+- supply-chain future: gateway `python:3.12-slim` base digest pin과 A1 전용 Python SBOM은 이번 fix 범위 밖의 비차단 후속이며 완료로 주장하지 않음
 - live service start/HTTP/OAuth/provider/chat/Mem0: real auth env 부재로 미실행
 
 ## 보호 대상

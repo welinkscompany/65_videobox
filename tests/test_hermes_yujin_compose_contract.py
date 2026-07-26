@@ -92,6 +92,19 @@ def test_base_compose_remains_yujin_free_and_overlay_is_explicitly_opt_in() -> N
     }
 
 
+def test_capability_authority_comment_matches_the_deployed_a1_state() -> None:
+    base_source = COMPOSE_PATH.read_text(encoding="utf-8")
+    top_comment = "\n".join(base_source.splitlines()[:8])
+
+    assert "future gateway" not in top_comment
+    assert "capability issuance, private key, and route remain not deployed" in (
+        top_comment
+    )
+    assert "health-only gateway and internal networks are deployed separately" in (
+        top_comment
+    )
+
+
 def test_hermes_yujin_uses_the_pinned_serve_contract_and_isolated_oauth_state() -> None:
     compose = _overlay()
     hermes = compose["services"]["videobox-hermes-yujin"]
@@ -419,6 +432,60 @@ def test_static_verifier_uses_child_dummy_env_and_checks_the_source_topology() -
         script,
         flags=re.IGNORECASE,
     )
+
+
+def test_static_verifier_rejects_workspace_alias_of_a_dummy_secret(
+    tmp_path: Path,
+) -> None:
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    (repository / "compose.yaml").write_text(
+        COMPOSE_PATH.read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    overlay_source = OVERLAY_PATH.read_text(encoding="utf-8").replace(
+        "  videobox-workspace:\n"
+        "    networks: [videobox-agent-gateway-api-network]\n",
+        "  videobox-workspace:\n"
+        "    environment:\n"
+        "      SAFE_ALIAS: ${HERMES_YUJIN_GATEWAY_PASSWORD}\n"
+        "    networks: [videobox-agent-gateway-api-network]\n",
+        1,
+    )
+    (repository / "compose.hermes-yujin.yaml").write_text(
+        overlay_source,
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(ROOT / "scripts" / "verify-hermes-yujin-runtime.ps1"),
+            "-StaticOnly",
+            "-RepositoryRoot",
+            str(repository),
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=30,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    output = f"{result.stdout}\n{result.stderr}"
+    for forbidden in (
+        "static-gateway-user",
+        "static-gateway-password",
+        "static-gateway-password-hash",
+    ):
+        assert forbidden not in output
 
 
 def test_env_example_distinguishes_plaintext_and_hash_without_usable_credentials() -> None:

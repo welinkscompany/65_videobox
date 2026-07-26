@@ -186,7 +186,9 @@ Expected: evidence distinguishes source configuration, container state, HTTP rea
 8. `start-hermes-yujin.ps1` must:
    - use the rendered Compose model—not a second raw `.env` parser—as the authority for the exact resolved credential environment;
    - reject missing, empty, unresolved, placeholder, mismatched username, or invalid URL values without echoing values;
+   - reject any resolved workspace environment whose key or serialized value contains the resolved gateway username, plaintext password, or Hermes password hash;
    - verify the plaintext/password-hash relationship with the pinned Hermes image's canonical `plugins.dashboard_auth.basic._verify_password` under `--network none`;
+   - drain captured config/password-check stdout and stderr concurrently, but run the actual targeted `up` through the native argument array with inherited streaming output;
    - offer `-ValidateOnly` so configuration and credential relationship can be checked without starting the services;
    - start only the named Yujin and agent-gateway services;
    - refuse to remove old containers or volumes.
