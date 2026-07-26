@@ -31,10 +31,14 @@ def test_static_capability_authority_names_the_future_owner_and_existing_durable
     assert contract.durable_revocation_storage_primitive == "LocalProjectStore.revoke_hermes_capability"
     assert contract.owner_authorized_revocation_writer_status == "not_deployed"
     assert contract.durable_consume_replay_boundary == "ProjectStore.consume_hermes_capability"
-    assert contract.gateway_route_status == "not_deployed"
-    assert contract.hermes_network_status == "preauth-network-none"
+    assert contract.capability_gateway_route_status == "not_deployed"
+    assert contract.signing_private_key_status == "not_deployed"
+    assert contract.preauth_hermes_network_status == "network_mode_none"
+    assert contract.yujin_topology_status == "deployed"
+    assert contract.gateway_service_status == "health_only"
     assert contract.ordinary_api_paths == "forbidden"
     assert contract.gateway_service == "videobox-agent-gateway"
+    assert contract.gateway_api_network == "videobox-agent-gateway-api-network"
     assert contract.gateway_network == "videobox-agent-gateway-network"
     assert contract.gateway_route_mode == "gateway-only"
 
@@ -70,6 +74,9 @@ def test_compose_fields_match_the_canonical_static_authority_contract() -> None:
 def test_gateway_boundary_is_not_an_active_hermes_attachment(tmp_path: Path) -> None:
     contract = HERMES_CAPABILITY_AUTHORITY_CONTRACT
     compose = yaml.safe_load(Path("compose.yaml").read_text(encoding="utf-8"))
+    overlay = yaml.safe_load(
+        Path("compose.hermes-yujin.yaml").read_text(encoding="utf-8")
+    )
     default_app = create_app(projects_root=tmp_path)
     default_paths = {route.path for route in default_app.routes}
     conditional_router = build_hermes_internal_router(
@@ -81,9 +88,21 @@ def test_gateway_boundary_is_not_an_active_hermes_attachment(tmp_path: Path) -> 
     assert contract.gateway_service not in compose["services"]
     assert contract.gateway_network not in compose["networks"]
     assert compose["services"]["videobox-hermes-agent"]["network_mode"] == "none"
+    gateway = overlay["services"][contract.gateway_service]
+    assert gateway["profiles"] == ["hermes-yujin"]
+    assert gateway["networks"] == [contract.gateway_api_network, contract.gateway_network]
+    assert overlay["networks"][contract.gateway_api_network]["internal"] is True
+    assert overlay["networks"][contract.gateway_network]["internal"] is True
+    assert "volumes" not in gateway
+    assert "ports" not in gateway
     assert "/internal/hermes/projects/{project_id}/status" not in default_paths
     assert conditional_paths == {"/internal/hermes/projects/{project_id}/status"}
     assert contract.gateway_route_mode == "gateway-only"
+    gateway_source = Path(
+        "services/agent-gateway/src/videobox_agent_gateway/main.py"
+    ).read_text(encoding="utf-8")
+    for forbidden in ("issue", "revoke", "capability", "signing"):
+        assert forbidden not in gateway_source.lower()
 
 
 def test_durable_revocation_is_a_storage_primitive_not_an_authorized_writer_route(tmp_path: Path) -> None:

@@ -35,6 +35,7 @@
 - A1 isolated Hermes/gateway topology와 deterministic static verifier: 완료
 - A1 Compose activation: base는 기존 호환, `compose.hermes-yujin.yaml` + `hermes-yujin` profile만 opt-in
 - A1 gateway build context: Dockerfile 전용 deny-all allowlist로 Dockerfile·requirements·gateway source만 허용
+- capability authority: A1 topology/health-only gateway 배치와 issuance·signer·revocation writer·capability route 미배치를 별도 상태로 고정
 - Phase 0: **2/2 완료**
 - Phase A: **1/4 완료**
 - production implementation: A1부터 시작

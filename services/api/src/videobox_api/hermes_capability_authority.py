@@ -19,10 +19,14 @@ class HermesCapabilityAuthorityContract:
     durable_revocation_storage_primitive: str
     owner_authorized_revocation_writer_status: str
     durable_consume_replay_boundary: str
-    gateway_route_status: str
+    capability_gateway_route_status: str
+    signing_private_key_status: str
     ordinary_api_paths: str
-    hermes_network_status: str
+    preauth_hermes_network_status: str
+    yujin_topology_status: str
+    gateway_service_status: str
     gateway_service: str
+    gateway_api_network: str
     gateway_network: str
     gateway_route_mode: str
 
@@ -36,10 +40,14 @@ HERMES_CAPABILITY_AUTHORITY_CONTRACT = HermesCapabilityAuthorityContract(
     durable_revocation_storage_primitive="LocalProjectStore.revoke_hermes_capability",
     owner_authorized_revocation_writer_status="not_deployed",
     durable_consume_replay_boundary="ProjectStore.consume_hermes_capability",
-    gateway_route_status="not_deployed",
+    capability_gateway_route_status="not_deployed",
+    signing_private_key_status="not_deployed",
     ordinary_api_paths="forbidden",
-    hermes_network_status="preauth-network-none",
+    preauth_hermes_network_status="network_mode_none",
+    yujin_topology_status="deployed",
+    gateway_service_status="health_only",
     gateway_service="videobox-agent-gateway",
+    gateway_api_network="videobox-agent-gateway-api-network",
     gateway_network="videobox-agent-gateway-network",
     gateway_route_mode="gateway-only",
 )
