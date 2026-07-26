@@ -276,6 +276,69 @@ def test_workspace_allows_a_benign_username_substring(
     _assert_no_values_leaked(result)
 
 
+@pytest.mark.parametrize(
+    "environment_json",
+    ("null", '"text"', "7", "[]", '["value"]', '{"SAFE":{"nested":"value"}}'),
+)
+def test_shared_environment_contract_rejects_non_scalar_maps(
+    tmp_path: Path,
+    environment_json: str,
+) -> None:
+    input_path = tmp_path / "environment.json"
+    input_path.write_text(environment_json, encoding="utf-8")
+    helper = ROOT / "scripts" / "hermes-yujin-environment-contract.ps1"
+    command = (
+        f". '{helper}'; "
+        f"$value = Get-Content -Raw -LiteralPath '{input_path}' | ConvertFrom-Json; "
+        "Assert-NoHermesYujinCredentialValueAliases "
+        "-Environment $value -CredentialValues @('secret') "
+        "-FailureMessage 'forbidden'"
+    )
+    result = subprocess.run(
+        ["powershell", "-NoProfile", "-Command", command],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "secret" not in f"{result.stdout}\n{result.stderr}"
+
+
+def test_shared_environment_contract_accepts_an_idictionary_map(
+    tmp_path: Path,
+) -> None:
+    helper = ROOT / "scripts" / "hermes-yujin-environment-contract.ps1"
+    runner = tmp_path / "runner.ps1"
+    runner.write_text(
+        f". '{helper}'\n"
+        "$environment = @{SAFE='benign-secret-suffix'}; "
+        "Assert-NoHermesYujinCredentialValueAliases "
+        "-Environment $environment "
+        "-CredentialValues ([string[]]@('secret')) -FailureMessage 'forbidden'\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(runner),
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+
+    assert result.returncode == 0
+
+
 def test_unresolved_value_never_reaches_targeted_up_with_a_fake_executable(
     tmp_path: Path,
 ) -> None:

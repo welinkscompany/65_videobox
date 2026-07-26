@@ -4,9 +4,23 @@ function Get-HermesYujinEnvironmentScalarValues {
         [object]$Environment
     )
 
+    if ($null -eq $Environment) {
+        throw "Resolved Compose environment must be a scalar map."
+    }
+    if ($Environment -is [System.Collections.IDictionary]) {
+        $rawValues = @($Environment.Values)
+    }
+    elseif ($Environment -is [pscustomobject]) {
+        $rawValues = @(
+            $Environment.PSObject.Properties | ForEach-Object { $_.Value }
+        )
+    }
+    else {
+        throw "Resolved Compose environment must be a scalar map."
+    }
+
     $values = New-Object System.Collections.Generic.List[string]
-    foreach ($property in @($Environment.PSObject.Properties)) {
-        $value = $property.Value
+    foreach ($value in $rawValues) {
         if (
             $null -eq $value -or
             -not ($value -is [string] -or $value -is [ValueType])
