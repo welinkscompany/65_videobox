@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import importlib.util
+import json
+import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -11,6 +14,7 @@ import yaml
 
 ROOT = Path(__file__).parents[1]
 COMPOSE_PATH = ROOT / "compose.yaml"
+OVERLAY_PATH = ROOT / "compose.hermes-yujin.yaml"
 PINNED_HERMES_IMAGE = (
     "nousresearch/hermes-agent@"
     "sha256:ad79951c26b7707c8c651f30780338d4f9bb17ddca19f6ea78eb27cbf83a3787"
@@ -24,8 +28,72 @@ def _compose() -> dict:
     return yaml.safe_load(COMPOSE_PATH.read_text(encoding="utf-8"))
 
 
+def _overlay() -> dict:
+    return yaml.safe_load(OVERLAY_PATH.read_text(encoding="utf-8"))
+
+
+def _render_compose(*, include_yujin: bool) -> dict:
+    command = ["docker", "compose", "-f", str(COMPOSE_PATH)]
+    environment = {
+        **os.environ,
+        "POSTGRES_PASSWORD": "static-base-password",
+        "VIDEOBOX_CONTAINER_DATA_ROOT": "D:/videobox-static-data",
+    }
+    if include_yujin:
+        command.extend(["-f", str(OVERLAY_PATH), "--profile", "hermes-yujin"])
+        environment.update(
+            {
+                "HERMES_YUJIN_GATEWAY_USERNAME": "static-gateway-user",
+                "HERMES_YUJIN_GATEWAY_PASSWORD": "static-gateway-password",
+                "HERMES_YUJIN_GATEWAY_PASSWORD_HASH": "static-gateway-password-hash",
+            }
+        )
+    command.extend(["config", "--format", "json"])
+    result = subprocess.run(
+        command,
+        cwd=ROOT,
+        env=environment,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    assert result.returncode == 0, "Compose config failed without safe diagnostics"
+    return json.loads(result.stdout)
+
+
+def test_base_compose_remains_yujin_free_and_overlay_is_explicitly_opt_in() -> None:
+    base_source = COMPOSE_PATH.read_text(encoding="utf-8")
+    base = _render_compose(include_yujin=False)
+    merged = _render_compose(include_yujin=True)
+
+    assert "HERMES_YUJIN" not in base_source
+    assert "videobox-agent-gateway" not in base["services"]
+    assert "videobox-hermes-yujin" not in base["services"]
+    assert set(base["services"]["videobox-workspace"]["networks"]) == {
+        "videobox-edge",
+        "videobox-internal",
+    }
+    assert set(merged["services"]) >= {
+        "videobox-agent-gateway",
+        "videobox-hermes-yujin",
+    }
+    assert merged["services"]["videobox-agent-gateway"]["profiles"] == [
+        "hermes-yujin"
+    ]
+    assert merged["services"]["videobox-hermes-yujin"]["profiles"] == [
+        "hermes-yujin"
+    ]
+    assert set(merged["services"]["videobox-workspace"]["networks"]) == {
+        "videobox-edge",
+        "videobox-internal",
+        GATEWAY_API_NETWORK,
+    }
+
+
 def test_hermes_yujin_uses_the_pinned_serve_contract_and_isolated_oauth_state() -> None:
-    compose = _compose()
+    compose = _overlay()
     hermes = compose["services"]["videobox-hermes-yujin"]
 
     assert hermes["image"] == PINNED_HERMES_IMAGE
@@ -54,7 +122,7 @@ def test_hermes_yujin_uses_the_pinned_serve_contract_and_isolated_oauth_state() 
 
 
 def test_hermes_yujin_receives_only_hashed_auth_and_has_honest_http_health() -> None:
-    hermes = _compose()["services"]["videobox-hermes-yujin"]
+    hermes = _overlay()["services"]["videobox-hermes-yujin"]
 
     assert hermes["environment"] == {
         "HERMES_DASHBOARD_BASIC_AUTH_USERNAME": (
@@ -80,7 +148,7 @@ def test_hermes_yujin_receives_only_hashed_auth_and_has_honest_http_health() -> 
 
 
 def test_gateway_is_the_only_two_network_application_bridge() -> None:
-    compose = _compose()
+    compose = _overlay()
     gateway = compose["services"]["videobox-agent-gateway"]
     workspace = compose["services"]["videobox-workspace"]
 
@@ -89,11 +157,7 @@ def test_gateway_is_the_only_two_network_application_bridge() -> None:
         "dockerfile": "docker/agent-gateway.Dockerfile",
     }
     assert gateway["networks"] == [GATEWAY_API_NETWORK, HERMES_NETWORK]
-    assert workspace["networks"] == [
-        "videobox-edge",
-        "videobox-internal",
-        GATEWAY_API_NETWORK,
-    ]
+    assert workspace["networks"] == [GATEWAY_API_NETWORK]
     assert compose["networks"][GATEWAY_API_NETWORK] == {"internal": True}
     assert compose["networks"][HERMES_NETWORK] == {"internal": True}
 
@@ -117,7 +181,7 @@ def test_gateway_is_the_only_two_network_application_bridge() -> None:
 
 
 def test_gateway_gets_plaintext_auth_but_workspace_never_gets_hermes_secrets() -> None:
-    compose = _compose()
+    compose = _overlay()
     gateway = compose["services"]["videobox-agent-gateway"]
     workspace = compose["services"]["videobox-workspace"]
 
@@ -131,7 +195,7 @@ def test_gateway_gets_plaintext_auth_but_workspace_never_gets_hermes_secrets() -
         "HERMES_YUJIN_URL": "http://videobox-hermes-yujin:9120",
     }
     assert "HERMES_YUJIN_GATEWAY_PASSWORD_HASH" not in gateway["environment"]
-    assert all("HERMES" not in name for name in workspace["environment"])
+    assert all("HERMES" not in name for name in workspace.get("environment", {}))
     assert "HERMES_YUJIN_GATEWAY_PASSWORD" not in str(workspace)
     assert "HERMES_YUJIN_GATEWAY_PASSWORD_HASH" not in str(workspace)
     assert gateway["read_only"] is True
@@ -274,6 +338,9 @@ def test_gateway_health_is_http_process_readiness_only_and_reads_no_auth_env(
         "chat_ready": False,
     }
     assert "must-not-be-returned" not in response.text
+    route_paths = {route.path for route in module.app.routes}
+    assert route_paths == {"/health"}
+    assert module.app.openapi_url is None
 
 
 def test_start_script_validates_a_real_env_file_and_is_nondestructive() -> None:
@@ -314,6 +381,8 @@ def test_static_verifier_uses_child_dummy_env_and_checks_the_source_topology() -
     assert "param(" in script
     assert "[switch]$StaticOnly" in script
     assert "ProcessStartInfo" in script
+    assert "compose.hermes-yujin.yaml" in script
+    assert "--profile hermes-yujin" in script
     assert "config --format json" in script
     assert "ConvertFrom-Json" in script
     assert ".env.container" not in re.sub(

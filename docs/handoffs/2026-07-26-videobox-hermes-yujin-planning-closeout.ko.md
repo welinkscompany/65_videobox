@@ -33,6 +33,7 @@
 - P0-1 audit: 완료
 - P0-2 reverse trace/plan-state verifier: 완료
 - A1 isolated Hermes/gateway topology와 deterministic static verifier: 완료
+- A1 Compose activation: base는 기존 호환, `compose.hermes-yujin.yaml` + `hermes-yujin` profile만 opt-in
 - A1 gateway build context: Dockerfile 전용 deny-all allowlist로 Dockerfile·requirements·gateway source만 허용
 - Phase 0: **2/2 완료**
 - Phase A: **1/4 완료**

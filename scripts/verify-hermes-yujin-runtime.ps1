@@ -13,6 +13,7 @@ if ([string]::IsNullOrWhiteSpace($RepositoryRoot)) {
 }
 
 $composePath = Join-Path $RepositoryRoot "compose.yaml"
+$overlayPath = Join-Path $RepositoryRoot "compose.hermes-yujin.yaml"
 $expectedImage = "nousresearch/hermes-agent@sha256:ad79951c26b7707c8c651f30780338d4f9bb17ddca19f6ea78eb27cbf83a3787"
 $gatewayApiNetwork = "videobox-agent-gateway-api-network"
 $hermesNetwork = "videobox-agent-gateway-network"
@@ -56,7 +57,8 @@ function Assert-NoProperty {
 }
 
 Assert-True (Test-Path -LiteralPath $composePath -PathType Leaf) "compose.yaml is missing."
-$source = [IO.File]::ReadAllText($composePath)
+Assert-True (Test-Path -LiteralPath $overlayPath -PathType Leaf) "Yujin Compose overlay is missing."
+$source = [IO.File]::ReadAllText($overlayPath)
 foreach ($requiredTemplate in @(
     '${HERMES_YUJIN_GATEWAY_USERNAME:?set in .env.container}'
     '${HERMES_YUJIN_GATEWAY_PASSWORD:?set in .env.container}'
@@ -67,7 +69,7 @@ foreach ($requiredTemplate in @(
 
 $processInfo = New-Object System.Diagnostics.ProcessStartInfo
 $processInfo.FileName = "docker"
-$processInfo.Arguments = "compose -f `"$composePath`" config --format json"
+$processInfo.Arguments = "compose -f `"$composePath`" -f `"$overlayPath`" --profile hermes-yujin config --format json"
 $processInfo.WorkingDirectory = $RepositoryRoot
 $processInfo.UseShellExecute = $false
 $processInfo.RedirectStandardOutput = $true

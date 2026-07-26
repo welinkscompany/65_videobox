@@ -136,6 +136,7 @@ Expected: evidence distinguishes source configuration, container state, HTTP rea
 **Files:**
 
 - Modify: `compose.yaml`
+- Create: `compose.hermes-yujin.yaml`
 - Modify: `.env.container.example`
 - Create: `docker/agent-gateway.Dockerfile`
 - Create: `docker/agent-gateway.Dockerfile.dockerignore`
@@ -150,6 +151,7 @@ Expected: evidence distinguishes source configuration, container state, HTTP rea
 **RED:**
 
 1. Add tests requiring service `videobox-hermes-yujin` to:
+   - exist only in the opt-in `compose.hermes-yujin.yaml` overlay with profile `hermes-yujin`, leaving base Compose free of Yujin auth interpolation;
    - use the existing pinned official image digest;
    - run `hermes serve --host 0.0.0.0 --port 9120`;
    - join only `videobox-hermes-provider-egress` and the Hermes-facing internal `videobox-agent-gateway-network`;
@@ -169,7 +171,7 @@ Expected: evidence distinguishes source configuration, container state, HTTP rea
 
 **GREEN:**
 
-5. Add the Hermes service with required environment variables sourced from local container configuration:
+5. Keep base `compose.yaml` compatible with the pre-A1 default and put the workspace network augmentation, both A1 services, and both new internal networks in opt-in `compose.hermes-yujin.yaml`. Give both optional services profile `hermes-yujin`. Add the Hermes service with required environment variables sourced from local container configuration:
 
    ```yaml
    HERMES_DASHBOARD_BASIC_AUTH_USERNAME: ${HERMES_YUJIN_GATEWAY_USERNAME:?set in .env.container}

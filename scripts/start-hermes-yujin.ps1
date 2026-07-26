@@ -6,6 +6,7 @@ param(
 $ErrorActionPreference = "Stop"
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $composeFile = Join-Path $repositoryRoot "compose.yaml"
+$overlayFile = Join-Path $repositoryRoot "compose.hermes-yujin.yaml"
 
 if (-not (Test-Path -LiteralPath $EnvFile -PathType Leaf)) {
     throw "A real container environment file is required."
@@ -40,7 +41,7 @@ foreach ($name in $requiredNames) {
 
 Push-Location $repositoryRoot
 try {
-    docker compose -f $composeFile --env-file $EnvFile up -d --build videobox-hermes-yujin videobox-agent-gateway
+    docker compose -f $composeFile -f $overlayFile --profile hermes-yujin --env-file $EnvFile up -d --build videobox-hermes-yujin videobox-agent-gateway
     if ($LASTEXITCODE -ne 0) {
         throw "Targeted Hermes Yujin startup failed."
     }
