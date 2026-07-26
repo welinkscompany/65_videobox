@@ -1,6 +1,6 @@
 # VideoBox 실행용 구현 계획서
 
-> 현재 worktree 기준 Task 22A–F release parity 기술 closeout은 `docs/superpowers/plans/2026-07-23-videobox-task22-release-parity.md`와 최신 status/handoff를 우선 적용한다. 다음 operational goal은 새 기능 확대가 아니라 사용자 원본 샘플 기반 owner dogfood다. 원본을 read-only로 보존한 복사본 프로젝트에서 B-roll/BGM/SFX/TTS/caption을 직접 적용·재생·청취 승인하고, 같은 revision을 실제 CapCut Desktop에서 열어 import 결과를 기록한다. Task 9 사람/환경 acceptance 전까지 공식 누적은 **9/22 (40.9%)**, 잔여 **59.1%**로 고정한다. 완료된 Local Media Director 상태는 `## 22`가 authoritative closeout이다. 그 외 상위 milestone/범위/순서 섹션은 제품·구현 계획의 기준을 설명한다.
+> 현재 worktree 기준 Task 22A–F release parity 기술 closeout은 `docs/superpowers/plans/2026-07-23-videobox-task22-release-parity.md`와 최신 status/handoff를 우선 적용한다. 모바일 원격 환경에서 owner dogfood/Task 9 사람·CapCut 실증은 별도로 보존하고, 현재 승인된 implementation goal은 `docs/superpowers/plans/2026-07-26-videobox-hermes-yujin-master-plan.md`의 Hermes Yujin 20-task initiative다. 실행 순서는 짧은 focused audit → 실제 RightDock 대화 → creator proposal/명시적 apply → realtime reliability → Hermes-owned Mem0이며, 구현 상태는 **0/20 (0.0%)**, 잔여 **100.0%**에서 시작한다. Task 9 사람/환경 acceptance 전까지 기존 공식 누적은 **9/22 (40.9%)**, 잔여 **59.1%**로 고정하고 새 initiative 분모와 합치지 않는다. 완료된 Local Media Director 상태는 `## 22`가 authoritative closeout이다. 그 외 상위 milestone/범위/순서 섹션은 제품·구현 계획의 기준을 설명한다.
 > 개발 운영 상위 규칙은 저장소 루트 `AGENTS.md`와 `docs/development-fast-path.ko.md`의 `## 10. 고정 운영 규정`을 프로젝트 전역 기본값으로 적용한다. 즉, 이 계획서를 실행할 때의 작업 우선순위, 선택적 TDD/서브에이전트/리뷰 사용, 표준 검증 경로, hot path 구분, 커밋/푸시, 진행률 보고, turn closeout 형식은 해당 규정을 따른다.
 
 ## 1. 목적

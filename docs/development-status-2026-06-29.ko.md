@@ -1,6 +1,16 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 300. 2026-07-24 Task 22 release parity closeout`를 우선 적용한다. 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 301. 2026-07-26 Hermes Yujin 실행 계획 승인·분해`를 우선 적용한다. Task 22 기술 closeout 근거는 `## 300`을 유지하며, 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+
+## 301. 2026-07-26 Hermes Yujin 실행 계획 승인·분해
+
+- `[x] written design 승인`: `docs/superpowers/specs/2026-07-26-videobox-hermes-yujin-integration-design.md`의 속도 우선 순서를 사용자 승인받았다. 첫 usable checkpoint는 RightDock 실제 대화와 수동 편집 fallback이고, 다음 checkpoint는 지원되는 편집의 typed proposal → 명시적 apply → 단일 preview → 기존 output 경로다.
+- `[x] 총괄·하위 계획 분해`: 총괄 `docs/superpowers/plans/2026-07-26-videobox-hermes-yujin-master-plan.md` 아래에 runtime/chat, creator tools, realtime reliability, Hermes-owned Mem0의 네 계획을 연결했다. 총 20개 고정 task ID와 master/child mirror, `[ ]/[~]/[x]/[!]` 규칙, TDD acceptance matrix, reverse runtime trace, phase별 검증·commit/push gate를 정의했다.
+- `[x] 속도·안전 경계 재검토`: SaaS, OpenCut source/runtime, generic provider/API 확대, 자동 apply를 제외했다. 첫 대화와 creator flow 뒤로 고급 reconnect/audit/memory UI를 미뤘지만 secret/OAuth/raw memory 비노출, Hermes DB/media mount 금지, gateway-only transport, current-revision 명시적 apply, manual fallback, local/test external provider call 0은 선행 필수로 유지했다.
+- `[x] Mem0 소유권`: Mem0는 Hermes/Yujin의 승인 기반 보조기억이다. VideoBox DB/project/session/timeline/media/review/output SSOT나 권한·승인 근거로 쓰지 않는다.
+- `[ ] production 구현`: 아직 시작하지 않았다. 새 initiative 진행률은 **0/20 (0.0%)**, 잔여 **100.0%**다. 첫 구현 task는 `P0-1` live/source drift와 공식 Hermes transport/dependency pin 확인이다.
+- `사람/환경 별도`: 모바일 원격 환경에서는 owner dogfood와 실제 CapCut Desktop acceptance를 수행하지 않는다. Task 9 사람/환경 acceptance 전까지 기존 공식 누적은 **9/22 (40.9%)**, 잔여 **59.1%**를 유지한다.
+- `보호 범위`: `?? .tmp-final-fence-debug/`, `?? .tmp-real-video-dogfood/`, `?? apps/web/.tmp-real-video-dogfood/`는 stage/remove/delete하지 않는다.
 
 ## 300. 2026-07-24 Task 22 release parity closeout
 
