@@ -15,6 +15,11 @@ VALID_HASH = (
     "scrypt$16384$8$1$iMe7ySNXHHKwvzoVKA3TJw==$"
     "kS4ekg9YeJwxO84hL0GQ/gaj4dMfUKWPJFmhwSFuaUQ="
 )
+MINIMUM_PASSWORD = "123456789012"
+MINIMUM_PASSWORD_HASH = (
+    "scrypt$16384$8$1$MDEyMzQ1Njc4OWFiY2RlZg==$"
+    "ZDdxqiZYgrigmrdTCAdvmXQvbXlKPUOS9oJw2i3yb+A="
+)
 
 
 def _env_text(*extra_lines: str) -> str:
@@ -59,6 +64,8 @@ def _assert_no_values_leaked(result: subprocess.CompletedProcess[str]) -> None:
     for forbidden in (
         VALID_PASSWORD,
         VALID_HASH,
+        MINIMUM_PASSWORD,
+        MINIMUM_PASSWORD_HASH,
         "valid-dummy-user",
         "replace-before-starting",
         "${MISSING}",
@@ -69,19 +76,21 @@ def _assert_no_values_leaked(result: subprocess.CompletedProcess[str]) -> None:
 def _rendered_model(
     workspace_environment: dict[str, object] | None = None,
     gateway_username: str = "valid-dummy-user",
+    gateway_password: str = VALID_PASSWORD,
+    password_hash: str = VALID_HASH,
 ) -> dict[str, object]:
     return {
         "services": {
             "videobox-agent-gateway": {
                 "environment": {
-                    "HERMES_YUJIN_GATEWAY_PASSWORD": VALID_PASSWORD,
+                    "HERMES_YUJIN_GATEWAY_PASSWORD": gateway_password,
                     "HERMES_YUJIN_GATEWAY_USERNAME": gateway_username,
                     "HERMES_YUJIN_URL": "http://videobox-hermes-yujin:9120",
                 }
             },
             "videobox-hermes-yujin": {
                 "environment": {
-                    "HERMES_DASHBOARD_BASIC_AUTH_PASSWORD_HASH": VALID_HASH,
+                    "HERMES_DASHBOARD_BASIC_AUTH_PASSWORD_HASH": password_hash,
                     "HERMES_DASHBOARD_BASIC_AUTH_USERNAME": gateway_username,
                 }
             },
@@ -124,6 +133,8 @@ def _run_fake_start(
     *,
     workspace_environment: dict[str, object] | None = None,
     gateway_username: str = "valid-dummy-user",
+    gateway_password: str = VALID_PASSWORD,
+    password_hash: str = VALID_HASH,
     validate_only: bool = False,
     config_stderr: str = "quiet",
     up_exit_code: int = 0,
@@ -133,7 +144,14 @@ def _run_fake_start(
     env_file.write_text(_env_text(), encoding="utf-8")
     fake_config = tmp_path / "config.json"
     fake_config.write_text(
-        json.dumps(_rendered_model(workspace_environment, gateway_username)),
+        json.dumps(
+            _rendered_model(
+                workspace_environment,
+                gateway_username,
+                gateway_password,
+                password_hash,
+            )
+        ),
         encoding="utf-8",
     )
     fake_log = tmp_path / "docker.log"
@@ -257,6 +275,61 @@ def test_workspace_alias_of_any_resolved_credential_fails_closed(
     _assert_no_values_leaked(result)
 
 
+@pytest.mark.parametrize(
+    "composite_secret",
+    (
+        f"https://user:{VALID_PASSWORD}@host/path",
+        f"prefix-{VALID_PASSWORD}-suffix",
+        f"https://host/{VALID_HASH}/status",
+        f"prefix-{VALID_HASH}-suffix",
+    ),
+)
+def test_workspace_composite_password_or_hash_fails_closed(
+    tmp_path: Path,
+    composite_secret: str,
+) -> None:
+    result, invocations = _run_fake_start(
+        tmp_path,
+        workspace_environment={"SAFE_ALIAS": composite_secret},
+        validate_only=True,
+    )
+
+    assert result.returncode != 0
+    assert len(invocations) == 1
+    _assert_no_values_leaked(result)
+
+
+@pytest.mark.parametrize("password_length", range(12))
+def test_validate_only_rejects_passwords_shorter_than_twelve_before_hash_check(
+    tmp_path: Path,
+    password_length: int,
+) -> None:
+    result, invocations = _run_fake_start(
+        tmp_path,
+        gateway_password="x" * password_length,
+        validate_only=True,
+    )
+
+    assert result.returncode != 0
+    assert len(invocations) == 1
+    _assert_no_values_leaked(result)
+
+
+def test_validate_only_accepts_a_twelve_character_password_boundary(
+    tmp_path: Path,
+) -> None:
+    result, invocations = _run_fake_start(
+        tmp_path,
+        gateway_password=MINIMUM_PASSWORD,
+        password_hash=MINIMUM_PASSWORD_HASH,
+        validate_only=True,
+    )
+
+    assert result.returncode == 0
+    assert len(invocations) == 2
+    _assert_no_values_leaked(result)
+
+
 def test_workspace_allows_a_benign_username_substring(
     tmp_path: Path,
 ) -> None:
@@ -291,7 +364,8 @@ def test_shared_environment_contract_rejects_non_scalar_maps(
         f". '{helper}'; "
         f"$value = Get-Content -Raw -LiteralPath '{input_path}' | ConvertFrom-Json; "
         "Assert-NoHermesYujinCredentialValueAliases "
-        "-Environment $value -CredentialValues @('secret') "
+        "-Environment $value -ExactCredentialValues @('username') "
+        "-SecretSubstringValues @('password','hash') "
         "-FailureMessage 'forbidden'"
     )
     result = subprocess.run(
@@ -317,7 +391,9 @@ def test_shared_environment_contract_accepts_an_idictionary_map(
         "$environment = @{SAFE='benign-secret-suffix'}; "
         "Assert-NoHermesYujinCredentialValueAliases "
         "-Environment $environment "
-        "-CredentialValues ([string[]]@('secret')) -FailureMessage 'forbidden'\n",
+        "-ExactCredentialValues ([string[]]@('username')) "
+        "-SecretSubstringValues ([string[]]@('password','hash')) "
+        "-FailureMessage 'forbidden'\n",
         encoding="utf-8",
     )
     result = subprocess.run(

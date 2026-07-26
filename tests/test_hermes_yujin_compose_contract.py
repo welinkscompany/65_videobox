@@ -400,6 +400,9 @@ def test_static_verifier_uses_child_dummy_env_and_checks_the_source_topology() -
     assert "param(" in script
     assert "[switch]$StaticOnly" in script
     assert "ProcessStartInfo" in script
+    assert "ReadToEndAsync" in script
+    assert ".StandardOutput.ReadToEnd()" not in script
+    assert ".StandardError.ReadToEnd()" not in script
     assert "compose.hermes-yujin.yaml" in script
     assert "--profile hermes-yujin" in script
     assert "Base Compose must not contain Yujin services." in script
@@ -492,6 +495,68 @@ def test_static_verifier_rejects_workspace_alias_of_a_dummy_secret(
     output = f"{result.stdout}\n{result.stderr}"
     for forbidden in (
         "static-gateway-user",
+        "static-gateway-password",
+        "static-gateway-password-hash",
+    ):
+        assert forbidden not in output
+
+
+@pytest.mark.parametrize(
+    "composite_expression",
+    (
+        "prefix-${HERMES_YUJIN_GATEWAY_PASSWORD}",
+        "${HERMES_YUJIN_GATEWAY_PASSWORD}-suffix",
+        "prefix-${HERMES_YUJIN_GATEWAY_PASSWORD_HASH}",
+        "${HERMES_YUJIN_GATEWAY_PASSWORD_HASH}-suffix",
+    ),
+)
+def test_static_verifier_rejects_composite_dummy_secrets(
+    tmp_path: Path,
+    composite_expression: str,
+) -> None:
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    (repository / "compose.yaml").write_text(
+        COMPOSE_PATH.read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    overlay_source = OVERLAY_PATH.read_text(encoding="utf-8").replace(
+        "  videobox-workspace:\n"
+        "    networks: [videobox-agent-gateway-api-network]\n",
+        "  videobox-workspace:\n"
+        "    environment:\n"
+        f"      SAFE_COMPOSITE: {composite_expression}\n"
+        "    networks: [videobox-agent-gateway-api-network]\n",
+        1,
+    )
+    (repository / "compose.hermes-yujin.yaml").write_text(
+        overlay_source,
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(ROOT / "scripts" / "verify-hermes-yujin-runtime.ps1"),
+            "-StaticOnly",
+            "-RepositoryRoot",
+            str(repository),
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=30,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    output = f"{result.stdout}\n{result.stderr}"
+    for forbidden in (
         "static-gateway-password",
         "static-gateway-password-hash",
     ):

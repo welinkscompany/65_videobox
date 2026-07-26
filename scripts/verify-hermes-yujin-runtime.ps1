@@ -57,6 +57,23 @@ function Assert-NoProperty {
     Assert-True ($null -eq $Value.PSObject.Properties[$PropertyName]) $Message
 }
 
+function Invoke-CapturedProcess {
+    param([System.Diagnostics.ProcessStartInfo]$ProcessInfo)
+
+    $capturedProcess = New-Object System.Diagnostics.Process
+    $capturedProcess.StartInfo = $ProcessInfo
+    [void]$capturedProcess.Start()
+    $stdoutTask = $capturedProcess.StandardOutput.ReadToEndAsync()
+    $stderrTask = $capturedProcess.StandardError.ReadToEndAsync()
+    $capturedProcess.WaitForExit()
+    $stdout = $stdoutTask.GetAwaiter().GetResult()
+    [void]$stderrTask.GetAwaiter().GetResult()
+    return [pscustomobject]@{
+        ExitCode = $capturedProcess.ExitCode
+        StdOut = $stdout
+    }
+}
+
 Assert-True (Test-Path -LiteralPath $composePath -PathType Leaf) "compose.yaml is missing."
 Assert-True (Test-Path -LiteralPath $overlayPath -PathType Leaf) "Yujin Compose overlay is missing."
 $baseSource = [IO.File]::ReadAllText($composePath)
@@ -87,13 +104,9 @@ foreach ($name in @(
 )) {
     [void]$baseProcessInfo.EnvironmentVariables.Remove($name)
 }
-$baseProcess = New-Object System.Diagnostics.Process
-$baseProcess.StartInfo = $baseProcessInfo
-[void]$baseProcess.Start()
-$baseJson = $baseProcess.StandardOutput.ReadToEnd()
-[void]$baseProcess.StandardError.ReadToEnd()
-$baseProcess.WaitForExit()
-Assert-True ($baseProcess.ExitCode -eq 0) "Base Compose static render failed."
+$baseResult = Invoke-CapturedProcess -ProcessInfo $baseProcessInfo
+$baseJson = $baseResult.StdOut
+Assert-True ($baseResult.ExitCode -eq 0) "Base Compose static render failed."
 $baseRendered = $baseJson | ConvertFrom-Json
 Assert-True (
     $null -eq $baseRendered.services.PSObject.Properties["videobox-agent-gateway"] -and
@@ -126,13 +139,9 @@ foreach ($name in $dummyEnvironment.Keys) {
     $processInfo.EnvironmentVariables[$name] = $dummyEnvironment[$name]
 }
 
-$process = New-Object System.Diagnostics.Process
-$process.StartInfo = $processInfo
-[void]$process.Start()
-$renderedJson = $process.StandardOutput.ReadToEnd()
-[void]$process.StandardError.ReadToEnd()
-$process.WaitForExit()
-Assert-True ($process.ExitCode -eq 0) "docker compose config failed in the isolated static child process."
+$configResult = Invoke-CapturedProcess -ProcessInfo $processInfo
+$renderedJson = $configResult.StdOut
+Assert-True ($configResult.ExitCode -eq 0) "docker compose config failed in the isolated static child process."
 $rendered = $renderedJson | ConvertFrom-Json
 
 $hermes = $rendered.services.'videobox-hermes-yujin'
@@ -180,8 +189,10 @@ foreach ($name in @($workspace.environment.PSObject.Properties.Name)) {
 }
 Assert-NoHermesYujinCredentialValueAliases `
     -Environment $workspace.environment `
-    -CredentialValues @(
+    -ExactCredentialValues @(
         $dummyEnvironment["HERMES_YUJIN_GATEWAY_USERNAME"]
+    ) `
+    -SecretSubstringValues @(
         $dummyEnvironment["HERMES_YUJIN_GATEWAY_PASSWORD"]
         $dummyEnvironment["HERMES_YUJIN_GATEWAY_PASSWORD_HASH"]
     ) `

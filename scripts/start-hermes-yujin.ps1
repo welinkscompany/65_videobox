@@ -152,6 +152,9 @@ $hermesUsername = Assert-ResolvedCredential `
 $hermesPasswordHash = Assert-ResolvedCredential `
     "HERMES_DASHBOARD_BASIC_AUTH_PASSWORD_HASH" `
     $hermes.environment.HERMES_DASHBOARD_BASIC_AUTH_PASSWORD_HASH
+if ($gatewayPassword.Length -lt 12) {
+    throw "Resolved container credential 'HERMES_YUJIN_GATEWAY_PASSWORD' is invalid."
+}
 if ($gatewayUsername -cne $hermesUsername) {
     throw "Gateway and Hermes usernames do not match."
 }
@@ -165,8 +168,8 @@ foreach ($name in @($workspace.environment.PSObject.Properties.Name)) {
 }
 Assert-NoHermesYujinCredentialValueAliases `
     -Environment $workspace.environment `
-    -CredentialValues @(
-        $gatewayUsername
+    -ExactCredentialValues @($gatewayUsername) `
+    -SecretSubstringValues @(
         $gatewayPassword
         $hermesPasswordHash
     ) `

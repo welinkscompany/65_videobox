@@ -48,7 +48,9 @@ function Assert-NoHermesYujinCredentialValueAliases {
         [Parameter(Mandatory = $true)]
         [object]$Environment,
         [Parameter(Mandatory = $true)]
-        [string[]]$CredentialValues,
+        [string[]]$ExactCredentialValues,
+        [Parameter(Mandatory = $true)]
+        [string[]]$SecretSubstringValues,
         [Parameter(Mandatory = $true)]
         [string]$FailureMessage
     )
@@ -56,14 +58,32 @@ function Assert-NoHermesYujinCredentialValueAliases {
     $environmentValues = @(
         Get-HermesYujinEnvironmentScalarValues -Environment $Environment
     )
+    foreach ($comparisonValue in @(
+        $ExactCredentialValues
+        $SecretSubstringValues
+    )) {
+        if ([string]::IsNullOrEmpty($comparisonValue)) {
+            throw "Credential comparison values must be nonempty."
+        }
+    }
     foreach ($environmentValue in $environmentValues) {
-        foreach ($credentialValue in $CredentialValues) {
+        foreach ($credentialValue in $ExactCredentialValues) {
             if (
                 [string]::Equals(
                     $environmentValue,
                     $credentialValue,
                     [StringComparison]::Ordinal
                 )
+            ) {
+                throw $FailureMessage
+            }
+        }
+        foreach ($secretValue in $SecretSubstringValues) {
+            if (
+                $environmentValue.IndexOf(
+                    $secretValue,
+                    [StringComparison]::Ordinal
+                ) -ge 0
             ) {
                 throw $FailureMessage
             }
