@@ -194,6 +194,35 @@ def test_verifier_rejects_a_task_moved_between_fixed_child_partitions(
     assert "expected 4" in output
 
 
+def test_verifier_rejects_equal_cardinality_task_swaps_between_children(
+    tmp_path: Path,
+) -> None:
+    fixture = _plan_fixture(tmp_path)
+    creator_child = fixture / PLAN_PATHS[2]
+    reliability_child = fixture / PLAN_PATHS[3]
+    creator_task = (
+        "- [ ] **B1** Build the allowlisted current-revision creator context "
+        "and typed read DTOs."
+    )
+    reliability_task = (
+        "- [ ] **C1** Persist run/event cursors and restore final or interrupted "
+        "conversation state."
+    )
+    _replace_once(creator_child, creator_task, reliability_task)
+    _replace_once(reliability_child, reliability_task, creator_task)
+
+    result = _run_verifier(fixture)
+    output = _combined_output(result)
+
+    assert result.returncode != 0, "verifier accepted swapped child task ownership"
+    assert "creator-tools" in output
+    assert "missing task IDs: B1" in output
+    assert "unexpected task IDs: C1" in output
+    assert "realtime-reliability" in output
+    assert "missing task IDs: C1" in output
+    assert "unexpected task IDs: B1" in output
+
+
 def test_status_mismatch_names_task_and_both_statuses(tmp_path: Path) -> None:
     fixture = _plan_fixture(tmp_path)
     runtime_child = fixture / PLAN_PATHS[1]

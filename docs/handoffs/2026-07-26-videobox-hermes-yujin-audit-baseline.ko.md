@@ -226,7 +226,7 @@ strict RED-GREEN TDD 근거:
 
 - RED: `.\.venv\Scripts\python.exe -m pytest tests/test_hermes_yujin_plan_state_contract.py -q`는 verifier가 없을 때 의도대로 `12 failed`였고, 모든 실패 원인은 `missing verifier: ...\scripts\verify-hermes-yujin-plan-state.ps1`였다.
 - 추가 회귀 RED: 기본 root invocation test는 PowerShell 5.1에서 parameter default 평가 시 `$PSScriptRoot`가 비어 `Split-Path`가 실패하는 실제 문제를 재현했다.
-- GREEN: 같은 contract suite는 최종 `13 passed`다.
+- GREEN: 같은 contract suite는 최종 `15 passed`다.
 - verifier 직접 실행은 master의 정확히 20 unique ID, 네 child 전체에서 각 ID 정확히 1회, master/child status, `[x]` numerator, 고정 denominator, 한 자리 진행/잔여율, unfinished marker 부재를 확인하고 exit 0이었다.
 - backend focused baseline `tests/test_director_conversation.py tests/test_api_hermes_project_status.py`는 `19 passed`다.
 - frontend focused baseline은 route, RightDock, PreviewCoordinator, PreviewStage의 `4 files / 78 tests`가 통과했다. 기존 React `act(...)` stderr warning 1건은 exit 0 비실패 출력이다.

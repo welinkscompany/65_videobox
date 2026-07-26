@@ -21,6 +21,20 @@ $expectedChildDenominators = @{
     "docs/superpowers/plans/2026-07-26-videobox-hermes-yujin-realtime-reliability.md" = 4
     "docs/superpowers/plans/2026-07-26-videobox-hermes-yujin-mem0-memory.md" = 5
 }
+$expectedChildTaskIds = @{
+    "docs/superpowers/plans/2026-07-26-videobox-hermes-yujin-runtime-chat-vertical-slice.md" = @(
+        "P0-1", "P0-2", "A1", "A2", "A3", "A4"
+    )
+    "docs/superpowers/plans/2026-07-26-videobox-hermes-yujin-creator-tools.md" = @(
+        "B1", "B2", "B3", "B4", "B5"
+    )
+    "docs/superpowers/plans/2026-07-26-videobox-hermes-yujin-realtime-reliability.md" = @(
+        "C1", "C2", "C3", "C4"
+    )
+    "docs/superpowers/plans/2026-07-26-videobox-hermes-yujin-mem0-memory.md" = @(
+        "D1", "D2", "D3", "D4", "F1"
+    )
+}
 $planPaths = @($masterPlan) + $childPlans
 $expectedTaskIds = @(
     "P0-1", "P0-2",
@@ -193,6 +207,18 @@ $childTasks = @(
 )
 $childGroups = @($childTasks | Group-Object Id)
 $childIds = @($childGroups.Name)
+foreach ($childPlan in $childPlans) {
+    $actualIds = @($states[$childPlan].Tasks | ForEach-Object { $_.Id })
+    $expectedIds = @($expectedChildTaskIds[$childPlan])
+    $missingIds = @($expectedIds | Where-Object { $_ -notin $actualIds })
+    $unexpectedIds = @($actualIds | Where-Object { $_ -notin $expectedIds })
+    if ($missingIds.Count -gt 0) {
+        Add-VerificationError "$childPlan missing task IDs: $($missingIds -join ', ')."
+    }
+    if ($unexpectedIds.Count -gt 0) {
+        Add-VerificationError "$childPlan unexpected task IDs: $($unexpectedIds -join ', ')."
+    }
+}
 foreach ($expectedTaskId in $expectedTaskIds) {
     $matchingGroup = @($childGroups | Where-Object { $_.Name -eq $expectedTaskId })
     $childCount = if ($matchingGroup.Count -eq 1) { $matchingGroup[0].Count } else { 0 }
