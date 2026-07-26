@@ -67,7 +67,7 @@ def _assert_no_values_leaked(result: subprocess.CompletedProcess[str]) -> None:
 
 
 def _rendered_model(
-    workspace_environment: dict[str, str] | None = None,
+    workspace_environment: dict[str, object] | None = None,
     gateway_username: str = "valid-dummy-user",
 ) -> dict[str, object]:
     return {
@@ -122,7 +122,7 @@ def _write_fake_docker(tmp_path: Path) -> Path:
 def _run_fake_start(
     tmp_path: Path,
     *,
-    workspace_environment: dict[str, str] | None = None,
+    workspace_environment: dict[str, object] | None = None,
     gateway_username: str = "valid-dummy-user",
     validate_only: bool = False,
     config_stderr: str = "quiet",
@@ -337,6 +337,23 @@ def test_shared_environment_contract_accepts_an_idictionary_map(
     )
 
     assert result.returncode == 0
+
+
+@pytest.mark.parametrize("array_value", ([], ["benign"], ["a", "b"]))
+def test_validate_only_rejects_workspace_property_arrays_before_password_check(
+    tmp_path: Path,
+    array_value: list[str],
+) -> None:
+    result, invocations = _run_fake_start(
+        tmp_path,
+        workspace_environment={"SAFE_ARRAY": array_value},
+        validate_only=True,
+    )
+
+    assert result.returncode != 0
+    assert len(invocations) == 1
+    assert "config" in invocations[0]
+    _assert_no_values_leaked(result)
 
 
 def test_unresolved_value_never_reaches_targeted_up_with_a_fake_executable(
