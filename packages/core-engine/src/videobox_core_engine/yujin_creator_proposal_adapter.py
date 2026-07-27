@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, replace
 import hashlib
 import json
 import re
 
+from videobox_storage.local_project_store import sha256_file
 from videobox_domain_models.director_proposals import (
     DirectorCandidate,
     DirectorProposal,
@@ -60,6 +62,10 @@ class YujinCreatorProjection:
     operation_count: int
     validation_outcome: str
     manual_fallback: bool
+
+
+_ACTIONABLE_MEDIA_KINDS = frozenset({"broll", "bgm", "sfx"})
+_BROLL_SOURCE_KINDS = frozenset({"raw_video", "broll_video"})
 
 
 def parse_and_project_yujin_creator_output(
@@ -134,6 +140,251 @@ def derive_yujin_persisted_proposal_id(*, project_id: str, run_id: str) -> str:
         separators=(",", ":"),
     ).encode("utf-8")
     return f"yujin-proposal-{hashlib.sha256(namespace).hexdigest()}"
+
+
+def activate_yujin_media_projection(
+    *,
+    store: object,
+    project_id: str,
+    context: YujinCreatorContext,
+    projection: YujinCreatorProjection,
+) -> YujinCreatorProjection:
+    """Read-only attest actionable B3 media while preserving deferred candidates."""
+
+    proposal = projection.proposal
+    if proposal is None:
+        return projection
+    try:
+        session = store.get_editing_session(  # type: ignore[attr-defined]
+            project_id=project_id,
+            session_id=context.session_id,
+        )
+        if (
+            str(session.get("project_id") or "") != project_id
+            or str(session.get("session_id") or "") != context.session_id
+            or int(session.get("session_revision") or 0)
+            != context.session_revision
+            or int(store.get_asset_index_revision(project_id))  # type: ignore[attr-defined]
+            != context.asset_index_revision
+        ):
+            return projection
+    except (AttributeError, KeyError, TypeError, ValueError):
+        return projection
+
+    operations = tuple(proposal.diff.get("operations", ()))
+    media_by_id = {item.asset_id: item for item in context.media_candidates}
+    segments_by_id = {item.segment_id: item for item in context.segment_summaries}
+    activated: list[DirectorCandidate] = []
+    actionable_count = 0
+    for index, candidate in enumerate(proposal.candidates):
+        operation = operations[index] if index < len(operations) else None
+        replacement = _attest_media_candidate(
+            store=store,
+            project_id=project_id,
+            context=context,
+            candidate=candidate,
+            operation=operation,
+            media_by_id=media_by_id,
+            segments_by_id=segments_by_id,
+        )
+        activated.append(replacement)
+        if replacement.availability == "actionable":
+            actionable_count += 1
+    try:
+        session_after = store.get_editing_session(  # type: ignore[attr-defined]
+            project_id=project_id,
+            session_id=context.session_id,
+        )
+        if (
+            int(session_after.get("session_revision") or 0)
+            != context.session_revision
+            or int(store.get_asset_index_revision(project_id))  # type: ignore[attr-defined]
+            != context.asset_index_revision
+        ):
+            return projection
+    except (AttributeError, KeyError, TypeError, ValueError):
+        return projection
+
+    mode = "yujin_actionable_media_v1" if actionable_count else "candidate_only"
+    updated_proposal = replace(
+        proposal,
+        status="ready" if actionable_count else "candidate_only",
+        candidates=tuple(activated),
+        diff={**dict(proposal.diff), "proposal_mode": mode},
+    )
+    return replace(projection, proposal=updated_proposal)
+
+
+def _attest_media_candidate(
+    *,
+    store: object,
+    project_id: str,
+    context: YujinCreatorContext,
+    candidate: DirectorCandidate,
+    operation: object,
+    media_by_id: dict[str, object],
+    segments_by_id: dict[str, object],
+) -> DirectorCandidate:
+    if (
+        candidate.media_type not in _ACTIONABLE_MEDIA_KINDS
+        or not isinstance(operation, Mapping)
+        or operation.get("kind") != candidate.media_type
+    ):
+        return candidate
+    parameters = operation.get("parameters")
+    target = operation.get("target")
+    if not isinstance(parameters, Mapping) or not isinstance(target, Mapping):
+        return candidate
+    parameters = dict(parameters)
+    target = dict(target)
+    asset_id = parameters.get("asset_id")
+    if asset_id != candidate.asset_id or not isinstance(asset_id, str):
+        return candidate
+    context_media = media_by_id.get(asset_id)
+    source_media_kind = getattr(context_media, "kind", None)
+    target_segment_id = _aligned_target_segment_id(
+        kind=candidate.media_type,
+        target=target,
+        parameters=parameters,
+        segments_by_id=segments_by_id,
+    )
+    expected_source_kinds = (
+        _BROLL_SOURCE_KINDS
+        if candidate.media_type == "broll"
+        else frozenset({candidate.media_type})
+    )
+    if target_segment_id is None or source_media_kind not in expected_source_kinds:
+        return candidate
+    try:
+        asset = store.get_asset(  # type: ignore[attr-defined]
+            project_id=project_id,
+            asset_id=asset_id,
+        )
+        if str(asset.get("asset_type") or "") != source_media_kind:
+            return candidate
+        source = store.resolve_storage_uri(  # type: ignore[attr-defined]
+            project_id=project_id,
+            storage_uri=str(asset["storage_uri"]),
+        )
+        if not source.is_file():
+            return candidate
+        digest = sha256_file(source)
+        media_revision = str(asset.get("created_at") or "").strip()
+        if not digest or not media_revision:
+            return candidate
+        if not _eligible_media_asset(
+            store=store,
+            project_id=project_id,
+            asset=asset,
+            candidate=candidate,
+        ):
+            return candidate
+        if not source.is_file() or sha256_file(source) != digest:
+            return candidate
+    except (AttributeError, KeyError, OSError, TypeError, ValueError):
+        return candidate
+
+    controls = _supported_media_controls(
+        kind=candidate.media_type,
+        parameters=parameters,
+    )
+    return replace(
+        candidate,
+        availability="actionable",
+        review_status="approved",
+        controls=controls,
+        expected_content_sha256=digest,
+        media_revision=media_revision,
+        canonical_metadata={
+            **dict(candidate.canonical_metadata),
+            "yujin_actionable_media": True,
+            "source_media_kind": source_media_kind,
+            "target_segment_id": target_segment_id,
+            "preview_summary": str(operation.get("preview_summary") or ""),
+            "base_session_revision": context.session_revision,
+            "asset_index_revision": context.asset_index_revision,
+        },
+    )
+
+
+def _aligned_target_segment_id(
+    *,
+    kind: str,
+    target: dict[str, object],
+    parameters: dict[str, object],
+    segments_by_id: dict[str, object],
+) -> str | None:
+    if kind == "bgm":
+        start_sec = parameters.get("start_sec")
+        matching = [
+            segment
+            for segment in segments_by_id.values()
+            if getattr(segment, "start_sec", None) == start_sec
+        ]
+        if len(matching) != 1:
+            return None
+        segment = matching[0]
+    else:
+        segment = segments_by_id.get(str(target.get("segment_id") or ""))
+        if segment is None or getattr(segment, "start_sec", None) != parameters.get(
+            "start_sec"
+        ):
+            return None
+    duration = float(getattr(segment, "end_sec")) - float(
+        getattr(segment, "start_sec")
+    )
+    proposed_duration = parameters.get("duration_sec")
+    if kind == "broll" and proposed_duration != duration:
+        return None
+    if kind == "bgm" and proposed_duration is not None and proposed_duration != duration:
+        return None
+    return str(getattr(segment, "segment_id"))
+
+
+def _eligible_media_asset(
+    *,
+    store: object,
+    project_id: str,
+    asset: dict[str, object],
+    candidate: DirectorCandidate,
+) -> bool:
+    metadata = dict(asset.get("metadata") or {})
+    if candidate.media_type in {"bgm", "sfx"}:
+        required = (
+            ("mood", "energy", "genre", "recommended_use")
+            if candidate.media_type == "bgm"
+            else ("action_event", "intensity", "recommended_use")
+        )
+        return metadata.get("canonical_metadata_indexed") is True and all(
+            metadata.get(field) not in (None, "") for field in required
+        )
+    analyses = store.list_media_analysis(project_id=project_id)  # type: ignore[attr-defined]
+    return any(
+        str(item.get("asset_id") or "") == candidate.asset_id
+        and item.get("status") == "succeeded"
+        and bool(item.get("result"))
+        and store.can_apply_media_analysis(  # type: ignore[attr-defined]
+            project_id=project_id,
+            analysis_id=str(item["analysis_id"]),
+        )
+        for item in analyses
+    )
+
+
+def _supported_media_controls(
+    *,
+    kind: str,
+    parameters: dict[str, object],
+) -> dict[str, object]:
+    if kind == "broll":
+        return {"fit": "fit" if parameters.get("fit") == "contain" else "crop"}
+    if kind == "bgm":
+        return {
+            "volume": parameters["volume"],
+            "fade_in_sec": parameters["fade_in_sec"],
+            "fade_out_sec": parameters["fade_out_sec"],
+        }
+    return {"volume": parameters["volume"]}
 
 
 def _derive_candidate_id(*, proposal_id: str, operation_index: int) -> str:

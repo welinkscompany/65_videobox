@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 import json
 import logging
@@ -12,12 +13,14 @@ import pytest
 
 from videobox_api.agent_gateway_client import AgentGatewayEvent
 from videobox_api.hermes_run_service import HermesRunService
+from videobox_domain_models.assets import AssetType
+from videobox_domain_models.director_proposals import DirectorCandidate, DirectorProposal
 from videobox_core_engine.yujin_creator_proposal_adapter import (
     MANUAL_FALLBACK,
     parse_and_project_yujin_creator_output,
 )
 from videobox_domain_models.yujin_creator_context import YujinCreatorContext
-from videobox_storage.local_project_store import LocalProjectStore
+from videobox_storage.local_project_store import LocalProjectStore, sha256_file
 from videobox_storage.postgres_compat import translate_sql
 
 
@@ -240,7 +243,7 @@ def _proposal_output(context: YujinCreatorContext) -> str:
                         "track_id": "video-primary",
                     },
                     "parameters": {
-                        "asset_id": "asset-video",
+                        "asset_id": context.media_candidates[0].asset_id,
                         "start_sec": 0.0,
                         "duration_sec": 3.0,
                         "fit": "cover",
@@ -255,6 +258,224 @@ def _proposal_output(context: YujinCreatorContext) -> str:
         f"{reply}\n```videobox-yujin-response\n"
         f"{json.dumps(payload, ensure_ascii=False)}\n```"
     )
+
+
+def _ready_yujin_proposal(
+    store: LocalProjectStore,
+    *,
+    project_id: str,
+    session_id: str,
+    asset_id: str,
+    claimed_source_kind: str = "broll_video",
+) -> DirectorProposal:
+    session = store.get_editing_session(
+        project_id=project_id,
+        session_id=session_id,
+    )
+    asset = store.get_asset(project_id=project_id, asset_id=asset_id)
+    source = store.resolve_storage_uri(
+        project_id=project_id,
+        storage_uri=str(asset["storage_uri"]),
+    )
+    candidate = DirectorCandidate(
+        candidate_id="yujin-ready-candidate",
+        visible_reference_code="P00-B-01",
+        media_type="broll",
+        asset_id=asset_id,
+        library_asset_id=None,
+        reason_chips=("추천",),
+        scores={},
+        availability="actionable",
+        review_status="approved",
+        preview_uri=None,
+        controls={"fit": "fit"},
+        expected_content_sha256=sha256_file(source),
+        media_revision=str(asset["created_at"]),
+        canonical_metadata={
+            "schema_version": "videobox.yujin-response.v1",
+            "proposal_kind": "broll",
+            "yujin_actionable_media": True,
+            "source_media_kind": claimed_source_kind,
+            "target_segment_id": "segment-1",
+        },
+    )
+    return DirectorProposal(
+        proposal_id="yujin-ready-proposal",
+        revision_code="P00",
+        revision=0,
+        base_session_revision=int(session["session_revision"]),
+        asset_index_revision=store.get_asset_index_revision(project_id),
+        source_session_id=session_id,
+        target_segment_ids=("segment-1",),
+        source_script_segment_ids=("segment-1",),
+        status="ready",
+        diff={"proposal_mode": "yujin_actionable_media_v1"},
+        expires_at=None,
+        candidates=(candidate,),
+    )
+
+
+@pytest.mark.parametrize(
+    "race",
+    (
+        "session_revision",
+        "asset_index",
+        "forged_type",
+        "media_revision",
+        "source_missing",
+        "claimed_raw_actual_broll",
+        "claimed_broll_actual_raw",
+    ),
+)
+def test_ready_yujin_terminal_cas_rolls_back_stale_proposal_before_terminal_write(
+    tmp_path: Path,
+    race: str,
+) -> None:
+    store, project_id, session_id = _scope(tmp_path)
+    source = tmp_path / f"{race}.bin"
+    source.write_bytes(b"terminal-race-source")
+    asset = store.register_asset(
+        project_id=project_id,
+        asset_type=(
+            AssetType.IMAGE
+            if race == "forged_type"
+            else AssetType.RAW_VIDEO
+            if race == "claimed_broll_actual_raw"
+            else AssetType.BROLL_VIDEO
+        ),
+        source_path=source,
+        metadata={},
+    )
+    proposal = _ready_yujin_proposal(
+        store,
+        project_id=project_id,
+        session_id=session_id,
+        asset_id=asset.asset_id,
+        claimed_source_kind=(
+            "raw_video" if race == "claimed_raw_actual_broll" else "broll_video"
+        ),
+    )
+    if race == "media_revision":
+        proposal = replace(
+            proposal,
+            candidates=(
+                replace(proposal.candidates[0], media_revision="forged-r1"),
+            ),
+        )
+    durable = store.begin_director_hermes_run(
+        project_id=project_id,
+        session_id=session_id,
+        conversation_id="conv",
+        client_message_id=f"terminal-race-{race}",
+        user_text="추천",
+        expected_session_revision=proposal.base_session_revision,
+        expected_asset_index_revision=proposal.asset_index_revision,
+    )
+    if race == "session_revision":
+        current = store.get_editing_session(
+            project_id=project_id,
+            session_id=session_id,
+        )
+        store.update_editing_session(
+            project_id=project_id,
+            session_id=session_id,
+            session_payload=current,
+            expected_revision=proposal.base_session_revision,
+        )
+    elif race == "asset_index":
+        store.bump_asset_index_revision(project_id)
+    elif race == "source_missing":
+        stored_asset = store.get_asset(
+            project_id=project_id,
+            asset_id=asset.asset_id,
+        )
+        store.resolve_storage_uri(
+            project_id=project_id,
+            storage_uri=str(stored_asset["storage_uri"]),
+        ).unlink()
+
+    result = store.complete_director_hermes_run(
+        project_id=project_id,
+        run_id=durable["run_id"],
+        owner_token=durable["owner_token"],
+        status="completed",
+        assistant_text="추천 결과",
+        retryable=False,
+        proposal=proposal,
+    )
+
+    assert result == "proposal_stale"
+    assert store.get_director_hermes_run(
+        project_id=project_id,
+        run_id=durable["run_id"],
+    )["status"] == "pending"
+    assert store.list_director_proposals(project_id) == []
+    messages = store.list_director_messages(
+        project_id=project_id,
+        conversation_id="conv",
+    )
+    assert [message["role"] for message in messages] == ["user"]
+
+
+@pytest.mark.parametrize(
+    ("asset_type", "claimed_source_kind"),
+    (
+        (AssetType.BROLL_VIDEO, "broll_video"),
+        (AssetType.RAW_VIDEO, "raw_video"),
+    ),
+)
+def test_current_ready_yujin_terminal_cas_persists_atomically(
+    tmp_path: Path,
+    asset_type: AssetType,
+    claimed_source_kind: str,
+) -> None:
+    store, project_id, session_id = _scope(tmp_path)
+    source = tmp_path / "current-ready.bin"
+    source.write_bytes(b"current-ready-source")
+    asset = store.register_asset(
+        project_id=project_id,
+        asset_type=asset_type,
+        source_path=source,
+        metadata={},
+    )
+    proposal = _ready_yujin_proposal(
+        store,
+        project_id=project_id,
+        session_id=session_id,
+        asset_id=asset.asset_id,
+        claimed_source_kind=claimed_source_kind,
+    )
+    durable = store.begin_director_hermes_run(
+        project_id=project_id,
+        session_id=session_id,
+        conversation_id="conv",
+        client_message_id="terminal-current",
+        user_text="추천",
+        expected_session_revision=proposal.base_session_revision,
+        expected_asset_index_revision=proposal.asset_index_revision,
+    )
+
+    assert store.complete_director_hermes_run(
+        project_id=project_id,
+        run_id=durable["run_id"],
+        owner_token=durable["owner_token"],
+        status="completed",
+        assistant_text="추천 결과",
+        retryable=False,
+        proposal=proposal,
+    )
+    assert store.get_director_hermes_run(
+        project_id=project_id,
+        run_id=durable["run_id"],
+    )["status"] == "completed"
+    assert [item.proposal_id for item in store.list_director_proposals(project_id)] == [
+        proposal.proposal_id
+    ]
+    assistant = store.list_director_messages(
+        project_id=project_id,
+        conversation_id="conv",
+    )[-1]
+    assert assistant["proposal_id"] == proposal.proposal_id
 
 
 def test_machine_payload_is_never_public_and_candidate_links_atomically(
@@ -334,6 +555,126 @@ def test_machine_payload_is_never_public_and_candidate_links_atomically(
     assert "operation-1" not in caplog.text
     assert "proposal-yujin-service" not in caplog.text
     assert "산책 영상을" not in caplog.text
+
+
+def test_current_media_projection_is_attested_after_context_recheck(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from dataclasses import replace
+
+    import videobox_api.hermes_run_service as run_module
+
+    store, project_id, session_id = _scope(tmp_path)
+    source = tmp_path / "attested-current.mp4"
+    source.write_bytes(b"attested-current")
+    asset = store.register_asset(
+        project_id=project_id,
+        asset_type=AssetType.BROLL_VIDEO,
+        source_path=source,
+        metadata={},
+    )
+    base_context = _proposal_context(
+        asset_revision=store.get_asset_index_revision(project_id)
+    )
+    context = base_context.model_copy(
+        update={
+            "project_id": project_id,
+            "session_id": session_id,
+            "media_candidates": (
+                base_context.media_candidates[0].model_copy(
+                    update={"asset_id": asset.asset_id}
+                ),
+            ),
+        }
+    )
+    gateway = _Gateway(
+        [AgentGatewayEvent("run_completed", _proposal_output(context))]
+    )
+    activation_calls: list[dict[str, object]] = []
+
+    def activate(**kwargs):
+        activation_calls.append(kwargs)
+        projection = kwargs["projection"]
+        proposal = projection.proposal
+        assert proposal is not None
+        candidate = replace(
+            proposal.candidates[0],
+            availability="actionable",
+            review_status="approved",
+            expected_content_sha256=sha256_file(
+                store.resolve_storage_uri(
+                    project_id=project_id,
+                    storage_uri=str(
+                        store.get_asset(
+                            project_id=project_id,
+                            asset_id=asset.asset_id,
+                        )["storage_uri"]
+                    ),
+                )
+            ),
+            media_revision=str(
+                store.get_asset(
+                    project_id=project_id,
+                    asset_id=asset.asset_id,
+                )["created_at"]
+            ),
+            canonical_metadata={
+                "schema_version": "videobox.yujin-response.v1",
+                "proposal_kind": "broll",
+                "yujin_actionable_media": True,
+                "source_media_kind": "broll_video",
+                "target_segment_id": "segment-1",
+            },
+            asset_id=asset.asset_id,
+        )
+        return replace(
+            projection,
+            proposal=replace(
+                proposal,
+                status="ready",
+                diff={
+                    **dict(proposal.diff),
+                    "proposal_mode": "yujin_actionable_media_v1",
+                },
+                candidates=(candidate,),
+            ),
+        )
+
+    monkeypatch.setattr(
+        run_module,
+        "activate_yujin_media_projection",
+        activate,
+        raising=False,
+    )
+    service = HermesRunService(
+        store=store,
+        gateway_client=gateway,
+        context_builder=lambda **_: context,
+    )
+
+    async def scenario():
+        run = await service.create_run(
+            project_id=project_id,
+            session_id=session_id,
+            conversation_id="conv",
+            client_message_id="actionable-proposal",
+            text="추천해줘",
+        )
+        await run.task
+        return run, [event async for event in service.subscribe(run.run_id)]
+
+    run, events = asyncio.run(scenario())
+
+    assert len(activation_calls) == 1
+    assert activation_calls[0]["context"] == context
+    assert events[-1].event_type == "run_completed"
+    stored = store.get_director_proposal(
+        project_id,
+        _persisted_proposal_id(project_id=project_id, run_id=run.run_id),
+    )
+    assert stored.status == "ready"
+    assert stored.candidates[0].availability == "actionable"
 
 
 def test_changed_terminal_context_discards_only_proposal_with_manual_fallback(
@@ -1297,6 +1638,56 @@ def test_proposal_insert_race_retries_terminal_cas_without_candidate() -> None:
             session_id=context.session_id,
             conversation_id="conversation",
             client_message_id="race",
+            text="추천",
+        )
+        await run.task
+        return [event async for event in service.subscribe(run.run_id)]
+
+    events = asyncio.run(scenario())
+    assert len(store.completions) == 2
+    assert store.completions[0]["proposal"] is not None
+    assert store.completions[1]["proposal"] is None
+    assert MANUAL_FALLBACK in store.completions[1]["assistant_text"]
+    assert events[-1].event_type == "run_completed"
+    assert events[-1].text == store.completions[1]["assistant_text"]
+
+
+def test_proposal_stale_retries_terminal_cas_without_candidate() -> None:
+    class Store:
+        def __init__(self) -> None:
+            self.completions: list[dict] = []
+
+        def begin_director_hermes_run(self, **_):
+            return {
+                "run_id": "stale-run",
+                "status": "pending",
+                "owner_token": "owner",
+                "dispatch": True,
+            }
+
+        def director_proposal_exists(self, **_):
+            return False
+
+        def complete_director_hermes_run(self, **kwargs):
+            self.completions.append(kwargs)
+            return "proposal_stale" if len(self.completions) == 1 else True
+
+    context = _proposal_context()
+    store = Store()
+    service = HermesRunService(
+        store=store,
+        gateway_client=_Gateway(
+            [AgentGatewayEvent("run_completed", _proposal_output(context))]
+        ),
+        context_builder=lambda **_: context,
+    )
+
+    async def scenario():
+        run = await service.create_run(
+            project_id=context.project_id,
+            session_id=context.session_id,
+            conversation_id="conversation",
+            client_message_id="stale",
             text="추천",
         )
         await run.task

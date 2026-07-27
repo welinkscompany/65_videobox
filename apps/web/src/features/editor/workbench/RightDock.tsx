@@ -103,8 +103,20 @@ export function RightDock({
   }, [conversationScroll.key, conversationScroll.pinnedToBottom, conversationScroll.top, messages]);
 
   const proposalIsReady = proposal?.status === "ready";
+  const proposalIsCurrent = proposalIsReady
+    && proposal.baseSessionRevision === proposal.currentRevision;
   const activeCandidateIds = selectedCandidateIds
     ?? (proposal?.candidates[0] ? [proposal.candidates[0].candidateId] : []);
+  const selectedCandidatesAreActionable = Boolean(
+    proposalIsCurrent
+    && activeCandidateIds.length === 1
+    && proposal?.candidates.some((candidate) => (
+      candidate.candidateId === activeCandidateIds[0]
+      && candidate.actionable
+      && candidate.availability === "actionable"
+      && candidate.reviewStatus === "approved"
+    )),
+  );
   const selectedInspectorTarget = inspectorTargets.find((target) => target.id === selectedInspectorTargetId) ?? null;
   const canSend = Boolean(!composerDisabled && onSendMessage && draft.trim());
   const submit = () => { if (canSend) void onSendMessage?.(draft.trim()); };
@@ -149,10 +161,46 @@ export function RightDock({
 
     <section aria-label="추천" className="vb-editor-workbench__summary">
       <h2>추천</h2>
+      {proposal ? <div aria-label="제안 편집본">
+        <p>{`제안 기준 편집본 ${proposal.baseSessionRevision}`}</p>
+        <p>{`현재 편집본 ${proposal.currentRevision}`}</p>
+      </div> : null}
       {proposal?.candidates.length ? <div role="radiogroup" aria-label="추천 후보">
-        {proposal.candidates.map((candidate) => <label key={candidate.candidateId}><Input type="radio" name="vb-eugene-candidate" aria-label={`${candidate.visibleReferenceCode} 선택`} checked={activeCandidateIds.includes(candidate.candidateId)} onChange={() => onSelectedCandidateIdsChange?.([candidate.candidateId])} />{candidate.visibleReferenceCode} · {candidate.mediaType}{proposalIsReady && candidate.previewUrl && onPreviewCandidate ? <Button type="button" onClick={() => onPreviewCandidate(candidate)}>추천 미리 듣기</Button> : null}</label>)}
+        {proposal.candidates.map((candidate) => {
+          const candidateDeclaresActionable = candidate.actionable === undefined
+            ? proposalIsReady
+            : (
+              candidate.actionable
+              && candidate.availability === "actionable"
+              && candidate.reviewStatus === "approved"
+            );
+          const candidateIsActionable = Boolean(
+            proposalIsCurrent
+            && candidateDeclaresActionable,
+          );
+          return <article key={candidate.candidateId}>
+            <label><Input
+              type="radio"
+              name="vb-eugene-candidate"
+              aria-label={`${candidate.visibleReferenceCode} 선택`}
+              checked={activeCandidateIds.includes(candidate.candidateId)}
+              disabled={!candidateIsActionable}
+              onChange={() => {
+                if (candidateIsActionable) onSelectedCandidateIdsChange?.([candidate.candidateId]);
+              }}
+            />{candidate.visibleReferenceCode} · {candidate.mediaType}</label>
+            <p>{candidate.previewSummary}</p>
+            <p>{`후보 상태: ${candidateDeclaresActionable ? "적용 가능" : "수동 적용"}`}</p>
+            <dl>
+              <dt>미디어</dt><dd>{mediaKindLabel(candidate.sourceMediaKind)}</dd>
+              <dt>대상 장면</dt><dd>{candidate.targetSegmentId}</dd>
+              <dt>적용 설정</dt><dd>{controlSummary(candidate.supportedControls ?? {})}</dd>
+            </dl>
+            {candidateIsActionable && candidate.previewUrl && onPreviewCandidate ? <Button type="button" onClick={() => onPreviewCandidate(candidate)}>추천 미리 듣기</Button> : null}
+          </article>;
+        })}
       </div> : <p>아직 추천이 없어요. 직접 편집을 계속하거나 유진에게 요청할 수 있어요.</p>}
-      {proposal && proposalIsReady && onApplyProposal ? <Button type="button" disabled={state === "applying" || !activeCandidateIds.length} onClick={() => void onApplyProposal(proposal.proposalId, activeCandidateIds)}>선택한 추천 적용</Button> : null}
+      {proposal && proposalIsReady && onApplyProposal ? <Button type="button" disabled={state === "applying" || !selectedCandidatesAreActionable} onClick={() => void onApplyProposal(proposal.proposalId, activeCandidateIds)}>선택한 추천 적용</Button> : null}
     </section>
 
     <section className="vb-editor-workbench__summary">
@@ -174,4 +222,25 @@ export function RightDock({
       </div> : null}
     </section>
   </div>;
+}
+
+function mediaKindLabel(kind: RightDockCandidate["sourceMediaKind"]) {
+  return {
+    raw_video: "원본 영상",
+    broll_video: "B-roll 영상",
+    image: "이미지",
+    bgm: "배경 음악",
+    sfx: "효과음",
+  }[kind] ?? "미디어";
+}
+
+function controlSummary(controls: Readonly<Record<string, unknown>>) {
+  const labels = Object.entries(controls).map(([name, value]) => {
+    if (name === "fit") return value === "crop" ? "화면 채우기" : "화면 안에 맞추기";
+    if (name === "volume") return `음량 ${value}`;
+    if (name === "fade_in_sec") return `시작 전환 ${value}초`;
+    if (name === "fade_out_sec") return `끝 전환 ${value}초`;
+    return null;
+  }).filter((value): value is string => value !== null);
+  return labels.join(", ") || "기본 설정";
 }

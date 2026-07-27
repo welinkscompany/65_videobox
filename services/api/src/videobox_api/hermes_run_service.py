@@ -17,6 +17,7 @@ from videobox_core_engine.yujin_creator_context import (
 from videobox_core_engine.yujin_creator_proposal_adapter import (
     MANUAL_FALLBACK,
     YujinCreatorProjection,
+    activate_yujin_media_projection,
     parse_and_project_yujin_creator_output,
     safe_yujin_stream_visible_prefix,
 )
@@ -740,8 +741,12 @@ class HermesRunService:
                 )
             except Exception:
                 stored = False
-            if stored == "proposal_conflict" and projection is not None:
-                projection = self._discard_projection_for_collision(projection)
+            if stored in {"proposal_conflict", "proposal_stale"} and projection is not None:
+                projection = (
+                    self._discard_projection_for_collision(projection)
+                    if stored == "proposal_conflict"
+                    else self._discard_stale_projection(projection)
+                )
                 text = projection.reply_text
                 proposal = None
                 event_type, text, retryable, proposal = self._normalize_terminal(
@@ -840,6 +845,13 @@ class HermesRunService:
                 != original.model_dump(mode="json")
             ):
                 raise ValueError("creator_context_changed")
+            projection = await asyncio.to_thread(
+                activate_yujin_media_projection,
+                store=self.store,
+                project_id=run.project_id,
+                context=current,
+                projection=projection,
+            )
         except Exception:
             visible = projection.reply_text.strip()
             return YujinCreatorProjection(
@@ -871,6 +883,24 @@ class HermesRunService:
             schema_version=projection.schema_version,
             operation_count=projection.operation_count,
             validation_outcome="proposal_conflict",
+            manual_fallback=True,
+        )
+
+    @staticmethod
+    def _discard_stale_projection(
+        projection: YujinCreatorProjection,
+    ) -> YujinCreatorProjection:
+        visible = projection.reply_text.strip()
+        return YujinCreatorProjection(
+            reply_text=(
+                f"{visible}\n\n{MANUAL_FALLBACK}"
+                if visible
+                else MANUAL_FALLBACK
+            ),
+            proposal=None,
+            schema_version=projection.schema_version,
+            operation_count=projection.operation_count,
+            validation_outcome="stale_context",
             manual_fallback=True,
         )
 

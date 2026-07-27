@@ -13,7 +13,7 @@
 Parent: `docs/superpowers/plans/2026-07-26-videobox-hermes-yujin-master-plan.md`
 Requires: Phase A task A4 complete.
 
-Child progress: **2/5 tasks (40.0%), remaining 60.0%**.
+Child progress: **3/5 tasks (60.0%), remaining 40.0%**.
 
 ## Supported-control rule
 
@@ -232,26 +232,53 @@ Each operation must carry:
 
 ## B3 — Implement B-roll, BGM, and SFX recommendation/apply
 
-- [ ] **B3** Support revision-safe B-roll, BGM, and SFX recommendation/apply paths.
+- [x] **B3** Support revision-safe B-roll, BGM, and SFX recommendation/apply paths.
 
 **Files:**
 
-- Modify: `packages/domain-models/src/videobox_domain_models/yujin_creator_proposals.py`
 - Modify: `packages/core-engine/src/videobox_core_engine/yujin_creator_proposal_adapter.py`
+- Modify: `packages/core-engine/src/videobox_core_engine/director_proposal_service.py`
+- Modify: `packages/storage-abstractions/src/videobox_storage/local_project_store.py`
+- Modify: `services/api/src/videobox_api/hermes_run_service.py`
+- Modify: `services/api/src/videobox_api/routers/director_proposals.py`
+- Modify: `config/hermes/yujin/skills/videobox-creator/SKILL.md`
+- Modify: `apps/web/src/features/editor/editorCommandPort.ts`
+- Modify: `apps/web/src/features/editor/editorCommandPort.test.ts`
 - Modify: `apps/web/src/features/editor/workbench/EditorWorkbenchRoute.tsx`
 - Modify: `apps/web/src/features/editor/workbench/rightDockTypes.ts`
 - Modify: `apps/web/src/features/editor/workbench/RightDock.tsx`
 - Modify: `apps/web/src/features/editor/workbench/editor-workbench-route.test.tsx`
 - Modify: `apps/web/src/features/editor/workbench/right-dock.test.tsx`
 - Create: `tests/test_yujin_media_proposal_adapter.py`
+- Modify: `tests/test_hermes_run_service.py`
+- Modify: `tests/test_api_media_director.py`
+
+**Narrow B3 contract amendment (2026-07-27):**
+
+- Only context media kinds `raw_video` and `broll_video` may become actionable
+  B-roll. `image` and every B4 kind remain non-actionable/manual fallback.
+- The saved proposal may become `ready` only after a fresh creator-context recheck
+  and server-side attestation of the exact asset/type, current bytes SHA-256,
+  media revision, eligibility, asset-index revision, editing session, and segment
+  alignment. A proposal with no actionable B3 candidate remains `candidate_only`.
+- RightDock only projects typed details and emits selection/apply intent. It must
+  disable non-actionable, stale, wrong-status, and wrong-revision candidates.
+- Route owns the first mutation: await the existing Director candidate materialize
+  endpoint, recheck route/director epoch and current revision after the await, then
+  call `EditorCommandPort.applyMedia`. Yujin B3 never uses `batchApply`.
+- Existing generic candidate gates and legacy Director apply/batch behavior remain
+  unchanged. Yujin preview/materialize re-attest the exact current asset truth,
+  while Yujin direct REST apply/batch routes are proposal-level forbidden so the
+  only edit mutation path remains the current-revision `EditorCommandPort`.
 
 **TDD acceptance matrix:**
 
 | Kind | Candidate source | Precondition | Existing command boundary | Stale completion |
 |---|---|---|---|---|
-| B-roll image/video | current asset projection | playable or materializable media kind | existing B-roll EditorCommandPort path | zero mutation |
-| BGM | current audio candidates | materialize success and post-await fence | existing BGM command | zero mutation |
-| SFX | current audio candidates | materialize success and post-await fence | existing SFX command | zero mutation |
+| B-roll video | current `raw_video`/`broll_video` projection | exact target segment start/duration; `contain → fit`, `cover → crop` | materialize, then existing B-roll `applyMedia` path | zero mutation |
+| BGM | current `bgm` candidate | start matches exactly one segment; optional duration equals that segment; volume/fades only | materialize, then existing BGM `applyMedia` path | zero mutation |
+| SFX | current `sfx` candidate | start equals the target segment start; volume only | materialize, then existing SFX `applyMedia` path | zero mutation |
+| Image/B4/deferred | current context only | never actionable in B3 | manual fallback only | zero mutation |
 
 **RED:**
 
@@ -267,9 +294,12 @@ Each operation must carry:
 
 **GREEN:**
 
-4. Reuse the Task 19 materialize and post-await route/current guards; do not duplicate fetch/materialize logic inside RightDock.
+4. Reuse the Task 19 candidate materialize API and post-await
+   route/director-epoch/current-revision guards; do not duplicate fetch/materialize
+   logic inside RightDock.
 5. Keep Route as asset truth and API owner. `RightDock` emits candidate selection/apply intent only.
-6. Preserve real media kinds; do not label audio as video or image as generic binary.
+6. Preserve real media kinds; do not label audio as video or admit image into the
+   actionable B-roll path.
 7. Run:
 
    ```powershell
@@ -278,7 +308,7 @@ Each operation must carry:
    git diff --check
    ```
 
-8. Mark B3 `[x]`, synchronize progress, and commit:
+8. After controller review, mark B3 `[x]`, synchronize progress, and commit:
 
    ```powershell
    git add packages apps/web tests docs/superpowers/plans

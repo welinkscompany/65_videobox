@@ -234,6 +234,41 @@ const directorProposal = (proposalId = "proposal-1") => ({
   candidates: [{ candidate_id: "candidate-1", visible_reference_code: "P01-B-01", media_type: "broll", asset_id: "broll-1", library_asset_id: null, reason_chips: [], scores: {}, availability: "available", review_status: "ready", preview_uri: "https://preview.invalid/candidate-1.mp4", controls: {}, expected_content_sha256: null, media_revision: "r1", canonical_metadata: {}, license_policy: "local", warning_provenance: [] }],
 });
 
+const yujinMediaProposal = (
+  kind: "broll" | "bgm" | "sfx" = "broll",
+  proposalId = `yujin-${kind}`,
+) => ({
+  ...directorProposal(proposalId),
+  diff: { proposal_mode: "yujin_actionable_media_v1" },
+  candidates: [{
+    ...directorProposal().candidates[0],
+    candidate_id: `candidate-${kind}`,
+    visible_reference_code: `P01-${kind.toUpperCase()}-01`,
+    media_type: kind,
+    asset_id: `source-${kind}`,
+    availability: "actionable",
+    review_status: "approved",
+    preview_uri: null,
+    controls: kind === "broll"
+      ? { fit: "crop" }
+      : kind === "bgm"
+        ? { volume: 0.6, fade_in_sec: 0.5, fade_out_sec: 0.75 }
+        : { volume: 0.4 },
+    expected_content_sha256: "a".repeat(64),
+    media_revision: "media-r1",
+    canonical_metadata: {
+      schema_version: "videobox.yujin-response.v1",
+      proposal_kind: kind,
+      yujin_actionable_media: true,
+      source_media_kind: kind === "broll" ? "broll_video" : kind,
+      target_segment_id: "segment-1",
+      preview_summary: `${kind} 추천 세부 내용`,
+      base_session_revision: 1,
+      asset_index_revision: 1,
+    },
+  }],
+});
+
 function pointer(target: Element, type: string, clientX: number) {
   fireEvent(target, new MouseEvent(type, { bubbles: true, cancelable: true, clientX }));
 }
@@ -1436,7 +1471,7 @@ describe("EditorWorkbenchRoute", () => {
     vi.mocked(api.getEditingSession).mockResolvedValue(inspectorSession(7) as never);
     vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
       conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },
-      messages: [], proposal: directorProposal(), references: [],
+      messages: [], proposal: { ...directorProposal(), base_session_revision: 7 }, references: [],
     } as never);
     vi.spyOn(api, "preflightDirectorProposal")
       .mockImplementation(() => new Promise((resolve) => { resolveDirectorPreflight = resolve; }) as never);
@@ -1693,6 +1728,149 @@ describe("EditorWorkbenchRoute", () => {
     fireEvent.click(await screen.findByRole("button", { name: "선택한 추천 적용" }));
     await waitFor(() => expect(preflight).toHaveBeenCalledWith("project-b", "proposal-session-b"));
     expect(batchApply).toHaveBeenCalledWith("project-b", "proposal-session-b", { candidate_ids: ["candidate-1"], expected_revision: 1 });
+  });
+
+  it.each([
+    ["broll", "updateEditingSessionBroll", { fit: "crop" }],
+    ["bgm", "updateEditingSessionMusicOverride", { volume: 0.6, fade_in_sec: 0.5, fade_out_sec: 0.75 }],
+    ["sfx", "updateEditingSessionSfxOverride", { volume: 0.4 }],
+  ] as const)("materializes then explicitly applies one selected Yujin %s operation through EditorCommandPort", async (kind, endpoint, controls) => {
+    const proposal = yujinMediaProposal(kind);
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
+      conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },
+      messages: [], proposal, references: [],
+    } as never);
+    const preflight = vi.spyOn(api, "preflightDirectorProposal").mockResolvedValue({ status: "ready" } as never);
+    const materialize = vi.spyOn(api, "materializeDirectorCandidate").mockResolvedValue({ asset_id: `materialized-${kind}` } as never);
+    const apply = vi.spyOn(api, endpoint).mockResolvedValue({} as never);
+    const batchApply = vi.spyOn(api, "batchApplyDirectorProposal");
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+    expect(screen.getByText(`${kind} 추천 세부 내용`)).toBeVisible();
+    expect(screen.getByRole("radio", { name: `${proposal.candidates[0].visible_reference_code} 선택` })).not.toBeChecked();
+    expect(screen.getByRole("button", { name: "선택한 추천 적용" })).toBeDisabled();
+    expect(preflight).not.toHaveBeenCalled();
+    expect(materialize).not.toHaveBeenCalled();
+    expect(apply).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("radio", { name: `${proposal.candidates[0].visible_reference_code} 선택` }));
+    const button = screen.getByRole("button", { name: "선택한 추천 적용" });
+    expect(button).toBeEnabled();
+    fireEvent.click(button);
+    fireEvent.click(button);
+
+    await waitFor(() => expect(materialize).toHaveBeenCalledWith(
+      "project-a",
+      proposal.proposal_id,
+      proposal.candidates[0].candidate_id,
+    ));
+    await waitFor(() => expect(apply).toHaveBeenCalledWith(
+      "project-a",
+      "session-a",
+      "segment-1",
+      {
+        asset_id: `materialized-${kind}`,
+        media_controls: controls,
+        expected_revision: 1,
+      },
+    ));
+    expect(materialize).toHaveBeenCalledTimes(1);
+    expect(apply).toHaveBeenCalledTimes(1);
+    expect(batchApply).not.toHaveBeenCalled();
+  });
+
+  it("disables stale Yujin Apply before materialize or edit mutation", async () => {
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
+      conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },
+      messages: [],
+      proposal: { ...yujinMediaProposal(), base_session_revision: 0 },
+      references: [],
+    } as never);
+    const materialize = vi.spyOn(api, "materializeDirectorCandidate");
+    const apply = vi.spyOn(api, "updateEditingSessionBroll");
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+
+    expect(screen.getByRole("button", { name: "선택한 추천 적용" })).toBeDisabled();
+    expect(materialize).not.toHaveBeenCalled();
+    expect(apply).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["broll", "bgm"],
+    ["bgm", "sfx"],
+    ["sfx", "broll_video"],
+  ] as const)("disables Yujin %s when source media kind is %s", async (kind, sourceMediaKind) => {
+    const proposal = yujinMediaProposal(kind);
+    proposal.candidates[0].canonical_metadata.source_media_kind = sourceMediaKind;
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
+      conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },
+      messages: [], proposal, references: [],
+    } as never);
+    const materialize = vi.spyOn(api, "materializeDirectorCandidate");
+    const batchApply = vi.spyOn(api, "batchApplyDirectorProposal");
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+
+    expect(screen.getByRole("radio", { name: `${proposal.candidates[0].visible_reference_code} 선택` })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "선택한 추천 적용" })).toBeDisabled();
+    expect(materialize).not.toHaveBeenCalled();
+    expect(batchApply).not.toHaveBeenCalled();
+  });
+
+  it("drops a Yujin materialize completion after route epoch changes", async () => {
+    let resolveMaterialize!: (value: unknown) => void;
+    vi.spyOn(api, "getEditorPlaybackManifest").mockImplementation(
+      (projectId, sessionId) => Promise.resolve(manifest(projectId, sessionId)) as never,
+    );
+    vi.spyOn(api, "reloadDirectorSession").mockImplementation((projectId, sessionId) => Promise.resolve({
+      conversation: { conversation_id: `conversation-${sessionId}`, project_id: String(projectId), session_id: String(sessionId) },
+      messages: [],
+      proposal: projectId === "project-a" ? yujinMediaProposal() : null,
+      references: [],
+    }) as never);
+    vi.spyOn(api, "preflightDirectorProposal").mockResolvedValue({ status: "ready" } as never);
+    const materialize = vi.spyOn(api, "materializeDirectorCandidate")
+      .mockImplementation(() => new Promise((resolve) => { resolveMaterialize = resolve; }) as never);
+    const apply = vi.spyOn(api, "updateEditingSessionBroll");
+    const rendered = render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+    fireEvent.click(await screen.findByRole("radio", { name: "P01-BROLL-01 선택" }));
+    fireEvent.click(await screen.findByRole("button", { name: "선택한 추천 적용" }));
+    await waitFor(() => expect(materialize).toHaveBeenCalledTimes(1));
+
+    rendered.rerender(<EditorWorkbenchRoute projectId="project-b" sessionId="session-b" />);
+    await expectEditorRevision(1);
+    await act(async () => { resolveMaterialize({ asset_id: "materialized-stale" }); });
+
+    expect(apply).not.toHaveBeenCalled();
+  });
+
+  it("keeps manual editing and issues zero edit commands when Yujin materialize fails", async () => {
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
+      conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },
+      messages: [], proposal: yujinMediaProposal(), references: [],
+    } as never);
+    vi.spyOn(api, "preflightDirectorProposal").mockResolvedValue({ status: "ready" } as never);
+    vi.spyOn(api, "materializeDirectorCandidate").mockRejectedValue(new Error("materialize failed"));
+    const apply = vi.spyOn(api, "updateEditingSessionBroll");
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+    fireEvent.click(await screen.findByRole("radio", { name: "P01-BROLL-01 선택" }));
+    fireEvent.click(await screen.findByRole("button", { name: "선택한 추천 적용" }));
+
+    expect(await screen.findByRole("button", { name: "Yujin 없이 계속 편집" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "n-1 클립 선택" })).toBeEnabled();
+    expect(apply).not.toHaveBeenCalled();
   });
 
   it("keeps reload read-only until the creator explicitly starts Eugene, then creates one conversation and proposal", async () => {
@@ -1981,6 +2159,10 @@ describe("EditorWorkbenchRoute", () => {
         availability: "candidate_only",
         review_status: "pending",
         preview_uri: null,
+        canonical_metadata: {
+          schema_version: "videobox.yujin-response.v1",
+          yujin_actionable_media: false,
+        },
       }],
     };
     vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue(
@@ -2037,7 +2219,7 @@ describe("EditorWorkbenchRoute", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
 
-    expect(await screen.findByRole("radio", { name: "P01-B-09 선택" })).toBeChecked();
+    expect(await screen.findByRole("radio", { name: "P01-B-09 선택" })).not.toBeChecked();
     expect(getProposal).toHaveBeenCalledWith("project-a", "proposal-from-hermes");
     expect(screen.queryByRole("button", { name: "추천 미리 듣기" })).toBeNull();
     expect(screen.queryByRole("button", { name: "선택한 추천 적용" })).toBeNull();

@@ -1,6 +1,17 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 304. 2026-07-27 Hermes Yujin B2 typed creator proposal closeout`을 우선 적용한다. Task 22 기술 closeout 근거는 `## 300`을 유지하며, 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 305. 2026-07-27 Hermes Yujin B3 media recommendation/apply closeout`을 우선 적용한다. Task 22 기술 closeout 근거는 `## 300`을 유지하며, 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+
+## 305. 2026-07-27 Hermes Yujin B3 media recommendation/apply closeout
+
+- `[x] B3 완료`: fresh creator context와 terminal transaction 안에서 session revision, asset-index revision, 실제 asset kind, media revision, source 존재와 SHA-256을 다시 확인한 `raw_video/broll_video` B-roll, BGM, SFX만 `ready/actionable`로 저장한다. 이미지와 B4 후보는 `candidate_only`/수동 적용으로 남고, 섞인 proposal에서도 actionable 후보만 freshness 대상이 된다.
+- `명시적 단일 적용`: RightDock은 기준/현재 편집본, 실제 미디어 종류, 대상 장면, 지원 control과 적용 가능 상태를 보여 주지만 첫 후보를 자동 선택하지 않는다. 사용자가 radio로 후보 하나를 선택한 뒤에만 Route가 preflight와 materialize를 실행하고, await 뒤 route/director epoch와 current revision을 다시 확인해 `EditorCommandPort.applyMedia`를 한 번 호출한다. B-roll `contain/cover`는 `fit/crop`, BGM은 volume/fade, SFX는 volume만 전달한다.
+- `우회·실패 경계`: Yujin direct REST `/apply`·`/batch-apply`는 proposal 단위로 mutation 전에 거부하고 legacy Director apply/batch는 유지한다. preview/materialize도 persisted metadata가 아니라 현재 DB asset kind/revision/source/SHA를 다시 확인한다. terminal CAS가 stale이면 모든 write를 rollback하고 proposal 없이 human reply와 manual fallback을 원자적으로 저장한다. display, stale completion, route 이동, materialize 실패, double-click에는 편집 mutation이 0 또는 명시적 한 번뿐이며 RightDock은 별도 player를 만들지 않는다.
+- `범위 제한`: source copy, OpenCut runtime, provider/API 확대, Hermes-owned Mem0, SaaS, 자동 apply, 이미지 B-roll과 backend 미지원 effect는 추가하지 않았다. Task 9 사람/환경 acceptance와 실제 CapCut Desktop 실증도 별도다.
+- `검증`: TDD RED→GREEN 뒤 controller fresh focused Python **323 passed, 1 skipped**(기존 Starlette multipart pending deprecation warning 1건), focused frontend **5 files / 126 passed**, production build, Hermes profile/20-ID plan-state/zero-tools verifier, Editor UI OSS provenance verifier, `git diff --check`가 통과했다. 독립 spec review와 독립 quality·gap·reverse review의 최종 판정은 Critical/Important/Minor **0** PASS다.
+- `미실행`: 전체 Python regression, 전체 frontend suite, live provider canary, 실제 Hermes service-stop/manual environment proof, 실제 PostgreSQL/Docker 동시성, 사용자 원본 미디어 재생·청취와 CapCut 사람 검증은 실행하지 않았고 통과로 간주하지 않는다. Python의 1 skip은 실제 PostgreSQL 환경 미설정 경로이며 production build의 500 kB chunk warning은 기존 비실패 출력이다.
+- `진행률`: Phase B **3/5 (60.0%)**, creator-tools child **3/5 (60.0%), 잔여 40.0%**, Hermes Yujin initiative **9/20 (45.0%), 잔여 55.0%**다. 기존 VideoBox 공식 누적은 Task 9 사람/환경 acceptance 전까지 **9/22 (40.9%)**, 잔여 **59.1%**로 유지한다.
+- `다음 작업`: **B4만** 진행한다. backend가 실제 지원하는 caption, voice/TTS, overlay, output-check control만 typed recommendation과 명시적 current-revision apply/read-only 경계에 연결한다. 미지원 OpenCut effect, 자동 apply, provider 확대, Mem0, SaaS는 시작하지 않는다.
 
 ## 304. 2026-07-27 Hermes Yujin B2 typed creator proposal closeout
 

@@ -50,6 +50,7 @@ function mediaControls(value: EditorControls | undefined): BrollOverrideRequest[
     fade_in_sec: value.fadeInSec,
     fade_out_sec: value.fadeOutSec,
     ducking: value.ducking,
+    fit: value.fit,
   }).filter(([, item]) => item !== undefined));
 }
 function captionStyle(style: EditorCaptionStyle): CaptionStyleMutationRequest["style"] {

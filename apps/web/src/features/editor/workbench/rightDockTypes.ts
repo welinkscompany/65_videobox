@@ -3,11 +3,21 @@ export type RightDockCandidate = Readonly<{
   visibleReferenceCode: string;
   mediaType: string;
   previewUrl: string | null;
+  kind: "broll" | "bgm" | "sfx" | string;
+  sourceMediaKind: "raw_video" | "broll_video" | "image" | "bgm" | "sfx" | string;
+  targetSegmentId: string;
+  previewSummary: string;
+  supportedControls: Readonly<Record<string, unknown>>;
+  availability: string;
+  reviewStatus: string;
+  actionable: boolean;
 }>;
 
 export type RightDockProposal = Readonly<{
   proposalId: string;
   status: string;
+  baseSessionRevision: number;
+  currentRevision: number;
   candidates: readonly RightDockCandidate[];
 }>;
 

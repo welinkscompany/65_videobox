@@ -31,15 +31,22 @@ proposal의 필드는 정확히 `proposal_id`, `base_revision`, `title`, `ration
 `requires_materialization`, `preview_summary`입니다. kind별 계약은 다음과 같습니다.
 
 - `broll`: target은 현재 `segment_id`와 `track_id: video-primary`만 사용합니다.
-  parameters는 현재 context의 `asset_id`, 0 이상 `start_sec`, 0보다 큰
-  `duration_sec`, `fit`(`contain` 또는 `cover`)만 사용하고
-  `requires_materialization`은 true입니다.
+  B3 적용 후보는 media candidate kind가 `raw_video` 또는 `broll_video`인
+  asset만 사용합니다. `image`는 B3 적용 후보가 아니므로 image밖에 없으면
+  proposal을 null로 두고 수동 대체를 안내합니다. parameters의 `start_sec`은
+  target segment의 시작과, `duration_sec`은 그 segment의 길이와 정확히
+  같아야 합니다. `fit`은 `contain` 또는 `cover`만 사용하고
+  `requires_materialization`은 true입니다. 실제 적용 경계에서는
+  `contain`은 `fit`, `cover`는 `crop`으로 전달됩니다.
 - `bgm`: target은 `track_id: audio-bgm`만 사용합니다. parameters는 현재
-  `asset_id`, 0 이상 `start_sec`, 선택적 양수 `duration_sec`, 0~2 `volume`,
-  0~30 `fade_in_sec`/`fade_out_sec`만 사용하고 `requires_materialization`은
+  media candidate kind가 `bgm`인 `asset_id`만 사용합니다. `start_sec`은
+  정확히 한 segment의 시작과 일치해야 하고, `duration_sec`을 넣으면 그
+  segment 길이와 정확히 같아야 합니다. 0~2 `volume`, 0~30
+  `fade_in_sec`/`fade_out_sec`만 사용하고 `requires_materialization`은
   true입니다.
 - `sfx`: target은 현재 `segment_id`와 `track_id: audio-sfx`만 사용합니다.
-  parameters는 현재 `asset_id`, 0 이상 `start_sec`, 0~2 `volume`만 사용하고
+  parameters는 현재 media candidate kind가 `sfx`인 `asset_id`, target
+  segment 시작과 정확히 같은 `start_sec`, 0~2 `volume`만 사용하고
   `requires_materialization`은 true입니다.
 - `caption`: target은 현재 `script_id`, 현재 `segment_id`,
   `track_id: caption-primary`만 사용합니다. parameters는 `text`와
@@ -63,6 +70,9 @@ context 밖의 ID를 추측하지 않습니다.
 
 모든 결과는 durable mutation 전의 `candidate_only` 후보입니다. 직접 preview,
 materialize, apply, render, export를 실행하거나 완료됐다고 말하지 않습니다.
+서버가 이후 현재 session/revision, asset-index revision, exact asset/type,
+현재 bytes SHA-256, media revision, eligibility, segment 정렬을 다시 검증하기
+전에는 어떤 B3 후보도 actionable 또는 ready라고 주장하지 않습니다.
 payload 어디에도 URL, 절대 경로, credential, secret, 실행 코드나 명령을 넣지
 않습니다. 근거가 부족하거나 형식을 확신할 수 없으면 proposal을 null로 두고
 수동 대체 절차를 사람이 읽는 답변에 안내합니다.

@@ -7,7 +7,11 @@ from threading import Event, Thread
 from pydantic import BaseModel, Field, field_validator
 from datetime import datetime
 
-from videobox_core_engine.director_proposal_service import DirectorProposalBlockedError, DirectorProposalService
+from videobox_core_engine.director_proposal_service import (
+    DirectorProposalBlockedError,
+    DirectorProposalService,
+    is_actionable_yujin_media_candidate,
+)
 from videobox_core_engine.director_proposals import proposal_to_payload
 from videobox_core_engine.project_asset_materializer import ProjectAssetMaterializer
 from videobox_storage.local_project_store import LocalProjectStore
@@ -269,6 +273,13 @@ def build_director_proposals_router(store: LocalProjectStore) -> APIRouter:
         candidate = next((item for item in proposal.candidates if item.candidate_id == candidate_id), None)
         if candidate is None:
             raise HTTPException(status_code=404, detail="candidate_missing")
+        require_actionable_yujin_candidate(proposal, candidate)
+        require_current_yujin_source(
+            store=store,
+            project_id=project_id,
+            proposal=proposal,
+            candidate=candidate,
+        )
         return candidate
 
     @router.get("/api/projects/{project_id}/director/proposals/{proposal_id}/candidates/{candidate_id:path}/preview")
@@ -302,10 +313,13 @@ def build_director_proposals_router(store: LocalProjectStore) -> APIRouter:
         try:
             proposal = service.get(project_id=project_id, proposal_id=proposal_id)
             require_ready(proposal)
+            reject_yujin_direct_apply(proposal)
             if proposal.base_session_revision != body.expected_revision:
                 raise HTTPException(status_code=409, detail="proposal_revision_mismatch")
             candidates = {item.candidate_id: item for item in proposal.candidates}
             selected = [candidates[item] for item in body.candidate_ids]
+            for candidate in selected:
+                require_actionable_yujin_candidate(proposal, candidate)
             materialized: dict[str, dict] = {}
             current_asset_index_revision = store.get_asset_index_revision(project_id)
             for candidate in selected:
@@ -367,6 +381,7 @@ def build_director_proposals_router(store: LocalProjectStore) -> APIRouter:
         try:
             proposal = service.get(project_id=project_id, proposal_id=proposal_id)
             require_ready(proposal)
+            reject_yujin_direct_apply(proposal)
             if proposal.base_session_revision != body.expected_revision:
                 raise HTTPException(status_code=409, detail="proposal_revision_mismatch")
             if service.stale_reasons(project_id=project_id, proposal=proposal):
@@ -375,6 +390,8 @@ def build_director_proposals_router(store: LocalProjectStore) -> APIRouter:
             if len(set(body.candidate_ids)) != len(body.candidate_ids):
                 raise ValueError("candidate_ids_duplicate")
             selected = [candidates_by_id[item] for item in body.candidate_ids]
+            for candidate in selected:
+                require_actionable_yujin_candidate(proposal, candidate)
             staged, materialized = materializer.stage_batch(project_id=project_id, candidates=selected)
             session = store.get_editing_session(project_id=project_id, session_id=proposal.source_session_id)
             if int(session.get("session_revision") or 1) != body.expected_revision:
@@ -418,6 +435,52 @@ def build_director_proposals_router(store: LocalProjectStore) -> APIRouter:
 def require_ready(proposal) -> None:
     if proposal.status != "ready":
         raise HTTPException(status_code=409, detail="proposal_not_ready")
+
+
+def require_actionable_yujin_candidate(proposal, candidate) -> None:
+    if proposal.diff.get("proposal_mode") != "yujin_actionable_media_v1":
+        return
+    if not is_actionable_yujin_media_candidate(candidate):
+        raise HTTPException(status_code=422, detail="candidate_unavailable")
+
+
+def reject_yujin_direct_apply(proposal) -> None:
+    if proposal.diff.get("proposal_mode") == "yujin_actionable_media_v1":
+        raise HTTPException(
+            status_code=422,
+            detail="yujin_direct_apply_forbidden",
+        )
+
+
+def require_current_yujin_source(*, store, project_id, proposal, candidate) -> None:
+    if proposal.diff.get("proposal_mode") != "yujin_actionable_media_v1":
+        return
+    try:
+        asset = store.get_asset(project_id=project_id, asset_id=candidate.asset_id)
+        actual_type = str(asset.get("asset_type") or "")
+        claimed_source_kind = str(
+            candidate.canonical_metadata.get("source_media_kind") or ""
+        )
+        expected_type_matches = actual_type == claimed_source_kind
+        source = store.resolve_storage_uri(
+            project_id=project_id,
+            storage_uri=str(asset["storage_uri"]),
+        )
+        if (
+            not expected_type_matches
+            or str(asset.get("created_at") or "") != candidate.media_revision
+            or not source.is_file()
+            or (
+                candidate.expected_content_sha256 is not None
+                and sha256_file(source) != candidate.expected_content_sha256
+            )
+        ):
+            raise ValueError("candidate_source_stale")
+    except (KeyError, OSError, TypeError, ValueError):
+        raise HTTPException(
+            status_code=422,
+            detail="candidate_unavailable",
+        ) from None
 
 
 def _mime_type(path) -> str | None:

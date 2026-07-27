@@ -10,9 +10,21 @@ afterEach(cleanup);
 const proposal: RightDockProposal = {
   proposalId: "proposal-1",
   status: "ready",
+  baseSessionRevision: 7,
+  currentRevision: 7,
   candidates: [
-    { candidateId: "candidate-1", visibleReferenceCode: "B-001", mediaType: "broll", previewUrl: null },
-    { candidateId: "candidate-2", visibleReferenceCode: "B-002", mediaType: "broll", previewUrl: null },
+    {
+      candidateId: "candidate-1", visibleReferenceCode: "B-001", mediaType: "broll", previewUrl: null,
+      kind: "broll", sourceMediaKind: "broll_video", targetSegmentId: "segment-1",
+      previewSummary: "첫 장면을 산책 영상으로 채웁니다.", supportedControls: { fit: "crop" },
+      availability: "actionable", reviewStatus: "approved", actionable: true,
+    },
+    {
+      candidateId: "candidate-2", visibleReferenceCode: "B-002", mediaType: "broll", previewUrl: null,
+      kind: "broll", sourceMediaKind: "raw_video", targetSegmentId: "segment-1",
+      previewSummary: "첫 장면을 원본 영상으로 채웁니다.", supportedControls: { fit: "fit" },
+      availability: "actionable", reviewStatus: "approved", actionable: true,
+    },
   ],
 } as const;
 
@@ -211,17 +223,72 @@ describe("RightDock", () => {
     expect(onApplyProposal).toHaveBeenCalledWith("proposal-1", ["candidate-1"]);
   });
 
+  it("shows typed media details without mutation and disables stale or deferred choices", () => {
+    const onApplyProposal = vi.fn();
+    const onSelectedCandidateIdsChange = vi.fn();
+    const stale: RightDockProposal = {
+      ...proposal,
+      baseSessionRevision: 6,
+      currentRevision: 7,
+      candidates: [
+        proposal.candidates[0],
+        {
+          ...proposal.candidates[1],
+          candidateId: "deferred-image",
+          visibleReferenceCode: "B-003",
+          sourceMediaKind: "image",
+          availability: "candidate_only",
+          reviewStatus: "pending",
+          actionable: false,
+        },
+      ],
+    };
+
+    const { container } = render(<RightDock
+      draft=""
+      onDraftChange={vi.fn()}
+      proposal={stale}
+      selectedCandidateIds={["candidate-1"]}
+      onSelectedCandidateIdsChange={onSelectedCandidateIdsChange}
+      onApplyProposal={onApplyProposal}
+    />);
+
+    expect(screen.getByText("첫 장면을 산책 영상으로 채웁니다.")).toBeVisible();
+    expect(screen.getByText("B-roll 영상")).toBeVisible();
+    expect(screen.getAllByText("segment-1")).toHaveLength(2);
+    expect(screen.getByText("화면 채우기")).toBeVisible();
+    expect(screen.getByText("제안 기준 편집본 6")).toBeVisible();
+    expect(screen.getByText("현재 편집본 7")).toBeVisible();
+    expect(screen.getByText("후보 상태: 적용 가능")).toBeVisible();
+    expect(screen.getByText("후보 상태: 수동 적용")).toBeVisible();
+    expect(screen.getByRole("radio", { name: "B-003 선택" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "선택한 추천 적용" })).toBeDisabled();
+    expect(container.querySelectorAll("audio, video")).toHaveLength(0);
+    expect(onSelectedCandidateIdsChange).not.toHaveBeenCalled();
+    expect(onApplyProposal).not.toHaveBeenCalled();
+  });
+
   it("shows candidate-only references without preview, materialize, or apply controls", () => {
     const onPreviewCandidate = vi.fn();
     const onApplyProposal = vi.fn();
     const candidateOnly: RightDockProposal = {
       proposalId: "candidate-only-proposal",
       status: "candidate_only",
+      baseSessionRevision: 7,
+      currentRevision: 7,
       candidates: [{
         candidateId: "candidate-only-1",
         visibleReferenceCode: "P01-B-01",
         mediaType: "broll",
         previewUrl: "https://must-not-preview.invalid/candidate.mp4",
+        kind: "broll",
+        sourceMediaKind: "image",
+        targetSegmentId: "segment-1",
+        previewSummary: "이미지는 아직 직접 적용할 수 없습니다.",
+        supportedControls: {},
+        availability: "candidate_only",
+        reviewStatus: "pending",
+        actionable: false,
       }],
     };
 
@@ -235,7 +302,7 @@ describe("RightDock", () => {
       onApplyProposal={onApplyProposal}
     />);
 
-    expect(screen.getByRole("radio", { name: "P01-B-01 선택" })).toBeVisible();
+    expect(screen.getByRole("radio", { name: "P01-B-01 선택" })).toBeDisabled();
     expect(screen.queryByRole("button", { name: "추천 미리 듣기" })).toBeNull();
     expect(screen.queryByRole("button", { name: "선택한 추천 적용" })).toBeNull();
     expect(container.querySelectorAll("audio, video")).toHaveLength(0);

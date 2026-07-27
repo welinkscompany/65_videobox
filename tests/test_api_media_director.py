@@ -304,6 +304,367 @@ def test_candidate_only_proposal_rejects_every_execution_surface_before_mutation
     assert store.list_assets(project_id=project_id) == before_assets
 
 
+def test_ready_yujin_proposal_rejects_deferred_candidate_when_ui_is_bypassed(
+    tmp_path: Path,
+) -> None:
+    from dataclasses import replace
+
+    app = create_app(projects_root=tmp_path / "projects")
+    client = TestClient(app)
+    store = app.state.store
+    project_id = client.post(
+        "/api/projects", json={"name": "deferred-yujin"}
+    ).json()["project_id"]
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"deferred-yujin-source")
+    asset = store.register_asset(
+        project_id=project_id,
+        asset_type=AssetType.BROLL_VIDEO,
+        source_path=source,
+        metadata={"semantic_score": 0.9, "review_status": "approved"},
+    )
+    digest = sha256(source.read_bytes()).hexdigest()
+    analysis = store.create_media_analysis(
+        project_id=project_id,
+        asset_id=asset.asset_id,
+        idempotency_key=f"{digest}:deferred",
+        cache_key="deferred",
+    )
+    claim = store.claim_media_analysis(
+        project_id=project_id, analysis_id=analysis["analysis_id"]
+    )
+    assert claim is not None
+    assert store.complete_media_analysis(
+        project_id=project_id,
+        analysis_id=analysis["analysis_id"],
+        expected_attempt=claim["attempt"],
+        result={"frames": [{"summary": "candidate"}]},
+    )
+    session = store.save_editing_session(
+        project_id=project_id,
+        timeline_id="timeline",
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg",
+                    "caption_text": "candidate",
+                    "start_sec": 0,
+                    "end_sec": 1,
+                }
+            ],
+            "history": [],
+        },
+    )
+    legacy = client.post(
+        f"/api/projects/{project_id}/director/proposals",
+        json={"session_id": session["session_id"]},
+    ).json()
+    stored = store.get_director_proposal(project_id, legacy["proposal_id"])
+    actionable = replace(
+        stored.candidates[0],
+        availability="actionable",
+        review_status="approved",
+        controls={"fit": "fit"},
+        expected_content_sha256=digest,
+        canonical_metadata={
+            **dict(stored.candidates[0].canonical_metadata),
+            "schema_version": "videobox.yujin-response.v1",
+            "proposal_kind": "broll",
+            "yujin_actionable_media": True,
+            "source_media_kind": "broll_video",
+            "target_segment_id": "seg",
+        },
+    )
+    deferred = replace(
+        stored.candidates[0],
+        candidate_id="yujin-deferred-image",
+        asset_id="missing-deferred-image",
+        availability="candidate_only",
+        expected_content_sha256=None,
+        media_revision="deferred-r1",
+        canonical_metadata={
+            **dict(stored.candidates[0].canonical_metadata),
+            "schema_version": "videobox.yujin-response.v1",
+            "proposal_kind": "broll",
+            "yujin_actionable_media": False,
+            "source_media_kind": "image",
+            "target_segment_id": "seg",
+        },
+    )
+    proposal = replace(
+        stored,
+        proposal_id="yujin-deferred-bypass",
+        status="ready",
+        diff={
+            **dict(stored.diff),
+            "proposal_mode": "yujin_actionable_media_v1",
+        },
+        candidates=(actionable, deferred),
+    )
+    store.save_director_proposal(project_id, proposal)
+    base = (
+        f"/api/projects/{project_id}/director/proposals/{proposal.proposal_id}"
+    )
+    before = deepcopy(
+        store.get_editing_session(
+            project_id=project_id, session_id=session["session_id"]
+        )
+    )
+    before_assets = store.list_assets(project_id=project_id)
+    preflight = client.post(f"{base}/preflight")
+    forbidden_direct_mutations = (
+        client.post(
+            f"{base}/apply",
+            json={
+                "candidate_ids": [actionable.candidate_id],
+                "expected_revision": session["session_revision"],
+            },
+        ),
+        client.post(
+            f"{base}/batch-apply",
+            json={
+                "candidate_ids": [actionable.candidate_id],
+                "expected_revision": session["session_revision"],
+            },
+        ),
+    )
+
+    responses = (
+        client.get(f"{base}/candidates/{deferred.candidate_id}/preview"),
+        client.post(f"{base}/candidates/{deferred.candidate_id}/materialize"),
+        client.post(
+            f"{base}/apply",
+            json={
+                "candidate_ids": [deferred.candidate_id],
+                "expected_revision": session["session_revision"],
+            },
+        ),
+        client.post(
+            f"{base}/batch-apply",
+            json={
+                "candidate_ids": [deferred.candidate_id],
+                "expected_revision": session["session_revision"],
+            },
+        ),
+    )
+
+    assert preflight.status_code == 200
+    assert preflight.json()["status"] == "ready"
+    assert [
+        (response.status_code, response.json())
+        for response in forbidden_direct_mutations
+    ] == [
+        (422, {"detail": "yujin_direct_apply_forbidden"})
+    ] * 2
+    assert (
+        store.get_editing_session(
+            project_id=project_id, session_id=session["session_id"]
+        )
+        == before
+    )
+    assert store.list_assets(project_id=project_id) == before_assets
+    actionable_preview = client.get(
+        f"{base}/candidates/{actionable.candidate_id}/preview"
+    )
+    assert actionable_preview.status_code == 200
+    assert actionable_preview.content == b"deferred-yujin-source"
+    assert [(response.status_code, response.json()) for response in responses] == [
+        (422, {"detail": "candidate_unavailable"}),
+        (422, {"detail": "candidate_unavailable"}),
+        (422, {"detail": "yujin_direct_apply_forbidden"}),
+        (422, {"detail": "yujin_direct_apply_forbidden"}),
+    ]
+    claimed_raw_actual_broll = replace(
+        actionable,
+        candidate_id="yujin-claimed-raw-actual-broll",
+        canonical_metadata={
+            **dict(actionable.canonical_metadata),
+            "source_media_kind": "raw_video",
+        },
+    )
+    claimed_raw_proposal = replace(
+        proposal,
+        proposal_id="yujin-claimed-raw-actual-broll",
+        candidates=(claimed_raw_actual_broll,),
+    )
+    store.save_director_proposal(project_id, claimed_raw_proposal)
+    claimed_raw_base = (
+        f"/api/projects/{project_id}/director/proposals/"
+        f"{claimed_raw_proposal.proposal_id}/candidates/"
+        f"{claimed_raw_actual_broll.candidate_id}"
+    )
+    assert [
+        client.get(f"{claimed_raw_base}/preview").status_code,
+        client.post(f"{claimed_raw_base}/materialize").status_code,
+    ] == [422, 422]
+    materialized = client.post(
+        f"{base}/candidates/{actionable.candidate_id}/materialize"
+    )
+    assert materialized.status_code == 201
+    assert materialized.json()["asset_id"]
+    persisted = store.get_director_proposal(project_id, proposal.proposal_id)
+    assert persisted.candidates[1].candidate_id == deferred.candidate_id
+    assert persisted.candidates[1].availability == "candidate_only"
+
+    raw_source = tmp_path / "valid-raw-video.mp4"
+    raw_source.write_bytes(b"valid-raw-video")
+    raw_asset = store.register_asset(
+        project_id=project_id,
+        asset_type=AssetType.RAW_VIDEO,
+        source_path=raw_source,
+        metadata={"semantic_score": 0.9, "review_status": "approved"},
+    )
+    raw_digest = sha256(raw_source.read_bytes()).hexdigest()
+    raw_analysis = store.create_media_analysis(
+        project_id=project_id,
+        asset_id=raw_asset.asset_id,
+        idempotency_key=f"{raw_digest}:raw",
+        cache_key="raw",
+    )
+    raw_claim = store.claim_media_analysis(
+        project_id=project_id,
+        analysis_id=raw_analysis["analysis_id"],
+    )
+    assert raw_claim is not None
+    assert store.complete_media_analysis(
+        project_id=project_id,
+        analysis_id=raw_analysis["analysis_id"],
+        expected_attempt=raw_claim["attempt"],
+        result={"frames": [{"summary": "raw"}]},
+    )
+    raw_stored = store.get_asset(
+        project_id=project_id,
+        asset_id=raw_asset.asset_id,
+    )
+    claimed_broll_actual_raw = replace(
+        actionable,
+        candidate_id="yujin-claimed-broll-actual-raw",
+        asset_id=raw_asset.asset_id,
+        expected_content_sha256=raw_digest,
+        media_revision=str(raw_stored["created_at"]),
+    )
+    claimed_broll_proposal = replace(
+        proposal,
+        proposal_id="yujin-claimed-broll-actual-raw",
+        asset_index_revision=store.get_asset_index_revision(project_id),
+        candidates=(claimed_broll_actual_raw,),
+    )
+    store.save_director_proposal(project_id, claimed_broll_proposal)
+    claimed_broll_base = (
+        f"/api/projects/{project_id}/director/proposals/"
+        f"{claimed_broll_proposal.proposal_id}/candidates/"
+        f"{claimed_broll_actual_raw.candidate_id}"
+    )
+    assert [
+        client.get(f"{claimed_broll_base}/preview").status_code,
+        client.post(f"{claimed_broll_base}/materialize").status_code,
+    ] == [422, 422]
+    valid_raw = replace(
+        claimed_broll_actual_raw,
+        candidate_id="yujin-valid-raw",
+        canonical_metadata={
+            **dict(claimed_broll_actual_raw.canonical_metadata),
+            "source_media_kind": "raw_video",
+        },
+    )
+    valid_raw_proposal = replace(
+        claimed_broll_proposal,
+        proposal_id="yujin-valid-raw",
+        candidates=(valid_raw,),
+    )
+    store.save_director_proposal(project_id, valid_raw_proposal)
+    valid_raw_base = (
+        f"/api/projects/{project_id}/director/proposals/"
+        f"{valid_raw_proposal.proposal_id}/candidates/{valid_raw.candidate_id}"
+    )
+    valid_raw_responses = (
+        client.get(f"{valid_raw_base}/preview"),
+        client.post(f"{valid_raw_base}/materialize"),
+    )
+    assert [response.status_code for response in valid_raw_responses] == [200, 201]
+    wrong_source = replace(
+        actionable,
+        candidate_id="yujin-wrong-source",
+        availability="actionable",
+        review_status="approved",
+        canonical_metadata={
+            **dict(actionable.canonical_metadata),
+            "yujin_actionable_media": True,
+            "source_media_kind": "bgm",
+        },
+    )
+    wrong_source_proposal = replace(
+        proposal,
+        proposal_id="yujin-wrong-source-bypass",
+        candidates=(wrong_source,),
+        asset_index_revision=store.get_asset_index_revision(project_id),
+    )
+    store.save_director_proposal(project_id, wrong_source_proposal)
+    wrong_source_response = client.post(
+        f"/api/projects/{project_id}/director/proposals/"
+        f"{wrong_source_proposal.proposal_id}/candidates/"
+        f"{wrong_source.candidate_id}/materialize"
+    )
+    assert wrong_source_response.status_code == 422
+    assert wrong_source_response.json() == {"detail": "candidate_unavailable"}
+
+    forged_source = tmp_path / "forged-image.png"
+    forged_source.write_bytes(b"forged-image-as-broll")
+    forged_asset = store.register_asset(
+        project_id=project_id,
+        asset_type=AssetType.IMAGE,
+        source_path=forged_source,
+        metadata={"semantic_score": 0.9, "review_status": "approved"},
+    )
+    forged_digest = sha256(forged_source.read_bytes()).hexdigest()
+    forged_analysis = store.create_media_analysis(
+        project_id=project_id,
+        asset_id=forged_asset.asset_id,
+        idempotency_key=f"{forged_digest}:forged",
+        cache_key="forged",
+    )
+    forged_claim = store.claim_media_analysis(
+        project_id=project_id,
+        analysis_id=forged_analysis["analysis_id"],
+    )
+    assert forged_claim is not None
+    assert store.complete_media_analysis(
+        project_id=project_id,
+        analysis_id=forged_analysis["analysis_id"],
+        expected_attempt=forged_claim["attempt"],
+        result={"frames": [{"summary": "forged"}]},
+    )
+    forged = replace(
+        actionable,
+        candidate_id="yujin-forged-image",
+        asset_id=forged_asset.asset_id,
+        expected_content_sha256=forged_digest,
+        media_revision=forged_asset.created_at.isoformat(),
+    )
+    forged_proposal = replace(
+        proposal,
+        proposal_id="yujin-forged-image-bypass",
+        candidates=(forged,),
+        asset_index_revision=store.get_asset_index_revision(project_id),
+    )
+    store.save_director_proposal(project_id, forged_proposal)
+    forged_base = (
+        f"/api/projects/{project_id}/director/proposals/"
+        f"{forged_proposal.proposal_id}/candidates/{forged.candidate_id}"
+    )
+    forged_responses = (
+        client.get(f"{forged_base}/preview"),
+        client.post(f"{forged_base}/materialize"),
+    )
+    assert [response.status_code for response in forged_responses] == [422, 422]
+    assert (
+        store.get_editing_session(
+            project_id=project_id, session_id=session["session_id"]
+        )
+        == before
+    )
+
+
 def test_director_candidate_preview_and_materialize_preserve_identity_controls_and_session(tmp_path: Path) -> None:
     """Task 10 RED: proposal candidates need a safe read-only preview/materialization boundary."""
     app = create_app(projects_root=tmp_path / "projects")

@@ -68,6 +68,35 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _is_actionable_yujin_media_proposal(proposal: DirectorProposal) -> bool:
+    if (
+        proposal.status != "ready"
+        or proposal.diff.get("proposal_mode") != "yujin_actionable_media_v1"
+    ):
+        return False
+    actionable = [
+        candidate
+        for candidate in proposal.candidates
+        if candidate.availability == "actionable"
+    ]
+    return bool(actionable) and all(
+        candidate.media_type in {"broll", "bgm", "sfx"}
+        and (
+            candidate.canonical_metadata.get("source_media_kind")
+            in {"raw_video", "broll_video"}
+            if candidate.media_type == "broll"
+            else candidate.canonical_metadata.get("source_media_kind")
+            == candidate.media_type
+        )
+        and candidate.review_status == "approved"
+        and candidate.expected_content_sha256 is not None
+        and len(candidate.expected_content_sha256) == 64
+        and candidate.canonical_metadata.get("yujin_actionable_media") is True
+        and bool(candidate.canonical_metadata.get("target_segment_id"))
+        for candidate in actionable
+    )
+
+
 def _is_relative_to(path: Path, parent: Path) -> bool:
     try:
         path.relative_to(parent)
@@ -4554,12 +4583,16 @@ class LocalProjectStore:
         assistant_text: str,
         retryable: bool,
         proposal: DirectorProposal | None = None,
-    ) -> bool | Literal["proposal_conflict"]:
+    ) -> bool | Literal["proposal_conflict", "proposal_stale"]:
         """Owner-token-fenced pending-to-terminal transition."""
         if status not in {"completed", "blocked"} or not assistant_text.strip():
             raise ValueError("director_hermes_terminal_invalid")
         if proposal is not None and (
-            status != "completed" or proposal.status != "candidate_only"
+            status != "completed"
+            or (
+                proposal.status != "candidate_only"
+                and not _is_actionable_yujin_media_proposal(proposal)
+            )
         ):
             raise ValueError("director_hermes_proposal_invalid")
         now = self._now_iso()
@@ -4567,6 +4600,19 @@ class LocalProjectStore:
         connection = self._connection(project_id)
         try:
             connection.execute("BEGIN IMMEDIATE")
+            if (
+                proposal is not None
+                and proposal.status == "ready"
+                and proposal.diff.get("proposal_mode")
+                == "yujin_actionable_media_v1"
+                and not self._ready_yujin_proposal_is_current(
+                    connection=connection,
+                    project_id=project_id,
+                    proposal=proposal,
+                )
+            ):
+                connection.rollback()
+                return "proposal_stale"
             cursor = connection.execute(
                 """
                 UPDATE director_hermes_runs
@@ -4716,6 +4762,62 @@ class LocalProjectStore:
             raise
         finally:
             connection.close()
+
+    def _ready_yujin_proposal_is_current(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        project_id: str,
+        proposal: DirectorProposal,
+    ) -> bool:
+        session = connection.execute(
+            "SELECT session_revision FROM editing_sessions "
+            "WHERE project_id = ? AND session_id = ?",
+            (project_id, proposal.source_session_id),
+        ).fetchone()
+        asset_revision = connection.execute(
+            "SELECT revision FROM director_asset_index_revisions "
+            "WHERE project_id = ?",
+            (project_id,),
+        ).fetchone()
+        if (
+            session is None
+            or int(session["session_revision"]) != proposal.base_session_revision
+            or int(asset_revision["revision"] if asset_revision is not None else 0)
+            != proposal.asset_index_revision
+        ):
+            return False
+        try:
+            for candidate in proposal.candidates:
+                if candidate.availability != "actionable":
+                    continue
+                asset = connection.execute(
+                    "SELECT asset_type, storage_uri, created_at FROM assets "
+                    "WHERE project_id = ? AND asset_id = ?",
+                    (project_id, candidate.asset_id),
+                ).fetchone()
+                if asset is None:
+                    return False
+                actual_type = str(asset["asset_type"] or "")
+                claimed_source_kind = str(
+                    candidate.canonical_metadata.get("source_media_kind") or ""
+                )
+                type_matches = actual_type == claimed_source_kind
+                source = self.resolve_storage_uri(
+                    project_id=project_id,
+                    storage_uri=str(asset["storage_uri"]),
+                )
+                if (
+                    not type_matches
+                    or str(asset["created_at"] or "") != candidate.media_revision
+                    or not source.is_file()
+                    or candidate.expected_content_sha256 is None
+                    or sha256_file(source) != candidate.expected_content_sha256
+                ):
+                    return False
+        except (KeyError, OSError, TypeError, ValueError):
+            return False
+        return True
 
     def get_director_hermes_run(
         self, *, project_id: str, run_id: str

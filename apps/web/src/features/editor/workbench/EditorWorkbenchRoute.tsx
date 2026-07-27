@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 
-import { ApiConflictError, api, type BrollAsset, type DirectorMessage, type DirectorProposal, type MediaLibraryAsset, type PartialRegenerationJob, type PartialRegenerationPreflight, type PartialRegenerationRun } from "../../../api";
+import { ApiConflictError, api, type BrollAsset, type DirectorCandidate, type DirectorMessage, type DirectorProposal, type MediaLibraryAsset, type PartialRegenerationJob, type PartialRegenerationPreflight, type PartialRegenerationRun } from "../../../api";
 import { Button } from "../../../components/ui/button";
 import { findLatestSucceededJob } from "../../../lib/formatters";
 import { projectEditorAssets, type EditorAssetCard } from "../assets/editorAssetProjection";
 import { createEditorCommandPort, type EditorCommandPort } from "../editorCommandPort";
 import { joinEditorSnapshot, type EditorSessionSnapshot } from "../editorSnapshot";
-import type { EditorViewModel } from "../editorViewModel";
+import type { EditorControls, EditorViewModel } from "../editorViewModel";
 import type { InspectorAction } from "../inspector/InspectorControls";
 import { canRestorePartialRegenerationResult, canRunPartialRegeneration, createPartialRegenerationTicket, PARTIAL_REGENERATION_FIELDS, preflightMatchesPartialRegenerationTicket, runMatchesPartialRegenerationTicket, type PartialRegenerationTicket } from "../partialRegenerationController";
 import { EditorWorkbench } from "./EditorWorkbench";
@@ -97,6 +97,8 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
   const hermesAbort = useRef<AbortController | null>(null);
   const hermesOperationId = useRef(0);
   const partialInFlight = useRef(false);
+  const currentEditorRevision = useRef(state.view?.expectedRevision ?? null);
+  currentEditorRevision.current = state.view?.expectedRevision ?? null;
   useEffect(() => {
     if (routeEpoch.current.key === requestKey) return;
     hermesOperationId.current += 1;
@@ -142,7 +144,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
         messages: projectDirectorMessages(recovered.messages),
         proposal: recovered.proposal,
         runState: { kind: "idle" },
-        selectedCandidateIds: recovered.proposal?.candidates[0]?.candidate_id ? [recovered.proposal.candidates[0].candidate_id] : [],
+        selectedCandidateIds: initialDirectorCandidateIds(recovered.proposal),
       } : current);
     }).catch((error: unknown) => {
       if (isCurrent()) setDirector((current) => current.key === requestKey ? { ...current, state: error instanceof SyntaxError || error instanceof TypeError ? "error" : "blocked", conversationId: null, messages: [], proposal: null } : current);
@@ -672,7 +674,9 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
                   ...current,
                   state: "proposal_ready",
                   proposal: terminalProposal,
-                  selectedCandidateIds: retainedSelection.length
+                  selectedCandidateIds: isYujinProposal(terminalProposal)
+                    ? []
+                    : retainedSelection.length
                     ? retainedSelection
                     : terminalProposal.candidates[0]?.candidate_id
                       ? [terminalProposal.candidates[0].candidate_id]
@@ -748,6 +752,16 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
   };
   const applyDirectorProposal = async (proposalId: string, candidateIds: readonly string[]) => {
     if (!sessionId || !state.view || activeDirector.proposal?.proposal_id !== proposalId || !candidateIds.length || directorMutationInFlight.current || mutationInFlight.current) return;
+    const proposal = activeDirector.proposal;
+    const yujinMedia = isYujinMediaProposal(proposal);
+    const selectedYujinCandidate = yujinMedia && candidateIds.length === 1
+      ? proposal.candidates.find((candidate) => candidate.candidate_id === candidateIds[0]) ?? null
+      : null;
+    if (yujinMedia && (
+      proposal.base_session_revision !== state.view.expectedRevision
+      || !selectedYujinCandidate
+      || !isActionableYujinCandidate(selectedYujinCandidate)
+    )) return;
     const epoch = routeEpoch.current.value;
     const operationId = directorOperationId.current + 1;
     directorOperationId.current = operationId;
@@ -755,16 +769,36 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     const currentRevision = state.view.expectedRevision;
     setDirector({ ...activeDirector, state: "applying" });
     try {
-      await commitTimelineMutation(async (_port, isCurrentMutation) => {
+      await commitTimelineMutation(async (port, isCurrentMutation) => {
         try {
           const preflight = await api.preflightDirectorProposal(projectId, proposalId);
-          if (!isCurrentMutation() || !isCurrentDirector(epoch, operationId)) return;
+          const isCurrentApply = () => (
+            isCurrentMutation()
+            && isCurrentDirector(epoch, operationId)
+            && currentEditorRevision.current === currentRevision
+          );
+          if (!isCurrentApply()) return;
           if (preflight.status === "stale" || preflight.code === "stale_proposal") {
             setDirector({ ...activeDirector, state: "blocked" });
             throw new Error("stale director proposal");
           }
-          await api.batchApplyDirectorProposal(projectId, proposalId, { candidate_ids: [...candidateIds], expected_revision: currentRevision });
-          if (isCurrentMutation() && isCurrentDirector(epoch, operationId)) setDirector({ ...activeDirector, state: "proposal_ready" });
+          if (selectedYujinCandidate) {
+            const materialized = await api.materializeDirectorCandidate(
+              projectId,
+              proposalId,
+              selectedYujinCandidate.candidate_id,
+            );
+            if (!isCurrentApply()) return;
+            await port.applyMedia({
+              kind: selectedYujinCandidate.media_type as "broll" | "bgm" | "sfx",
+              segmentId: String(selectedYujinCandidate.canonical_metadata.target_segment_id),
+              assetId: materialized.asset_id,
+              controls: editorControlsFromCandidate(selectedYujinCandidate),
+            });
+          } else {
+            await api.batchApplyDirectorProposal(projectId, proposalId, { candidate_ids: [...candidateIds], expected_revision: currentRevision });
+          }
+          if (isCurrentApply()) setDirector({ ...activeDirector, state: "proposal_ready" });
         } catch (error) {
           if (isCurrentMutation() && isCurrentDirector(epoch, operationId)) setDirector({ ...activeDirector, state: "blocked" });
           throw error;
@@ -779,7 +813,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
   const rightDock: RightDockDirector = {
     state: mutation.isSaving ? "applying" : activeDirector.state,
     messages: activeDirector.messages,
-    proposal: projectDirectorProposal(activeDirector.proposal),
+    proposal: projectDirectorProposal(activeDirector.proposal, state.view.expectedRevision),
     draft: activeDirector.draft,
     runState: activeDirector.runState,
     selectedCandidateIds: activeDirector.selectedCandidateIds,
@@ -836,8 +870,89 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
   </>;
 }
 
-function projectDirectorProposal(proposal: DirectorProposal | null): RightDockProposal | null {
-  return proposal ? { proposalId: proposal.proposal_id, status: proposal.status, candidates: proposal.candidates.map((candidate) => ({ candidateId: candidate.candidate_id, visibleReferenceCode: candidate.visible_reference_code, mediaType: candidate.media_type, previewUrl: candidate.preview_uri })) } : null;
+function projectDirectorProposal(proposal: DirectorProposal | null, currentRevision: number): RightDockProposal | null {
+  if (!proposal) return null;
+  const isYujin = isYujinMediaProposal(proposal);
+  return {
+    proposalId: proposal.proposal_id,
+    status: proposal.status,
+    baseSessionRevision: proposal.base_session_revision,
+    currentRevision,
+    candidates: proposal.candidates.map((candidate) => {
+      const metadata = candidate.canonical_metadata ?? {};
+      const actionable = isYujin
+        ? isActionableYujinCandidate(candidate)
+        : proposal.status === "ready";
+      return {
+        candidateId: candidate.candidate_id,
+        visibleReferenceCode: candidate.visible_reference_code,
+        mediaType: candidate.media_type,
+        previewUrl: candidate.preview_uri,
+        kind: candidate.media_type,
+        sourceMediaKind: String(metadata.source_media_kind ?? candidate.media_type),
+        targetSegmentId: String(metadata.target_segment_id ?? proposal.target_segment_ids[0] ?? ""),
+        previewSummary: String(metadata.preview_summary ?? candidate.reason_chips[0] ?? "추천 세부 내용을 확인해 주세요."),
+        supportedControls: candidate.controls ?? {},
+        availability: isYujin ? candidate.availability : actionable ? "actionable" : candidate.availability,
+        reviewStatus: isYujin ? candidate.review_status : actionable ? "approved" : candidate.review_status,
+        actionable,
+      };
+    }),
+  };
+}
+
+function isYujinMediaProposal(proposal: DirectorProposal) {
+  return proposal.diff.proposal_mode === "yujin_actionable_media_v1";
+}
+
+function isYujinProposal(proposal: DirectorProposal) {
+  return isYujinMediaProposal(proposal)
+    || proposal.candidates.some(
+      (candidate) => candidate.canonical_metadata?.schema_version === "videobox.yujin-response.v1",
+    );
+}
+
+function initialDirectorCandidateIds(proposal: DirectorProposal | null) {
+  if (!proposal || isYujinProposal(proposal)) return [];
+  return proposal.candidates[0]?.candidate_id
+    ? [proposal.candidates[0].candidate_id]
+    : [];
+}
+
+function isActionableYujinCandidate(candidate: DirectorCandidate) {
+  const metadata = candidate.canonical_metadata ?? {};
+  const sourceMediaKind = metadata.source_media_kind;
+  const sourceKindMatches = candidate.media_type === "broll"
+    ? sourceMediaKind === "raw_video" || sourceMediaKind === "broll_video"
+    : sourceMediaKind === candidate.media_type;
+  return (
+    candidate.availability === "actionable"
+    && candidate.review_status === "approved"
+    && (candidate.media_type === "broll" || candidate.media_type === "bgm" || candidate.media_type === "sfx")
+    && metadata.yujin_actionable_media === true
+    && sourceKindMatches
+    && typeof metadata.target_segment_id === "string"
+    && metadata.target_segment_id.length > 0
+  );
+}
+
+function editorControlsFromCandidate(candidate: DirectorCandidate): EditorControls {
+  const controls = candidate.controls ?? {};
+  if (candidate.media_type === "broll") {
+    return controls.fit === "fit" || controls.fit === "crop"
+      ? { fit: controls.fit }
+      : {};
+  }
+  if (candidate.media_type === "bgm") {
+    return {
+      volume: typeof controls.volume === "number" ? controls.volume : undefined,
+      fadeInSec: typeof controls.fade_in_sec === "number" ? controls.fade_in_sec : undefined,
+      fadeOutSec: typeof controls.fade_out_sec === "number" ? controls.fade_out_sec : undefined,
+    };
+  }
+  return {
+    volume: typeof controls.volume === "number" ? controls.volume : undefined,
+  };
 }
 
 export function findHermesRunProposalId(

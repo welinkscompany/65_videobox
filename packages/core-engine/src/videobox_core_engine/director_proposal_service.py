@@ -10,6 +10,25 @@ from videobox_core_engine.media_ranking import rank_candidates
 from videobox_domain_models.director_proposals import DirectorProposal
 
 
+def is_actionable_yujin_media_candidate(candidate: object) -> bool:
+    media_type = getattr(candidate, "media_type", None)
+    metadata = getattr(candidate, "canonical_metadata", {})
+    source_media_kind = metadata.get("source_media_kind")
+    source_kind_matches = (
+        source_media_kind in {"raw_video", "broll_video"}
+        if media_type == "broll"
+        else source_media_kind == media_type
+    )
+    return bool(
+        getattr(candidate, "availability", None) == "actionable"
+        and getattr(candidate, "review_status", None) == "approved"
+        and media_type in {"broll", "bgm", "sfx"}
+        and metadata.get("yujin_actionable_media") is True
+        and source_kind_matches
+        and metadata.get("target_segment_id")
+    )
+
+
 class DirectorProposalBlockedError(Exception):
     def __init__(self, lifecycle: dict[str, object]) -> None:
         super().__init__("Director proposal requires applicable local media analysis.")
@@ -99,7 +118,14 @@ class DirectorProposalService:
             reasons.append("session_missing")
         if self.store.get_asset_index_revision(project_id) != proposal.asset_index_revision:
             reasons.append("asset_index_revision")
-        for candidate in proposal.candidates:
+        candidates = proposal.candidates
+        if proposal.diff.get("proposal_mode") == "yujin_actionable_media_v1":
+            candidates = tuple(
+                candidate
+                for candidate in candidates
+                if is_actionable_yujin_media_candidate(candidate)
+            )
+        for candidate in candidates:
             try:
                 asset = self.store.get_asset(project_id=project_id, asset_id=candidate.asset_id)
                 source = self.store.resolve_storage_uri(project_id=project_id, storage_uri=str(asset["storage_uri"]))
