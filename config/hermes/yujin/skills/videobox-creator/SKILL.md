@@ -49,19 +49,30 @@ proposal의 필드는 정확히 `proposal_id`, `base_revision`, `title`, `ration
   segment 시작과 정확히 같은 `start_sec`, 0~2 `volume`만 사용하고
   `requires_materialization`은 true입니다.
 - `caption`: target은 현재 `script_id`, 현재 `segment_id`,
-  `track_id: caption-primary`만 사용합니다. parameters는 `text`와
-  `placement`(`top`, `middle`, `bottom`)만 사용하고
-  `requires_materialization`은 false입니다.
+  `track_id: caption-primary`만 사용하고 `requires_materialization`은
+  false입니다. parameters는 아래 두 형태 중 정확히 하나만 사용합니다.
+  - 자막 문구 변경: `action: set_text`와 현재 segment에 넣을 `text`
+  - 자막 스타일 변경: `action: set_style`와 `style`
+    (`font_family`, `font_size_px`, `text_color`, `outline_color`,
+    `outline_width_px`, `background_color`, `position_x_percent`,
+    `position_y_percent`, `horizontal_align`, `safe_area_enabled`,
+    `shadow_blur_px`)의 정확히 11개 필드
+  색상은 `#RRGGBBAA`, 세로 위치는 0~94 범위만 사용합니다.
 - `voice`: target은 현재 `script_id`, 현재 `segment_id`,
-  `track_id: voice-primary`만 사용합니다. parameters는 현재 `asset_id`, 선택적
-  `text`, 0.5~2 `speed`만 사용하고 `requires_materialization`은 true입니다.
+  `track_id: voice-primary`만 사용합니다. parameters는 현재 context의
+  `approved_tts_candidates`에 같은 `candidate_id`, `asset_id`, `segment_id`로
+  함께 있는 승인 후보만 사용합니다. `candidate_id`는 `tts_candidate_`로
+  시작해야 하며 `requires_materialization`은 false입니다.
 - `overlay`: target은 현재 `segment_id`와 `track_id: video-overlay`만
-  사용합니다. parameters는 `text`, 0~1 `x`/`y`/`opacity`만 사용하고
-  `requires_materialization`은 false입니다.
+  사용하고 `requires_materialization`은 false입니다. parameters는 아래 세
+  형태 중 정확히 하나만 사용하며 위치, 타이밍, opacity를 만들지 않습니다.
+  - `overlay_kind: explanation_card`, `title`, `body`, `text`
+  - `overlay_kind: image`, 현재 context의 image `asset_id`, `text`
+  - `overlay_kind: table`, `columns`, `rows`, `text`
 - `output_check`: target은 `track_id: output-primary`만 사용합니다.
-  parameters는 `check` 하나이며 `timeline_gaps`, `missing_media`,
-  `preview_readiness`, `export_readiness` 중 하나입니다.
-  `requires_materialization`은 false입니다.
+  parameters는 `check: timeline_gaps` 하나만 사용하고
+  `requires_materialization`은 false입니다. 이 결과는 backend가 확인한
+  읽기 전용 finding이며 preview/export/model readiness를 뜻하지 않습니다.
 
 `broll`, `bgm`, `sfx`, `caption`, `voice`, `overlay` control mode는 반드시
 `recommendation_only`, `output_check`는 반드시 `read_only`인 현재 context에서만
@@ -70,9 +81,10 @@ context 밖의 ID를 추측하지 않습니다.
 
 모든 결과는 durable mutation 전의 `candidate_only` 후보입니다. 직접 preview,
 materialize, apply, render, export를 실행하거나 완료됐다고 말하지 않습니다.
-서버가 이후 현재 session/revision, asset-index revision, exact asset/type,
-현재 bytes SHA-256, media revision, eligibility, segment 정렬을 다시 검증하기
-전에는 어떤 B3 후보도 actionable 또는 ready라고 주장하지 않습니다.
+서버가 이후 현재 session/revision, asset-index revision, target segment,
+exact TTS candidate/status/asset 또는 image asset/type, 현재 bytes SHA-256,
+asset revision을 다시 검증하기 전에는 어떤 B3/B4 후보도 actionable 또는
+ready라고 주장하지 않습니다.
 payload 어디에도 URL, 절대 경로, credential, secret, 실행 코드나 명령을 넣지
 않습니다. 근거가 부족하거나 형식을 확신할 수 없으면 proposal을 null로 두고
 수동 대체 절차를 사람이 읽는 답변에 안내합니다.

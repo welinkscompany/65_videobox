@@ -4,13 +4,17 @@ from concurrent.futures import ThreadPoolExecutor
 import json
 
 from fastapi.testclient import TestClient
+import pytest
+from pydantic import ValidationError as PydanticValidationError
 
 from videobox_agent_gateway.creator_context import (
+    GatewayCreatorContext,
     MAX_RESERVATIONS,
     CreatorContextLedger,
 )
 from videobox_agent_gateway.hermes_rpc_client import HermesRpcEvent
 from videobox_agent_gateway.main import create_app
+from videobox_domain_models.yujin_creator_context import YujinCreatorContext
 
 
 TOKEN = "service-secret-that-is-at-least-32-bytes"
@@ -45,6 +49,7 @@ def _context(**patch: object) -> dict[str, object]:
             }
         ],
         "media_candidates": [],
+        "approved_tts_candidates": [],
         "timeline_summary": {
             "duration_sec": 2.0,
             "track_count": 1,
@@ -93,6 +98,104 @@ def _attach(
             "identity": identity or IDENTITY,
             "context": context or _context(),
         },
+    )
+
+
+def _approved_tts_candidate(**patch: object) -> dict[str, object]:
+    candidate: dict[str, object] = {
+        "candidate_id": "tts_candidate_001",
+        "asset_id": "asset-tts",
+        "segment_id": "segment-a",
+        "source_text": "creator voice text is data only",
+        "technical_status": "accepted",
+        "operator_review_status": "approved",
+        "asset_revision": "2026-07-28T00:00:00+00:00",
+        "expected_content_sha256": "a" * 64,
+    }
+    candidate.update(patch)
+    return candidate
+
+
+def test_gateway_attaches_actual_domain_serialized_context_with_approved_tts() -> None:
+    hermes = _Hermes()
+    client = TestClient(create_app(hermes_client=hermes, service_token=TOKEN))
+    domain_context = YujinCreatorContext.model_validate_json(
+        json.dumps(
+            _context(approved_tts_candidates=[_approved_tts_candidate()]),
+            ensure_ascii=False,
+        )
+    )
+    serialized = domain_context.model_dump(mode="json")
+    assert serialized["approved_tts_candidates"] == [_approved_tts_candidate()]
+
+    ticket = _reserve(client)
+    response = _attach(client, ticket, context=serialized)
+
+    assert response.status_code == 204
+    assert hermes.prompts == []
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("candidate_id", "legacy-candidate-1"),
+        ("technical_status", "pending"),
+        ("operator_review_status", "pending"),
+        ("expected_content_sha256", "A" * 64),
+        ("source_text", "가" * 86),
+    ),
+)
+def test_gateway_rejects_invalid_approved_tts_candidate_field_at_exact_location(
+    field: str,
+    value: object,
+) -> None:
+    with pytest.raises(PydanticValidationError) as error:
+        GatewayCreatorContext.model_validate(
+            _context(
+                approved_tts_candidates=[
+                    _approved_tts_candidate(**{field: value}),
+                ]
+            )
+        )
+
+    assert any(
+        item["loc"][-1] == field
+        for item in error.value.errors()
+    )
+
+
+def test_gateway_rejects_extra_approved_tts_candidate_field() -> None:
+    with pytest.raises(PydanticValidationError) as error:
+        GatewayCreatorContext.model_validate(
+            _context(
+                approved_tts_candidates=[
+                    _approved_tts_candidate(unexpected="not-allowed"),
+                ]
+            )
+        )
+
+    assert any(
+        item["loc"][-1] == "unexpected"
+        for item in error.value.errors()
+    )
+
+
+def test_gateway_bounds_approved_tts_candidates_to_32() -> None:
+    with pytest.raises(PydanticValidationError) as error:
+        GatewayCreatorContext.model_validate(
+            _context(
+                approved_tts_candidates=[
+                    _approved_tts_candidate(
+                        candidate_id=f"tts_candidate_{index:03d}",
+                    )
+                    for index in range(33)
+                ]
+            )
+        )
+
+    assert any(
+        item["loc"][-1] == "approved_tts_candidates"
+        for item in error.value.errors()
     )
 
 

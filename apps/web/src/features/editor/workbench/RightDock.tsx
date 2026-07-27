@@ -125,6 +125,8 @@ export function RightDock({
     : runState.kind === "unavailable"
     ? `${runState.message} 수동 편집을 계속할 수 있어요.`
     : null;
+  const recommendationCandidates = proposal?.candidates.filter((candidate) => !candidate.readOnlyFinding) ?? [];
+  const readOnlyFindings = proposal?.candidates.filter((candidate) => candidate.readOnlyFinding) ?? [];
 
   return <div className="vb-editor-right-dock">
     <section aria-label="유진" className="vb-editor-workbench__summary">
@@ -165,8 +167,8 @@ export function RightDock({
         <p>{`제안 기준 편집본 ${proposal.baseSessionRevision}`}</p>
         <p>{`현재 편집본 ${proposal.currentRevision}`}</p>
       </div> : null}
-      {proposal?.candidates.length ? <div role="radiogroup" aria-label="추천 후보">
-        {proposal.candidates.map((candidate) => {
+      {recommendationCandidates.length ? <div role="radiogroup" aria-label="추천 후보">
+        {recommendationCandidates.map((candidate) => {
           const candidateDeclaresActionable = candidate.actionable === undefined
             ? proposalIsReady
             : (
@@ -202,6 +204,15 @@ export function RightDock({
       </div> : <p>아직 추천이 없어요. 직접 편집을 계속하거나 유진에게 요청할 수 있어요.</p>}
       {proposal && proposalIsReady && onApplyProposal ? <Button type="button" disabled={state === "applying" || !selectedCandidatesAreActionable} onClick={() => void onApplyProposal(proposal.proposalId, activeCandidateIds)}>선택한 추천 적용</Button> : null}
     </section>
+
+    {readOnlyFindings.length ? <section aria-label="검사 결과" className="vb-editor-workbench__summary">
+      <h2>검사 결과</h2>
+      {readOnlyFindings.map((finding) => <article key={finding.candidateId}>
+        {finding.supportedControls.check === "timeline_gaps"
+          ? <p>{`빈 구간 ${String(finding.supportedControls.gap_count ?? 0)}개`}</p>
+          : null}
+      </article>)}
+    </section> : null}
 
     <section className="vb-editor-workbench__summary">
       <Button type="button" aria-expanded={inspectorOpen} onClick={() => setInspectorOpen((open) => !open)}>{inspectorOpen ? "편집 항목 닫기" : "편집 항목 열기"}</Button>
@@ -240,6 +251,10 @@ function controlSummary(controls: Readonly<Record<string, unknown>>) {
     if (name === "volume") return `음량 ${value}`;
     if (name === "fade_in_sec") return `시작 전환 ${value}초`;
     if (name === "fade_out_sec") return `끝 전환 ${value}초`;
+    if (name === "text") return "문구 변경";
+    if (name === "style") return "자막 모양 변경";
+    if (name === "candidate_id") return "승인한 음성";
+    if (name === "overlay_kind") return "오버레이 변경";
     return null;
   }).filter((value): value is string => value !== null);
   return labels.join(", ") || "기본 설정";

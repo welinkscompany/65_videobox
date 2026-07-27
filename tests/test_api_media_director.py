@@ -12,6 +12,7 @@ import pytest
 from videobox_api.main import create_app
 from videobox_storage.local_project_store import LocalProjectStore
 from videobox_domain_models.assets import AssetType
+from videobox_domain_models.director_proposals import DirectorCandidate, DirectorProposal
 from videobox_domain_models.jobs import JobStatus, JobType
 from videobox_core_engine.ffmpeg_final_renderer import FfmpegFinalRenderer
 from videobox_core_engine.output_source_verifier import OutputSourceStaleError, verify_output_sources
@@ -24,6 +25,350 @@ def test_director_route_surface_has_no_external_provider_dependency() -> None:
 
     retired_provider = "g" + "emini"
     assert retired_provider not in source.lower()
+
+
+def test_generalized_yujin_direct_apply_and_batch_remain_forbidden(
+    tmp_path: Path,
+) -> None:
+    app = create_app(projects_root=tmp_path / "projects")
+    client = TestClient(app)
+    project_id = client.post(
+        "/api/projects",
+        json={"name": "generalized yujin"},
+    ).json()["project_id"]
+    session = app.state.store.save_editing_session(
+        project_id=project_id,
+        timeline_id="timeline",
+        session_payload={
+            "segments": [{"segment_id": "seg", "caption_text": "기존 자막"}],
+            "history": [],
+        },
+    )
+    candidate = DirectorCandidate(
+        candidate_id="caption-command",
+        visible_reference_code="P00-CAPTION-01",
+        media_type="caption",
+        asset_id="caption-command",
+        library_asset_id=None,
+        reason_chips=("자막",),
+        scores={},
+        availability="actionable",
+        review_status="approved",
+        preview_uri=None,
+        controls={"text": "추천 자막"},
+        expected_content_sha256=None,
+        media_revision="caption-r1",
+        canonical_metadata={
+            "schema_version": "videobox.yujin-response.v1",
+            "yujin_actionable_operation": True,
+            "command_kind": "set_caption_text",
+            "target_segment_id": "seg",
+            "requires_materialization": False,
+        },
+    )
+    proposal = DirectorProposal(
+        proposal_id="generalized-yujin",
+        revision_code="P00",
+        revision=0,
+        base_session_revision=session["session_revision"],
+        asset_index_revision=app.state.store.get_asset_index_revision(project_id),
+        source_session_id=session["session_id"],
+        target_segment_ids=("seg",),
+        source_script_segment_ids=("seg",),
+        status="ready",
+        diff={"proposal_mode": "yujin_actionable_v1"},
+        expires_at=None,
+        candidates=(candidate,),
+    )
+    app.state.store.save_director_proposal(project_id, proposal)
+    before = deepcopy(
+        app.state.store.get_editing_session(
+            project_id=project_id,
+            session_id=session["session_id"],
+        )
+    )
+    base = f"/api/projects/{project_id}/director/proposals/{proposal.proposal_id}"
+
+    responses = (
+        client.post(
+            f"{base}/apply",
+            json={"candidate_ids": [candidate.candidate_id], "expected_revision": 1},
+        ),
+        client.post(
+            f"{base}/batch-apply",
+            json={"candidate_ids": [candidate.candidate_id], "expected_revision": 1},
+        ),
+    )
+
+    assert [(item.status_code, item.json()) for item in responses] == [
+        (422, {"detail": "yujin_direct_apply_forbidden"}),
+        (422, {"detail": "yujin_direct_apply_forbidden"}),
+    ]
+    assert app.state.store.get_editing_session(
+        project_id=project_id,
+        session_id=session["session_id"],
+    ) == before
+
+
+def _save_generalized_yujin_proposal(
+    *,
+    store: LocalProjectStore,
+    project_id: str,
+    session_id: str,
+    session_revision: int,
+    proposal_id: str,
+    candidates: tuple[DirectorCandidate, ...],
+) -> DirectorProposal:
+    proposal = DirectorProposal(
+        proposal_id=proposal_id,
+        revision_code="P00",
+        revision=0,
+        base_session_revision=session_revision,
+        asset_index_revision=store.get_asset_index_revision(project_id),
+        source_session_id=session_id,
+        target_segment_ids=("seg",),
+        source_script_segment_ids=("seg",),
+        status="ready",
+        diff={"proposal_mode": "yujin_actionable_v1"},
+        expires_at=None,
+        candidates=candidates,
+    )
+    store.save_director_proposal(project_id, proposal)
+    return proposal
+
+
+def _complete_image_analysis(
+    *,
+    store: LocalProjectStore,
+    project_id: str,
+    asset_id: str,
+    digest: str,
+) -> None:
+    analysis = store.create_media_analysis(
+        project_id=project_id,
+        asset_id=asset_id,
+        idempotency_key=f"{digest}:generalized-yujin",
+        cache_key=f"generalized-{asset_id}",
+    )
+    claim = store.claim_media_analysis(
+        project_id=project_id,
+        analysis_id=analysis["analysis_id"],
+    )
+    assert claim is not None
+    assert store.complete_media_analysis(
+        project_id=project_id,
+        analysis_id=analysis["analysis_id"],
+        expected_attempt=claim["attempt"],
+        result={"frames": [{"summary": "generalized candidate"}]},
+    )
+
+
+def test_generalized_yujin_preview_and_materialize_reject_forged_b3_asset_kind(
+    tmp_path: Path,
+) -> None:
+    app = create_app(projects_root=tmp_path / "projects")
+    client = TestClient(app)
+    store = app.state.store
+    project_id = client.post(
+        "/api/projects",
+        json={"name": "generalized forged b3"},
+    ).json()["project_id"]
+    session = store.save_editing_session(
+        project_id=project_id,
+        timeline_id="timeline",
+        session_payload={
+            "segments": [{"segment_id": "seg", "caption_text": "장면"}],
+            "history": [],
+        },
+    )
+    source = tmp_path / "forged-broll.png"
+    source.write_bytes(b"actual-image-bytes")
+    asset = store.register_asset(
+        project_id=project_id,
+        asset_type=AssetType.IMAGE,
+        source_path=source,
+        metadata={"review_status": "approved"},
+    )
+    digest = sha256(source.read_bytes()).hexdigest()
+    _complete_image_analysis(
+        store=store,
+        project_id=project_id,
+        asset_id=asset.asset_id,
+        digest=digest,
+    )
+    candidate = DirectorCandidate(
+        candidate_id="generalized-forged-broll",
+        visible_reference_code="P00-B-01",
+        media_type="broll",
+        asset_id=asset.asset_id,
+        library_asset_id=None,
+        reason_chips=("위조 B-roll",),
+        scores={},
+        availability="actionable",
+        review_status="approved",
+        preview_uri=None,
+        controls={"fit": "cover"},
+        expected_content_sha256=digest,
+        media_revision=asset.created_at.isoformat(),
+        canonical_metadata={
+            "schema_version": "videobox.yujin-response.v1",
+            "proposal_kind": "broll",
+            "yujin_actionable_media": True,
+            "source_media_kind": "broll_video",
+            "target_segment_id": "seg",
+        },
+    )
+    proposal = _save_generalized_yujin_proposal(
+        store=store,
+        project_id=project_id,
+        session_id=session["session_id"],
+        session_revision=session["session_revision"],
+        proposal_id="generalized-forged-b3",
+        candidates=(candidate,),
+    )
+    before_assets = store.list_assets(project_id=project_id)
+    base = (
+        f"/api/projects/{project_id}/director/proposals/{proposal.proposal_id}"
+        f"/candidates/{candidate.candidate_id}"
+    )
+
+    responses = (
+        client.get(f"{base}/preview"),
+        client.post(f"{base}/materialize"),
+    )
+
+    assert [(item.status_code, item.json()) for item in responses] == [
+        (422, {"detail": "candidate_unavailable"}),
+        (422, {"detail": "candidate_unavailable"}),
+    ]
+    assert store.list_assets(project_id=project_id) == before_assets
+
+
+def test_generalized_mixed_yujin_materializes_only_valid_b3_media(
+    tmp_path: Path,
+) -> None:
+    app = create_app(projects_root=tmp_path / "projects")
+    client = TestClient(app)
+    store = app.state.store
+    project_id = client.post(
+        "/api/projects",
+        json={"name": "generalized mixed candidates"},
+    ).json()["project_id"]
+    session = store.save_editing_session(
+        project_id=project_id,
+        timeline_id="timeline",
+        session_payload={
+            "segments": [{"segment_id": "seg", "caption_text": "장면"}],
+            "history": [],
+        },
+    )
+    bgm_source = tmp_path / "mixed-bgm.mp3"
+    bgm_source.write_bytes(b"valid-bgm-bytes")
+    bgm_asset = store.register_asset(
+        project_id=project_id,
+        asset_type=AssetType.BGM,
+        source_path=bgm_source,
+        metadata={
+            "canonical_metadata_indexed": True,
+            "mood": "calm",
+            "energy": "low",
+            "genre": "ambient",
+            "recommended_use": "bed",
+        },
+    )
+    image_source = tmp_path / "mixed-overlay.png"
+    image_source.write_bytes(b"overlay-image-bytes")
+    image_asset = store.register_asset(
+        project_id=project_id,
+        asset_type=AssetType.IMAGE,
+        source_path=image_source,
+        metadata={"review_status": "approved"},
+    )
+    image_digest = sha256(image_source.read_bytes()).hexdigest()
+    _complete_image_analysis(
+        store=store,
+        project_id=project_id,
+        asset_id=image_asset.asset_id,
+        digest=image_digest,
+    )
+    bgm = DirectorCandidate(
+        candidate_id="generalized-valid-bgm",
+        visible_reference_code="P00-BGM-01",
+        media_type="bgm",
+        asset_id=bgm_asset.asset_id,
+        library_asset_id=None,
+        reason_chips=("배경 음악",),
+        scores={},
+        availability="actionable",
+        review_status="approved",
+        preview_uri=None,
+        controls={"gain_db": -10.0, "ducking_db": -6.0},
+        expected_content_sha256=sha256(bgm_source.read_bytes()).hexdigest(),
+        media_revision=bgm_asset.created_at.isoformat(),
+        canonical_metadata={
+            "schema_version": "videobox.yujin-response.v1",
+            "proposal_kind": "bgm",
+            "yujin_actionable_media": True,
+            "source_media_kind": "bgm",
+            "target_segment_id": "seg",
+        },
+    )
+    overlay = DirectorCandidate(
+        candidate_id="generalized-image-overlay",
+        visible_reference_code="P00-OVERLAY-01",
+        media_type="overlay",
+        asset_id=image_asset.asset_id,
+        library_asset_id=None,
+        reason_chips=("이미지 오버레이",),
+        scores={},
+        availability="actionable",
+        review_status="approved",
+        preview_uri=None,
+        controls={
+            "overlay_kind": "image",
+            "asset_id": image_asset.asset_id,
+            "text": "장면 이미지",
+        },
+        expected_content_sha256=image_digest,
+        media_revision=image_asset.created_at.isoformat(),
+        canonical_metadata={
+            "schema_version": "videobox.yujin-response.v1",
+            "proposal_kind": "overlay",
+            "yujin_actionable_operation": True,
+            "command_kind": "apply_overlay",
+            "source_media_kind": "image",
+            "target_segment_id": "seg",
+            "requires_materialization": False,
+        },
+    )
+    proposal = _save_generalized_yujin_proposal(
+        store=store,
+        project_id=project_id,
+        session_id=session["session_id"],
+        session_revision=session["session_revision"],
+        proposal_id="generalized-mixed",
+        candidates=(bgm, overlay),
+    )
+    base = f"/api/projects/{project_id}/director/proposals/{proposal.proposal_id}"
+    before_assets = store.list_assets(project_id=project_id)
+
+    blocked = (
+        client.get(f"{base}/candidates/{overlay.candidate_id}/preview"),
+        client.post(f"{base}/candidates/{overlay.candidate_id}/materialize"),
+    )
+    materialized = client.post(
+        f"{base}/candidates/{bgm.candidate_id}/materialize"
+    )
+
+    assert [(item.status_code, item.json()) for item in blocked] == [
+        (422, {"detail": "candidate_unavailable"}),
+        (422, {"detail": "candidate_unavailable"}),
+    ]
+    assert materialized.status_code == 201
+    assert materialized.json()["content_sha256"] == bgm.expected_content_sha256
+    after_assets = store.list_assets(project_id=project_id)
+    assert len(after_assets) == len(before_assets) + 1
+    assert after_assets[-1]["asset_type"] == "bgm"
 
 
 def test_director_reload_get_is_behavioral_read_only_and_never_calls_a_provider(tmp_path: Path) -> None:

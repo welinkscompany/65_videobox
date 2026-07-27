@@ -1,6 +1,18 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 305. 2026-07-27 Hermes Yujin B3 media recommendation/apply closeout`을 우선 적용한다. Task 22 기술 closeout 근거는 `## 300`을 유지하며, 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 306. 2026-07-28 Hermes Yujin B4 supported controls closeout`을 우선 적용한다. Task 22 기술 closeout 근거는 `## 300`을 유지하며, 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+
+## 306. 2026-07-28 Hermes Yujin B4 supported controls closeout
+
+- `[x] B4 완료`: 실제 backend와 `EditorCommandPort`가 지원하는 자막 문구, 완전한 11필드 자막 스타일, 청취 승인된 persisted TTS 후보, explanation/image/table 오버레이만 typed recommendation과 명시적 단일 Apply에 연결했다. caption timing/placement, voice free-text/speed/sample/provider, overlay x/y/opacity, effect/transition/keyframe/mask/filter/animation은 거부한다.
+- `읽기 전용 output`: `output_check`는 current playback의 `timeline_gaps` 한 종류만 허용한다. 모델 문구는 검사 결과에서 폐기하고 backend가 재계산한 gap 수만 보여 준다. radio/Apply, preview/final render, export, CapCut handoff 호출은 0이다.
+- `terminal·gateway 경계`: creator context는 accepted+approved `tts_candidate_*`의 exact segment/asset/status/revision/SHA만 제한적으로 담고 strict Agent Gateway DTO가 같은 계약을 다시 검증한다. terminal transaction은 caption/voice/overlay controls의 exact key/DTO, current session/segment, TTS identity, image type/source/revision/SHA와 materialized gap truth를 다시 확인한다. stale·위조·race이면 proposal과 assistant write를 rollback하고 proposal 없는 manual fallback으로 닫는다.
+- `명시적 적용·혼합 proposal`: RightDock은 Yujin 후보를 자동 선택하지 않고 read-only finding을 radio 밖에 둔다. 사용자가 후보 하나를 고른 뒤 Route가 preflight와 route/director epoch/current revision을 재확인하고 기존 typed command 하나만 호출한다. generalized B3+B4 proposal의 preview/materialize도 B3 B-roll/BGM/SFX allowlist에만 열리며, B4 후보와 실제 kind가 다른 자산은 422·복사 0이다. legacy Director와 단일 PreviewStage 소유권은 유지한다.
+- `범위 제한`: source copy, OpenCut runtime, provider/API 확대, Hermes-owned Mem0, SaaS, 자동 apply와 backend 미지원 effect는 추가하지 않았다. Task 9 사람/환경 acceptance와 실제 CapCut Desktop 실증도 별도다.
+- `검증`: TDD RED→GREEN 뒤 controller fresh focused Python **373 passed, 1 skipped**(기존 Starlette multipart pending deprecation warning 1건), 전체 frontend **50 files / 648 passed**, production build, Hermes profile/runtime/20-ID plan-state/zero-tools verifier, Editor UI OSS provenance/UI-system verifier, provenance Python **21 passed**, `git diff --check`가 통과했다. 독립 spec review와 독립 quality·gap·reverse review는 최초 finding을 TDD로 수정한 뒤 최종 Critical/Important/Minor **0** PASS다.
+- `미실행`: 전체 Python regression, editor E2E, live provider canary, 실제 Hermes service-stop/manual environment proof, 실제 PostgreSQL/Docker integration, 사용자 원본 미디어 재생·청취와 CapCut 사람 검증은 실행하지 않았고 통과로 간주하지 않는다. Python의 1 skip은 환경 의존 경로이며 frontend의 React `act(...)`, jsdom navigation, intentional ErrorBoundary stderr와 build의 500 kB chunk warning은 exit 0인 기존 비실패 출력이다.
+- `진행률`: Phase B **4/5 (80.0%)**, creator-tools child **4/5 (80.0%), 잔여 20.0%**, Hermes Yujin initiative **10/20 (50.0%), 잔여 50.0%**다. 기존 VideoBox 공식 누적은 Task 9 사람/환경 acceptance 전까지 **9/22 (40.9%)**, 잔여 **59.1%**로 유지한다.
+- `다음 작업`: **B5만** 진행한다. explicit Apply 전 mutation 0, one-player preview, output reverse smoke, Inspector close/open state 보존, Hermes unavailable manual fallback을 non-live real-store smoke와 UI/E2E로 증명하고 Phase B를 closeout한다. `-Live` smoke는 별도 환경·credential이 준비된 경우에만 실행한다.
 
 ## 305. 2026-07-27 Hermes Yujin B3 media recommendation/apply closeout
 

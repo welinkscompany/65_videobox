@@ -195,9 +195,9 @@ class SfxParameters(_Parameters):
     volume: float = Field(default=1.0, ge=0, le=2)
 
 
-class CaptionParameters(_Parameters):
+class CaptionTextParameters(_Parameters):
+    action: Literal["set_text"]
     text: str = Field(min_length=1, max_length=1024)
-    placement: Literal["top", "middle", "bottom"] = "bottom"
 
     @field_validator("text")
     @classmethod
@@ -205,26 +205,79 @@ class CaptionParameters(_Parameters):
         return _bounded_utf8(value, limit=2_048, label="caption_text")
 
 
+class EditorCaptionStyle(_StrictFrozenModel):
+    font_family: str = Field(min_length=1, max_length=128)
+    font_size_px: int = Field(ge=12, le=160)
+    text_color: str = Field(pattern=r"^#[0-9A-Fa-f]{8}$")
+    outline_color: str = Field(pattern=r"^#[0-9A-Fa-f]{8}$")
+    outline_width_px: int = Field(ge=0, le=12)
+    background_color: str = Field(pattern=r"^#[0-9A-Fa-f]{8}$")
+    position_x_percent: int = Field(ge=0, le=100)
+    position_y_percent: int = Field(ge=0, le=94)
+    horizontal_align: Literal["left", "center", "right"]
+    safe_area_enabled: bool
+    shadow_blur_px: int = Field(ge=0)
+
+
+class CaptionStyleParameters(_Parameters):
+    action: Literal["set_style"]
+    style: EditorCaptionStyle
+
+
+CaptionParameters = Annotated[
+    CaptionTextParameters | CaptionStyleParameters,
+    Field(discriminator="action"),
+]
+
+
 class VoiceParameters(_Parameters):
+    candidate_id: str = Field(
+        min_length=1,
+        max_length=256,
+        pattern=r"^tts_candidate_[A-Za-z0-9_-]+$",
+    )
     asset_id: str = Field(min_length=1, max_length=256)
-    text: str | None = Field(default=None, max_length=1024)
-    speed: float = Field(default=1.0, ge=0.5, le=2)
 
 
-class OverlayParameters(_Parameters):
-    text: str = Field(min_length=1, max_length=512)
-    x: float = Field(ge=0, le=1)
-    y: float = Field(ge=0, le=1)
-    opacity: float = Field(default=1.0, ge=0, le=1)
+class ExplanationCardParameters(_Parameters):
+    overlay_kind: Literal["explanation_card"]
+    title: str = Field(max_length=256)
+    body: str = Field(max_length=1024)
+    text: str = Field(min_length=1, max_length=1024)
+
+
+class ImageOverlayParameters(_Parameters):
+    overlay_kind: Literal["image"]
+    asset_id: str = Field(min_length=1, max_length=256)
+    text: str = Field(max_length=1024)
+
+
+class TableOverlayParameters(_Parameters):
+    overlay_kind: Literal["table"]
+    columns: tuple[str, ...] = Field(max_length=32)
+    rows: tuple[tuple[str, ...], ...] = Field(max_length=128)
+    text: str = Field(min_length=1, max_length=1024)
+
+    @model_validator(mode="after")
+    def table_shape_matches_columns(self):
+        if not self.columns or any(not item.strip() for item in self.columns):
+            raise ValueError("overlay_table_columns_required")
+        if any(
+            len(row) != len(self.columns) or any(not cell.strip() for cell in row)
+            for row in self.rows
+        ):
+            raise ValueError("overlay_table_rows_malformed")
+        return self
+
+
+OverlayParameters = Annotated[
+    ExplanationCardParameters | ImageOverlayParameters | TableOverlayParameters,
+    Field(discriminator="overlay_kind"),
+]
 
 
 class OutputCheckParameters(_Parameters):
-    check: Literal[
-        "timeline_gaps",
-        "missing_media",
-        "preview_readiness",
-        "export_readiness",
-    ]
+    check: Literal["timeline_gaps"]
 
 
 class _Operation(_StrictFrozenModel):
@@ -277,7 +330,7 @@ class VoiceOperation(_Operation):
     kind: Literal["voice"]
     target: VoiceTarget
     parameters: VoiceParameters
-    requires_materialization: Literal[True]
+    requires_materialization: Literal[False]
 
 
 class OverlayOperation(_Operation):
@@ -403,11 +456,10 @@ def validate_yujin_creator_response(
         "broll": {"raw_video", "broll_video", "image"},
         "bgm": {"bgm"},
         "sfx": {"sfx"},
-        "voice": {
-            "narration_audio",
-            "voice_sample_audio",
-            "generated_tts_audio",
-        },
+    }
+    approved_tts = {
+        (item.candidate_id, item.asset_id, item.segment_id)
+        for item in context.approved_tts_candidates
     }
     segment_required = {"broll", "sfx", "caption", "voice", "overlay"}
     script_required = {"caption", "voice"}
@@ -429,6 +481,18 @@ def validate_yujin_creator_response(
         asset_id = getattr(parameters, "asset_id", None)
         if operation.kind in compatible_media and (
             media.get(asset_id) not in compatible_media[operation.kind]
+        ):
+            raise ValueError("proposal_media_incompatible")
+        if operation.kind == "voice" and (
+            parameters.candidate_id,
+            parameters.asset_id,
+            target.segment_id,
+        ) not in approved_tts:
+            raise ValueError("proposal_tts_candidate_not_current")
+        if (
+            operation.kind == "overlay"
+            and parameters.overlay_kind == "image"
+            and media.get(parameters.asset_id) != "image"
         ):
             raise ValueError("proposal_media_incompatible")
     return response

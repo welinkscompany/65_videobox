@@ -95,6 +95,28 @@ class TimelineSummary(_StrictModel):
     gap_count: int = Field(ge=0, strict=True)
 
 
+class ApprovedTtsCandidateSummary(_StrictModel):
+    candidate_id: str = Field(
+        min_length=1,
+        max_length=256,
+        pattern=r"^tts_candidate_[A-Za-z0-9_-]+$",
+    )
+    asset_id: str = Field(min_length=1, max_length=256)
+    segment_id: str = Field(min_length=1, max_length=256)
+    source_text: str = Field(max_length=256)
+    technical_status: Literal["accepted"]
+    operator_review_status: Literal["approved"]
+    asset_revision: str = Field(min_length=1, max_length=256)
+    expected_content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @field_validator("source_text")
+    @classmethod
+    def source_text_fits_utf8_limit(cls, value: str) -> str:
+        if len(value.encode("utf-8")) > 256:
+            raise ValueError("tts_source_text_too_large")
+        return value
+
+
 class SupportedControl(_StrictModel):
     kind: Literal[
         "broll",
@@ -120,6 +142,10 @@ class GatewayCreatorContext(_StrictModel):
     selected_segment_id: str | None = Field(default=None, max_length=256)
     segment_summaries: tuple[SegmentSummary, ...] = Field(max_length=32)
     media_candidates: tuple[MediaCandidateSummary, ...] = Field(max_length=48)
+    approved_tts_candidates: tuple[ApprovedTtsCandidateSummary, ...] = Field(
+        default=(),
+        max_length=32,
+    )
     timeline_summary: TimelineSummary
     supported_controls: tuple[SupportedControl, ...] = Field(max_length=7)
 

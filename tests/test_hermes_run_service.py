@@ -17,8 +17,10 @@ from videobox_domain_models.assets import AssetType
 from videobox_domain_models.director_proposals import DirectorCandidate, DirectorProposal
 from videobox_core_engine.yujin_creator_proposal_adapter import (
     MANUAL_FALLBACK,
+    activate_yujin_media_projection,
     parse_and_project_yujin_creator_output,
 )
+from videobox_core_engine.yujin_creator_context import build_yujin_creator_context
 from videobox_domain_models.yujin_creator_context import YujinCreatorContext
 from videobox_storage.local_project_store import LocalProjectStore, sha256_file
 from videobox_storage.postgres_compat import translate_sql
@@ -63,7 +65,17 @@ def _scope(tmp_path: Path, *, now=None):
     session = store.save_editing_session(
         project_id=project.project_id,
         timeline_id="timeline",
-        session_payload={"segments": [], "history": []},
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "segment-1",
+                    "start_sec": 0.0,
+                    "end_sec": 5.0,
+                    "caption_text": "첫 장면",
+                }
+            ],
+            "history": [],
+        },
     )
     store.create_director_conversation(
         project_id=project.project_id,
@@ -258,6 +270,405 @@ def _proposal_output(context: YujinCreatorContext) -> str:
         f"{reply}\n```videobox-yujin-response\n"
         f"{json.dumps(payload, ensure_ascii=False)}\n```"
     )
+
+
+def _output_check_projection(
+    *,
+    store: LocalProjectStore,
+    project_id: str,
+    session_id: str,
+    run_id: str,
+):
+    session = store.get_editing_session(
+        project_id=project_id,
+        session_id=session_id,
+    )
+    context = build_yujin_creator_context(
+        store=store,
+        project_id=project_id,
+        session_id=session_id,
+        expected_session_revision=int(session["session_revision"]),
+        selected_segment_id="segment-1",
+    )
+    reply = "현재 타임라인의 빈 구간을 확인했습니다."
+    payload = {
+        "schema_version": "videobox.yujin-response.v1",
+        "reply_text": reply,
+        "proposal": {
+            "proposal_id": "untrusted-output-check",
+            "base_revision": (
+                f"session:{context.session_id}:revision:{context.session_revision}:"
+                f"assets:{context.asset_index_revision}"
+            ),
+            "title": "빈 구간 확인",
+            "rationale": "현재 편집본의 빈 구간만 읽습니다.",
+            "operations": [
+                {
+                    "operation_id": "operation-output-check",
+                    "kind": "output_check",
+                    "target": {"track_id": "output-primary"},
+                    "parameters": {"check": "timeline_gaps"},
+                    "requires_materialization": False,
+                    "preview_summary": "빈 구간 확인",
+                }
+            ],
+        },
+    }
+    raw = (
+        f"{reply}\n```videobox-yujin-response\n"
+        f"{json.dumps(payload, ensure_ascii=False, separators=(',', ':'))}\n```"
+    )
+    projection = parse_and_project_yujin_creator_output(
+        raw,
+        context,
+        trusted_project_id=project_id,
+        trusted_run_id=run_id,
+    )
+    activated = activate_yujin_media_projection(
+        store=store,
+        project_id=project_id,
+        context=context,
+        projection=projection,
+    )
+    assert activated.proposal is not None
+    assert activated.proposal.candidates[0].controls["gap_count"] == (
+        context.timeline_summary.gap_count
+    )
+    return context, activated
+
+
+def _real_output_scope(
+    tmp_path: Path,
+    *,
+    gap_count: int,
+    remove_segment: bool = False,
+):
+    store = LocalProjectStore(tmp_path / "projects")
+    project = store.bootstrap_project("output-gap-terminal")
+    gap_slots = [
+        {
+            "gap_id": f"gap-{index + 1}",
+            "segment_id": "segment-1",
+            "start_sec": float(index),
+            "end_sec": float(index + 1),
+            "reason": "asset_gap",
+        }
+        for index in range(gap_count)
+    ]
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "version": "v001",
+            "tracks": [],
+            "gap_slots": gap_slots,
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "segment-1",
+                    "start_sec": 0.0,
+                    "end_sec": 5.0,
+                    "caption_text": "첫 장면",
+                    **({"cut_action": "remove"} if remove_segment else {}),
+                }
+            ],
+            "history": [],
+        },
+    )
+    store.create_director_conversation(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+        conversation_id="conv-output-gap",
+    )
+    return store, project.project_id, session["session_id"], timeline["timeline_id"]
+
+
+@pytest.mark.parametrize("gap_count", (0, 1))
+def test_real_store_output_check_terminal_uses_current_materialized_gap_truth(
+    tmp_path: Path,
+    gap_count: int,
+) -> None:
+    store, project_id, session_id, _timeline_id = _real_output_scope(
+        tmp_path,
+        gap_count=gap_count,
+    )
+    run_id = f"output-gap-{gap_count}"
+    context, projection = _output_check_projection(
+        store=store,
+        project_id=project_id,
+        session_id=session_id,
+        run_id=run_id,
+    )
+    proposal = projection.proposal
+    assert proposal is not None
+    assert context.timeline_summary.gap_count == gap_count
+    durable = store.begin_director_hermes_run(
+        project_id=project_id,
+        session_id=session_id,
+        conversation_id="conv-output-gap",
+        client_message_id=run_id,
+        user_text="빈 구간 확인",
+        expected_session_revision=context.session_revision,
+        expected_asset_index_revision=context.asset_index_revision,
+    )
+
+    result = store.complete_director_hermes_run(
+        project_id=project_id,
+        run_id=durable["run_id"],
+        owner_token=durable["owner_token"],
+        status="completed",
+        assistant_text=projection.reply_text,
+        retryable=False,
+        proposal=proposal,
+    )
+
+    assert result is True
+    assert store.get_director_hermes_run(
+        project_id=project_id,
+        run_id=durable["run_id"],
+    )["status"] == "completed"
+
+
+def test_real_store_output_check_terminal_uses_materialized_not_raw_gap_count(
+    tmp_path: Path,
+) -> None:
+    store, project_id, session_id, _timeline_id = _real_output_scope(
+        tmp_path,
+        gap_count=1,
+        remove_segment=True,
+    )
+    run_id = "output-gap-materialized"
+    context, projection = _output_check_projection(
+        store=store,
+        project_id=project_id,
+        session_id=session_id,
+        run_id=run_id,
+    )
+    proposal = projection.proposal
+    assert proposal is not None
+    assert context.timeline_summary.gap_count == 0
+    assert proposal.candidates[0].controls["gap_count"] == 0
+    durable = store.begin_director_hermes_run(
+        project_id=project_id,
+        session_id=session_id,
+        conversation_id="conv-output-gap",
+        client_message_id=run_id,
+        user_text="빈 구간 확인",
+        expected_session_revision=context.session_revision,
+        expected_asset_index_revision=context.asset_index_revision,
+    )
+
+    result = store.complete_director_hermes_run(
+        project_id=project_id,
+        run_id=durable["run_id"],
+        owner_token=durable["owner_token"],
+        status="completed",
+        assistant_text=projection.reply_text,
+        retryable=False,
+        proposal=proposal,
+    )
+
+    assert result is True
+
+
+def test_real_store_output_check_terminal_rolls_back_when_gap_truth_changes(
+    tmp_path: Path,
+) -> None:
+    store, project_id, session_id, timeline_id = _real_output_scope(
+        tmp_path,
+        gap_count=0,
+    )
+    run_id = "output-gap-race"
+    context, projection = _output_check_projection(
+        store=store,
+        project_id=project_id,
+        session_id=session_id,
+        run_id=run_id,
+    )
+    proposal = projection.proposal
+    assert proposal is not None
+    durable = store.begin_director_hermes_run(
+        project_id=project_id,
+        session_id=session_id,
+        conversation_id="conv-output-gap",
+        client_message_id=run_id,
+        user_text="빈 구간 확인",
+        expected_session_revision=context.session_revision,
+        expected_asset_index_revision=context.asset_index_revision,
+    )
+    timeline = store.get_timeline_run(
+        project_id=project_id,
+        timeline_id=timeline_id,
+    )
+    timeline["gap_slots"] = [
+        {
+            "gap_id": "gap-after-context",
+            "segment_id": "segment-1",
+            "start_sec": 0.0,
+            "end_sec": 1.0,
+            "reason": "asset_gap",
+        }
+    ]
+    store.update_timeline_run(
+        project_id=project_id,
+        timeline_id=timeline_id,
+        timeline_payload=timeline,
+    )
+
+    result = store.complete_director_hermes_run(
+        project_id=project_id,
+        run_id=durable["run_id"],
+        owner_token=durable["owner_token"],
+        status="completed",
+        assistant_text=projection.reply_text,
+        retryable=False,
+        proposal=proposal,
+    )
+
+    assert result == "proposal_stale"
+    assert store.get_director_hermes_run(
+        project_id=project_id,
+        run_id=durable["run_id"],
+    )["status"] == "pending"
+    assert store.list_director_proposals(project_id) == []
+    assert [
+        message["role"]
+        for message in store.list_director_messages(
+            project_id=project_id,
+            conversation_id="conv-output-gap",
+        )
+    ] == ["user"]
+
+
+def test_real_store_output_check_terminal_rejects_file_before_summary_race(
+    tmp_path: Path,
+) -> None:
+    store, project_id, session_id, timeline_id = _real_output_scope(
+        tmp_path,
+        gap_count=0,
+    )
+    run_id = "output-gap-file-before-db"
+    context, projection = _output_check_projection(
+        store=store,
+        project_id=project_id,
+        session_id=session_id,
+        run_id=run_id,
+    )
+    proposal = projection.proposal
+    assert proposal is not None
+    durable = store.begin_director_hermes_run(
+        project_id=project_id,
+        session_id=session_id,
+        conversation_id="conv-output-gap",
+        client_message_id=run_id,
+        user_text="빈 구간 확인",
+        expected_session_revision=context.session_revision,
+        expected_asset_index_revision=context.asset_index_revision,
+    )
+    timeline = store.get_timeline_run(
+        project_id=project_id,
+        timeline_id=timeline_id,
+    )
+    timeline.pop("summary", None)
+    timeline["gap_slots"] = [
+        {
+            "gap_id": "gap-file-before-db",
+            "segment_id": "segment-1",
+            "start_sec": 0.0,
+            "end_sec": 1.0,
+            "reason": "asset_gap",
+        }
+    ]
+    timeline_path = store.resolve_storage_uri(
+        project_id=project_id,
+        storage_uri=str(timeline["file_uri"]),
+    )
+    timeline_path.write_text(
+        json.dumps(timeline, indent=2, ensure_ascii=True),
+        encoding="utf-8",
+    )
+
+    result = store.complete_director_hermes_run(
+        project_id=project_id,
+        run_id=durable["run_id"],
+        owner_token=durable["owner_token"],
+        status="completed",
+        assistant_text=projection.reply_text,
+        retryable=False,
+        proposal=proposal,
+    )
+
+    assert result == "proposal_stale"
+    assert store.get_director_hermes_run(
+        project_id=project_id,
+        run_id=durable["run_id"],
+    )["status"] == "pending"
+    assert store.list_director_proposals(project_id) == []
+
+
+def test_real_store_output_check_terminal_materializes_legacy_gap_summary(
+    tmp_path: Path,
+) -> None:
+    store, project_id, session_id, timeline_id = _real_output_scope(
+        tmp_path,
+        gap_count=1,
+    )
+    run_id = "output-gap-legacy-summary"
+    context, projection = _output_check_projection(
+        store=store,
+        project_id=project_id,
+        session_id=session_id,
+        run_id=run_id,
+    )
+    proposal = projection.proposal
+    assert proposal is not None
+    connection = store._connection(project_id)
+    try:
+        row = connection.execute(
+            "SELECT summary_json FROM timelines "
+            "WHERE project_id = ? AND timeline_id = ?",
+            (project_id, timeline_id),
+        ).fetchone()
+        summary = json.loads(str(row["summary_json"]))
+        summary.pop("gap_count")
+        connection.execute(
+            "UPDATE timelines SET summary_json = ? "
+            "WHERE project_id = ? AND timeline_id = ?",
+            (json.dumps(summary, ensure_ascii=True), project_id, timeline_id),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+    durable = store.begin_director_hermes_run(
+        project_id=project_id,
+        session_id=session_id,
+        conversation_id="conv-output-gap",
+        client_message_id=run_id,
+        user_text="빈 구간 확인",
+        expected_session_revision=context.session_revision,
+        expected_asset_index_revision=context.asset_index_revision,
+    )
+
+    result = store.complete_director_hermes_run(
+        project_id=project_id,
+        run_id=durable["run_id"],
+        owner_token=durable["owner_token"],
+        status="completed",
+        assistant_text=projection.reply_text,
+        retryable=False,
+        proposal=proposal,
+    )
+
+    assert result is True
+    assert store.get_director_hermes_run(
+        project_id=project_id,
+        run_id=durable["run_id"],
+    )["status"] == "completed"
 
 
 def _ready_yujin_proposal(
@@ -468,6 +879,76 @@ def test_current_ready_yujin_terminal_cas_persists_atomically(
         project_id=project_id,
         run_id=durable["run_id"],
     )["status"] == "completed"
+
+
+def test_current_b4_caption_terminal_cas_persists_without_fake_asset_lookup(
+    tmp_path: Path,
+) -> None:
+    store, project_id, session_id = _scope(tmp_path)
+    session = store.get_editing_session(
+        project_id=project_id,
+        session_id=session_id,
+    )
+    candidate = DirectorCandidate(
+        candidate_id="yujin-caption-command",
+        visible_reference_code="P00-CAPTION-01",
+        media_type="caption",
+        asset_id="yujin-caption-command",
+        library_asset_id=None,
+        reason_chips=("자막 변경",),
+        scores={},
+        availability="actionable",
+        review_status="approved",
+        preview_uri=None,
+        controls={"text": "현재 장면 자막"},
+        expected_content_sha256=None,
+        media_revision="session-caption-r1",
+        canonical_metadata={
+            "schema_version": "videobox.yujin-response.v1",
+            "proposal_kind": "caption",
+            "yujin_actionable_operation": True,
+            "command_kind": "set_caption_text",
+            "target_segment_id": "segment-1",
+            "requires_materialization": False,
+        },
+    )
+    proposal = DirectorProposal(
+        proposal_id="yujin-caption-proposal",
+        revision_code="P00",
+        revision=0,
+        base_session_revision=int(session["session_revision"]),
+        asset_index_revision=store.get_asset_index_revision(project_id),
+        source_session_id=session_id,
+        target_segment_ids=("segment-1",),
+        source_script_segment_ids=("segment-1",),
+        status="ready",
+        diff={"proposal_mode": "yujin_actionable_v1"},
+        expires_at=None,
+        candidates=(candidate,),
+    )
+    durable = store.begin_director_hermes_run(
+        project_id=project_id,
+        session_id=session_id,
+        conversation_id="conv",
+        client_message_id="terminal-caption-current",
+        user_text="자막 추천",
+        expected_session_revision=proposal.base_session_revision,
+        expected_asset_index_revision=proposal.asset_index_revision,
+    )
+
+    assert store.complete_director_hermes_run(
+        project_id=project_id,
+        run_id=durable["run_id"],
+        owner_token=durable["owner_token"],
+        status="completed",
+        assistant_text="자막 추천 결과",
+        retryable=False,
+        proposal=proposal,
+    )
+    assert store.get_director_proposal(
+        project_id,
+        proposal.proposal_id,
+    ).diff["proposal_mode"] == "yujin_actionable_v1"
     assert [item.proposal_id for item in store.list_director_proposals(project_id)] == [
         proposal.proposal_id
     ]
@@ -476,6 +957,241 @@ def test_current_ready_yujin_terminal_cas_persists_atomically(
         conversation_id="conv",
     )[-1]
     assert assistant["proposal_id"] == proposal.proposal_id
+
+
+@pytest.mark.parametrize(
+    ("forgery", "media_type", "command_kind", "controls"),
+    (
+        (
+            "caption-placement",
+            "caption",
+            "set_caption_text",
+            {"text": "현재 장면 자막", "placement": "bottom"},
+        ),
+        (
+            "caption-partial-style",
+            "caption",
+            "set_caption_style",
+            {"scope": "current_caption", "style": {"font_family": "Arial"}},
+        ),
+        (
+            "overlay-position",
+            "overlay",
+            "apply_overlay",
+            {
+                "overlay_kind": "explanation-card",
+                "title": "핵심",
+                "body": "설명",
+                "text": "장면 설명",
+                "x": 0.5,
+                "y": 0.5,
+                "opacity": 1.0,
+            },
+        ),
+        (
+            "overlay-malformed-table",
+            "overlay",
+            "apply_overlay",
+            {
+                "overlay_kind": "table",
+                "columns": ["항목", "값"],
+                "rows": [["한 칸뿐"]],
+                "text": "잘못된 표",
+            },
+        ),
+    ),
+)
+def test_b4_terminal_cas_rejects_forged_caption_and_overlay_controls(
+    tmp_path: Path,
+    forgery: str,
+    media_type: str,
+    command_kind: str,
+    controls: dict[str, object],
+) -> None:
+    store, project_id, session_id = _scope(tmp_path)
+    session = store.get_editing_session(
+        project_id=project_id,
+        session_id=session_id,
+    )
+    candidate = DirectorCandidate(
+        candidate_id=f"yujin-{forgery}",
+        visible_reference_code="P00-B4-01",
+        media_type=media_type,
+        asset_id=f"yujin-{forgery}",
+        library_asset_id=None,
+        reason_chips=("위조 B4 command",),
+        scores={},
+        availability="actionable",
+        review_status="approved",
+        preview_uri=None,
+        controls=controls,
+        expected_content_sha256=None,
+        media_revision="session-b4-r1",
+        canonical_metadata={
+            "schema_version": "videobox.yujin-response.v1",
+            "proposal_kind": media_type,
+            "yujin_actionable_operation": True,
+            "command_kind": command_kind,
+            "target_segment_id": "segment-1",
+            "requires_materialization": False,
+        },
+    )
+    proposal = DirectorProposal(
+        proposal_id=f"yujin-{forgery}-proposal",
+        revision_code="P00",
+        revision=0,
+        base_session_revision=int(session["session_revision"]),
+        asset_index_revision=store.get_asset_index_revision(project_id),
+        source_session_id=session_id,
+        target_segment_ids=("segment-1",),
+        source_script_segment_ids=("segment-1",),
+        status="ready",
+        diff={"proposal_mode": "yujin_actionable_v1"},
+        expires_at=None,
+        candidates=(candidate,),
+    )
+    durable = store.begin_director_hermes_run(
+        project_id=project_id,
+        session_id=session_id,
+        conversation_id="conv",
+        client_message_id=f"terminal-{forgery}",
+        user_text="위조 추천",
+        expected_session_revision=proposal.base_session_revision,
+        expected_asset_index_revision=proposal.asset_index_revision,
+    )
+
+    result = store.complete_director_hermes_run(
+        project_id=project_id,
+        run_id=durable["run_id"],
+        owner_token=durable["owner_token"],
+        status="completed",
+        assistant_text="위조 추천 결과",
+        retryable=False,
+        proposal=proposal,
+    )
+
+    assert result == "proposal_stale"
+    assert store.get_director_hermes_run(
+        project_id=project_id,
+        run_id=durable["run_id"],
+    )["status"] == "pending"
+    assert store.list_director_proposals(project_id) == []
+    assert [
+        message["role"]
+        for message in store.list_director_messages(
+            project_id=project_id,
+            conversation_id="conv",
+        )
+    ] == ["user"]
+
+
+def test_b4_terminal_cas_rejects_voice_controls_that_disagree_with_attested_identity(
+    tmp_path: Path,
+) -> None:
+    store, project_id, session_id = _scope(tmp_path)
+    source = tmp_path / "approved-voice.bin"
+    source.write_bytes(b"approved-voice")
+    asset = store.register_asset(
+        project_id=project_id,
+        asset_type=AssetType.GENERATED_TTS_AUDIO,
+        source_path=source,
+        metadata={},
+    )
+    persisted = store.save_tts_candidate(
+        project_id=project_id,
+        segment_id="segment-1",
+        asset_id=asset.asset_id,
+        source_text="승인 음성",
+        acceptance=SimpleNamespace(
+            technical_status="accepted",
+            operator_review_status="pending",
+        ),
+    )
+    store.update_tts_candidate_listening_review(
+        project_id=project_id,
+        candidate_id=persisted["candidate_id"],
+        decision="approved",
+    )
+    session = store.get_editing_session(
+        project_id=project_id,
+        session_id=session_id,
+    )
+    candidate = DirectorCandidate(
+        candidate_id="yujin-forged-voice",
+        visible_reference_code="P00-VOICE-01",
+        media_type="voice",
+        asset_id=asset.asset_id,
+        library_asset_id=None,
+        reason_chips=("위조 음성 command",),
+        scores={},
+        availability="actionable",
+        review_status="approved",
+        preview_uri=None,
+        controls={
+            "candidate_id": "tts_candidate_999",
+            "asset_id": asset.asset_id,
+        },
+        expected_content_sha256=sha256_file(
+            store.resolve_storage_uri(
+                project_id=project_id,
+                storage_uri=str(asset.storage_uri),
+            )
+        ),
+        media_revision=asset.created_at.isoformat(),
+        canonical_metadata={
+            "schema_version": "videobox.yujin-response.v1",
+            "proposal_kind": "voice",
+            "yujin_actionable_operation": True,
+            "command_kind": "apply_tts_candidate",
+            "candidate_id": persisted["candidate_id"],
+            "source_media_kind": "generated_tts_audio",
+            "target_segment_id": "segment-1",
+            "requires_materialization": False,
+        },
+    )
+    proposal = DirectorProposal(
+        proposal_id="yujin-forged-voice-proposal",
+        revision_code="P00",
+        revision=0,
+        base_session_revision=int(session["session_revision"]),
+        asset_index_revision=store.get_asset_index_revision(project_id),
+        source_session_id=session_id,
+        target_segment_ids=("segment-1",),
+        source_script_segment_ids=("segment-1",),
+        status="ready",
+        diff={"proposal_mode": "yujin_actionable_v1"},
+        expires_at=None,
+        candidates=(candidate,),
+    )
+    durable = store.begin_director_hermes_run(
+        project_id=project_id,
+        session_id=session_id,
+        conversation_id="conv",
+        client_message_id="terminal-forged-voice",
+        user_text="위조 음성 추천",
+        expected_session_revision=proposal.base_session_revision,
+        expected_asset_index_revision=proposal.asset_index_revision,
+    )
+
+    result = store.complete_director_hermes_run(
+        project_id=project_id,
+        run_id=durable["run_id"],
+        owner_token=durable["owner_token"],
+        status="completed",
+        assistant_text="위조 음성 추천 결과",
+        retryable=False,
+        proposal=proposal,
+    )
+
+    assert result == "proposal_stale"
+    assert store.list_director_proposals(project_id) == []
+    assert [
+        message["role"]
+        for message in store.list_director_messages(
+            project_id=project_id,
+            conversation_id="conv",
+        )
+    ] == ["user"]
 
 
 def test_machine_payload_is_never_public_and_candidate_links_atomically(

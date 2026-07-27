@@ -269,6 +269,65 @@ const yujinMediaProposal = (
   }],
 });
 
+const yujinB4Proposal = (
+  kind: "caption-text" | "caption-style" | "voice" | "explanation" | "image" | "table",
+) => {
+  const mediaType = kind.startsWith("caption") ? "caption" : kind === "voice" ? "voice" : "overlay";
+  const commandKind = kind === "caption-text"
+    ? "set_caption_text"
+    : kind === "caption-style"
+      ? "set_caption_style"
+      : kind === "voice"
+        ? "apply_tts_candidate"
+        : "apply_overlay";
+  const controls = kind === "caption-text"
+    ? { text: "추천 자막" }
+    : kind === "caption-style"
+      ? {
+        scope: "current_caption",
+        style: {
+          font_family: "Pretendard", font_size_px: 42, text_color: "#FFFFFFFF",
+          outline_color: "#000000FF", outline_width_px: 2, background_color: "#00000000",
+          position_x_percent: 50, position_y_percent: 88, horizontal_align: "center",
+          safe_area_enabled: true, shadow_blur_px: 0,
+        },
+      }
+      : kind === "voice"
+        ? { candidate_id: "tts_candidate_001", asset_id: "asset-tts" }
+        : kind === "explanation"
+          ? { overlay_kind: "explanation-card", title: "핵심", body: "설명", text: "장면 설명" }
+          : kind === "image"
+            ? { overlay_kind: "image", asset_id: "asset-image", text: "장면 이미지" }
+            : { overlay_kind: "table", columns: ["항목", "값"], rows: [["속도", "빠름"]], text: "장면 표" };
+  return {
+    ...directorProposal(`yujin-${kind}`),
+    diff: { proposal_mode: "yujin_actionable_v1" },
+    candidates: [{
+      ...directorProposal().candidates[0],
+      candidate_id: `candidate-${kind}`,
+      visible_reference_code: `P01-${kind.toUpperCase()}-01`,
+      media_type: mediaType,
+      asset_id: kind === "voice" ? "asset-tts" : kind === "image" ? "asset-image" : `candidate-${kind}`,
+      availability: "actionable",
+      review_status: "approved",
+      preview_uri: null,
+      controls,
+      expected_content_sha256: kind === "voice" || kind === "image" ? "a".repeat(64) : null,
+      media_revision: "media-r1",
+      canonical_metadata: {
+        schema_version: "videobox.yujin-response.v1",
+        proposal_kind: mediaType,
+        yujin_actionable_operation: true,
+        command_kind: commandKind,
+        ...(kind === "voice" ? { candidate_id: "tts_candidate_001" } : {}),
+        target_segment_id: "segment-1",
+        preview_summary: `${kind} 추천 세부 내용`,
+        requires_materialization: false,
+      },
+    }],
+  };
+};
+
 function pointer(target: Element, type: string, clientX: number) {
   fireEvent(target, new MouseEvent(type, { bubbles: true, cancelable: true, clientX }));
 }
@@ -296,6 +355,102 @@ describe("EditorWorkbenchRoute", () => {
     vi.spyOn(api, "listMediaLibraryAssets").mockResolvedValue({ assets: [] } as never);
     vi.spyOn(api, "listJobs").mockResolvedValue([]);
     vi.spyOn(api, "listTtsCandidates").mockResolvedValue({ candidates: [] });
+  });
+
+  it.each([
+    ["caption-text", "updateEditingSessionCaption"],
+    ["caption-style", "updateEditingSessionCaptionStyle"],
+    ["voice", "updateEditingSessionTtsReplacement"],
+    ["explanation", "updateEditingSessionExplanationCard"],
+    ["image", "updateEditingSessionImageOverlay"],
+    ["table", "updateEditingSessionTableOverlay"],
+  ] as const)("applies one exact Yujin %s command without materialize or batch", async (kind, apiMethod) => {
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
+      conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },
+      messages: [], proposal: yujinB4Proposal(kind), references: [],
+    } as never);
+    vi.spyOn(api, "preflightDirectorProposal").mockResolvedValue({ status: "ready" } as never);
+    const command = vi.spyOn(api, apiMethod).mockResolvedValue({} as never);
+    const materialize = vi.spyOn(api, "materializeDirectorCandidate");
+    const batchApply = vi.spyOn(api, "batchApplyDirectorProposal");
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+    fireEvent.click(await screen.findByRole("radio", { name: `P01-${kind.toUpperCase()}-01 선택` }));
+    fireEvent.click(screen.getByRole("button", { name: "선택한 추천 적용" }));
+
+    await waitFor(() => expect(command).toHaveBeenCalledTimes(1));
+    expect(materialize).not.toHaveBeenCalled();
+    expect(batchApply).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["caption-text", { text: "추천 자막", placement: "bottom" }],
+    ["caption-style", {
+      scope: "current_caption",
+      style: {
+        font_family: "Pretendard", font_size_px: 42, text_color: "#FFFFFFFF",
+        outline_color: "#000000FF", outline_width_px: 2, background_color: "#00000000",
+        position_x_percent: 50, position_y_percent: 95, horizontal_align: "center",
+        safe_area_enabled: true, shadow_blur_px: 0,
+      },
+    }],
+    ["voice", { candidate_id: "tts_candidate_001", asset_id: "asset-tts", speed: 1 }],
+    ["explanation", {
+      overlay_kind: "explanation-card", title: "핵심", body: "설명", text: "장면 설명",
+      x: 0.5, y: 0.5, opacity: 1,
+    }],
+    ["table", {
+      overlay_kind: "table", columns: ["항목", "값"], rows: [["한 칸뿐"]], text: "잘못된 표",
+    }],
+  ] as const)("keeps malformed persisted Yujin %s controls disabled", async (kind, controls) => {
+    const base = yujinB4Proposal(kind);
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
+      conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },
+      messages: [],
+      proposal: {
+        ...base,
+        candidates: [{ ...base.candidates[0], controls }],
+      },
+      references: [],
+    } as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+    const radio = await screen.findByRole("radio", { name: `P01-${kind.toUpperCase()}-01 선택` });
+    fireEvent.click(radio);
+
+    expect(radio).toBeDisabled();
+    expect(screen.getByRole("button", { name: "선택한 추천 적용" })).toBeDisabled();
+  });
+
+  it("issues zero B4 commands when the route changes while preflight is pending", async () => {
+    let resolvePreflight!: (value: { status: string }) => void;
+    vi.mocked(api.getEditorPlaybackManifest).mockImplementation(
+      (projectId, sessionId) => Promise.resolve(manifest(projectId, sessionId)) as never,
+    );
+    vi.spyOn(api, "reloadDirectorSession").mockImplementation((projectId, sessionId) => Promise.resolve({
+      conversation: { conversation_id: `conversation-${sessionId}`, project_id: String(projectId), session_id: String(sessionId) },
+      messages: [], proposal: projectId === "project-a" ? yujinB4Proposal("caption-text") : null, references: [],
+    }) as never);
+    vi.spyOn(api, "preflightDirectorProposal").mockImplementation(
+      () => new Promise((resolve) => { resolvePreflight = resolve; }) as never,
+    );
+    const caption = vi.spyOn(api, "updateEditingSessionCaption");
+    const rendered = render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+    fireEvent.click(await screen.findByRole("radio", { name: "P01-CAPTION-TEXT-01 선택" }));
+    fireEvent.click(screen.getByRole("button", { name: "선택한 추천 적용" }));
+    await waitFor(() => expect(api.preflightDirectorProposal).toHaveBeenCalledTimes(1));
+
+    rendered.rerender(<EditorWorkbenchRoute projectId="project-b" sessionId="session-b" />);
+    await expectEditorRevision(1);
+    await act(async () => { resolvePreflight({ status: "ready" }); });
+
+    expect(caption).not.toHaveBeenCalled();
   });
 
   it("publishes nothing until the matching manifest and session arrive together", async () => {

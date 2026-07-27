@@ -213,6 +213,16 @@ def test_creator_skill_pins_the_exact_envelope_and_all_operation_contracts() -> 
     assert "```javascript" not in skill
 
 
+def test_creator_skill_overlay_variants_name_every_required_strict_field() -> None:
+    skill = (
+        PROFILE_ROOT / "skills" / "videobox-creator" / "SKILL.md"
+    ).read_text(encoding="utf-8")
+
+    assert "`overlay_kind: explanation_card`, `title`, `body`, `text`" in skill
+    assert "`overlay_kind: image`, 현재 context의 image `asset_id`, `text`" in skill
+    assert "`overlay_kind: table`, `columns`, `rows`, `text`" in skill
+
+
 def test_profile_is_mounted_read_only_only_in_the_opt_in_overlay() -> None:
     overlay = yaml.safe_load(OVERLAY_PATH.read_text(encoding="utf-8"))
     hermes = overlay["services"]["videobox-hermes-yujin"]

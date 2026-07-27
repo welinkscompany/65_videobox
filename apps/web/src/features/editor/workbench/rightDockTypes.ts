@@ -11,6 +11,7 @@ export type RightDockCandidate = Readonly<{
   availability: string;
   reviewStatus: string;
   actionable: boolean;
+  readOnlyFinding?: boolean;
 }>;
 
 export type RightDockProposal = Readonly<{

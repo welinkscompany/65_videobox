@@ -309,4 +309,47 @@ describe("RightDock", () => {
     expect(onPreviewCandidate).not.toHaveBeenCalled();
     expect(onApplyProposal).not.toHaveBeenCalled();
   });
+
+  it("keeps output findings separate and never selectable or applicable", () => {
+    const mixed: RightDockProposal = {
+      ...proposal,
+      candidates: [
+        proposal.candidates[0],
+        {
+          candidateId: "finding-gaps",
+          visibleReferenceCode: "P01-CHECK-01",
+          mediaType: "output_check",
+          previewUrl: null,
+          kind: "output_check",
+          sourceMediaKind: "output_check",
+          targetSegmentId: "",
+          previewSummary: "미디어, 미리보기, 내보내기 준비가 모두 끝났습니다.",
+          supportedControls: { check: "timeline_gaps", gap_count: 2 },
+          availability: "read_only",
+          reviewStatus: "not_applicable",
+          actionable: false,
+          readOnlyFinding: true,
+        },
+      ],
+    };
+    const onApplyProposal = vi.fn();
+    const onSelectedCandidateIdsChange = vi.fn();
+
+    render(<RightDock
+      draft=""
+      onDraftChange={vi.fn()}
+      proposal={mixed}
+      selectedCandidateIds={[]}
+      onSelectedCandidateIdsChange={onSelectedCandidateIdsChange}
+      onApplyProposal={onApplyProposal}
+    />);
+
+    const finding = screen.getByRole("region", { name: "검사 결과" });
+    expect(finding).toHaveTextContent("빈 구간 2개");
+    expect(finding).not.toHaveTextContent("미디어, 미리보기, 내보내기 준비가 모두 끝났습니다.");
+    expect(screen.queryByRole("radio", { name: "P01-CHECK-01 선택" })).toBeNull();
+    expect(screen.getByRole("button", { name: "선택한 추천 적용" })).toBeDisabled();
+    expect(onSelectedCandidateIdsChange).not.toHaveBeenCalled();
+    expect(onApplyProposal).not.toHaveBeenCalled();
+  });
 });

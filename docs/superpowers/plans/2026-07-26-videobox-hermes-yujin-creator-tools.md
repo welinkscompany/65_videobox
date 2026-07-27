@@ -13,7 +13,7 @@
 Parent: `docs/superpowers/plans/2026-07-26-videobox-hermes-yujin-master-plan.md`
 Requires: Phase A task A4 complete.
 
-Child progress: **3/5 tasks (60.0%), remaining 40.0%**.
+Child progress: **4/5 tasks (80.0%), remaining 20.0%**.
 
 ## Supported-control rule
 
@@ -317,19 +317,87 @@ Each operation must carry:
 
 ## B4 — Implement supported captions, voice, overlay, and output checks
 
-- [ ] **B4** Support only existing caption, voice/TTS, overlay, and output-check controls.
+- [x] **B4** Support only existing caption, voice/TTS, overlay, and output-check controls.
 
 **Files:**
 
 - Inspect first: `apps/web/src/features/editor/editorCommandPort.ts`
 - Inspect first: current caption, voice, overlay, and output DTO/route implementations
 - Modify only supported unions in: `packages/domain-models/src/videobox_domain_models/yujin_creator_proposals.py`
+- Modify: `packages/domain-models/src/videobox_domain_models/yujin_creator_context.py`
 - Modify: `packages/core-engine/src/videobox_core_engine/yujin_creator_context.py`
 - Modify: `packages/core-engine/src/videobox_core_engine/yujin_creator_proposal_adapter.py`
+- Modify: `packages/core-engine/src/videobox_core_engine/director_proposal_service.py`
+- Modify: `packages/storage-abstractions/src/videobox_storage/local_project_store.py`
+- Modify: `services/api/src/videobox_api/hermes_run_service.py`
+- Modify: `services/api/src/videobox_api/routers/director_proposals.py`
+- Modify: `config/hermes/yujin/skills/videobox-creator/SKILL.md`
 - Modify: `apps/web/src/features/editor/workbench/EditorWorkbenchRoute.tsx`
+- Modify: `apps/web/src/features/editor/workbench/rightDockTypes.ts`
 - Modify: `apps/web/src/features/editor/workbench/RightDock.tsx`
 - Create: `tests/test_yujin_text_voice_overlay_proposal_adapter.py`
+- Modify: `tests/test_yujin_creator_context.py`
+- Modify: `tests/test_hermes_run_service.py`
+- Modify: `tests/test_api_media_director.py`
 - Modify: `apps/web/src/features/editor/workbench/editor-workbench-route.test.tsx`
+- Modify: `apps/web/src/features/editor/workbench/right-dock.test.tsx`
+
+**Narrow B4 contract amendment (2026-07-28):**
+
+- Caption recommendations may call only the existing `setCaptionText` command or
+  the complete existing eleven-field `setCaptionStyle` DTO. Independent caption
+  timing and the old `placement` shortcut are unsupported.
+- Voice recommendations may reference only a persisted TTS candidate whose
+  technical status is accepted and whose listening review is approved for the
+  exact current segment and asset. Creator context exposes that bounded identity,
+  and context construction plus terminal proposal activation fence the TTS
+  candidate truth. Free-form voice text, speed, sample, or provider selection is
+  unsupported.
+- Overlay recommendations use only the existing exact discriminated commands:
+  explanation card (`title/body/text`), image (`asset_id/text`) with a current
+  project image-asset attestation, or table (`columns/rows/text`). The old generic
+  `x/y/opacity` shape and every generic effect payload are unsupported.
+- `output_check` is a separate read-only finding. B4 supports only
+  `timeline_gaps`, derived from the fenced creator-context timeline summary. It
+  is never selectable and cannot call preview render, final render, export, or
+  any other mutation. Claims for missing media, preview readiness, export
+  readiness, or CapCut freshness remain unavailable until an authoritative
+  bounded read model exists.
+- A mixed B3/B4 proposal may use one generalized Yujin actionable mode, but the
+  existing B3 media mode remains readable. Direct Yujin proposal apply/batch
+  stays forbidden. RightDock emits only one explicit selection; Route owns the
+  current-revision/route-epoch preflight and exactly one typed
+  `EditorCommandPort` mutation.
+- Unsupported OpenCut effect, transition, keyframe, mask, filter, animation, and
+  automatic apply remain rejected. Manual editor controls and the single
+  `PreviewStage` player remain available if Yujin is unavailable.
+
+**TDD acceptance matrix:**
+
+| Kind | Proven input | Existing command boundary | Non-actionable/rejected |
+|---|---|---|---|
+| Caption text | current segment plus bounded text | `setCaptionText` | placement, independent timing |
+| Caption style | complete existing eleven-field style DTO | `setCaptionStyle`, current caption scope | partial/unknown style payload |
+| Voice/TTS | current approved candidate ID, asset ID, segment ID | `applyTtsCandidate` | text, speed, sample/provider choice, stale/unapproved candidate |
+| Explanation overlay | title, body, text | `applyOverlay(explanation-card)` | generic effect fields |
+| Image overlay | current image asset ID, text | `applyOverlay(image)` | absent/wrong-kind/stale asset, x/y/opacity |
+| Table overlay | bounded columns, rows, text | `applyOverlay(table)` | malformed table or generic effect fields |
+| Output check | fenced timeline `gap_count` | read-only finding, zero command | preview/export/render/CapCut readiness claims |
+
+**Reverse runtime trace:**
+
+1. A saved operation is derived only from a fresh creator-context identifier and
+   exact supported payload; unsupported shapes fail before persistence.
+2. Terminal persistence rechecks current session, asset index, referenced image
+   asset or approved TTS candidate, and keeps output findings read-only.
+3. RightDock display has zero mutation and cannot select a read-only or stale
+   entry.
+4. Explicit Apply reaches Route, which checks route/director epoch and current
+   revision before and after any await, then invokes exactly one existing typed
+   command.
+5. The command advances one editing-session revision; the normal reload path
+   refreshes the existing one-player preview. Failure or staleness advances no
+   revision and leaves manual editing available.
 
 **RED:**
 

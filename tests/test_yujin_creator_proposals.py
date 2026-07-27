@@ -57,6 +57,18 @@ def _context(**changes) -> YujinCreatorContext:
                 "tags": (),
             },
         ),
+        "approved_tts_candidates": (
+            {
+                "candidate_id": "tts_candidate_001",
+                "asset_id": "asset-voice",
+                "segment_id": "segment-1",
+                "source_text": "안전한 음성",
+                "technical_status": "accepted",
+                "operator_review_status": "approved",
+                "asset_revision": "voice-r1",
+                "expected_content_sha256": "a" * 64,
+            },
+        ),
         "timeline_summary": {
             "duration_sec": 5.0,
             "track_count": 2,
@@ -154,7 +166,7 @@ def _operation(kind: str) -> dict[str, object]:
                 "segment_id": "segment-1",
                 "track_id": "caption-primary",
             },
-            "parameters": {"text": "안전한 자막", "placement": "bottom"},
+            "parameters": {"action": "set_text", "text": "안전한 자막"},
             "requires_materialization": False,
         },
         "voice": {
@@ -164,11 +176,10 @@ def _operation(kind: str) -> dict[str, object]:
                 "track_id": "voice-primary",
             },
             "parameters": {
+                "candidate_id": "tts_candidate_001",
                 "asset_id": "asset-voice",
-                "text": "안전한 음성",
-                "speed": 1.0,
             },
-            "requires_materialization": True,
+            "requires_materialization": False,
         },
         "overlay": {
             "target": {
@@ -176,10 +187,10 @@ def _operation(kind: str) -> dict[str, object]:
                 "track_id": "video-overlay",
             },
             "parameters": {
+                "overlay_kind": "explanation_card",
+                "title": "안전한 제목",
+                "body": "안전한 본문",
                 "text": "안전한 오버레이",
-                "x": 0.5,
-                "y": 0.5,
-                "opacity": 1.0,
             },
             "requires_materialization": False,
         },
@@ -269,8 +280,15 @@ def test_bounds_materialization_and_recursive_secret_values_are_rejected() -> No
         {
             "operation_id": "caption-1",
             "kind": "caption",
-            "target": {"script_id": "script-1", "segment_id": "segment-1"},
-            "parameters": {"text": {"nested": "api_key=should-never-appear"}},
+            "target": {
+                "script_id": "script-1",
+                "segment_id": "segment-1",
+                "track_id": "caption-primary",
+            },
+            "parameters": {
+                "action": "set_text",
+                "text": {"nested": "api_key=should-never-appear"},
+            },
             "requires_materialization": False,
             "preview_summary": "자막",
         }
@@ -295,8 +313,15 @@ def test_utf8_id_bounds_and_token_shaped_parameter_values_are_rejected() -> None
         {
             "operation_id": "caption-1",
             "kind": "caption",
-            "target": {"script_id": "script-1", "segment_id": "segment-1"},
-            "parameters": {"text": "Bearer " + ("a" * 32)},
+            "target": {
+                "script_id": "script-1",
+                "segment_id": "segment-1",
+                "track_id": "caption-primary",
+            },
+            "parameters": {
+                "action": "set_text",
+                "text": "Bearer " + ("a" * 32),
+            },
             "requires_materialization": False,
             "preview_summary": "자막",
         }

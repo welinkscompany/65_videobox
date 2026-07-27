@@ -11,6 +11,7 @@ from videobox_core_engine.editor_playback_manifest import (
     build_editor_playback_manifest,
 )
 from videobox_domain_models.yujin_creator_context import (
+    ApprovedTtsCandidateSummary,
     MediaCandidateSummary,
     SegmentSummary,
     SupportedControl,
@@ -137,6 +138,12 @@ def build_yujin_creator_context(
         timeline_version=str(timeline.get("version") or "v001"),
     )
     assets = store.list_assets(project_id=project_id)  # type: ignore[attr-defined]
+    approved_tts_before = _approved_tts_candidates(
+        store=store,
+        project_id=project_id,
+        segment_ids=segment_ids,
+        assets=assets,
+    )
 
     session_after = store.get_editing_session(  # type: ignore[attr-defined]
         project_id=project_id,
@@ -145,12 +152,19 @@ def build_yujin_creator_context(
     asset_revision_after = int(  # type: ignore[attr-defined]
         store.get_asset_index_revision(project_id)
     )
+    approved_tts_after = _approved_tts_candidates(
+        store=store,
+        project_id=project_id,
+        segment_ids=segment_ids,
+        assets=assets,
+    )
     if (
         _positive_revision(session_after.get("session_revision"))
         != session_revision
         or str(session_after.get("session_id") or "") != session_id
         or str(session_after.get("timeline_id") or "") != timeline_id
         or asset_revision_after != asset_revision_before
+        or approved_tts_after != approved_tts_before
     ):
         raise YujinCreatorContextError("creator_context_snapshot_changed")
 
@@ -200,6 +214,7 @@ def build_yujin_creator_context(
         selected_segment_id=normalized_selection,
         segment_summaries=segments,
         media_candidates=candidates,
+        approved_tts_candidates=approved_tts_before,
         timeline_summary=timeline_summary,
         supported_controls=_CONTROLS,
     )
@@ -209,9 +224,12 @@ def build_yujin_creator_context(
 def _fit_context(context: YujinCreatorContext) -> YujinCreatorContext:
     segments = context.segment_summaries
     candidates = context.media_candidates
+    approved_tts = context.approved_tts_candidates
     while len(canonical_creator_context_json(context).encode("utf-8")) > MAX_CONTEXT_BYTES:
         if candidates:
             candidates = candidates[:-1]
+        elif approved_tts:
+            approved_tts = approved_tts[:-1]
         elif segments:
             segments = segments[:-1]
         else:
@@ -220,6 +238,7 @@ def _fit_context(context: YujinCreatorContext) -> YujinCreatorContext:
             update={
                 "segment_summaries": segments,
                 "media_candidates": candidates,
+                "approved_tts_candidates": approved_tts,
             }
         )
     return context
@@ -307,6 +326,84 @@ def _media_candidate(
         ),
         duration_sec=duration,
         tags=tags,
+    )
+
+
+def _approved_tts_candidates(
+    *,
+    store: object,
+    project_id: str,
+    segment_ids: set[str],
+    assets: list[dict[str, Any]],
+) -> tuple[ApprovedTtsCandidateSummary, ...]:
+    list_candidates = getattr(store, "list_tts_candidates", None)
+    resolve_storage_uri = getattr(store, "resolve_storage_uri", None)
+    if not callable(list_candidates) or not callable(resolve_storage_uri):
+        return ()
+    assets_by_id = {
+        str(item.get("asset_id") or ""): item
+        for item in assets
+        if isinstance(item, dict)
+        and str(item.get("project_id") or "") == project_id
+    }
+    result: list[ApprovedTtsCandidateSummary] = []
+    for segment_id in sorted(segment_ids):
+        try:
+            candidates = list_candidates(
+                project_id=project_id,
+                segment_id=segment_id,
+            )
+        except (KeyError, OSError, TypeError, ValueError):
+            continue
+        for item in candidates:
+            if not isinstance(item, dict):
+                continue
+            candidate_id = str(item.get("candidate_id") or "")
+            asset_id = str(item.get("asset_id") or "")
+            asset = assets_by_id.get(asset_id)
+            if (
+                not candidate_id.startswith("tts_candidate_")
+                or str(item.get("project_id") or "") != project_id
+                or str(item.get("segment_id") or "") != segment_id
+                or item.get("technical_status") != "accepted"
+                or item.get("operator_review_status") != "approved"
+                or not isinstance(asset, dict)
+                or str(asset.get("asset_type") or "") != "generated_tts_audio"
+            ):
+                continue
+            try:
+                source = resolve_storage_uri(
+                    project_id=project_id,
+                    storage_uri=str(asset["storage_uri"]),
+                )
+                asset_revision = str(asset.get("created_at") or "").strip()
+                if not source.is_file() or not asset_revision:
+                    continue
+                from videobox_storage.local_project_store import sha256_file
+
+                digest = sha256_file(source)
+            except (KeyError, OSError, TypeError, ValueError):
+                continue
+            result.append(
+                ApprovedTtsCandidateSummary(
+                    candidate_id=candidate_id,
+                    asset_id=asset_id,
+                    segment_id=segment_id,
+                    source_text=_truncate_utf8(
+                        str(item.get("source_text") or ""),
+                        MAX_SEGMENT_TEXT_BYTES,
+                    ),
+                    technical_status="accepted",
+                    operator_review_status="approved",
+                    asset_revision=asset_revision,
+                    expected_content_sha256=digest,
+                )
+            )
+    return tuple(
+        sorted(
+            result,
+            key=lambda item: (item.segment_id, item.candidate_id, item.asset_id),
+        )[:32]
     )
 
 

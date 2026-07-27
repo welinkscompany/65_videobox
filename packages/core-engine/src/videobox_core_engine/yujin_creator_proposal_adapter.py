@@ -66,6 +66,7 @@ class YujinCreatorProjection:
 
 _ACTIONABLE_MEDIA_KINDS = frozenset({"broll", "bgm", "sfx"})
 _BROLL_SOURCE_KINDS = frozenset({"raw_video", "broll_video"})
+_ACTIONABLE_B4_KINDS = frozenset({"caption", "voice", "overlay"})
 
 
 def parse_and_project_yujin_creator_output(
@@ -178,14 +179,26 @@ def activate_yujin_media_projection(
     actionable_count = 0
     for index, candidate in enumerate(proposal.candidates):
         operation = operations[index] if index < len(operations) else None
-        replacement = _attest_media_candidate(
-            store=store,
-            project_id=project_id,
-            context=context,
-            candidate=candidate,
-            operation=operation,
-            media_by_id=media_by_id,
-            segments_by_id=segments_by_id,
+        replacement = (
+            _attest_media_candidate(
+                store=store,
+                project_id=project_id,
+                context=context,
+                candidate=candidate,
+                operation=operation,
+                media_by_id=media_by_id,
+                segments_by_id=segments_by_id,
+            )
+            if candidate.media_type in _ACTIONABLE_MEDIA_KINDS
+            else _attest_b4_candidate(
+                store=store,
+                project_id=project_id,
+                context=context,
+                candidate=candidate,
+                operation=operation,
+                media_by_id=media_by_id,
+                segments_by_id=segments_by_id,
+            )
         )
         activated.append(replacement)
         if replacement.availability == "actionable":
@@ -205,7 +218,18 @@ def activate_yujin_media_projection(
     except (AttributeError, KeyError, TypeError, ValueError):
         return projection
 
-    mode = "yujin_actionable_media_v1" if actionable_count else "candidate_only"
+    has_b4_actionable = any(
+        item.availability == "actionable"
+        and item.media_type in _ACTIONABLE_B4_KINDS
+        for item in activated
+    )
+    mode = (
+        "yujin_actionable_v1"
+        if has_b4_actionable
+        else "yujin_actionable_media_v1"
+        if actionable_count
+        else "candidate_only"
+    )
     updated_proposal = replace(
         proposal,
         status="ready" if actionable_count else "candidate_only",
@@ -213,6 +237,201 @@ def activate_yujin_media_projection(
         diff={**dict(proposal.diff), "proposal_mode": mode},
     )
     return replace(projection, proposal=updated_proposal)
+
+
+def _attest_b4_candidate(
+    *,
+    store: object,
+    project_id: str,
+    context: YujinCreatorContext,
+    candidate: DirectorCandidate,
+    operation: object,
+    media_by_id: dict[str, object],
+    segments_by_id: dict[str, object],
+) -> DirectorCandidate:
+    if not isinstance(operation, Mapping) or operation.get("kind") != candidate.media_type:
+        return candidate
+    parameters = operation.get("parameters")
+    target = operation.get("target")
+    if not isinstance(parameters, Mapping) or not isinstance(target, Mapping):
+        return candidate
+    parameters = dict(parameters)
+    target = dict(target)
+
+    if candidate.media_type == "output_check":
+        if parameters != {"check": "timeline_gaps"}:
+            return candidate
+        gap_count = context.timeline_summary.gap_count
+        finding_summary = f"타임라인 빈 구간 검사 결과: {gap_count}개"
+        return replace(
+            candidate,
+            availability="read_only",
+            review_status="not_applicable",
+            reason_chips=(finding_summary,),
+            controls={
+                "check": "timeline_gaps",
+                "gap_count": gap_count,
+            },
+            canonical_metadata={
+                **dict(candidate.canonical_metadata),
+                "yujin_read_only_finding": True,
+                "selectable": False,
+                "render_calls": 0,
+                "preview_summary": finding_summary,
+            },
+        )
+
+    if candidate.media_type not in _ACTIONABLE_B4_KINDS:
+        return candidate
+    segment_id = str(target.get("segment_id") or "")
+    if segment_id not in segments_by_id:
+        return candidate
+    preview_summary = str(operation.get("preview_summary") or "")
+    metadata: dict[str, object] = {
+        **dict(candidate.canonical_metadata),
+        "yujin_actionable_operation": True,
+        "target_segment_id": segment_id,
+        "preview_summary": preview_summary,
+        "base_session_revision": context.session_revision,
+        "asset_index_revision": context.asset_index_revision,
+        "requires_materialization": False,
+    }
+    expected_sha256: str | None = None
+    media_revision = candidate.media_revision
+
+    if candidate.media_type == "caption":
+        action = parameters.get("action")
+        if action == "set_text":
+            controls = {"text": parameters.get("text")}
+            metadata["command_kind"] = "set_caption_text"
+        elif action == "set_style" and isinstance(parameters.get("style"), Mapping):
+            controls = {
+                "scope": "current_caption",
+                "style": dict(parameters["style"]),
+            }
+            metadata["command_kind"] = "set_caption_style"
+        else:
+            return candidate
+    elif candidate.media_type == "voice":
+        candidate_id = str(parameters.get("candidate_id") or "")
+        asset_id = str(parameters.get("asset_id") or "")
+        approved = next(
+            (
+                item
+                for item in context.approved_tts_candidates
+                if item.candidate_id == candidate_id
+                and item.asset_id == asset_id
+                and item.segment_id == segment_id
+            ),
+            None,
+        )
+        if approved is None or not candidate_id.startswith("tts_candidate_"):
+            return candidate
+        try:
+            persisted = store.get_tts_candidate(  # type: ignore[attr-defined]
+                project_id=project_id,
+                candidate_id=candidate_id,
+            )
+            asset = store.get_asset(  # type: ignore[attr-defined]
+                project_id=project_id,
+                asset_id=asset_id,
+            )
+            source = store.resolve_storage_uri(  # type: ignore[attr-defined]
+                project_id=project_id,
+                storage_uri=str(asset["storage_uri"]),
+            )
+            digest = sha256_file(source) if source.is_file() else ""
+            actual_revision = str(asset.get("created_at") or "").strip()
+            if (
+                str(persisted.get("project_id") or "") != project_id
+                or str(persisted.get("candidate_id") or "") != candidate_id
+                or str(persisted.get("asset_id") or "") != asset_id
+                or str(persisted.get("segment_id") or "") != segment_id
+                or persisted.get("technical_status") != "accepted"
+                or persisted.get("operator_review_status") != "approved"
+                or str(asset.get("project_id") or "") != project_id
+                or str(asset.get("asset_type") or "") != "generated_tts_audio"
+                or actual_revision != approved.asset_revision
+                or digest != approved.expected_content_sha256
+            ):
+                return candidate
+        except (AttributeError, KeyError, OSError, TypeError, ValueError):
+            return candidate
+        controls = {
+            "candidate_id": candidate_id,
+            "asset_id": asset_id,
+        }
+        metadata.update(
+            {
+                "command_kind": "apply_tts_candidate",
+                "candidate_id": candidate_id,
+                "source_media_kind": "generated_tts_audio",
+            }
+        )
+        expected_sha256 = digest
+        media_revision = actual_revision
+    else:
+        overlay_kind = str(parameters.get("overlay_kind") or "")
+        if overlay_kind == "explanation_card":
+            controls = {
+                "overlay_kind": "explanation-card",
+                "title": parameters.get("title"),
+                "body": parameters.get("body"),
+                "text": parameters.get("text"),
+            }
+        elif overlay_kind == "table":
+            controls = {
+                "overlay_kind": "table",
+                "columns": list(parameters.get("columns") or ()),
+                "rows": [list(row) for row in parameters.get("rows") or ()],
+                "text": parameters.get("text"),
+            }
+        elif overlay_kind == "image":
+            asset_id = str(parameters.get("asset_id") or "")
+            context_asset = media_by_id.get(asset_id)
+            if getattr(context_asset, "kind", None) != "image":
+                return candidate
+            try:
+                asset = store.get_asset(  # type: ignore[attr-defined]
+                    project_id=project_id,
+                    asset_id=asset_id,
+                )
+                source = store.resolve_storage_uri(  # type: ignore[attr-defined]
+                    project_id=project_id,
+                    storage_uri=str(asset["storage_uri"]),
+                )
+                digest = sha256_file(source) if source.is_file() else ""
+                actual_revision = str(asset.get("created_at") or "").strip()
+                if (
+                    str(asset.get("project_id") or "") != project_id
+                    or str(asset.get("asset_type") or "") != "image"
+                    or not digest
+                    or not actual_revision
+                ):
+                    return candidate
+            except (AttributeError, KeyError, OSError, TypeError, ValueError):
+                return candidate
+            controls = {
+                "overlay_kind": "image",
+                "asset_id": asset_id,
+                "text": parameters.get("text"),
+            }
+            metadata["source_media_kind"] = "image"
+            expected_sha256 = digest
+            media_revision = actual_revision
+        else:
+            return candidate
+        metadata["command_kind"] = "apply_overlay"
+
+    return replace(
+        candidate,
+        availability="actionable",
+        review_status="approved",
+        controls=controls,
+        expected_content_sha256=expected_sha256,
+        media_revision=media_revision,
+        canonical_metadata=metadata,
+    )
 
 
 def _attest_media_candidate(

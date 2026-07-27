@@ -6,7 +6,7 @@ import { findLatestSucceededJob } from "../../../lib/formatters";
 import { projectEditorAssets, type EditorAssetCard } from "../assets/editorAssetProjection";
 import { createEditorCommandPort, type EditorCommandPort } from "../editorCommandPort";
 import { joinEditorSnapshot, type EditorSessionSnapshot } from "../editorSnapshot";
-import type { EditorControls, EditorViewModel } from "../editorViewModel";
+import type { EditorCaptionStyle, EditorControls, EditorViewModel } from "../editorViewModel";
 import type { InspectorAction } from "../inspector/InspectorControls";
 import { canRestorePartialRegenerationResult, canRunPartialRegeneration, createPartialRegenerationTicket, PARTIAL_REGENERATION_FIELDS, preflightMatchesPartialRegenerationTicket, runMatchesPartialRegenerationTicket, type PartialRegenerationTicket } from "../partialRegenerationController";
 import { EditorWorkbench } from "./EditorWorkbench";
@@ -753,11 +753,11 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
   const applyDirectorProposal = async (proposalId: string, candidateIds: readonly string[]) => {
     if (!sessionId || !state.view || activeDirector.proposal?.proposal_id !== proposalId || !candidateIds.length || directorMutationInFlight.current || mutationInFlight.current) return;
     const proposal = activeDirector.proposal;
-    const yujinMedia = isYujinMediaProposal(proposal);
-    const selectedYujinCandidate = yujinMedia && candidateIds.length === 1
+    const yujinActionable = isYujinActionableProposal(proposal);
+    const selectedYujinCandidate = yujinActionable && candidateIds.length === 1
       ? proposal.candidates.find((candidate) => candidate.candidate_id === candidateIds[0]) ?? null
       : null;
-    if (yujinMedia && (
+    if (yujinActionable && (
       proposal.base_session_revision !== state.view.expectedRevision
       || !selectedYujinCandidate
       || !isActionableYujinCandidate(selectedYujinCandidate)
@@ -782,7 +782,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
             setDirector({ ...activeDirector, state: "blocked" });
             throw new Error("stale director proposal");
           }
-          if (selectedYujinCandidate) {
+          if (selectedYujinCandidate && isActionableYujinMediaCandidate(selectedYujinCandidate)) {
             const materialized = await api.materializeDirectorCandidate(
               projectId,
               proposalId,
@@ -795,6 +795,8 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
               assetId: materialized.asset_id,
               controls: editorControlsFromCandidate(selectedYujinCandidate),
             });
+          } else if (selectedYujinCandidate) {
+            await applyYujinB4Candidate(port, selectedYujinCandidate);
           } else {
             await api.batchApplyDirectorProposal(projectId, proposalId, { candidate_ids: [...candidateIds], expected_revision: currentRevision });
           }
@@ -872,7 +874,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
 
 function projectDirectorProposal(proposal: DirectorProposal | null, currentRevision: number): RightDockProposal | null {
   if (!proposal) return null;
-  const isYujin = isYujinMediaProposal(proposal);
+  const isYujin = isYujinProposal(proposal);
   return {
     proposalId: proposal.proposal_id,
     status: proposal.status,
@@ -896,6 +898,7 @@ function projectDirectorProposal(proposal: DirectorProposal | null, currentRevis
         availability: isYujin ? candidate.availability : actionable ? "actionable" : candidate.availability,
         reviewStatus: isYujin ? candidate.review_status : actionable ? "approved" : candidate.review_status,
         actionable,
+        readOnlyFinding: metadata.yujin_read_only_finding === true,
       };
     }),
   };
@@ -905,8 +908,13 @@ function isYujinMediaProposal(proposal: DirectorProposal) {
   return proposal.diff.proposal_mode === "yujin_actionable_media_v1";
 }
 
-function isYujinProposal(proposal: DirectorProposal) {
+function isYujinActionableProposal(proposal: DirectorProposal) {
   return isYujinMediaProposal(proposal)
+    || proposal.diff.proposal_mode === "yujin_actionable_v1";
+}
+
+function isYujinProposal(proposal: DirectorProposal) {
+  return isYujinActionableProposal(proposal)
     || proposal.candidates.some(
       (candidate) => candidate.canonical_metadata?.schema_version === "videobox.yujin-response.v1",
     );
@@ -920,6 +928,11 @@ function initialDirectorCandidateIds(proposal: DirectorProposal | null) {
 }
 
 function isActionableYujinCandidate(candidate: DirectorCandidate) {
+  return isActionableYujinMediaCandidate(candidate)
+    || isActionableYujinB4Candidate(candidate);
+}
+
+function isActionableYujinMediaCandidate(candidate: DirectorCandidate) {
   const metadata = candidate.canonical_metadata ?? {};
   const sourceMediaKind = metadata.source_media_kind;
   const sourceKindMatches = candidate.media_type === "broll"
@@ -934,6 +947,202 @@ function isActionableYujinCandidate(candidate: DirectorCandidate) {
     && typeof metadata.target_segment_id === "string"
     && metadata.target_segment_id.length > 0
   );
+}
+
+function isActionableYujinB4Candidate(candidate: DirectorCandidate) {
+  const metadata = candidate.canonical_metadata ?? {};
+  return (
+    candidate.availability === "actionable"
+    && candidate.review_status === "approved"
+    && (candidate.media_type === "caption" || candidate.media_type === "voice" || candidate.media_type === "overlay")
+    && metadata.yujin_actionable_operation === true
+    && typeof metadata.target_segment_id === "string"
+    && metadata.target_segment_id.length > 0
+    && metadata.requires_materialization === false
+    && parseYujinB4Command(candidate) !== null
+  );
+}
+
+async function applyYujinB4Candidate(port: EditorCommandPort, candidate: DirectorCandidate) {
+  const metadata = candidate.canonical_metadata ?? {};
+  const segmentId = String(metadata.target_segment_id ?? "");
+  const command = parseYujinB4Command(candidate);
+  if (!isActionableYujinB4Candidate(candidate) || !segmentId || !command) throw new Error("yujin_candidate_unavailable");
+  if (command.kind === "caption-text") {
+    return port.setCaptionText({ segmentId, text: command.text });
+  }
+  if (command.kind === "caption-style") {
+    return port.setCaptionStyle({
+      segmentIds: [segmentId],
+      scope: "current_caption",
+      style: command.style,
+    });
+  }
+  if (command.kind === "voice") {
+    return port.applyTtsCandidate({ segmentId, candidateId: command.candidateId, assetId: command.assetId });
+  }
+  if (command.kind === "explanation-card") {
+    return port.applyOverlay({ kind: "explanation-card", segmentId, title: command.title, body: command.body, text: command.text });
+  }
+  if (command.kind === "image") {
+    return port.applyOverlay({ kind: "image", segmentId, assetId: command.assetId, text: command.text });
+  }
+  return port.applyOverlay({ kind: "table", segmentId, columns: command.columns, rows: command.rows, text: command.text });
+}
+
+type ParsedYujinB4Command =
+  | Readonly<{ kind: "caption-text"; text: string }>
+  | Readonly<{ kind: "caption-style"; style: EditorCaptionStyle }>
+  | Readonly<{ kind: "voice"; candidateId: string; assetId: string }>
+  | Readonly<{ kind: "explanation-card"; title: string; body: string; text: string }>
+  | Readonly<{ kind: "image"; assetId: string; text: string }>
+  | Readonly<{ kind: "table"; columns: string[]; rows: string[][]; text: string }>;
+
+function parseYujinB4Command(candidate: DirectorCandidate): ParsedYujinB4Command | null {
+  const metadata = candidate.canonical_metadata ?? {};
+  const controls = candidate.controls ?? {};
+  if (
+    candidate.media_type === "caption"
+    && metadata.command_kind === "set_caption_text"
+    && hasExactKeys(controls, ["text"])
+    && isBoundedString(controls.text, 1, 1024)
+    && new TextEncoder().encode(controls.text).length <= 2048
+  ) {
+    return { kind: "caption-text", text: controls.text };
+  }
+  if (
+    candidate.media_type === "caption"
+    && metadata.command_kind === "set_caption_style"
+    && hasExactKeys(controls, ["scope", "style"])
+    && controls.scope === "current_caption"
+    && isRecord(controls.style)
+  ) {
+    const style = captionStyleFromCandidate(controls.style);
+    return style ? { kind: "caption-style", style } : null;
+  }
+  if (
+    candidate.media_type === "voice"
+    && metadata.command_kind === "apply_tts_candidate"
+    && hasExactKeys(controls, ["candidate_id", "asset_id"])
+    && isBoundedString(controls.candidate_id, 1, 256)
+    && /^tts_candidate_[A-Za-z0-9_-]+$/.test(controls.candidate_id)
+    && controls.candidate_id === metadata.candidate_id
+    && isBoundedString(controls.asset_id, 1, 256)
+    && controls.asset_id === candidate.asset_id
+  ) {
+    return { kind: "voice", candidateId: controls.candidate_id, assetId: controls.asset_id };
+  }
+  if (candidate.media_type !== "overlay" || metadata.command_kind !== "apply_overlay") return null;
+  if (
+    controls.overlay_kind === "explanation-card"
+    && hasExactKeys(controls, ["overlay_kind", "title", "body", "text"])
+    && isBoundedString(controls.title, 0, 256)
+    && isBoundedString(controls.body, 0, 1024)
+    && isBoundedString(controls.text, 1, 1024)
+  ) {
+    return { kind: "explanation-card", title: controls.title, body: controls.body, text: controls.text };
+  }
+  if (
+    controls.overlay_kind === "image"
+    && hasExactKeys(controls, ["overlay_kind", "asset_id", "text"])
+    && isBoundedString(controls.asset_id, 1, 256)
+    && controls.asset_id === candidate.asset_id
+    && isBoundedString(controls.text, 0, 1024)
+  ) {
+    return { kind: "image", assetId: controls.asset_id, text: controls.text };
+  }
+  if (
+    controls.overlay_kind === "table"
+    && hasExactKeys(controls, ["overlay_kind", "columns", "rows", "text"])
+  ) {
+    const columns = controls.columns;
+    const rows = controls.rows;
+    if (
+      !isStringArray(columns)
+      || columns.length === 0
+      || columns.length > 32
+      || !columns.every((value) => value.trim().length > 0)
+      || !isStringMatrix(rows)
+      || rows.length > 128
+      || !rows.every(
+        (row) => row.length === columns.length && row.every((value) => value.trim().length > 0),
+      )
+      || !isBoundedString(controls.text, 1, 1024)
+    ) return null;
+    return {
+      kind: "table",
+      columns: [...columns],
+      rows: rows.map((row) => [...row]),
+      text: controls.text,
+    };
+  }
+  return null;
+}
+
+function captionStyleFromCandidate(raw: Record<string, unknown>): EditorCaptionStyle | null {
+  const required = [
+    "font_family", "font_size_px", "text_color", "outline_color", "outline_width_px",
+    "background_color", "position_x_percent", "position_y_percent", "horizontal_align",
+    "safe_area_enabled", "shadow_blur_px",
+  ];
+  if (!hasExactKeys(raw, required)) return null;
+  if (
+    !isBoundedString(raw.font_family, 1, 128)
+    || !isBoundedInteger(raw.font_size_px, 12, 160)
+    || !isRgbaColor(raw.text_color)
+    || !isRgbaColor(raw.outline_color)
+    || !isBoundedInteger(raw.outline_width_px, 0, 12)
+    || !isRgbaColor(raw.background_color)
+    || !isBoundedInteger(raw.position_x_percent, 0, 100)
+    || !isBoundedInteger(raw.position_y_percent, 0, 94)
+    || (raw.horizontal_align !== "left" && raw.horizontal_align !== "center" && raw.horizontal_align !== "right")
+    || typeof raw.safe_area_enabled !== "boolean"
+    || typeof raw.shadow_blur_px !== "number"
+    || !Number.isInteger(raw.shadow_blur_px)
+    || raw.shadow_blur_px < 0
+  ) return null;
+  return {
+    fontFamily: raw.font_family,
+    fontSizePx: raw.font_size_px,
+    textColor: raw.text_color,
+    outlineColor: raw.outline_color,
+    outlineWidthPx: raw.outline_width_px,
+    backgroundColor: raw.background_color,
+    positionXPercent: raw.position_x_percent,
+    positionYPercent: raw.position_y_percent,
+    horizontalAlign: raw.horizontal_align,
+    safeAreaEnabled: raw.safe_area_enabled,
+    shadowBlurPx: raw.shadow_blur_px,
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]) {
+  const actual = Object.keys(value);
+  return actual.length === expected.length && expected.every((field) => field in value);
+}
+
+function isBoundedString(value: unknown, minimum: number, maximum: number): value is string {
+  return typeof value === "string" && value.length >= minimum && value.length <= maximum;
+}
+
+function isBoundedInteger(value: unknown, minimum: number, maximum: number): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= minimum && value <= maximum;
+}
+
+function isRgbaColor(value: unknown): value is string {
+  return typeof value === "string" && /^#[0-9A-Fa-f]{8}$/.test(value);
+}
+
+function isStringArray(value: unknown): value is readonly string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
+function isStringMatrix(value: unknown): value is readonly (readonly string[])[] {
+  return Array.isArray(value) && value.every(isStringArray);
 }
 
 function editorControlsFromCandidate(candidate: DirectorCandidate): EditorControls {

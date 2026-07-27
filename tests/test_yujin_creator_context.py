@@ -348,6 +348,90 @@ def test_stale_selection_playback_and_toctou_fail_closed(
     assert playback.calls == prompt_calls
 
 
+def test_context_exposes_only_exact_approved_tts_and_fences_review_race(
+    tmp_path,
+) -> None:
+    class TtsStore(_Store):
+        def __init__(self, *, change_review: bool = False) -> None:
+            super().__init__()
+            self.path = tmp_path / (
+                "changed-review.bin" if change_review else "approved.bin"
+            )
+            self.path.write_bytes(b"approved-tts")
+            self.change_review = change_review
+            self.tts_reads = 0
+
+        def list_assets(self, *, project_id: str) -> list[dict[str, object]]:
+            return [
+                {
+                    "project_id": project_id,
+                    "asset_id": "asset-tts",
+                    "asset_type": "generated_tts_audio",
+                    "storage_uri": "storage://approved-tts",
+                    "created_at": "tts-r1",
+                    "duration_sec": 1.0,
+                    "metadata": {"title": "승인 음성"},
+                }
+            ]
+
+        def list_tts_candidates(
+            self, *, project_id: str, segment_id: str
+        ) -> list[dict[str, object]]:
+            if segment_id != "segment-00":
+                return []
+            self.tts_reads += 1
+            return [
+                {
+                    "candidate_id": "tts_candidate_001",
+                    "project_id": project_id,
+                    "segment_id": segment_id,
+                    "asset_id": "asset-tts",
+                    "source_text": "승인한 음성",
+                    "technical_status": "accepted",
+                    "operator_review_status": (
+                        "rejected"
+                        if self.change_review and self.tts_reads > 1
+                        else "approved"
+                    ),
+                }
+            ]
+
+        def resolve_storage_uri(self, *, project_id: str, storage_uri: str):
+            return self.path
+
+    context = build_yujin_creator_context(
+        store=TtsStore(),
+        project_id="project-a",
+        session_id="session-a",
+        expected_session_revision=7,
+        selected_segment_id="segment-00",
+        playback_builder=_Playback(),
+    )
+
+    assert len(context.approved_tts_candidates) == 1
+    approved = context.approved_tts_candidates[0]
+    assert approved.candidate_id == "tts_candidate_001"
+    assert approved.asset_id == "asset-tts"
+    assert approved.segment_id == "segment-00"
+    assert approved.technical_status == "accepted"
+    assert approved.operator_review_status == "approved"
+    assert approved.asset_revision == "tts-r1"
+    assert len(approved.expected_content_sha256) == 64
+
+    with pytest.raises(
+        YujinCreatorContextError,
+        match="^creator_context_snapshot_changed$",
+    ):
+        build_yujin_creator_context(
+            store=TtsStore(change_review=True),
+            project_id="project-a",
+            session_id="session-a",
+            expected_session_revision=7,
+            selected_segment_id="segment-00",
+            playback_builder=_Playback(),
+        )
+
+
 def test_playback_identity_must_match_exact_session_and_revision() -> None:
     for patch in (
         {"session_id": "other"},

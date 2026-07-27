@@ -10,6 +10,7 @@ import shutil
 import sqlite3
 import subprocess
 import uuid
+from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Literal
@@ -22,11 +23,22 @@ from videobox_domain_models.recommendations import RecommendationRecord, Recomme
 from videobox_domain_models.transcripts import TranscriptRecord
 from videobox_core_engine.provider_trace import build_provider_trace
 from videobox_core_engine.exact_preview import ExactPreviewRequest
+from videobox_core_engine.editor_playback_manifest import (
+    build_editor_playback_manifest,
+)
 from videobox_storage.sqlite_schema import (
     ARTIFACT_SOURCE_SESSION_BACKFILL_STATEMENTS,
     PROJECT_SCHEMA_STATEMENTS,
 )
 from videobox_domain_models.director_proposals import DirectorProposal
+from videobox_domain_models.yujin_creator_proposals import (
+    CaptionTextParameters,
+    EditorCaptionStyle,
+    ExplanationCardParameters,
+    ImageOverlayParameters,
+    TableOverlayParameters,
+    VoiceParameters,
+)
 from videobox_core_engine.director_proposals import proposal_from_payload, proposal_to_payload
 from videobox_core_engine.creation_interview import (
     CreationInterviewRuntime,
@@ -71,7 +83,8 @@ def sha256_file(path: Path) -> str:
 def _is_actionable_yujin_media_proposal(proposal: DirectorProposal) -> bool:
     if (
         proposal.status != "ready"
-        or proposal.diff.get("proposal_mode") != "yujin_actionable_media_v1"
+        or proposal.diff.get("proposal_mode")
+        not in {"yujin_actionable_media_v1", "yujin_actionable_v1"}
     ):
         return False
     actionable = [
@@ -79,22 +92,102 @@ def _is_actionable_yujin_media_proposal(proposal: DirectorProposal) -> bool:
         for candidate in proposal.candidates
         if candidate.availability == "actionable"
     ]
-    return bool(actionable) and all(
-        candidate.media_type in {"broll", "bgm", "sfx"}
-        and (
-            candidate.canonical_metadata.get("source_media_kind")
-            in {"raw_video", "broll_video"}
-            if candidate.media_type == "broll"
-            else candidate.canonical_metadata.get("source_media_kind")
-            == candidate.media_type
+    def valid(candidate: DirectorCandidate) -> bool:
+        metadata = candidate.canonical_metadata
+        if candidate.review_status != "approved" or not metadata.get(
+            "target_segment_id"
+        ):
+            return False
+        if candidate.media_type in {"broll", "bgm", "sfx"}:
+            return bool(
+                (
+                    metadata.get("source_media_kind")
+                    in {"raw_video", "broll_video"}
+                    if candidate.media_type == "broll"
+                    else metadata.get("source_media_kind") == candidate.media_type
+                )
+                and candidate.expected_content_sha256 is not None
+                and len(candidate.expected_content_sha256) == 64
+                and metadata.get("yujin_actionable_media") is True
+            )
+        return bool(
+            candidate.media_type in {"caption", "voice", "overlay"}
+            and metadata.get("yujin_actionable_operation") is True
+            and metadata.get("command_kind")
+            in {
+                "set_caption_text",
+                "set_caption_style",
+                "apply_tts_candidate",
+                "apply_overlay",
+            }
         )
-        and candidate.review_status == "approved"
-        and candidate.expected_content_sha256 is not None
-        and len(candidate.expected_content_sha256) == 64
-        and candidate.canonical_metadata.get("yujin_actionable_media") is True
-        and bool(candidate.canonical_metadata.get("target_segment_id"))
-        for candidate in actionable
-    )
+
+    return bool(actionable) and all(valid(candidate) for candidate in actionable)
+
+
+def _has_exact_keys(value: object, expected: set[str]) -> bool:
+    return isinstance(value, Mapping) and set(value) == expected
+
+
+def _valid_b4_candidate_controls(candidate: DirectorCandidate) -> bool:
+    controls = candidate.controls
+    metadata = candidate.canonical_metadata
+    command_kind = metadata.get("command_kind")
+    try:
+        if candidate.media_type == "caption" and command_kind == "set_caption_text":
+            if not _has_exact_keys(controls, {"text"}):
+                return False
+            CaptionTextParameters.model_validate(
+                {"action": "set_text", "text": controls["text"]}
+            )
+            return True
+        if candidate.media_type == "caption" and command_kind == "set_caption_style":
+            if (
+                not _has_exact_keys(controls, {"scope", "style"})
+                or controls.get("scope") != "current_caption"
+            ):
+                return False
+            EditorCaptionStyle.model_validate(controls["style"])
+            return True
+        if candidate.media_type == "voice" and command_kind == "apply_tts_candidate":
+            if not _has_exact_keys(controls, {"candidate_id", "asset_id"}):
+                return False
+            voice = VoiceParameters.model_validate(dict(controls))
+            return bool(
+                voice.candidate_id == metadata.get("candidate_id")
+                and voice.asset_id == candidate.asset_id
+            )
+        if candidate.media_type != "overlay" or command_kind != "apply_overlay":
+            return False
+        overlay_kind = controls.get("overlay_kind")
+        if overlay_kind == "explanation-card":
+            if not _has_exact_keys(
+                controls,
+                {"overlay_kind", "title", "body", "text"},
+            ):
+                return False
+            ExplanationCardParameters.model_validate(
+                {**dict(controls), "overlay_kind": "explanation_card"}
+            )
+            return True
+        if overlay_kind == "image":
+            if not _has_exact_keys(controls, {"overlay_kind", "asset_id", "text"}):
+                return False
+            image = ImageOverlayParameters.model_validate(dict(controls))
+            return image.asset_id == candidate.asset_id
+        if overlay_kind == "table":
+            if not _has_exact_keys(
+                controls,
+                {"overlay_kind", "columns", "rows", "text"},
+            ):
+                return False
+            TableOverlayParameters.model_validate_json(
+                json.dumps(dict(controls), ensure_ascii=False)
+            )
+            return True
+    except (KeyError, TypeError, ValueError):
+        return False
+    return False
 
 
 def _is_relative_to(path: Path, parent: Path) -> bool:
@@ -210,6 +303,7 @@ def _normalize_review_flag_payloads(value: object) -> list[dict[str, str]]:
 
 def _timeline_summary_json(payload: dict[str, Any]) -> str:
     tracks = payload.get("tracks", [])
+    gap_slots = payload.get("gap_slots", [])
     review_flags = payload.get("review_flags", [])
     applied_recommendations = payload.get("applied_recommendations", [])
     pending_recommendations = payload.get("pending_recommendations", [])
@@ -217,6 +311,9 @@ def _timeline_summary_json(payload: dict[str, Any]) -> str:
         {
             "track_count": sum(1 for track in tracks if _is_store_supported_track(track))
             if isinstance(tracks, list)
+            else 0,
+            "gap_count": sum(1 for gap in gap_slots if isinstance(gap, dict))
+            if isinstance(gap_slots, list)
             else 0,
             "review_flag_count": sum(
                 1 for flag in review_flags if _is_store_blocking_review_flag(flag)
@@ -4602,9 +4699,11 @@ class LocalProjectStore:
             connection.execute("BEGIN IMMEDIATE")
             if (
                 proposal is not None
-                and proposal.status == "ready"
-                and proposal.diff.get("proposal_mode")
-                == "yujin_actionable_media_v1"
+                and any(
+                    candidate.canonical_metadata.get("schema_version")
+                    == "videobox.yujin-response.v1"
+                    for candidate in proposal.candidates
+                )
                 and not self._ready_yujin_proposal_is_current(
                     connection=connection,
                     project_id=project_id,
@@ -4771,7 +4870,7 @@ class LocalProjectStore:
         proposal: DirectorProposal,
     ) -> bool:
         session = connection.execute(
-            "SELECT session_revision FROM editing_sessions "
+            "SELECT session_revision, session_json, timeline_id FROM editing_sessions "
             "WHERE project_id = ? AND session_id = ?",
             (project_id, proposal.source_session_id),
         ).fetchone()
@@ -4788,9 +4887,135 @@ class LocalProjectStore:
         ):
             return False
         try:
+            session_payload = json.loads(str(session["session_json"] or "{}"))
+            segment_ids = {
+                str(item.get("segment_id") or "")
+                for item in session_payload.get("segments", [])
+                if isinstance(item, dict)
+            }
             for candidate in proposal.candidates:
+                metadata = candidate.canonical_metadata
+                if metadata.get("yujin_read_only_finding") is True:
+                    timeline = connection.execute(
+                        "SELECT timeline_id, version, file_uri, summary_json FROM timelines "
+                        "WHERE project_id = ? AND timeline_id = ?",
+                        (project_id, str(session["timeline_id"])),
+                    ).fetchone()
+                    current_gap_count: int | None = None
+                    if timeline is not None:
+                        try:
+                            summary = json.loads(
+                                str(timeline["summary_json"] or "{}")
+                            )
+                            if not isinstance(summary, dict):
+                                raise ValueError("timeline_summary_invalid")
+                            timeline_path = self.resolve_storage_uri(
+                                project_id=project_id,
+                                storage_uri=str(timeline["file_uri"]),
+                            )
+                            timeline_payload = json.loads(
+                                timeline_path.read_text(encoding="utf-8")
+                            )
+                            if not isinstance(timeline_payload, dict):
+                                raise ValueError("timeline_payload_invalid")
+                            raw_gaps = timeline_payload.get("gap_slots", [])
+                            raw_gap_count = (
+                                sum(
+                                    1
+                                    for gap in raw_gaps
+                                    if isinstance(gap, dict)
+                                )
+                                if isinstance(raw_gaps, list)
+                                else 0
+                            )
+                            persisted_gap_count = summary.get("gap_count")
+                            if persisted_gap_count is not None and (
+                                type(persisted_gap_count) is not int
+                                or persisted_gap_count < 0
+                                or persisted_gap_count != raw_gap_count
+                            ):
+                                raise ValueError("timeline_gap_summary_stale")
+                            if (
+                                str(timeline_payload.get("project_id") or "")
+                                != project_id
+                                or str(timeline_payload.get("timeline_id") or "")
+                                != str(timeline["timeline_id"])
+                                or str(timeline_payload.get("version") or "")
+                                != str(timeline["version"])
+                            ):
+                                raise ValueError("timeline_payload_stale")
+                            manifest = build_editor_playback_manifest(
+                                project_id=project_id,
+                                session=session_payload,
+                                timeline=timeline_payload,
+                                asset_content_url_prefix="",
+                            )
+                            source_status = manifest.get("source_status")
+                            if (
+                                not isinstance(source_status, dict)
+                                or source_status.get("status") != "current"
+                                or str(
+                                    source_status.get("source_session_id") or ""
+                                )
+                                != proposal.source_session_id
+                                or int(
+                                    source_status.get(
+                                        "source_session_revision"
+                                    )
+                                    or 0
+                                )
+                                != proposal.base_session_revision
+                            ):
+                                raise ValueError("timeline_source_stale")
+                            current_gaps = manifest.get("gap_slots")
+                            if not isinstance(current_gaps, list):
+                                raise ValueError("timeline_gap_contract_invalid")
+                            current_gap_count = len(current_gaps)
+                        except (
+                            KeyError,
+                            OSError,
+                            TypeError,
+                            ValueError,
+                            json.JSONDecodeError,
+                        ):
+                            current_gap_count = None
+                    if (
+                        current_gap_count is None
+                        or candidate.availability != "read_only"
+                        or not _has_exact_keys(
+                            candidate.controls,
+                            {"check", "gap_count"},
+                        )
+                        or candidate.controls.get("check") != "timeline_gaps"
+                        or type(candidate.controls.get("gap_count")) is not int
+                        or candidate.controls["gap_count"] < 0
+                        or candidate.controls["gap_count"]
+                        != current_gap_count
+                    ):
+                        return False
+                    continue
                 if candidate.availability != "actionable":
                     continue
+                target_segment_id = str(metadata.get("target_segment_id") or "")
+                if target_segment_id not in segment_ids:
+                    return False
+                command_kind = str(metadata.get("command_kind") or "")
+                if metadata.get("yujin_actionable_operation") is True:
+                    if not _valid_b4_candidate_controls(candidate):
+                        return False
+                    if candidate.media_type == "caption":
+                        if command_kind not in {
+                            "set_caption_text",
+                            "set_caption_style",
+                        }:
+                            return False
+                        continue
+                    if candidate.media_type == "overlay" and candidate.controls.get(
+                        "overlay_kind"
+                    ) != "image":
+                        if command_kind != "apply_overlay":
+                            return False
+                        continue
                 asset = connection.execute(
                     "SELECT asset_type, storage_uri, created_at FROM assets "
                     "WHERE project_id = ? AND asset_id = ?",
@@ -4800,7 +5025,7 @@ class LocalProjectStore:
                     return False
                 actual_type = str(asset["asset_type"] or "")
                 claimed_source_kind = str(
-                    candidate.canonical_metadata.get("source_media_kind") or ""
+                    metadata.get("source_media_kind") or ""
                 )
                 type_matches = actual_type == claimed_source_kind
                 source = self.resolve_storage_uri(
@@ -4815,6 +5040,25 @@ class LocalProjectStore:
                     or sha256_file(source) != candidate.expected_content_sha256
                 ):
                     return False
+                if candidate.media_type == "voice":
+                    tts_candidate_id = str(metadata.get("candidate_id") or "")
+                    persisted = connection.execute(
+                        "SELECT segment_id, asset_id, technical_status, "
+                        "operator_review_status FROM tts_candidates "
+                        "WHERE project_id = ? AND candidate_id = ?",
+                        (project_id, tts_candidate_id),
+                    ).fetchone()
+                    if (
+                        not tts_candidate_id.startswith("tts_candidate_")
+                        or persisted is None
+                        or str(persisted["segment_id"] or "")
+                        != target_segment_id
+                        or str(persisted["asset_id"] or "") != candidate.asset_id
+                        or str(persisted["technical_status"] or "") != "accepted"
+                        or str(persisted["operator_review_status"] or "")
+                        != "approved"
+                    ):
+                        return False
         except (KeyError, OSError, TypeError, ValueError):
             return False
         return True

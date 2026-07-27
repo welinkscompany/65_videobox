@@ -438,14 +438,20 @@ def require_ready(proposal) -> None:
 
 
 def require_actionable_yujin_candidate(proposal, candidate) -> None:
-    if proposal.diff.get("proposal_mode") != "yujin_actionable_media_v1":
+    if proposal.diff.get("proposal_mode") not in {
+        "yujin_actionable_media_v1",
+        "yujin_actionable_v1",
+    }:
         return
     if not is_actionable_yujin_media_candidate(candidate):
         raise HTTPException(status_code=422, detail="candidate_unavailable")
 
 
 def reject_yujin_direct_apply(proposal) -> None:
-    if proposal.diff.get("proposal_mode") == "yujin_actionable_media_v1":
+    if proposal.diff.get("proposal_mode") in {
+        "yujin_actionable_media_v1",
+        "yujin_actionable_v1",
+    }:
         raise HTTPException(
             status_code=422,
             detail="yujin_direct_apply_forbidden",
@@ -453,7 +459,10 @@ def reject_yujin_direct_apply(proposal) -> None:
 
 
 def require_current_yujin_source(*, store, project_id, proposal, candidate) -> None:
-    if proposal.diff.get("proposal_mode") != "yujin_actionable_media_v1":
+    if proposal.diff.get("proposal_mode") not in {
+        "yujin_actionable_media_v1",
+        "yujin_actionable_v1",
+    }:
         return
     try:
         asset = store.get_asset(project_id=project_id, asset_id=candidate.asset_id)

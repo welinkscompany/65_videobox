@@ -119,11 +119,19 @@ class DirectorProposalService:
         if self.store.get_asset_index_revision(project_id) != proposal.asset_index_revision:
             reasons.append("asset_index_revision")
         candidates = proposal.candidates
-        if proposal.diff.get("proposal_mode") == "yujin_actionable_media_v1":
+        if proposal.diff.get("proposal_mode") in {
+            "yujin_actionable_media_v1",
+            "yujin_actionable_v1",
+        }:
             candidates = tuple(
                 candidate
                 for candidate in candidates
                 if is_actionable_yujin_media_candidate(candidate)
+                or (
+                    candidate.availability == "actionable"
+                    and candidate.media_type in {"voice", "overlay"}
+                    and candidate.expected_content_sha256
+                )
             )
         for candidate in candidates:
             try:
@@ -139,6 +147,31 @@ class DirectorProposalService:
                     analyses = [item for item in self.store.list_media_analysis(project_id=project_id) if str(item["asset_id"]) == candidate.asset_id]
                     if not analyses or not any(self.store.can_apply_media_analysis(project_id=project_id, analysis_id=str(item["analysis_id"])) and bool(item.get("result")) for item in analyses):
                         reasons.append("analysis_unavailable")
+                        break
+                if candidate.media_type == "voice":
+                    tts_candidate_id = str(
+                        candidate.canonical_metadata.get("candidate_id") or ""
+                    )
+                    tts_candidate = self.store.get_tts_candidate(
+                        project_id=project_id,
+                        candidate_id=tts_candidate_id,
+                    )
+                    if (
+                        not tts_candidate_id.startswith("tts_candidate_")
+                        or str(tts_candidate.get("segment_id") or "")
+                        != str(
+                            candidate.canonical_metadata.get(
+                                "target_segment_id"
+                            )
+                            or ""
+                        )
+                        or str(tts_candidate.get("asset_id") or "")
+                        != candidate.asset_id
+                        or tts_candidate.get("technical_status") != "accepted"
+                        or tts_candidate.get("operator_review_status")
+                        != "approved"
+                    ):
+                        reasons.append("tts_candidate_stale")
                         break
                 if candidate.media_revision != str(asset.get("created_at") or ""):
                     reasons.append("media_revision")
