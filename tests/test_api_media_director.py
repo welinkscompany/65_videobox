@@ -224,6 +224,86 @@ def test_director_proposal_api_e2e_is_snapshot_only_and_returns_actionable_stale
     assert client.get(f"/api/projects/{project_id}/director/preferences").json()["pin_asset"] == [asset.asset_id]
 
 
+def test_candidate_only_proposal_rejects_every_execution_surface_before_mutation(
+    tmp_path: Path,
+) -> None:
+    app = create_app(projects_root=tmp_path / "projects")
+    client = TestClient(app)
+    store = app.state.store
+    project_id = client.post("/api/projects", json={"name": "candidate-only"}).json()["project_id"]
+    source = tmp_path / "candidate.mp4"
+    source.write_bytes(b"candidate-only-source")
+    asset = store.register_asset(
+        project_id=project_id,
+        asset_type=AssetType.BROLL_VIDEO,
+        source_path=source,
+        metadata={"semantic_score": 0.9, "review_status": "approved"},
+    )
+    digest = sha256(source.read_bytes()).hexdigest()
+    analysis = store.create_media_analysis(
+        project_id=project_id,
+        asset_id=asset.asset_id,
+        idempotency_key=f"{digest}:candidate-only",
+        cache_key="candidate-only",
+    )
+    claim = store.claim_media_analysis(
+        project_id=project_id, analysis_id=analysis["analysis_id"]
+    )
+    assert claim is not None
+    assert store.complete_media_analysis(
+        project_id=project_id,
+        analysis_id=analysis["analysis_id"],
+        expected_attempt=claim["attempt"],
+        result={"frames": [{"summary": "candidate"}]},
+    )
+    session = store.save_editing_session(
+        project_id=project_id,
+        timeline_id="timeline",
+        session_payload={
+            "segments": [{"segment_id": "seg", "caption_text": "candidate"}],
+            "history": [],
+        },
+    )
+    proposal = client.post(
+        f"/api/projects/{project_id}/director/proposals",
+        json={"session_id": session["session_id"]},
+    ).json()
+    candidate_id = proposal["candidates"][0]["candidate_id"]
+    connection = store._connection(project_id)
+    connection.execute(
+        "UPDATE director_proposals SET status = 'candidate_only' "
+        "WHERE project_id = ? AND proposal_id = ?",
+        (project_id, proposal["proposal_id"]),
+    )
+    connection.commit()
+    before_session = store.get_editing_session(
+        project_id=project_id, session_id=session["session_id"]
+    )
+    before_assets = store.list_assets(project_id=project_id)
+    base = f"/api/projects/{project_id}/director/proposals/{proposal['proposal_id']}"
+    responses = (
+        client.post(f"{base}/preflight"),
+        client.get(f"{base}/candidates/{candidate_id}/preview"),
+        client.post(f"{base}/candidates/{candidate_id}/materialize"),
+        client.post(
+            f"{base}/apply",
+            json={"candidate_ids": [candidate_id], "expected_revision": 1},
+        ),
+        client.post(
+            f"{base}/batch-apply",
+            json={"candidate_ids": [candidate_id], "expected_revision": 1},
+        ),
+    )
+
+    assert [(response.status_code, response.json()) for response in responses] == [
+        (409, {"detail": "proposal_not_ready"})
+    ] * 5
+    assert store.get_editing_session(
+        project_id=project_id, session_id=session["session_id"]
+    ) == before_session
+    assert store.list_assets(project_id=project_id) == before_assets
+
+
 def test_director_candidate_preview_and_materialize_preserve_identity_controls_and_session(tmp_path: Path) -> None:
     """Task 10 RED: proposal candidates need a safe read-only preview/materialization boundary."""
     app = create_app(projects_root=tmp_path / "projects")

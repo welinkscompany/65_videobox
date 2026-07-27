@@ -150,7 +150,7 @@ export function RightDock({
     <section aria-label="추천" className="vb-editor-workbench__summary">
       <h2>추천</h2>
       {proposal?.candidates.length ? <div role="radiogroup" aria-label="추천 후보">
-        {proposal.candidates.map((candidate) => <label key={candidate.candidateId}><Input type="radio" name="vb-eugene-candidate" aria-label={`${candidate.visibleReferenceCode} 선택`} checked={activeCandidateIds.includes(candidate.candidateId)} onChange={() => onSelectedCandidateIdsChange?.([candidate.candidateId])} />{candidate.visibleReferenceCode} · {candidate.mediaType}{candidate.previewUrl && onPreviewCandidate ? <Button type="button" onClick={() => onPreviewCandidate(candidate)}>추천 미리 듣기</Button> : null}</label>)}
+        {proposal.candidates.map((candidate) => <label key={candidate.candidateId}><Input type="radio" name="vb-eugene-candidate" aria-label={`${candidate.visibleReferenceCode} 선택`} checked={activeCandidateIds.includes(candidate.candidateId)} onChange={() => onSelectedCandidateIdsChange?.([candidate.candidateId])} />{candidate.visibleReferenceCode} · {candidate.mediaType}{proposalIsReady && candidate.previewUrl && onPreviewCandidate ? <Button type="button" onClick={() => onPreviewCandidate(candidate)}>추천 미리 듣기</Button> : null}</label>)}
       </div> : <p>아직 추천이 없어요. 직접 편집을 계속하거나 유진에게 요청할 수 있어요.</p>}
       {proposal && proposalIsReady && onApplyProposal ? <Button type="button" disabled={state === "applying" || !activeCandidateIds.length} onClick={() => void onApplyProposal(proposal.proposalId, activeCandidateIds)}>선택한 추천 적용</Button> : null}
     </section>

@@ -48,7 +48,7 @@ if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
 }
 $expectedManifest = @'
 name: videobox-yujin
-version: 1.0.0
+version: 1.1.0
 hermes_requires: ">=0.18.0"
 distribution_owned:
   - SOUL.md
@@ -65,6 +65,7 @@ $requiredFiles = @(
     "SOUL.md"
     "config.yaml"
     "skills/videobox-editor/SKILL.md"
+    "skills/videobox-creator/SKILL.md"
 )
 foreach ($relativePath in $requiredFiles) {
     $candidate = Join-Path $resolvedRoot $relativePath

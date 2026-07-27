@@ -3,11 +3,22 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { startTransition, StrictMode, Suspense, useState } from "react";
 
 import { ApiConflictError, api } from "../../../api";
-import { EditorWorkbenchRoute } from "./EditorWorkbenchRoute";
+import { EditorWorkbenchRoute, findHermesRunProposalId } from "./EditorWorkbenchRoute";
 import * as hermesSseClient from "./hermesSseClient";
 import type { HermesSseEvent } from "./hermesSseClient";
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+
+it("links a terminal proposal only to the exact Hermes run assistant", () => {
+  const messages = [
+    { message_id: "old", role: "assistant", proposal_id: "proposal-old", metadata: { hermes_run_id: "run-old" } },
+    { message_id: "current", role: "assistant", proposal_id: null, metadata: { hermes_run_id: "run-current" } },
+  ] as never;
+
+  expect(findHermesRunProposalId(messages, "run-current")).toBeNull();
+  expect(findHermesRunProposalId(messages, "run-missing")).toBeNull();
+  expect(findHermesRunProposalId(messages, "run-old")).toBe("proposal-old");
+});
 
 const manifest = (projectId: string, sessionId: string) => ({ project_id: projectId, session_id: sessionId, timeline_id: `timeline-${sessionId}`, session_revision: 1, timeline_version: "v1", timebase: "seconds", fps: { num: 30, den: 1 }, output: { width: 1080, height: 1920, sample_aspect_ratio: "1:1", rotation: 0, duration_sec: 1 }, tracks: [], captions: [], gap_slots: [], source_status: { status: "current", source_session_id: sessionId, source_session_revision: 1 }, audition: { asset_urls: {} }, exact_preview: { status: "unavailable", url: null, source_session_id: sessionId, source_session_revision: 1 } });
 const editingSession = (projectId: string, sessionId: string, revision = 1) => ({
@@ -1957,6 +1968,81 @@ describe("EditorWorkbenchRoute", () => {
     expect(screen.queryByText("유진의 답을 받지 못했어요.")).toBeNull();
     expect(screen.queryByText(/PRIVATE/)).toBeNull();
     expect(screen.getByRole("button", { name: "n-1 클립 선택" })).toBeEnabled();
+  });
+
+  it("loads the terminal-linked candidate-only proposal without remounting route-owned UI", async () => {
+    const candidateOnly = {
+      ...directorProposal("proposal-from-hermes"),
+      status: "candidate_only",
+      candidates: [{
+        ...directorProposal().candidates[0],
+        candidate_id: "candidate-from-hermes",
+        visible_reference_code: "P01-B-09",
+        availability: "candidate_only",
+        review_status: "pending",
+        preview_uri: null,
+      }],
+    };
+    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue(
+      "00000000-0000-4000-8000-000000000009",
+    );
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
+      conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },
+      messages: [],
+      proposal: null,
+      references: [],
+    } as never);
+    vi.spyOn(api, "createHermesRun").mockResolvedValue({
+      run_id: "run-proposal",
+      conversation_id: "conversation-1",
+      events_url: "/api/projects/project-a/director/conversations/conversation-1/hermes-runs/run-proposal/events",
+    });
+    vi.spyOn(api, "openHermesRunEvents").mockResolvedValue(
+      new Response("", { headers: { "Content-Type": "text/event-stream" } }),
+    );
+    vi.spyOn(api, "listDirectorMessages").mockResolvedValue([
+      { message_id: "user-1", conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a", role: "user", text: "추천해 줘", proposal_id: null, metadata: {}, client_message_id: "00000000-0000-4000-8000-000000000009", created_at: "1" },
+      { message_id: "assistant-1", conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a", role: "assistant", text: "후보를 준비했어요.", proposal_id: "proposal-from-hermes", metadata: { hermes_run_id: "run-proposal" }, client_message_id: null, created_at: "2" },
+      { message_id: "assistant-old", conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a", role: "assistant", text: "예전 후보", proposal_id: "proposal-old", metadata: { hermes_run_id: "run-old" }, client_message_id: null, created_at: "1.5" },
+    ] as never);
+    const getProposal = vi.spyOn(api, "getDirectorProposal").mockResolvedValue(
+      candidateOnly as never,
+    );
+    vi.spyOn(hermesSseClient, "parseHermesSse").mockImplementation(
+      async (_response, options) => {
+        options.onEvent({ event_id: 1, event_type: "run_started", text: "", retryable: false });
+        options.onEvent({ event_id: 2, event_type: "text_delta", text: "후보를 준비했어요.", retryable: false });
+        options.onEvent({ event_id: 3, event_type: "run_completed", text: "후보를 준비했어요.", retryable: false });
+      },
+    );
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    const player = screen.getByRole("region", { name: "미리보기" });
+    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+    const history = await screen.findByRole("log", { name: "유진 대화" });
+    Object.defineProperties(history, {
+      scrollHeight: { configurable: true, value: 200 },
+      clientHeight: { configurable: true, value: 80 },
+      scrollTop: {
+        configurable: true,
+        writable: true,
+        value: 41,
+      },
+    });
+    fireEvent.scroll(history);
+    fireEvent.change(
+      screen.getByRole("textbox", { name: "유진에게 요청하기" }),
+      { target: { value: "추천해 줘" } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
+
+    expect(await screen.findByRole("radio", { name: "P01-B-09 선택" })).toBeChecked();
+    expect(getProposal).toHaveBeenCalledWith("project-a", "proposal-from-hermes");
+    expect(screen.queryByRole("button", { name: "추천 미리 듣기" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "선택한 추천 적용" })).toBeNull();
+    expect(screen.getByRole("log", { name: "유진 대화" }).scrollTop).toBe(41);
+    expect(screen.getByRole("region", { name: "미리보기" })).toBe(player);
   });
 
   it("reloads a blocked terminal row and keeps its durable fallback copy redacted", async () => {

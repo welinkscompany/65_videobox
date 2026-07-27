@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime, timedelta
+import json
+import logging
 from pathlib import Path
 import threading
 from types import SimpleNamespace
@@ -10,8 +12,24 @@ import pytest
 
 from videobox_api.agent_gateway_client import AgentGatewayEvent
 from videobox_api.hermes_run_service import HermesRunService
+from videobox_core_engine.yujin_creator_proposal_adapter import (
+    MANUAL_FALLBACK,
+    parse_and_project_yujin_creator_output,
+)
+from videobox_domain_models.yujin_creator_context import YujinCreatorContext
 from videobox_storage.local_project_store import LocalProjectStore
 from videobox_storage.postgres_compat import translate_sql
+
+
+def _persisted_proposal_id(*, project_id: str, run_id: str) -> str:
+    from videobox_core_engine.yujin_creator_proposal_adapter import (
+        derive_yujin_persisted_proposal_id,
+    )
+
+    return derive_yujin_persisted_proposal_id(
+        project_id=project_id,
+        run_id=run_id,
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -158,6 +176,1141 @@ def test_run_persists_user_before_dispatch_and_final_before_terminal_event(
     assert messages[1]["metadata"]["hermes_status"] == "completed"
 
 
+def _proposal_context(*, asset_revision: int = 0) -> YujinCreatorContext:
+    return YujinCreatorContext.model_validate(
+        {
+            "schema_version": "videobox.yujin-context.v1",
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "session_revision": 1,
+            "asset_index_revision": asset_revision,
+            "timeline_id": "timeline",
+            "timeline_version": "v001",
+            "selected_script_id": "script-1",
+            "selected_segment_id": "segment-1",
+            "segment_summaries": (
+                {
+                    "segment_id": "segment-1",
+                    "start_sec": 0.0,
+                    "end_sec": 5.0,
+                    "text": "첫 장면",
+                },
+            ),
+            "media_candidates": (
+                {
+                    "asset_id": "asset-video",
+                    "kind": "broll_video",
+                    "title": "산책",
+                    "duration_sec": 5.0,
+                    "tags": (),
+                },
+            ),
+            "timeline_summary": {
+                "duration_sec": 5.0,
+                "track_count": 1,
+                "clip_count": 1,
+                "gap_count": 0,
+            },
+            "supported_controls": (
+                {"kind": "broll", "mode": "recommendation_only"},
+            ),
+        }
+    )
+
+
+def _proposal_output(context: YujinCreatorContext) -> str:
+    reply = "산책 영상을 추천합니다."
+    payload = {
+        "schema_version": "videobox.yujin-response.v1",
+        "reply_text": reply,
+        "proposal": {
+            "proposal_id": "proposal-yujin-service",
+            "base_revision": (
+                f"session:{context.session_id}:revision:{context.session_revision}:"
+                f"assets:{context.asset_index_revision}"
+            ),
+            "title": "첫 장면 B-roll",
+            "rationale": "장면을 보강합니다.",
+            "operations": [
+                {
+                    "operation_id": "operation-1",
+                    "kind": "broll",
+                    "target": {
+                        "segment_id": "segment-1",
+                        "track_id": "video-primary",
+                    },
+                    "parameters": {
+                        "asset_id": "asset-video",
+                        "start_sec": 0.0,
+                        "duration_sec": 3.0,
+                        "fit": "cover",
+                    },
+                    "requires_materialization": True,
+                    "preview_summary": "첫 장면에 3초 산책 영상",
+                }
+            ],
+        },
+    }
+    return (
+        f"{reply}\n```videobox-yujin-response\n"
+        f"{json.dumps(payload, ensure_ascii=False)}\n```"
+    )
+
+
+def test_machine_payload_is_never_public_and_candidate_links_atomically(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO, logger="videobox_api.hermes_run_service")
+    store, project_id, session_id = _scope(tmp_path)
+    session = store.get_editing_session(project_id=project_id, session_id=session_id)
+    context = _proposal_context()
+    context = context.model_copy(
+        update={"project_id": project_id, "session_id": session_id}
+    )
+    raw = _proposal_output(context)
+    split = raw.index("```") + 2
+    gateway = _Gateway(
+        [
+            AgentGatewayEvent("text_delta", raw[:split]),
+            AgentGatewayEvent("text_delta", raw[split:]),
+            AgentGatewayEvent("run_completed", raw),
+        ]
+    )
+    service = HermesRunService(
+        store=store,
+        gateway_client=gateway,
+        context_builder=lambda **_: context,
+    )
+
+    async def scenario():
+        run = await service.create_run(
+            project_id=project_id,
+            session_id=session_id,
+            conversation_id="conv",
+            client_message_id="typed-proposal",
+            text="추천해줘",
+        )
+        await run.task
+        return run, [event async for event in service.subscribe(run.run_id)]
+
+    run, events = asyncio.run(scenario())
+    persisted_proposal_id = _persisted_proposal_id(
+        project_id=project_id,
+        run_id=run.run_id,
+    )
+    deltas = "".join(
+        event.text for event in events if event.event_type == "text_delta"
+    )
+    terminal = events[-1]
+    assert terminal.event_type == "run_completed"
+    assert deltas == terminal.text == "산책 영상을 추천합니다."
+    assert "```" not in "".join(event.text for event in events)
+    messages = store.list_director_messages(
+        project_id=project_id, conversation_id="conv"
+    )
+    assert messages[-1]["text"] == terminal.text
+    assert messages[-1]["proposal_id"] == persisted_proposal_id
+    stored = store.get_director_proposal(project_id, persisted_proposal_id)
+    assert stored.status == "candidate_only"
+    assert stored.candidates[0].preview_uri is None
+    unchanged = store.get_editing_session(
+        project_id=project_id, session_id=session_id
+    )
+    assert unchanged["session_revision"] == session["session_revision"]
+    assert unchanged["history"] == session["history"]
+    validation_records = [
+        record
+        for record in caplog.records
+        if record.message == "yujin_creator_proposal_validation"
+    ]
+    assert len(validation_records) == 1
+    record = validation_records[0]
+    assert record.proposal_id == persisted_proposal_id
+    assert record.schema_version == "videobox.yujin-response.v1"
+    assert record.operation_count == 1
+    assert record.validation_outcome == "valid"
+    assert "asset-video" not in caplog.text
+    assert "operation-1" not in caplog.text
+    assert "proposal-yujin-service" not in caplog.text
+    assert "산책 영상을" not in caplog.text
+
+
+def test_changed_terminal_context_discards_only_proposal_with_manual_fallback(
+    tmp_path: Path,
+) -> None:
+    store, project_id, session_id = _scope(tmp_path)
+    initial = _proposal_context().model_copy(
+        update={"project_id": project_id, "session_id": session_id}
+    )
+    changed = initial.model_copy(update={"asset_index_revision": 1})
+    contexts = iter((initial, changed))
+    gateway = _Gateway(
+        [AgentGatewayEvent("run_completed", _proposal_output(initial))]
+    )
+    service = HermesRunService(
+        store=store,
+        gateway_client=gateway,
+        context_builder=lambda **_: next(contexts),
+    )
+
+    async def scenario():
+        run = await service.create_run(
+            project_id=project_id,
+            session_id=session_id,
+            conversation_id="conv",
+            client_message_id="stale-proposal",
+            text="추천해줘",
+        )
+        await run.task
+        return [event async for event in service.subscribe(run.run_id)]
+
+    events = asyncio.run(scenario())
+    assert events[-1].event_type == "run_completed"
+    assert events[-1].text.startswith("산책 영상을 추천합니다.")
+    assert "수동" in events[-1].text
+    assert "".join(
+        event.text for event in events if event.event_type == "text_delta"
+    ) == events[-1].text
+    assert store.list_director_proposals(project_id) == []
+    messages = store.list_director_messages(
+        project_id=project_id, conversation_id="conv"
+    )
+    assert messages[-1]["proposal_id"] is None
+
+
+def test_invalid_json_fence_is_neither_streamed_nor_persisted(
+    tmp_path: Path,
+) -> None:
+    store, project_id, session_id = _scope(tmp_path)
+    context = _proposal_context().model_copy(
+        update={"project_id": project_id, "session_id": session_id}
+    )
+    raw = '설명입니다.\n```json\n{"password":"must-not-publish"}\n```'
+    gateway = _Gateway(
+        [
+            AgentGatewayEvent("text_delta", raw[:12]),
+            AgentGatewayEvent("text_delta", raw[12:]),
+            AgentGatewayEvent("run_completed", raw),
+        ]
+    )
+    service = HermesRunService(
+        store=store,
+        gateway_client=gateway,
+        context_builder=lambda **_: context,
+    )
+
+    async def scenario():
+        run = await service.create_run(
+            project_id=project_id,
+            session_id=session_id,
+            conversation_id="conv",
+            client_message_id="invalid-frame",
+            text="설명해줘",
+        )
+        await run.task
+        return [event async for event in service.subscribe(run.run_id)]
+
+    events = asyncio.run(scenario())
+    public = "".join(event.text for event in events)
+    assert "```" not in public
+    assert "password" not in public
+    assert "수동" in events[-1].text
+    message = store.list_director_messages(
+        project_id=project_id, conversation_id="conv"
+    )[-1]
+    assert message["text"] == events[-1].text
+    assert "password" not in message["text"]
+    assert message["proposal_id"] is None
+
+
+def test_fence_free_json_and_array_are_buffered_at_every_split_boundary() -> None:
+    class Store:
+        def __init__(self) -> None:
+            self.completions: list[dict] = []
+
+        def begin_director_hermes_run(self, **kwargs):
+            return {
+                "run_id": kwargs["client_message_id"],
+                "status": "pending",
+                "owner_token": "owner",
+                "dispatch": True,
+            }
+
+        def complete_director_hermes_run(self, **kwargs):
+            self.completions.append(kwargs)
+            return True
+
+    async def exercise(raw: str, split: int, expected: str) -> None:
+        store = Store()
+        gateway = _Gateway(
+            [
+                AgentGatewayEvent("text_delta", raw[:split]),
+                AgentGatewayEvent("text_delta", raw[split:]),
+                AgentGatewayEvent("run_completed", ""),
+            ]
+        )
+        service = HermesRunService(store=store, gateway_client=gateway)
+        run = await service.create_run(
+            project_id="project",
+            session_id="session",
+            conversation_id="conversation",
+            client_message_id=f"json-{len(raw)}-{split}",
+            text="question",
+        )
+        await run.task
+        events = [event async for event in service.subscribe(run.run_id)]
+        deltas = "".join(
+            event.text for event in events if event.event_type == "text_delta"
+        )
+        assert events[-1].event_type == "run_completed"
+        assert deltas == events[-1].text == expected
+        assert store.completions[0]["assistant_text"] == expected
+        public = "".join(event.text for event in events)
+        assert "schema_version" not in public
+        assert "password" not in public
+        assert "must-not-publish" not in public
+
+    async def scenario() -> None:
+        raws = (
+            (
+                ' \r\n {"schema_version":"videobox.yujin-response.v1",'
+                '"password":"must-not-publish"}',
+                MANUAL_FALLBACK,
+            ),
+            (
+                ' \t[{"password":"must-not-publish"}]',
+                MANUAL_FALLBACK,
+            ),
+            (
+                'Here is JSON: {"schema_version":'
+                '"videobox.yujin-response.v1","password":"must-not-publish"}',
+                f"Here is JSON:\n\n{MANUAL_FALLBACK}",
+            ),
+            (
+                '추천 결과입니다.\n[\n{"password":"must-not-publish"}\n]',
+                f"추천 결과입니다.\n\n{MANUAL_FALLBACK}",
+            ),
+            (
+                '설명입니다.\n{"schema_version":"videobox.yujin-response.v1",'
+                '"password":"must-not-publish"',
+                f"설명입니다.\n\n{MANUAL_FALLBACK}",
+            ),
+        )
+        for raw, expected in raws:
+            for split in range(1, len(raw)):
+                await exercise(raw, split, expected)
+
+    asyncio.run(scenario())
+
+
+def test_prose_json_cas_failure_publishes_zero_text_delta() -> None:
+    raw = (
+        'Here is JSON: {"schema_version":"videobox.yujin-response.v1",'
+        '"password":"must-not-publish"}'
+    )
+
+    class Store:
+        def begin_director_hermes_run(self, **_):
+            return {
+                "run_id": "prose-json-cas-failure",
+                "status": "pending",
+                "owner_token": "owner",
+                "dispatch": True,
+            }
+
+        def complete_director_hermes_run(self, **_):
+            return False
+
+    service = HermesRunService(
+        store=Store(),
+        gateway_client=_Gateway(
+            [
+                AgentGatewayEvent("text_delta", raw[:15]),
+                AgentGatewayEvent("text_delta", raw[15:]),
+                AgentGatewayEvent("run_completed", ""),
+            ]
+        ),
+    )
+
+    async def scenario():
+        run = await service.create_run(
+            project_id="project",
+            session_id="session",
+            conversation_id="conversation",
+            client_message_id="prose-json-cas-failure",
+            text="question",
+        )
+        await run.task
+        return [event async for event in service.subscribe(run.run_id)]
+
+    events = asyncio.run(scenario())
+    assert events[-1].event_type == "blocked"
+    assert "".join(
+        event.text for event in events if event.event_type == "text_delta"
+    ) == events[-1].text
+    assert "schema_version" not in "".join(event.text for event in events)
+    assert "password" not in "".join(event.text for event in events)
+
+
+@pytest.mark.parametrize(
+    ("raw", "visible_prefix"),
+    (
+        (
+            'Visible reply\n{"reply_text":"must-not-publish"',
+            "Visible reply",
+        ),
+        (
+            'Inline reply: {"password":"must-not-publish"',
+            "Inline reply:",
+        ),
+        (
+            "Array reply\n[false",
+            "Array reply",
+        ),
+    ),
+)
+def test_malformed_machine_suffix_storage_and_sse_keep_exact_visible_boundary(
+    tmp_path: Path,
+    raw: str,
+    visible_prefix: str,
+) -> None:
+    store, project_id, session_id = _scope(tmp_path)
+    context = _proposal_context().model_copy(
+        update={"project_id": project_id, "session_id": session_id}
+    )
+    boundary = min(
+        index for index in (raw.find("{"), raw.find("[")) if index >= 0
+    )
+    gateway = _Gateway(
+        [
+            AgentGatewayEvent("text_delta", raw[: boundary + 1]),
+            AgentGatewayEvent("text_delta", raw[boundary + 1 : boundary + 4]),
+            AgentGatewayEvent("text_delta", raw[boundary + 4 :]),
+            AgentGatewayEvent("run_completed", ""),
+        ]
+    )
+    service = HermesRunService(
+        store=store,
+        gateway_client=gateway,
+        context_builder=lambda **_: context,
+    )
+
+    async def scenario():
+        run = await service.create_run(
+            project_id=project_id,
+            session_id=session_id,
+            conversation_id="conv",
+            client_message_id=f"malformed-machine-{boundary}-{len(raw)}",
+            text="설명해줘",
+        )
+        await run.task
+        return [event async for event in service.subscribe(run.run_id)]
+
+    events = asyncio.run(scenario())
+    expected = f"{visible_prefix}\n\n{MANUAL_FALLBACK}"
+    deltas = "".join(
+        event.text for event in events if event.event_type == "text_delta"
+    )
+    assert events[-1].event_type == "run_completed"
+    assert deltas == events[-1].text == expected
+    public = "".join(event.text for event in events)
+    assert "reply_text" not in public
+    assert "password" not in public
+    assert "must-not-publish" not in public
+    persisted = store.list_director_messages(
+        project_id=project_id,
+        conversation_id="conv",
+    )[-1]
+    assert persisted["text"] == expected
+    assert persisted["proposal_id"] is None
+
+
+def test_no_visible_delta_is_published_before_terminal_store_succeeds() -> None:
+    entered = threading.Event()
+    release = threading.Event()
+
+    class Store:
+        def begin_director_hermes_run(self, **_):
+            return {
+                "run_id": "durable-first",
+                "status": "pending",
+                "owner_token": "owner",
+                "dispatch": True,
+            }
+
+        def complete_director_hermes_run(self, **_):
+            entered.set()
+            assert release.wait(timeout=2)
+            return True
+
+    service = HermesRunService(
+        store=Store(),
+        gateway_client=_Gateway(
+            [
+                AgentGatewayEvent("text_delta", "legacy "),
+                AgentGatewayEvent("text_delta", "reply"),
+                AgentGatewayEvent("run_completed", "legacy reply"),
+            ]
+        ),
+    )
+
+    async def scenario():
+        run = await service.create_run(
+            project_id="p",
+            session_id="s",
+            conversation_id="c",
+            client_message_id="durable-first",
+            text="q",
+        )
+        assert await asyncio.to_thread(entered.wait, 1)
+        assert [event.event_type for event in run.events] == ["run_started"]
+        release.set()
+        await run.task
+        return [event async for event in service.subscribe(run.run_id)]
+
+    events = asyncio.run(scenario())
+    assert [event.event_type for event in events] == [
+        "run_started",
+        "text_delta",
+        "run_completed",
+    ]
+    assert events[1].text == events[2].text == "legacy reply"
+
+
+def test_live_subscriber_sees_only_durable_visible_draft_before_terminal(
+    tmp_path: Path,
+) -> None:
+    visible = "This durable visible answer is long enough to stream safely."
+
+    class Gateway(_Gateway):
+        def __init__(self) -> None:
+            super().__init__([])
+            self.emitted = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def stream_run(self, **_):
+            self.calls += 1
+            yield AgentGatewayEvent("text_delta", visible)
+            self.emitted.set()
+            await self.release.wait()
+            yield AgentGatewayEvent("run_completed", visible)
+
+    store, project_id, session_id = _scope(tmp_path)
+    gateway = Gateway()
+    service = HermesRunService(store=store, gateway_client=gateway)
+
+    async def scenario():
+        run = await service.create_run(
+            project_id=project_id,
+            session_id=session_id,
+            conversation_id="conv",
+            client_message_id="live-durable-draft",
+            text="질문",
+        )
+        await gateway.emitted.wait()
+        collected: list = []
+
+        async def consume() -> None:
+            async for event in service.subscribe(run.run_id):
+                collected.append(event)
+
+        subscriber = asyncio.create_task(consume())
+        await asyncio.sleep(0)
+        before_terminal = list(collected)
+        durable_before_terminal = store.get_director_hermes_run(
+            project_id=project_id,
+            run_id=run.run_id,
+        )
+        gateway.release.set()
+        await run.task
+        await subscriber
+        return before_terminal, durable_before_terminal, collected
+
+    before_terminal, durable, events = asyncio.run(scenario())
+    assert [event.event_type for event in before_terminal] == [
+        "run_started",
+        "text_delta",
+    ]
+    assert before_terminal[-1].text == visible
+    assert durable["status"] == "pending"
+    assert durable["assistant_draft_text"] == visible
+    assert "".join(
+        event.text for event in events if event.event_type == "text_delta"
+    ) == events[-1].text == visible
+
+
+def test_cancellation_clears_durable_visible_draft_and_extends_it_with_failure(
+    tmp_path: Path,
+) -> None:
+    visible = "This cancellable durable draft is long enough for live streaming."
+
+    class Gateway(_Gateway):
+        def __init__(self) -> None:
+            super().__init__([])
+            self.emitted = asyncio.Event()
+            self.never = asyncio.Event()
+
+        async def stream_run(self, **_):
+            yield AgentGatewayEvent("text_delta", visible)
+            self.emitted.set()
+            await self.never.wait()
+
+    store, project_id, session_id = _scope(tmp_path)
+    gateway = Gateway()
+    service = HermesRunService(store=store, gateway_client=gateway)
+
+    async def scenario():
+        run = await service.create_run(
+            project_id=project_id,
+            session_id=session_id,
+            conversation_id="conv",
+            client_message_id="cancel-durable-draft",
+            text="질문",
+        )
+        await gateway.emitted.wait()
+        before = store.get_director_hermes_run(
+            project_id=project_id,
+            run_id=run.run_id,
+        )
+        await service.cancel(run.run_id)
+        await asyncio.gather(run.task, return_exceptions=True)
+        after = store.get_director_hermes_run(
+            project_id=project_id,
+            run_id=run.run_id,
+        )
+        assistant_text = store.list_director_messages(
+            project_id=project_id,
+            conversation_id="conv",
+        )[-1]["text"]
+        events = [event async for event in service.subscribe(run.run_id)]
+        return before, after, assistant_text, events
+
+    before, after, assistant_text, events = asyncio.run(scenario())
+    assert before["assistant_draft_text"] == visible
+    assert after["status"] == "blocked"
+    assert after["assistant_draft_text"] == ""
+    assert [event.event_type for event in events] == [
+        "run_started",
+        "text_delta",
+        "text_delta",
+        "blocked",
+    ]
+    assert "".join(
+        event.text for event in events if event.event_type == "text_delta"
+    ) == events[-1].text == assistant_text
+    assert events[-1].text.startswith(visible)
+
+
+def test_draft_append_cas_loss_publishes_no_delta_and_blocks() -> None:
+    class Store:
+        def __init__(self) -> None:
+            self.append_calls: list[dict] = []
+            self.completions: list[dict] = []
+
+        def begin_director_hermes_run(self, **_):
+            return {
+                "run_id": "draft-cas-loser",
+                "status": "pending",
+                "owner_token": "owner",
+                "dispatch": True,
+            }
+
+        def append_director_hermes_draft(self, **kwargs):
+            self.append_calls.append(kwargs)
+            return False
+
+        def complete_director_hermes_run(self, **kwargs):
+            self.completions.append(kwargs)
+            return True
+
+    store = Store()
+    service = HermesRunService(
+        store=store,
+        gateway_client=_Gateway(
+            [
+                AgentGatewayEvent(
+                    "text_delta",
+                    "This visible draft is long enough for live streaming.",
+                ),
+                AgentGatewayEvent("run_completed", "must-not-complete"),
+            ]
+        ),
+    )
+
+    async def scenario():
+        run = await service.create_run(
+            project_id="project",
+            session_id="session",
+            conversation_id="conversation",
+            client_message_id="draft-cas-loser",
+            text="question",
+        )
+        await run.task
+        return [event async for event in service.subscribe(run.run_id)]
+
+    events = asyncio.run(scenario())
+    assert len(store.append_calls) == 1
+    assert store.completions[-1]["status"] == "blocked"
+    assert events[-1].event_type == "blocked"
+    assert "".join(
+        event.text for event in events if event.event_type == "text_delta"
+    ) == events[-1].text == store.completions[-1]["assistant_text"]
+
+
+def test_durable_draft_append_is_owner_fenced_monotonic_and_terminally_cleared(
+    tmp_path: Path,
+) -> None:
+    store, project_id, session_id = _scope(tmp_path)
+    durable = store.begin_director_hermes_run(
+        project_id=project_id,
+        session_id=session_id,
+        conversation_id="conv",
+        client_message_id="draft-store-contract",
+        user_text="질문",
+        expected_session_revision=1,
+        expected_asset_index_revision=0,
+    )
+
+    assert store.append_director_hermes_draft(
+        project_id=project_id,
+        run_id=durable["run_id"],
+        owner_token=durable["owner_token"],
+        assistant_draft_text="visible",
+    )
+    assert not store.append_director_hermes_draft(
+        project_id=project_id,
+        run_id=durable["run_id"],
+        owner_token=durable["owner_token"],
+        assistant_draft_text="short",
+    )
+    assert not store.append_director_hermes_draft(
+        project_id=project_id,
+        run_id=durable["run_id"],
+        owner_token="wrong-owner",
+        assistant_draft_text="visible extension",
+    )
+    assert (
+        store.get_director_hermes_run(
+            project_id=project_id,
+            run_id=durable["run_id"],
+        )["assistant_draft_text"]
+        == "visible"
+    )
+    assert store.complete_director_hermes_run(
+        project_id=project_id,
+        run_id=durable["run_id"],
+        owner_token=durable["owner_token"],
+        status="completed",
+        assistant_text="visible",
+        retryable=False,
+    )
+    settled = store.get_director_hermes_run(
+        project_id=project_id,
+        run_id=durable["run_id"],
+    )
+    assert settled["assistant_draft_text"] == ""
+    assert not store.append_director_hermes_draft(
+        project_id=project_id,
+        run_id=durable["run_id"],
+        owner_token=durable["owner_token"],
+        assistant_draft_text="late",
+    )
+
+
+@pytest.mark.parametrize(
+    ("limit", "terminal_text"),
+    (
+        (8, "123456789"),
+        (8, "한글한"),
+    ),
+)
+def test_terminal_text_enforces_utf8_byte_cap_before_storage_and_sse(
+    tmp_path: Path,
+    limit: int,
+    terminal_text: str,
+) -> None:
+    store, project_id, session_id = _scope(tmp_path)
+    service = HermesRunService(
+        store=store,
+        gateway_client=_Gateway(
+            [AgentGatewayEvent("run_completed", terminal_text)]
+        ),
+        max_text_bytes=limit,
+    )
+
+    async def scenario():
+        run = await service.create_run(
+            project_id=project_id,
+            session_id=session_id,
+            conversation_id="conv",
+            client_message_id=f"terminal-cap-{limit}-{len(terminal_text)}",
+            text="질문",
+        )
+        await run.task
+        return run, [event async for event in service.subscribe(run.run_id)]
+
+    run, events = asyncio.run(scenario())
+    assert events[-1].event_type == "blocked"
+    assert terminal_text not in "".join(event.text for event in events)
+    persisted = store.get_director_hermes_run(
+        project_id=project_id,
+        run_id=run.run_id,
+    )
+    assert persisted["status"] == "blocked"
+    assert all(
+        terminal_text not in message["text"]
+        for message in store.list_director_messages(
+            project_id=project_id,
+            conversation_id="conv",
+        )
+    )
+
+
+def test_terminal_text_under_byte_cap_may_differ_from_assembled_but_stays_equal(
+    tmp_path: Path,
+) -> None:
+    terminal_text = "final text under one hundred bytes"
+    store, project_id, session_id = _scope(tmp_path)
+    service = HermesRunService(
+        store=store,
+        gateway_client=_Gateway(
+            [
+                AgentGatewayEvent("text_delta", "draft"),
+                AgentGatewayEvent("run_completed", terminal_text),
+            ]
+        ),
+        max_text_bytes=100,
+    )
+
+    async def scenario():
+        run = await service.create_run(
+            project_id=project_id,
+            session_id=session_id,
+            conversation_id="conv",
+            client_message_id="terminal-under-cap",
+            text="질문",
+        )
+        await run.task
+        return [event async for event in service.subscribe(run.run_id)]
+
+    events = asyncio.run(scenario())
+    assert events[-1].event_type == "run_completed"
+    assert "".join(
+        event.text for event in events if event.event_type == "text_delta"
+    ) == events[-1].text == terminal_text
+
+
+def test_post_projection_fallback_expansion_rechecks_utf8_terminal_cap(
+    tmp_path: Path,
+) -> None:
+    raw = 'Visible answer long\n{"reply_text":"truncated"'
+    limit = len(raw.encode("utf-8"))
+    store, project_id, session_id = _scope(tmp_path)
+    service = HermesRunService(
+        store=store,
+        gateway_client=_Gateway([AgentGatewayEvent("run_completed", raw)]),
+        max_text_bytes=limit,
+    )
+
+    async def scenario():
+        run = await service.create_run(
+            project_id=project_id,
+            session_id=session_id,
+            conversation_id="conv",
+            client_message_id="post-projection-cap",
+            text="question",
+        )
+        await run.task
+        return [event async for event in service.subscribe(run.run_id)]
+
+    events = asyncio.run(scenario())
+    persisted = store.list_director_messages(
+        project_id=project_id, conversation_id="conv"
+    )[-1]["text"]
+    assert events[-1].event_type == "blocked"
+    assert len(events[-1].text.encode("utf-8")) <= limit
+    assert "".join(
+        event.text for event in events if event.event_type == "text_delta"
+    ) == events[-1].text == persisted
+
+
+@pytest.mark.parametrize(
+    "limits",
+    (
+        {"max_events": 1},
+        {"max_event_bytes": 180},
+    ),
+)
+def test_terminal_event_budget_is_preflighted_before_durable_cas(limits: dict) -> None:
+    class Store:
+        def __init__(self) -> None:
+            self.completions: list[dict] = []
+
+        def begin_director_hermes_run(self, **_):
+            return {
+                "run_id": "terminal-budget",
+                "status": "pending",
+                "owner_token": "owner",
+                "dispatch": True,
+            }
+
+        def complete_director_hermes_run(self, **kwargs):
+            self.completions.append(kwargs)
+            return True
+
+    store = Store()
+    service = HermesRunService(
+        store=store,
+        gateway_client=_Gateway(
+            [AgentGatewayEvent("run_completed", "terminal answer")]
+        ),
+        **limits,
+    )
+
+    async def scenario():
+        run = await service.create_run(
+            project_id="project",
+            session_id="session",
+            conversation_id="conversation",
+            client_message_id=f"terminal-budget-{limits}",
+            text="question",
+        )
+        await run.task
+        return [event async for event in service.subscribe(run.run_id)]
+
+    events = asyncio.run(scenario())
+    assert store.completions[-1]["status"] == "blocked"
+    assert events[-1].event_type == "blocked"
+    assert events[-1].text == store.completions[-1]["assistant_text"]
+
+
+def test_terminal_text_that_diverges_after_a_live_draft_fails_closed() -> None:
+    class Store:
+        def __init__(self) -> None:
+            self.completions: list[dict] = []
+
+        def begin_director_hermes_run(self, **_):
+            return {
+                "run_id": "divergent-live-terminal",
+                "status": "pending",
+                "owner_token": "owner",
+                "dispatch": True,
+            }
+
+        def append_director_hermes_draft(self, **_):
+            return True
+
+        def complete_director_hermes_run(self, **kwargs):
+            self.completions.append(kwargs)
+            return True
+
+    visible = "This live draft is long enough to become publicly visible."
+    store = Store()
+    service = HermesRunService(
+        store=store,
+        gateway_client=_Gateway(
+            [
+                AgentGatewayEvent("text_delta", visible),
+                AgentGatewayEvent("run_completed", "A different terminal answer."),
+            ]
+        ),
+    )
+
+    async def scenario():
+        run = await service.create_run(
+            project_id="project",
+            session_id="session",
+            conversation_id="conversation",
+            client_message_id="divergent-live-terminal",
+            text="question",
+        )
+        await run.task
+        return [event async for event in service.subscribe(run.run_id)]
+
+    events = asyncio.run(scenario())
+    assert store.completions[-1]["status"] == "blocked"
+    assert [event.event_type for event in events] == [
+        "run_started",
+        "text_delta",
+        "text_delta",
+        "blocked",
+    ]
+    assert "".join(
+        event.text for event in events if event.event_type == "text_delta"
+    ) == events[-1].text == store.completions[-1]["assistant_text"]
+
+
+def test_terminal_cas_loser_cannot_save_orphan_candidate(tmp_path: Path) -> None:
+    clock = [datetime(2026, 7, 27, tzinfo=UTC)]
+    store, project_id, session_id = _scope(tmp_path, now=lambda: clock[0])
+    identity = {
+        "project_id": project_id,
+        "session_id": session_id,
+        "conversation_id": "conv",
+        "client_message_id": "cas-proposal",
+        "user_text": "추천",
+        "expected_session_revision": 1,
+        "expected_asset_index_revision": 0,
+    }
+    first = store.begin_director_hermes_run(**identity)
+    clock[0] += timedelta(seconds=301)
+    winner = store.begin_director_hermes_run(**identity)
+    context = _proposal_context().model_copy(
+        update={"project_id": project_id, "session_id": session_id}
+    )
+    proposal = parse_and_project_yujin_creator_output(
+        _proposal_output(context),
+        context,
+        revision=1,
+        trusted_project_id=project_id,
+        trusted_run_id=winner["run_id"],
+    ).proposal
+    assert proposal is not None
+
+    assert not store.complete_director_hermes_run(
+        project_id=project_id,
+        run_id=first["run_id"],
+        owner_token=first["owner_token"],
+        status="completed",
+        assistant_text="산책 영상을 추천합니다.",
+        retryable=False,
+        proposal=proposal,
+    )
+    assert store.list_director_proposals(project_id) == []
+    assert store.complete_director_hermes_run(
+        project_id=project_id,
+        run_id=winner["run_id"],
+        owner_token=winner["owner_token"],
+        status="completed",
+        assistant_text="산책 영상을 추천합니다.",
+        retryable=False,
+        proposal=proposal,
+    )
+    assert [item.proposal_id for item in store.list_director_proposals(project_id)] == [
+        proposal.proposal_id
+    ]
+
+
+def test_preexisting_trusted_proposal_id_discards_candidate_but_keeps_reply(
+    tmp_path: Path,
+) -> None:
+    class Gateway(_Gateway):
+        def __init__(self, raw: str) -> None:
+            super().__init__()
+            self.raw = raw
+            self.entered = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def stream_run(self, **_):
+            self.calls += 1
+            self.entered.set()
+            await self.release.wait()
+            yield AgentGatewayEvent("run_completed", self.raw)
+
+    store, project_id, session_id = _scope(tmp_path)
+    context = _proposal_context().model_copy(
+        update={"project_id": project_id, "session_id": session_id}
+    )
+    gateway = Gateway(_proposal_output(context))
+    service = HermesRunService(
+        store=store,
+        gateway_client=gateway,
+        context_builder=lambda **_: context,
+    )
+
+    async def scenario():
+        run = await service.create_run(
+            project_id=project_id,
+            session_id=session_id,
+            conversation_id="conv",
+            client_message_id="preexisting-proposal",
+            text="추천해줘",
+        )
+        await gateway.entered.wait()
+        preexisting = parse_and_project_yujin_creator_output(
+            gateway.raw,
+            context,
+            revision=1,
+            trusted_project_id=project_id,
+            trusted_run_id=run.run_id,
+        ).proposal
+        assert preexisting is not None
+        store.save_director_proposal(project_id, preexisting)
+        gateway.release.set()
+        await run.task
+        return preexisting, [
+            event async for event in service.subscribe(run.run_id)
+        ]
+
+    preexisting, events = asyncio.run(scenario())
+    assert events[-1].event_type == "run_completed"
+    assert events[-1].text.startswith("산책 영상을 추천합니다.")
+    assert MANUAL_FALLBACK in events[-1].text
+    assert "".join(
+        event.text for event in events if event.event_type == "text_delta"
+    ) == events[-1].text
+    proposals = store.list_director_proposals(project_id)
+    assert [proposal.proposal_id for proposal in proposals] == [
+        preexisting.proposal_id
+    ]
+    message = store.list_director_messages(
+        project_id=project_id, conversation_id="conv"
+    )[-1]
+    assert message["text"] == events[-1].text
+    assert message["proposal_id"] is None
+
+
+def test_proposal_insert_race_retries_terminal_cas_without_candidate() -> None:
+    class Store:
+        def __init__(self) -> None:
+            self.completions: list[dict] = []
+
+        def begin_director_hermes_run(self, **_):
+            return {
+                "run_id": "race-run",
+                "status": "pending",
+                "owner_token": "owner",
+                "dispatch": True,
+            }
+
+        def director_proposal_exists(self, **_):
+            return False
+
+        def complete_director_hermes_run(self, **kwargs):
+            self.completions.append(kwargs)
+            return "proposal_conflict" if len(self.completions) == 1 else True
+
+    context = _proposal_context()
+    store = Store()
+    service = HermesRunService(
+        store=store,
+        gateway_client=_Gateway(
+            [AgentGatewayEvent("run_completed", _proposal_output(context))]
+        ),
+        context_builder=lambda **_: context,
+    )
+
+    async def scenario():
+        run = await service.create_run(
+            project_id=context.project_id,
+            session_id=context.session_id,
+            conversation_id="conversation",
+            client_message_id="race",
+            text="추천",
+        )
+        await run.task
+        return [event async for event in service.subscribe(run.run_id)]
+
+    events = asyncio.run(scenario())
+    assert len(store.completions) == 2
+    assert store.completions[0]["proposal"] is not None
+    assert store.completions[1]["proposal"] is None
+    assert MANUAL_FALLBACK in store.completions[1]["assistant_text"]
+    assert events[-1].event_type == "run_completed"
+    assert events[-1].text == store.completions[1]["assistant_text"]
+
+
 def test_changed_text_conflicts_and_owner_token_fences_stale_finalizer(
     tmp_path: Path,
 ) -> None:
@@ -255,6 +1408,9 @@ def test_terminal_cas_failure_still_publishes_one_blocked_terminal(store_result)
     assert events[-1].event_type == "blocked"
     assert sum(event.event_type == "blocked" for event in events) == 1
     assert events[-1].retryable is True
+    assert "".join(
+        event.text for event in events if event.event_type == "text_delta"
+    ) == events[-1].text
 
 
 def test_gateway_release_cannot_delay_terminal_delivery() -> None:
@@ -575,6 +1731,25 @@ def test_postgres_translation_preserves_atomic_upsert_contract() -> None:
     assert "status = 'pending'" in cas
     assert "owner_token = %s" in cas
     assert cas.count("%s") == 4
+
+    proposal_exists = translate_sql(
+        "SELECT 1 FROM director_proposals "
+        "WHERE project_id = ? AND proposal_id = ?"
+    )
+    assert "project_id = %s" in proposal_exists
+    assert "proposal_id = %s" in proposal_exists
+    assert proposal_exists.count("%s") == 2
+
+    draft_cas = translate_sql(
+        "UPDATE director_hermes_runs SET assistant_draft_text = ? "
+        "WHERE project_id = ? AND run_id = ? AND status = 'pending' "
+        "AND owner_token = ? "
+        "AND substr(?, 1, length(assistant_draft_text)) = assistant_draft_text"
+    )
+    assert "assistant_draft_text = %s" in draft_cas
+    assert "owner_token = %s" in draft_cas
+    assert "substr(%s, 1, length(assistant_draft_text))" in draft_cas
+    assert draft_cas.count("%s") == 5
 
 
 def test_completed_run_replays_durable_text_after_process_restart(

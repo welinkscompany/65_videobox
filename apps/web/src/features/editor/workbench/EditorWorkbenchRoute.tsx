@@ -655,6 +655,39 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
               ? { kind: "complete", runId: run.run_id }
               : { kind: "unavailable", message: yujinUnavailableMessage },
           } : current);
+          if (terminal.eventType === "run_completed") {
+            const proposalId = findHermesRunProposalId(persisted, run.run_id);
+            if (proposalId) {
+              const terminalProposal = await api.getDirectorProposal(projectId, proposalId);
+              if (!isCurrentHermes()) return;
+              setDirector((current) => {
+                if (current.key !== requestKey) return current;
+                const candidateIds = new Set(
+                  terminalProposal.candidates.map((candidate) => candidate.candidate_id),
+                );
+                const retainedSelection = current.selectedCandidateIds.filter(
+                  (candidateId) => candidateIds.has(candidateId),
+                );
+                return {
+                  ...current,
+                  state: "proposal_ready",
+                  proposal: terminalProposal,
+                  selectedCandidateIds: retainedSelection.length
+                    ? retainedSelection
+                    : terminalProposal.candidates[0]?.candidate_id
+                      ? [terminalProposal.candidates[0].candidate_id]
+                      : [],
+                };
+              });
+            } else {
+              setDirector((current) => current.key === requestKey ? {
+                ...current,
+                state: "idle",
+                proposal: null,
+                selectedCandidateIds: [],
+              } : current);
+            }
+          }
         } catch {
           if (!isCurrentHermes()) return;
           if (terminal.eventType === "run_completed") {
@@ -805,6 +838,16 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
 
 function projectDirectorProposal(proposal: DirectorProposal | null): RightDockProposal | null {
   return proposal ? { proposalId: proposal.proposal_id, status: proposal.status, candidates: proposal.candidates.map((candidate) => ({ candidateId: candidate.candidate_id, visibleReferenceCode: candidate.visible_reference_code, mediaType: candidate.media_type, previewUrl: candidate.preview_uri })) } : null;
+}
+
+export function findHermesRunProposalId(
+  messages: readonly DirectorMessage[],
+  runId: string,
+): string | null {
+  return messages.find(
+    (message) => message.role === "assistant"
+      && message.metadata.hermes_run_id === runId,
+  )?.proposal_id ?? null;
 }
 
 function projectDirectorMessages(messages: readonly DirectorMessage[]): readonly RightDockMessage[] {

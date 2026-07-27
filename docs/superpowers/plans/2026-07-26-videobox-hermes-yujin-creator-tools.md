@@ -13,7 +13,7 @@
 Parent: `docs/superpowers/plans/2026-07-26-videobox-hermes-yujin-master-plan.md`
 Requires: Phase A task A4 complete.
 
-Child progress: **1/5 tasks (20.0%), remaining 80.0%**.
+Child progress: **2/5 tasks (40.0%), remaining 60.0%**.
 
 ## Supported-control rule
 
@@ -140,7 +140,7 @@ Builder and bound rules:
 
 ## B2 — Add typed creator skills and proposal validation
 
-- [ ] **B2** Add Yujin creator skills and validate typed recommendation/proposal responses.
+- [x] **B2** Add Yujin creator skills and validate typed recommendation/proposal responses.
 
 **Files:**
 
@@ -149,8 +149,11 @@ Builder and bound rules:
 - Create: `packages/domain-models/src/videobox_domain_models/yujin_creator_proposals.py`
 - Create: `packages/core-engine/src/videobox_core_engine/yujin_creator_proposal_adapter.py`
 - Modify: `services/api/src/videobox_api/hermes_run_service.py`
+- Modify: `packages/storage-abstractions/src/videobox_storage/local_project_store.py`
+- Modify: `scripts/verify-hermes-yujin-profile.ps1`
 - Create: `tests/test_yujin_creator_proposals.py`
 - Create: `tests/test_yujin_creator_proposal_adapter.py`
+- Modify: `tests/test_hermes_run_service.py`
 - Modify: `tests/test_hermes_yujin_profile_distribution.py`
 
 **Response envelope:**
@@ -193,11 +196,26 @@ Each operation must carry:
 
 **GREEN:**
 
-4. Teach the skill to return one fenced machine payload after the human reply, never executable code.
-5. Parse only the machine payload; on failure persist the conversational reply but discard the proposal and show a nonblocking explanation.
-6. Map validated operations into the existing Director proposal DTO instead of creating a parallel frontend proposal protocol.
-7. Ensure API logs include only proposal ID, schema version, operation count, and validation outcome.
-8. Run:
+4. Teach the skill to return exactly one trailing
+   `videobox-yujin-response` fenced JSON payload after the human reply, never
+   executable code. The payload `reply_text` must equal the trimmed visible
+   prefix.
+5. Parse only that payload. Withhold any partial opening fence from SSE and
+   publish no machine bytes after a fence begins. On failure persist only the
+   conversational prefix plus a nonblocking manual fallback, never raw machine
+   JSON.
+6. Rebuild the current creator context before terminal projection. A changed
+   session/asset/context discards only the proposal and keeps the human reply
+   plus manual fallback.
+7. Map a valid response into the existing Director proposal/candidate DTO as
+   immutable `candidate_only`, with null preview URI and no materialization,
+   apply, or editing-session mutation. Do not create a parallel frontend
+   protocol.
+8. Save the candidate-only proposal and link the assistant message inside the
+   owned terminal CAS transaction. A CAS loser must save neither an orphan nor
+   a duplicate proposal. Log only proposal ID, schema version, operation count,
+   and validation outcome.
+9. Run:
 
    ```powershell
    .\.venv\Scripts\python.exe -m pytest tests/test_yujin_creator_proposals.py tests/test_yujin_creator_proposal_adapter.py tests/test_hermes_yujin_profile_distribution.py -q
@@ -205,7 +223,7 @@ Each operation must carry:
    git diff --check
    ```
 
-9. Mark B2 `[x]`, synchronize progress, and commit:
+10. Mark B2 `[x]`, synchronize progress, and commit:
 
    ```powershell
    git add config/hermes/yujin packages services/api tests docs/superpowers/plans

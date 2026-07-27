@@ -210,4 +210,36 @@ describe("RightDock", () => {
     fireEvent.click(screen.getByRole("button", { name: "선택한 추천 적용" }));
     expect(onApplyProposal).toHaveBeenCalledWith("proposal-1", ["candidate-1"]);
   });
+
+  it("shows candidate-only references without preview, materialize, or apply controls", () => {
+    const onPreviewCandidate = vi.fn();
+    const onApplyProposal = vi.fn();
+    const candidateOnly: RightDockProposal = {
+      proposalId: "candidate-only-proposal",
+      status: "candidate_only",
+      candidates: [{
+        candidateId: "candidate-only-1",
+        visibleReferenceCode: "P01-B-01",
+        mediaType: "broll",
+        previewUrl: "https://must-not-preview.invalid/candidate.mp4",
+      }],
+    };
+
+    const { container } = render(<RightDock
+      draft=""
+      onDraftChange={vi.fn()}
+      proposal={candidateOnly}
+      selectedCandidateIds={["candidate-only-1"]}
+      onSelectedCandidateIdsChange={vi.fn()}
+      onPreviewCandidate={onPreviewCandidate}
+      onApplyProposal={onApplyProposal}
+    />);
+
+    expect(screen.getByRole("radio", { name: "P01-B-01 선택" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "추천 미리 듣기" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "선택한 추천 적용" })).toBeNull();
+    expect(container.querySelectorAll("audio, video")).toHaveLength(0);
+    expect(onPreviewCandidate).not.toHaveBeenCalled();
+    expect(onApplyProposal).not.toHaveBeenCalled();
+  });
 });

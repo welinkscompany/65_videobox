@@ -87,6 +87,10 @@ def test_postgres_migrations_add_hermes_creator_context_identity_columns() -> No
         "ALTER TABLE director_hermes_runs ADD COLUMN IF NOT EXISTS "
         "selected_segment_id TEXT"
     ) in statements
+    assert (
+        "ALTER TABLE director_hermes_runs ADD COLUMN IF NOT EXISTS "
+        "assistant_draft_text TEXT NOT NULL DEFAULT ''"
+    ) in statements
 
 
 def test_output_publish_transaction_explicitly_serializes_postgres_lineage_and_paths() -> None:

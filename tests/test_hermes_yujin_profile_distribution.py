@@ -29,7 +29,7 @@ OVERLAY_PATH = ROOT / "compose.hermes-yujin.yaml"
 
 EXPECTED_MANIFEST = {
     "name": "videobox-yujin",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "hermes_requires": ">=0.18.0",
     "distribution_owned": ["SOUL.md", "config.yaml", "skills/"],
 }
@@ -38,6 +38,7 @@ EXPECTED_FILES = {
     "SOUL.md",
     "config.yaml",
     "skills/videobox-editor/SKILL.md",
+    "skills/videobox-creator/SKILL.md",
 }
 PARTIAL_PROFILE_STATE = (
     "Profile install may have left a partial profile in the "
@@ -149,6 +150,67 @@ def test_first_skill_is_only_conversation_clarification_and_manual_fallback() ->
         "내보내기를 실행",
     ):
         assert forbidden not in skill
+
+
+def test_creator_skill_requires_one_non_executable_trailing_machine_frame() -> None:
+    skill = (
+        PROFILE_ROOT / "skills" / "videobox-creator" / "SKILL.md"
+    ).read_text(encoding="utf-8")
+
+    for required in (
+        "videobox.yujin-response.v1",
+        "```videobox-yujin-response",
+        "정확히 하나",
+        "사람이 읽는 답변 뒤",
+        "실행 가능한 코드",
+        "reply_text",
+        "candidate_only",
+        "자동 적용하지",
+    ):
+        assert required in skill
+    assert "```python" not in skill
+    assert "```powershell" not in skill
+
+
+def test_creator_skill_pins_the_exact_envelope_and_all_operation_contracts() -> None:
+    skill = (
+        PROFILE_ROOT / "skills" / "videobox-creator" / "SKILL.md"
+    ).read_text(encoding="utf-8")
+
+    for required in (
+        "schema_version",
+        "reply_text",
+        "proposal_id",
+        "base_revision",
+        "operation_id",
+        "requires_materialization",
+        "preview_summary",
+        "broll",
+        "bgm",
+        "sfx",
+        "caption",
+        "voice",
+        "overlay",
+        "output_check",
+        "video-primary",
+        "audio-bgm",
+        "audio-sfx",
+        "caption-primary",
+        "voice-primary",
+        "video-overlay",
+        "output-primary",
+        "recommendation_only",
+        "read_only",
+        "session:{session_id}:revision:{session_revision}:assets:{asset_index_revision}",
+        "최대 16",
+        "URL",
+        "절대 경로",
+        "secret",
+        "candidate_only",
+        "수동 대체",
+    ):
+        assert required in skill
+    assert "```javascript" not in skill
 
 
 def test_profile_is_mounted_read_only_only_in_the_opt_in_overlay() -> None:

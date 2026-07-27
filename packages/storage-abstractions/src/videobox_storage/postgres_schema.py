@@ -57,6 +57,7 @@ POSTGRES_MIGRATION_STATEMENTS = (
     "ALTER TABLE director_hermes_runs ADD COLUMN IF NOT EXISTS expected_session_revision INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE director_hermes_runs ADD COLUMN IF NOT EXISTS expected_asset_index_revision INTEGER NOT NULL DEFAULT -1",
     "ALTER TABLE director_hermes_runs ADD COLUMN IF NOT EXISTS selected_segment_id TEXT",
+    "ALTER TABLE director_hermes_runs ADD COLUMN IF NOT EXISTS assistant_draft_text TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE recommendations ADD COLUMN IF NOT EXISTS decision_state TEXT",
     "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS progress_percent INTEGER",
     "ALTER TABLE editing_sessions ADD COLUMN IF NOT EXISTS session_revision INTEGER NOT NULL DEFAULT 1",

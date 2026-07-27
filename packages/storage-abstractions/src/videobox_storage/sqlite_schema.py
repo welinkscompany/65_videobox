@@ -444,6 +444,7 @@ PROJECT_SCHEMA_STATEMENTS = (
         user_text TEXT NOT NULL,
         user_message_id TEXT NOT NULL,
         assistant_message_id TEXT,
+        assistant_draft_text TEXT NOT NULL DEFAULT '',
         status TEXT NOT NULL,
         owner_token TEXT NOT NULL,
         heartbeat_at TEXT NOT NULL,

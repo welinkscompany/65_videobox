@@ -4,6 +4,7 @@ import json
 import hashlib
 import math
 from copy import deepcopy
+from dataclasses import replace
 import re
 import shutil
 import sqlite3
@@ -11,7 +12,7 @@ import subprocess
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Literal
 
 from videobox_domain_models.assets import AssetRecord, AssetType
 from videobox_domain_models.jobs import JobStatus, JobType
@@ -2890,6 +2891,17 @@ class LocalProjectStore:
         payload["metadata"] = self._json_object(str(payload.pop("metadata_json", "{}")))
         return payload
 
+    def director_proposal_exists(
+        self, *, project_id: str, proposal_id: str
+    ) -> bool:
+        row = self._fetchone(
+            project_id,
+            "SELECT 1 FROM director_proposals "
+            "WHERE project_id = ? AND proposal_id = ?",
+            (project_id, proposal_id),
+        )
+        return row is not None
+
     def save_director_proposal(self, project_id: str, proposal: DirectorProposal) -> DirectorProposal:
         payload = proposal_to_payload(proposal)
         canonical_payload = json.dumps(payload, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
@@ -4501,6 +4513,37 @@ class LocalProjectStore:
             )
         return result
 
+    def append_director_hermes_draft(
+        self,
+        *,
+        project_id: str,
+        run_id: str,
+        owner_token: str,
+        assistant_draft_text: str,
+    ) -> bool:
+        """Atomically advance a pending run's owner-fenced visible draft."""
+        if not assistant_draft_text:
+            raise ValueError("director_hermes_draft_invalid")
+        connection = self._connection(project_id)
+        cursor = connection.execute(
+            """
+            UPDATE director_hermes_runs
+            SET assistant_draft_text = ?
+            WHERE project_id = ? AND run_id = ? AND status = 'pending'
+              AND owner_token = ?
+              AND substr(?, 1, length(assistant_draft_text)) = assistant_draft_text
+            """,
+            (
+                assistant_draft_text,
+                project_id,
+                run_id,
+                owner_token,
+                assistant_draft_text,
+            ),
+        )
+        connection.commit()
+        return cursor.rowcount == 1
+
     def complete_director_hermes_run(
         self,
         *,
@@ -4510,10 +4553,15 @@ class LocalProjectStore:
         status: str,
         assistant_text: str,
         retryable: bool,
-    ) -> bool:
+        proposal: DirectorProposal | None = None,
+    ) -> bool | Literal["proposal_conflict"]:
         """Owner-token-fenced pending-to-terminal transition."""
         if status not in {"completed", "blocked"} or not assistant_text.strip():
             raise ValueError("director_hermes_terminal_invalid")
+        if proposal is not None and (
+            status != "completed" or proposal.status != "candidate_only"
+        ):
+            raise ValueError("director_hermes_proposal_invalid")
         now = self._now_iso()
         assistant_message_id = uuid.uuid4().hex
         connection = self._connection(project_id)
@@ -4522,7 +4570,7 @@ class LocalProjectStore:
             cursor = connection.execute(
                 """
                 UPDATE director_hermes_runs
-                SET status = ?, assistant_message_id = ?, updated_at = ?
+                SET status = ?, assistant_message_id = ?, assistant_draft_text = '', updated_at = ?
                 WHERE project_id = ? AND run_id = ? AND status = 'pending'
                   AND owner_token = ?
                 """,
@@ -4542,6 +4590,84 @@ class LocalProjectStore:
                 "SELECT conversation_id, session_id FROM director_hermes_runs WHERE project_id = ? AND run_id = ?",
                 (project_id, run_id),
             ).fetchone()
+            stored_proposal = proposal
+            if stored_proposal is not None:
+                if stored_proposal.source_session_id != str(row["session_id"]):
+                    raise ValueError("director_hermes_proposal_session_mismatch")
+                existing_proposal = connection.execute(
+                    "SELECT 1 FROM director_proposals "
+                    "WHERE project_id = ? AND proposal_id = ?",
+                    (project_id, stored_proposal.proposal_id),
+                ).fetchone()
+                if existing_proposal is not None:
+                    connection.rollback()
+                    return "proposal_conflict"
+                connection.execute(
+                    "INSERT INTO director_proposal_revisions (project_id, revision) "
+                    "VALUES (?, 1) ON CONFLICT(project_id) DO UPDATE "
+                    "SET revision = revision + 1",
+                    (project_id,),
+                )
+                revision_row = connection.execute(
+                    "SELECT revision FROM director_proposal_revisions "
+                    "WHERE project_id = ?",
+                    (project_id,),
+                ).fetchone()
+                revision = int(revision_row["revision"])
+                stored_proposal = replace(
+                    stored_proposal,
+                    revision=revision,
+                    revision_code=f"P{revision:02d}",
+                    candidates=tuple(
+                        replace(
+                            candidate,
+                            visible_reference_code=(
+                                f"P{revision:02d}"
+                                + candidate.visible_reference_code[3:]
+                            ),
+                        )
+                        for candidate in stored_proposal.candidates
+                    ),
+                )
+                proposal_payload = proposal_to_payload(stored_proposal)
+                canonical_proposal = json.dumps(
+                    proposal_payload,
+                    ensure_ascii=True,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                connection.execute(
+                    """
+                    INSERT INTO director_proposals (
+                        proposal_id, project_id, status, source_session_id,
+                        source_script_segment_ids_json, proposal_json,
+                        created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        stored_proposal.proposal_id,
+                        project_id,
+                        stored_proposal.status,
+                        stored_proposal.source_session_id,
+                        json.dumps(
+                            list(stored_proposal.source_script_segment_ids)
+                        ),
+                        canonical_proposal,
+                        now,
+                        now,
+                    ),
+                )
+                connection.execute(
+                    "INSERT INTO director_proposal_lifecycle_events "
+                    "(proposal_id, status, reason, changed_at) "
+                    "VALUES (?, ?, ?, ?)",
+                    (
+                        stored_proposal.proposal_id,
+                        stored_proposal.status,
+                        "hermes_candidate_created",
+                        now,
+                    ),
+                )
             metadata = {
                 "hermes_run_id": run_id,
                 "hermes_status": status,
@@ -4552,7 +4678,7 @@ class LocalProjectStore:
                 INSERT INTO director_messages (
                     message_id, conversation_id, project_id, session_id, role,
                     text, proposal_id, metadata_json, client_message_id, created_at
-                ) VALUES (?, ?, ?, ?, 'assistant', ?, NULL, ?, NULL, ?)
+                ) VALUES (?, ?, ?, ?, 'assistant', ?, ?, ?, NULL, ?)
                 """,
                 (
                     assistant_message_id,
@@ -4560,6 +4686,11 @@ class LocalProjectStore:
                     project_id,
                     str(row["session_id"]),
                     assistant_text,
+                    (
+                        stored_proposal.proposal_id
+                        if stored_proposal is not None
+                        else None
+                    ),
                     json.dumps(metadata, ensure_ascii=True, sort_keys=True),
                     now,
                 ),
@@ -4573,6 +4704,15 @@ class LocalProjectStore:
         except Exception:
             if connection.in_transaction:
                 connection.rollback()
+            if proposal is not None:
+                existing_proposal = self._fetchone(
+                    project_id,
+                    "SELECT 1 FROM director_proposals "
+                    "WHERE project_id = ? AND proposal_id = ?",
+                    (project_id, proposal.proposal_id),
+                )
+                if existing_proposal is not None:
+                    return "proposal_conflict"
             raise
         finally:
             connection.close()
@@ -6639,6 +6779,15 @@ class LocalProjectStore:
                 connection.execute(
                     "ALTER TABLE director_hermes_runs "
                     "ADD COLUMN expected_asset_index_revision INTEGER NOT NULL DEFAULT -1"
+                )
+            except sqlite3.OperationalError as exc:
+                if "duplicate column name" not in str(exc).lower():
+                    raise
+        if "assistant_draft_text" not in columns:
+            try:
+                connection.execute(
+                    "ALTER TABLE director_hermes_runs "
+                    "ADD COLUMN assistant_draft_text TEXT NOT NULL DEFAULT ''"
                 )
             except sqlite3.OperationalError as exc:
                 if "duplicate column name" not in str(exc).lower():

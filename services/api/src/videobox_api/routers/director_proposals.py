@@ -254,6 +254,7 @@ def build_director_proposals_router(store: LocalProjectStore) -> APIRouter:
             proposal = service.get(project_id=project_id, proposal_id=proposal_id)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+        require_ready(proposal)
         reasons = service.stale_reasons(project_id=project_id, proposal=proposal)
         immutable_diff = proposal_to_payload(proposal)["diff"]
         if reasons:
@@ -262,6 +263,7 @@ def build_director_proposals_router(store: LocalProjectStore) -> APIRouter:
 
     def candidate_for(project_id: str, proposal_id: str, candidate_id: str):
         proposal = service.get(project_id=project_id, proposal_id=proposal_id)
+        require_ready(proposal)
         if service.stale_reasons(project_id=project_id, proposal=proposal):
             raise HTTPException(status_code=409, detail="stale_proposal")
         candidate = next((item for item in proposal.candidates if item.candidate_id == candidate_id), None)
@@ -283,6 +285,7 @@ def build_director_proposals_router(store: LocalProjectStore) -> APIRouter:
         try:
             candidate = candidate_for(project_id, proposal_id, candidate_id)
             proposal = service.get(project_id=project_id, proposal_id=proposal_id)
+            require_ready(proposal)
             return materializer.materialize(project_id=project_id, candidate=candidate, expected_asset_index_revision=proposal.asset_index_revision)
         except (KeyError, ValueError):
             raise HTTPException(status_code=422, detail="candidate_unavailable") from None
@@ -298,6 +301,7 @@ def build_director_proposals_router(store: LocalProjectStore) -> APIRouter:
     def apply(project_id: str, proposal_id: str, body: ProposalApplyRequest) -> dict:
         try:
             proposal = service.get(project_id=project_id, proposal_id=proposal_id)
+            require_ready(proposal)
             if proposal.base_session_revision != body.expected_revision:
                 raise HTTPException(status_code=409, detail="proposal_revision_mismatch")
             candidates = {item.candidate_id: item for item in proposal.candidates}
@@ -362,6 +366,7 @@ def build_director_proposals_router(store: LocalProjectStore) -> APIRouter:
         staged: list[dict] = []
         try:
             proposal = service.get(project_id=project_id, proposal_id=proposal_id)
+            require_ready(proposal)
             if proposal.base_session_revision != body.expected_revision:
                 raise HTTPException(status_code=409, detail="proposal_revision_mismatch")
             if service.stale_reasons(project_id=project_id, proposal=proposal):
@@ -408,6 +413,11 @@ def build_director_proposals_router(store: LocalProjectStore) -> APIRouter:
         return store.save_director_preferences(project_id, body.model_dump(exclude_unset=True))
 
     return router
+
+
+def require_ready(proposal) -> None:
+    if proposal.status != "ready":
+        raise HTTPException(status_code=409, detail="proposal_not_ready")
 
 
 def _mime_type(path) -> str | None:

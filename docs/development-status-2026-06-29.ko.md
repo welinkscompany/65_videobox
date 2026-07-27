@@ -1,6 +1,17 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 303. 2026-07-27 Hermes Yujin B1 creator context closeout`을 우선 적용한다. Task 22 기술 closeout 근거는 `## 300`을 유지하며, 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 304. 2026-07-27 Hermes Yujin B2 typed creator proposal closeout`을 우선 적용한다. Task 22 기술 closeout 근거는 `## 300`을 유지하며, 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+
+## 304. 2026-07-27 Hermes Yujin B2 typed creator proposal closeout
+
+- `[x] B2 완료`: versioned `videobox-creator` skill에 exact trailing response fence, 최대 16개 operation, 7종 `broll/bgm/sfx/caption/voice/overlay/output_check`의 kind별 target·track·control·parameter 계약을 고정했다. 응답은 strict typed model로 검증하고 trusted project/run hash에서 proposal/candidate ID를 만들며, 모델이 준 ID·URL·경로·credential·private key·JWT와 current context 밖 identifier를 저장하지 않는다.
+- `실시간·저장 일치`: safe visible prefix는 `director_hermes_runs.assistant_draft_text`에 pending owner-token·monotonic-prefix CAS로 먼저 저장된 뒤에만 SSE로 공개된다. terminal 전에 event count/serialized-byte 예산을 계산하고, projection·stale·collision fallback 뒤 UTF-8 cap을 다시 검사한다. 완료·차단·취소·timeout 모두 durable draft, delta 합계, terminal, assistant text가 일치하며 terminal CAS가 proposal·assistant link·draft clear를 원자적으로 닫는다. SQLite legacy migration과 PostgreSQL 호환 SQL을 함께 고정했다.
+- `candidate-only 권한`: 유효 응답은 기존 `DirectorProposal`/`DirectorCandidate`에 `candidate_only`로만 투영된다. RightDock은 정확한 `hermes_run_id`의 assistant가 연결한 proposal만 다시 읽고, 현재 run에 proposal이 없으면 과거 후보와 selection을 비운다. UI는 candidate를 읽기 전용으로 보여 주며 preview/materialize/apply control을 만들지 않는다. 서버 preflight·preview·materialize·apply·batch-apply도 `ready`가 아닌 proposal을 mutation 전에 `409 proposal_not_ready`로 거부한다.
+- `실패·보안 경계`: malformed fence/JSON/assignment와 credential key 변형은 chunk split·CRLF에서도 raw machine bytes를 공개하거나 저장하지 않고 visible prefix와 수동 fallback으로 닫힌다. title/rationale/preview summary 안쪽의 embedded URI·절대경로·UNC·credential도 거부한다. stale context와 proposal collision은 proposal을 폐기하고 manual fallback을 유지한다. provider/OpenCut/Mem0/SaaS와 자동 apply는 추가하지 않았다.
+- `검증`: controller fresh focused Python **291 passed, 1 skipped**(기존 Starlette multipart pending deprecation warning 1건), focused frontend **3 files / 104 passed**, production build, Hermes profile/plan-state/zero-tools verifier, Editor UI OSS provenance verifier, `git diff --check`가 통과했다. 독립 spec review와 독립 quality·gap·reverse review의 최종 판정은 Critical/Important/Minor **0** PASS다.
+- `미실행`: 전체 Python regression, 전체 frontend suite, live provider canary, 실제 Hermes service-stop/manual environment proof, 실제 PostgreSQL/Docker integration은 실행하지 않았고 통과로 간주하지 않는다. PostgreSQL 13개 integration test는 `VIDEOBOX_TEST_POSTGRES_URL` 미설정으로 이번 관련 확장 실행에서 skip됐고, 별도 1개 skip은 현재 Windows 계정의 symlink 생성 권한 제한이다. production build의 500 kB chunk warning은 기존 비실패 출력이다.
+- `진행률`: Phase B **2/5 (40.0%)**, creator-tools child **2/5 (40.0%), 잔여 60.0%**, Hermes Yujin initiative **8/20 (40.0%), 잔여 60.0%**다. 기존 VideoBox 공식 누적은 Task 9 사람/환경 acceptance 전까지 **9/22 (40.9%)**, 잔여 **59.1%**로 유지한다.
+- `다음 작업`: **B3만** 진행한다. candidate-only proposal을 기존 Director Inspector에 연결하되 사용자의 명시적 Apply 전에는 mutation이 0이어야 하며, current revision·route epoch·manual fallback·단일 preview owner를 유지한다.
 
 ## 303. 2026-07-27 Hermes Yujin B1 creator context closeout
 
