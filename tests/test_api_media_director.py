@@ -137,6 +137,381 @@ def _save_generalized_yujin_proposal(
     return proposal
 
 
+def _yujin_image_overlay_fixture(
+    tmp_path: Path,
+    *,
+    candidate_text: str = "승인된 장면 이미지",
+) -> tuple[TestClient, LocalProjectStore, str, dict, DirectorProposal, DirectorCandidate, Path]:
+    app = create_app(projects_root=tmp_path / "projects")
+    client = TestClient(app)
+    store = app.state.store
+    project_id = client.post(
+        "/api/projects",
+        json={"name": "attested yujin image overlay"},
+    ).json()["project_id"]
+    session = store.save_editing_session(
+        project_id=project_id,
+        timeline_id="timeline",
+        session_payload={
+            "segments": [{
+                "segment_id": "seg",
+                "caption_text": "장면",
+                "start_sec": 0.0,
+                "end_sec": 1.0,
+                "cut_action": "keep",
+                "review_required": False,
+            }],
+            "history": [],
+        },
+    )
+    source = tmp_path / "attested-overlay.png"
+    source.write_bytes(b"approved-image-bytes")
+    asset = store.register_asset(
+        project_id=project_id,
+        asset_type=AssetType.IMAGE,
+        source_path=source,
+        metadata={"review_status": "approved"},
+    )
+    digest = sha256(source.read_bytes()).hexdigest()
+    candidate = DirectorCandidate(
+        candidate_id="attested-image-overlay",
+        visible_reference_code="P00-OVERLAY-01",
+        media_type="overlay",
+        asset_id=asset.asset_id,
+        library_asset_id=None,
+        reason_chips=("이미지 오버레이",),
+        scores={},
+        availability="actionable",
+        review_status="approved",
+        preview_uri=None,
+        controls={
+            "overlay_kind": "image",
+            "asset_id": asset.asset_id,
+            "text": candidate_text,
+        },
+        expected_content_sha256=digest,
+        media_revision=asset.created_at.isoformat(),
+        canonical_metadata={
+            "schema_version": "videobox.yujin-response.v1",
+            "proposal_kind": "overlay",
+            "yujin_actionable_operation": True,
+            "command_kind": "apply_overlay",
+            "source_media_kind": "image",
+            "target_segment_id": "seg",
+            "requires_materialization": False,
+        },
+    )
+    proposal = _save_generalized_yujin_proposal(
+        store=store,
+        project_id=project_id,
+        session_id=session["session_id"],
+        session_revision=session["session_revision"],
+        proposal_id="attested-image-proposal",
+        candidates=(candidate,),
+    )
+    registered = store.get_asset(project_id=project_id, asset_id=asset.asset_id)
+    registered_path = store.resolve_storage_uri(
+        project_id=project_id,
+        storage_uri=str(registered["storage_uri"]),
+    )
+    return client, store, project_id, session, proposal, candidate, registered_path
+
+
+def test_yujin_image_overlay_attestation_applies_the_exact_persisted_candidate(
+    tmp_path: Path,
+) -> None:
+    client, store, project_id, session, proposal, candidate, _ = (
+        _yujin_image_overlay_fixture(tmp_path)
+    )
+    base = f"/api/projects/{project_id}/director/proposals/{proposal.proposal_id}"
+    assert client.post(f"{base}/preflight").status_code == 200
+
+    response = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session['session_id']}"
+        "/segments/seg/image-overlay",
+        json={
+            "asset_id": candidate.asset_id,
+            "text": candidate.controls["text"],
+            "expected_revision": session["session_revision"],
+            "proposal_id": proposal.proposal_id,
+            "candidate_id": candidate.candidate_id,
+        },
+    )
+
+    assert response.status_code == 200
+    overlay = response.json()["segments"][0]["visual_overlays"][0]
+    assert overlay["asset_id"] == candidate.asset_id
+    assert overlay["text"] == candidate.controls["text"]
+    assert overlay["expected_content_sha256"] == candidate.expected_content_sha256
+    assert overlay["media_revision"] == candidate.media_revision
+    assert store.get_editing_session(
+        project_id=project_id,
+        session_id=session["session_id"],
+    )["session_revision"] == session["session_revision"] + 1
+
+
+def test_yujin_image_overlay_attestation_canonicalizes_candidate_text_whitespace(
+    tmp_path: Path,
+) -> None:
+    client, _, project_id, session, proposal, candidate, _ = (
+        _yujin_image_overlay_fixture(
+            tmp_path,
+            candidate_text="  승인된 장면 이미지  ",
+        )
+    )
+
+    response = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session['session_id']}"
+        "/segments/seg/image-overlay",
+        json={
+            "asset_id": candidate.asset_id,
+            "text": candidate.controls["text"],
+            "expected_revision": session["session_revision"],
+            "proposal_id": proposal.proposal_id,
+            "candidate_id": candidate.candidate_id,
+        },
+    )
+
+    assert response.status_code == 200
+    overlay = response.json()["segments"][0]["visual_overlays"][0]
+    assert overlay["text"] == "승인된 장면 이미지"
+
+
+@pytest.mark.parametrize(
+    "tamper",
+    ["file", "type", "revision", "candidate", "asset", "control", "asset-index"],
+)
+def test_yujin_image_overlay_attestation_rejects_post_preflight_tampering_without_mutation(
+    tmp_path: Path,
+    tamper: str,
+) -> None:
+    client, store, project_id, session, proposal, candidate, registered_path = (
+        _yujin_image_overlay_fixture(tmp_path)
+    )
+    base = f"/api/projects/{project_id}/director/proposals/{proposal.proposal_id}"
+    assert client.post(f"{base}/preflight").status_code == 200
+    payload = {
+        "asset_id": candidate.asset_id,
+        "text": candidate.controls["text"],
+        "expected_revision": session["session_revision"],
+        "proposal_id": proposal.proposal_id,
+        "candidate_id": candidate.candidate_id,
+    }
+    if tamper == "file":
+        registered_path.write_bytes(b"changed-after-preflight")
+    elif tamper == "type":
+        store._execute(
+            project_id,
+            "UPDATE assets SET asset_type = ? WHERE project_id = ? AND asset_id = ?",
+            (AssetType.BROLL_VIDEO.value, project_id, candidate.asset_id),
+        )
+    elif tamper == "revision":
+        store._execute(
+            project_id,
+            "UPDATE assets SET created_at = ? WHERE project_id = ? AND asset_id = ?",
+            ("2099-01-01T00:00:00+00:00", project_id, candidate.asset_id),
+        )
+    elif tamper == "candidate":
+        payload["candidate_id"] = "forged-candidate"
+    elif tamper == "asset":
+        payload["asset_id"] = "forged-asset"
+    elif tamper == "control":
+        payload["text"] = "브라우저가 바꾼 설명"
+    else:
+        store.bump_asset_index_revision(project_id)
+    before = deepcopy(
+        store.get_editing_session(
+            project_id=project_id,
+            session_id=session["session_id"],
+        )
+    )
+
+    response = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session['session_id']}"
+        "/segments/seg/image-overlay",
+        json=payload,
+    )
+
+    assert response.status_code == 400
+    assert store.get_editing_session(
+        project_id=project_id,
+        session_id=session["session_id"],
+    ) == before
+
+
+@pytest.mark.parametrize("tamper", ["proposal", "asset", "file"])
+def test_yujin_image_overlay_terminal_transaction_rechecks_after_initial_validation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tamper: str,
+) -> None:
+    client, store, project_id, session, proposal, candidate, registered_path = (
+        _yujin_image_overlay_fixture(tmp_path)
+    )
+    original_write = store._write_editing_session
+
+    def race_after_initial_validation(**kwargs):
+        if tamper == "proposal":
+            store._execute(
+                project_id,
+                "UPDATE director_proposals SET status = ? WHERE project_id = ? AND proposal_id = ?",
+                ("expired", project_id, proposal.proposal_id),
+            )
+        elif tamper == "asset":
+            store._execute(
+                project_id,
+                "UPDATE assets SET asset_type = ?, created_at = ? "
+                "WHERE project_id = ? AND asset_id = ?",
+                (
+                    AssetType.BROLL_VIDEO.value,
+                    "2099-01-01T00:00:00+00:00",
+                    project_id,
+                    candidate.asset_id,
+                ),
+            )
+        else:
+            registered_path.write_bytes(b"terminal-race-bytes")
+        return original_write(**kwargs)
+
+    monkeypatch.setattr(store, "_write_editing_session", race_after_initial_validation)
+    before = deepcopy(
+        store.get_editing_session(
+            project_id=project_id,
+            session_id=session["session_id"],
+        )
+    )
+
+    response = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session['session_id']}"
+        "/segments/seg/image-overlay",
+        json={
+            "asset_id": candidate.asset_id,
+            "text": candidate.controls["text"],
+            "expected_revision": session["session_revision"],
+            "proposal_id": proposal.proposal_id,
+            "candidate_id": candidate.candidate_id,
+        },
+    )
+
+    assert response.status_code != 200
+    assert store.get_editing_session(
+        project_id=project_id,
+        session_id=session["session_id"],
+    ) == before
+
+
+def test_yujin_image_overlay_terminal_transaction_rejects_stale_session_identity_rebinding(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, store, project_id, session, proposal, candidate, registered_path = (
+        _yujin_image_overlay_fixture(tmp_path)
+    )
+    original_write = store._write_editing_session
+
+    def race_to_a_new_terminal_identity(**kwargs):
+        replacement = b"new-terminal-image-identity"
+        replacement_sha = sha256(replacement).hexdigest()
+        replacement_revision = "2099-01-01T00:00:00+00:00"
+        registered_path.write_bytes(replacement)
+        store._execute(
+            project_id,
+            "UPDATE assets SET created_at = ? "
+            "WHERE project_id = ? AND asset_id = ?",
+            (replacement_revision, project_id, candidate.asset_id),
+        )
+        row = store._fetchone(
+            project_id,
+            "SELECT proposal_json FROM director_proposals "
+            "WHERE project_id = ? AND proposal_id = ?",
+            (project_id, proposal.proposal_id),
+        )
+        assert row is not None
+        proposal_payload = json.loads(str(row["proposal_json"]))
+        proposal_payload["candidates"][0]["expected_content_sha256"] = replacement_sha
+        proposal_payload["candidates"][0]["media_revision"] = replacement_revision
+        store._execute(
+            project_id,
+            "UPDATE director_proposals SET proposal_json = ? "
+            "WHERE project_id = ? AND proposal_id = ?",
+            (
+                json.dumps(proposal_payload, ensure_ascii=True, sort_keys=True),
+                project_id,
+                proposal.proposal_id,
+            ),
+        )
+        return original_write(**kwargs)
+
+    monkeypatch.setattr(
+        store,
+        "_write_editing_session",
+        race_to_a_new_terminal_identity,
+    )
+    before = deepcopy(
+        store.get_editing_session(
+            project_id=project_id,
+            session_id=session["session_id"],
+        )
+    )
+
+    response = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session['session_id']}"
+        "/segments/seg/image-overlay",
+        json={
+            "asset_id": candidate.asset_id,
+            "text": candidate.controls["text"],
+            "expected_revision": session["session_revision"],
+            "proposal_id": proposal.proposal_id,
+            "candidate_id": candidate.candidate_id,
+        },
+    )
+
+    assert response.status_code != 200
+    assert store.get_editing_session(
+        project_id=project_id,
+        session_id=session["session_id"],
+    ) == before
+
+
+@pytest.mark.parametrize(
+    "identity",
+    [
+        {"proposal_id": "attested-image-proposal"},
+        {"candidate_id": "attested-image-overlay"},
+    ],
+)
+def test_image_overlay_attestation_identity_is_a_strict_pair(
+    tmp_path: Path,
+    identity: dict[str, str],
+) -> None:
+    client, store, project_id, session, _, candidate, _ = (
+        _yujin_image_overlay_fixture(tmp_path)
+    )
+    before = deepcopy(
+        store.get_editing_session(
+            project_id=project_id,
+            session_id=session["session_id"],
+        )
+    )
+
+    response = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session['session_id']}"
+        "/segments/seg/image-overlay",
+        json={
+            "asset_id": candidate.asset_id,
+            "text": candidate.controls["text"],
+            "expected_revision": session["session_revision"],
+            **identity,
+        },
+    )
+
+    assert response.status_code == 422
+    assert store.get_editing_session(
+        project_id=project_id,
+        session_id=session["session_id"],
+    ) == before
+
+
 def _complete_image_analysis(
     *,
     store: LocalProjectStore,

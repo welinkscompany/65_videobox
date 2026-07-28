@@ -678,8 +678,20 @@ class EditingSessionRegenerationMixin:
         asset_id: str,
         text: str,
         expected_revision: int,
+        proposal_id: str | None = None,
+        candidate_id: str | None = None,
     ) -> dict[str, Any]:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        attested_identity = self._validate_yujin_image_overlay_attestation(
+            project_id=project_id,
+            session=session,
+            session_id=session_id,
+            segment_id=segment_id,
+            asset_id=asset_id,
+            text=text,
+            proposal_id=proposal_id,
+            candidate_id=candidate_id,
+        )
         updated_session = update_segment_image_overlay(
             session=session,
             segment_id=segment_id,
@@ -689,15 +701,103 @@ class EditingSessionRegenerationMixin:
         # Existing legacy sessions can still contain assetless cards.  A real
         # project asset, however, becomes a renderable source and must carry a
         # durable identity from the moment the user selects it.
-        try:
-            identity = self._resolve_project_asset_identity(project_id=project_id, asset_id=asset_id)
-        except ValueError:
-            identity = None
+        identity = attested_identity
+        if identity is None:
+            try:
+                identity = self._resolve_project_asset_identity(project_id=project_id, asset_id=asset_id)
+            except ValueError:
+                identity = None
         if identity is not None:
             self._persist_image_overlay_identity(
                 updated_session=updated_session, segment_id=segment_id, asset_id=asset_id, identity=identity,
             )
+        if proposal_id is not None and candidate_id is not None:
+            if int(session.get("session_revision") or 1) != expected_revision:
+                raise EditingSessionConflict(session)
+            try:
+                return self.store.update_yujin_image_overlay_transaction(
+                    project_id=project_id,
+                    session_id=session_id,
+                    proposal_id=proposal_id,
+                    candidate_id=candidate_id,
+                    segment_id=segment_id,
+                    asset_id=asset_id,
+                    text=text,
+                    session_payload=updated_session,
+                    expected_revision=expected_revision,
+                )
+            except EditingSessionRevisionConflict:
+                raise EditingSessionConflict(
+                    self.store.get_editing_session(
+                        project_id=project_id,
+                        session_id=session_id,
+                    )
+                ) from None
         return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=updated_session, expected_revision=expected_revision)
+
+    def _validate_yujin_image_overlay_attestation(
+        self,
+        *,
+        project_id: str,
+        session: dict[str, Any],
+        session_id: str,
+        segment_id: str,
+        asset_id: str,
+        text: str,
+        proposal_id: str | None,
+        candidate_id: str | None,
+    ) -> dict[str, str] | None:
+        if (proposal_id is None) != (candidate_id is None):
+            raise ValueError("yujin_image_overlay_attestation_pair_required")
+        if proposal_id is None or candidate_id is None:
+            return None
+        try:
+            proposal = self.store.get_director_proposal(project_id, proposal_id)
+            candidate = next(
+                item for item in proposal.candidates
+                if item.candidate_id == candidate_id
+            )
+            metadata = candidate.canonical_metadata
+            controls = candidate.controls
+            if (
+                proposal.status != "ready"
+                or proposal.diff.get("proposal_mode") != "yujin_actionable_v1"
+                or proposal.source_session_id != session_id
+                or proposal.base_session_revision != int(session.get("session_revision") or 0)
+                or self.store.get_asset_index_revision(project_id)
+                != proposal.asset_index_revision
+                or candidate.availability != "actionable"
+                or candidate.review_status != "approved"
+                or candidate.media_type != "overlay"
+                or candidate.asset_id != asset_id
+                or metadata.get("schema_version") != "videobox.yujin-response.v1"
+                or metadata.get("yujin_actionable_operation") is not True
+                or metadata.get("command_kind") != "apply_overlay"
+                or metadata.get("source_media_kind") != "image"
+                or metadata.get("target_segment_id") != segment_id
+                or metadata.get("requires_materialization") is not False
+                or set(controls) != {"overlay_kind", "asset_id", "text"}
+                or controls.get("overlay_kind") != "image"
+                or controls.get("asset_id") != asset_id
+                or controls.get("text") != text
+                or not candidate.expected_content_sha256
+                or not candidate.media_revision
+            ):
+                raise ValueError("yujin_image_overlay_attestation_invalid")
+            identity = self._resolve_project_asset_identity(
+                project_id=project_id,
+                asset_id=asset_id,
+                expected_type=AssetType.IMAGE,
+            )
+            if (
+                identity["expected_content_sha256"]
+                != candidate.expected_content_sha256
+                or identity["media_revision"] != candidate.media_revision
+            ):
+                raise ValueError("yujin_image_overlay_attestation_stale")
+            return identity
+        except (KeyError, StopIteration, TypeError, ValueError):
+            raise ValueError("yujin_image_overlay_attestation_invalid") from None
 
     def update_editing_session_segment_table_overlay(
         self,

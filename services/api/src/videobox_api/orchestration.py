@@ -768,6 +768,8 @@ class ApiOrchestrator:
         asset_id: str,
         text: str,
         expected_revision: int,
+        proposal_id: str | None = None,
+        candidate_id: str | None = None,
     ) -> dict[str, Any]:
         return self.pipeline.update_editing_session_segment_image_overlay(
             project_id=project_id,
@@ -776,6 +778,8 @@ class ApiOrchestrator:
             asset_id=asset_id,
             text=text,
             expected_revision=expected_revision,
+            proposal_id=proposal_id,
+            candidate_id=candidate_id,
         )
 
     def update_segment_table_overlay(

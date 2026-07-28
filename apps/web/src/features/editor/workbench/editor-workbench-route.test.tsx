@@ -381,8 +381,116 @@ describe("EditorWorkbenchRoute", () => {
     fireEvent.click(screen.getByRole("button", { name: "선택한 추천 적용" }));
 
     await waitFor(() => expect(command).toHaveBeenCalledTimes(1));
+    if (kind === "image") {
+      expect(command).toHaveBeenCalledWith(
+        "project-a",
+        "session-a",
+        "segment-1",
+        {
+          asset_id: "asset-image",
+          candidate_id: "candidate-image",
+          expected_revision: 1,
+          proposal_id: "yujin-image",
+          text: "장면 이미지",
+        },
+      );
+    }
     expect(materialize).not.toHaveBeenCalled();
     expect(batchApply).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [false, 100, 100],
+    [true, 95, 94],
+    [true, 100, 94],
+  ] as const)(
+    "matches backend caption safe-area semantics for safe=%s y=%s",
+    async (safeAreaEnabled, positionYPercent, expectedPositionYPercent) => {
+      const base = yujinB4Proposal("caption-style");
+      const style = {
+        ...(base.candidates[0].controls.style as Record<string, unknown>),
+        position_y_percent: positionYPercent,
+        safe_area_enabled: safeAreaEnabled,
+      };
+      vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
+        conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },
+        messages: [],
+        proposal: {
+          ...base,
+          candidates: [{
+            ...base.candidates[0],
+            controls: { scope: "current_caption", style },
+          }],
+        },
+        references: [],
+      } as never);
+      vi.spyOn(api, "preflightDirectorProposal").mockResolvedValue({ status: "ready" } as never);
+      const command = vi.spyOn(api, "updateEditingSessionCaptionStyle").mockResolvedValue({} as never);
+
+      render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+      await expectEditorRevision(1);
+      fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+      fireEvent.click(await screen.findByRole("radio", { name: "P01-CAPTION-STYLE-01 선택" }));
+      fireEvent.click(screen.getByRole("button", { name: "선택한 추천 적용" }));
+
+      await waitFor(() => expect(command).toHaveBeenCalledWith(
+        "project-a",
+        "session-a",
+        expect.objectContaining({
+          expected_revision: 1,
+          scope: "current_caption",
+          segment_ids: ["segment-1"],
+          style: expect.objectContaining({
+            position_y_percent: expectedPositionYPercent,
+            safe_area_enabled: safeAreaEnabled,
+          }),
+        }),
+      ));
+    },
+  );
+
+  it("accepts bounded table items at 256 code points and 1024 UTF-8 bytes", async () => {
+    const bounded = "😀".repeat(256);
+    const base = yujinB4Proposal("table");
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
+      conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },
+      messages: [],
+      proposal: {
+        ...base,
+        candidates: [{
+          ...base.candidates[0],
+          controls: {
+            overlay_kind: "table",
+            columns: [bounded],
+            rows: [[bounded]],
+            text: "장면 표",
+          },
+        }],
+      },
+      references: [],
+    } as never);
+    vi.spyOn(api, "preflightDirectorProposal").mockResolvedValue({ status: "ready" } as never);
+    const command = vi.spyOn(api, "updateEditingSessionTableOverlay").mockResolvedValue({} as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+    fireEvent.click(await screen.findByRole("radio", { name: "P01-TABLE-01 선택" }));
+    fireEvent.click(screen.getByRole("button", { name: "선택한 추천 적용" }));
+
+    await waitFor(() => expect(command).toHaveBeenCalledWith(
+      "project-a",
+      "session-a",
+      "segment-1",
+      {
+        columns: [bounded],
+        expected_revision: 1,
+        rows: [[bounded]],
+        text: "장면 표",
+      },
+    ));
+    expect([...bounded]).toHaveLength(256);
+    expect(new TextEncoder().encode(bounded)).toHaveLength(1024);
   });
 
   it.each([
@@ -392,8 +500,8 @@ describe("EditorWorkbenchRoute", () => {
       style: {
         font_family: "Pretendard", font_size_px: 42, text_color: "#FFFFFFFF",
         outline_color: "#000000FF", outline_width_px: 2, background_color: "#00000000",
-        position_x_percent: 50, position_y_percent: 95, horizontal_align: "center",
-        safe_area_enabled: true, shadow_blur_px: 0,
+        position_x_percent: 50, position_y_percent: 101, horizontal_align: "center",
+        safe_area_enabled: false, shadow_blur_px: 0,
       },
     }],
     ["voice", { candidate_id: "tts_candidate_001", asset_id: "asset-tts", speed: 1 }],
@@ -403,6 +511,12 @@ describe("EditorWorkbenchRoute", () => {
     }],
     ["table", {
       overlay_kind: "table", columns: ["항목", "값"], rows: [["한 칸뿐"]], text: "잘못된 표",
+    }],
+    ["table", {
+      overlay_kind: "table", columns: ["a".repeat(257)], rows: [["값"]], text: "긴 열",
+    }],
+    ["table", {
+      overlay_kind: "table", columns: ["항목"], rows: [["a".repeat(257)]], text: "긴 셀",
     }],
   ] as const)("keeps malformed persisted Yujin %s controls disabled", async (kind, controls) => {
     const base = yujinB4Proposal(kind);
@@ -424,6 +538,40 @@ describe("EditorWorkbenchRoute", () => {
 
     expect(radio).toBeDisabled();
     expect(screen.getByRole("button", { name: "선택한 추천 적용" })).toBeDisabled();
+  });
+
+  it("issues zero editor mutations for a forged unsupported persisted Yujin candidate", async () => {
+    const base = yujinB4Proposal("caption-text");
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
+      conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },
+      messages: [],
+      proposal: {
+        ...base,
+        candidates: [{
+          ...base.candidates[0],
+          canonical_metadata: {
+            ...base.candidates[0].canonical_metadata,
+            command_kind: "delete_project",
+          },
+        }],
+      },
+      references: [],
+    } as never);
+    const captionMutation = vi.spyOn(api, "updateEditingSessionCaption");
+    const batchApply = vi.spyOn(api, "batchApplyDirectorProposal");
+    const materialize = vi.spyOn(api, "materializeDirectorCandidate");
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+    const candidate = await screen.findByRole("radio", { name: "P01-CAPTION-TEXT-01 선택" });
+    fireEvent.click(candidate);
+    fireEvent.click(screen.getByRole("button", { name: "선택한 추천 적용" }));
+
+    expect(candidate).toBeDisabled();
+    expect(captionMutation).not.toHaveBeenCalled();
+    expect(batchApply).not.toHaveBeenCalled();
+    expect(materialize).not.toHaveBeenCalled();
   });
 
   it("issues zero B4 commands when the route changes while preflight is pending", async () => {
@@ -2382,6 +2530,77 @@ describe("EditorWorkbenchRoute", () => {
     expect(screen.getByRole("region", { name: "미리보기" })).toBe(player);
   });
 
+  it("applies one terminal-linked persisted caption proposal only after explicit selection and refreshes the editor snapshot", async () => {
+    const proposal = yujinB4Proposal("caption-text");
+    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue(
+      "00000000-0000-4000-8000-000000000010",
+    );
+    vi.mocked(api.getEditorPlaybackManifest)
+      .mockReset()
+      .mockResolvedValueOnce(captionManifest(1) as never)
+      .mockResolvedValueOnce(captionManifest(2, "추천 자막") as never);
+    mockEditingSessionRevisions(1, 2);
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
+      conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },
+      messages: [],
+      proposal: null,
+      references: [],
+    } as never);
+    vi.spyOn(api, "createHermesRun").mockResolvedValue({
+      run_id: "run-caption",
+      conversation_id: "conversation-1",
+      events_url: "/api/projects/project-a/director/conversations/conversation-1/hermes-runs/run-caption/events",
+    });
+    vi.spyOn(api, "openHermesRunEvents").mockResolvedValue(
+      new Response("", { headers: { "Content-Type": "text/event-stream" } }),
+    );
+    vi.spyOn(api, "listDirectorMessages").mockResolvedValue([
+      { message_id: "user-caption", conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a", role: "user", text: "자막을 다듬어 줘", proposal_id: null, metadata: {}, client_message_id: "00000000-0000-4000-8000-000000000010", created_at: "1" },
+      { message_id: "assistant-caption", conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a", role: "assistant", text: "자막 후보를 준비했어요.", proposal_id: proposal.proposal_id, metadata: { hermes_run_id: "run-caption" }, client_message_id: null, created_at: "2" },
+    ] as never);
+    vi.spyOn(api, "getDirectorProposal").mockResolvedValue(proposal as never);
+    vi.spyOn(api, "preflightDirectorProposal").mockResolvedValue({ status: "ready" } as never);
+    const captionMutation = vi.spyOn(api, "updateEditingSessionCaption").mockResolvedValue(
+      editingSession("project-a", "session-a", 2) as never,
+    );
+    vi.spyOn(hermesSseClient, "parseHermesSse").mockImplementation(
+      async (_response, options) => {
+        options.onEvent({ event_id: 1, event_type: "run_started", text: "", retryable: false });
+        options.onEvent({ event_id: 2, event_type: "text_delta", text: "자막 후보를 준비했어요.", retryable: false });
+        options.onEvent({ event_id: 3, event_type: "run_completed", text: "자막 후보를 준비했어요.", retryable: false });
+      },
+    );
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+    fireEvent.change(
+      await screen.findByRole("textbox", { name: "유진에게 요청하기" }),
+      { target: { value: "자막을 다듬어 줘" } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
+
+    const candidate = await screen.findByRole("radio", { name: "P01-CAPTION-TEXT-01 선택" });
+    expect(screen.getByText("자막 후보를 준비했어요.")).toBeVisible();
+    expect(candidate).not.toBeChecked();
+    expect(captionMutation).not.toHaveBeenCalled();
+
+    fireEvent.click(candidate);
+    expect(captionMutation).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "선택한 추천 적용" }));
+
+    await waitFor(() => expect(captionMutation).toHaveBeenCalledTimes(1));
+    expect(captionMutation).toHaveBeenCalledWith(
+      "project-a",
+      "session-a",
+      "segment-1",
+      { caption_text: "추천 자막", expected_revision: 1 },
+    );
+    await expectEditorRevision(2);
+    expect(api.getEditorPlaybackManifest).toHaveBeenCalledTimes(2);
+    expect(api.getEditingSession).toHaveBeenCalledTimes(2);
+  });
+
   it("reloads a blocked terminal row and keeps its durable fallback copy redacted", async () => {
     vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
       conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },
@@ -2423,6 +2642,9 @@ describe("EditorWorkbenchRoute", () => {
     vi.spyOn(api, "createHermesRun").mockRejectedValue(new Error("PRIVATE upstream failure"));
     const openEvents = vi.spyOn(api, "openHermesRunEvents");
     const createProposal = vi.spyOn(api, "createDirectorProposal");
+    const captionMutation = vi.spyOn(api, "updateEditingSessionCaption");
+    const batchApply = vi.spyOn(api, "batchApplyDirectorProposal");
+    const materialize = vi.spyOn(api, "materializeDirectorCandidate");
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
@@ -2441,6 +2663,9 @@ describe("EditorWorkbenchRoute", () => {
     expect(screen.getByText("남아 있는 대화")).toBeVisible();
     expect(openEvents).not.toHaveBeenCalled();
     expect(createProposal).not.toHaveBeenCalled();
+    expect(captionMutation).not.toHaveBeenCalled();
+    expect(batchApply).not.toHaveBeenCalled();
+    expect(materialize).not.toHaveBeenCalled();
   });
 
   it("keeps route-owned draft, candidate, history scroll, and player while the right drawer unmounts", async () => {
@@ -2479,6 +2704,8 @@ describe("EditorWorkbenchRoute", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
     expect(await screen.findByRole("textbox", { name: "유진에게 요청하기" })).toHaveValue("작성 중");
+    expect(screen.getByText("요청")).toBeVisible();
+    expect(screen.getByText("답변")).toBeVisible();
     expect(screen.getByRole("radio", { name: "P01-B-02 선택" })).toBeChecked();
     expect(screen.getByRole("log", { name: "유진 대화" }).scrollTop).toBe(72);
     expect(screen.getByRole("region", { name: "미리보기" })).toBe(player);

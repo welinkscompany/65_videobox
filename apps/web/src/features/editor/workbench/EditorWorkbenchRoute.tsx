@@ -796,7 +796,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
               controls: editorControlsFromCandidate(selectedYujinCandidate),
             });
           } else if (selectedYujinCandidate) {
-            await applyYujinB4Candidate(port, selectedYujinCandidate);
+            await applyYujinB4Candidate(port, proposalId, selectedYujinCandidate);
           } else {
             await api.batchApplyDirectorProposal(projectId, proposalId, { candidate_ids: [...candidateIds], expected_revision: currentRevision });
           }
@@ -963,7 +963,7 @@ function isActionableYujinB4Candidate(candidate: DirectorCandidate) {
   );
 }
 
-async function applyYujinB4Candidate(port: EditorCommandPort, candidate: DirectorCandidate) {
+async function applyYujinB4Candidate(port: EditorCommandPort, proposalId: string, candidate: DirectorCandidate) {
   const metadata = candidate.canonical_metadata ?? {};
   const segmentId = String(metadata.target_segment_id ?? "");
   const command = parseYujinB4Command(candidate);
@@ -985,7 +985,13 @@ async function applyYujinB4Candidate(port: EditorCommandPort, candidate: Directo
     return port.applyOverlay({ kind: "explanation-card", segmentId, title: command.title, body: command.body, text: command.text });
   }
   if (command.kind === "image") {
-    return port.applyOverlay({ kind: "image", segmentId, assetId: command.assetId, text: command.text });
+    return port.applyOverlay({
+      kind: "image",
+      segmentId,
+      assetId: command.assetId,
+      text: command.text,
+      attestation: { proposalId, candidateId: candidate.candidate_id },
+    });
   }
   return port.applyOverlay({ kind: "table", segmentId, columns: command.columns, rows: command.rows, text: command.text });
 }
@@ -1061,11 +1067,11 @@ function parseYujinB4Command(candidate: DirectorCandidate): ParsedYujinB4Command
       !isStringArray(columns)
       || columns.length === 0
       || columns.length > 32
-      || !columns.every((value) => value.trim().length > 0)
+      || !columns.every(isBoundedTableItem)
       || !isStringMatrix(rows)
       || rows.length > 128
       || !rows.every(
-        (row) => row.length === columns.length && row.every((value) => value.trim().length > 0),
+        (row) => row.length === columns.length && row.every(isBoundedTableItem),
       )
       || !isBoundedString(controls.text, 1, 1024)
     ) return null;
@@ -1094,7 +1100,7 @@ function captionStyleFromCandidate(raw: Record<string, unknown>): EditorCaptionS
     || !isBoundedInteger(raw.outline_width_px, 0, 12)
     || !isRgbaColor(raw.background_color)
     || !isBoundedInteger(raw.position_x_percent, 0, 100)
-    || !isBoundedInteger(raw.position_y_percent, 0, 94)
+    || !isBoundedInteger(raw.position_y_percent, 0, 100)
     || (raw.horizontal_align !== "left" && raw.horizontal_align !== "center" && raw.horizontal_align !== "right")
     || typeof raw.safe_area_enabled !== "boolean"
     || typeof raw.shadow_blur_px !== "number"
@@ -1109,7 +1115,9 @@ function captionStyleFromCandidate(raw: Record<string, unknown>): EditorCaptionS
     outlineWidthPx: raw.outline_width_px,
     backgroundColor: raw.background_color,
     positionXPercent: raw.position_x_percent,
-    positionYPercent: raw.position_y_percent,
+    positionYPercent: raw.safe_area_enabled && raw.position_y_percent > 94
+      ? 94
+      : raw.position_y_percent,
     horizontalAlign: raw.horizontal_align,
     safeAreaEnabled: raw.safe_area_enabled,
     shadowBlurPx: raw.shadow_blur_px,
@@ -1131,6 +1139,14 @@ function isBoundedString(value: unknown, minimum: number, maximum: number): valu
 
 function isBoundedInteger(value: unknown, minimum: number, maximum: number): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= minimum && value <= maximum;
+}
+
+function isBoundedTableItem(value: unknown): value is string {
+  if (typeof value !== "string" || value.trim().length === 0) return false;
+  const codePoints = Array.from(value).length;
+  return codePoints >= 1
+    && codePoints <= 256
+    && new TextEncoder().encode(value).length <= 1024;
 }
 
 function isRgbaColor(value: unknown): value is string {

@@ -568,6 +568,8 @@ def build_editing_session_router(orchestrator: ApiOrchestrator, store: LocalProj
                 asset_id=payload.asset_id,
                 text=payload.text,
                 expected_revision=payload.expected_revision,
+                proposal_id=payload.proposal_id,
+                candidate_id=payload.candidate_id,
             )
         except EditingSessionConflict as exc:
             return _editing_session_conflict_response(exc)

@@ -190,6 +190,64 @@ def _valid_b4_candidate_controls(candidate: DirectorCandidate) -> bool:
     return False
 
 
+def _session_image_overlay_matches_identity(
+    *,
+    session_payload: dict[str, Any],
+    segment_id: str,
+    asset_id: str,
+    text: str,
+    asset_uri: str,
+    expected_content_sha256: str,
+    media_revision: str,
+) -> bool:
+    has_direct_match = any(
+        isinstance(segment, dict)
+        and str(segment.get("segment_id") or "") == segment_id
+        for segment in session_payload.get("segments", [])
+    )
+    matched: list[dict[str, Any]] = []
+    for segment in session_payload.get("segments", []):
+        if not isinstance(segment, dict):
+            continue
+        containing_segment_id = str(segment.get("segment_id") or "")
+        direct_match = containing_segment_id == segment_id
+        overlay_lists: list[list[Any]] = []
+        if direct_match and isinstance(segment.get("visual_overlays"), list):
+            overlay_lists.append(segment["visual_overlays"])
+        content_windows = segment.get("content_windows")
+        if isinstance(content_windows, list):
+            for window in content_windows:
+                if not isinstance(window, dict):
+                    continue
+                source_segment_id = str(
+                    window.get("source_segment_id") or containing_segment_id
+                )
+                visible_match = (
+                    direct_match
+                    if has_direct_match
+                    else source_segment_id == segment_id
+                )
+                if visible_match and isinstance(
+                    window.get("visual_overlays"), list
+                ):
+                    overlay_lists.append(window["visual_overlays"])
+        for overlays in overlay_lists:
+            matched.extend(
+                overlay
+                for overlay in overlays
+                if isinstance(overlay, dict)
+                and overlay.get("overlay_type") == "image_overlay"
+            )
+    return bool(matched) and all(
+        overlay.get("asset_id") == asset_id
+        and overlay.get("text") == text
+        and overlay.get("asset_uri") == asset_uri
+        and overlay.get("expected_content_sha256") == expected_content_sha256
+        and overlay.get("media_revision") == media_revision
+        for overlay in matched
+    )
+
+
 def _is_relative_to(path: Path, parent: Path) -> bool:
     try:
         path.relative_to(parent)
@@ -2393,6 +2451,161 @@ class LocalProjectStore:
             project_id=project_id, timeline_id=str(existing["timeline_id"]), session_id=session_id,
             session_payload=payload, is_new=False, created_at=str(existing["created_at"]),
             expected_revision=expected_revision, transaction_hook=consume,
+            transaction_start_hook=self._begin_director_session_transaction,
+        )
+
+    @staticmethod
+    def _begin_director_session_transaction(connection: Any) -> None:
+        """Serialize director attestation truth before the session CAS write."""
+        if isinstance(connection, sqlite3.Connection):
+            connection.execute("BEGIN IMMEDIATE")
+            return
+        connection.execute("BEGIN")
+        # Preserve the common writer order: session CAS, asset registration,
+        # asset-index revision, proposal state, then dependent outputs.
+        connection.execute(
+            "LOCK TABLE editing_sessions, assets, director_asset_index_revisions, "
+            "director_proposals, review_approvals, subtitle_renders, "
+            "preview_renders, exports, exact_preview_renders "
+            "IN SHARE ROW EXCLUSIVE MODE"
+        )
+
+    def update_yujin_image_overlay_transaction(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        proposal_id: str,
+        candidate_id: str,
+        segment_id: str,
+        asset_id: str,
+        text: str,
+        session_payload: dict[str, Any],
+        expected_revision: int,
+    ) -> dict[str, Any]:
+        """Atomically re-attest one Yujin image overlay and save its session CAS."""
+        existing = self.get_editing_session(
+            project_id=project_id,
+            session_id=session_id,
+        )
+        payload = deepcopy(session_payload)
+        if int(payload.get("session_revision") or 0) <= int(
+            existing.get("session_revision") or 1
+        ):
+            payload["session_revision"] = int(
+                existing.get("session_revision") or 1
+            ) + 1
+
+        def attest(connection: sqlite3.Connection) -> None:
+            try:
+                proposal_row = connection.execute(
+                    "SELECT proposal_json, status FROM director_proposals "
+                    "WHERE project_id = ? AND proposal_id = ?",
+                    (project_id, proposal_id),
+                ).fetchone()
+                if proposal_row is None or str(proposal_row["status"]) != "ready":
+                    raise ValueError("proposal_not_ready")
+                proposal = proposal_from_payload(
+                    json.loads(str(proposal_row["proposal_json"]))
+                )
+                candidate = next(
+                    item
+                    for item in proposal.candidates
+                    if item.candidate_id == candidate_id
+                )
+                metadata = candidate.canonical_metadata
+                controls = candidate.controls
+                revision_row = connection.execute(
+                    "SELECT revision FROM director_asset_index_revisions "
+                    "WHERE project_id = ?",
+                    (project_id,),
+                ).fetchone()
+                current_asset_index_revision = (
+                    int(revision_row["revision"])
+                    if revision_row is not None
+                    else 0
+                )
+                asset_row = connection.execute(
+                    "SELECT asset_type, storage_uri, created_at FROM assets "
+                    "WHERE project_id = ? AND asset_id = ?",
+                    (project_id, asset_id),
+                ).fetchone()
+                if (
+                    proposal.status != "ready"
+                    or proposal.diff.get("proposal_mode")
+                    != "yujin_actionable_v1"
+                    or proposal.source_session_id != session_id
+                    or proposal.base_session_revision != expected_revision
+                    or segment_id not in proposal.target_segment_ids
+                    or current_asset_index_revision
+                    != proposal.asset_index_revision
+                    or candidate.availability != "actionable"
+                    or candidate.review_status != "approved"
+                    or candidate.media_type != "overlay"
+                    or candidate.asset_id != asset_id
+                    or metadata.get("schema_version")
+                    != "videobox.yujin-response.v1"
+                    or metadata.get("yujin_actionable_operation") is not True
+                    or metadata.get("command_kind") != "apply_overlay"
+                    or metadata.get("source_media_kind") != "image"
+                    or metadata.get("target_segment_id") != segment_id
+                    or metadata.get("requires_materialization") is not False
+                    or not _valid_b4_candidate_controls(candidate)
+                    or not _has_exact_keys(
+                        controls, {"overlay_kind", "asset_id", "text"}
+                    )
+                    or controls.get("overlay_kind") != "image"
+                    or controls.get("asset_id") != asset_id
+                    or controls.get("text") != text
+                    or not candidate.expected_content_sha256
+                    or not candidate.media_revision
+                    or asset_row is None
+                    or str(asset_row["asset_type"]) != AssetType.IMAGE.value
+                    or str(asset_row["created_at"] or "")
+                    != candidate.media_revision
+                ):
+                    raise ValueError("attestation_mismatch")
+                source = self.resolve_storage_uri(
+                    project_id=project_id,
+                    storage_uri=str(asset_row["storage_uri"]),
+                )
+                if (
+                    not source.is_file()
+                    or sha256_file(source)
+                    != candidate.expected_content_sha256
+                    or not _session_image_overlay_matches_identity(
+                        session_payload=payload,
+                        segment_id=segment_id,
+                        asset_id=asset_id,
+                        text=str(controls["text"]).strip(),
+                        asset_uri=str(asset_row["storage_uri"]),
+                        expected_content_sha256=candidate.expected_content_sha256,
+                        media_revision=candidate.media_revision,
+                    )
+                ):
+                    raise ValueError("source_identity_mismatch")
+            except (
+                KeyError,
+                OSError,
+                StopIteration,
+                TypeError,
+                ValueError,
+                json.JSONDecodeError,
+            ):
+                raise EditingSessionRevisionConflict(
+                    "Yujin image overlay attestation changed before session save."
+                ) from None
+
+        return self._write_editing_session(
+            project_id=project_id,
+            timeline_id=str(existing["timeline_id"]),
+            session_id=session_id,
+            session_payload=payload,
+            is_new=False,
+            created_at=str(existing["created_at"]),
+            expected_revision=expected_revision,
+            transaction_hook=attest,
+            transaction_start_hook=self._begin_director_session_transaction,
         )
 
     def batch_apply_director_proposal_transaction(
@@ -2461,6 +2674,7 @@ class LocalProjectStore:
                 project_id=project_id, timeline_id=str(existing["timeline_id"]), session_id=session_id,
                 session_payload=payload, is_new=False, created_at=str(existing["created_at"]),
                 expected_revision=expected_revision, transaction_hook=consume,
+                transaction_start_hook=self._begin_director_session_transaction,
             )
             for manifest_path in {Path(str(item.get("manifest_path"))) for item in staged_assets if item.get("manifest_path")}:
                 try:
@@ -7376,6 +7590,7 @@ class LocalProjectStore:
         created_at: str | None = None,
         expected_revision: int | None = None,
         transaction_hook: Callable[[sqlite3.Connection], None] | None = None,
+        transaction_start_hook: Callable[[Any], None] | None = None,
         invalidate_output_freshness: bool = True,
     ) -> dict[str, Any]:
         session_path = self.project_root(project_id) / "editing_sessions" / f"{session_id}.json"
@@ -7451,7 +7666,10 @@ class LocalProjectStore:
             # even though the canonical JSON path itself remains valid.
             temporary_path = session_path.with_name(f".es-{uuid.uuid4().hex[:12]}.tmp")
             try:
-                connection.execute("BEGIN IMMEDIATE")
+                if transaction_start_hook is None:
+                    connection.execute("BEGIN IMMEDIATE")
+                else:
+                    transaction_start_hook(connection)
                 cursor = connection.execute(
                     """
                     UPDATE editing_sessions

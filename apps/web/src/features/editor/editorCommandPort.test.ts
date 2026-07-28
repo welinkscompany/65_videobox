@@ -133,6 +133,29 @@ describe("EditorCommandPort", () => {
     expect(api.updateEditingSessionCaptionStyle).toHaveBeenCalledWith("p", "s", expect.objectContaining({ expected_revision: 7, segment_ids: ["seg"] }));
   });
 
+  it("forwards paired server attestation only for an attested image overlay command", async () => {
+    const port = createEditorCommandPort({ projectId: "p", sessionId: "s", expectedRevision: 7 }, api);
+
+    await port.applyOverlay({
+      kind: "image",
+      segmentId: "seg",
+      assetId: "asset-image",
+      text: "제품",
+      attestation: {
+        proposalId: "proposal-image",
+        candidateId: "candidate-image",
+      },
+    });
+
+    expect(api.updateEditingSessionImageOverlay).toHaveBeenCalledWith("p", "s", "seg", {
+      asset_id: "asset-image",
+      candidate_id: "candidate-image",
+      expected_revision: 7,
+      proposal_id: "proposal-image",
+      text: "제품",
+    });
+  });
+
   it("applies and clears an approved TTS candidate through revisioned endpoints", async () => {
     const port = createEditorCommandPort({ projectId: "p", sessionId: "s", expectedRevision: 7 }, api);
 

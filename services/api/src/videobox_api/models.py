@@ -541,14 +541,23 @@ class ImageOverlayRequest(BaseModel):
     expected_revision: int = Field(ge=1)
     asset_id: str = Field(min_length=1)
     text: str = ""
+    proposal_id: str | None = Field(default=None, min_length=1, max_length=256)
+    candidate_id: str | None = Field(default=None, min_length=1, max_length=256)
 
     @model_validator(mode="after")
     def validate_image_overlay(self) -> "ImageOverlayRequest":
-        asset_id = self.asset_id.strip()
-        if not asset_id:
+        if (self.proposal_id is None) != (self.candidate_id is None):
+            raise ValueError("proposal_id and candidate_id must be provided together.")
+        if not self.asset_id.strip():
             raise ValueError("asset_id must not be blank.")
-        self.asset_id = asset_id
-        self.text = self.text.strip()
+        if self.proposal_id is None:
+            self.asset_id = self.asset_id.strip()
+            self.text = self.text.strip()
+        else:
+            self.proposal_id = self.proposal_id.strip()
+            self.candidate_id = self.candidate_id.strip() if self.candidate_id else None
+            if not self.proposal_id or not self.candidate_id:
+                raise ValueError("proposal_id and candidate_id must not be blank.")
         return self
 
 

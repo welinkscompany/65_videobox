@@ -413,7 +413,10 @@ export type ExplanationCardRequest = RevisionedEditingSessionMutation & {
 export type ImageOverlayRequest = RevisionedEditingSessionMutation & {
   asset_id: string;
   text: string;
-};
+} & (
+  | { proposal_id: string; candidate_id: string }
+  | { proposal_id?: never; candidate_id?: never }
+);
 
 export type TableOverlayRequest = RevisionedEditingSessionMutation & {
   columns: string[];

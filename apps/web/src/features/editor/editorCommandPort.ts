@@ -6,7 +6,7 @@ type MediaKind = "broll" | "bgm" | "sfx";
 type MediaCommand = Readonly<{ kind: MediaKind; segmentId: string; assetId: string; controls?: EditorControls }>;
 type OverlayApply =
   | Readonly<{ kind: "explanation-card"; segmentId: string; title: string; body: string; text: string }>
-  | Readonly<{ kind: "image"; segmentId: string; assetId: string; text: string }>
+  | Readonly<{ kind: "image"; segmentId: string; assetId: string; text: string; attestation?: Readonly<{ proposalId: string; candidateId: string }> }>
   | Readonly<{ kind: "table"; segmentId: string; columns: string[]; rows: string[][]; text: string }>;
 type OverlayClear = Readonly<{ kind: OverlayApply["kind"]; segmentId: string }>;
 
@@ -90,7 +90,7 @@ export function createEditorCommandPort(context: Context, commandApi: EditorComm
     applyMedia,
     updateMediaControls: applyMedia,
     clearMedia: ({ kind, segmentId }) => kind === "broll" ? commandApi.clearEditingSessionBrollOverride(projectId, sessionId, segmentId, expectedRevision) : kind === "bgm" ? commandApi.clearEditingSessionMusicOverride(projectId, sessionId, segmentId, expectedRevision) : commandApi.clearEditingSessionSfxOverride(projectId, sessionId, segmentId, expectedRevision),
-    applyOverlay: (input) => input.kind === "explanation-card" ? commandApi.updateEditingSessionExplanationCard(projectId, sessionId, input.segmentId, { title: input.title, body: input.body, text: input.text, ...revise }) : input.kind === "image" ? commandApi.updateEditingSessionImageOverlay(projectId, sessionId, input.segmentId, { asset_id: input.assetId, text: input.text, ...revise } as ImageOverlayRequest) : commandApi.updateEditingSessionTableOverlay(projectId, sessionId, input.segmentId, { columns: input.columns, rows: input.rows, text: input.text, ...revise } as TableOverlayRequest),
+    applyOverlay: (input) => input.kind === "explanation-card" ? commandApi.updateEditingSessionExplanationCard(projectId, sessionId, input.segmentId, { title: input.title, body: input.body, text: input.text, ...revise }) : input.kind === "image" ? commandApi.updateEditingSessionImageOverlay(projectId, sessionId, input.segmentId, { asset_id: input.assetId, text: input.text, ...(input.attestation ? { proposal_id: input.attestation.proposalId, candidate_id: input.attestation.candidateId } : {}), ...revise } as ImageOverlayRequest) : commandApi.updateEditingSessionTableOverlay(projectId, sessionId, input.segmentId, { columns: input.columns, rows: input.rows, text: input.text, ...revise } as TableOverlayRequest),
     clearOverlay: (input) => input.kind === "explanation-card" ? commandApi.removeEditingSessionExplanationCard(projectId, sessionId, input.segmentId, expectedRevision) : input.kind === "image" ? commandApi.removeEditingSessionImageOverlay(projectId, sessionId, input.segmentId, expectedRevision) : commandApi.removeEditingSessionTableOverlay(projectId, sessionId, input.segmentId, expectedRevision),
     applyTtsCandidate: ({ segmentId, candidateId, assetId }) => commandApi.updateEditingSessionTtsReplacement(projectId, sessionId, segmentId, { recommendation_id: candidateId, asset_id: assetId, ...revise }),
     clearTtsCandidate: ({ segmentId }) => commandApi.clearEditingSessionTtsReplacement(projectId, sessionId, segmentId, expectedRevision),

@@ -1,3 +1,5 @@
+import inspect
+
 from videobox_storage.postgres_compat import translate_sql
 from videobox_storage.postgres_schema import POSTGRES_MIGRATION_STATEMENTS, POSTGRES_SCHEMA_STATEMENTS
 from videobox_storage.local_project_store import LocalProjectStore
@@ -132,3 +134,41 @@ def test_postgres_output_and_handoff_transactions_share_the_same_lock_order() ->
     for statements in (output.statements, handoff.statements):
         lock = statements[1]
         assert lock.index("editing_sessions") < lock.index("exports")
+
+
+def test_director_transactions_explicitly_lock_postgres_truth_in_shared_order() -> None:
+    class RecordingPostgresConnection:
+        def __init__(self) -> None:
+            self.statements: list[str] = []
+
+        def execute(self, statement: str) -> None:
+            self.statements.append(statement)
+
+    connection = RecordingPostgresConnection()
+
+    LocalProjectStore._begin_director_session_transaction(connection)
+
+    assert connection.statements == [
+        "BEGIN",
+        (
+            "LOCK TABLE editing_sessions, assets, director_asset_index_revisions, "
+            "director_proposals, review_approvals, subtitle_renders, "
+            "preview_renders, exports, exact_preview_renders "
+            "IN SHARE ROW EXCLUSIVE MODE"
+        ),
+    ]
+    lock = connection.statements[1]
+    assert translate_sql(lock) == lock
+    assert lock.index("editing_sessions") < lock.index("assets")
+    assert lock.index("assets") < lock.index("director_asset_index_revisions")
+    assert lock.index("director_asset_index_revisions") < lock.index("director_proposals")
+    assert lock.index("director_proposals") < lock.index("review_approvals")
+    assert lock.index("review_approvals") < lock.index("exports")
+    assert lock.index("exports") < lock.index("exact_preview_renders")
+    for method in (
+        LocalProjectStore.apply_director_proposal_transaction,
+        LocalProjectStore.update_yujin_image_overlay_transaction,
+        LocalProjectStore.batch_apply_director_proposal_transaction,
+    ):
+        source = inspect.getsource(method)
+        assert "transaction_start_hook=self._begin_director_session_transaction" in source

@@ -13,7 +13,7 @@
 Parent: `docs/superpowers/plans/2026-07-26-videobox-hermes-yujin-master-plan.md`
 Requires: Phase A task A4 complete.
 
-Child progress: **4/5 tasks (80.0%), remaining 20.0%**.
+Child progress: **5/5 tasks (100.0%), remaining 0.0%**.
 
 ## Supported-control rule
 
@@ -422,7 +422,7 @@ Each operation must carry:
 
 ## B5 — Prove explicit apply, preview, and output reverse path
 
-- [ ] **B5** Prove explicit apply, one-player preview, output reverse smoke, manual fallback, and Phase B closeout.
+- [x] **B5** Prove explicit apply, one-player preview, output reverse smoke, manual fallback, and Phase B closeout.
 
 **Files:**
 
@@ -431,7 +431,7 @@ Each operation must carry:
 - Modify: `apps/web/src/features/editor/preview/preview-coordinator.test.ts`
 - Modify: `apps/web/src/features/editor/preview/preview-stage.test.tsx`
 - Create: `scripts/smoke-hermes-yujin-creator-flow.ps1`
-- Create: `docs/handoffs/2026-07-26-videobox-hermes-yujin-phase-b-closeout.ko.md`
+- Create: `docs/handoffs/2026-07-28-videobox-hermes-yujin-phase-b-closeout.ko.md`
 - Modify: `docs/implementation-plan.ko.md`
 - Modify: `docs/development-status-2026-06-29.ko.md`
 

@@ -1778,6 +1778,10 @@ describe("OutputsPage", () => {
     ["unavailable", "아직 미리보기가 없어요."],
   ])("keeps an exact preview in %s creator-safe and read-only", async (status, copy) => {
     stubCanonicalSubtitleApi();
+    const renderSubtitle = vi.spyOn(api, "renderSubtitle");
+    const startFinalRender = vi.spyOn(api, "startFinalRender");
+    const startCapcutDraftExport = vi.spyOn(api, "startCapcutDraftExport");
+    const registerCapcutDraftHandoff = vi.spyOn(api, "registerCapcutDraftHandoff");
     vi.mocked(api.getEditorPlaybackManifest).mockResolvedValue(playbackManifest({
       exactPreview: {
         status,
@@ -1791,6 +1795,10 @@ describe("OutputsPage", () => {
 
     expect(await screen.findByText(copy)).toBeVisible();
     expect(document.querySelector("audio, video")).toBeNull();
+    expect(renderSubtitle).not.toHaveBeenCalled();
+    expect(startFinalRender).not.toHaveBeenCalled();
+    expect(startCapcutDraftExport).not.toHaveBeenCalled();
+    expect(registerCapcutDraftHandoff).not.toHaveBeenCalled();
   });
 
   it("fails closed when an exact-preview response uses the non-backend current status", async () => {

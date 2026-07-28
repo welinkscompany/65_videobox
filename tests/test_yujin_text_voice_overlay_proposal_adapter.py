@@ -305,6 +305,35 @@ def test_output_check_is_backend_attested_read_only_finding(tmp_path: Path) -> N
 
 
 @pytest.mark.parametrize(
+    ("safe_area_enabled", "position_y_percent", "expected_position_y_percent"),
+    (
+        (False, 100, 100),
+        (True, 95, 94),
+    ),
+)
+def test_caption_style_projection_matches_backend_safe_area_semantics(
+    tmp_path: Path,
+    safe_area_enabled: bool,
+    position_y_percent: int,
+    expected_position_y_percent: int,
+) -> None:
+    operation = _operation("caption", "style")
+    operation["parameters"]["style"].update(
+        {
+            "safe_area_enabled": safe_area_enabled,
+            "position_y_percent": position_y_percent,
+        }
+    )
+
+    activated = _activate(_Store(tmp_path), [operation])
+
+    assert activated.proposal is not None
+    style = activated.proposal.candidates[0].controls["style"]
+    assert style["safe_area_enabled"] is safe_area_enabled
+    assert style["position_y_percent"] == expected_position_y_percent
+
+
+@pytest.mark.parametrize(
     "operation",
     (
         {
@@ -321,13 +350,14 @@ def test_output_check_is_backend_attested_read_only_finding(tmp_path: Path) -> N
         {
             **_operation("caption", "style"),
             "parameters": {
-                **_operation("caption", "style")["parameters"],
-                "style": {
-                    **_operation("caption", "style")["parameters"]["style"],
-                    "position_y_percent": 95,
+                    **_operation("caption", "style")["parameters"],
+                    "style": {
+                        **_operation("caption", "style")["parameters"]["style"],
+                        "position_y_percent": 101,
+                        "safe_area_enabled": False,
+                    },
                 },
             },
-        },
         {
             **_operation("caption", "style"),
             "parameters": {
@@ -358,6 +388,22 @@ def test_output_check_is_backend_attested_read_only_finding(tmp_path: Path) -> N
             "parameters": {
                 **_operation("overlay", "image")["parameters"],
                 "x": 0.5,
+            },
+        },
+        {
+            **_operation("overlay", "table"),
+            "parameters": {
+                **_operation("overlay", "table")["parameters"],
+                "columns": ["a" * 257],
+                "rows": [["값"]],
+            },
+        },
+        {
+            **_operation("overlay", "table"),
+            "parameters": {
+                **_operation("overlay", "table")["parameters"],
+                "columns": ["항목"],
+                "rows": [["a" * 257]],
             },
         },
         {

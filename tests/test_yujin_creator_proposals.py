@@ -6,6 +6,10 @@ import pytest
 from pydantic import ValidationError
 
 from videobox_domain_models.yujin_creator_context import YujinCreatorContext
+from videobox_domain_models.yujin_creator_proposals import (
+    EditorCaptionStyle,
+    TableOverlayParameters,
+)
 
 
 def _context(**changes) -> YujinCreatorContext:
@@ -128,6 +132,111 @@ def _validate(payload: dict[str, object], context: YujinCreatorContext | None = 
     )
 
     return validate_yujin_creator_response(payload, context or _context())
+
+
+def _caption_style(**changes: object) -> dict[str, object]:
+    style: dict[str, object] = {
+        "font_family": "Pretendard",
+        "font_size_px": 42,
+        "text_color": "#FFFFFFFF",
+        "outline_color": "#000000FF",
+        "outline_width_px": 2,
+        "background_color": "#00000000",
+        "position_x_percent": 50,
+        "position_y_percent": 88,
+        "horizontal_align": "center",
+        "safe_area_enabled": True,
+        "shadow_blur_px": 0,
+    }
+    style.update(changes)
+    return style
+
+
+@pytest.mark.parametrize(
+    ("safe_area_enabled", "position_y_percent", "expected_position_y_percent"),
+    (
+        (False, 100, 100),
+        (True, 95, 94),
+        (True, 100, 94),
+    ),
+)
+def test_b4_caption_style_matches_backend_safe_area_semantics(
+    safe_area_enabled: bool,
+    position_y_percent: int,
+    expected_position_y_percent: int,
+) -> None:
+    style = EditorCaptionStyle.model_validate(
+        _caption_style(
+            safe_area_enabled=safe_area_enabled,
+            position_y_percent=position_y_percent,
+        )
+    )
+
+    assert style.position_y_percent == expected_position_y_percent
+    assert set(style.model_dump()) == {
+        "font_family",
+        "font_size_px",
+        "text_color",
+        "outline_color",
+        "outline_width_px",
+        "background_color",
+        "position_x_percent",
+        "position_y_percent",
+        "horizontal_align",
+        "safe_area_enabled",
+        "shadow_blur_px",
+    }
+
+
+@pytest.mark.parametrize("position_y_percent", (-1, 101))
+def test_b4_caption_style_rejects_absolute_position_y_outside_0_to_100(
+    position_y_percent: int,
+) -> None:
+    with pytest.raises(ValidationError):
+        EditorCaptionStyle.model_validate(
+            _caption_style(position_y_percent=position_y_percent)
+        )
+
+
+def test_b4_table_items_accept_256_code_points_and_1024_utf8_bytes() -> None:
+    bounded = "😀" * 256
+
+    table = TableOverlayParameters.model_validate(
+        {
+            "overlay_kind": "table",
+            "columns": (bounded,),
+            "rows": ((bounded,),),
+            "text": "표 설명",
+        }
+    )
+
+    assert table.columns == (bounded,)
+    assert table.rows == ((bounded,),)
+    assert len(bounded) == 256
+    assert len(bounded.encode("utf-8")) == 1024
+
+
+@pytest.mark.parametrize(
+    ("columns", "rows"),
+    (
+        (("a" * 257,), (("값",),)),
+        (("항목",), (("a" * 257,),)),
+    ),
+    ids=("oversized-column", "oversized-cell"),
+)
+def test_b4_table_rejects_items_over_256_code_points(
+    columns: tuple[str, ...],
+    rows: tuple[tuple[str, ...], ...],
+) -> None:
+    with pytest.raises(ValidationError):
+        TableOverlayParameters.model_validate(
+            {
+                "overlay_kind": "table",
+                "columns": columns,
+                "rows": rows,
+                "text": "표 설명",
+            }
+        )
 
 
 def _operation(kind: str) -> dict[str, object]:

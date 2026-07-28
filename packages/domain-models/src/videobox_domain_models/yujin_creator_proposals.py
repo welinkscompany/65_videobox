@@ -83,6 +83,19 @@ def _bounded_utf8(value: str, *, limit: int, label: str) -> str:
     return value
 
 
+def _validate_table_item(value: str, *, label: str) -> None:
+    if not value.strip():
+        raise ValueError(f"{label}_required")
+    if len(value) > 256:
+        raise ValueError(f"{label}_too_many_code_points")
+    try:
+        size = len(value.encode("utf-8"))
+    except UnicodeEncodeError as exc:
+        raise ValueError(f"{label}_invalid_unicode") from exc
+    if size > 1_024:
+        raise ValueError(f"{label}_too_large")
+
+
 def _validated_model_id(value: str, *, label: str) -> str:
     _bounded_utf8(value, limit=_ID_BYTES, label=label)
     if (
@@ -213,10 +226,16 @@ class EditorCaptionStyle(_StrictFrozenModel):
     outline_width_px: int = Field(ge=0, le=12)
     background_color: str = Field(pattern=r"^#[0-9A-Fa-f]{8}$")
     position_x_percent: int = Field(ge=0, le=100)
-    position_y_percent: int = Field(ge=0, le=94)
+    position_y_percent: int = Field(ge=0, le=100)
     horizontal_align: Literal["left", "center", "right"]
     safe_area_enabled: bool
     shadow_blur_px: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def clamp_position_to_backend_safe_area(self):
+        if self.safe_area_enabled and self.position_y_percent > 94:
+            object.__setattr__(self, "position_y_percent", 94)
+        return self
 
 
 class CaptionStyleParameters(_Parameters):
@@ -257,6 +276,27 @@ class TableOverlayParameters(_Parameters):
     columns: tuple[str, ...] = Field(max_length=32)
     rows: tuple[tuple[str, ...], ...] = Field(max_length=128)
     text: str = Field(min_length=1, max_length=1024)
+
+    @field_validator("columns")
+    @classmethod
+    def columns_are_bounded(
+        cls,
+        value: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        for item in value:
+            _validate_table_item(item, label="overlay_table_column")
+        return value
+
+    @field_validator("rows")
+    @classmethod
+    def cells_are_bounded(
+        cls,
+        value: tuple[tuple[str, ...], ...],
+    ) -> tuple[tuple[str, ...], ...]:
+        for row in value:
+            for cell in row:
+                _validate_table_item(cell, label="overlay_table_cell")
+        return value
 
     @model_validator(mode="after")
     def table_shape_matches_columns(self):
