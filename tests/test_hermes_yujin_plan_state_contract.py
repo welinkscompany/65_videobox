@@ -257,9 +257,10 @@ def test_verifier_rejects_equal_cardinality_task_swaps_between_children(
         r"^- \[(?: |~|x|!)\] \*\*B1\*\* Build the allowlisted current-revision creator context "
         r"and typed read DTOs\.",
     )
-    reliability_task = (
-        "- [ ] **C1** Persist run/event cursors and restore final or interrupted "
-        "conversation state."
+    reliability_task = _unique_matching_line(
+        reliability_child,
+        r"^- \[(?: |~|x|!)\] \*\*C1\*\* Persist run/event cursors and restore final or "
+        r"interrupted conversation state\.",
     )
     _replace_once(creator_child, creator_task, reliability_task)
     _replace_once(reliability_child, reliability_task, creator_task)

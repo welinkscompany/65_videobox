@@ -447,11 +447,29 @@ PROJECT_SCHEMA_STATEMENTS = (
         assistant_draft_text TEXT NOT NULL DEFAULT '',
         status TEXT NOT NULL,
         owner_token TEXT NOT NULL,
+        next_event_id INTEGER NOT NULL DEFAULT 1,
+        events_pruned_at TEXT,
         heartbeat_at TEXT NOT NULL,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         UNIQUE(conversation_id, client_message_id)
     )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS director_hermes_run_events (
+        project_id TEXT NOT NULL,
+        run_id TEXT NOT NULL,
+        event_id INTEGER NOT NULL,
+        event_type TEXT NOT NULL,
+        text TEXT NOT NULL DEFAULT '',
+        retryable INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (project_id, run_id, event_id)
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_director_hermes_events_retention
+    ON director_hermes_run_events (project_id, created_at, run_id)
     """,
     """
     CREATE TABLE IF NOT EXISTS exact_preview_renders (

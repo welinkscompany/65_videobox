@@ -60,12 +60,12 @@ class _Run:
     assembled: str = ""
     public_text: str = ""
     lifecycle: _Lifecycle = _Lifecycle.QUEUED
-    subscriber_claimed: bool = False
     signal: asyncio.Event = field(default_factory=asyncio.Event)
     dispatch_task: asyncio.Task | None = None
     terminal_task: asyncio.Task | None = None
     active_slot: bool = False
     terminal_at: float | None = None
+    persistence_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     @property
     def terminal(self) -> bool:
@@ -228,36 +228,75 @@ class HermesRunService:
                 async with self._lock:
                     admission.waiters -= 1
 
-    async def reserve_subscriber(self, run_id: str) -> None:
-        async with self._lock:
-            run = self.get_run(run_id)
-            if run.subscriber_claimed:
-                raise ValueError("hermes_run_single_subscriber")
-            run.subscriber_claimed = True
-
     async def subscribe(
-        self, run_id: str, *, reserved: bool = False
+        self,
+        run_id: str,
+        *,
+        project_id: str | None = None,
+        conversation_id: str | None = None,
+        after_event_id: int = 0,
     ) -> AsyncIterator[HermesStreamEvent]:
-        if not reserved:
-            await self.reserve_subscriber(run_id)
-        run = self.get_run(run_id)
-        index = 0
-        try:
+        list_events = getattr(
+            self.store, "list_director_hermes_run_events", None
+        )
+        run = self._runs.get(run_id)
+        if list_events is not None:
+            if project_id is None or conversation_id is None:
+                if run is None:
+                    raise KeyError("director_hermes_run_missing")
+                project_id = run.project_id
+                conversation_id = run.conversation_id
+            cursor = after_event_id
             while True:
-                async with self._lock:
-                    batch = run.events[index:]
-                    index = len(run.events)
-                    terminal = run.terminal
-                    if not batch and not terminal:
-                        run.signal.clear()
-                for event in batch:
+                rows = await asyncio.to_thread(
+                    list_events,
+                    project_id=project_id,
+                    conversation_id=conversation_id,
+                    run_id=run_id,
+                    after_event_id=cursor,
+                )
+                for item in rows:
+                    event = HermesStreamEvent.model_validate(item)
+                    cursor = event.event_id
                     yield event
-                if terminal:
+                durable = await asyncio.to_thread(
+                    self.store.get_director_hermes_run,
+                    project_id=project_id,
+                    run_id=run_id,
+                )
+                if str(durable.get("status") or "") in {
+                    "completed",
+                    "blocked",
+                    "interrupted",
+                }:
+                    if cursor >= int(durable.get("next_event_id") or 1) - 1:
+                        return
+                    continue
+                if run is None:
                     return
-                await run.signal.wait()
-        finally:
-            if not run.terminal:
-                await self.cancel(run_id)
+                if run.terminal:
+                    return
+                run.signal.clear()
+                try:
+                    await asyncio.wait_for(run.signal.wait(), timeout=0.25)
+                except TimeoutError:
+                    pass
+            return
+        if run is None:
+            raise KeyError("director_hermes_run_missing")
+        index = 0
+        while True:
+            async with self._lock:
+                batch = run.events[index:]
+                index = len(run.events)
+                terminal = run.terminal
+                if not batch and not terminal:
+                    run.signal.clear()
+            for event in batch:
+                yield event
+            if terminal:
+                return
+            await run.signal.wait()
 
     async def cancel(self, run_id: str) -> None:
         run = self._runs.get(run_id)
@@ -372,12 +411,12 @@ class HermesRunService:
                 selected_segment_id=selected_segment_id,
             )
             if (
-                str(durable.get("status") or "") == "pending"
+                str(durable.get("status") or "") in {"pending", "streaming"}
                 and not bool(durable.get("dispatch"))
             ):
                 raise HermesCapacityUnavailable("hermes_run_in_progress")
             if (
-                str(durable.get("status") or "") == "pending"
+                str(durable.get("status") or "") in {"pending", "streaming"}
                 and bool(durable.get("dispatch"))
                 and durable.get("owner_token") is not None
             ):
@@ -423,7 +462,7 @@ class HermesRunService:
                 self._keys[key] = run.run_id
                 self._publish_locked(run, "run_started")
                 status = str(durable.get("status") or "")
-                if status != "pending":
+                if status not in {"pending", "streaming"}:
                     terminal_text = str(durable.get("assistant_text") or "")
                     self._publish_locked(
                         run,
@@ -576,6 +615,13 @@ class HermesRunService:
             await self._terminal(run, "blocked", _BLOCKED_TEXT, retryable=True)
 
     async def _persist_visible_draft(self, run: _Run) -> bool:
+        async with run.persistence_lock:
+            return await self._persist_visible_draft_serialized(run)
+
+    async def _persist_visible_draft_serialized(self, run: _Run) -> bool:
+        append_event = getattr(
+            self.store, "append_director_hermes_draft_event", None
+        )
         append_draft = getattr(self.store, "append_director_hermes_draft", None)
         if append_draft is None or run.owner_token is None:
             return True
@@ -606,24 +652,47 @@ class HermesRunService:
             ):
                 return True
         try:
-            stored = await asyncio.to_thread(
-                append_draft,
-                project_id=run.project_id,
-                run_id=run.run_id,
-                owner_token=run.owner_token,
-                assistant_draft_text=target,
-            )
+            kwargs = {
+                "project_id": run.project_id,
+                "run_id": run.run_id,
+                "owner_token": run.owner_token,
+                "assistant_draft_text": target,
+            }
+            if append_event is not None:
+                kwargs.update(
+                    {
+                        "event_text": target[len(run.public_text) :],
+                        "expected_event_id": len(run.events) + 1,
+                    }
+                )
+                append_task = asyncio.create_task(
+                    asyncio.to_thread(append_event, **kwargs),
+                    name=f"videobox-draft-persist-{run.run_id}",
+                )
+            else:
+                append_task = asyncio.create_task(
+                    asyncio.to_thread(append_draft, **kwargs),
+                    name=f"videobox-draft-persist-{run.run_id}",
+                )
+            cancelled = False
+            try:
+                stored = await asyncio.shield(append_task)
+            except asyncio.CancelledError:
+                cancelled = True
+                stored = await asyncio.shield(append_task)
         except Exception:
             return False
         if stored is not True:
             return False
         async with self._lock:
-            if run.terminal or run.terminalizing:
+            if run.terminal:
                 return False
             try:
                 self._publish_public_delta_locked(run, target)
             except OverflowError:
                 return False
+        if cancelled:
+            raise asyncio.CancelledError
         return True
 
     async def _dispatch_done(
@@ -663,6 +732,22 @@ class HermesRunService:
         await asyncio.shield(task)
 
     async def _finish_terminal(
+        self,
+        run: _Run,
+        *,
+        event_type: str,
+        text: str,
+        retryable: bool,
+    ) -> None:
+        async with run.persistence_lock:
+            await self._finish_terminal_serialized(
+                run,
+                event_type=event_type,
+                text=text,
+                retryable=retryable,
+            )
+
+    async def _finish_terminal_serialized(
         self,
         run: _Run,
         *,
@@ -725,19 +810,24 @@ class HermesRunService:
         stored: bool | str = not preflight_failed
         if run.owner_token is not None and stored:
             try:
-                stored = await asyncio.to_thread(
-                    self.store.complete_director_hermes_run,
-                    project_id=run.project_id,
-                    run_id=run.run_id,
-                    owner_token=run.owner_token,
-                    status=(
+                completion_kwargs = {
+                    "project_id": run.project_id,
+                    "run_id": run.run_id,
+                    "owner_token": run.owner_token,
+                    "status": (
                         "completed"
                         if event_type == "run_completed"
                         else "blocked"
                     ),
-                    assistant_text=text or _BLOCKED_TEXT,
-                    retryable=retryable,
-                    proposal=proposal,
+                    "assistant_text": text or _BLOCKED_TEXT,
+                    "retryable": retryable,
+                    "proposal": proposal,
+                }
+                if hasattr(self.store, "list_director_hermes_run_events"):
+                    completion_kwargs["public_text"] = run.public_text
+                stored = await asyncio.to_thread(
+                    self.store.complete_director_hermes_run,
+                    **completion_kwargs,
                 )
             except Exception:
                 stored = False
@@ -764,19 +854,24 @@ class HermesRunService:
                     text = self._bounded_failure_text(run)
                     retryable = True
                 try:
-                    stored = await asyncio.to_thread(
-                        self.store.complete_director_hermes_run,
-                        project_id=run.project_id,
-                        run_id=run.run_id,
-                        owner_token=run.owner_token,
-                        status=(
+                    completion_kwargs = {
+                        "project_id": run.project_id,
+                        "run_id": run.run_id,
+                        "owner_token": run.owner_token,
+                        "status": (
                             "completed"
                             if event_type == "run_completed"
                             else "blocked"
                         ),
-                        assistant_text=text,
-                        retryable=retryable,
-                        proposal=None,
+                        "assistant_text": text,
+                        "retryable": retryable,
+                        "proposal": None,
+                    }
+                    if hasattr(self.store, "list_director_hermes_run_events"):
+                        completion_kwargs["public_text"] = run.public_text
+                    stored = await asyncio.to_thread(
+                        self.store.complete_director_hermes_run,
+                        **completion_kwargs,
                     )
                 except Exception:
                     stored = False
@@ -798,24 +893,30 @@ class HermesRunService:
         async with self._lock:
             if not run.terminal:
                 if not persist_succeeded:
-                    event_type = "blocked"
-                    text = self._bounded_failure_text(run)
-                    retryable = True
-                    publish_remainder = self._sequence_fits_locked(
+                    if hasattr(
+                        self.store, "list_director_hermes_run_events"
+                    ):
+                        self._mark_terminal_without_event_locked(run)
+                    else:
+                        event_type = "blocked"
+                        text = self._bounded_failure_text(run)
+                        retryable = True
+                        publish_remainder = self._sequence_fits_locked(
+                            run,
+                            target=run.public_text,
+                            terminal_event_type=event_type,
+                            terminal_text=text,
+                        )
+                if not run.terminal:
+                    if publish_remainder:
+                        self._publish_terminal_remainder_locked(run, text)
+                    self._publish_locked(
                         run,
-                        target=run.public_text,
-                        terminal_event_type=event_type,
-                        terminal_text=text,
+                        event_type,
+                        text=text,
+                        retryable=retryable,
+                        terminal=True,
                     )
-                if publish_remainder:
-                    self._publish_terminal_remainder_locked(run, text)
-                self._publish_locked(
-                    run,
-                    event_type,
-                    text=text,
-                    retryable=retryable,
-                    terminal=True,
-                )
             self._release_slot_and_promote_locked(run)
         if run.gateway_prepared:
             self._spawn_cleanup(
@@ -1002,14 +1103,27 @@ class HermesRunService:
         if completed.cancelled() or completed.exception() is not None:
             async with self._lock:
                 if not run.terminal:
-                    self._publish_locked(
-                        run,
-                        "blocked",
-                        text=_BLOCKED_TEXT,
-                        retryable=True,
-                        terminal=True,
-                    )
+                    if hasattr(
+                        self.store, "list_director_hermes_run_events"
+                    ):
+                        self._mark_terminal_without_event_locked(run)
+                    else:
+                        self._publish_locked(
+                            run,
+                            "blocked",
+                            text=_BLOCKED_TEXT,
+                            retryable=True,
+                            terminal=True,
+                        )
                 self._release_slot_and_promote_locked(run)
+
+    def _mark_terminal_without_event_locked(self, run: _Run) -> None:
+        """Close only process-local lifecycle when durable terminal CAS failed."""
+        if run.terminal:
+            return
+        run.lifecycle = _Lifecycle.TERMINAL
+        run.terminal_at = self._clock()
+        run.signal.set()
 
     def _release_slot_and_promote_locked(self, run: _Run) -> None:
         if run.active_slot:

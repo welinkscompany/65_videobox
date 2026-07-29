@@ -4729,14 +4729,18 @@ class LocalProjectStore:
         selected_segment_id: str | None = None,
         stale_after_seconds: int = 300,
     ) -> dict[str, Any]:
-        """Create a durable pending run and user row, or return its idempotent state."""
+        """Create a durable pending run and user/event rows.
+
+        ``stale_after_seconds`` remains a source-compatible argument only.
+        C1 never reclaims or redispatches an orphaned provider run.
+        """
         now = self._now_iso()
         run_id = f"hermes-run-{uuid.uuid4().hex}"
         owner_token = uuid.uuid4().hex
         user_message_id = uuid.uuid4().hex
         connection = self._connection(project_id)
         try:
-            connection.execute("BEGIN IMMEDIATE")
+            self._begin_director_hermes_transaction(connection)
             existing = connection.execute(
                 "SELECT * FROM director_hermes_runs "
                 "WHERE conversation_id = ? AND client_message_id = ?",
@@ -4760,8 +4764,6 @@ class LocalProjectStore:
                     expected_asset_index_revision=expected_asset_index_revision,
                     selected_segment_id=selected_segment_id,
                     now=now,
-                    stale_after_seconds=stale_after_seconds,
-                    allow_reclaim=False,
                 )
                 connection.commit()
                 return result
@@ -4818,8 +4820,6 @@ class LocalProjectStore:
                     expected_asset_index_revision=expected_asset_index_revision,
                     selected_segment_id=selected_segment_id,
                     now=now,
-                    stale_after_seconds=stale_after_seconds,
-                    allow_reclaim=True,
                 )
                 connection.commit()
                 return result
@@ -4830,8 +4830,9 @@ class LocalProjectStore:
                     session_id, expected_session_revision,
                     expected_asset_index_revision, selected_segment_id,
                     user_text, user_message_id, assistant_message_id,
-                    status, owner_token, heartbeat_at, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'pending', ?, ?, ?, ?)
+                    status, owner_token, next_event_id, heartbeat_at,
+                    created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'pending', ?, 2, ?, ?, ?)
                 ON CONFLICT (conversation_id, client_message_id) DO NOTHING
                 """,
                 (
@@ -4871,6 +4872,15 @@ class LocalProjectStore:
                     ),
                 )
                 connection.execute(
+                    """
+                    INSERT INTO director_hermes_run_events (
+                        project_id, run_id, event_id, event_type, text,
+                        retryable, created_at
+                    ) VALUES (?, ?, 1, 'run_started', '', 0, ?)
+                    """,
+                    (project_id, run_id, now),
+                )
+                connection.execute(
                     "UPDATE director_conversations SET updated_at = ? WHERE conversation_id = ?",
                     (now, conversation_id),
                 )
@@ -4898,8 +4908,6 @@ class LocalProjectStore:
                 expected_asset_index_revision=expected_asset_index_revision,
                 selected_segment_id=selected_segment_id,
                 now=now,
-                stale_after_seconds=stale_after_seconds,
-                allow_reclaim=True,
             )
             connection.commit()
             return result
@@ -4909,6 +4917,30 @@ class LocalProjectStore:
             raise
         finally:
             connection.close()
+
+    @staticmethod
+    def _begin_director_hermes_transaction(connection: Any) -> None:
+        """Serialize run cursor/message state without translating SQLite locks."""
+        if isinstance(connection, sqlite3.Connection):
+            connection.execute("BEGIN IMMEDIATE")
+            return
+        connection.execute("BEGIN")
+        connection.execute(
+            "LOCK TABLE director_hermes_runs, director_hermes_run_events, "
+            "director_messages IN SHARE ROW EXCLUSIVE MODE"
+        )
+
+    @staticmethod
+    def _lock_director_hermes_run(
+        connection: Any, *, project_id: str, run_id: str
+    ) -> None:
+        """Use PostgreSQL row ownership in addition to the cursor CAS."""
+        if not isinstance(connection, sqlite3.Connection):
+            connection.execute(
+                "SELECT run_id FROM director_hermes_runs "
+                "WHERE project_id = ? AND run_id = ? FOR UPDATE",
+                (project_id, run_id),
+            )
 
     def _director_hermes_existing_result(
         self,
@@ -4923,8 +4955,6 @@ class LocalProjectStore:
         expected_asset_index_revision: int,
         selected_segment_id: str | None,
         now: str,
-        stale_after_seconds: int,
-        allow_reclaim: bool,
     ) -> dict[str, Any]:
         if (
             str(row["project_id"]) != project_id
@@ -4980,8 +5010,6 @@ class LocalProjectStore:
                     expected_asset_index_revision=expected_asset_index_revision,
                     selected_segment_id=selected_segment_id,
                     now=now,
-                    stale_after_seconds=stale_after_seconds,
-                    allow_reclaim=False,
                 )
             connection.execute(
                 """
@@ -5026,40 +5054,6 @@ class LocalProjectStore:
             )
             return result
 
-        if status == "pending" and allow_reclaim:
-            heartbeat = datetime.fromisoformat(str(row["heartbeat_at"])).astimezone(UTC)
-            instant = datetime.fromisoformat(now).astimezone(UTC)
-            if heartbeat + timedelta(seconds=stale_after_seconds) <= instant:
-                new_owner_token = uuid.uuid4().hex
-                claimed = connection.execute(
-                    """
-                    UPDATE director_hermes_runs
-                    SET owner_token = ?, heartbeat_at = ?, updated_at = ?
-                    WHERE project_id = ? AND run_id = ? AND status = 'pending'
-                      AND owner_token = ? AND heartbeat_at = ?
-                    """,
-                    (
-                        new_owner_token,
-                        now,
-                        now,
-                        project_id,
-                        str(row["run_id"]),
-                        str(row["owner_token"]),
-                        str(row["heartbeat_at"]),
-                    ),
-                )
-                if claimed.rowcount == 1:
-                    result = dict(row)
-                    result.update(
-                        {
-                            "owner_token": new_owner_token,
-                            "heartbeat_at": now,
-                            "updated_at": now,
-                            "dispatch": True,
-                        }
-                    )
-                    return result
-
         result = dict(row)
         result["dispatch"] = False
         result["owner_token"] = None
@@ -5088,28 +5082,91 @@ class LocalProjectStore:
         owner_token: str,
         assistant_draft_text: str,
     ) -> bool:
-        """Atomically advance a pending run's owner-fenced visible draft."""
+        """Compatibility wrapper that durably appends the matching public delta."""
+        row = self.get_director_hermes_run(project_id=project_id, run_id=run_id)
+        previous = str(row.get("assistant_draft_text") or "")
+        if not assistant_draft_text.startswith(previous):
+            return False
+        return self.append_director_hermes_draft_event(
+            project_id=project_id,
+            run_id=run_id,
+            owner_token=owner_token,
+            assistant_draft_text=assistant_draft_text,
+            event_text=assistant_draft_text[len(previous) :],
+            expected_event_id=int(row.get("next_event_id") or 1),
+        )
+
+    def append_director_hermes_draft_event(
+        self,
+        *,
+        project_id: str,
+        run_id: str,
+        owner_token: str,
+        assistant_draft_text: str,
+        event_text: str,
+        expected_event_id: int,
+    ) -> bool:
+        """Atomically append a visible draft delta and advance its durable cursor."""
         if not assistant_draft_text:
             raise ValueError("director_hermes_draft_invalid")
+        if not event_text or expected_event_id < 1:
+            raise ValueError("director_hermes_event_invalid")
+        now = self._now_iso()
         connection = self._connection(project_id)
-        cursor = connection.execute(
-            """
-            UPDATE director_hermes_runs
-            SET assistant_draft_text = ?
-            WHERE project_id = ? AND run_id = ? AND status = 'pending'
-              AND owner_token = ?
-              AND substr(?, 1, length(assistant_draft_text)) = assistant_draft_text
-            """,
-            (
-                assistant_draft_text,
-                project_id,
-                run_id,
-                owner_token,
-                assistant_draft_text,
-            ),
-        )
-        connection.commit()
-        return cursor.rowcount == 1
+        try:
+            self._begin_director_hermes_transaction(connection)
+            self._lock_director_hermes_run(
+                connection, project_id=project_id, run_id=run_id
+            )
+            cursor = connection.execute(
+                """
+                UPDATE director_hermes_runs
+                SET assistant_draft_text = ?, status = 'streaming',
+                    next_event_id = next_event_id + 1,
+                    heartbeat_at = ?, updated_at = ?
+                WHERE project_id = ? AND run_id = ?
+                  AND status IN ('pending', 'streaming')
+                  AND owner_token = ? AND next_event_id = ?
+                  AND substr(?, 1, length(assistant_draft_text)) = assistant_draft_text
+                  AND substr(?, length(assistant_draft_text) + 1) = ?
+                """,
+                (
+                    assistant_draft_text,
+                    now,
+                    now,
+                    project_id,
+                    run_id,
+                    owner_token,
+                    expected_event_id,
+                    assistant_draft_text,
+                    assistant_draft_text,
+                    event_text,
+                ),
+            )
+            if cursor.rowcount != 1:
+                connection.rollback()
+                return False
+            connection.execute(
+                """
+                INSERT INTO director_hermes_run_events (
+                    project_id, run_id, event_id, event_type, text,
+                    retryable, created_at
+                ) VALUES (?, ?, ?, 'text_delta', ?, 0, ?)
+                """,
+                (project_id, run_id, expected_event_id, event_text, now),
+            )
+            connection.commit()
+            return True
+        except sqlite3.IntegrityError:
+            if connection.in_transaction:
+                connection.rollback()
+            return False
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+        finally:
+            connection.close()
 
     def complete_director_hermes_run(
         self,
@@ -5121,9 +5178,10 @@ class LocalProjectStore:
         assistant_text: str,
         retryable: bool,
         proposal: DirectorProposal | None = None,
+        public_text: str | None = None,
     ) -> bool | Literal["proposal_conflict", "proposal_stale"]:
-        """Owner-token-fenced pending-to-terminal transition."""
-        if status not in {"completed", "blocked"} or not assistant_text.strip():
+        """Owner-token-fenced active-to-terminal transition with durable events."""
+        if status not in {"completed", "blocked", "interrupted"} or not assistant_text.strip():
             raise ValueError("director_hermes_terminal_invalid")
         if proposal is not None and (
             status != "completed"
@@ -5137,7 +5195,10 @@ class LocalProjectStore:
         assistant_message_id = uuid.uuid4().hex
         connection = self._connection(project_id)
         try:
-            connection.execute("BEGIN IMMEDIATE")
+            self._begin_director_hermes_transaction(connection)
+            self._lock_director_hermes_run(
+                connection, project_id=project_id, run_id=run_id
+            )
             if (
                 proposal is not None
                 and any(
@@ -5153,29 +5214,54 @@ class LocalProjectStore:
             ):
                 connection.rollback()
                 return "proposal_stale"
+            active = connection.execute(
+                """
+                SELECT conversation_id, session_id, assistant_draft_text,
+                       next_event_id
+                FROM director_hermes_runs
+                WHERE project_id = ? AND run_id = ?
+                  AND status IN ('pending', 'streaming') AND owner_token = ?
+                """,
+                (project_id, run_id, owner_token),
+            ).fetchone()
+            if active is None:
+                connection.rollback()
+                return False
+            persisted_public = str(active["assistant_draft_text"] or "")
+            terminal_public = persisted_public if public_text is None else public_text
+            if (
+                terminal_public != persisted_public
+                or not assistant_text.startswith(terminal_public)
+            ):
+                connection.rollback()
+                return False
+            next_event_id = int(active["next_event_id"])
+            remainder = assistant_text[len(terminal_public) :]
+            terminal_event_id = next_event_id + (1 if remainder else 0)
             cursor = connection.execute(
                 """
                 UPDATE director_hermes_runs
-                SET status = ?, assistant_message_id = ?, assistant_draft_text = '', updated_at = ?
-                WHERE project_id = ? AND run_id = ? AND status = 'pending'
-                  AND owner_token = ?
+                SET status = ?, assistant_message_id = ?, assistant_draft_text = '',
+                    next_event_id = ?, updated_at = ?
+                WHERE project_id = ? AND run_id = ?
+                  AND status IN ('pending', 'streaming')
+                  AND owner_token = ? AND next_event_id = ?
                 """,
                 (
                     status,
                     assistant_message_id,
+                    terminal_event_id + 1,
                     now,
                     project_id,
                     run_id,
                     owner_token,
+                    next_event_id,
                 ),
             )
             if cursor.rowcount != 1:
                 connection.rollback()
                 return False
-            row = connection.execute(
-                "SELECT conversation_id, session_id FROM director_hermes_runs WHERE project_id = ? AND run_id = ?",
-                (project_id, run_id),
-            ).fetchone()
+            row = active
             stored_proposal = proposal
             if stored_proposal is not None:
                 if stored_proposal.source_session_id != str(row["session_id"]):
@@ -5285,7 +5371,44 @@ class LocalProjectStore:
                 "UPDATE director_conversations SET updated_at = ? WHERE conversation_id = ?",
                 (now, str(row["conversation_id"])),
             )
+            if remainder:
+                connection.execute(
+                    """
+                    INSERT INTO director_hermes_run_events (
+                        project_id, run_id, event_id, event_type, text,
+                        retryable, created_at
+                    ) VALUES (?, ?, ?, 'text_delta', ?, 0, ?)
+                    """,
+                    (project_id, run_id, next_event_id, remainder, now),
+                )
+            connection.execute(
+                """
+                INSERT INTO director_hermes_run_events (
+                    project_id, run_id, event_id, event_type, text,
+                    retryable, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    project_id,
+                    run_id,
+                    terminal_event_id,
+                    "run_completed" if status == "completed" else "blocked",
+                    assistant_text,
+                    int(retryable),
+                    now,
+                ),
+            )
             connection.commit()
+            try:
+                self.prune_director_hermes_run_events(
+                    project_id=project_id,
+                    retention_days=30,
+                    keep_terminal_streams=128,
+                )
+            except Exception:
+                # Terminal truth is already committed. Retention is bounded
+                # maintenance and must never turn that success into a retry.
+                pass
             return True
         except Exception:
             if connection.in_transaction:
@@ -5515,6 +5638,229 @@ class LocalProjectStore:
         if row is None:
             raise KeyError("director_hermes_run_missing")
         return dict(row)
+
+    def list_director_hermes_run_events(
+        self,
+        *,
+        project_id: str,
+        conversation_id: str,
+        run_id: str,
+        after_event_id: int = 0,
+    ) -> list[dict[str, Any]]:
+        if type(after_event_id) is not int or after_event_id < 0:
+            raise ValueError("hermes_run_cursor_invalid")
+        if not any(
+            str(project.get("project_id") or "") == project_id
+            for project in self.list_projects()
+        ):
+            raise KeyError("director_hermes_run_missing")
+        connection = self._connection(project_id)
+        try:
+            run = connection.execute(
+                """
+                SELECT next_event_id, events_pruned_at
+                FROM director_hermes_runs
+                WHERE project_id = ? AND conversation_id = ? AND run_id = ?
+                """,
+                (project_id, conversation_id, run_id),
+            ).fetchone()
+            if run is None:
+                raise KeyError("director_hermes_run_missing")
+            if run["events_pruned_at"] is not None:
+                raise ValueError("hermes_run_events_expired")
+            last_event_id = int(run["next_event_id"]) - 1
+            if after_event_id > last_event_id:
+                raise ValueError("hermes_run_cursor_out_of_range")
+            rows = connection.execute(
+                """
+                SELECT event_id, event_type, text, retryable
+                FROM director_hermes_run_events
+                WHERE project_id = ? AND run_id = ? AND event_id > ?
+                ORDER BY event_id
+                """,
+                (project_id, run_id, after_event_id),
+            ).fetchall()
+            return [
+                {
+                    "event_id": int(row["event_id"]),
+                    "event_type": str(row["event_type"]),
+                    "text": str(row["text"] or ""),
+                    "retryable": bool(row["retryable"]),
+                }
+                for row in rows
+            ]
+        finally:
+            connection.close()
+
+    def recover_interrupted_director_hermes_runs(
+        self, *, project_id: str
+    ) -> list[dict[str, Any]]:
+        """Settle startup orphans once; recovery never grants a new provider owner."""
+        now = self._now_iso()
+        fallback_suffix = (
+            "Hermes is temporarily unavailable. "
+            "Manual Director remains available."
+        )
+        recovered: list[dict[str, Any]] = []
+        connection = self._connection(project_id)
+        try:
+            self._begin_director_hermes_transaction(connection)
+            rows = connection.execute(
+                """
+                SELECT run_id, conversation_id, session_id, assistant_draft_text,
+                       next_event_id
+                FROM director_hermes_runs
+                WHERE project_id = ? AND status IN ('pending', 'streaming')
+                ORDER BY created_at, run_id
+                """,
+                (project_id,),
+            ).fetchall()
+            for row in rows:
+                run_id = str(row["run_id"])
+                public_text = str(row["assistant_draft_text"] or "")
+                assistant_text = (
+                    f"{public_text}\n\n{fallback_suffix}"
+                    if public_text
+                    else fallback_suffix
+                )
+                assistant_message_id = uuid.uuid4().hex
+                next_event_id = int(row["next_event_id"])
+                terminal_event_id = next_event_id + (0 if public_text else 0)
+                changed = connection.execute(
+                    """
+                    UPDATE director_hermes_runs
+                    SET status = 'interrupted', assistant_message_id = ?,
+                        assistant_draft_text = '', next_event_id = ?,
+                        updated_at = ?
+                    WHERE project_id = ? AND run_id = ?
+                      AND status IN ('pending', 'streaming')
+                      AND next_event_id = ?
+                    """,
+                    (
+                        assistant_message_id,
+                        terminal_event_id + 1,
+                        now,
+                        project_id,
+                        run_id,
+                        next_event_id,
+                    ),
+                )
+                if changed.rowcount != 1:
+                    continue
+                connection.execute(
+                    """
+                    INSERT INTO director_messages (
+                        message_id, conversation_id, project_id, session_id,
+                        role, text, proposal_id, metadata_json,
+                        client_message_id, created_at
+                    ) VALUES (?, ?, ?, ?, 'assistant', ?, NULL, ?, NULL, ?)
+                    """,
+                    (
+                        assistant_message_id,
+                        str(row["conversation_id"]),
+                        project_id,
+                        str(row["session_id"]),
+                        assistant_text,
+                        json.dumps(
+                            {
+                                "hermes_run_id": run_id,
+                                "hermes_status": "interrupted",
+                                "retryable": True,
+                            },
+                            ensure_ascii=True,
+                            sort_keys=True,
+                        ),
+                        now,
+                    ),
+                )
+                connection.execute(
+                    """
+                    INSERT INTO director_hermes_run_events (
+                        project_id, run_id, event_id, event_type, text,
+                        retryable, created_at
+                    ) VALUES (?, ?, ?, 'blocked', ?, 1, ?)
+                    """,
+                    (
+                        project_id,
+                        run_id,
+                        terminal_event_id,
+                        assistant_text,
+                        now,
+                    ),
+                )
+                connection.execute(
+                    "UPDATE director_conversations SET updated_at = ? "
+                    "WHERE conversation_id = ?",
+                    (now, str(row["conversation_id"])),
+                )
+                recovered.append(
+                    {
+                        "run_id": run_id,
+                        "status": "interrupted",
+                        "assistant_text": assistant_text,
+                    }
+                )
+            connection.commit()
+            return recovered
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def prune_director_hermes_run_events(
+        self,
+        *,
+        project_id: str,
+        retention_days: int = 30,
+        keep_terminal_streams: int = 128,
+    ) -> int:
+        if retention_days < 1 or keep_terminal_streams < 1:
+            raise ValueError("hermes_run_retention_invalid")
+        cutoff = (self._clock() - timedelta(days=retention_days)).isoformat()
+        now = self._now_iso()
+        connection = self._connection(project_id)
+        try:
+            self._begin_director_hermes_transaction(connection)
+            terminal = connection.execute(
+                """
+                SELECT run_id, updated_at
+                FROM director_hermes_runs
+                WHERE project_id = ?
+                  AND status IN ('completed', 'blocked', 'interrupted')
+                  AND events_pruned_at IS NULL
+                ORDER BY updated_at DESC, run_id DESC
+                """,
+                (project_id,),
+            ).fetchall()
+            candidates = [
+                str(row["run_id"])
+                for index, row in enumerate(terminal)
+                if index >= keep_terminal_streams
+                or str(row["updated_at"]) <= cutoff
+            ]
+            for run_id in candidates:
+                connection.execute(
+                    "DELETE FROM director_hermes_run_events "
+                    "WHERE project_id = ? AND run_id = ?",
+                    (project_id, run_id),
+                )
+                connection.execute(
+                    "UPDATE director_hermes_runs SET events_pruned_at = ? "
+                    "WHERE project_id = ? AND run_id = ? "
+                    "AND status IN ('completed', 'blocked', 'interrupted') "
+                    "AND events_pruned_at IS NULL",
+                    (now, project_id, run_id),
+                )
+            connection.commit()
+            return len(candidates)
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+        finally:
+            connection.close()
 
     @staticmethod
     def capcut_draft_handoff_claim_renewal_interval_seconds() -> float:
@@ -7579,6 +7925,101 @@ class LocalProjectStore:
             except sqlite3.OperationalError as exc:
                 if "duplicate column name" not in str(exc).lower():
                     raise
+        if "next_event_id" not in columns:
+            try:
+                connection.execute(
+                    "ALTER TABLE director_hermes_runs "
+                    "ADD COLUMN next_event_id INTEGER NOT NULL DEFAULT 1"
+                )
+            except sqlite3.OperationalError as exc:
+                if "duplicate column name" not in str(exc).lower():
+                    raise
+        if "events_pruned_at" not in columns:
+            try:
+                connection.execute(
+                    "ALTER TABLE director_hermes_runs ADD COLUMN events_pruned_at TEXT"
+                )
+            except sqlite3.OperationalError as exc:
+                if "duplicate column name" not in str(exc).lower():
+                    raise
+        legacy_rows = connection.execute(
+            """
+            SELECT run_id, project_id, status, assistant_message_id,
+                   created_at, updated_at
+            FROM director_hermes_runs AS run
+            WHERE next_event_id = 1 AND events_pruned_at IS NULL
+              AND NOT EXISTS (
+                  SELECT 1 FROM director_hermes_run_events AS event
+                  WHERE event.project_id = run.project_id
+                    AND event.run_id = run.run_id
+              )
+            """
+        ).fetchall()
+        for row in legacy_rows:
+            run_id = str(row[0])
+            project_id = str(row[1])
+            status = str(row[2])
+            assistant_message_id = row[3]
+            created_at = str(row[4])
+            updated_at = str(row[5])
+            connection.execute(
+                """
+                INSERT INTO director_hermes_run_events (
+                    project_id, run_id, event_id, event_type, text,
+                    retryable, created_at
+                ) VALUES (?, ?, 1, 'run_started', '', 0, ?)
+                """,
+                (project_id, run_id, created_at),
+            )
+            assistant = None
+            if (
+                status in {"completed", "blocked", "interrupted"}
+                and assistant_message_id is not None
+            ):
+                assistant = connection.execute(
+                    "SELECT text FROM director_messages "
+                    "WHERE project_id = ? AND message_id = ?",
+                    (
+                        project_id,
+                        str(assistant_message_id),
+                    ),
+                ).fetchone()
+            if assistant is not None:
+                connection.execute(
+                    """
+                    INSERT INTO director_hermes_run_events (
+                        project_id, run_id, event_id, event_type, text,
+                        retryable, created_at
+                    ) VALUES (?, ?, 2, ?, ?, ?, ?)
+                    """,
+                    (
+                        project_id,
+                        run_id,
+                        "run_completed" if status == "completed" else "blocked",
+                        str(assistant[0]),
+                        int(status != "completed"),
+                        updated_at,
+                    ),
+                )
+                connection.execute(
+                    "UPDATE director_hermes_runs SET next_event_id = 3 "
+                    "WHERE project_id = ? AND run_id = ? AND next_event_id = 1",
+                    (project_id, run_id),
+                )
+            elif status in {"completed", "blocked", "interrupted"}:
+                connection.execute(
+                    "UPDATE director_hermes_runs SET events_pruned_at = updated_at "
+                    "WHERE project_id = ? AND run_id = ? AND next_event_id = 1",
+                    (project_id, run_id),
+                )
+            else:
+                connection.execute(
+                    "UPDATE director_hermes_runs SET next_event_id = 2 "
+                    "WHERE project_id = ? AND run_id = ? AND next_event_id = 1",
+                    (project_id, run_id),
+                )
+        if legacy_rows:
+            connection.commit()
 
     def _ensure_recommendation_decision_state_column(self, connection: sqlite3.Connection) -> None:
         existing_columns = {

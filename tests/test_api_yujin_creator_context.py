@@ -300,7 +300,7 @@ def test_durable_begin_rechecks_session_and_asset_revision_after_context_build(
         store.begin_director_hermes_run(**arguments)
 
 
-def test_stale_pending_is_reclaimed_after_process_restart(
+def test_stale_pending_is_interrupted_without_redispatch_after_process_restart(
     tmp_path: Path,
 ) -> None:
     clock = [datetime(2026, 7, 27, tzinfo=UTC)]
@@ -331,6 +331,10 @@ def test_stale_pending_is_reclaimed_after_process_restart(
     restarted = LocalProjectStore(
         tmp_path / "projects", now=lambda: clock[0]
     )
+    recovered = restarted.recover_interrupted_director_hermes_runs(
+        project_id=project.project_id
+    )
+    assert [item["run_id"] for item in recovered] == [crashed["run_id"]]
     order: list[str] = []
     gateway = _Gateway(order)
     service = HermesRunService(
@@ -358,16 +362,25 @@ def test_stale_pending_is_reclaimed_after_process_restart(
             text="help",
             expected_session_revision=session["session_revision"],
         )
-        await run.task
+        events = [
+            event
+            async for event in service.subscribe(
+                run.run_id,
+                project_id=project.project_id,
+                conversation_id="conversation-a",
+            )
+        ]
         await service.shutdown()
+        return events
 
-    asyncio.run(scenario())
+    events = asyncio.run(scenario())
     durable = restarted.get_director_hermes_run(
         project_id=project.project_id,
         run_id=crashed["run_id"],
     )
-    assert durable["status"] == "completed"
-    assert gateway.stream_calls == 1
+    assert durable["status"] == "interrupted"
+    assert events[-1].event_type == "blocked"
+    assert gateway.stream_calls == 0
 
 
 def test_legacy_terminal_replays_and_legacy_pending_is_blocked_without_dispatch(
@@ -528,8 +541,6 @@ def test_legacy_pending_cas_loser_replays_winner_without_second_assistant(
         expected_asset_index_revision=13,
         selected_segment_id=None,
         now="2026-07-27T00:01:00+00:00",
-        stale_after_seconds=300,
-        allow_reclaim=True,
     )
 
     assert replay["status"] == "blocked"

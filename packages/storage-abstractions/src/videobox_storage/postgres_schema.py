@@ -58,6 +58,61 @@ POSTGRES_MIGRATION_STATEMENTS = (
     "ALTER TABLE director_hermes_runs ADD COLUMN IF NOT EXISTS expected_asset_index_revision INTEGER NOT NULL DEFAULT -1",
     "ALTER TABLE director_hermes_runs ADD COLUMN IF NOT EXISTS selected_segment_id TEXT",
     "ALTER TABLE director_hermes_runs ADD COLUMN IF NOT EXISTS assistant_draft_text TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE director_hermes_runs ADD COLUMN IF NOT EXISTS next_event_id INTEGER NOT NULL DEFAULT 1",
+    "ALTER TABLE director_hermes_runs ADD COLUMN IF NOT EXISTS events_pruned_at TEXT",
+    """
+    INSERT INTO director_hermes_run_events (
+        project_id, run_id, event_id, event_type, text, retryable, created_at
+    )
+    SELECT run.project_id, run.run_id, 1, 'run_started', '', 0, run.created_at
+    FROM director_hermes_runs AS run
+    WHERE run.next_event_id = 1 AND run.events_pruned_at IS NULL
+      AND NOT EXISTS (
+          SELECT 1 FROM director_hermes_run_events AS event
+          WHERE event.project_id = run.project_id AND event.run_id = run.run_id
+      )
+    ON CONFLICT DO NOTHING
+    """,
+    """
+    INSERT INTO director_hermes_run_events (
+        project_id, run_id, event_id, event_type, text, retryable, created_at
+    )
+    SELECT run.project_id, run.run_id, 2,
+           CASE WHEN run.status = 'completed' THEN 'run_completed' ELSE 'blocked' END,
+           message.text,
+           CASE WHEN run.status = 'completed' THEN 0 ELSE 1 END,
+           run.updated_at
+    FROM director_hermes_runs AS run
+    JOIN director_messages AS message
+      ON message.project_id = run.project_id
+     AND message.message_id = run.assistant_message_id
+    WHERE run.next_event_id = 1
+      AND run.status IN ('completed', 'blocked', 'interrupted')
+      AND run.events_pruned_at IS NULL
+    ON CONFLICT DO NOTHING
+    """,
+    """
+    UPDATE director_hermes_runs AS run
+    SET next_event_id = CASE
+            WHEN run.status IN ('completed', 'blocked', 'interrupted')
+                 AND EXISTS (
+                     SELECT 1 FROM director_hermes_run_events AS event
+                     WHERE event.project_id = run.project_id
+                       AND event.run_id = run.run_id
+                       AND event.event_id = 2
+                 )
+            THEN 3 ELSE 2 END,
+        events_pruned_at = CASE
+            WHEN run.status IN ('completed', 'blocked', 'interrupted')
+                 AND NOT EXISTS (
+                     SELECT 1 FROM director_hermes_run_events AS event
+                     WHERE event.project_id = run.project_id
+                       AND event.run_id = run.run_id
+                       AND event.event_id = 2
+                 )
+            THEN run.updated_at ELSE run.events_pruned_at END
+    WHERE run.next_event_id = 1
+    """,
     "ALTER TABLE recommendations ADD COLUMN IF NOT EXISTS decision_state TEXT",
     "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS progress_percent INTEGER",
     "ALTER TABLE editing_sessions ADD COLUMN IF NOT EXISTS session_revision INTEGER NOT NULL DEFAULT 1",

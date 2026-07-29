@@ -118,15 +118,43 @@ async def _poll_media_analysis(app: FastAPI, *, recover_running: bool) -> None:
             await asyncio.to_thread(dispatcher, project_id=project_id, analysis_id=analysis_id)
 
 
+async def _recover_hermes_runs(app: FastAPI) -> None:
+    """Fail closed across API restarts without redispatching provider work."""
+    store: LocalProjectStore = app.state.store
+    projects = await asyncio.to_thread(store.list_projects)
+    for project in projects:
+        project_id = str(project["project_id"])
+        await asyncio.to_thread(
+            store.recover_interrupted_director_hermes_runs,
+            project_id=project_id,
+        )
+
+
+async def _prune_hermes_run_events(app: FastAPI) -> None:
+    """Bound durable event payloads without re-running orphan recovery."""
+    store: LocalProjectStore = app.state.store
+    projects = await asyncio.to_thread(store.list_projects)
+    for project in projects:
+        project_id = str(project["project_id"])
+        await asyncio.to_thread(
+            store.prune_director_hermes_run_events,
+            project_id=project_id,
+            retention_days=30,
+            keep_terminal_streams=128,
+        )
+
+
 @asynccontextmanager
 async def _media_analysis_lifespan(app: FastAPI):
     """Run recovery and durable retry polling outside request/startup hot paths."""
     stop_event = asyncio.Event()
+    await _recover_hermes_runs(app)
 
     async def worker() -> None:
         first = True
         while not stop_event.is_set():
             await _poll_media_analysis(app, recover_running=first)
+            await _prune_hermes_run_events(app)
             first = False
             try:
                 await asyncio.wait_for(stop_event.wait(), timeout=app.state.media_analysis_poll_interval_seconds)

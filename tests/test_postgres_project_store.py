@@ -124,6 +124,198 @@ def test_postgres_store_durably_consumes_and_revokes_hermes_capabilities(
         connection.close()
 
 
+def test_postgres_hermes_events_use_durable_cursor_and_terminal_cas(
+    tmp_path: Path, postgres_url: str
+) -> None:
+    store = PostgresProjectStore(tmp_path, database_url=postgres_url)
+    project = store.bootstrap_project(f"Hermes events {uuid4().hex}")
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=f"timeline-{uuid4().hex}",
+        session_payload={"segments": [], "history": []},
+    )
+    conversation_id = f"conv-{uuid4().hex}"
+    store.create_director_conversation(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+        conversation_id=conversation_id,
+    )
+    run = store.begin_director_hermes_run(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+        conversation_id=conversation_id,
+        client_message_id=f"message-{uuid4().hex}",
+        user_text="hello",
+        expected_session_revision=session["session_revision"],
+        expected_asset_index_revision=0,
+    )
+    assert store.append_director_hermes_draft_event(
+        project_id=project.project_id,
+        run_id=run["run_id"],
+        owner_token=run["owner_token"],
+        assistant_draft_text="visible",
+        event_text="visible",
+        expected_event_id=2,
+    )
+    assert store.complete_director_hermes_run(
+        project_id=project.project_id,
+        run_id=run["run_id"],
+        owner_token=run["owner_token"],
+        status="completed",
+        assistant_text="visible answer",
+        public_text="visible",
+        retryable=False,
+    )
+    assert [
+        item["event_id"]
+        for item in store.list_director_hermes_run_events(
+            project_id=project.project_id,
+            conversation_id=conversation_id,
+            run_id=run["run_id"],
+        )
+    ] == [1, 2, 3, 4]
+
+
+def test_postgres_hermes_cursor_and_terminal_have_one_concurrent_winner(
+    tmp_path: Path, postgres_url: str
+) -> None:
+    store = PostgresProjectStore(tmp_path, database_url=postgres_url)
+    project = store.bootstrap_project(f"Hermes CAS {uuid4().hex}")
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=f"timeline-{uuid4().hex}",
+        session_payload={"segments": [], "history": []},
+    )
+    conversation_id = f"conv-{uuid4().hex}"
+    store.create_director_conversation(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+        conversation_id=conversation_id,
+    )
+    run = store.begin_director_hermes_run(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+        conversation_id=conversation_id,
+        client_message_id=f"message-{uuid4().hex}",
+        user_text="hello",
+        expected_session_revision=session["session_revision"],
+        expected_asset_index_revision=0,
+    )
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        draft_results = list(
+            executor.map(
+                lambda suffix: store.append_director_hermes_draft_event(
+                    project_id=project.project_id,
+                    run_id=run["run_id"],
+                    owner_token=run["owner_token"],
+                    assistant_draft_text=f"visible {suffix}",
+                    event_text=f"visible {suffix}",
+                    expected_event_id=2,
+                ),
+                ("one", "two"),
+            )
+        )
+    assert sorted(draft_results) == [False, True]
+    durable = store.get_director_hermes_run(
+        project_id=project.project_id, run_id=run["run_id"]
+    )
+    public_text = durable["assistant_draft_text"]
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        terminal_results = list(
+            executor.map(
+                lambda _: store.complete_director_hermes_run(
+                    project_id=project.project_id,
+                    run_id=run["run_id"],
+                    owner_token=run["owner_token"],
+                    status="completed",
+                    assistant_text=f"{public_text} final",
+                    public_text=public_text,
+                    retryable=False,
+                ),
+                range(2),
+            )
+        )
+    assert sorted(terminal_results) == [False, True]
+    events = store.list_director_hermes_run_events(
+        project_id=project.project_id,
+        conversation_id=conversation_id,
+        run_id=run["run_id"],
+    )
+    assert [item["event_id"] for item in events] == [1, 2, 3, 4]
+    assert sum(item["event_type"] == "run_completed" for item in events) == 1
+
+
+def test_postgres_pre_c1_terminal_tombstone_backfills_exact_replay(
+    tmp_path: Path, postgres_url: str
+) -> None:
+    store = PostgresProjectStore(tmp_path, database_url=postgres_url)
+    project = store.bootstrap_project(f"Hermes legacy {uuid4().hex}")
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=f"timeline-{uuid4().hex}",
+        session_payload={"segments": [], "history": []},
+    )
+    conversation_id = f"conv-{uuid4().hex}"
+    store.create_director_conversation(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+        conversation_id=conversation_id,
+    )
+    run = store.begin_director_hermes_run(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+        conversation_id=conversation_id,
+        client_message_id=f"message-{uuid4().hex}",
+        user_text="hello",
+        expected_session_revision=session["session_revision"],
+        expected_asset_index_revision=0,
+    )
+    assert store.complete_director_hermes_run(
+        project_id=project.project_id,
+        run_id=run["run_id"],
+        owner_token=run["owner_token"],
+        status="completed",
+        assistant_text="legacy answer",
+        public_text="",
+        retryable=False,
+    )
+    connection = store._connection(project.project_id)
+    try:
+        connection.execute(
+            "DELETE FROM director_hermes_run_events "
+            "WHERE project_id = ? AND run_id = ?",
+            (project.project_id, run["run_id"]),
+        )
+        connection.execute(
+            "UPDATE director_hermes_runs SET next_event_id = 1 "
+            "WHERE project_id = ? AND run_id = ?",
+            (project.project_id, run["run_id"]),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    upgraded = PostgresProjectStore(tmp_path, database_url=postgres_url)
+    assert upgraded.list_director_hermes_run_events(
+        project_id=project.project_id,
+        conversation_id=conversation_id,
+        run_id=run["run_id"],
+    ) == [
+        {
+            "event_id": 1,
+            "event_type": "run_started",
+            "text": "",
+            "retryable": False,
+        },
+        {
+            "event_id": 2,
+            "event_type": "run_completed",
+            "text": "legacy answer",
+            "retryable": False,
+        },
+    ]
+
+
 def test_sqlite_store_purges_expired_hermes_capability_ledger_rows(tmp_path: Path) -> None:
     instant = datetime(2026, 7, 19, tzinfo=UTC)
     store = LocalProjectStore(tmp_path, now=lambda: instant)

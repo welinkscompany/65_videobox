@@ -1,6 +1,19 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 307. 2026-07-28 Hermes Yujin Phase B creator flow closeout`을 우선 적용한다. Task 22 기술 closeout 근거는 `## 300`을 유지하며, 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 308. 2026-07-30 Hermes Yujin C1 durable conversation closeout`을 우선 적용한다. Task 22 기술 closeout 근거는 `## 300`, Phase B 근거는 `## 307`을 유지하며, 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+
+## 308. 2026-07-30 Hermes Yujin C1 durable conversation closeout
+
+- `[x] C1 완료`: 기존 `director_hermes_runs`와 Director message를 재사용하고 `run_started`, `text_delta`, `blocked`, `run_completed` public event만 project/run cursor 순서로 영속 저장한다. user+run+첫 event, draft+cursor, terminal remainder+assistant/proposal+terminal event는 각각 같은 transaction과 owner/cursor CAS 경계에서 저장된다.
+- `재시작·중단 복구`: process memory는 알림만 소유하고 replay truth는 DB다. API 재시작 뒤 완료 run은 `Last-Event-ID` 이후 suffix를 다시 읽고, 남아 있던 `pending/streaming`은 provider 재호출 없이 `interrupted` assistant와 `blocked` event로 exactly once 정리된다. stale pending 자동 재획득·재전송은 제거했다.
+- `SSE 경계`: 반복 GET과 process restart replay를 허용하며 project/conversation/run scope 불일치는 404, malformed cursor는 400, 미래 cursor는 409, payload가 정리된 known stream은 410 `hermes_run_events_expired`다. SSE disconnect는 provider run을 취소하지 않는다.
+- `경쟁조건`: run별 persistence lock이 draft commit과 cancel/terminal을 직렬화한다. terminal commit이 event-list/status 조회 사이에 끼어도 마지막 durable cursor까지 drain한다. terminal 저장이 실패하면 저장된 suffix까지만 유한하게 전달하고 가짜 terminal/assistant는 만들지 않으며, 다음 startup이 interrupted로 복구한다.
+- `retention·migration`: terminal 성공 직후와 기존 lifespan worker의 periodic maintenance가 `30일 초과 OR 최신 128개 밖`의 event payload를 정리한다. active stream과 run/message tombstone은 보존한다. SQLite와 PostgreSQL 모두 pre-C1 terminal tombstone을 `run_started + terminal` exact replay로 backfill한다.
+- `PostgreSQL`: SQLite `BEGIN IMMEDIATE` 번역에 기대지 않고 PostgreSQL `BEGIN`, 공통 lock order, cursor CAS, unique event key를 사용한다. 실제 PostgreSQL에서 draft/terminal concurrent winner 각각 1개, terminal exactly once, legacy backfill을 검증했다.
+- `검증`: C1 focused **92 passed**, 전체 Python **2168 passed, 25 skipped**, 실제 PostgreSQL+compatibility **31 passed**, targeted terminal-failure **2 passed**, 전체 frontend **50 files / 657 passed**, production build, Python `py_compile`, Hermes profile/runtime/plan-state/zero-tools verifier, Editor UI OSS provenance/UI-system verifier, `git diff --check`가 통과했다. 독립 spec review와 독립 quality·gap·reverse review는 발견 결함을 TDD로 수정한 뒤 최종 Critical/Important/Minor **0** PASS다.
+- `범위 제한`: C2 browser reconnect/backoff/cancel/retry, C3 capability lifecycle, C4 dashboard operations, Mem0, source copy, OpenCut runtime, 자동 apply, provider/API 확대는 시작하지 않았다. 실제 provider 호출과 Task 9 사용자 미디어·CapCut Desktop 사람 검증도 별도다.
+- `진행률`: Phase C **1/4 (25.0%), 잔여 75.0%**, realtime-reliability child **1/4 (25.0%), 잔여 75.0%**, Hermes Yujin initiative **12/20 (60.0%), 잔여 40.0%**다. 기존 VideoBox 공식 누적은 Task 9 사람/환경 acceptance 전까지 **9/22 (40.9%)**, 잔여 **59.1%**로 유지한다.
+- `다음 작업`: **C2만** 진행한다. C1 durable cursor/replay truth를 유지한 채 browser reconnect/backoff, cancel/retry, duplicate suppression과 stale-run fencing을 TDD로 구현한다. C3/C4와 Mem0는 선행 구현하지 않는다.
 
 ## 307. 2026-07-28 Hermes Yujin Phase B creator flow closeout
 

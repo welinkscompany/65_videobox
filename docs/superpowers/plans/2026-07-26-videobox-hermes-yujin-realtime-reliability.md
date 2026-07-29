@@ -13,19 +13,48 @@
 Parent: `docs/superpowers/plans/2026-07-26-videobox-hermes-yujin-master-plan.md`
 Requires: Phase B task B5 complete.
 
-Child progress: **0/4 tasks (0.0%), remaining 100.0%**.
+Child progress: **1/4 tasks (25.0%), remaining 75.0%**.
 
 ## C1 — Persist run and event cursors
 
-- [ ] **C1** Persist run/event cursors and restore final or interrupted conversation state.
+- [x] **C1** Persist run/event cursors and restore final or interrupted conversation state.
+
+**2026-07-30 source-grounded C1 amendment:**
+
+- B1/B2 already created the authoritative `director_hermes_runs` row,
+  user-before-dispatch transaction, owner-token terminal CAS, assistant link,
+  durable public draft, and completed-run reconstruction. C1 extends that row
+  and its store; it does not create a second run store or duplicate message
+  model.
+- Persist only the current public SSE contract
+  (`run_started`, `text_delta`, `blocked`, `run_completed`). The written
+  design's future `proposal_ready` and `memory_reference` names gain no new
+  producer or browser exposure in C1.
+- Preserve legacy `pending`, `completed`, and `blocked`; add `streaming` and
+  `interrupted`. C1 never writes a new `failed` synonym. Startup atomically
+  settles orphaned `pending/streaming` rows as `interrupted`, stores one
+  fail-closed assistant/terminal event, and never reclaims or redispatches
+  provider work.
+- Durable event payload retention is bounded to 30 days and the newest 128
+  terminal run streams per project, while active streams are never pruned.
+  The minimal run/client-message/assistant tombstone remains for conversation
+  lifetime so the one-assistant invariant survives pruning. A scoped events
+  request for a pruned stream returns `410 hermes_run_events_expired`; unknown
+  or other-project runs remain indistinguishable `404`.
+- C1 accepts and replays strictly after a validated backend
+  `Last-Event-ID`. Browser reconnect/backoff and suffix-parser adoption remain
+  C2; C1 does not silently expand frontend behavior.
+- The current product has one VideoBox API owner per project store. Multi-API
+  lease coordination is not introduced by C1.
 
 **Files:**
 
-- Create: `packages/domain-models/src/videobox_domain_models/hermes_runs.py`
 - Modify: `packages/storage-abstractions/src/videobox_storage/local_project_store.py`
-- Modify: storage schema/migrations owned by `LocalProjectStore`
+- Modify: `packages/storage-abstractions/src/videobox_storage/sqlite_schema.py`
+- Modify: `packages/storage-abstractions/src/videobox_storage/postgres_schema.py`
 - Modify: `services/api/src/videobox_api/hermes_run_service.py`
 - Modify: `services/api/src/videobox_api/routers/hermes_conversation.py`
+- Modify: `services/api/src/videobox_api/main.py`
 - Create: `tests/test_hermes_run_store.py`
 - Modify: `tests/test_hermes_run_service.py`
 - Modify: `tests/test_api_hermes_conversation.py`
@@ -33,19 +62,9 @@ Child progress: **0/4 tasks (0.0%), remaining 100.0%**.
 **Domain contract:**
 
 ```python
-class HermesRunStatus(StrEnum):
-    PENDING = "pending"
-    STREAMING = "streaming"
-    COMPLETED = "completed"
-    INTERRUPTED = "interrupted"
-    FAILED = "failed"
-
-class HermesRunEvent(BaseModel):
-    run_id: str
-    event_id: int
-    event_type: Literal["run_started", "text_delta", "proposal_ready", "memory_reference", "blocked", "run_completed"]
-    public_text: str
-    created_at: datetime
+active statuses = {"pending", "streaming"}
+terminal statuses = {"completed", "blocked", "interrupted"}
+public event types = {"run_started", "text_delta", "blocked", "run_completed"}
 ```
 
 Storage invariants:

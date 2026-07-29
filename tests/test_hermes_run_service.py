@@ -191,6 +191,259 @@ def test_run_persists_user_before_dispatch_and_final_before_terminal_event(
     assert messages[1]["metadata"]["hermes_status"] == "completed"
 
 
+def test_completed_run_replays_from_store_after_process_restart(
+    tmp_path: Path,
+) -> None:
+    store, project_id, session_id = _scope(tmp_path)
+    service = HermesRunService(store=store, gateway_client=_Gateway())
+
+    async def finish():
+        run = await service.create_run(
+            project_id=project_id,
+            session_id=session_id,
+            conversation_id="conv",
+            client_message_id="restart-replay",
+            text="질문",
+        )
+        await run.task
+        return run.run_id
+
+    run_id = asyncio.run(finish())
+    restarted = HermesRunService(store=store, gateway_client=_Gateway())
+
+    async def replay():
+        return [
+            event
+            async for event in restarted.subscribe(
+                run_id,
+                project_id=project_id,
+                conversation_id="conv",
+                after_event_id=1,
+            )
+        ]
+
+    events = asyncio.run(replay())
+    assert [event.event_type for event in events] == [
+        "text_delta",
+        "run_completed",
+    ]
+    assert [event.event_id for event in events] == [2, 3]
+
+
+def test_closing_one_subscription_does_not_cancel_provider_run(
+    tmp_path: Path,
+) -> None:
+    store, project_id, session_id = _scope(tmp_path)
+    gateway = _BlockingGateway()
+    service = HermesRunService(store=store, gateway_client=gateway)
+
+    async def scenario():
+        run = await service.create_run(
+            project_id=project_id,
+            session_id=session_id,
+            conversation_id="conv",
+            client_message_id="disconnect",
+            text="질문",
+        )
+        await gateway.entered.wait()
+        subscription = service.subscribe(run.run_id)
+        assert (await anext(subscription)).event_type == "run_started"
+        await subscription.aclose()
+        durable = store.get_director_hermes_run(
+            project_id=project_id, run_id=run.run_id
+        )
+        gateway.release.set()
+        await run.task
+        return durable, [
+            event async for event in service.subscribe(run.run_id)
+        ]
+
+    durable, replay = asyncio.run(scenario())
+    assert durable["status"] in {"pending", "streaming"}
+    assert replay[-1].event_type == "run_completed"
+
+
+def test_terminal_commit_between_replay_list_and_status_is_drained(
+    tmp_path: Path,
+) -> None:
+    store, project_id, session_id = _scope(tmp_path)
+    durable = store.begin_director_hermes_run(
+        project_id=project_id,
+        session_id=session_id,
+        conversation_id="conv",
+        client_message_id="terminal-race",
+        user_text="질문",
+        expected_session_revision=1,
+        expected_asset_index_revision=0,
+    )
+    original_list = store.list_director_hermes_run_events
+    first = True
+
+    def interleaved_list(**kwargs):
+        nonlocal first
+        events = original_list(**kwargs)
+        if first:
+            first = False
+            assert store.complete_director_hermes_run(
+                project_id=project_id,
+                run_id=durable["run_id"],
+                owner_token=durable["owner_token"],
+                status="completed",
+                assistant_text="answer",
+                public_text="",
+                retryable=False,
+            )
+        return events
+
+    store.list_director_hermes_run_events = interleaved_list
+    service = HermesRunService(store=store, gateway_client=_Gateway())
+
+    async def replay():
+        return [
+            event
+            async for event in service.subscribe(
+                durable["run_id"],
+                project_id=project_id,
+                conversation_id="conv",
+            )
+        ]
+
+    events = asyncio.run(replay())
+    assert [event.event_type for event in events] == [
+        "run_started",
+        "text_delta",
+        "run_completed",
+    ]
+
+
+def test_draft_commit_racing_cancel_reconciles_before_terminal(
+    tmp_path: Path,
+) -> None:
+    visible = "This committed draft is long enough to race cancellation safely."
+    store, project_id, session_id = _scope(tmp_path)
+    committed = threading.Event()
+    release_return = threading.Event()
+    original_append = store.append_director_hermes_draft_event
+
+    def delayed_append(**kwargs):
+        result = original_append(**kwargs)
+        committed.set()
+        assert release_return.wait(timeout=3)
+        return result
+
+    store.append_director_hermes_draft_event = delayed_append
+    gateway = _Gateway(
+        events=[
+            AgentGatewayEvent("text_delta", visible),
+            AgentGatewayEvent("run_completed", visible),
+        ]
+    )
+    service = HermesRunService(store=store, gateway_client=gateway)
+
+    async def scenario():
+        run = await service.create_run(
+            project_id=project_id,
+            session_id=session_id,
+            conversation_id="conv",
+            client_message_id="draft-cancel-race",
+            text="질문",
+        )
+        assert await asyncio.to_thread(committed.wait, 3)
+        cancel = asyncio.create_task(service.cancel(run.run_id))
+        for _ in range(100):
+            if run.terminalizing:
+                break
+            await asyncio.sleep(0.01)
+        assert run.terminalizing
+        release_return.set()
+        await asyncio.gather(run.task, cancel, return_exceptions=True)
+        events = await asyncio.wait_for(
+            _collect_events(service.subscribe(run.run_id)), timeout=2
+        )
+        return run, events
+
+    async def _collect_events(events):
+        return [event async for event in events]
+
+    run, events = asyncio.run(scenario())
+    durable = store.get_director_hermes_run(
+        project_id=project_id, run_id=run.run_id
+    )
+    assert durable["status"] == "blocked"
+    assert events[-1].event_type == "blocked"
+    assert sum(event.event_type == "blocked" for event in events) == 1
+    assert "".join(
+        event.text for event in events if event.event_type == "text_delta"
+    ) == events[-1].text
+    messages = store.list_director_messages(
+        project_id=project_id, conversation_id="conv"
+    )
+    assert sum(message["role"] == "assistant" for message in messages) == 1
+
+
+@pytest.mark.parametrize(
+    "terminal_failure", [False, RuntimeError("terminal unavailable")]
+)
+def test_real_store_terminal_failure_ends_without_fabricated_durable_event(
+    tmp_path: Path, terminal_failure
+) -> None:
+    visible = "This durable suffix must survive terminal persistence failure."
+    store, project_id, session_id = _scope(tmp_path)
+    original_complete = store.complete_director_hermes_run
+
+    def fail_terminal(**kwargs):
+        if isinstance(terminal_failure, Exception):
+            raise terminal_failure
+        return terminal_failure
+
+    store.complete_director_hermes_run = fail_terminal
+    service = HermesRunService(
+        store=store,
+        gateway_client=_Gateway(
+            events=[
+                AgentGatewayEvent("text_delta", visible),
+                AgentGatewayEvent("run_completed", visible),
+            ]
+        ),
+    )
+
+    async def scenario():
+        run = await service.create_run(
+            project_id=project_id,
+            session_id=session_id,
+            conversation_id="conv",
+            client_message_id=f"terminal-failure-{type(terminal_failure).__name__}",
+            text="질문",
+        )
+        await run.task
+        events = await asyncio.wait_for(
+            _collect_events(service.subscribe(run.run_id)), timeout=1
+        )
+        return run, events
+
+    async def _collect_events(events):
+        return [event async for event in events]
+
+    run, events = asyncio.run(scenario())
+    store.complete_director_hermes_run = original_complete
+    assert [event.event_type for event in events] == [
+        "run_started",
+        "text_delta",
+    ]
+    assert events[-1].text == visible
+    assert sum(
+        event.event_type in {"blocked", "run_completed"} for event in events
+    ) == 0
+    durable = store.get_director_hermes_run(
+        project_id=project_id, run_id=run.run_id
+    )
+    assert durable["status"] in {"pending", "streaming"}
+    messages = store.list_director_messages(
+        project_id=project_id, conversation_id="conv"
+    )
+    assert sum(message["role"] == "assistant" for message in messages) == 0
+
+
 def _proposal_context(*, asset_revision: int = 0) -> YujinCreatorContext:
     return YujinCreatorContext.model_validate(
         {
@@ -1773,7 +2026,10 @@ def test_live_subscriber_sees_only_durable_visible_draft_before_terminal(
                 collected.append(event)
 
         subscriber = asyncio.create_task(consume())
-        await asyncio.sleep(0)
+        for _ in range(100):
+            if len(collected) >= 2:
+                break
+            await asyncio.sleep(0.01)
         before_terminal = list(collected)
         durable_before_terminal = store.get_director_hermes_run(
             project_id=project_id,
@@ -1790,7 +2046,7 @@ def test_live_subscriber_sees_only_durable_visible_draft_before_terminal(
         "text_delta",
     ]
     assert before_terminal[-1].text == visible
-    assert durable["status"] == "pending"
+    assert durable["status"] == "streaming"
     assert durable["assistant_draft_text"] == visible
     assert "".join(
         event.text for event in events if event.event_type == "text_delta"
@@ -2212,7 +2468,12 @@ def test_terminal_cas_loser_cannot_save_orphan_candidate(tmp_path: Path) -> None
     }
     first = store.begin_director_hermes_run(**identity)
     clock[0] += timedelta(seconds=301)
-    winner = store.begin_director_hermes_run(**identity)
+    duplicate = store.begin_director_hermes_run(**identity)
+    assert duplicate["dispatch"] is False
+    assert duplicate["owner_token"] is None
+    assert store.recover_interrupted_director_hermes_runs(
+        project_id=project_id
+    )
     context = _proposal_context().model_copy(
         update={"project_id": project_id, "session_id": session_id}
     )
@@ -2221,7 +2482,7 @@ def test_terminal_cas_loser_cannot_save_orphan_candidate(tmp_path: Path) -> None
         context,
         revision=1,
         trusted_project_id=project_id,
-        trusted_run_id=winner["run_id"],
+        trusted_run_id=first["run_id"],
     ).proposal
     assert proposal is not None
 
@@ -2235,18 +2496,6 @@ def test_terminal_cas_loser_cannot_save_orphan_candidate(tmp_path: Path) -> None
         proposal=proposal,
     )
     assert store.list_director_proposals(project_id) == []
-    assert store.complete_director_hermes_run(
-        project_id=project_id,
-        run_id=winner["run_id"],
-        owner_token=winner["owner_token"],
-        status="completed",
-        assistant_text="산책 영상을 추천합니다.",
-        retryable=False,
-        proposal=proposal,
-    )
-    assert [item.proposal_id for item in store.list_director_proposals(project_id)] == [
-        proposal.proposal_id
-    ]
 
 
 def test_preexisting_trusted_proposal_id_discards_candidate_but_keeps_reply(
@@ -2450,7 +2699,7 @@ def test_changed_text_conflicts_and_owner_token_fences_stale_finalizer(
         )
     clock[0] += timedelta(seconds=301)
     restarted = LocalProjectStore(tmp_path / "projects", now=lambda: clock[0])
-    reclaimed = restarted.begin_director_hermes_run(
+    duplicate = restarted.begin_director_hermes_run(
         project_id=project_id,
         session_id=session_id,
         conversation_id="conv",
@@ -2458,9 +2707,12 @@ def test_changed_text_conflicts_and_owner_token_fences_stale_finalizer(
         user_text="one",
         **context_identity,
     )
-    assert reclaimed["run_id"] == first["run_id"]
-    assert reclaimed["dispatch"] is True
-    assert reclaimed["owner_token"] != first["owner_token"]
+    assert duplicate["run_id"] == first["run_id"]
+    assert duplicate["dispatch"] is False
+    assert duplicate["owner_token"] is None
+    assert restarted.recover_interrupted_director_hermes_runs(
+        project_id=project_id
+    )
     assert not restarted.complete_director_hermes_run(
         project_id=project_id,
         run_id=first["run_id"],
@@ -2469,17 +2721,12 @@ def test_changed_text_conflicts_and_owner_token_fences_stale_finalizer(
         assistant_text="winner",
         retryable=False,
     )
-    assert restarted.complete_director_hermes_run(
-        project_id=project_id,
-        run_id=first["run_id"],
-        owner_token=reclaimed["owner_token"],
-        status="completed",
-        assistant_text="winner",
-        retryable=False,
-    )
     assert [item["text"] for item in restarted.list_director_messages(
         project_id=project_id, conversation_id="conv"
-    )] == ["one", "winner"]
+    )] == [
+        "one",
+        "Hermes is temporarily unavailable. Manual Director remains available.",
+    ]
 
 
 @pytest.mark.parametrize("store_result", [False, RuntimeError("db unavailable")])
@@ -2896,6 +3143,7 @@ def test_completed_run_replays_durable_text_after_process_restart(
     events = asyncio.run(replay())
     assert [event.event_type for event in events] == [
         "run_started",
+        "text_delta",
         "run_completed",
     ]
     assert events[-1].text == "안녕하세요"
