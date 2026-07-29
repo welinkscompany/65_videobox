@@ -204,6 +204,8 @@ POST /api/projects/{project_id}/director/conversations/{conversation_id}/hermes-
 
 **2026-07-30 source-grounded amendment:** The authoritative C3 contract is
 `docs/superpowers/specs/2026-07-30-videobox-hermes-yujin-c3-capability-lifecycle-design.md`.
+The executable TDD sequence is
+`docs/superpowers/plans/2026-07-30-videobox-hermes-yujin-c3-capability-lifecycle.md`.
 It replaces the earlier multi-action/base-revision sketch below with two exact
 one-action capabilities bound to the current
 project/conversation/run/session/session-revision/asset-index-revision. It
@@ -236,6 +238,7 @@ mutation authority, or a provider call.
 - Modify: `.env.container.example`
 - Modify: `scripts/start-hermes-yujin.ps1`
 - Create: `tests/test_hermes_yujin_capability_lifecycle.py`
+- Modify: `tests/test_agent_gateway_api.py`
 - Modify: `tests/test_agent_gateway_creator_context.py`
 - Modify: `tests/test_agent_gateway_client.py`
 - Modify: `tests/test_hermes_run_service.py`
@@ -310,7 +313,7 @@ Each token contains exactly one action. Never issue an `apply`, `render`,
    `VIDEOBOX_TEST_POSTGRES_URL` set. A skipped PostgreSQL case is not a pass:
 
    ```powershell
-   .\.venv\Scripts\python.exe -m pytest tests/test_hermes_yujin_capability_lifecycle.py tests/test_hermes_capability_authority_contract.py tests/test_agent_gateway_creator_context.py tests/test_agent_gateway_client.py tests/test_hermes_run_service.py tests/test_postgres_project_store.py tests/test_hermes_yujin_compose_contract.py tests/test_start_hermes_yujin_script.py -q
+   .\.venv\Scripts\python.exe -m pytest tests/test_hermes_yujin_capability_lifecycle.py tests/test_hermes_capability_authority_contract.py tests/test_agent_gateway_api.py tests/test_agent_gateway_creator_context.py tests/test_agent_gateway_client.py tests/test_hermes_run_service.py tests/test_postgres_project_store.py tests/test_hermes_yujin_compose_contract.py tests/test_start_hermes_yujin_script.py -q
    $env:VIDEOBOX_TEST_POSTGRES_URL = "<disposable PostgreSQL 16 test URL>"
    .\.venv\Scripts\python.exe -m pytest tests/test_postgres_project_store.py -k "hermes_capability" -q
    git diff --check
@@ -319,8 +322,8 @@ Each token contains exactly one action. Never issue an `apply`, `render`,
 10. Mark C3 `[x]`, synchronize progress, and commit:
 
    ```powershell
-   git add requirements-agent-gateway.txt requirements-container.txt requirements-dev.txt services/agent-gateway services/api packages tests compose.yaml compose.hermes-yujin.yaml .env.container.example scripts/start-hermes-yujin.ps1 docs/superpowers/specs/2026-07-30-videobox-hermes-yujin-c3-capability-lifecycle-design.md docs/superpowers/plans
-   git commit -m "feat: complete Yujin capability lifecycle"
+   # Use the exact-file staging, authority checks, commit, push, and post-push
+   # verification block in the linked 2026-07-30 C3 detailed plan.
    ```
 
 ## C4 — Add operations, failure drills, and Phase C closeout
