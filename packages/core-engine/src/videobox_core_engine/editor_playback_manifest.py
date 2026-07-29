@@ -65,7 +65,7 @@ def build_editor_playback_manifest(
     output = materialized.get("output") if isinstance(materialized.get("output"), dict) else {}
     segments = materialized.get("session_captions") if isinstance(materialized.get("session_captions"), list) else []
     raw_style = session.get("caption_style") if isinstance(session.get("caption_style"), dict) else {}
-    style = CaptionStyle.from_dict(raw_style).to_dict()
+    CaptionStyle.from_dict(raw_style)
     source_session_id = timeline.get("source_session_id")
     source_revision = timeline.get("source_session_revision")
     session_revision = int(session.get("session_revision") or 1)
@@ -103,7 +103,11 @@ def build_editor_playback_manifest(
                 "text": str(segment.get("caption_text") or segment.get("text") or ""),
                 "start_sec": float(segment.get("start_sec") or 0),
                 "end_sec": float(segment.get("end_sec") or 0),
-                "style": style,
+                "style": CaptionStyle.from_dict(
+                    segment.get("caption_style")
+                    if isinstance(segment.get("caption_style"), dict)
+                    else raw_style
+                ).to_dict(),
             }
             for segment in segments
             if isinstance(segment, dict) and segment.get("segment_id")

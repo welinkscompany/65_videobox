@@ -402,7 +402,25 @@ class EditorFavoriteRequest(BaseModel):
     enabled: bool
 
 
-class CaptionOverrideRequest(BaseModel):
+class OptionalYujinCandidateAttestation(BaseModel):
+    proposal_id: str | None = Field(default=None, min_length=1, max_length=256)
+    candidate_id: str | None = Field(default=None, min_length=1, max_length=256)
+
+    @model_validator(mode="after")
+    def validate_optional_yujin_candidate_attestation(
+        self,
+    ) -> "OptionalYujinCandidateAttestation":
+        if (self.proposal_id is None) != (self.candidate_id is None):
+            raise ValueError("proposal_id and candidate_id must be provided together.")
+        if self.proposal_id is not None:
+            self.proposal_id = self.proposal_id.strip()
+            self.candidate_id = self.candidate_id.strip() if self.candidate_id else None
+            if not self.proposal_id or not self.candidate_id:
+                raise ValueError("proposal_id and candidate_id must not be blank.")
+        return self
+
+
+class CaptionOverrideRequest(OptionalYujinCandidateAttestation):
     expected_revision: int = Field(ge=1)
     caption_text: str = Field(min_length=1)
 
@@ -415,7 +433,7 @@ class CaptionOverrideRequest(BaseModel):
         return self
 
 
-class CaptionStyleMutationRequest(BaseModel):
+class CaptionStyleMutationRequest(OptionalYujinCandidateAttestation):
     expected_revision: int = Field(ge=1)
     scope: str = Field(pattern="^(current_caption|selected_captions|from_current|whole_project|project_default)$")
     segment_ids: list[str] = Field(default_factory=list)
@@ -518,7 +536,7 @@ class VisualOverlayRequest(BaseModel):
         return self
 
 
-class ExplanationCardRequest(BaseModel):
+class ExplanationCardRequest(OptionalYujinCandidateAttestation):
     expected_revision: int = Field(ge=1)
     title: str = ""
     body: str = ""
@@ -561,7 +579,7 @@ class ImageOverlayRequest(BaseModel):
         return self
 
 
-class TableOverlayRequest(BaseModel):
+class TableOverlayRequest(OptionalYujinCandidateAttestation):
     expected_revision: int = Field(ge=1)
     columns: list[str] = Field(default_factory=list)
     rows: list[list[str]] = Field(default_factory=list)
@@ -578,7 +596,7 @@ class TableOverlayRequest(BaseModel):
         return self
 
 
-class TTSReplacementRequest(BaseModel):
+class TTSReplacementRequest(OptionalYujinCandidateAttestation):
     expected_revision: int = Field(ge=1)
     recommendation_id: str = Field(min_length=1)
     asset_id: str = Field(min_length=1)
@@ -767,7 +785,7 @@ class EditorCaptionStyleResponse(BaseModel):
     outline_width_px: int = Field(ge=0, le=12)
     background_color: str
     position_x_percent: int = Field(ge=0, le=100)
-    position_y_percent: int = Field(ge=0, le=94)
+    position_y_percent: int = Field(ge=0, le=100)
     horizontal_align: Literal["left", "center", "right"]
     safe_area_enabled: bool
     shadow_blur_px: int = Field(ge=0)

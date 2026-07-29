@@ -262,6 +262,52 @@ class EditingSessionRegenerationMixin:
                 self.store.get_editing_session(project_id=project_id, session_id=session_id)
             ) from None
 
+    def _save_yujin_b4_command_with_revision(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        session: dict[str, Any],
+        updated_session: dict[str, Any],
+        expected_revision: int,
+        proposal_id: str | None,
+        candidate_id: str | None,
+        command_kind: str,
+        segment_id: str,
+        controls: dict[str, Any],
+    ) -> dict[str, Any]:
+        if (proposal_id is None) != (candidate_id is None):
+            raise ValueError("yujin_b4_attestation_pair_required")
+        if proposal_id is None or candidate_id is None:
+            return self._save_editing_session_with_revision(
+                project_id=project_id,
+                session_id=session_id,
+                session=session,
+                updated_session=updated_session,
+                expected_revision=expected_revision,
+            )
+        if int(session.get("session_revision") or 1) != expected_revision:
+            raise EditingSessionConflict(session)
+        try:
+            return self.store.update_yujin_b4_command_transaction(
+                project_id=project_id,
+                session_id=session_id,
+                proposal_id=proposal_id,
+                candidate_id=candidate_id,
+                command_kind=command_kind,
+                segment_id=segment_id,
+                controls=controls,
+                session_payload=updated_session,
+                expected_revision=expected_revision,
+            )
+        except EditingSessionRevisionConflict:
+            raise EditingSessionConflict(
+                self.store.get_editing_session(
+                    project_id=project_id,
+                    session_id=session_id,
+                )
+            ) from None
+
     def preview_editing_session_caption_style_scope(self, *, project_id: str, session_id: str, scope: str, segment_ids: list[str]) -> dict[str, Any]:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
         return {"affected_segment_ids": preview_caption_style_scope(session=session, scope=scope, segment_ids=segment_ids)}
@@ -309,10 +355,11 @@ class EditingSessionRegenerationMixin:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
         return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=redo(session=session), expected_revision=expected_revision)
 
-    def update_editing_session_caption_style(self, *, project_id: str, session_id: str, style: dict[str, Any], scope: str, segment_ids: list[str], expected_revision: int) -> dict[str, Any]:
+    def update_editing_session_caption_style(self, *, project_id: str, session_id: str, style: dict[str, Any], scope: str, segment_ids: list[str], expected_revision: int, proposal_id: str | None = None, candidate_id: str | None = None) -> dict[str, Any]:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
         updated = update_caption_style(session=session, style=style, scope=scope, segment_ids=segment_ids)
-        return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=updated, expected_revision=expected_revision)
+        target_segment_id = segment_ids[0] if len(segment_ids) == 1 else ""
+        return self._save_yujin_b4_command_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=updated, expected_revision=expected_revision, proposal_id=proposal_id, candidate_id=candidate_id, command_kind="set_caption_style", segment_id=target_segment_id, controls={"scope": scope, "style": style})
     def update_editing_session_segment_caption(
         self,
         *,
@@ -321,6 +368,8 @@ class EditingSessionRegenerationMixin:
         segment_id: str,
         caption_text: str,
         expected_revision: int,
+        proposal_id: str | None = None,
+        candidate_id: str | None = None,
     ) -> dict[str, Any]:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
         updated_session = update_segment_caption(
@@ -328,7 +377,7 @@ class EditingSessionRegenerationMixin:
             segment_id=segment_id,
             caption_text=caption_text,
         )
-        return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=updated_session, expected_revision=expected_revision)
+        return self._save_yujin_b4_command_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=updated_session, expected_revision=expected_revision, proposal_id=proposal_id, candidate_id=candidate_id, command_kind="set_caption_text", segment_id=segment_id, controls={"text": caption_text})
 
     def get_editing_session(self, *, project_id: str, session_id: str) -> dict[str, Any]:
         return self.store.get_editing_session(project_id=project_id, session_id=session_id)
@@ -643,6 +692,8 @@ class EditingSessionRegenerationMixin:
         body: str,
         text: str,
         expected_revision: int,
+        proposal_id: str | None = None,
+        candidate_id: str | None = None,
     ) -> dict[str, Any]:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
         updated_session = update_segment_explanation_card(
@@ -652,7 +703,7 @@ class EditingSessionRegenerationMixin:
             body=body,
             text=text,
         )
-        return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=updated_session, expected_revision=expected_revision)
+        return self._save_yujin_b4_command_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=updated_session, expected_revision=expected_revision, proposal_id=proposal_id, candidate_id=candidate_id, command_kind="apply_overlay", segment_id=segment_id, controls={"overlay_kind": "explanation-card", "title": title, "body": body, "text": text})
 
     def remove_editing_session_segment_explanation_card(
         self,
@@ -809,6 +860,8 @@ class EditingSessionRegenerationMixin:
         rows: list[list[str]],
         text: str,
         expected_revision: int,
+        proposal_id: str | None = None,
+        candidate_id: str | None = None,
     ) -> dict[str, Any]:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
         updated_session = update_segment_table_overlay(
@@ -818,7 +871,7 @@ class EditingSessionRegenerationMixin:
             rows=rows,
             text=text,
         )
-        return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=updated_session, expected_revision=expected_revision)
+        return self._save_yujin_b4_command_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=updated_session, expected_revision=expected_revision, proposal_id=proposal_id, candidate_id=candidate_id, command_kind="apply_overlay", segment_id=segment_id, controls={"overlay_kind": "table", "columns": columns, "rows": rows, "text": text})
 
     def remove_editing_session_segment_image_overlay(
         self,
@@ -929,6 +982,8 @@ class EditingSessionRegenerationMixin:
         asset_id: str,
         media_controls: dict[str, Any] | None = None,
         expected_revision: int,
+        proposal_id: str | None = None,
+        candidate_id: str | None = None,
     ) -> dict[str, Any]:
         try:
             candidate = self.store.get_tts_candidate(
@@ -949,7 +1004,7 @@ class EditingSessionRegenerationMixin:
                 recommendation_id=recommendation_id,
                 asset_id=asset_id,
             )
-            return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=updated_session, expected_revision=expected_revision)
+            return self._save_yujin_b4_command_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=updated_session, expected_revision=expected_revision, proposal_id=proposal_id, candidate_id=candidate_id, command_kind="apply_tts_candidate", segment_id=segment_id, controls={"candidate_id": recommendation_id, "asset_id": asset_id})
         if candidate["segment_id"] != segment_id:
             raise ValueError("TTS candidate does not belong to the requested segment.")
         if candidate["asset_id"] != asset_id:
@@ -965,7 +1020,7 @@ class EditingSessionRegenerationMixin:
             recommendation_id=recommendation_id,
             asset_id=asset_id,
         )
-        return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=updated_session, expected_revision=expected_revision)
+        return self._save_yujin_b4_command_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=updated_session, expected_revision=expected_revision, proposal_id=proposal_id, candidate_id=candidate_id, command_kind="apply_tts_candidate", segment_id=segment_id, controls={"candidate_id": recommendation_id, "asset_id": asset_id})
 
     def clear_editing_session_segment_tts_replacement(
         self,

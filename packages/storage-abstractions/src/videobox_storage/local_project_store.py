@@ -129,6 +129,17 @@ def _has_exact_keys(value: object, expected: set[str]) -> bool:
     return isinstance(value, Mapping) and set(value) == expected
 
 
+def _json_plain_value(value: object) -> object:
+    if isinstance(value, Mapping):
+        return {
+            str(key): _json_plain_value(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [_json_plain_value(item) for item in value]
+    return value
+
+
 def _valid_b4_candidate_controls(candidate: DirectorCandidate) -> bool:
     controls = candidate.controls
     metadata = candidate.canonical_metadata
@@ -147,7 +158,7 @@ def _valid_b4_candidate_controls(candidate: DirectorCandidate) -> bool:
                 or controls.get("scope") != "current_caption"
             ):
                 return False
-            EditorCaptionStyle.model_validate(controls["style"])
+            EditorCaptionStyle.model_validate(dict(controls["style"]))
             return True
         if candidate.media_type == "voice" and command_kind == "apply_tts_candidate":
             if not _has_exact_keys(controls, {"candidate_id", "asset_id"}):
@@ -245,6 +256,67 @@ def _session_image_overlay_matches_identity(
         and overlay.get("expected_content_sha256") == expected_content_sha256
         and overlay.get("media_revision") == media_revision
         for overlay in matched
+    )
+
+
+def _session_matches_yujin_b4_command(
+    *,
+    session_payload: dict[str, Any],
+    segment_id: str,
+    command_kind: str,
+    controls: dict[str, Any],
+) -> bool:
+    targets: list[dict[str, Any]] = []
+    for segment in session_payload.get("segments", []):
+        if not isinstance(segment, dict):
+            continue
+        containing_id = str(segment.get("segment_id") or "")
+        if containing_id == segment_id:
+            targets.append(segment)
+        for window in segment.get("content_windows", []):
+            if not isinstance(window, dict):
+                continue
+            source_id = str(window.get("source_segment_id") or containing_id)
+            if source_id == segment_id:
+                targets.append(window)
+    if command_kind == "set_caption_text":
+        return any(
+            item.get("caption_text") == str(controls.get("text") or "").strip()
+            for item in targets
+        )
+    if command_kind == "set_caption_style":
+        return any(
+            _json_plain_value(item.get("caption_style"))
+            == _json_plain_value(controls.get("style"))
+            for item in targets
+        )
+    if command_kind == "apply_tts_candidate":
+        expected = {
+            "recommendation_id": controls.get("candidate_id"),
+            "asset_id": controls.get("asset_id"),
+        }
+        return any(item.get("tts_replacement") == expected for item in targets)
+    if command_kind != "apply_overlay":
+        return False
+    expected_type = {
+        "explanation-card": "explanation_card",
+        "table": "table_overlay",
+    }.get(controls.get("overlay_kind"))
+    if expected_type is None:
+        return False
+    expected_payload = {
+        "overlay_type": expected_type,
+        **{
+            key: value
+            for key, value in controls.items()
+            if key != "overlay_kind"
+        },
+    }
+    return any(
+        _json_plain_value(overlay) == _json_plain_value(expected_payload)
+        for item in targets
+        for overlay in item.get("visual_overlays", [])
+        if isinstance(overlay, dict)
     )
 
 
@@ -2465,7 +2537,7 @@ class LocalProjectStore:
         # asset-index revision, proposal state, then dependent outputs.
         connection.execute(
             "LOCK TABLE editing_sessions, assets, director_asset_index_revisions, "
-            "director_proposals, review_approvals, subtitle_renders, "
+            "director_proposals, tts_candidates, review_approvals, subtitle_renders, "
             "preview_renders, exports, exact_preview_renders "
             "IN SHARE ROW EXCLUSIVE MODE"
         )
@@ -2594,6 +2666,161 @@ class LocalProjectStore:
             ):
                 raise EditingSessionRevisionConflict(
                     "Yujin image overlay attestation changed before session save."
+                ) from None
+
+        return self._write_editing_session(
+            project_id=project_id,
+            timeline_id=str(existing["timeline_id"]),
+            session_id=session_id,
+            session_payload=payload,
+            is_new=False,
+            created_at=str(existing["created_at"]),
+            expected_revision=expected_revision,
+            transaction_hook=attest,
+            transaction_start_hook=self._begin_director_session_transaction,
+        )
+
+    def update_yujin_b4_command_transaction(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        proposal_id: str,
+        candidate_id: str,
+        command_kind: str,
+        segment_id: str,
+        controls: dict[str, Any],
+        session_payload: dict[str, Any],
+        expected_revision: int,
+    ) -> dict[str, Any]:
+        """Atomically bind one non-image Yujin command to its persisted candidate."""
+        existing = self.get_editing_session(
+            project_id=project_id,
+            session_id=session_id,
+        )
+        payload = deepcopy(session_payload)
+        if int(payload.get("session_revision") or 0) <= int(
+            existing.get("session_revision") or 1
+        ):
+            payload["session_revision"] = int(
+                existing.get("session_revision") or 1
+            ) + 1
+
+        def attest(connection: sqlite3.Connection) -> None:
+            try:
+                proposal_row = connection.execute(
+                    "SELECT proposal_json, status FROM director_proposals "
+                    "WHERE project_id = ? AND proposal_id = ?",
+                    (project_id, proposal_id),
+                ).fetchone()
+                if proposal_row is None or str(proposal_row["status"]) != "ready":
+                    raise ValueError("proposal_not_ready")
+                proposal = proposal_from_payload(
+                    json.loads(str(proposal_row["proposal_json"]))
+                )
+                candidate = next(
+                    item
+                    for item in proposal.candidates
+                    if item.candidate_id == candidate_id
+                )
+                metadata = candidate.canonical_metadata
+                revision_row = connection.execute(
+                    "SELECT revision FROM director_asset_index_revisions "
+                    "WHERE project_id = ?",
+                    (project_id,),
+                ).fetchone()
+                current_asset_index_revision = (
+                    int(revision_row["revision"])
+                    if revision_row is not None
+                    else 0
+                )
+                expected_media_type = {
+                    "set_caption_text": "caption",
+                    "set_caption_style": "caption",
+                    "apply_tts_candidate": "voice",
+                    "apply_overlay": "overlay",
+                }.get(command_kind)
+                if (
+                    expected_media_type is None
+                    or proposal.status != "ready"
+                    or proposal.diff.get("proposal_mode")
+                    != "yujin_actionable_v1"
+                    or proposal.source_session_id != session_id
+                    or proposal.base_session_revision != expected_revision
+                    or segment_id not in proposal.target_segment_ids
+                    or current_asset_index_revision
+                    != proposal.asset_index_revision
+                    or candidate.availability != "actionable"
+                    or candidate.review_status != "approved"
+                    or candidate.media_type != expected_media_type
+                    or metadata.get("schema_version")
+                    != "videobox.yujin-response.v1"
+                    or metadata.get("yujin_actionable_operation") is not True
+                    or metadata.get("command_kind") != command_kind
+                    or metadata.get("target_segment_id") != segment_id
+                    or metadata.get("requires_materialization") is not False
+                    or not _valid_b4_candidate_controls(candidate)
+                    or _json_plain_value(candidate.controls)
+                    != _json_plain_value(controls)
+                    or not _session_matches_yujin_b4_command(
+                        session_payload=payload,
+                        segment_id=segment_id,
+                        command_kind=command_kind,
+                        controls=controls,
+                    )
+                ):
+                    raise ValueError("attestation_mismatch")
+                if command_kind == "apply_tts_candidate":
+                    asset_row = connection.execute(
+                        "SELECT project_id, asset_type, storage_uri, created_at "
+                        "FROM assets WHERE project_id = ? AND asset_id = ?",
+                        (project_id, controls["asset_id"]),
+                    ).fetchone()
+                    persisted = connection.execute(
+                        "SELECT segment_id, asset_id, technical_status, "
+                        "operator_review_status FROM tts_candidates "
+                        "WHERE project_id = ? AND candidate_id = ?",
+                        (project_id, controls["candidate_id"]),
+                    ).fetchone()
+                    if (
+                        candidate.asset_id != controls["asset_id"]
+                        or not candidate.expected_content_sha256
+                        or not candidate.media_revision
+                        or metadata.get("source_media_kind")
+                        != AssetType.GENERATED_TTS_AUDIO.value
+                        or asset_row is None
+                        or str(asset_row["project_id"]) != project_id
+                        or str(asset_row["asset_type"])
+                        != AssetType.GENERATED_TTS_AUDIO.value
+                        or str(asset_row["created_at"] or "")
+                        != candidate.media_revision
+                        or persisted is None
+                        or str(persisted["segment_id"]) != segment_id
+                        or str(persisted["asset_id"]) != controls["asset_id"]
+                        or str(persisted["technical_status"]) != "accepted"
+                        or str(persisted["operator_review_status"]) != "approved"
+                    ):
+                        raise ValueError("tts_attestation_mismatch")
+                    source = self.resolve_storage_uri(
+                        project_id=project_id,
+                        storage_uri=str(asset_row["storage_uri"]),
+                    )
+                    if (
+                        not source.is_file()
+                        or sha256_file(source)
+                        != candidate.expected_content_sha256
+                    ):
+                        raise ValueError("tts_source_identity_mismatch")
+            except (
+                KeyError,
+                OSError,
+                StopIteration,
+                TypeError,
+                ValueError,
+                json.JSONDecodeError,
+            ):
+                raise EditingSessionRevisionConflict(
+                    "Yujin command attestation changed before session save."
                 ) from None
 
         return self._write_editing_session(

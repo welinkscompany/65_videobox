@@ -33,7 +33,13 @@
   - conversation/run/SSE/proposal/preflight/caption apply/playback manifest/output readiness
   - output job 0, external provider call 0
   - 별도 Live 경로는 이중 승인, loopback, disposable root/sample copy, source SHA 보존
-  - 첫 POST 전과 Apply 전후에 supplied root session JSON과 API exact session을 대조하며 mismatch면 POST 0
+  - secret-gated nonce HMAC으로 server canonical project root를 첫 POST 전에 묶고 raw path는 응답하지 않음
+  - 같은 데이터의 다른 절대 root clone이면 `root_attestation_mismatch`, POST 0
+- 2026-07-30 재개 리뷰 보완
+  - segment별 persisted caption style을 playback manifest에 투영
+  - caption text/style, explanation/table, 승인 TTS를 exact persisted proposal/candidate terminal CAS에 연결
+  - TTS generated-audio asset kind/revision/file SHA를 같은 transaction에서 재검증
+  - 실제 PostgreSQL 16에서 변조 TTS session write 전체 rollback 확인
 
 ## 코드리뷰·갭·역방향 검증
 
@@ -45,6 +51,9 @@
 4. PostgreSQL proposal/asset/session truth 직렬화 잠금 부족
 5. candidate text canonical whitespace 불일치
 6. Live smoke가 이름이 같은 다른 loopback 프로젝트에 쓰기 가능한 root/session binding gap
+7. segment caption style이 playback manifest에서 global style로 덮이는 문제
+8. non-image typed command의 proposal/candidate terminal binding 누락
+9. preflight 뒤 TTS asset bytes 교체가 terminal CAS를 통과하는 문제
 
 최종 독립 spec review와 quality·gap·reverse review는 **Critical 0 / Important 0 / Minor 0, READY**다.
 
@@ -82,6 +91,13 @@ current revision creator context
 - Hermes profile/runtime/20-ID plan-state/zero-tools verifier: 통과
 - Editor UI OSS provenance/UI-system verifier: 통과
 - `git diff --check`: 통과
+- 2026-07-30 fresh remediation:
+  - focused Python: **83 passed**
+  - focused frontend: **3 files / 127 passed**
+  - production build: 통과
+  - 실제 PostgreSQL store: **16 passed**
+  - targeted TTS terminal rollback: **1 passed**
+  - non-live output readiness current→invalidated, output job 0, external provider call 0
 
 warning 1건은 기존 Starlette multipart pending deprecation이다. frontend의 React `act(...)`, jsdom navigation, intentional ErrorBoundary stderr와 production build의 500 kB chunk warning은 exit 0인 기존 비실패 출력이다.
 
@@ -89,8 +105,8 @@ warning 1건은 기존 Starlette multipart pending deprecation이다. frontend�
 
 - 실제 `-Live` creator smoke happy path
 - live Hermes/provider 호출
-- 실제 PostgreSQL 동시성 integration
-- Docker 환경 실증
+- 다중 writer PostgreSQL 동시성 stress
+- 전체 Docker topology 환경 실증
 - 사용자 원본 영상 재생·청취
 - 실제 CapCut Desktop 사람 검증
 

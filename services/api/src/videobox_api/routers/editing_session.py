@@ -144,7 +144,7 @@ def build_editing_session_router(orchestrator: ApiOrchestrator, store: LocalProj
     @router.patch("/api/projects/{project_id}/editing-sessions/{session_id}/caption-style")
     def patch_caption_style(project_id: str, session_id: str, payload: CaptionStyleMutationRequest) -> EditingSessionResponse:
         try:
-            result = orchestrator.update_caption_style(project_id=project_id, session_id=session_id, style=payload.style, scope=payload.scope, segment_ids=payload.segment_ids, expected_revision=payload.expected_revision)
+            result = orchestrator.update_caption_style(project_id=project_id, session_id=session_id, style=payload.style, scope=payload.scope, segment_ids=payload.segment_ids, expected_revision=payload.expected_revision, proposal_id=payload.proposal_id, candidate_id=payload.candidate_id)
         except EditingSessionConflict as exc:
             return _editing_session_conflict_response(exc)
         except ValueError as exc:
@@ -167,6 +167,8 @@ def build_editing_session_router(orchestrator: ApiOrchestrator, store: LocalProj
                 segment_id=segment_id,
                 caption_text=payload.caption_text,
                 expected_revision=payload.expected_revision,
+                proposal_id=payload.proposal_id,
+                candidate_id=payload.candidate_id,
             )
         except EditingSessionConflict as exc:
             return _editing_session_conflict_response(exc)
@@ -526,6 +528,8 @@ def build_editing_session_router(orchestrator: ApiOrchestrator, store: LocalProj
                 body=payload.body,
                 text=payload.text,
                 expected_revision=payload.expected_revision,
+                proposal_id=payload.proposal_id,
+                candidate_id=payload.candidate_id,
             )
         except EditingSessionConflict as exc:
             return _editing_session_conflict_response(exc)
@@ -613,6 +617,8 @@ def build_editing_session_router(orchestrator: ApiOrchestrator, store: LocalProj
                 rows=payload.rows,
                 text=payload.text,
                 expected_revision=payload.expected_revision,
+                proposal_id=payload.proposal_id,
+                candidate_id=payload.candidate_id,
             )
         except EditingSessionConflict as exc:
             return _editing_session_conflict_response(exc)
@@ -697,6 +703,8 @@ def build_editing_session_router(orchestrator: ApiOrchestrator, store: LocalProj
                 recommendation_id=payload.recommendation_id,
                 asset_id=payload.asset_id,
                 expected_revision=payload.expected_revision,
+                proposal_id=payload.proposal_id,
+                candidate_id=payload.candidate_id,
             )
         except EditingSessionConflict as exc:
             return _editing_session_conflict_response(exc)

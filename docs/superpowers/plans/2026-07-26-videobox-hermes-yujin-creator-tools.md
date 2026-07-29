@@ -424,6 +424,29 @@ Each operation must carry:
 
 - [x] **B5** Prove explicit apply, one-player preview, output reverse smoke, manual fallback, and Phase B closeout.
 
+**2026-07-30 independent re-review reopening:** B5 was reopened after fresh
+code/gap/reverse review found that persisted segment caption styles were not
+projected into the playback manifest, non-image typed Yujin commands lacked
+terminal proposal/candidate attestation, and the optional live smoke could not
+distinguish an exact-clone project on a different loopback API root. These
+findings must be reproduced RED, fixed without automatic apply or generic
+effect/API authority, and independently re-reviewed before B5 can return to
+`[x]`. Actual PostgreSQL concurrency remains a separately named environment
+proof and must not be claimed from static compatibility tests.
+
+**2026-07-30 re-review resolution:** The reopened findings were reproduced and
+closed. Playback now projects each segment's persisted caption style, including
+`safe_area_enabled=false` with Y=100. Caption text/style, explanation/table, and
+approved TTS commands carry persisted proposal/candidate identity into the
+same terminal session-CAS transaction; TTS additionally rechecks the exact
+generated-audio asset type, media revision, file, and SHA-256. The optional
+Live smoke uses a secret-gated nonce HMAC over the canonical server project
+root before its first POST, so an exact clone at another loopback root is
+rejected without exposing the raw path. A disposable PostgreSQL 16 integration
+proved the TTS identity failure rolls back the complete session write. Final
+independent spec and quality/gap/reverse reviews found
+Critical/Important/Minor **0/0/0**.
+
 **Files:**
 
 - Modify: `apps/web/src/features/editor/workbench/editor-workbench-route.test.tsx`

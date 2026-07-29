@@ -84,6 +84,46 @@ def test_caption_patch_materializes_updated_content_window_in_playback_manifest(
     assert manifest.json()["captions"][0]["text"] == "반가워요"
 
 
+def test_caption_style_patch_projects_exact_segment_style_into_playback_manifest(
+    tmp_path,
+) -> None:
+    client = TestClient(create_app(projects_root=tmp_path))
+    project_id, _, session_id = _manifest_fixture(client, tmp_path)
+    style = {
+        "font_family": "Pretendard",
+        "font_size_px": 64,
+        "text_color": "#00FF00FF",
+        "outline_color": "#000000FF",
+        "outline_width_px": 4,
+        "background_color": "#00000080",
+        "position_x_percent": 25,
+        "position_y_percent": 100,
+        "horizontal_align": "left",
+        "safe_area_enabled": False,
+        "shadow_blur_px": 6,
+    }
+
+    saved = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/caption-style",
+        json={
+            "expected_revision": 1,
+            "scope": "current_caption",
+            "segment_ids": ["segment-1"],
+            "style": style,
+        },
+    )
+    manifest = client.get(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/playback-manifest",
+    )
+
+    assert saved.status_code == 200
+    assert saved.json()["session_revision"] == 2
+    assert saved.json()["segments"][0]["caption_style"] == style
+    assert manifest.status_code == 200
+    assert manifest.json()["session_revision"] == 2
+    assert manifest.json()["captions"][0]["style"] == style
+
+
 def test_overlay_patches_roundtrip_through_content_windows_and_typed_manifest(tmp_path) -> None:
     client = TestClient(create_app(projects_root=tmp_path))
     project_id, _, session_id = _manifest_fixture(client, tmp_path)

@@ -5,9 +5,11 @@ from __future__ import annotations
 import argparse
 from copy import deepcopy
 from hashlib import sha256
+import hmac
 import json
 import os
 from pathlib import Path
+import secrets
 import shutil
 import socket
 import sys
@@ -40,6 +42,12 @@ from videobox_api.main import create_app as create_videobox_app
 
 SERVICE_TOKEN = "creator-smoke-service-token-with-32-bytes"
 PASS_MARKER = "HERMES_YUJIN_CREATOR_NON_LIVE_PASS"
+_ROOT_ATTESTATION_REQUEST_DOMAIN = (
+    "videobox-live-smoke-root-attestation-request-v1"
+)
+_ROOT_ATTESTATION_RESPONSE_DOMAIN = (
+    "videobox-live-smoke-root-attestation-response-v1"
+)
 
 
 class LiveSmokeBlocked(ValueError):
@@ -114,6 +122,77 @@ def _validate_live_project_root(*, root: Path, project_id: str) -> None:
     _live_assert(
         sqlite_marker.is_file() or cross_store_layout,
         "project_root_layout_missing",
+    )
+
+
+def _live_root_attestation_secret() -> bytes:
+    value = os.environ.get(
+        "VIDEOBOX_HERMES_YUJIN_LIVE_ROOT_ATTESTATION_SECRET",
+        "",
+    )
+    _live_assert(bool(value), "root_attestation_configuration_required")
+    encoded = value.encode("utf-8")
+    _live_assert(
+        value == value.strip()
+        and len(encoded) >= 32
+        and "placeholder" not in value.lower()
+        and "changeme" not in value.lower(),
+        "root_attestation_configuration_invalid",
+    )
+    return encoded
+
+
+def _root_attestation_mac(secret: bytes, message: str) -> str:
+    return hmac.new(secret, message.encode("utf-8"), sha256).hexdigest()
+
+
+def _attest_live_project_root(
+    *,
+    client: httpx.Client,
+    project_id: str,
+    root: Path,
+    secret: bytes,
+) -> None:
+    nonce = secrets.token_hex(32)
+    request_attestation = _root_attestation_mac(
+        secret,
+        (
+            f"{_ROOT_ATTESTATION_REQUEST_DOMAIN}\0"
+            f"{project_id}\0{nonce}"
+        ),
+    )
+    response = client.get(
+        (
+            "/internal/live-smoke/projects/"
+            f"{quote(project_id, safe='')}/root-attestation"
+        ),
+        params={"nonce": nonce},
+        headers={
+            "X-VideoBox-Live-Smoke-Attestation": request_attestation,
+        },
+    )
+    try:
+        payload = response.json()
+    except (TypeError, ValueError):
+        payload = {}
+    canonical_root = os.path.normcase(str(root.resolve(strict=True)))
+    expected_response = _root_attestation_mac(
+        secret,
+        (
+            f"{_ROOT_ATTESTATION_RESPONSE_DOMAIN}\0"
+            f"{project_id}\0{nonce}\0{canonical_root}"
+        ),
+    )
+    actual_response = str(payload.get("root_attestation") or "")
+    _live_assert(
+        response.status_code == 200
+        and not response.is_redirect
+        and payload.get("version") == "v1"
+        and payload.get("project_id") == project_id
+        and payload.get("nonce") == nonce
+        and len(actual_response) == 64
+        and hmac.compare_digest(actual_response, expected_response),
+        "root_attestation_mismatch",
     )
 
 
@@ -545,7 +624,19 @@ def run_non_live() -> dict[str, int | bool]:
                     f"{timeline['timeline_id']}"
                 )
                 _assert(
-                    output_readiness_before.status_code == 200,
+                    output_readiness_before.status_code == 200
+                    and output_readiness_before.json().get("source_session_id")
+                    == session["session_id"]
+                    and output_readiness_before.json().get(
+                        "source_session_revision"
+                    )
+                    == session["session_revision"]
+                    and output_readiness_before.json().get("is_current") is True
+                    and output_readiness_before.json().get("invalidated_at") is None
+                    and output_readiness_before.json().get(
+                        "invalidated_reason"
+                    )
+                    is None,
                     "output_readiness_before",
                 )
                 jobs_before_response = client.get(f"{base}/jobs")
@@ -621,7 +712,21 @@ def run_non_live() -> dict[str, int | bool]:
                     f"{timeline['timeline_id']}"
                 )
                 _assert(
-                    output_readiness_after.status_code == 200,
+                    output_readiness_after.status_code == 200
+                    and output_readiness_after.json().get("source_session_id")
+                    == session["session_id"]
+                    and output_readiness_after.json().get(
+                        "source_session_revision"
+                    )
+                    == session["session_revision"]
+                    and output_readiness_after.json().get("is_current") is False
+                    and bool(
+                        output_readiness_after.json().get("invalidated_at")
+                    )
+                    and output_readiness_after.json().get(
+                        "invalidated_reason"
+                    )
+                    == "editing_session_mutation",
                     "output_readiness_after",
                 )
                 jobs_response = client.get(f"{base}/jobs")
@@ -674,14 +779,6 @@ def run_live(
     """Run one explicit caption apply against an already disposable live project."""
 
     resolved_base_uri = _validated_live_base_uri(base_uri)
-    api_token = os.environ.get("VIDEOBOX_HERMES_YUJIN_LIVE_API_TOKEN", "")
-    _live_assert(bool(api_token.strip()), "api_credential_required")
-    _live_assert(
-        api_token == api_token.strip()
-        and "placeholder" not in api_token.lower()
-        and "changeme" not in api_token.lower(),
-        "api_credential_invalid",
-    )
     root = disposable_project_root.resolve(strict=True)
     sample = sample_asset_path.resolve(strict=True)
     _live_assert(root.is_dir(), "disposable_root_required")
@@ -699,9 +796,9 @@ def run_live(
         project_id=project_id,
         session_id=session_id,
     )
+    root_attestation_secret = _live_root_attestation_secret()
 
     original_source_sha = _sha256(sample)
-    headers = {"Authorization": f"Bearer {api_token}"}
     with tempfile.TemporaryDirectory(
         prefix="videobox_hermes_yujin_live_",
         dir=root,
@@ -716,11 +813,16 @@ def run_live(
 
         with httpx.Client(
             base_url=resolved_base_uri,
-            headers=headers,
             timeout=timeout_seconds,
             follow_redirects=False,
             trust_env=False,
         ) as client:
+            _attest_live_project_root(
+                client=client,
+                project_id=project_id,
+                root=root,
+                secret=root_attestation_secret,
+            )
             projects_response = client.get("/api/projects")
             _live_assert(
                 projects_response.status_code == 200
@@ -852,10 +954,7 @@ def run_live(
             )
             events_response = client.get(
                 events_url,
-                headers={
-                    **headers,
-                    "Accept": "text/event-stream",
-                },
+                headers={"Accept": "text/event-stream"},
             )
             _live_assert(
                 events_response.status_code == 200
@@ -969,6 +1068,8 @@ def run_live(
                         session_before_run["session_revision"]
                     ),
                     "caption_text": recommended_caption,
+                    "proposal_id": proposal_id,
+                    "candidate_id": str(candidate["candidate_id"]),
                 },
             )
             _live_assert(

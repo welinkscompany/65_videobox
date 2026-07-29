@@ -33,6 +33,7 @@ from videobox_api.routers.editing_session import build_editing_session_router
 from videobox_api.routers.director_proposals import build_director_proposals_router
 from videobox_api.routers.editor_library import build_editor_library_router
 from videobox_api.routers.jobs import build_jobs_router
+from videobox_api.routers.live_smoke_attestation import build_live_smoke_attestation_router
 from videobox_api.routers.media_library import build_media_library_router
 from videobox_api.routers.media_analysis import build_media_analysis_router
 from videobox_api.routers.outputs import build_outputs_router
@@ -211,6 +212,7 @@ def create_app(
     agent_gateway_url: str | None = None,
     agent_gateway_service_token: str | None = None,
     agent_gateway_http_client_factory=None,
+    live_smoke_root_attestation_secret: str | None = None,
 ) -> FastAPI:
     app = FastAPI(title="VideoBox API", version="0.1.0", lifespan=_media_analysis_lifespan)
 
@@ -227,6 +229,21 @@ def create_app(
         )
 
     resolved_projects_root = projects_root or resolve_projects_root()
+    resolved_root_attestation_secret = live_smoke_root_attestation_secret
+    if projects_root is None and resolved_root_attestation_secret is None:
+        resolved_root_attestation_secret = os.environ.get(
+            "VIDEOBOX_HERMES_YUJIN_LIVE_ROOT_ATTESTATION_SECRET"
+        )
+    root_attestation_secret_bytes: bytes | None = None
+    if resolved_root_attestation_secret is not None:
+        if (
+            resolved_root_attestation_secret != resolved_root_attestation_secret.strip()
+            or len(resolved_root_attestation_secret.encode("utf-8")) < 32
+        ):
+            raise ValueError("live_smoke_root_attestation_secret_invalid")
+        root_attestation_secret_bytes = resolved_root_attestation_secret.encode(
+            "utf-8"
+        )
     database_url = resolve_database_url()
     snapshot_root = resolve_container_snapshot_root()
     if snapshot_root is not None:
@@ -394,6 +411,13 @@ def create_app(
             consume_hermes_capability
         )
     app.include_router(build_projects_router(store))
+    if root_attestation_secret_bytes is not None:
+        app.include_router(
+            build_live_smoke_attestation_router(
+                store,
+                secret=root_attestation_secret_bytes,
+            )
+        )
     if hermes_capability_verifier is not None:
         app.include_router(build_hermes_internal_router(store, hermes_capability_verifier))
     app.include_router(build_creation_briefs_router(orchestrator))

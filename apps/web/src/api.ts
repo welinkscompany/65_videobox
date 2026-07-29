@@ -248,12 +248,16 @@ export type CaptionStyleScope =
   | 'whole_project'
   | 'project_default';
 
+type OptionalYujinCandidateAttestation =
+  | { proposal_id: string; candidate_id: string }
+  | { proposal_id?: never; candidate_id?: never };
+
 export type CaptionStyleMutationRequest = {
   expected_revision: number;
   scope: CaptionStyleScope;
   segment_ids: string[];
   style: CaptionStyleSnapshot;
-};
+} & OptionalYujinCandidateAttestation;
 
 export type CaptionStyleScopePreflight = {
   affected_segment_ids: string[];
@@ -388,7 +392,7 @@ export type SelectedRangePreview = {
 
 export type CaptionOverrideRequest = RevisionedEditingSessionMutation & {
   caption_text: string;
-};
+} & OptionalYujinCandidateAttestation;
 
 export type CutActionOverrideRequest = RevisionedEditingSessionMutation & {
   cut_action: string;
@@ -408,7 +412,7 @@ export type ExplanationCardRequest = RevisionedEditingSessionMutation & {
   title: string;
   body: string;
   text: string;
-};
+} & OptionalYujinCandidateAttestation;
 
 export type ImageOverlayRequest = RevisionedEditingSessionMutation & {
   asset_id: string;
@@ -422,12 +426,12 @@ export type TableOverlayRequest = RevisionedEditingSessionMutation & {
   columns: string[];
   rows: string[][];
   text: string;
-};
+} & OptionalYujinCandidateAttestation;
 
 export type TtsReplacementRequest = RevisionedEditingSessionMutation & {
   recommendation_id: string;
   asset_id: string;
-};
+} & OptionalYujinCandidateAttestation;
 
 export type PartialRegenerationRequest = RevisionedEditingSessionMutation & {
   segment_ids: string[];

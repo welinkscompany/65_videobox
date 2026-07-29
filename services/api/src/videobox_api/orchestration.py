@@ -565,8 +565,8 @@ class ApiOrchestrator:
     def preview_caption_style_scope(self, *, project_id: str, session_id: str, scope: str, segment_ids: list[str]) -> dict[str, Any]:
         return self.pipeline.preview_editing_session_caption_style_scope(project_id=project_id, session_id=session_id, scope=scope, segment_ids=segment_ids)
 
-    def update_caption_style(self, *, project_id: str, session_id: str, style: dict[str, Any], scope: str, segment_ids: list[str], expected_revision: int) -> dict[str, Any]:
-        return self.pipeline.update_editing_session_caption_style(project_id=project_id, session_id=session_id, style=style, scope=scope, segment_ids=segment_ids, expected_revision=expected_revision)
+    def update_caption_style(self, *, project_id: str, session_id: str, style: dict[str, Any], scope: str, segment_ids: list[str], expected_revision: int, proposal_id: str | None = None, candidate_id: str | None = None) -> dict[str, Any]:
+        return self.pipeline.update_editing_session_caption_style(project_id=project_id, session_id=session_id, style=style, scope=scope, segment_ids=segment_ids, expected_revision=expected_revision, proposal_id=proposal_id, candidate_id=candidate_id)
 
     def update_segment_caption(
         self,
@@ -576,6 +576,8 @@ class ApiOrchestrator:
         segment_id: str,
         caption_text: str,
         expected_revision: int,
+        proposal_id: str | None = None,
+        candidate_id: str | None = None,
     ) -> dict[str, Any]:
         return self.pipeline.update_editing_session_segment_caption(
             project_id=project_id,
@@ -583,6 +585,8 @@ class ApiOrchestrator:
             segment_id=segment_id,
             caption_text=caption_text,
             expected_revision=expected_revision,
+            proposal_id=proposal_id,
+            candidate_id=candidate_id,
         )
 
     def update_segment_cut_action(
@@ -733,6 +737,8 @@ class ApiOrchestrator:
         body: str,
         text: str,
         expected_revision: int,
+        proposal_id: str | None = None,
+        candidate_id: str | None = None,
     ) -> dict[str, Any]:
         return self.pipeline.update_editing_session_segment_explanation_card(
             project_id=project_id,
@@ -742,6 +748,8 @@ class ApiOrchestrator:
             body=body,
             text=text,
             expected_revision=expected_revision,
+            proposal_id=proposal_id,
+            candidate_id=candidate_id,
         )
 
     def remove_segment_explanation_card(
@@ -792,6 +800,8 @@ class ApiOrchestrator:
         rows: list[list[str]],
         text: str,
         expected_revision: int,
+        proposal_id: str | None = None,
+        candidate_id: str | None = None,
     ) -> dict[str, Any]:
         return self.pipeline.update_editing_session_segment_table_overlay(
             project_id=project_id,
@@ -801,6 +811,8 @@ class ApiOrchestrator:
             rows=rows,
             text=text,
             expected_revision=expected_revision,
+            proposal_id=proposal_id,
+            candidate_id=candidate_id,
         )
 
     def remove_segment_image_overlay(
@@ -876,6 +888,8 @@ class ApiOrchestrator:
         recommendation_id: str,
         asset_id: str,
         expected_revision: int,
+        proposal_id: str | None = None,
+        candidate_id: str | None = None,
     ) -> dict[str, Any]:
         return self.pipeline.select_editing_session_segment_tts_replacement(
             project_id=project_id,
@@ -884,6 +898,8 @@ class ApiOrchestrator:
             recommendation_id=recommendation_id,
             asset_id=asset_id,
             expected_revision=expected_revision,
+            proposal_id=proposal_id,
+            candidate_id=candidate_id,
         )
 
     def clear_segment_tts_replacement(

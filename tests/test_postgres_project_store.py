@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 import json
 import os
 import sqlite3
@@ -17,9 +18,11 @@ from fastapi.testclient import TestClient
 
 from videobox_api.main import create_app
 from videobox_domain_models.assets import AssetType
+from videobox_domain_models.director_proposals import DirectorCandidate, DirectorProposal
 from videobox_domain_models.jobs import JobStatus, JobType
+from videobox_core_engine.editing_session import select_segment_tts_replacement
 from videobox_storage.postgres_project_store import PostgresProjectStore, _PostgresConnection
-from videobox_storage.local_project_store import LocalProjectStore
+from videobox_storage.local_project_store import EditingSessionRevisionConflict, LocalProjectStore
 
 
 def _approve_postgres_brief(store: PostgresProjectStore, project_id: str) -> dict:
@@ -557,3 +560,138 @@ def test_postgres_store_scopes_tts_candidates_to_their_projects(
     )
     assert store.get_tts_candidate(project_id=second_project.project_id, candidate_id=second_candidate["candidate_id"])["operator_review_status"] == "pending"
     assert [item["candidate_id"] for item in store.list_tts_candidates(project_id=first_project.project_id, segment_id="segment_001")] == ["tts_candidate_001"]
+
+
+def test_postgres_yujin_tts_terminal_attestation_rolls_back_after_asset_bytes_change(
+    tmp_path: Path,
+    postgres_url: str,
+) -> None:
+    store = PostgresProjectStore(
+        tmp_path / "postgres-yujin-tts",
+        database_url=postgres_url,
+    )
+    project = store.bootstrap_project(
+        f"PostgreSQL Yujin TTS CAS {uuid4().hex}"
+    )
+    project_id = project.project_id
+    session = store.save_editing_session(
+        project_id=project_id,
+        timeline_id=f"timeline-{uuid4().hex}",
+        session_payload={
+            "segments": [{
+                "segment_id": "seg",
+                "caption_text": "unchanged",
+                "start_sec": 0.0,
+                "end_sec": 1.0,
+            }],
+            "history": [],
+        },
+    )
+    source = tmp_path / f"tts-{uuid4().hex}.wav"
+    original_bytes = b"postgres-approved-generated-tts"
+    source.write_bytes(original_bytes)
+    asset = store.register_asset(
+        project_id=project_id,
+        asset_type=AssetType.GENERATED_TTS_AUDIO,
+        source_path=source,
+    )
+    acceptance = SimpleNamespace(
+        technical_status="accepted",
+        operator_review_status="approved",
+        target_duration_sec=1.0,
+        actual_duration_sec=1.0,
+        failure_code=None,
+    )
+    tts_candidate = store.save_tts_candidate(
+        project_id=project_id,
+        segment_id="seg",
+        asset_id=asset.asset_id,
+        source_text="approved voice",
+        acceptance=acceptance,
+    )
+    proposal_candidate = DirectorCandidate(
+        candidate_id=f"voice-operation-{uuid4().hex}",
+        visible_reference_code="P00-VOICE-01",
+        media_type="voice",
+        asset_id=asset.asset_id,
+        library_asset_id=None,
+        reason_chips=("voice",),
+        scores={},
+        availability="actionable",
+        review_status="approved",
+        preview_uri=None,
+        controls={
+            "candidate_id": tts_candidate["candidate_id"],
+            "asset_id": asset.asset_id,
+        },
+        expected_content_sha256=sha256(original_bytes).hexdigest(),
+        media_revision=asset.created_at.isoformat(),
+        canonical_metadata={
+            "schema_version": "videobox.yujin-response.v1",
+            "proposal_kind": "voice",
+            "yujin_actionable_operation": True,
+            "command_kind": "apply_tts_candidate",
+            "candidate_id": tts_candidate["candidate_id"],
+            "source_media_kind": "generated_tts_audio",
+            "target_segment_id": "seg",
+            "requires_materialization": False,
+        },
+    )
+    proposal = DirectorProposal(
+        proposal_id=f"proposal-{uuid4().hex}",
+        revision_code="P00",
+        revision=0,
+        base_session_revision=session["session_revision"],
+        asset_index_revision=store.get_asset_index_revision(project_id),
+        source_session_id=session["session_id"],
+        target_segment_ids=("seg",),
+        source_script_segment_ids=("seg",),
+        status="ready",
+        diff={"proposal_mode": "yujin_actionable_v1"},
+        expires_at=None,
+        candidates=(proposal_candidate,),
+    )
+    store.save_director_proposal(project_id, proposal)
+    before = deepcopy(store.get_editing_session(
+        project_id=project_id,
+        session_id=session["session_id"],
+    ))
+    updated = select_segment_tts_replacement(
+        session=before,
+        segment_id="seg",
+        recommendation_id=tts_candidate["candidate_id"],
+        asset_id=asset.asset_id,
+    )
+    stored_asset = store.get_asset(
+        project_id=project_id,
+        asset_id=asset.asset_id,
+    )
+    stored_path = store.resolve_storage_uri(
+        project_id=project_id,
+        storage_uri=stored_asset["storage_uri"],
+    )
+    stored_path.write_bytes(b"tampered-after-proposal")
+
+    with pytest.raises(
+        EditingSessionRevisionConflict,
+        match="attestation changed",
+    ):
+        store.update_yujin_b4_command_transaction(
+            project_id=project_id,
+            session_id=session["session_id"],
+            proposal_id=proposal.proposal_id,
+            candidate_id=proposal_candidate.candidate_id,
+            command_kind="apply_tts_candidate",
+            segment_id="seg",
+            controls={
+                "candidate_id": tts_candidate["candidate_id"],
+                "asset_id": asset.asset_id,
+            },
+            session_payload=updated,
+            expected_revision=session["session_revision"],
+        )
+
+    assert store.get_editing_session(
+        project_id=project_id,
+        session_id=session["session_id"],
+    ) == before

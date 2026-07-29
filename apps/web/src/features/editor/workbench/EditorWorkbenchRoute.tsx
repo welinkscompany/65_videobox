@@ -968,21 +968,23 @@ async function applyYujinB4Candidate(port: EditorCommandPort, proposalId: string
   const segmentId = String(metadata.target_segment_id ?? "");
   const command = parseYujinB4Command(candidate);
   if (!isActionableYujinB4Candidate(candidate) || !segmentId || !command) throw new Error("yujin_candidate_unavailable");
+  const attestation = { proposalId, candidateId: candidate.candidate_id };
   if (command.kind === "caption-text") {
-    return port.setCaptionText({ segmentId, text: command.text });
+    return port.setCaptionText({ segmentId, text: command.text, attestation });
   }
   if (command.kind === "caption-style") {
     return port.setCaptionStyle({
       segmentIds: [segmentId],
       scope: "current_caption",
       style: command.style,
+      attestation,
     });
   }
   if (command.kind === "voice") {
-    return port.applyTtsCandidate({ segmentId, candidateId: command.candidateId, assetId: command.assetId });
+    return port.applyTtsCandidate({ segmentId, candidateId: command.candidateId, assetId: command.assetId, attestation });
   }
   if (command.kind === "explanation-card") {
-    return port.applyOverlay({ kind: "explanation-card", segmentId, title: command.title, body: command.body, text: command.text });
+    return port.applyOverlay({ kind: "explanation-card", segmentId, title: command.title, body: command.body, text: command.text, attestation });
   }
   if (command.kind === "image") {
     return port.applyOverlay({
@@ -990,10 +992,10 @@ async function applyYujinB4Candidate(port: EditorCommandPort, proposalId: string
       segmentId,
       assetId: command.assetId,
       text: command.text,
-      attestation: { proposalId, candidateId: candidate.candidate_id },
+      attestation,
     });
   }
-  return port.applyOverlay({ kind: "table", segmentId, columns: command.columns, rows: command.rows, text: command.text });
+  return port.applyOverlay({ kind: "table", segmentId, columns: command.columns, rows: command.rows, text: command.text, attestation });
 }
 
 type ParsedYujinB4Command =

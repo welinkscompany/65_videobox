@@ -369,7 +369,7 @@ describe("EditorWorkbenchRoute", () => {
       conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },
       messages: [], proposal: yujinB4Proposal(kind), references: [],
     } as never);
-    vi.spyOn(api, "preflightDirectorProposal").mockResolvedValue({ status: "ready" } as never);
+    const preflight = vi.spyOn(api, "preflightDirectorProposal").mockResolvedValue({ status: "ready" } as never);
     const command = vi.spyOn(api, apiMethod).mockResolvedValue({} as never);
     const materialize = vi.spyOn(api, "materializeDirectorCandidate");
     const batchApply = vi.spyOn(api, "batchApplyDirectorProposal");
@@ -378,9 +378,16 @@ describe("EditorWorkbenchRoute", () => {
     await expectEditorRevision(1);
     fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
     fireEvent.click(await screen.findByRole("radio", { name: `P01-${kind.toUpperCase()}-01 선택` }));
-    fireEvent.click(screen.getByRole("button", { name: "선택한 추천 적용" }));
+    const applyButton = screen.getByRole("button", { name: "선택한 추천 적용" });
+    fireEvent.click(applyButton);
+    fireEvent.click(applyButton);
 
     await waitFor(() => expect(command).toHaveBeenCalledTimes(1));
+    expect(preflight).toHaveBeenCalledTimes(1);
+    expect(command.mock.calls[0].at(-1)).toEqual(expect.objectContaining({
+      proposal_id: `yujin-${kind}`,
+      candidate_id: `candidate-${kind}`,
+    }));
     if (kind === "image") {
       expect(command).toHaveBeenCalledWith(
         "project-a",
@@ -483,8 +490,10 @@ describe("EditorWorkbenchRoute", () => {
       "session-a",
       "segment-1",
       {
+        candidate_id: "candidate-table",
         columns: [bounded],
         expected_revision: 1,
+        proposal_id: "yujin-table",
         rows: [[bounded]],
         text: "장면 표",
       },
@@ -2594,7 +2603,12 @@ describe("EditorWorkbenchRoute", () => {
       "project-a",
       "session-a",
       "segment-1",
-      { caption_text: "추천 자막", expected_revision: 1 },
+      {
+        candidate_id: "candidate-caption-text",
+        caption_text: "추천 자막",
+        expected_revision: 1,
+        proposal_id: "yujin-caption-text",
+      },
     );
     await expectEditorRevision(2);
     expect(api.getEditorPlaybackManifest).toHaveBeenCalledTimes(2);

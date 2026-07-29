@@ -1,13 +1,14 @@
-import { api, type BrollOverrideRequest, type CaptionStyleMutationRequest, type EditingSession, type ImageOverlayRequest, type MusicOverrideRequest, type TableOverlayRequest } from "../../api";
+import { api, type BrollOverrideRequest, type CaptionOverrideRequest, type CaptionStyleMutationRequest, type EditingSession, type ExplanationCardRequest, type ImageOverlayRequest, type MusicOverrideRequest, type TableOverlayRequest, type TtsReplacementRequest } from "../../api";
 import type { EditorCaptionStyle, EditorControls } from "./editorViewModel";
 
 type Context = Readonly<{ projectId: string; sessionId: string; expectedRevision: number }>;
 type MediaKind = "broll" | "bgm" | "sfx";
 type MediaCommand = Readonly<{ kind: MediaKind; segmentId: string; assetId: string; controls?: EditorControls }>;
+type CandidateAttestation = Readonly<{ proposalId: string; candidateId: string }>;
 type OverlayApply =
-  | Readonly<{ kind: "explanation-card"; segmentId: string; title: string; body: string; text: string }>
-  | Readonly<{ kind: "image"; segmentId: string; assetId: string; text: string; attestation?: Readonly<{ proposalId: string; candidateId: string }> }>
-  | Readonly<{ kind: "table"; segmentId: string; columns: string[]; rows: string[][]; text: string }>;
+  | Readonly<{ kind: "explanation-card"; segmentId: string; title: string; body: string; text: string; attestation?: CandidateAttestation }>
+  | Readonly<{ kind: "image"; segmentId: string; assetId: string; text: string; attestation?: CandidateAttestation }>
+  | Readonly<{ kind: "table"; segmentId: string; columns: string[]; rows: string[][]; text: string; attestation?: CandidateAttestation }>;
 type OverlayClear = Readonly<{ kind: OverlayApply["kind"]; segmentId: string }>;
 
 export type EditorCommandApi = Pick<typeof api,
@@ -34,10 +35,10 @@ export type EditorCommandPort = Readonly<{
   clearMedia(input: { kind: MediaKind; segmentId: string }): Promise<EditingSession>;
   applyOverlay(input: OverlayApply): Promise<EditingSession>;
   clearOverlay(input: OverlayClear): Promise<EditingSession>;
-  applyTtsCandidate(input: { segmentId: string; candidateId: string; assetId: string }): Promise<EditingSession>;
+  applyTtsCandidate(input: { segmentId: string; candidateId: string; assetId: string; attestation?: CandidateAttestation }): Promise<EditingSession>;
   clearTtsCandidate(input: { segmentId: string }): Promise<EditingSession>;
-  setCaptionText(input: { segmentId: string; text: string }): Promise<EditingSession>;
-  setCaptionStyle(input: { segmentIds: string[]; scope: CaptionStyleMutationRequest["scope"]; style: EditorCaptionStyle }): Promise<EditingSession>;
+  setCaptionText(input: { segmentId: string; text: string; attestation?: CandidateAttestation }): Promise<EditingSession>;
+  setCaptionStyle(input: { segmentIds: string[]; scope: CaptionStyleMutationRequest["scope"]; style: EditorCaptionStyle; attestation?: CandidateAttestation }): Promise<EditingSession>;
 }>;
 
 function mediaControls(value: EditorControls | undefined): BrollOverrideRequest["media_controls"] {
@@ -90,11 +91,11 @@ export function createEditorCommandPort(context: Context, commandApi: EditorComm
     applyMedia,
     updateMediaControls: applyMedia,
     clearMedia: ({ kind, segmentId }) => kind === "broll" ? commandApi.clearEditingSessionBrollOverride(projectId, sessionId, segmentId, expectedRevision) : kind === "bgm" ? commandApi.clearEditingSessionMusicOverride(projectId, sessionId, segmentId, expectedRevision) : commandApi.clearEditingSessionSfxOverride(projectId, sessionId, segmentId, expectedRevision),
-    applyOverlay: (input) => input.kind === "explanation-card" ? commandApi.updateEditingSessionExplanationCard(projectId, sessionId, input.segmentId, { title: input.title, body: input.body, text: input.text, ...revise }) : input.kind === "image" ? commandApi.updateEditingSessionImageOverlay(projectId, sessionId, input.segmentId, { asset_id: input.assetId, text: input.text, ...(input.attestation ? { proposal_id: input.attestation.proposalId, candidate_id: input.attestation.candidateId } : {}), ...revise } as ImageOverlayRequest) : commandApi.updateEditingSessionTableOverlay(projectId, sessionId, input.segmentId, { columns: input.columns, rows: input.rows, text: input.text, ...revise } as TableOverlayRequest),
+    applyOverlay: (input) => input.kind === "explanation-card" ? commandApi.updateEditingSessionExplanationCard(projectId, sessionId, input.segmentId, { title: input.title, body: input.body, text: input.text, ...(input.attestation ? { proposal_id: input.attestation.proposalId, candidate_id: input.attestation.candidateId } : {}), ...revise } as ExplanationCardRequest) : input.kind === "image" ? commandApi.updateEditingSessionImageOverlay(projectId, sessionId, input.segmentId, { asset_id: input.assetId, text: input.text, ...(input.attestation ? { proposal_id: input.attestation.proposalId, candidate_id: input.attestation.candidateId } : {}), ...revise } as ImageOverlayRequest) : commandApi.updateEditingSessionTableOverlay(projectId, sessionId, input.segmentId, { columns: input.columns, rows: input.rows, text: input.text, ...(input.attestation ? { proposal_id: input.attestation.proposalId, candidate_id: input.attestation.candidateId } : {}), ...revise } as TableOverlayRequest),
     clearOverlay: (input) => input.kind === "explanation-card" ? commandApi.removeEditingSessionExplanationCard(projectId, sessionId, input.segmentId, expectedRevision) : input.kind === "image" ? commandApi.removeEditingSessionImageOverlay(projectId, sessionId, input.segmentId, expectedRevision) : commandApi.removeEditingSessionTableOverlay(projectId, sessionId, input.segmentId, expectedRevision),
-    applyTtsCandidate: ({ segmentId, candidateId, assetId }) => commandApi.updateEditingSessionTtsReplacement(projectId, sessionId, segmentId, { recommendation_id: candidateId, asset_id: assetId, ...revise }),
+    applyTtsCandidate: ({ segmentId, candidateId, assetId, attestation }) => commandApi.updateEditingSessionTtsReplacement(projectId, sessionId, segmentId, { recommendation_id: candidateId, asset_id: assetId, ...(attestation ? { proposal_id: attestation.proposalId, candidate_id: attestation.candidateId } : {}), ...revise } as TtsReplacementRequest),
     clearTtsCandidate: ({ segmentId }) => commandApi.clearEditingSessionTtsReplacement(projectId, sessionId, segmentId, expectedRevision),
-    setCaptionText: ({ segmentId, text }) => commandApi.updateEditingSessionCaption(projectId, sessionId, segmentId, { caption_text: text, ...revise }),
-    setCaptionStyle: ({ segmentIds, scope, style }) => commandApi.updateEditingSessionCaptionStyle(projectId, sessionId, { segment_ids: segmentIds, scope, style: captionStyle(style), ...revise }),
+    setCaptionText: ({ segmentId, text, attestation }) => commandApi.updateEditingSessionCaption(projectId, sessionId, segmentId, { caption_text: text, ...(attestation ? { proposal_id: attestation.proposalId, candidate_id: attestation.candidateId } : {}), ...revise } as CaptionOverrideRequest),
+    setCaptionStyle: ({ segmentIds, scope, style, attestation }) => commandApi.updateEditingSessionCaptionStyle(projectId, sessionId, { segment_ids: segmentIds, scope, style: captionStyle(style), ...(attestation ? { proposal_id: attestation.proposalId, candidate_id: attestation.candidateId } : {}), ...revise } as CaptionStyleMutationRequest),
   };
 }

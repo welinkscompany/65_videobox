@@ -152,7 +152,7 @@ def test_director_transactions_explicitly_lock_postgres_truth_in_shared_order() 
         "BEGIN",
         (
             "LOCK TABLE editing_sessions, assets, director_asset_index_revisions, "
-            "director_proposals, review_approvals, subtitle_renders, "
+            "director_proposals, tts_candidates, review_approvals, subtitle_renders, "
             "preview_renders, exports, exact_preview_renders "
             "IN SHARE ROW EXCLUSIVE MODE"
         ),
@@ -162,7 +162,8 @@ def test_director_transactions_explicitly_lock_postgres_truth_in_shared_order() 
     assert lock.index("editing_sessions") < lock.index("assets")
     assert lock.index("assets") < lock.index("director_asset_index_revisions")
     assert lock.index("director_asset_index_revisions") < lock.index("director_proposals")
-    assert lock.index("director_proposals") < lock.index("review_approvals")
+    assert lock.index("director_proposals") < lock.index("tts_candidates")
+    assert lock.index("tts_candidates") < lock.index("review_approvals")
     assert lock.index("review_approvals") < lock.index("exports")
     assert lock.index("exports") < lock.index("exact_preview_renders")
     for method in (

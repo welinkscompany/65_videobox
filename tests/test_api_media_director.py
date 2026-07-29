@@ -5,6 +5,7 @@ from copy import deepcopy
 from hashlib import sha256
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 import pytest
@@ -510,6 +511,501 @@ def test_image_overlay_attestation_identity_is_a_strict_pair(
         project_id=project_id,
         session_id=session["session_id"],
     ) == before
+
+
+@pytest.mark.parametrize(
+    ("kind", "command_kind", "media_type", "controls", "route_suffix"),
+    [
+        (
+            "caption_text",
+            "set_caption_text",
+            "caption",
+            {"text": "승인된 자막"},
+            "caption",
+        ),
+        (
+            "caption_style",
+            "set_caption_style",
+            "caption",
+            {
+                "scope": "current_caption",
+                "style": {
+                    "font_family": "Pretendard",
+                    "font_size_px": 42,
+                    "text_color": "#FFFFFFFF",
+                    "outline_color": "#000000FF",
+                    "outline_width_px": 2,
+                    "background_color": "#00000000",
+                    "position_x_percent": 50,
+                    "position_y_percent": 88,
+                    "horizontal_align": "center",
+                    "safe_area_enabled": True,
+                    "shadow_blur_px": 0,
+                },
+            },
+            "caption-style",
+        ),
+        (
+            "explanation",
+            "apply_overlay",
+            "overlay",
+            {
+                "overlay_kind": "explanation-card",
+                "title": "핵심",
+                "body": "승인된 설명",
+                "text": "승인된 카드",
+            },
+            "explanation-card",
+        ),
+        (
+            "table",
+            "apply_overlay",
+            "overlay",
+            {
+                "overlay_kind": "table",
+                "columns": ["항목", "값"],
+                "rows": [["속도", "빠름"]],
+                "text": "승인된 표",
+            },
+            "table-overlay",
+        ),
+    ],
+)
+def test_non_image_yujin_terminal_attestation_rejects_substituted_controls(
+    tmp_path: Path,
+    kind: str,
+    command_kind: str,
+    media_type: str,
+    controls: dict[str, object],
+    route_suffix: str,
+) -> None:
+    app = create_app(projects_root=tmp_path / "projects")
+    client = TestClient(app)
+    store = app.state.store
+    project_id = client.post(
+        "/api/projects",
+        json={"name": f"attested {kind}"},
+    ).json()["project_id"]
+    session = store.save_editing_session(
+        project_id=project_id,
+        timeline_id="timeline",
+        session_payload={
+            "segments": [{
+                "segment_id": "seg",
+                "caption_text": "기존 자막",
+                "start_sec": 0.0,
+                "end_sec": 1.0,
+                "cut_action": "keep",
+                "review_required": False,
+            }],
+            "history": [],
+        },
+    )
+    candidate = DirectorCandidate(
+        candidate_id=f"attested-{kind}",
+        visible_reference_code=f"P00-{kind.upper()}-01",
+        media_type=media_type,
+        asset_id=f"attested-{kind}",
+        library_asset_id=None,
+        reason_chips=(kind,),
+        scores={},
+        availability="actionable",
+        review_status="approved",
+        preview_uri=None,
+        controls=controls,
+        expected_content_sha256=None,
+        media_revision="control-r1",
+        canonical_metadata={
+            "schema_version": "videobox.yujin-response.v1",
+            "proposal_kind": media_type,
+            "yujin_actionable_operation": True,
+            "command_kind": command_kind,
+            "target_segment_id": "seg",
+            "requires_materialization": False,
+        },
+    )
+    proposal = _save_generalized_yujin_proposal(
+        store=store,
+        project_id=project_id,
+        session_id=session["session_id"],
+        session_revision=session["session_revision"],
+        proposal_id=f"attested-{kind}-proposal",
+        candidates=(candidate,),
+    )
+    base = f"/api/projects/{project_id}"
+    assert client.post(
+        f"{base}/director/proposals/{proposal.proposal_id}/preflight",
+    ).status_code == 200
+    identity = {
+        "proposal_id": proposal.proposal_id,
+        "candidate_id": candidate.candidate_id,
+    }
+    if kind == "caption_text":
+        exact = {
+            "caption_text": controls["text"],
+            "expected_revision": 1,
+            **identity,
+        }
+        forged = {**exact, "caption_text": "바꿔치기 자막"}
+        route = (
+            f"{base}/editing-sessions/{session['session_id']}"
+            "/segments/seg/caption"
+        )
+    elif kind == "caption_style":
+        exact = {
+            "scope": controls["scope"],
+            "segment_ids": ["seg"],
+            "style": controls["style"],
+            "expected_revision": 1,
+            **identity,
+        }
+        forged = {
+            **exact,
+            "style": {**controls["style"], "font_size_px": 64},
+        }
+        route = (
+            f"{base}/editing-sessions/{session['session_id']}/caption-style"
+        )
+    elif kind == "explanation":
+        exact = {
+            "title": controls["title"],
+            "body": controls["body"],
+            "text": controls["text"],
+            "expected_revision": 1,
+            **identity,
+        }
+        forged = {**exact, "text": "바꿔치기 카드"}
+        route = (
+            f"{base}/editing-sessions/{session['session_id']}"
+            f"/segments/seg/{route_suffix}"
+        )
+    else:
+        exact = {
+            "columns": controls["columns"],
+            "rows": controls["rows"],
+            "text": controls["text"],
+            "expected_revision": 1,
+            **identity,
+        }
+        forged = {**exact, "text": "바꿔치기 표"}
+        route = (
+            f"{base}/editing-sessions/{session['session_id']}"
+            f"/segments/seg/{route_suffix}"
+        )
+    before = deepcopy(store.get_editing_session(
+        project_id=project_id,
+        session_id=session["session_id"],
+    ))
+
+    rejected = client.patch(route, json=forged)
+
+    assert rejected.status_code != 200
+    assert store.get_editing_session(
+        project_id=project_id,
+        session_id=session["session_id"],
+    ) == before
+    accepted = client.patch(route, json=exact)
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["session_revision"] == 2
+
+
+@pytest.mark.parametrize(
+    ("route_suffix", "payload"),
+    [
+        (
+            "segments/seg/caption",
+            {
+                "caption_text": "manual caption",
+                "expected_revision": 1,
+                "proposal_id": "proposal-only",
+            },
+        ),
+        (
+            "caption-style",
+            {
+                "scope": "current_caption",
+                "segment_ids": ["seg"],
+                "style": {
+                    "font_family": "Arial",
+                    "font_size_px": 54,
+                    "text_color": "#FFFFFFFF",
+                    "outline_color": "#000000FF",
+                    "outline_width_px": 3,
+                    "background_color": "#00000000",
+                    "position_x_percent": 50,
+                    "position_y_percent": 88,
+                    "horizontal_align": "center",
+                    "safe_area_enabled": True,
+                    "shadow_blur_px": 0,
+                },
+                "expected_revision": 1,
+                "candidate_id": "candidate-only",
+            },
+        ),
+        (
+            "segments/seg/explanation-card",
+            {
+                "title": "title",
+                "body": "body",
+                "text": "card",
+                "expected_revision": 1,
+                "proposal_id": "proposal-only",
+            },
+        ),
+        (
+            "segments/seg/table-overlay",
+            {
+                "columns": ["column"],
+                "rows": [["value"]],
+                "text": "table",
+                "expected_revision": 1,
+                "candidate_id": "candidate-only",
+            },
+        ),
+        (
+            "segments/seg/tts-replacement",
+            {
+                "recommendation_id": "tts_candidate_manual",
+                "asset_id": "asset-manual",
+                "expected_revision": 1,
+                "proposal_id": "proposal-only",
+            },
+        ),
+    ],
+)
+def test_non_image_yujin_attestation_identity_must_be_a_complete_pair(
+    tmp_path: Path,
+    route_suffix: str,
+    payload: dict[str, object],
+) -> None:
+    app = create_app(projects_root=tmp_path / "projects")
+    client = TestClient(app)
+    store = app.state.store
+    project_id = client.post(
+        "/api/projects",
+        json={"name": "one-sided attestation"},
+    ).json()["project_id"]
+    session = store.save_editing_session(
+        project_id=project_id,
+        timeline_id="timeline",
+        session_payload={
+            "segments": [{
+                "segment_id": "seg",
+                "caption_text": "unchanged",
+                "start_sec": 0.0,
+                "end_sec": 1.0,
+            }],
+            "history": [],
+        },
+    )
+    before = deepcopy(store.get_editing_session(
+        project_id=project_id,
+        session_id=session["session_id"],
+    ))
+
+    response = client.patch(
+        (
+            f"/api/projects/{project_id}/editing-sessions/"
+            f"{session['session_id']}/{route_suffix}"
+        ),
+        json=payload,
+    )
+
+    assert response.status_code == 422
+    assert store.get_editing_session(
+        project_id=project_id,
+        session_id=session["session_id"],
+    ) == before
+
+
+def test_approved_tts_yujin_terminal_attestation_rejects_another_valid_candidate(
+    tmp_path: Path,
+) -> None:
+    app = create_app(projects_root=tmp_path / "projects")
+    client = TestClient(app)
+    store = app.state.store
+    project_id = client.post(
+        "/api/projects",
+        json={"name": "attested TTS"},
+    ).json()["project_id"]
+    session = store.save_editing_session(
+        project_id=project_id,
+        timeline_id="timeline",
+        session_payload={
+            "segments": [{
+                "segment_id": "seg",
+                "caption_text": "장면",
+                "start_sec": 0.0,
+                "end_sec": 1.0,
+                "cut_action": "keep",
+                "review_required": False,
+            }],
+            "history": [],
+        },
+    )
+    acceptance = SimpleNamespace(
+        technical_status="accepted",
+        operator_review_status="approved",
+        target_duration_sec=1.0,
+        actual_duration_sec=1.0,
+        failure_code=None,
+    )
+    candidates = []
+    assets = []
+    for index in (1, 2):
+        source = tmp_path / f"voice-{index}.wav"
+        source.write_bytes(f"approved-voice-{index}".encode())
+        asset = store.register_asset(
+            project_id=project_id,
+            asset_type=AssetType.GENERATED_TTS_AUDIO,
+            source_path=source,
+        )
+        assets.append(asset)
+        candidates.append(store.save_tts_candidate(
+            project_id=project_id,
+            segment_id="seg",
+            asset_id=asset.asset_id,
+            source_text=f"voice {index}",
+            acceptance=acceptance,
+        ))
+    proposal_candidate = DirectorCandidate(
+        candidate_id="attested-voice-operation",
+        visible_reference_code="P00-VOICE-01",
+        media_type="voice",
+        asset_id=assets[0].asset_id,
+        library_asset_id=None,
+        reason_chips=("voice",),
+        scores={},
+        availability="actionable",
+        review_status="approved",
+        preview_uri=None,
+        controls={
+            "candidate_id": candidates[0]["candidate_id"],
+            "asset_id": assets[0].asset_id,
+        },
+        expected_content_sha256=sha256((tmp_path / "voice-1.wav").read_bytes()).hexdigest(),
+        media_revision=assets[0].created_at.isoformat(),
+        canonical_metadata={
+            "schema_version": "videobox.yujin-response.v1",
+            "proposal_kind": "voice",
+            "yujin_actionable_operation": True,
+                "command_kind": "apply_tts_candidate",
+                "candidate_id": candidates[0]["candidate_id"],
+                "source_media_kind": "generated_tts_audio",
+                "target_segment_id": "seg",
+            "requires_materialization": False,
+        },
+    )
+    proposal = _save_generalized_yujin_proposal(
+        store=store,
+        project_id=project_id,
+        session_id=session["session_id"],
+        session_revision=1,
+        proposal_id="attested-voice-proposal",
+        candidates=(proposal_candidate,),
+    )
+    base = f"/api/projects/{project_id}"
+    assert client.post(
+        f"{base}/director/proposals/{proposal.proposal_id}/preflight",
+    ).status_code == 200
+    route = (
+        f"{base}/editing-sessions/{session['session_id']}"
+        "/segments/seg/tts-replacement"
+    )
+    before = deepcopy(store.get_editing_session(
+        project_id=project_id,
+        session_id=session["session_id"],
+    ))
+
+    rejected = client.patch(route, json={
+        "recommendation_id": candidates[1]["candidate_id"],
+        "asset_id": assets[1].asset_id,
+        "expected_revision": 1,
+        "proposal_id": proposal.proposal_id,
+        "candidate_id": proposal_candidate.candidate_id,
+    })
+
+    assert rejected.status_code != 200
+    assert store.get_editing_session(
+        project_id=project_id,
+        session_id=session["session_id"],
+    ) == before
+    exact_payload = {
+        "recommendation_id": candidates[0]["candidate_id"],
+        "asset_id": assets[0].asset_id,
+        "expected_revision": 1,
+        "proposal_id": proposal.proposal_id,
+        "candidate_id": proposal_candidate.candidate_id,
+    }
+    stored_asset = store.get_asset(
+        project_id=project_id,
+        asset_id=assets[0].asset_id,
+    )
+    stored_path = store.resolve_storage_uri(
+        project_id=project_id,
+        storage_uri=stored_asset["storage_uri"],
+    )
+    original_bytes = stored_path.read_bytes()
+    stored_path.write_bytes(b"tampered-after-preflight")
+
+    stale = client.patch(route, json=exact_payload)
+
+    assert stale.status_code != 200
+    assert store.get_editing_session(
+        project_id=project_id,
+        session_id=session["session_id"],
+    ) == before
+    stored_path.write_bytes(original_bytes)
+    store._execute(
+        project_id,
+        "UPDATE assets SET asset_type = ? "
+        "WHERE project_id = ? AND asset_id = ?",
+        (
+            AssetType.NARRATION_AUDIO.value,
+            project_id,
+            assets[0].asset_id,
+        ),
+    )
+
+    wrong_kind = client.patch(route, json=exact_payload)
+
+    assert wrong_kind.status_code != 200
+    assert store.get_editing_session(
+        project_id=project_id,
+        session_id=session["session_id"],
+    ) == before
+    store._execute(
+        project_id,
+        "UPDATE assets SET asset_type = ?, created_at = ? "
+        "WHERE project_id = ? AND asset_id = ?",
+        (
+            AssetType.GENERATED_TTS_AUDIO.value,
+            "2026-01-01T00:00:00+00:00",
+            project_id,
+            assets[0].asset_id,
+        ),
+    )
+
+    wrong_revision = client.patch(route, json=exact_payload)
+
+    assert wrong_revision.status_code != 200
+    assert store.get_editing_session(
+        project_id=project_id,
+        session_id=session["session_id"],
+    ) == before
+    store._execute(
+        project_id,
+        "UPDATE assets SET created_at = ? "
+        "WHERE project_id = ? AND asset_id = ?",
+        (
+            proposal_candidate.media_revision,
+            project_id,
+            assets[0].asset_id,
+        ),
+    )
+    accepted = client.patch(route, json=exact_payload)
+    assert accepted.status_code == 200
+    assert accepted.json()["session_revision"] == 2
 
 
 def _complete_image_analysis(
