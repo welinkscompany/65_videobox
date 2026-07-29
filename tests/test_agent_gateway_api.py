@@ -13,7 +13,7 @@ from videobox_agent_gateway.main import _stream_public_lines, create_app
 class _Hermes:
     calls = 0
 
-    async def stream_prompt(self, *, text: str):
+    async def stream_prompt(self, *, text: str, run_id: str | None = None):
         self.calls += 1
         yield HermesRpcEvent("message.delta", "a")
         yield HermesRpcEvent("message.complete", "answer")
@@ -111,6 +111,31 @@ def test_gateway_has_only_health_and_authenticated_bounded_run_flow() -> None:
     assert hermes.calls == 1
 
 
+def test_gateway_cancel_is_authenticated_and_targets_only_the_named_run() -> None:
+    class InterruptibleHermes(_Hermes):
+        def __init__(self) -> None:
+            self.interruptions: list[str] = []
+
+        async def interrupt(self, *, run_id: str) -> bool:
+            self.interruptions.append(run_id)
+            return False
+
+    hermes = InterruptibleHermes()
+    token = "service-secret-that-is-at-least-32-bytes"
+    client = TestClient(create_app(hermes_client=hermes, service_token=token))
+
+    assert client.post(
+        "/internal/hermes/runs/run-a/cancel"
+    ).status_code == 401
+    response = client.post(
+        "/internal/hermes/runs/run-a/cancel",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 204
+    assert hermes.interruptions == ["run-a"]
+
+
 def test_unconfigured_gateway_remains_health_only() -> None:
     app = create_app()
     paths = {route.path for route in app.routes}
@@ -121,7 +146,7 @@ def test_validation_and_unsafe_output_are_redacted() -> None:
     sentinel = "do-not-reflect-this-secret"
 
     class UnsafeHermes:
-        async def stream_prompt(self, *, text: str):
+        async def stream_prompt(self, *, text: str, run_id: str | None = None):
             yield HermesRpcEvent("message.delta", "safe prefix")
             yield HermesRpcEvent(
                 "message.complete",
@@ -156,7 +181,7 @@ def test_validation_and_unsafe_output_are_redacted() -> None:
 
 def test_unsafe_output_split_across_events_is_quarantined() -> None:
     class SplitHermes:
-        async def stream_prompt(self, *, text: str):
+        async def stream_prompt(self, *, text: str, run_id: str | None = None):
             yield HermesRpcEvent("message.delta", "pass")
             yield HermesRpcEvent("message.delta", "word=private")
             yield HermesRpcEvent("message.complete", "never publish")
@@ -175,7 +200,7 @@ def test_unsafe_output_split_across_events_is_quarantined() -> None:
 
 def test_excessive_empty_event_stream_is_bounded() -> None:
     class NoisyHermes:
-        async def stream_prompt(self, *, text: str):
+        async def stream_prompt(self, *, text: str, run_id: str | None = None):
             for _ in range(513):
                 yield HermesRpcEvent("message.delta", "")
             yield HermesRpcEvent("message.complete", "answer")
@@ -199,7 +224,7 @@ def test_safe_prefix_streams_before_hermes_completion_barrier() -> None:
             self.delta_sent = asyncio.Event()
             self.release_completion = asyncio.Event()
 
-        async def stream_prompt(self, *, text: str):
+        async def stream_prompt(self, *, text: str, run_id: str | None = None):
             self.delta_sent.set()
             yield HermesRpcEvent("message.delta", safe_text)
             await self.release_completion.wait()
@@ -245,7 +270,7 @@ def test_split_sensitive_markers_are_blocked_before_any_marker_bytes_escape(
     safe_prefix = ("s" * 300) + "\n"
 
     class SplitHermes:
-        async def stream_prompt(self, *, text: str):
+        async def stream_prompt(self, *, text: str, run_id: str | None = None):
             yield HermesRpcEvent("message.delta", safe_prefix + chunks[0])
             yield HermesRpcEvent("message.delta", chunks[1])
             yield HermesRpcEvent("message.complete", safe_prefix + "".join(chunks))
@@ -274,7 +299,7 @@ def test_split_sensitive_markers_are_blocked_before_any_marker_bytes_escape(
 
 def _stream_events_for_chunks(chunks: tuple[str, ...], final_text: str) -> list[dict]:
     class ChunkedHermes:
-        async def stream_prompt(self, *, text: str):
+        async def stream_prompt(self, *, text: str, run_id: str | None = None):
             for chunk in chunks:
                 yield HermesRpcEvent("message.delta", chunk)
             yield HermesRpcEvent("message.complete", final_text)
@@ -463,7 +488,7 @@ def test_long_non_sensitive_prose_still_streams_incrementally(
         def __init__(self) -> None:
             self.release_completion = asyncio.Event()
 
-        async def stream_prompt(self, *, text: str):
+        async def stream_prompt(self, *, text: str, run_id: str | None = None):
             yield HermesRpcEvent("message.delta", safe_text)
             await self.release_completion.wait()
             yield HermesRpcEvent("message.complete", safe_text)
@@ -485,7 +510,7 @@ def test_long_non_sensitive_prose_still_streams_incrementally(
 
 def test_single_oversized_hermes_chunk_fails_closed() -> None:
     class OversizedHermes:
-        async def stream_prompt(self, *, text: str):
+        async def stream_prompt(self, *, text: str, run_id: str | None = None):
             yield HermesRpcEvent("message.delta", "x" * 200_001)
             yield HermesRpcEvent("message.complete", "x" * 200_001)
 
@@ -504,7 +529,7 @@ def test_public_delta_frames_are_chunked_below_api_client_text_limit() -> None:
     safe_text = "x" * 63_000
 
     class LargeHermes:
-        async def stream_prompt(self, *, text: str):
+        async def stream_prompt(self, *, text: str, run_id: str | None = None):
             yield HermesRpcEvent("message.delta", safe_text)
             yield HermesRpcEvent("message.complete", safe_text)
 

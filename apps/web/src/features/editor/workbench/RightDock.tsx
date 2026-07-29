@@ -45,6 +45,8 @@ export type RightDockProps = Readonly<{
   onPreviewCandidate?: (candidate: RightDockCandidate) => void;
   onStart?: () => void | Promise<void>;
   onRetryMessage?: () => void | Promise<void>;
+  onCancelRun?: () => void | Promise<void>;
+  onRetryRun?: () => void | Promise<void>;
   retryAfterSeconds?: number | null;
 }>;
 
@@ -73,6 +75,8 @@ export function RightDock({
   onPreviewCandidate,
   onStart,
   onRetryMessage,
+  onCancelRun,
+  onRetryRun,
   retryAfterSeconds = null,
 }: RightDockProps) {
   const [inspectorOpen, setInspectorOpen] = useState(false);
@@ -135,6 +139,9 @@ export function RightDock({
       {runState.kind === "complete" && runState.syncWarning
         ? <p aria-label="대화 저장 상태" className="vb-editor-right-dock__sync-warning">{runState.syncWarning}</p>
         : null}
+      {(runState.kind === "streaming" || runState.kind === "unavailable") && runState.cancelWarning
+        ? <p role="status" className="vb-editor-right-dock__sync-warning">{runState.cancelWarning}</p>
+        : null}
       {state === "blocked" || state === "error" || runState.kind === "unavailable" ? <div className="vb-editor-right-dock__fallback"><p>{runState.kind === "unavailable" ? runState.message : "유진의 답을 받지 못했어요."}</p>{onManualEdit ? <Button type="button" onClick={onManualEdit}>Yujin 없이 계속 편집</Button> : null}</div> : null}
       {state === "idle" && !proposal && onStart ? <Button type="button" onClick={() => void onStart()}>유진에게 추천받기</Button> : null}
       <div
@@ -158,6 +165,12 @@ export function RightDock({
       <label htmlFor="vb-eugene-request">유진에게 요청하기</label>
       <Textarea id="vb-eugene-request" disabled={composerDisabled} value={draft} onChange={(event) => onDraftChange(event.target.value)} placeholder="예: 이 구간에 어울리는 B-roll을 추천해 줘" />
       <Button type="button" disabled={!canSend} onClick={submit}>요청 보내기</Button>
+      {onCancelRun
+        ? <Button type="button" onClick={() => void onCancelRun()}>답변 중단</Button>
+        : null}
+      {runState.kind === "unavailable" && runState.retryable && onRetryRun
+        ? <Button type="button" onClick={() => void onRetryRun()}>같은 요청 다시 보내기</Button>
+        : null}
       {onRetryMessage ? <Button type="button" disabled={retryRemaining > 0} onClick={() => void onRetryMessage()}>{retryRemaining > 0 ? `같은 요청 다시 보내기 (${retryRemaining}초)` : "같은 요청 다시 보내기"}</Button> : null}
     </section>
 

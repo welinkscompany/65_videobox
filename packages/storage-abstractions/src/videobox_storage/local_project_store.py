@@ -3275,7 +3275,7 @@ class LocalProjectStore:
         message_id = uuid.uuid4().hex
         connection = self._connection(project_id)
         try:
-            connection.execute("BEGIN IMMEDIATE")
+            self._begin_director_hermes_transaction(connection)
             session = connection.execute("SELECT session_id FROM editing_sessions WHERE session_id = ? AND project_id = ?", (session_id, project_id)).fetchone()
             if session is None:
                 raise KeyError("editing_session_missing")
@@ -3284,9 +3284,12 @@ class LocalProjectStore:
                 raise KeyError("director_conversation_missing")
             if str(conversation["project_id"]) != project_id or str(conversation["session_id"]) != session_id:
                 raise ValueError("conversation_scope_mismatch")
+            message_order = self._next_director_message_order(
+                connection, conversation_id=conversation_id
+            )
             connection.execute(
-                "INSERT INTO director_messages (message_id, conversation_id, project_id, session_id, role, text, proposal_id, metadata_json, client_message_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, '{}', ?, ?)",
-                (message_id, conversation_id, project_id, session_id, role, text, proposal_id, client_message_id, now),
+                "INSERT INTO director_messages (message_id, conversation_id, project_id, session_id, role, text, proposal_id, metadata_json, client_message_id, message_order, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, '{}', ?, ?, ?)",
+                (message_id, conversation_id, project_id, session_id, role, text, proposal_id, client_message_id, message_order, now),
             )
             connection.execute("UPDATE director_conversations SET updated_at = ? WHERE conversation_id = ?", (now, conversation_id))
             connection.commit()
@@ -3299,7 +3302,17 @@ class LocalProjectStore:
         return {"message_id": message_id, "conversation_id": conversation_id, "project_id": project_id, "session_id": session_id, "role": role, "text": text, "proposal_id": proposal_id, "client_message_id": client_message_id, "created_at": now}
 
     def list_director_messages(self, *, project_id: str, conversation_id: str) -> list[dict[str, Any]]:
-        rows = self._fetchall(project_id, "SELECT message_id, conversation_id, project_id, session_id, role, text, proposal_id, metadata_json, client_message_id, created_at FROM director_messages WHERE conversation_id = ? AND project_id = ? ORDER BY created_at, rowid", (conversation_id, project_id))
+        rows = self._fetchall(
+            project_id,
+            """
+            SELECT message_id, conversation_id, project_id, session_id, role,
+                   text, proposal_id, metadata_json, client_message_id, created_at
+            FROM director_messages
+            WHERE conversation_id = ? AND project_id = ?
+            ORDER BY message_order, message_id
+            """,
+            (conversation_id, project_id),
+        )
         return [self._director_message_payload(row) for row in rows]
 
     def get_director_exchange_by_client_message_id(self, *, project_id: str, session_id: str, conversation_id: str, client_message_id: str, user_text: str) -> dict[str, Any] | None:
@@ -3418,7 +3431,7 @@ class LocalProjectStore:
         now = self._now_iso()
         connection = self._connection(project_id)
         try:
-            connection.execute("BEGIN IMMEDIATE")
+            self._begin_director_hermes_transaction(connection)
             session = connection.execute("SELECT session_id FROM editing_sessions WHERE session_id = ? AND project_id = ?", (session_id, project_id)).fetchone()
             if session is None:
                 raise KeyError("editing_session_missing")
@@ -3431,19 +3444,45 @@ class LocalProjectStore:
                 raise KeyError("director_conversation_missing")
             if str(conversation["project_id"]) != project_id or str(conversation["session_id"]) != session_id:
                 raise ValueError("conversation_scope_mismatch")
-            existing = connection.execute("SELECT message_id FROM director_messages WHERE conversation_id = ? AND client_message_id = ?", (conversation_id, client_message_id)).fetchone()
+            existing = connection.execute(
+                """
+                SELECT message_id, conversation_id, project_id, session_id, role,
+                       text, proposal_id, metadata_json, client_message_id,
+                       message_order, created_at
+                FROM director_messages
+                WHERE conversation_id = ? AND client_message_id = ?
+                """,
+                (conversation_id, client_message_id),
+            ).fetchone()
             if existing is not None:
-                rows = connection.execute("SELECT message_id, conversation_id, project_id, session_id, role, text, proposal_id, metadata_json, client_message_id, created_at FROM director_messages WHERE conversation_id = ? ORDER BY created_at, rowid", (conversation_id,)).fetchall()
-                user_index = next(index for index, row in enumerate(rows) if str(row["message_id"]) == str(existing["message_id"]))
-                if str(rows[user_index]["text"]) != user_text:
+                if str(existing["text"]) != user_text:
                     raise ValueError("client_message_id_reused_with_different_content")
-                if user_index + 1 >= len(rows) or str(rows[user_index + 1]["role"]) != "assistant":
+                assistant_rows = connection.execute(
+                    """
+                    SELECT message_id, conversation_id, project_id, session_id,
+                           role, text, proposal_id, metadata_json,
+                           client_message_id, message_order, created_at
+                    FROM director_messages
+                    WHERE conversation_id = ? AND role = 'assistant'
+                      AND message_order = ?
+                    """,
+                    (conversation_id, int(existing["message_order"]) + 1),
+                ).fetchall()
+                if len(assistant_rows) != 1:
                     raise ValueError("incomplete persisted director exchange")
                 connection.commit()
-                return {"user_message": self._director_message_payload(rows[user_index]), "assistant_message": self._director_message_payload(rows[user_index + 1])}
+                return {
+                    "user_message": self._director_message_payload(existing),
+                    "assistant_message": self._director_message_payload(
+                        assistant_rows[0]
+                    ),
+                }
             user_id, assistant_id = uuid.uuid4().hex, uuid.uuid4().hex
-            connection.execute("INSERT INTO director_messages (message_id, conversation_id, project_id, session_id, role, text, proposal_id, metadata_json, client_message_id, created_at) VALUES (?, ?, ?, ?, 'user', ?, NULL, '{}', ?, ?)", (user_id, conversation_id, project_id, session_id, user_text, client_message_id, now))
-            connection.execute("INSERT INTO director_messages (message_id, conversation_id, project_id, session_id, role, text, proposal_id, metadata_json, client_message_id, created_at) VALUES (?, ?, ?, ?, 'assistant', ?, ?, ?, NULL, ?)", (assistant_id, conversation_id, project_id, session_id, assistant_text, proposal_id, json.dumps(assistant_metadata or {}, ensure_ascii=True, sort_keys=True), now))
+            user_message_order = self._next_director_message_order(
+                connection, conversation_id=conversation_id
+            )
+            connection.execute("INSERT INTO director_messages (message_id, conversation_id, project_id, session_id, role, text, proposal_id, metadata_json, client_message_id, message_order, created_at) VALUES (?, ?, ?, ?, 'user', ?, NULL, '{}', ?, ?, ?)", (user_id, conversation_id, project_id, session_id, user_text, client_message_id, user_message_order, now))
+            connection.execute("INSERT INTO director_messages (message_id, conversation_id, project_id, session_id, role, text, proposal_id, metadata_json, client_message_id, message_order, created_at) VALUES (?, ?, ?, ?, 'assistant', ?, ?, ?, NULL, ?, ?)", (assistant_id, conversation_id, project_id, session_id, assistant_text, proposal_id, json.dumps(assistant_metadata or {}, ensure_ascii=True, sort_keys=True), user_message_order + 1, now))
             connection.commit()
         except Exception:
             if connection.in_transaction:
@@ -3455,8 +3494,26 @@ class LocalProjectStore:
 
     def _director_message_payload(self, row: sqlite3.Row) -> dict[str, Any]:
         payload = dict(row)
+        payload.pop("message_order", None)
         payload["metadata"] = self._json_object(str(payload.pop("metadata_json", "{}")))
         return payload
+
+    @staticmethod
+    def _next_director_message_order(
+        connection: Any, *, conversation_id: str
+    ) -> int:
+        if not isinstance(connection, sqlite3.Connection):
+            connection.execute(
+                "SELECT conversation_id FROM director_conversations "
+                "WHERE conversation_id = ? FOR UPDATE",
+                (conversation_id,),
+            )
+        row = connection.execute(
+            "SELECT MAX(message_order) AS max_message_order "
+            "FROM director_messages WHERE conversation_id = ?",
+            (conversation_id,),
+        ).fetchone()
+        return int(row["max_message_order"] or 0) + 1
 
     def director_proposal_exists(
         self, *, project_id: str, proposal_id: str
@@ -4727,6 +4784,7 @@ class LocalProjectStore:
         expected_session_revision: int,
         expected_asset_index_revision: int,
         selected_segment_id: str | None = None,
+        retry_of_run_id: str | None = None,
         stale_after_seconds: int = 300,
     ) -> dict[str, Any]:
         """Create a durable pending run and user/event rows.
@@ -4767,6 +4825,35 @@ class LocalProjectStore:
                 )
                 connection.commit()
                 return result
+            if retry_of_run_id is not None:
+                retry_source = connection.execute(
+                    """
+                    SELECT project_id, conversation_id, session_id, user_text,
+                           expected_session_revision,
+                           expected_asset_index_revision, selected_segment_id,
+                           status
+                    FROM director_hermes_runs
+                    WHERE project_id = ? AND run_id = ?
+                    """,
+                    (project_id, retry_of_run_id),
+                ).fetchone()
+                if (
+                    retry_source is None
+                    or str(retry_source["conversation_id"]) != conversation_id
+                ):
+                    raise KeyError("director_hermes_run_missing")
+                if str(retry_source["status"]) not in {"blocked", "interrupted"}:
+                    raise ValueError("hermes_run_retry_not_eligible")
+                if (
+                    str(retry_source["session_id"]) != session_id
+                    or str(retry_source["user_text"]) != user_text
+                    or int(retry_source["expected_session_revision"])
+                    != expected_session_revision
+                    or int(retry_source["expected_asset_index_revision"])
+                    != expected_asset_index_revision
+                    or retry_source["selected_segment_id"] != selected_segment_id
+                ):
+                    raise ValueError("hermes_run_retry_identity_mismatch")
             session = connection.execute(
                 "SELECT session_id, session_revision, session_json "
                 "FROM editing_sessions WHERE session_id = ? AND project_id = ?",
@@ -4823,16 +4910,20 @@ class LocalProjectStore:
                 )
                 connection.commit()
                 return result
+            user_message_order = self._next_director_message_order(
+                connection, conversation_id=conversation_id
+            )
             inserted = connection.execute(
                 """
                 INSERT INTO director_hermes_runs (
                     run_id, conversation_id, client_message_id, project_id,
                     session_id, expected_session_revision,
                     expected_asset_index_revision, selected_segment_id,
+                    retry_of_run_id,
                     user_text, user_message_id, assistant_message_id,
                     status, owner_token, next_event_id, heartbeat_at,
                     created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'pending', ?, 2, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'pending', ?, 2, ?, ?, ?)
                 ON CONFLICT (conversation_id, client_message_id) DO NOTHING
                 """,
                 (
@@ -4844,6 +4935,7 @@ class LocalProjectStore:
                     expected_session_revision,
                     expected_asset_index_revision,
                     selected_segment_id,
+                    retry_of_run_id,
                     user_text,
                     user_message_id,
                     owner_token,
@@ -4858,8 +4950,8 @@ class LocalProjectStore:
                     INSERT INTO director_messages (
                         message_id, conversation_id, project_id, session_id,
                         role, text, proposal_id, metadata_json,
-                        client_message_id, created_at
-                    ) VALUES (?, ?, ?, ?, 'user', ?, NULL, '{}', ?, ?)
+                        client_message_id, message_order, created_at
+                    ) VALUES (?, ?, ?, ?, 'user', ?, NULL, '{}', ?, ?, ?)
                     """,
                     (
                         user_message_id,
@@ -4868,6 +4960,7 @@ class LocalProjectStore:
                         session_id,
                         user_text,
                         client_message_id,
+                        user_message_order,
                         now,
                     ),
                 )
@@ -5011,12 +5104,16 @@ class LocalProjectStore:
                     selected_segment_id=selected_segment_id,
                     now=now,
                 )
+            assistant_message_order = self._next_director_message_order(
+                connection, conversation_id=conversation_id
+            )
             connection.execute(
                 """
                 INSERT INTO director_messages (
                     message_id, conversation_id, project_id, session_id, role,
-                    text, proposal_id, metadata_json, client_message_id, created_at
-                ) VALUES (?, ?, ?, ?, 'assistant', ?, NULL, ?, NULL, ?)
+                    text, proposal_id, metadata_json, client_message_id,
+                    message_order, created_at
+                ) VALUES (?, ?, ?, ?, 'assistant', ?, NULL, ?, NULL, ?, ?)
                 """,
                 (
                     assistant_message_id,
@@ -5034,6 +5131,7 @@ class LocalProjectStore:
                         ensure_ascii=True,
                         sort_keys=True,
                     ),
+                    assistant_message_order,
                     now,
                 ),
             )
@@ -5345,12 +5443,16 @@ class LocalProjectStore:
                 "hermes_status": status,
                 "retryable": retryable,
             }
+            assistant_message_order = self._next_director_message_order(
+                connection, conversation_id=str(row["conversation_id"])
+            )
             connection.execute(
                 """
                 INSERT INTO director_messages (
                     message_id, conversation_id, project_id, session_id, role,
-                    text, proposal_id, metadata_json, client_message_id, created_at
-                ) VALUES (?, ?, ?, ?, 'assistant', ?, ?, ?, NULL, ?)
+                    text, proposal_id, metadata_json, client_message_id,
+                    message_order, created_at
+                ) VALUES (?, ?, ?, ?, 'assistant', ?, ?, ?, NULL, ?, ?)
                 """,
                 (
                     assistant_message_id,
@@ -5364,6 +5466,7 @@ class LocalProjectStore:
                         else None
                     ),
                     json.dumps(metadata, ensure_ascii=True, sort_keys=True),
+                    assistant_message_order,
                     now,
                 ),
             )
@@ -5747,13 +5850,17 @@ class LocalProjectStore:
                 )
                 if changed.rowcount != 1:
                     continue
+                assistant_message_order = self._next_director_message_order(
+                    connection,
+                    conversation_id=str(row["conversation_id"]),
+                )
                 connection.execute(
                     """
                     INSERT INTO director_messages (
                         message_id, conversation_id, project_id, session_id,
                         role, text, proposal_id, metadata_json,
-                        client_message_id, created_at
-                    ) VALUES (?, ?, ?, ?, 'assistant', ?, NULL, ?, NULL, ?)
+                        client_message_id, message_order, created_at
+                    ) VALUES (?, ?, ?, ?, 'assistant', ?, NULL, ?, NULL, ?, ?)
                     """,
                     (
                         assistant_message_id,
@@ -5770,6 +5877,7 @@ class LocalProjectStore:
                             ensure_ascii=True,
                             sort_keys=True,
                         ),
+                        assistant_message_order,
                         now,
                     ),
                 )
@@ -7845,6 +7953,7 @@ class LocalProjectStore:
             self._ensure_artifact_freshness_columns(connection)
             self._ensure_capcut_draft_handoff_claim_columns(connection)
             self._ensure_director_message_metadata_column(connection)
+            self._ensure_director_message_order_column(connection)
             self._ensure_director_claim_columns(connection)
             self._ensure_director_hermes_run_context_columns(connection)
             self._ensure_creation_brief_columns(connection)
@@ -7873,6 +7982,41 @@ class LocalProjectStore:
         columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(director_messages)").fetchall()}
         if "metadata_json" not in columns:
             connection.execute("ALTER TABLE director_messages ADD COLUMN metadata_json TEXT NOT NULL DEFAULT '{}'")
+
+    def _ensure_director_message_order_column(
+        self, connection: sqlite3.Connection
+    ) -> None:
+        columns = {
+            str(row[1])
+            for row in connection.execute(
+                "PRAGMA table_info(director_messages)"
+            ).fetchall()
+        }
+        if "message_order" not in columns:
+            connection.execute(
+                "ALTER TABLE director_messages ADD COLUMN message_order INTEGER"
+            )
+        connection.execute(
+            """
+            UPDATE director_messages
+            SET message_order = (
+                SELECT COUNT(*)
+                FROM director_messages AS ordered
+                WHERE ordered.conversation_id =
+                      director_messages.conversation_id
+                  AND ordered.rowid <= director_messages.rowid
+            )
+            WHERE message_order IS NULL
+            """
+        )
+        connection.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS
+                director_messages_conversation_order_idx
+            ON director_messages (conversation_id, message_order)
+            """
+        )
+        connection.commit()
 
     def _ensure_director_claim_columns(self, connection: sqlite3.Connection) -> None:
         columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(director_message_claims)").fetchall()}
@@ -7938,6 +8082,14 @@ class LocalProjectStore:
             try:
                 connection.execute(
                     "ALTER TABLE director_hermes_runs ADD COLUMN events_pruned_at TEXT"
+                )
+            except sqlite3.OperationalError as exc:
+                if "duplicate column name" not in str(exc).lower():
+                    raise
+        if "retry_of_run_id" not in columns:
+            try:
+                connection.execute(
+                    "ALTER TABLE director_hermes_runs ADD COLUMN retry_of_run_id TEXT"
                 )
             except sqlite3.OperationalError as exc:
                 if "duplicate column name" not in str(exc).lower():

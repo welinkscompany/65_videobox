@@ -109,6 +109,7 @@ class _BlockingGateway:
         self.entered = asyncio.Event()
         self.release = asyncio.Event()
         self.preparations = 0
+        self.cancellations: list[str] = []
 
     async def prepare_run(self, **_):
         self.preparations += 1
@@ -118,6 +119,11 @@ class _BlockingGateway:
         self.entered.set()
         await self.release.wait()
         yield AgentGatewayEvent("run_completed", "answer")
+
+    async def cancel_run(self, *, run_id: str):
+        self.cancellations.append(run_id)
+        await asyncio.sleep(0)
+        return True
 
 
 class _ThreadBlockedStore:
@@ -263,6 +269,409 @@ def test_closing_one_subscription_does_not_cancel_provider_run(
     assert replay[-1].event_type == "run_completed"
 
 
+def test_explicit_cancel_interrupts_upstream_then_persists_interrupted_once(
+    tmp_path: Path,
+) -> None:
+    store, project_id, session_id = _scope(tmp_path)
+    gateway = _BlockingGateway()
+    service = HermesRunService(store=store, gateway_client=gateway)
+
+    async def scenario():
+        run = await service.create_run(
+            project_id=project_id,
+            session_id=session_id,
+            conversation_id="conv",
+            client_message_id="cancel-streaming",
+            text="질문",
+        )
+        await gateway.entered.wait()
+        await asyncio.gather(
+            service.cancel(
+                run.run_id,
+                project_id=project_id,
+                conversation_id="conv",
+            ),
+            service.cancel(
+                run.run_id,
+                project_id=project_id,
+                conversation_id="conv",
+            ),
+        )
+        await service.cancel(
+            run.run_id,
+            project_id=project_id,
+            conversation_id="conv",
+        )
+        return run, [
+            event
+            async for event in service.subscribe(
+                run.run_id,
+                project_id=project_id,
+                conversation_id="conv",
+            )
+        ]
+
+    run, events = asyncio.run(scenario())
+    durable = store.get_director_hermes_run(
+        project_id=project_id, run_id=run.run_id
+    )
+    assert gateway.cancellations == [run.run_id]
+    assert durable["status"] == "interrupted"
+    assert events[-1].event_type == "blocked"
+    assert events[-1].retryable is True
+
+
+def test_explicit_cancel_intent_wins_inline_provider_blocked_terminal(
+    tmp_path: Path,
+) -> None:
+    class InlineBlockedGateway:
+        def __init__(self) -> None:
+            self.calls = 0
+            self.preparations = 0
+            self.cancellations: list[str] = []
+            self.entered = asyncio.Event()
+            self.interrupted = asyncio.Event()
+            self.service: HermesRunService | None = None
+
+        async def prepare_run(self, **_) -> None:
+            self.preparations += 1
+
+        async def stream_run(self, **_):
+            self.calls += 1
+            self.entered.set()
+            await self.interrupted.wait()
+            yield AgentGatewayEvent("blocked", "")
+
+        async def cancel_run(self, *, run_id: str) -> bool:
+            self.cancellations.append(run_id)
+            self.interrupted.set()
+            assert self.service is not None
+            while not self.service.get_run(run_id).terminal:
+                await asyncio.sleep(0)
+            return True
+
+    store, project_id, session_id = _scope(tmp_path)
+    gateway = InlineBlockedGateway()
+    service = HermesRunService(store=store, gateway_client=gateway)
+    gateway.service = service
+
+    async def scenario():
+        run = await service.create_run(
+            project_id=project_id,
+            session_id=session_id,
+            conversation_id="conv",
+            client_message_id="cancel-inline-blocked",
+            text="질문",
+        )
+        await gateway.entered.wait()
+        await service.cancel(
+            run.run_id,
+            project_id=project_id,
+            conversation_id="conv",
+        )
+        await service.cancel(
+            run.run_id,
+            project_id=project_id,
+            conversation_id="conv",
+        )
+        return run, [
+            event
+            async for event in service.subscribe(
+                run.run_id,
+                project_id=project_id,
+                conversation_id="conv",
+            )
+        ]
+
+    run, events = asyncio.run(scenario())
+    durable = store.get_director_hermes_run(
+        project_id=project_id,
+        run_id=run.run_id,
+    )
+    assert durable["status"] == "interrupted"
+    assert gateway.cancellations == [run.run_id]
+    assert events[0].event_type == "run_started"
+    terminal_events = [
+        event
+        for event in events
+        if event.event_type in {"blocked", "run_completed"}
+    ]
+    assert [event.event_type for event in terminal_events] == ["blocked"]
+    assert terminal_events[0].retryable is True
+
+
+def test_cancel_queued_run_before_upstream_entry_and_completed_run_is_noop(
+    tmp_path: Path,
+) -> None:
+    store, project_id, session_id = _scope(tmp_path)
+    gateway = _BlockingGateway()
+    service = HermesRunService(
+        store=store,
+        gateway_client=gateway,
+        max_active=1,
+        max_queue=1,
+    )
+
+    async def scenario():
+        active = await service.create_run(
+            project_id=project_id,
+            session_id=session_id,
+            conversation_id="conv",
+            client_message_id="cancel-active-slot",
+            text="첫 질문",
+        )
+        await gateway.entered.wait()
+        queued = await service.create_run(
+            project_id=project_id,
+            session_id=session_id,
+            conversation_id="conv",
+            client_message_id="cancel-before-upstream-entry",
+            text="둘째 질문",
+        )
+        assert gateway.calls == 1
+        await service.cancel(
+            queued.run_id,
+            project_id=project_id,
+            conversation_id="conv",
+        )
+        gateway.release.set()
+        await active.task
+        await service.cancel(
+            active.run_id,
+            project_id=project_id,
+            conversation_id="conv",
+        )
+        return active, queued
+
+    active, queued = asyncio.run(scenario())
+    assert gateway.calls == 1
+    assert gateway.cancellations == [queued.run_id]
+    assert store.get_director_hermes_run(
+        project_id=project_id,
+        run_id=queued.run_id,
+    )["status"] == "interrupted"
+    assert store.get_director_hermes_run(
+        project_id=project_id,
+        run_id=active.run_id,
+    )["status"] == "completed"
+
+
+def test_explicit_retry_links_new_run_and_rejects_active_or_completed_source(
+    tmp_path: Path,
+) -> None:
+    store, project_id, session_id = _scope(tmp_path)
+    interrupted = store.begin_director_hermes_run(
+        project_id=project_id,
+        session_id=session_id,
+        conversation_id="conv",
+        client_message_id="retry-source",
+        user_text="다시 해 줘",
+        expected_session_revision=1,
+        expected_asset_index_revision=0,
+    )
+    assert store.complete_director_hermes_run(
+        project_id=project_id,
+        run_id=interrupted["run_id"],
+        owner_token=interrupted["owner_token"],
+        status="interrupted",
+        assistant_text="중단됐어요.",
+        public_text="",
+        retryable=True,
+    )
+    active = store.begin_director_hermes_run(
+        project_id=project_id,
+        session_id=session_id,
+        conversation_id="conv",
+        client_message_id="retry-active",
+        user_text="진행 중",
+        expected_session_revision=1,
+        expected_asset_index_revision=0,
+    )
+    completed = store.begin_director_hermes_run(
+        project_id=project_id,
+        session_id=session_id,
+        conversation_id="conv",
+        client_message_id="retry-completed",
+        user_text="완료됨",
+        expected_session_revision=1,
+        expected_asset_index_revision=0,
+    )
+    assert store.complete_director_hermes_run(
+        project_id=project_id,
+        run_id=completed["run_id"],
+        owner_token=completed["owner_token"],
+        status="completed",
+        assistant_text="완료",
+        public_text="",
+        retryable=False,
+    )
+    blocked = store.begin_director_hermes_run(
+        project_id=project_id,
+        session_id=session_id,
+        conversation_id="conv",
+        client_message_id="retry-blocked",
+        user_text="차단됨",
+        expected_session_revision=1,
+        expected_asset_index_revision=0,
+    )
+    assert store.complete_director_hermes_run(
+        project_id=project_id,
+        run_id=blocked["run_id"],
+        owner_token=blocked["owner_token"],
+        status="blocked",
+        assistant_text="차단",
+        public_text="",
+        retryable=True,
+    )
+    gateway = _Gateway()
+    service = HermesRunService(store=store, gateway_client=gateway)
+
+    async def scenario():
+        before_wrong_scope = store.list_director_messages(
+            project_id=project_id,
+            conversation_id="conv",
+        )
+        with pytest.raises(KeyError, match="director_hermes_run_missing"):
+            await service.retry(
+                interrupted["run_id"],
+                project_id=project_id,
+                conversation_id="wrong-conversation",
+            )
+        with pytest.raises(KeyError, match="director_hermes_run_missing"):
+            await service.retry(
+                interrupted["run_id"],
+                project_id="wrong-project",
+                conversation_id="conv",
+            )
+        assert store.list_director_messages(
+            project_id=project_id,
+            conversation_id="conv",
+        ) == before_wrong_scope
+        retried = await service.retry(
+            interrupted["run_id"],
+            project_id=project_id,
+            conversation_id="conv",
+        )
+        await retried.task
+        with pytest.raises(ValueError, match="hermes_run_retry_not_eligible"):
+            await service.retry(
+                active["run_id"],
+                project_id=project_id,
+                conversation_id="conv",
+            )
+        with pytest.raises(ValueError, match="hermes_run_retry_not_eligible"):
+            await service.retry(
+                completed["run_id"],
+                project_id=project_id,
+                conversation_id="conv",
+            )
+        retried_blocked = await service.retry(
+            blocked["run_id"],
+            project_id=project_id,
+            conversation_id="conv",
+        )
+        await retried_blocked.task
+        return retried, retried_blocked
+
+    retried, retried_blocked = asyncio.run(scenario())
+    durable = store.get_director_hermes_run(
+        project_id=project_id, run_id=retried.run_id
+    )
+    assert durable["retry_of_run_id"] == interrupted["run_id"]
+    assert durable["client_message_id"] != "retry-source"
+    assert store.get_director_hermes_run(
+        project_id=project_id,
+        run_id=retried_blocked.run_id,
+    )["retry_of_run_id"] == blocked["run_id"]
+    assert gateway.calls == 2
+
+
+@pytest.mark.parametrize("stale_identity", ("session", "asset"))
+def test_retry_rejects_stale_source_identity_without_store_mutation(
+    tmp_path: Path,
+    stale_identity: str,
+) -> None:
+    store, project_id, session_id = _scope(tmp_path)
+    source = store.begin_director_hermes_run(
+        project_id=project_id,
+        session_id=session_id,
+        conversation_id="conv",
+        client_message_id=f"retry-stale-{stale_identity}",
+        user_text="오래된 요청",
+        expected_session_revision=1,
+        expected_asset_index_revision=0,
+    )
+    assert store.complete_director_hermes_run(
+        project_id=project_id,
+        run_id=source["run_id"],
+        owner_token=source["owner_token"],
+        status="interrupted",
+        assistant_text="중단",
+        public_text="",
+        retryable=True,
+    )
+    context_builder = None
+    if stale_identity == "session":
+        current = store.get_editing_session(
+            project_id=project_id,
+            session_id=session_id,
+        )
+        store.update_editing_session(
+            project_id=project_id,
+            session_id=session_id,
+            session_payload=current,
+            expected_revision=1,
+        )
+    else:
+        store.bump_asset_index_revision(project_id)
+
+        def context_builder(**kwargs):
+            return SimpleNamespace(
+                session_revision=kwargs["expected_session_revision"],
+                asset_index_revision=1,
+                model_dump=lambda **_: {
+                    "project_id": kwargs["project_id"],
+                    "session_id": kwargs["session_id"],
+                    "session_revision": kwargs["expected_session_revision"],
+                    "asset_index_revision": 1,
+                },
+            )
+
+    gateway = _Gateway()
+    service = HermesRunService(
+        store=store,
+        gateway_client=gateway,
+        **({"context_builder": context_builder} if context_builder else {}),
+    )
+    before = store.list_director_messages(
+        project_id=project_id,
+        conversation_id="conv",
+    )
+
+    async def scenario():
+        with pytest.raises(
+            ValueError,
+            match=(
+                "creator_context_session_revision_mismatch"
+                if stale_identity == "session"
+                else "hermes_run_retry_identity_mismatch"
+            ),
+        ):
+            await service.retry(
+                source["run_id"],
+                project_id=project_id,
+                conversation_id="conv",
+            )
+
+    asyncio.run(scenario())
+    assert store.list_director_messages(
+        project_id=project_id,
+        conversation_id="conv",
+    ) == before
+    assert gateway.preparations == 0
+    assert gateway.calls == 0
+
+
 def test_terminal_commit_between_replay_list_and_status_is_drained(
     tmp_path: Path,
 ) -> None:
@@ -369,7 +778,7 @@ def test_draft_commit_racing_cancel_reconciles_before_terminal(
     durable = store.get_director_hermes_run(
         project_id=project_id, run_id=run.run_id
     )
-    assert durable["status"] == "blocked"
+    assert durable["status"] == "interrupted"
     assert events[-1].event_type == "blocked"
     assert sum(event.event_type == "blocked" for event in events) == 1
     assert "".join(
@@ -2101,7 +2510,7 @@ def test_cancellation_clears_durable_visible_draft_and_extends_it_with_failure(
 
     before, after, assistant_text, events = asyncio.run(scenario())
     assert before["assistant_draft_text"] == visible
-    assert after["status"] == "blocked"
+    assert after["status"] == "interrupted"
     assert after["assistant_draft_text"] == ""
     assert [event.event_type for event in events] == [
         "run_started",

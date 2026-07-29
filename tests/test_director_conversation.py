@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Event
 from datetime import UTC, datetime, timedelta
+import sqlite3
 
 import pytest
 
@@ -55,6 +56,139 @@ def test_client_message_id_returns_original_persisted_assistant_response(tmp_pat
     )
     assert retry == result
     assert [item["text"] for item in store.list_director_messages(project_id=project.project_id, conversation_id="conv")] == ["hello", "local response"]
+
+
+def test_fixed_clock_preserves_exchange_order_and_exact_idempotent_replay(
+    tmp_path: Path,
+) -> None:
+    instant = datetime(2026, 7, 30, tzinfo=UTC)
+    store = LocalProjectStore(tmp_path / "projects", now=lambda: instant)
+    project = store.bootstrap_project("fixed-clock-exchanges")
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id="timeline",
+        session_payload={"segments": [], "history": []},
+    )
+    store.create_director_conversation(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+        conversation_id="conv",
+    )
+
+    first = store.append_director_exchange(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+        conversation_id="conv",
+        client_message_id="message-1",
+        user_text="user-1",
+        assistant_text="assistant-1",
+    )
+    store.append_director_exchange(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+        conversation_id="conv",
+        client_message_id="message-2",
+        user_text="user-2",
+        assistant_text="assistant-2",
+    )
+    replay = store.append_director_exchange(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+        conversation_id="conv",
+        client_message_id="message-1",
+        user_text="user-1",
+        assistant_text="must-not-replace",
+    )
+
+    assert replay == first
+    assert [
+        message["text"]
+        for message in store.list_director_messages(
+            project_id=project.project_id,
+            conversation_id="conv",
+        )
+    ] == ["user-1", "assistant-1", "user-2", "assistant-2"]
+
+
+def test_sqlite_upgrade_backfills_legacy_director_message_insertion_order(
+    tmp_path: Path,
+) -> None:
+    instant = datetime(2026, 7, 30, tzinfo=UTC)
+    store = LocalProjectStore(tmp_path / "projects", now=lambda: instant)
+    project = store.bootstrap_project("legacy-message-order")
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id="timeline",
+        session_payload={"segments": [], "history": []},
+    )
+    store.create_director_conversation(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+        conversation_id="conv",
+    )
+    for index in (1, 2):
+        store.append_director_exchange(
+            project_id=project.project_id,
+            session_id=session["session_id"],
+            conversation_id="conv",
+            client_message_id=f"message-{index}",
+            user_text=f"user-{index}",
+            assistant_text=f"assistant-{index}",
+        )
+
+    connection = sqlite3.connect(store.database_path(project.project_id))
+    connection.execute(
+        "ALTER TABLE director_messages RENAME TO director_messages_with_order"
+    )
+    connection.execute(
+        """
+        CREATE TABLE director_messages (
+            message_id TEXT PRIMARY KEY,
+            conversation_id TEXT NOT NULL,
+            project_id TEXT NOT NULL,
+            session_id TEXT NOT NULL,
+            role TEXT NOT NULL,
+            text TEXT NOT NULL,
+            proposal_id TEXT,
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            client_message_id TEXT,
+            created_at TEXT NOT NULL,
+            UNIQUE(conversation_id, client_message_id)
+        )
+        """
+    )
+    connection.execute(
+        """
+        INSERT INTO director_messages (
+            message_id, conversation_id, project_id, session_id, role, text,
+            proposal_id, metadata_json, client_message_id, created_at
+        )
+        SELECT message_id, conversation_id, project_id, session_id, role, text,
+               proposal_id, metadata_json, client_message_id, created_at
+        FROM director_messages_with_order
+        ORDER BY message_order
+        """
+    )
+    connection.execute("DROP TABLE director_messages_with_order")
+    connection.commit()
+    connection.close()
+
+    restarted = LocalProjectStore(tmp_path / "projects", now=lambda: instant)
+    messages = restarted.list_director_messages(
+        project_id=project.project_id,
+        conversation_id="conv",
+    )
+    assert [message["text"] for message in messages] == [
+        "user-1",
+        "assistant-1",
+        "user-2",
+        "assistant-2",
+    ]
+    connection = sqlite3.connect(store.database_path(project.project_id))
+    assert connection.execute(
+        "SELECT message_order FROM director_messages ORDER BY message_order"
+    ).fetchall() == [(1,), (2,), (3,), (4,)]
+    connection.close()
 
 
 def test_exchange_duplicate_cannot_cross_session_boundary(tmp_path: Path) -> None:

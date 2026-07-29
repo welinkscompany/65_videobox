@@ -73,75 +73,169 @@ class HermesRpcClient:
         self._http_factory = http_client_factory
         self._ws_factory = websocket_factory
         self._timeout = timeout_seconds
+        self._active_runs: dict[str, tuple[object, str]] = {}
+        self._active_lock = asyncio.Lock()
 
-    async def stream_prompt(self, *, text: str) -> AsyncIterator[HermesRpcEvent]:
-        session_id = ""
-        websocket = None
+    async def stream_prompt(
+        self, *, text: str, run_id: str | None = None
+    ) -> AsyncIterator[HermesRpcEvent]:
         try:
             async with asyncio.timeout(self._timeout):
-                async with self._http_factory(
-                    base_url=self._base_url, timeout=self._timeout
-                ) as http:
-                    login = await http.post(
-                        "/auth/password-login",
-                        json={
-                            "provider": "basic",
-                            "username": self._username,
-                            "password": self._password,
-                            "next": "",
-                        },
-                    )
-                    login.raise_for_status()
-                    ticket_response = await http.post("/api/auth/ws-ticket")
-                    ticket_response.raise_for_status()
-                    ticket = str(ticket_response.json().get("ticket") or "")
-                    if not ticket:
-                        raise HermesTransportError("hermes_transport_unavailable")
-
-                ws_base = self._base_url.replace("http://", "ws://", 1).replace(
-                    "https://", "wss://", 1
-                )
-                ws_url = f"{ws_base}/api/ws?ticket={quote(ticket, safe='')}"
-                async with self._ws_factory(
-                    ws_url,
-                    open_timeout=self._timeout,
-                    close_timeout=min(self._timeout, 5.0),
-                ) as websocket:
-                    await websocket.send(
-                        json.dumps(
-                            {
-                                "jsonrpc": "2.0",
-                                "id": 1,
-                                "method": "session.create",
-                                "params": {"source": "videobox"},
-                            }
+                for ticket_attempt in range(2):
+                    session_id = ""
+                    websocket = None
+                    registered = False
+                    ticket_minted = False
+                    prompt_accepted = False
+                    try:
+                        ticket = await self._mint_ticket()
+                        ticket_minted = True
+                        ws_base = self._base_url.replace(
+                            "http://", "ws://", 1
+                        ).replace("https://", "wss://", 1)
+                        ws_url = (
+                            f"{ws_base}/api/ws?"
+                            f"ticket={quote(ticket, safe='')}"
                         )
-                    )
-                    session_id = await self._wait_for_session(websocket)
-                    await websocket.send(
-                        json.dumps(
-                            {
-                                "jsonrpc": "2.0",
-                                "id": 2,
-                                "method": "prompt.submit",
-                                "params": {"session_id": session_id, "text": text},
-                            }
-                        )
-                    )
-                    async for event in self._read_prompt_events(websocket, session_id):
-                        yield event
+                        async with self._ws_factory(
+                            ws_url,
+                            open_timeout=self._timeout,
+                            close_timeout=min(self._timeout, 5.0),
+                        ) as websocket:
+                            await websocket.send(
+                                json.dumps(
+                                    {
+                                        "jsonrpc": "2.0",
+                                        "id": 1,
+                                        "method": "session.create",
+                                        "params": {"source": "videobox"},
+                                    }
+                                )
+                            )
+                            session_id = await self._wait_for_session(websocket)
+                            if run_id is not None:
+                                async with self._active_lock:
+                                    if run_id in self._active_runs:
+                                        raise HermesTransportError(
+                                            "hermes_invalid_response"
+                                        )
+                                    self._active_runs[run_id] = (
+                                        websocket,
+                                        session_id,
+                                    )
+                                    registered = True
+                            await websocket.send(
+                                json.dumps(
+                                    {
+                                        "jsonrpc": "2.0",
+                                        "id": 2,
+                                        "method": "prompt.submit",
+                                        "params": {
+                                            "session_id": session_id,
+                                            "text": text,
+                                        },
+                                    }
+                                )
+                            )
+                            await self._wait_for_prompt_acceptance(
+                                websocket, session_id
+                            )
+                            prompt_accepted = True
+                            async for event in self._read_prompt_events(
+                                websocket, session_id
+                            ):
+                                yield event
+                            return
+                    except asyncio.CancelledError:
+                        if websocket is not None and session_id:
+                            await self._interrupt_best_effort(
+                                websocket, session_id
+                            )
+                        raise
+                    except HermesTransportError as error:
+                        if (
+                            str(error) == "hermes_ticket_expired"
+                            and ticket_attempt == 0
+                            and not prompt_accepted
+                        ):
+                            continue
+                        raise
+                    except Exception as error:
+                        if (
+                            ticket_minted
+                            and self._is_ticket_expired(error)
+                            and not prompt_accepted
+                        ):
+                            if ticket_attempt == 0:
+                                continue
+                            raise HermesTransportError(
+                                "hermes_ticket_expired"
+                            ) from error
+                        raise HermesTransportError(
+                            "hermes_unavailable"
+                        ) from error
+                    finally:
+                        if registered and run_id is not None:
+                            async with self._active_lock:
+                                current = self._active_runs.get(run_id)
+                                if (
+                                    current is not None
+                                    and current[0] is websocket
+                                    and current[1] == session_id
+                                ):
+                                    self._active_runs.pop(run_id, None)
+                raise HermesTransportError("hermes_ticket_expired")
         except asyncio.CancelledError:
-            if websocket is not None and session_id:
-                await self._interrupt_best_effort(websocket, session_id)
             raise
         except TimeoutError as error:
-            if websocket is not None and session_id:
-                await self._interrupt_best_effort(websocket, session_id)
-            raise HermesTransportError("hermes_transport_timeout") from error
+            raise HermesTransportError("hermes_timeout") from error
         except HermesTransportError:
             raise
         except Exception as error:
-            raise HermesTransportError("hermes_transport_unavailable") from error
+            raise HermesTransportError("hermes_unavailable") from error
+
+    async def _mint_ticket(self) -> str:
+        async with self._http_factory(
+            base_url=self._base_url, timeout=self._timeout
+        ) as http:
+            login = await http.post(
+                "/auth/password-login",
+                json={
+                    "provider": "basic",
+                    "username": self._username,
+                    "password": self._password,
+                    "next": "",
+                },
+            )
+            login.raise_for_status()
+            ticket_response = await http.post("/api/auth/ws-ticket")
+            ticket_response.raise_for_status()
+            ticket = str(ticket_response.json().get("ticket") or "")
+            if not ticket:
+                raise HermesTransportError("hermes_unavailable")
+            return ticket
+
+    async def interrupt(self, *, run_id: str) -> bool:
+        async with self._active_lock:
+            active = self._active_runs.get(run_id)
+        if active is None:
+            return False
+        websocket, session_id = active
+        return await self._interrupt_best_effort(websocket, session_id)
+
+    @staticmethod
+    def _is_ticket_expired(error: BaseException) -> bool:
+        if (
+            isinstance(error, HermesTransportError)
+            and str(error) == "hermes_ticket_expired"
+        ):
+            return True
+        status_code = getattr(error, "status_code", None)
+        if status_code is None:
+            status_code = getattr(
+                getattr(error, "response", None), "status_code", None
+            )
+        return status_code in {401, 403}
 
     async def _wait_for_session(self, websocket) -> str:
         while True:
@@ -150,19 +244,45 @@ class HermesRpcClient:
                 self._validate_ignored_message(message)
                 continue
             if "error" in message:
-                raise HermesTransportError("hermes_session_unavailable")
+                error = message.get("error")
+                if (
+                    isinstance(error, dict)
+                    and error.get("code") == "ticket_expired"
+                ):
+                    raise HermesTransportError("hermes_ticket_expired")
+                raise HermesTransportError("hermes_unavailable")
             session_id = str((message.get("result") or {}).get("session_id") or "")
             if not session_id:
-                raise HermesTransportError("hermes_session_unavailable")
+                raise HermesTransportError("hermes_invalid_response")
             return session_id
+
+    async def _wait_for_prompt_acceptance(
+        self, websocket, session_id: str
+    ) -> None:
+        while True:
+            message = self._decode(await websocket.recv())
+            if message.get("id") != 2:
+                self._validate_ignored_message(message)
+                continue
+            if "error" in message:
+                error = message.get("error")
+                if (
+                    isinstance(error, dict)
+                    and error.get("code") == "ticket_expired"
+                ):
+                    raise HermesTransportError("hermes_ticket_expired")
+                raise HermesTransportError("hermes_unavailable")
+            if message.get("result") != {"status": "accepted"}:
+                raise HermesTransportError("hermes_invalid_response")
+            return
 
     async def _read_prompt_events(
         self, websocket, session_id: str
     ) -> AsyncIterator[HermesRpcEvent]:
         while True:
             message = self._decode(await websocket.recv())
-            if message.get("id") == 2 and "error" in message:
-                raise HermesTransportError("hermes_prompt_unavailable")
+            if message.get("id") == 2:
+                raise HermesTransportError("hermes_invalid_response")
             if message.get("method") != "event":
                 continue
             params = message.get("params")
@@ -175,12 +295,12 @@ class HermesRpcClient:
                 or event_type.startswith("terminal.")
                 or event_type.startswith("file.")
             ):
-                raise HermesTransportError("hermes_tool_event_forbidden")
+                raise HermesTransportError("hermes_invalid_response")
             if event_type not in {"gateway.ready", "message.delta", "message.complete"}:
                 continue
             event_session = params.get("session_id")
             if event_type != "gateway.ready" and event_session != session_id:
-                raise HermesTransportError("hermes_event_session_invalid")
+                raise HermesTransportError("hermes_invalid_response")
             payload = params.get("payload")
             payload = payload if isinstance(payload, dict) else {}
             if event_type == "gateway.ready":
@@ -188,16 +308,18 @@ class HermesRpcClient:
             elif event_type == "message.delta":
                 text = payload.get("text", "")
                 if not isinstance(text, str):
-                    raise HermesTransportError("hermes_protocol_invalid")
+                    raise HermesTransportError("hermes_invalid_response")
                 yield HermesRpcEvent("message.delta", text)
             else:
+                if payload.get("status") == "interrupted":
+                    raise HermesTransportError("hermes_interrupted")
                 if payload.get("status") != "complete":
-                    raise HermesTransportError("hermes_completion_blocked")
+                    raise HermesTransportError("hermes_unavailable")
                 text = payload.get("text", "")
                 if not isinstance(text, str):
-                    raise HermesTransportError("hermes_protocol_invalid")
+                    raise HermesTransportError("hermes_invalid_response")
                 if not text.strip():
-                    raise HermesTransportError("hermes_completion_blocked")
+                    raise HermesTransportError("hermes_invalid_response")
                 yield HermesRpcEvent(
                     "message.complete", text
                 )
@@ -206,15 +328,15 @@ class HermesRpcClient:
     @staticmethod
     def _decode(raw: object) -> dict:
         if not isinstance(raw, (str, bytes)):
-            raise HermesTransportError("hermes_protocol_invalid")
+            raise HermesTransportError("hermes_invalid_response")
         if len(raw.encode("utf-8") if isinstance(raw, str) else raw) > _MAX_RPC_FRAME_BYTES:
-            raise HermesTransportError("hermes_protocol_invalid")
+            raise HermesTransportError("hermes_invalid_response")
         try:
             message = json.loads(raw)
         except Exception as error:
-            raise HermesTransportError("hermes_protocol_invalid") from error
+            raise HermesTransportError("hermes_invalid_response") from error
         if not isinstance(message, dict) or message.get("jsonrpc") != "2.0":
-            raise HermesTransportError("hermes_protocol_invalid")
+            raise HermesTransportError("hermes_invalid_response")
         return message
 
     @staticmethod
@@ -230,12 +352,12 @@ class HermesRpcClient:
                 or event_type.startswith("terminal.")
                 or event_type.startswith("file.")
             ):
-                raise HermesTransportError("hermes_tool_event_forbidden")
+                raise HermesTransportError("hermes_invalid_response")
             if event_type in {"message.delta", "message.complete"}:
-                raise HermesTransportError("hermes_event_session_invalid")
+                raise HermesTransportError("hermes_invalid_response")
 
     @staticmethod
-    async def _interrupt_best_effort(websocket, session_id: str) -> None:
+    async def _interrupt_best_effort(websocket, session_id: str) -> bool:
         try:
             await websocket.send(
                 json.dumps(
@@ -247,5 +369,6 @@ class HermesRpcClient:
                     }
                 )
             )
+            return True
         except Exception:
-            pass
+            return False

@@ -31,9 +31,11 @@ export function EditorWorkbenchReadOnlyAdapters({ view, session, dock, director,
     onApplyProposal={director?.onApplyProposal}
     onDraftChange={onEugeneDraftChange}
     onConversationScrollChange={director?.onConversationScrollChange}
+    onCancelRun={director?.onCancelRun}
     onManualEdit={director?.onManualEdit}
     onPreviewCandidate={director?.onPreviewCandidate}
     onRetryMessage={director?.onRetryMessage}
+    onRetryRun={director?.onRetryRun}
     onSelectedCandidateIdsChange={director?.onSelectedCandidateIdsChange}
     onSendMessage={director?.onSendMessage}
     onStart={director?.onStart}

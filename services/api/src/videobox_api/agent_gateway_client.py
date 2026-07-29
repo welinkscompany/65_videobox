@@ -173,6 +173,19 @@ class AgentGatewayClient:
             # has its own attached-context expiry fence.
             return
 
+    async def cancel_run(self, *, run_id: str) -> None:
+        try:
+            async with self._factory(
+                base_url=self._base_url, timeout=self._timeout
+            ) as client:
+                response = await client.post(
+                    f"/internal/hermes/runs/{run_id}/cancel",
+                    headers={"Authorization": f"Bearer {self._token}"},
+                )
+                response.raise_for_status()
+        except Exception as error:
+            raise AgentGatewayUnavailable("hermes_unavailable") from error
+
     async def stream_run(
         self,
         *,

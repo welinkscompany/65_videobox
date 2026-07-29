@@ -68,10 +68,16 @@ def _context(**patch: object) -> dict[str, object]:
 class _Hermes:
     def __init__(self) -> None:
         self.prompts: list[str] = []
+        self.run_ids: list[str] = []
+        self.interruptions: list[str] = []
 
-    async def stream_prompt(self, *, text: str):
+    async def stream_prompt(self, *, text: str, run_id: str):
         self.prompts.append(text)
+        self.run_ids.append(run_id)
         yield HermesRpcEvent("message.complete", "answer")
+
+    async def interrupt(self, *, run_id: str) -> None:
+        self.interruptions.append(run_id)
 
 
 def _reserve(client: TestClient, identity: dict[str, object] | None = None) -> str:
@@ -231,6 +237,7 @@ def test_reserve_attach_stream_is_single_use_and_uses_untrusted_data_envelope() 
         '{"event_type":"text_delta","text":"answer"}',
         '{"event_type":"run_completed","text":"answer"}',
     ]
+    assert hermes.run_ids == ["run-a"]
     assert len(hermes.prompts) == 1
     assert hermes.prompts[0].startswith("VideoBox trusted instruction:")
     assert hermes.prompts[0].count("<VIDEOBOX_UNTRUSTED_CREATOR_DATA>") == 1
@@ -282,6 +289,7 @@ def test_prompt_injection_markers_remain_escaped_data_and_release_is_idempotent(
         json={"client_message_id": "message-a", "text": "help"},
     )
     assert response.status_code == 200
+    assert hermes.run_ids == ["run-a"]
     prompt = hermes.prompts[0]
     assert prompt.count("</VIDEOBOX_UNTRUSTED_CREATOR_DATA>") == 1
     assert "\\u003c/VIDEOBOX_UNTRUSTED_CREATOR_DATA\\u003e" in prompt

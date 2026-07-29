@@ -69,7 +69,7 @@ Status symbols:
 
 Only `[x]` counts as complete. Reopen `[x]` to `[~]` if later evidence finds a regression. The child task and this mirror must be updated in the same closeout commit.
 
-Current initiative progress: **12/20 (60.0%), remaining 40.0%**.
+Current initiative progress: **13/20 (65.0%), remaining 35.0%**.
 
 The existing VideoBox official cumulative status remains separately fixed at **9/22 (40.9%), remaining 59.1%** until Task 9 human/environment acceptance. Do not combine that denominator with this initiative.
 
@@ -95,10 +95,10 @@ The existing VideoBox official cumulative status remains separately fixed at **9
 - [x] **B4** Support only existing caption, voice/TTS, overlay, and output-check controls.
 - [x] **B5** Prove explicit apply, one-player preview, output reverse smoke, manual fallback, and Phase B closeout.
 
-### Phase C — realtime reliability and operations (1/4)
+### Phase C — realtime reliability and operations (2/4)
 
 - [x] **C1** Persist run/event cursors and restore final or interrupted conversation state.
-- [ ] **C2** Add bounded reconnect, cancel, retry, duplicate suppression, and stale-run fencing.
+- [x] **C2** Add bounded reconnect, cancel, retry, duplicate suppression, and stale-run fencing.
 - [ ] **C3** Complete issue/consume/replay/revoke capability lifecycle with redacted audit evidence.
 - [ ] **C4** Add dashboard health/restart/fallback operations, failure drills, and Phase C closeout.
 

@@ -59,12 +59,18 @@ class _FakeHermes:
         self.response = response
         self.local_response_calls = 0
         self.external_provider_calls = 0
+        self.run_ids: list[str] = []
+        self.interruptions: list[str] = []
 
-    async def stream_prompt(self, *, text: str):
+    async def stream_prompt(self, *, text: str, run_id: str):
         if not text:
             raise AssertionError("fake Hermes received an empty prompt")
         self.local_response_calls += 1
+        self.run_ids.append(run_id)
         yield HermesRpcEvent("message.complete", self.response)
+
+    async def interrupt(self, *, run_id: str) -> None:
+        self.interruptions.append(run_id)
 
 
 def _assert(condition: bool, marker: str) -> None:
@@ -750,6 +756,10 @@ def run_non_live() -> dict[str, int | bool]:
                 ]
 
         _assert(fake_hermes.local_response_calls == 1, "fake_hermes_call_count")
+        _assert(
+            fake_hermes.run_ids == [run_response.json()["run_id"]],
+            "fake_hermes_run_identity",
+        )
         _assert(fake_hermes.external_provider_calls == 0, "external_provider_call")
         _assert(network_attempts == 0, "network_attempt")
         _assert(not output_jobs_before and not output_jobs, "output_job_created")

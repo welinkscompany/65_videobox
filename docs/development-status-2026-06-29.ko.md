@@ -1,6 +1,19 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 308. 2026-07-30 Hermes Yujin C1 durable conversation closeout`을 우선 적용한다. Task 22 기술 closeout 근거는 `## 300`, Phase B 근거는 `## 307`을 유지하며, 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 309. 2026-07-30 Hermes Yujin C2 realtime recovery closeout`을 우선 적용한다. Task 22 기술 closeout 근거는 `## 300`, Phase B 근거는 `## 307`, C1 근거는 `## 308`을 유지하며, 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+
+## 309. 2026-07-30 Hermes Yujin C2 realtime recovery closeout
+
+- `[x] C2 완료`: 최초 SSE open부터 `100/250/500ms` bounded reconnect를 적용하고, durable `Last-Event-ID`보다 작거나 같은 이벤트는 다시 반영하지 않는다. reconnect 소진 뒤에도 route-owned run을 잃지 않으며 새 Hermes 전송·Retry·legacy Director 시작만 막고 수동 편집과 명시적 중단은 유지한다.
+- `소유권·취소`: RightDock close/open은 실행을 취소하지 않는다. route/project 이동 또는 unmount는 같은 run을 정확히 한 번 취소하고, terminal 확인이나 명시적 cancel 성공 때만 소유권을 해제한다. cancel 경쟁에서 upstream public `blocked` terminal은 한 번만 보이지만 durable status는 사용자의 cancel intent인 `interrupted`를 유지한다.
+- `RPC·재시도`: Agent Gateway가 run별 official Hermes session을 소유하고 cancel을 `session.interrupt`로 보낸다. prompt acceptance 전 정확한 `ticket_expired`만 새 ticket으로 한 번 재시도하며 login/generic disconnect/malformed acceptance와 acceptance 이후 손실은 자동 provider 재시도 없이 안정된 공개 코드로 닫힌다. blocked/interrupted Retry는 새 run을 만들고 `retry_of_run_id`로 연결하며 project/conversation/session revision/asset-index/segment identity를 transaction 안에서 다시 확인한다.
+- `DB parity`: SQLite와 PostgreSQL의 기존 run row에 nullable `retry_of_run_id`만 추가했다. runtime의 SQLite 전용 `rowid` 정렬을 제거하고 conversation-scoped `message_order`를 영속 저장해 같은 timestamp의 여러 user/assistant exchange와 exact replay를 보존한다. 기존 SQLite row insertion order와 PostgreSQL pre-column 데이터를 one-time backfill하고 repeated bootstrap, non-null, unique order를 검증했다.
+- `UI fence·fallback`: 같은 route의 Director operation, conversation, revision, route epoch가 바뀐 late message/proposal은 게시하지 않는다. stale terminal은 일치하는 옛 run handle만 정리하고 새 run은 건드리지 않는다. cancel 실패와 부분 답변 뒤 blocked 상태는 내부 영문 오류를 노출하지 않는 쉬운 안내로 남으며 manual editor fallback, explicit Apply 전 mutation 0, sole PreviewStage는 유지된다.
+- `리뷰`: 독립 spec review와 독립 quality·gap·reverse review에서 reconnect ownership leak, pre-accept ticket 분류, cancel terminal race, stale handle leak, 실제 PostgreSQL `rowid`, 동일 timestamp 대화 재정렬을 RED로 재현해 수정했다. 최종 Critical/Important/Minor **0**, PASS다.
+- `검증`: C2 focused Python **194 passed**, focused frontend **2 files / 137 passed**, 전체 Python **2192 passed, 29 skipped**, 실제 PostgreSQL 전체 저장소 **23 passed**, 전체 frontend **50 files / 668 passed**, production build, Python `py_compile`, Hermes profile/runtime/20-ID plan-state/zero-tools verifier, Editor UI OSS provenance/UI-system verifier, `git diff --check`가 통과했다. 기존 Starlette warning 1건, React `act(...)`, jsdom navigation, intentional ErrorBoundary stderr와 500kB build warning은 비실패 출력이다.
+- `범위 제한`: 실제 Hermes/provider 호출, 브라우저 사람 E2E, 실제 service-stop drill, 사용자 원본 영상 재생·청취, CapCut Desktop 사람 검증은 실행하지 않았다. C3 capability, C4 dashboard, D1–D4 Mem0, source copy, OpenCut runtime, 자동 apply, SaaS/provider/API 확대도 시작하지 않았다.
+- `진행률`: Phase C **2/4 (50.0%), 잔여 50.0%**, realtime-reliability child **2/4 (50.0%), 잔여 50.0%**, Hermes Yujin initiative **13/20 (65.0%), 잔여 35.0%**다. 기존 VideoBox 공식 누적은 Task 9 사람/환경 acceptance 전까지 **9/22 (40.9%)**, 잔여 **59.1%**로 유지한다.
+- `다음 작업`: **C3만** 진행한다. 기존 attach/stream topology와 durable capability ledger를 재사용하는 source-grounded plan amendment를 먼저 확정하고, 한 capability당 정확히 한 action만 허용한다. 임의 gateway→API callback이나 apply/render/export/DB/filesystem/raw-media capability는 만들지 않는다.
 
 ## 308. 2026-07-30 Hermes Yujin C1 durable conversation closeout
 

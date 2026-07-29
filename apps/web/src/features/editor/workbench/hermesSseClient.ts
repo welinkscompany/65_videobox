@@ -31,11 +31,18 @@ const textEncoder = new TextEncoder();
 type ParseHermesSseOptions = Readonly<{
   signal: AbortSignal;
   onEvent: (event: HermesSseEvent) => void;
+  resume?: HermesSseResume;
+  onProgress?: (resume: HermesSseResume) => void;
+}>;
+
+export type HermesSseResume = Readonly<{
+  lastEventId: number;
+  assembledText: string;
 }>;
 
 export async function parseHermesSse(
   response: Response,
-  { signal, onEvent }: ParseHermesSseOptions,
+  { signal, onEvent, resume, onProgress }: ParseHermesSseOptions,
 ): Promise<void> {
   abortIfNeeded(signal);
   const mediaType = response.headers.get("content-type")
@@ -58,11 +65,11 @@ export async function parseHermesSse(
   let frameBytes = 0;
   let streamBytes = 0;
   let eventCount = 0;
-  let lastEventId = 0;
-  let assembledText = "";
-  let assembledTextBytes = 0;
-  let deltaCount = 0;
-  let started = false;
+  let lastEventId = resume?.lastEventId ?? 0;
+  let assembledText = resume?.assembledText ?? "";
+  let assembledTextBytes = utf8ByteLength(assembledText);
+  let deltaCount = assembledText ? 1 : 0;
+  let started = lastEventId > 0;
   let terminal = false;
   let readerCancelled = false;
   const cancelReader = async () => {
@@ -115,6 +122,7 @@ export async function parseHermesSse(
 
     lastEventId = payload.event_id;
     onEvent(payload);
+    onProgress?.({ lastEventId, assembledText });
   };
 
   const acceptLine = (line: string, contentBytes: number, wireBytes: number) => {
@@ -177,7 +185,7 @@ export async function parseHermesSse(
       if (lineBytes) finishLine(0);
       dispatchFrame();
     }
-    if (!terminal) throw protocolError();
+    if (!terminal) throw disconnectedError();
     await cancelReader();
   } catch (error) {
     await cancelReader().catch(() => undefined);
@@ -186,6 +194,61 @@ export async function parseHermesSse(
     signal.removeEventListener("abort", abortReader);
     reader.releaseLock();
   }
+}
+
+type StreamHermesSseWithReconnectOptions = Readonly<{
+  signal: AbortSignal;
+  open: (lastEventId: number) => Promise<Response>;
+  onEvent: (event: HermesSseEvent) => void;
+  wait?: (milliseconds: number, signal: AbortSignal) => Promise<void>;
+}>;
+
+const reconnectBackoffMilliseconds = [100, 250, 500] as const;
+
+export async function streamHermesSseWithReconnect({
+  signal,
+  open,
+  onEvent,
+  wait = waitForReconnect,
+}: StreamHermesSseWithReconnectOptions): Promise<void> {
+  let resume: HermesSseResume = { lastEventId: 0, assembledText: "" };
+  for (
+    let attempt = 0;
+    attempt <= reconnectBackoffMilliseconds.length;
+    attempt += 1
+  ) {
+    abortIfNeeded(signal);
+    let response: Response;
+    try {
+      response = await open(resume.lastEventId);
+    } catch (error) {
+      if (isAbortError(error) || signal.aborted) throw error;
+      if (attempt === reconnectBackoffMilliseconds.length) {
+        throw protocolError();
+      }
+      await wait(reconnectBackoffMilliseconds[attempt], signal);
+      continue;
+    }
+    try {
+      await parseHermesSse(response, {
+        signal,
+        onEvent,
+        resume,
+        onProgress: (next) => {
+          resume = next;
+        },
+      });
+      return;
+    } catch (error) {
+      if (isAbortError(error) || signal.aborted) throw error;
+      if (!(error instanceof HermesSseDisconnectedError)) throw error;
+      if (attempt === reconnectBackoffMilliseconds.length) {
+        throw protocolError();
+      }
+      await wait(reconnectBackoffMilliseconds[attempt], signal);
+    }
+  }
+  throw protocolError();
 }
 
 function parseFrame(lines: readonly string[]) {
@@ -245,4 +308,29 @@ function utf8ByteLength(value: string) {
 
 function protocolError() {
   return new Error(protocolErrorMessage);
+}
+
+class HermesSseDisconnectedError extends Error {}
+
+function disconnectedError() {
+  return new HermesSseDisconnectedError(protocolErrorMessage);
+}
+
+function isAbortError(error: unknown) {
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
+function waitForReconnect(milliseconds: number, signal: AbortSignal) {
+  return new Promise<void>((resolve, reject) => {
+    abortIfNeeded(signal);
+    const onAbort = () => {
+      window.clearTimeout(timer);
+      reject(new DOMException("Aborted", "AbortError"));
+    };
+    const timer = window.setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, milliseconds);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
 }

@@ -30,9 +30,21 @@ export type RightDockMessage = Readonly<{
 
 export type YujinRunState =
   | { kind: "idle" }
-  | { kind: "streaming"; runId: string; routeEpoch: number; text: string }
+  | {
+    kind: "streaming";
+    runId: string;
+    routeEpoch: number;
+    text: string;
+    cancelWarning?: string;
+  }
   | { kind: "complete"; runId: string; syncWarning?: string }
-  | { kind: "unavailable"; message: string };
+  | {
+    kind: "unavailable";
+    message: string;
+    runId?: string;
+    retryable?: boolean;
+    cancelWarning?: string;
+  };
 
 export type RightDockConversationScroll = Readonly<{
   key: string;
@@ -58,5 +70,7 @@ export type RightDockDirector = Readonly<{
   onPreviewCandidate: (candidate: RightDockCandidate) => void;
   onStart?: () => void | Promise<void>;
   onRetryMessage?: () => void | Promise<void>;
+  onCancelRun?: () => void | Promise<void>;
+  onRetryRun?: () => void | Promise<void>;
   retryAfterSeconds?: number | null;
 }>;

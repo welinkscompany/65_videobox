@@ -79,7 +79,9 @@ def _valid_service_token(value: str) -> bool:
     )
 
 
-async def _stream_public_lines(hermes_client, *, text: str) -> AsyncIterator[bytes]:
+async def _stream_public_lines(
+    hermes_client, *, text: str, run_id: str | None = None
+) -> AsyncIterator[bytes]:
     """Translate the strict Hermes stream into public NDJSON frames."""
 
     try:
@@ -88,7 +90,12 @@ async def _stream_public_lines(hermes_client, *, text: str) -> AsyncIterator[byt
         emitted = ""
         quarantine = ""
         event_count = 0
-        async for event in hermes_client.stream_prompt(text=text):
+        stream = (
+            hermes_client.stream_prompt(text=text, run_id=run_id)
+            if run_id is not None
+            else hermes_client.stream_prompt(text=text)
+        )
+        async for event in stream:
             event_count += 1
             if event_count > _MAX_PUBLIC_EVENTS:
                 raise ValueError("gateway_event_limit")
@@ -415,6 +422,7 @@ def create_app(
             return StreamingResponse(
                 _stream_public_lines(
                     hermes_client,
+                    run_id=run_id,
                     text=prompt_envelope(
                         user_text=body.text,
                         context_json=context_json,
@@ -422,6 +430,19 @@ def create_app(
                 ),
                 media_type="application/x-ndjson",
             )
+
+        @app.post(
+            "/internal/hermes/runs/{run_id}/cancel",
+            status_code=204,
+            response_class=Response,
+        )
+        async def cancel_run(
+            run_id: str,
+            authorization: str | None = Header(default=None),
+        ) -> Response:
+            require_service_token(authorization)
+            await hermes_client.interrupt(run_id=run_id)
+            return Response(status_code=204)
 
         @app.delete(
             "/internal/hermes/runs/{run_id}",

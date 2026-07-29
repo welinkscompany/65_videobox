@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator
 import re
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 
 from videobox_api.models import HermesRunCreateRequest, HermesRunCreateResponse
 from videobox_api.agent_gateway_client import AgentGatewayUnavailable
@@ -46,6 +46,67 @@ def build_hermes_conversation_router(run_service) -> APIRouter:
         except AgentGatewayUnavailable as error:
             raise HTTPException(
                 status_code=503, detail="hermes_context_preparation_unavailable"
+            ) from error
+        events_url = (
+            f"/api/projects/{project_id}/director/conversations/"
+            f"{conversation_id}/hermes-runs/{run.run_id}/events"
+        )
+        return HermesRunCreateResponse(
+            run_id=run.run_id,
+            conversation_id=conversation_id,
+            events_url=events_url,
+        )
+
+    @router.post(
+        "/api/projects/{project_id}/director/conversations/{conversation_id}/hermes-runs/{run_id}/cancel",
+        status_code=204,
+        response_class=Response,
+    )
+    async def cancel_run(
+        project_id: str,
+        conversation_id: str,
+        run_id: str,
+    ) -> Response:
+        try:
+            await run_service.cancel(
+                run_id,
+                project_id=project_id,
+                conversation_id=conversation_id,
+            )
+        except KeyError as error:
+            raise HTTPException(
+                status_code=404, detail=str(error.args[0])
+            ) from error
+        return Response(status_code=204)
+
+    @router.post(
+        "/api/projects/{project_id}/director/conversations/{conversation_id}/hermes-runs/{run_id}/retry",
+        response_model=HermesRunCreateResponse,
+        status_code=201,
+    )
+    async def retry_run(
+        project_id: str,
+        conversation_id: str,
+        run_id: str,
+    ) -> HermesRunCreateResponse:
+        try:
+            run = await run_service.retry(
+                run_id,
+                project_id=project_id,
+                conversation_id=conversation_id,
+            )
+        except KeyError as error:
+            raise HTTPException(
+                status_code=404, detail=str(error.args[0])
+            ) from error
+        except ValueError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        except HermesCapacityUnavailable as error:
+            raise HTTPException(status_code=503, detail=str(error)) from error
+        except AgentGatewayUnavailable as error:
+            raise HTTPException(
+                status_code=503,
+                detail="hermes_context_preparation_unavailable",
             ) from error
         events_url = (
             f"/api/projects/{project_id}/director/conversations/"

@@ -13,7 +13,7 @@
 Parent: `docs/superpowers/plans/2026-07-26-videobox-hermes-yujin-master-plan.md`
 Requires: Phase B task B5 complete.
 
-Child progress: **1/4 tasks (25.0%), remaining 75.0%**.
+Child progress: **2/4 tasks (50.0%), remaining 50.0%**.
 
 ## C1 — Persist run and event cursors
 
@@ -103,7 +103,34 @@ Storage invariants:
 
 ## C2 — Add reconnect, cancel, retry, and stale-run fencing
 
-- [ ] **C2** Add bounded reconnect, cancel, retry, duplicate suppression, and stale-run fencing.
+- [x] **C2** Add bounded reconnect, cancel, retry, duplicate suppression, and stale-run fencing.
+
+**2026-07-30 source-grounded C2 amendment:**
+
+- Reuse the existing `director_hermes_runs` row and add only nullable
+  `retry_of_run_id`; do not create a second run or conversation store.
+- A route-owned run survives RightDock close and non-terminal reconnect
+  exhaustion. Route/project navigation or unmount cancels that exact run once;
+  terminal truth or successful explicit cancel releases ownership. While
+  ownership remains, new Hermes send/retry and legacy Director start are
+  blocked, but manual editing and explicit cancel remain available.
+- Browser reconnect starts with the initial open inside the same bounded helper,
+  then uses `100/250/500ms` backoff and strict durable `Last-Event-ID`
+  duplicate suppression. Provider work is never automatically retried after
+  prompt acceptance.
+- Exact `ticket_expired` before prompt acceptance can mint one fresh ticket.
+  Login failure, generic disconnect, malformed acceptance, and any
+  post-acceptance loss use stable public failure codes without a provider retry.
+- Explicit cancel owns durable `interrupted` state even if the upstream
+  interruption concurrently emits a public `blocked` terminal. Repeated or
+  concurrent cancel calls share one owner and one upstream interrupt.
+- SQLite and PostgreSQL use a durable conversation-scoped `message_order`.
+  This replaces runtime SQLite `rowid` ordering, preserves user/assistant pairs
+  under identical timestamps, and safely migrates pre-C2 databases.
+- The accepted file set therefore also includes the existing storage schemas,
+  project store, PostgreSQL compatibility/integration tests, and the non-live
+  Hermes fake harnesses needed to exercise the official run-aware port. This is
+  backend-parity remediation, not a new capability, provider, or apply path.
 
 **Files:**
 

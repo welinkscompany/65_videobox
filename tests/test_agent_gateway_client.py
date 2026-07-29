@@ -164,6 +164,31 @@ def test_cancelled_prepare_releases_created_reservation() -> None:
     ]
 
 
+def test_cancel_run_uses_the_authenticated_internal_interrupt_endpoint() -> None:
+    http = _Http()
+
+    async def post(path, **kwargs):
+        http.calls.append(("POST", path, kwargs))
+        return _PostResponse()
+
+    http.post = post
+    client = AgentGatewayClient(
+        base_url="http://videobox-agent-gateway:8081",
+        service_token=SERVICE_TOKEN,
+        http_client_factory=lambda **_: http,
+    )
+
+    asyncio.run(client.cancel_run(run_id="run-active"))
+
+    assert http.calls == [
+        (
+            "POST",
+            "/internal/hermes/runs/run-active/cancel",
+            {"headers": {"Authorization": f"Bearer {SERVICE_TOKEN}"}},
+        )
+    ]
+
+
 def test_internal_url_and_service_credential_only() -> None:
     http = _Http()
     factory_calls = []

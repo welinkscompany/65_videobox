@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "../../../api";
-import { parseHermesSse, type HermesSseEvent } from "./hermesSseClient";
+import {
+  parseHermesSse,
+  streamHermesSseWithReconnect,
+  type HermesSseEvent,
+} from "./hermesSseClient";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -311,6 +315,74 @@ describe("parseHermesSse", () => {
   });
 });
 
+describe("streamHermesSseWithReconnect", () => {
+  it("reconnects the same run after the last accepted cursor and suppresses replay duplicates", async () => {
+    const openedAfter: number[] = [];
+    const responses = [
+      sseResponse([event(1, "run_started") + event(2, "text_delta", "안녕")]),
+      sseResponse([
+        event(2, "text_delta", "중복")
+        + event(3, "run_completed", "안녕"),
+      ]),
+    ];
+    const received: HermesSseEvent[] = [];
+
+    await streamHermesSseWithReconnect({
+      signal: new AbortController().signal,
+      open: async (lastEventId) => {
+        openedAfter.push(lastEventId);
+        return responses.shift()!;
+      },
+      onEvent: (next) => received.push(next),
+      wait: async () => undefined,
+    });
+
+    expect(openedAfter).toEqual([0, 2]);
+    expect(received.map((next) => next.event_id)).toEqual([1, 2, 3]);
+    expect(received.at(-1)?.text).toBe("안녕");
+  });
+
+  it("bounds reconnect to three attempts and never retries an abort or protocol violation", async () => {
+    const open = vi.fn(async () => sseResponse([]));
+    const wait = vi.fn(async () => undefined);
+
+    await expect(streamHermesSseWithReconnect({
+      signal: new AbortController().signal,
+      open,
+      onEvent: vi.fn(),
+      wait,
+    })).rejects.toThrow("유진 응답을 이어받지 못했어요.");
+    expect(open).toHaveBeenCalledTimes(4);
+    expect(wait.mock.calls.map(([milliseconds]) => milliseconds)).toEqual([
+      100,
+      250,
+      500,
+    ]);
+
+    const malformedOpen = vi.fn(async () => sseResponse([
+      "id: 1\nevent: text_delta\ndata: not-json\n\n",
+    ]));
+    await expect(streamHermesSseWithReconnect({
+      signal: new AbortController().signal,
+      open: malformedOpen,
+      onEvent: vi.fn(),
+      wait,
+    })).rejects.toThrow("유진 응답을 이어받지 못했어요.");
+    expect(malformedOpen).toHaveBeenCalledOnce();
+
+    const controller = new AbortController();
+    controller.abort();
+    const abortedOpen = vi.fn();
+    await expect(streamHermesSseWithReconnect({
+      signal: controller.signal,
+      open: abortedOpen,
+      onEvent: vi.fn(),
+      wait,
+    })).rejects.toMatchObject({ name: "AbortError" });
+    expect(abortedOpen).not.toHaveBeenCalled();
+  });
+});
+
 describe("Hermes browser API boundary", () => {
   it("creates a typed run and opens only its same-origin VideoBox SSE URL", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch")
@@ -346,6 +418,29 @@ describe("Hermes browser API boundary", () => {
       created.events_url,
       expect.objectContaining({ method: "GET", credentials: "same-origin", signal: controller.signal }),
     );
+  });
+
+  it("sends only a validated per-run Last-Event-ID cursor on reconnect", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      sseResponse([event(3, "run_completed", "완료")]),
+    );
+    const run = {
+      run_id: "run-1",
+      conversation_id: "conversation-1",
+      events_url: "/api/projects/project-a/director/conversations/conversation-1/hermes-runs/run-1/events",
+    };
+
+    await api.openHermesRunEvents(
+      "project-a",
+      "conversation-1",
+      run,
+      new AbortController().signal,
+      2,
+    );
+
+    const headers = fetchMock.mock.calls[0][1]?.headers as Headers;
+    expect(headers.get("Last-Event-ID")).toBe("2");
+    expect(headers.get("Accept")).toBe("text/event-stream");
   });
 
   it("requires HTTP 201 and an exactly linked run before accepting creation", async () => {

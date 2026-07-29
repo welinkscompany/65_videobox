@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-import { ApiConflictError, api, type BrollAsset, type DirectorCandidate, type DirectorMessage, type DirectorProposal, type MediaLibraryAsset, type PartialRegenerationJob, type PartialRegenerationPreflight, type PartialRegenerationRun } from "../../../api";
+import { ApiConflictError, api, type BrollAsset, type DirectorCandidate, type DirectorMessage, type DirectorProposal, type HermesRunCreateResponse, type MediaLibraryAsset, type PartialRegenerationJob, type PartialRegenerationPreflight, type PartialRegenerationRun } from "../../../api";
 import { Button } from "../../../components/ui/button";
 import { findLatestSucceededJob } from "../../../lib/formatters";
 import { projectEditorAssets, type EditorAssetCard } from "../assets/editorAssetProjection";
@@ -10,7 +10,7 @@ import type { EditorCaptionStyle, EditorControls, EditorViewModel } from "../edi
 import type { InspectorAction } from "../inspector/InspectorControls";
 import { canRestorePartialRegenerationResult, canRunPartialRegeneration, createPartialRegenerationTicket, PARTIAL_REGENERATION_FIELDS, preflightMatchesPartialRegenerationTicket, runMatchesPartialRegenerationTicket, type PartialRegenerationTicket } from "../partialRegenerationController";
 import { EditorWorkbench } from "./EditorWorkbench";
-import { parseHermesSse, type HermesSseEvent } from "./hermesSseClient";
+import { streamHermesSseWithReconnect, type HermesSseEvent } from "./hermesSseClient";
 import type { RightDockDirector, RightDockMessage, RightDockProposal } from "./rightDockTypes";
 
 type MutationState = Readonly<{ isSaving: boolean; message?: string }>;
@@ -42,9 +42,16 @@ type PartialState = Readonly<{
   isResultOpen: boolean;
   message: string | null;
 }>;
+type ActiveHermesRouteRun = Readonly<{
+  projectId: string;
+  conversationId: string;
+  runId: string;
+  controller: AbortController;
+}>;
 
 const assetLoadError = "일부 자산을 불러오지 못했어요. 편집은 계속할 수 있어요. 잠시 후 다시 확인해 주세요.";
 const yujinUnavailableMessage = "유진의 답을 받지 못했어요.";
+const hermesUnavailableTechnicalText = "Hermes is temporarily unavailable. Manual Director remains available.";
 const maxDirectorMessages = 200;
 
 function directorDraftStorageKey(requestKey: string) {
@@ -95,12 +102,28 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
   const directorMutationInFlight = useRef(false);
   const hermesRunInFlight = useRef(false);
   const hermesAbort = useRef<AbortController | null>(null);
+  const activeHermesRouteRun = useRef<ActiveHermesRouteRun | null>(null);
   const hermesOperationId = useRef(0);
+  const currentDirectorConversationId = useRef<string | null>(null);
   const partialInFlight = useRef(false);
   const currentEditorRevision = useRef(state.view?.expectedRevision ?? null);
   currentEditorRevision.current = state.view?.expectedRevision ?? null;
+  const cancelActiveRouteRun = () => {
+    const active = activeHermesRouteRun.current;
+    if (!active) return;
+    activeHermesRouteRun.current = null;
+    const cancelController = new AbortController();
+    void api.cancelHermesRun(
+      active.projectId,
+      active.conversationId,
+      active.runId,
+      cancelController.signal,
+    ).catch(() => undefined);
+    active.controller.abort();
+  };
   useEffect(() => {
     if (routeEpoch.current.key === requestKey) return;
+    cancelActiveRouteRun();
     hermesOperationId.current += 1;
     hermesRunInFlight.current = false;
     hermesAbort.current?.abort();
@@ -110,6 +133,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     directorOperationId.current += 1;
     partialOperationId.current += 1;
     directorMutationInFlight.current = false;
+    currentDirectorConversationId.current = null;
     partialInFlight.current = false;
     mutationInFlight.current = false;
     setMutation({ isSaving: false });
@@ -118,6 +142,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     setPartialRecoveryError(false);
   }, [requestKey]);
   useEffect(() => () => {
+    cancelActiveRouteRun();
     hermesOperationId.current += 1;
     hermesRunInFlight.current = false;
     hermesAbort.current?.abort();
@@ -552,11 +577,183 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     }, activePartial.result),
   );
   const activeDirector = director.key === requestKey ? director : createDirectorState(requestKey, sessionId);
+  currentDirectorConversationId.current = activeDirector.conversationId;
   const isCurrentDirector = (epoch: number, operationId: number) => routeEpoch.current.value === epoch && directorOperationId.current === operationId;
+  const streamHermesRun = async ({
+    conversationId,
+    run,
+    controller,
+    epoch,
+    operationId,
+    expectedRevision,
+    expectedDirectorOperationId,
+  }: Readonly<{
+    conversationId: string;
+    run: HermesRunCreateResponse;
+    controller: AbortController;
+    epoch: number;
+    operationId: number;
+    expectedRevision: number;
+    expectedDirectorOperationId: number;
+  }>) => {
+    const assistantMessageId = `hermes-run:${run.run_id}`;
+    const terminal = {
+      eventType: null as HermesSseEvent["event_type"] | null,
+      retryable: false,
+    };
+    const isCurrentHermes = () => (
+      routeEpoch.current.value === epoch
+      && hermesOperationId.current === operationId
+      && currentEditorRevision.current === expectedRevision
+      && directorOperationId.current === expectedDirectorOperationId
+      && currentDirectorConversationId.current === conversationId
+      && !controller.signal.aborted
+    );
+    await streamHermesSseWithReconnect({
+      signal: controller.signal,
+      open: (lastEventId) => api.openHermesRunEvents(
+        projectId,
+        conversationId,
+        run,
+        controller.signal,
+        lastEventId,
+      ),
+      onEvent: (event) => {
+        const isTerminal = event.event_type === "blocked" || event.event_type === "run_completed";
+        const ownsActiveHandle = isTerminal
+          && activeHermesRouteRun.current?.runId === run.run_id
+          && activeHermesRouteRun.current.controller === controller;
+        if (ownsActiveHandle) {
+          activeHermesRouteRun.current = null;
+        }
+        if (!isCurrentHermes()) {
+          if (ownsActiveHandle) {
+            setDirector((current) => current.key === requestKey
+              && current.runState.kind === "streaming"
+              && current.runState.runId === run.run_id
+              ? {
+                ...current,
+                isSending: false,
+                runState: { kind: "idle" },
+              }
+              : current);
+          }
+          return;
+        }
+        if (isTerminal) {
+          terminal.eventType = event.event_type;
+          terminal.retryable = event.retryable;
+        }
+        setDirector((current) => {
+          if (current.key !== requestKey) return current;
+          if (event.event_type === "text_delta") {
+            const nextText = current.runState.kind === "streaming" && current.runState.runId === run.run_id
+              ? `${current.runState.text}${event.text}`
+              : event.text;
+            return {
+              ...current,
+              messages: replaceDirectorMessageText(current.messages, assistantMessageId, nextText),
+              runState: { kind: "streaming", runId: run.run_id, routeEpoch: epoch, text: nextText },
+            };
+          }
+          if (event.event_type === "blocked") {
+            return {
+              ...current,
+              messages: replaceDirectorMessageText(current.messages, assistantMessageId, yujinUnavailableMessage),
+              runState: {
+                kind: "unavailable",
+                message: yujinUnavailableMessage,
+                runId: run.run_id,
+                retryable: event.retryable,
+              },
+            };
+          }
+          if (event.event_type === "run_completed") {
+            return {
+              ...current,
+              messages: replaceDirectorMessageText(current.messages, assistantMessageId, event.text),
+              runState: { kind: "complete", runId: run.run_id },
+            };
+          }
+          return current;
+        });
+      },
+    });
+    if (!isCurrentHermes() || terminal.eventType === null) return;
+    try {
+      const persisted = await api.listDirectorMessages(projectId, conversationId, sessionId!);
+      if (!isCurrentHermes()) return;
+      setDirector((current) => current.key === requestKey ? {
+        ...current,
+        messages: persisted.length
+          ? projectDirectorMessages(persisted)
+          : current.messages,
+        runState: terminal.eventType === "run_completed"
+          ? { kind: "complete", runId: run.run_id }
+          : {
+            kind: "unavailable",
+            message: yujinUnavailableMessage,
+            runId: run.run_id,
+            retryable: terminal.retryable,
+          },
+      } : current);
+      if (terminal.eventType !== "run_completed") return;
+      const proposalId = findHermesRunProposalId(persisted, run.run_id);
+      if (proposalId) {
+        const terminalProposal = await api.getDirectorProposal(projectId, proposalId);
+        if (!isCurrentHermes()) return;
+        setDirector((current) => {
+          if (current.key !== requestKey) return current;
+          const candidateIds = new Set(
+            terminalProposal.candidates.map((candidate) => candidate.candidate_id),
+          );
+          const retainedSelection = current.selectedCandidateIds.filter(
+            (candidateId) => candidateIds.has(candidateId),
+          );
+          return {
+            ...current,
+            state: "proposal_ready",
+            proposal: terminalProposal,
+            selectedCandidateIds: isYujinProposal(terminalProposal)
+              ? []
+              : retainedSelection.length
+              ? retainedSelection
+              : terminalProposal.candidates[0]?.candidate_id
+                ? [terminalProposal.candidates[0].candidate_id]
+                : [],
+          };
+        });
+      } else {
+        setDirector((current) => current.key === requestKey ? {
+          ...current,
+          state: "idle",
+          proposal: null,
+          selectedCandidateIds: [],
+        } : current);
+      }
+    } catch {
+      if (!isCurrentHermes() || terminal.eventType !== "run_completed") return;
+      setDirector((current) => current.key === requestKey ? {
+        ...current,
+        runState: {
+          kind: "complete",
+          runId: run.run_id,
+          syncWarning: "대화 저장 상태를 확인하지 못했어요.",
+        },
+      } : current);
+    }
+  };
   const sendDirectorMessage = async (text: string) => {
     const submittedDraft = text.trim();
     const currentView = state.view;
-    if (!sessionId || !currentView || !submittedDraft || hermesRunInFlight.current) return;
+    if (
+      !sessionId
+      || !currentView
+      || !submittedDraft
+      || hermesRunInFlight.current
+      || directorMutationInFlight.current
+      || activeHermesRouteRun.current !== null
+    ) return;
     const clientMessageId = globalThis.crypto?.randomUUID?.();
     if (!clientMessageId) {
       setDirector((current) => current.key === requestKey ? { ...current, runState: { kind: "unavailable", message: yujinUnavailableMessage } } : current);
@@ -564,6 +761,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     }
     const epoch = routeEpoch.current.value;
     const operationId = hermesOperationId.current + 1;
+    const expectedDirectorOperationId = directorOperationId.current;
     hermesOperationId.current = operationId;
     hermesRunInFlight.current = true;
     const controller = new AbortController();
@@ -571,10 +769,11 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     const optimisticUserId = `hermes-user:${clientMessageId}`;
     let runId: string | null = null;
     let createdRun = false;
-    const terminal = { eventType: null as HermesSseEvent["event_type"] | null };
     const isCurrentHermes = () => (
       routeEpoch.current.value === epoch
       && hermesOperationId.current === operationId
+      && currentEditorRevision.current === currentView.expectedRevision
+      && directorOperationId.current === expectedDirectorOperationId
       && !controller.signal.aborted
     );
     setDirector((current) => current.key === requestKey ? {
@@ -589,6 +788,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
         const conversation = await api.createDirectorConversation(projectId, { session_id: sessionId });
         if (!isCurrentHermes()) return;
         conversationId = conversation.conversation_id;
+        currentDirectorConversationId.current = conversationId;
       }
       const run = await api.createHermesRun(projectId, conversationId, {
         session_id: sessionId,
@@ -600,6 +800,12 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       if (!isCurrentHermes()) return;
       createdRun = true;
       runId = run.run_id;
+      activeHermesRouteRun.current = {
+        projectId,
+        conversationId,
+        runId: run.run_id,
+        controller,
+      };
       const assistantMessageId = `hermes-run:${run.run_id}`;
       setDirector((current) => current.key === requestKey ? {
         ...current,
@@ -608,104 +814,15 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
         messages: capDirectorMessages([...current.messages, { id: assistantMessageId, role: "assistant", text: "" }]),
         runState: { kind: "streaming", runId: run.run_id, routeEpoch: epoch, text: "" },
       } : current);
-      const response = await api.openHermesRunEvents(projectId, conversationId, run, controller.signal);
-      if (!isCurrentHermes()) return;
-      await parseHermesSse(response, {
-        signal: controller.signal,
-        onEvent: (event) => {
-          if (!isCurrentHermes() || runId !== run.run_id) return;
-          if (event.event_type === "blocked" || event.event_type === "run_completed") terminal.eventType = event.event_type;
-          setDirector((current) => {
-            if (current.key !== requestKey) return current;
-            if (event.event_type === "text_delta") {
-              const nextText = current.runState.kind === "streaming" && current.runState.runId === run.run_id
-                ? `${current.runState.text}${event.text}`
-                : event.text;
-              return {
-                ...current,
-                messages: replaceDirectorMessageText(current.messages, assistantMessageId, nextText),
-                runState: { kind: "streaming", runId: run.run_id, routeEpoch: epoch, text: nextText },
-              };
-            }
-            if (event.event_type === "blocked") {
-              return {
-                ...current,
-                messages: replaceDirectorMessageText(current.messages, assistantMessageId, yujinUnavailableMessage),
-                runState: { kind: "unavailable", message: yujinUnavailableMessage },
-              };
-            }
-            if (event.event_type === "run_completed") {
-              return {
-                ...current,
-                messages: replaceDirectorMessageText(current.messages, assistantMessageId, event.text),
-                runState: { kind: "complete", runId: run.run_id },
-              };
-            }
-            return current;
-          });
-        },
+      await streamHermesRun({
+        conversationId,
+        run,
+        controller,
+        epoch,
+        operationId,
+        expectedRevision: currentView.expectedRevision,
+        expectedDirectorOperationId,
       });
-      if (!isCurrentHermes()) return;
-      if (terminal.eventType !== null) {
-        try {
-          const persisted = await api.listDirectorMessages(projectId, conversationId, sessionId);
-          if (!isCurrentHermes()) return;
-          setDirector((current) => current.key === requestKey ? {
-            ...current,
-            messages: projectDirectorMessages(persisted),
-            runState: terminal.eventType === "run_completed"
-              ? { kind: "complete", runId: run.run_id }
-              : { kind: "unavailable", message: yujinUnavailableMessage },
-          } : current);
-          if (terminal.eventType === "run_completed") {
-            const proposalId = findHermesRunProposalId(persisted, run.run_id);
-            if (proposalId) {
-              const terminalProposal = await api.getDirectorProposal(projectId, proposalId);
-              if (!isCurrentHermes()) return;
-              setDirector((current) => {
-                if (current.key !== requestKey) return current;
-                const candidateIds = new Set(
-                  terminalProposal.candidates.map((candidate) => candidate.candidate_id),
-                );
-                const retainedSelection = current.selectedCandidateIds.filter(
-                  (candidateId) => candidateIds.has(candidateId),
-                );
-                return {
-                  ...current,
-                  state: "proposal_ready",
-                  proposal: terminalProposal,
-                  selectedCandidateIds: isYujinProposal(terminalProposal)
-                    ? []
-                    : retainedSelection.length
-                    ? retainedSelection
-                    : terminalProposal.candidates[0]?.candidate_id
-                      ? [terminalProposal.candidates[0].candidate_id]
-                      : [],
-                };
-              });
-            } else {
-              setDirector((current) => current.key === requestKey ? {
-                ...current,
-                state: "idle",
-                proposal: null,
-                selectedCandidateIds: [],
-              } : current);
-            }
-          }
-        } catch {
-          if (!isCurrentHermes()) return;
-          if (terminal.eventType === "run_completed") {
-            setDirector((current) => current.key === requestKey ? {
-              ...current,
-              runState: {
-                kind: "complete",
-                runId: run.run_id,
-                syncWarning: "대화 저장 상태를 확인하지 못했어요.",
-              },
-            } : current);
-          }
-        }
-      }
     } catch (error) {
       if (isAbortError(error) || !isCurrentHermes()) return;
       setDirector((current) => {
@@ -716,7 +833,11 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
         return {
           ...current,
           messages: failedMessages,
-          runState: { kind: "unavailable", message: yujinUnavailableMessage },
+          runState: {
+            kind: "unavailable",
+            message: yujinUnavailableMessage,
+            ...(runId ? { runId } : {}),
+          },
           isSending: false,
         };
       });
@@ -728,8 +849,183 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       }
     }
   };
+  const cancelDirectorRun = async () => {
+    const ownedRun = activeHermesRouteRun.current;
+    if (
+      !ownedRun
+      || ownedRun.projectId !== projectId
+      || ownedRun.conversationId !== activeDirector.conversationId
+    ) return;
+    const runId = ownedRun.runId;
+    const conversationId = ownedRun.conversationId;
+    const epoch = routeEpoch.current.value;
+    const operationId = hermesOperationId.current;
+    const cancelController = new AbortController();
+    try {
+      await api.cancelHermesRun(
+        projectId,
+        conversationId,
+        runId,
+        cancelController.signal,
+      );
+      if (
+        routeEpoch.current.value !== epoch
+        || hermesOperationId.current !== operationId
+        || activeHermesRouteRun.current !== ownedRun
+      ) return;
+      hermesOperationId.current += 1;
+      hermesRunInFlight.current = false;
+      activeHermesRouteRun.current = null;
+      ownedRun.controller.abort();
+      if (hermesAbort.current === ownedRun.controller) {
+        hermesAbort.current = null;
+      }
+      setDirector((current) => current.key === requestKey ? {
+        ...current,
+        isSending: false,
+        messages: replaceDirectorMessageText(
+          current.messages,
+          `hermes-run:${runId}`,
+          yujinUnavailableMessage,
+        ),
+        runState: {
+          kind: "unavailable",
+          message: yujinUnavailableMessage,
+          runId,
+          retryable: true,
+        },
+      } : current);
+    } catch (error) {
+      if (isAbortError(error)) return;
+      setDirector((current) => (
+        current.key === requestKey
+        && (current.runState.kind === "streaming" || current.runState.kind === "unavailable")
+        && current.runState.runId === runId
+          ? {
+            ...current,
+            runState: {
+              ...current.runState,
+              cancelWarning: "답변 중단 요청을 보내지 못했어요. 답변은 계속 진행 중이에요.",
+            },
+          }
+          : current
+      ));
+    }
+  };
+  const retryDirectorRun = async () => {
+    const sourceRunState = activeDirector.runState;
+    const currentView = state.view;
+    if (
+      sourceRunState.kind !== "unavailable"
+      || !sourceRunState.retryable
+      || !sourceRunState.runId
+      || !activeDirector.conversationId
+      || !sessionId
+      || !currentView
+      || hermesRunInFlight.current
+      || activeHermesRouteRun.current !== null
+    ) return;
+    const conversationId = activeDirector.conversationId;
+    const sourceRunId = sourceRunState.runId;
+    const epoch = routeEpoch.current.value;
+    const operationId = hermesOperationId.current + 1;
+    const expectedDirectorOperationId = directorOperationId.current;
+    hermesOperationId.current = operationId;
+    hermesRunInFlight.current = true;
+    const controller = new AbortController();
+    hermesAbort.current = controller;
+    let retryRunId: string | null = null;
+    const isCurrentHermes = () => (
+      routeEpoch.current.value === epoch
+      && hermesOperationId.current === operationId
+      && currentEditorRevision.current === currentView.expectedRevision
+      && directorOperationId.current === expectedDirectorOperationId
+      && currentDirectorConversationId.current === conversationId
+      && !controller.signal.aborted
+    );
+    setDirector((current) => current.key === requestKey ? {
+      ...current,
+      isSending: true,
+    } : current);
+    try {
+      const run = await api.retryHermesRun(
+        projectId,
+        conversationId,
+        sourceRunId,
+        controller.signal,
+      );
+      if (!isCurrentHermes()) return;
+      retryRunId = run.run_id;
+      activeHermesRouteRun.current = {
+        projectId,
+        conversationId,
+        runId: run.run_id,
+        controller,
+      };
+      setDirector((current) => current.key === requestKey ? {
+        ...current,
+        messages: capDirectorMessages([
+          ...current.messages,
+          { id: `hermes-run:${run.run_id}`, role: "assistant", text: "" },
+        ]),
+        runState: {
+          kind: "streaming",
+          runId: run.run_id,
+          routeEpoch: epoch,
+          text: "",
+        },
+      } : current);
+      await streamHermesRun({
+        conversationId,
+        run,
+        controller,
+        epoch,
+        operationId,
+        expectedRevision: currentView.expectedRevision,
+        expectedDirectorOperationId,
+      });
+    } catch (error) {
+      if (isAbortError(error) || !isCurrentHermes()) return;
+      setDirector((current) => current.key === requestKey ? {
+        ...current,
+        isSending: false,
+        messages: retryRunId
+          ? replaceDirectorMessageText(
+            current.messages,
+            `hermes-run:${retryRunId}`,
+            yujinUnavailableMessage,
+          )
+          : current.messages,
+        runState: {
+          kind: "unavailable",
+          message: yujinUnavailableMessage,
+          runId: retryRunId ?? sourceRunId,
+          retryable: retryRunId === null,
+        },
+      } : current);
+    } finally {
+      if (
+        routeEpoch.current.value === epoch
+        && hermesOperationId.current === operationId
+      ) {
+        hermesRunInFlight.current = false;
+        if (hermesAbort.current === controller) hermesAbort.current = null;
+        setDirector((current) => current.key === requestKey ? {
+          ...current,
+          isSending: false,
+        } : current);
+      }
+    }
+  };
   const startDirector = async () => {
-    if (!sessionId || activeDirector.proposal || activeDirector.state !== "idle" || directorMutationInFlight.current) return;
+    if (
+      !sessionId
+      || activeDirector.proposal
+      || activeDirector.state !== "idle"
+      || directorMutationInFlight.current
+      || hermesRunInFlight.current
+      || activeHermesRouteRun.current !== null
+    ) return;
     const epoch = routeEpoch.current.value;
     const operationId = directorOperationId.current + 1;
     directorOperationId.current = operationId;
@@ -812,6 +1108,11 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       }
     }
   };
+  const ownsActiveHermesRouteRun = Boolean(
+    activeHermesRouteRun.current
+    && activeHermesRouteRun.current.projectId === projectId
+    && activeHermesRouteRun.current.conversationId === activeDirector.conversationId,
+  );
   const rightDock: RightDockDirector = {
     state: mutation.isSaving ? "applying" : activeDirector.state,
     messages: activeDirector.messages,
@@ -820,15 +1121,28 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     runState: activeDirector.runState,
     selectedCandidateIds: activeDirector.selectedCandidateIds,
     conversationScroll: activeDirector.conversationScroll,
-    composerDisabled: mutation.isSaving || activeDirector.isSending === true || activeDirector.state === "analysis_running" || activeDirector.state === "applying",
+    composerDisabled: mutation.isSaving || activeDirector.isSending === true || activeDirector.state === "analysis_running" || activeDirector.state === "applying" || ownsActiveHermesRouteRun,
     onDraftChange: (draft) => setDirector((current) => current.key === requestKey ? { ...current, draft } : current),
     onSelectedCandidateIdsChange: (selectedCandidateIds) => setDirector((current) => current.key === requestKey ? { ...current, selectedCandidateIds } : current),
     onConversationScrollChange: (conversationScroll) => setDirector((current) => current.key === requestKey ? { ...current, conversationScroll } : current),
     onSendMessage: sendDirectorMessage,
+    onCancelRun: ownsActiveHermesRouteRun
+      ? cancelDirectorRun
+      : undefined,
+    onRetryRun: activeDirector.runState.kind === "unavailable"
+      && activeDirector.runState.retryable
+      && !ownsActiveHermesRouteRun
+      ? retryDirectorRun
+      : undefined,
     onApplyProposal: applyDirectorProposal,
     onManualEdit: () => setDirector((current) => current.key === requestKey ? { ...current, state: "idle" } : current),
     onPreviewCandidate: () => undefined,
-    onStart: activeDirector.state === "idle" && !activeDirector.proposal ? startDirector : undefined,
+    onStart: activeDirector.state === "idle"
+      && !activeDirector.proposal
+      && activeDirector.runState.kind !== "streaming"
+      && !ownsActiveHermesRouteRun
+      ? startDirector
+      : undefined,
   };
   return <>
     {state.error ? <p role="status">{state.error}</p> : null}
@@ -1197,11 +1511,21 @@ function projectDirectorMessages(messages: readonly DirectorMessage[]): readonly
     ? [{
       id: message.message_id,
       role: message.role,
-      text: message.role === "assistant" && message.text === "Hermes is temporarily unavailable. Manual Director remains available."
-        ? yujinUnavailableMessage
+      text: message.role === "assistant"
+        ? localizeDirectorAssistantText(message.text)
         : message.text,
     }]
     : []));
+}
+
+function localizeDirectorAssistantText(text: string) {
+  if (text === hermesUnavailableTechnicalText) {
+    return yujinUnavailableMessage;
+  }
+  const technicalSuffix = `\n\n${hermesUnavailableTechnicalText}`;
+  return text.endsWith(technicalSuffix)
+    ? `${text.slice(0, -technicalSuffix.length)}\n\n${yujinUnavailableMessage}`
+    : text;
 }
 
 function replaceDirectorMessageText(messages: readonly RightDockMessage[], id: string, text: string) {

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -26,6 +27,9 @@ class _Gateway:
         self.calls += 1
         yield AgentGatewayEvent("text_delta", "a")
         yield AgentGatewayEvent("run_completed", "answer")
+
+    async def cancel_run(self, **_):
+        return False
 
 
 def _configured_app(tmp_path: Path):
@@ -113,6 +117,106 @@ def test_create_and_sse_preserve_manual_conversation_and_headers(
             json={
                 "session_id": session["session_id"],
                 "client_message_id": "manual-1",
+                "text": "manual",
+            },
+        )
+        assert manual.status_code == 200
+
+
+def test_cancel_and_retry_are_scoped_durable_and_keep_manual_editing_available(
+    tmp_path: Path,
+) -> None:
+    class SlowGateway(_Gateway):
+        def __init__(self) -> None:
+            self.calls = 0
+            self.preparations = 0
+            self.cancellations: list[str] = []
+
+        async def stream_run(self, **_):
+            self.calls += 1
+            await asyncio.Event().wait()
+            yield AgentGatewayEvent("run_completed", "unreachable")
+
+        async def cancel_run(self, *, run_id: str):
+            self.cancellations.append(run_id)
+            return True
+
+    app, _gateway = _configured_app(tmp_path)
+    gateway = SlowGateway()
+    app.state.hermes_run_service.gateway_client = gateway
+    with TestClient(app) as client:
+        project_id = client.post(
+            "/api/projects", json={"name": "cancel retry"}
+        ).json()["project_id"]
+        session = app.state.store.save_editing_session(
+            project_id=project_id,
+            timeline_id="timeline",
+            session_payload={"segments": [], "history": []},
+        )
+        conversation_id = client.post(
+            f"/api/projects/{project_id}/director/conversations",
+            json={"session_id": session["session_id"]},
+        ).json()["conversation_id"]
+        created = client.post(
+            f"/api/projects/{project_id}/director/conversations/"
+            f"{conversation_id}/hermes-runs",
+            json={
+                "session_id": session["session_id"],
+                "client_message_id": "cancel-me",
+                "text": "hello",
+                "expected_session_revision": session["session_revision"],
+            },
+        ).json()
+        action_base = (
+            f"/api/projects/{project_id}/director/conversations/"
+            f"{conversation_id}/hermes-runs/{created['run_id']}"
+        )
+
+        cancelled = client.post(f"{action_base}/cancel")
+        repeated = client.post(f"{action_base}/cancel")
+        assert cancelled.status_code == 204
+        assert repeated.status_code == 204
+        assert client.post(
+            action_base.replace(project_id, "other-project") + "/cancel"
+        ).status_code == 404
+        assert client.post(
+            action_base.replace(conversation_id, "other-conversation")
+            + "/cancel"
+        ).status_code == 404
+        assert app.state.store.get_director_hermes_run(
+            project_id=project_id, run_id=created["run_id"]
+        )["status"] == "interrupted"
+        assert gateway.cancellations == [created["run_id"]]
+
+        retried = client.post(f"{action_base}/retry")
+        assert retried.status_code == 201
+        retried_body = retried.json()
+        retried_row = app.state.store.get_director_hermes_run(
+            project_id=project_id, run_id=retried_body["run_id"]
+        )
+        assert retried_row["retry_of_run_id"] == created["run_id"]
+        assert client.post(
+            f"{action_base}/retry"
+        ).status_code == 201
+        assert client.post(
+            f"/api/projects/{project_id}/director/conversations/"
+            f"{conversation_id}/hermes-runs/{retried_body['run_id']}/retry"
+        ).status_code == 409
+        assert client.post(
+            f"/api/projects/other/director/conversations/"
+            f"{conversation_id}/hermes-runs/{created['run_id']}/retry"
+        ).status_code == 404
+        assert client.post(
+            f"/api/projects/{project_id}/director/conversations/"
+            f"other-conversation/hermes-runs/{created['run_id']}/retry"
+        ).status_code == 404
+
+        manual = client.post(
+            f"/api/projects/{project_id}/director/conversations/"
+            f"{conversation_id}/messages",
+            json={
+                "session_id": session["session_id"],
+                "client_message_id": "manual-after-cancel",
                 "text": "manual",
             },
         )

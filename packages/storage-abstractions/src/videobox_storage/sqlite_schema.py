@@ -321,6 +321,7 @@ PROJECT_SCHEMA_STATEMENTS = (
         proposal_id TEXT,
         metadata_json TEXT NOT NULL DEFAULT '{}',
         client_message_id TEXT,
+        message_order INTEGER NOT NULL,
         created_at TEXT NOT NULL,
         UNIQUE(conversation_id, client_message_id)
     )
@@ -441,6 +442,7 @@ PROJECT_SCHEMA_STATEMENTS = (
         expected_session_revision INTEGER NOT NULL,
         expected_asset_index_revision INTEGER NOT NULL,
         selected_segment_id TEXT,
+        retry_of_run_id TEXT,
         user_text TEXT NOT NULL,
         user_message_id TEXT NOT NULL,
         assistant_message_id TEXT,

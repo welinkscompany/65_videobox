@@ -1,4 +1,5 @@
 import inspect
+import re
 
 from videobox_storage.postgres_compat import translate_sql
 from videobox_storage.postgres_schema import POSTGRES_MIGRATION_STATEMENTS, POSTGRES_SCHEMA_STATEMENTS
@@ -67,6 +68,31 @@ def test_postgres_schema_has_no_sqlite_only_autoincrement_syntax() -> None:
     assert all("AUTOINCREMENT" not in statement for statement in POSTGRES_SCHEMA_STATEMENTS)
 
 
+def test_director_message_queries_do_not_depend_on_sqlite_rowid() -> None:
+    source = "\n".join(
+        (
+            inspect.getsource(LocalProjectStore.list_director_messages),
+            inspect.getsource(LocalProjectStore.append_director_exchange),
+        )
+    )
+
+    assert "rowid" not in source
+    assert "ORDER BY message_order, message_id" in source
+    assert "message_order = ?" in source
+
+
+def test_all_director_message_writes_persist_durable_order() -> None:
+    source = inspect.getsource(LocalProjectStore)
+    inserts = re.findall(
+        r"INSERT INTO director_messages\s*\((.*?)\)\s*VALUES",
+        source,
+        flags=re.DOTALL,
+    )
+
+    assert len(inserts) == 7
+    assert all("message_order" in columns for columns in inserts)
+
+
 def test_postgres_migrations_add_durable_capcut_handoff_claim_columns() -> None:
     statements = "\n".join(POSTGRES_MIGRATION_STATEMENTS)
 
@@ -78,6 +104,16 @@ def test_postgres_migrations_add_hermes_creator_context_identity_columns() -> No
     statements = "\n".join(POSTGRES_MIGRATION_STATEMENTS)
 
     assert (
+        "ALTER TABLE director_messages ADD COLUMN IF NOT EXISTS "
+        "message_order BIGINT"
+    ) in statements
+    assert "PARTITION BY conversation_id" in statements
+    assert "ORDER BY created_at, ctid" in statements
+    assert (
+        "ALTER TABLE director_messages ALTER COLUMN message_order SET NOT NULL"
+        in statements
+    )
+    assert (
         "ALTER TABLE director_hermes_runs ADD COLUMN IF NOT EXISTS "
         "expected_session_revision INTEGER NOT NULL DEFAULT 0"
     ) in statements
@@ -88,6 +124,10 @@ def test_postgres_migrations_add_hermes_creator_context_identity_columns() -> No
     assert (
         "ALTER TABLE director_hermes_runs ADD COLUMN IF NOT EXISTS "
         "selected_segment_id TEXT"
+    ) in statements
+    assert (
+        "ALTER TABLE director_hermes_runs ADD COLUMN IF NOT EXISTS "
+        "retry_of_run_id TEXT"
     ) in statements
     assert (
         "ALTER TABLE director_hermes_runs ADD COLUMN IF NOT EXISTS "

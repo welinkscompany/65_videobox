@@ -763,6 +763,7 @@ async function openHermesRunEventsRequest(
   conversationId: string,
   run: HermesRunCreateResponse,
   signal: AbortSignal,
+  lastEventId = 0,
 ): Promise<Response> {
   const path = run.events_url;
   const expectedPath = `/api/projects/${encodeURIComponent(projectId)}/director/conversations/${encodeURIComponent(conversationId)}/hermes-runs/${encodeURIComponent(run.run_id)}/events`;
@@ -783,9 +784,19 @@ async function openHermesRunEventsRequest(
   ) {
     throw new Error("유진 응답을 시작하지 못했어요.");
   }
+  if (
+    !Number.isSafeInteger(lastEventId)
+    || lastEventId < 0
+  ) {
+    throw new Error("유진 응답을 시작하지 못했어요.");
+  }
+  const headers = new Headers({ Accept: "text/event-stream" });
+  if (lastEventId > 0) {
+    headers.set("Last-Event-ID", String(lastEventId));
+  }
   const response = await fetch(path, {
     method: "GET",
-    headers: { Accept: "text/event-stream" },
+    headers,
     credentials: "same-origin",
     redirect: "error",
     signal,
@@ -794,6 +805,54 @@ async function openHermesRunEventsRequest(
     throw new Error("유진 응답을 시작하지 못했어요.");
   }
   return response;
+}
+
+async function cancelHermesRunRequest(
+  projectId: string,
+  conversationId: string,
+  runId: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  const path = `/api/projects/${encodeURIComponent(projectId)}/director/conversations/${encodeURIComponent(conversationId)}/hermes-runs/${encodeURIComponent(runId)}/cancel`;
+  const response = await fetch(path, {
+    method: "POST",
+    credentials: "same-origin",
+    redirect: "error",
+    signal,
+  });
+  if (response.status !== 204 || response.redirected) {
+    throw new Error("유진 요청을 중단하지 못했어요.");
+  }
+}
+
+async function retryHermesRunRequest(
+  projectId: string,
+  conversationId: string,
+  runId: string,
+  signal?: AbortSignal,
+): Promise<HermesRunCreateResponse> {
+  const path = `/api/projects/${encodeURIComponent(projectId)}/director/conversations/${encodeURIComponent(conversationId)}/hermes-runs/${encodeURIComponent(runId)}/retry`;
+  const response = await fetch(path, {
+    method: "POST",
+    credentials: "same-origin",
+    redirect: "error",
+    signal,
+  });
+  if (response.status !== 201 || response.redirected) {
+    throw new Error("같은 요청을 다시 시작하지 못했어요.");
+  }
+  const candidate = await response.json() as Record<string, unknown>;
+  const expectedEventsUrl = `/api/projects/${encodeURIComponent(projectId)}/director/conversations/${encodeURIComponent(conversationId)}/hermes-runs/${encodeURIComponent(String(candidate.run_id ?? ""))}/events`;
+  if (
+    Object.keys(candidate).length !== 3
+    || typeof candidate.run_id !== "string"
+    || !candidate.run_id
+    || candidate.conversation_id !== conversationId
+    || candidate.events_url !== expectedEventsUrl
+  ) {
+    throw new Error("같은 요청을 다시 시작하지 못했어요.");
+  }
+  return candidate as HermesRunCreateResponse;
 }
 
 async function createHermesRunRequest(
@@ -926,7 +985,36 @@ export const api = {
     conversationId: string,
     run: HermesRunCreateResponse,
     signal: AbortSignal,
-  ) => openHermesRunEventsRequest(projectId, conversationId, run, signal),
+    lastEventId = 0,
+  ) => openHermesRunEventsRequest(
+    projectId,
+    conversationId,
+    run,
+    signal,
+    lastEventId,
+  ),
+  cancelHermesRun: (
+    projectId: string,
+    conversationId: string,
+    runId: string,
+    signal?: AbortSignal,
+  ) => cancelHermesRunRequest(
+    projectId,
+    conversationId,
+    runId,
+    signal,
+  ),
+  retryHermesRun: (
+    projectId: string,
+    conversationId: string,
+    runId: string,
+    signal?: AbortSignal,
+  ) => retryHermesRunRequest(
+    projectId,
+    conversationId,
+    runId,
+    signal,
+  ),
   applyDirectorProposal: (projectId: string, proposalId: string, payload: { candidate_ids: string[]; expected_revision: number }) =>
     request<ApplyDirectorProposalResponse>(`/api/projects/${projectId}/director/proposals/${proposalId}/apply`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ candidate_ids: payload.candidate_ids, expected_revision: payload.expected_revision }) }),
   batchApplyDirectorProposal: (projectId: string, proposalId: string, payload: { candidate_ids: string[]; expected_revision: number }) =>

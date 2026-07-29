@@ -9,6 +9,7 @@ from enum import Enum
 import logging
 import time
 from typing import AsyncIterator, Callable, Coroutine
+import uuid
 
 from videobox_api.models import HermesStreamEvent
 from videobox_core_engine.yujin_creator_context import (
@@ -52,6 +53,7 @@ class _Run:
     user_text: str
     expected_session_revision: int
     selected_segment_id: str | None
+    retry_of_run_id: str | None
     owner_token: str | None
     creator_context: YujinCreatorContext | object | None = None
     gateway_prepared: bool = False
@@ -63,6 +65,8 @@ class _Run:
     signal: asyncio.Event = field(default_factory=asyncio.Event)
     dispatch_task: asyncio.Task | None = None
     terminal_task: asyncio.Task | None = None
+    cancellation_task: asyncio.Task | None = None
+    cancel_requested: bool = False
     active_slot: bool = False
     terminal_at: float | None = None
     persistence_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
@@ -144,6 +148,7 @@ class HermesRunService:
         text: str,
         expected_session_revision: int = 1,
         selected_segment_id: str | None = None,
+        retry_of_run_id: str | None = None,
     ) -> _Run:
         key = (project_id, conversation_id, client_message_id)
         async with self._lock:
@@ -183,6 +188,7 @@ class HermesRunService:
                         text=text,
                         expected_session_revision=expected_session_revision,
                         selected_segment_id=selected_segment_id,
+                        retry_of_run_id=retry_of_run_id,
                     ),
                     self._admission_tasks,
                     name=f"videobox-admit-{client_message_id}",
@@ -298,14 +304,115 @@ class HermesRunService:
                 return
             await run.signal.wait()
 
-    async def cancel(self, run_id: str) -> None:
+    async def cancel(
+        self,
+        run_id: str,
+        *,
+        project_id: str | None = None,
+        conversation_id: str | None = None,
+    ) -> None:
         run = self._runs.get(run_id)
-        if run is None or run.terminal:
+        if run is None:
+            if project_id is None:
+                return
+            projects = await asyncio.to_thread(self.store.list_projects)
+            if not any(
+                str(project.get("project_id") or "") == project_id
+                for project in projects
+            ):
+                raise KeyError("director_hermes_run_missing")
+            try:
+                durable = await asyncio.to_thread(
+                    self.store.get_director_hermes_run,
+                    project_id=project_id,
+                    run_id=run_id,
+                )
+            except (KeyError, OSError) as error:
+                raise KeyError("director_hermes_run_missing") from error
+            if (
+                conversation_id is not None
+                and str(durable.get("conversation_id") or "") != conversation_id
+            ):
+                raise KeyError("director_hermes_run_missing")
             return
+        if (
+            (project_id is not None and run.project_id != project_id)
+            or (
+                conversation_id is not None
+                and run.conversation_id != conversation_id
+            )
+        ):
+            raise KeyError("director_hermes_run_missing")
+        async with self._lock:
+            if run.terminal:
+                return
+            task = run.cancellation_task
+            if task is None:
+                if run.terminalizing:
+                    return
+                run.cancel_requested = True
+                task = self._spawn_task(
+                    self._cancel_owned(run),
+                    self._cleanup_tasks,
+                    name=f"videobox-cancel-{run.run_id}",
+                )
+                run.cancellation_task = task
+        await asyncio.shield(task)
+
+    async def _cancel_owned(self, run: _Run) -> None:
+        if run.gateway_prepared:
+            try:
+                await self.gateway_client.cancel_run(run_id=run.run_id)
+            except Exception:
+                pass
+        await self._terminal(
+            run,
+            "blocked",
+            _BLOCKED_TEXT,
+            retryable=True,
+            durable_status="interrupted",
+        )
         task = run.dispatch_task
         if task is not None and task is not asyncio.current_task():
             task.cancel()
-        await self._terminal(run, "blocked", _BLOCKED_TEXT, retryable=True)
+
+    async def retry(
+        self,
+        run_id: str,
+        *,
+        project_id: str,
+        conversation_id: str,
+    ) -> _Run:
+        projects = await asyncio.to_thread(self.store.list_projects)
+        if not any(
+            str(project.get("project_id") or "") == project_id
+            for project in projects
+        ):
+            raise KeyError("director_hermes_run_missing")
+        try:
+            durable = await asyncio.to_thread(
+                self.store.get_director_hermes_run,
+                project_id=project_id,
+                run_id=run_id,
+            )
+        except (KeyError, OSError) as error:
+            raise KeyError("director_hermes_run_missing") from error
+        if str(durable.get("conversation_id") or "") != conversation_id:
+            raise KeyError("director_hermes_run_missing")
+        if str(durable.get("status") or "") not in {"blocked", "interrupted"}:
+            raise ValueError("hermes_run_retry_not_eligible")
+        return await self.create_run(
+            project_id=project_id,
+            session_id=str(durable["session_id"]),
+            conversation_id=conversation_id,
+            client_message_id=f"retry-{uuid.uuid4().hex}",
+            text=str(durable["user_text"]),
+            expected_session_revision=int(
+                durable["expected_session_revision"]
+            ),
+            selected_segment_id=durable.get("selected_segment_id"),
+            retry_of_run_id=run_id,
+        )
 
     async def shutdown(self) -> None:
         async with self._lock:
@@ -389,6 +496,7 @@ class HermesRunService:
         text: str,
         expected_session_revision: int,
         selected_segment_id: str | None,
+        retry_of_run_id: str | None,
     ) -> _Run:
         try:
             context = await asyncio.to_thread(
@@ -409,6 +517,7 @@ class HermesRunService:
                 expected_session_revision=expected_session_revision,
                 expected_asset_index_revision=context.asset_index_revision,
                 selected_segment_id=selected_segment_id,
+                retry_of_run_id=retry_of_run_id,
             )
             if (
                 str(durable.get("status") or "") in {"pending", "streaming"}
@@ -452,6 +561,7 @@ class HermesRunService:
                 user_text=text,
                 expected_session_revision=expected_session_revision,
                 selected_segment_id=selected_segment_id,
+                retry_of_run_id=retry_of_run_id,
                 owner_token=durable.get("owner_token"),
                 creator_context=context,
                 gateway_prepared=bool(durable.get("dispatch")),
@@ -710,12 +820,18 @@ class HermesRunService:
         text: str,
         *,
         retryable: bool,
+        durable_status: str | None = None,
     ) -> None:
         async with self._lock:
             if run.terminal:
                 return
             task = run.terminal_task
             if task is None:
+                if run.cancel_requested:
+                    event_type = "blocked"
+                    text = _BLOCKED_TEXT
+                    retryable = True
+                    durable_status = "interrupted"
                 run.lifecycle = _Lifecycle.TERMINALIZING
                 task = self._spawn_task(
                     self._finish_terminal(
@@ -723,6 +839,7 @@ class HermesRunService:
                         event_type=event_type,
                         text=text,
                         retryable=retryable,
+                        durable_status=durable_status,
                     ),
                     self._terminal_tasks,
                     name=f"videobox-terminal-{run.run_id}",
@@ -738,6 +855,7 @@ class HermesRunService:
         event_type: str,
         text: str,
         retryable: bool,
+        durable_status: str | None,
     ) -> None:
         async with run.persistence_lock:
             await self._finish_terminal_serialized(
@@ -745,6 +863,7 @@ class HermesRunService:
                 event_type=event_type,
                 text=text,
                 retryable=retryable,
+                durable_status=durable_status,
             )
 
     async def _finish_terminal_serialized(
@@ -754,6 +873,7 @@ class HermesRunService:
         event_type: str,
         text: str,
         retryable: bool,
+        durable_status: str | None,
     ) -> None:
         proposal = None
         projection: YujinCreatorProjection | None = None
@@ -815,9 +935,12 @@ class HermesRunService:
                     "run_id": run.run_id,
                     "owner_token": run.owner_token,
                     "status": (
-                        "completed"
-                        if event_type == "run_completed"
-                        else "blocked"
+                        durable_status
+                        or (
+                            "completed"
+                            if event_type == "run_completed"
+                            else "blocked"
+                        )
                     ),
                     "assistant_text": text or _BLOCKED_TEXT,
                     "retryable": retryable,

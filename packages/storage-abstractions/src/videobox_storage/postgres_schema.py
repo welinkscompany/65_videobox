@@ -52,11 +52,30 @@ POSTGRES_MIGRATION_STATEMENTS = (
     "ALTER TABLE creation_briefs ADD COLUMN IF NOT EXISTS summary_text TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE creation_briefs ADD COLUMN IF NOT EXISTS script_asset_owned INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE director_messages ADD COLUMN IF NOT EXISTS metadata_json TEXT NOT NULL DEFAULT '{}'",
+    "ALTER TABLE director_messages ADD COLUMN IF NOT EXISTS message_order BIGINT",
+    """
+    WITH ordered AS (
+        SELECT ctid,
+               ROW_NUMBER() OVER (
+                   PARTITION BY conversation_id
+                   ORDER BY created_at, ctid
+               ) AS message_order
+        FROM director_messages
+        WHERE message_order IS NULL
+    )
+    UPDATE director_messages AS message
+    SET message_order = ordered.message_order
+    FROM ordered
+    WHERE message.ctid = ordered.ctid
+    """,
+    "ALTER TABLE director_messages ALTER COLUMN message_order SET NOT NULL",
+    "CREATE UNIQUE INDEX IF NOT EXISTS director_messages_conversation_order_idx ON director_messages (conversation_id, message_order)",
     "ALTER TABLE director_message_claims ADD COLUMN IF NOT EXISTS owner_token TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE director_message_claims ADD COLUMN IF NOT EXISTS heartbeat_at TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE director_hermes_runs ADD COLUMN IF NOT EXISTS expected_session_revision INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE director_hermes_runs ADD COLUMN IF NOT EXISTS expected_asset_index_revision INTEGER NOT NULL DEFAULT -1",
     "ALTER TABLE director_hermes_runs ADD COLUMN IF NOT EXISTS selected_segment_id TEXT",
+    "ALTER TABLE director_hermes_runs ADD COLUMN IF NOT EXISTS retry_of_run_id TEXT",
     "ALTER TABLE director_hermes_runs ADD COLUMN IF NOT EXISTS assistant_draft_text TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE director_hermes_runs ADD COLUMN IF NOT EXISTS next_event_id INTEGER NOT NULL DEFAULT 1",
     "ALTER TABLE director_hermes_runs ADD COLUMN IF NOT EXISTS events_pruned_at TEXT",

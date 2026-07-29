@@ -68,6 +68,30 @@ def _run_two_requests_at_same_insert(*, statement_marker: str, request) -> list[
             return list(executor.map(lambda _: request(), range(2)))
 
 
+def _cleanup_postgres_hermes_project(
+    store: PostgresProjectStore,
+    project_id: str,
+) -> None:
+    connection = store._connection(project_id)
+    try:
+        for table in (
+            "director_hermes_run_events",
+            "director_hermes_runs",
+            "director_messages",
+            "director_conversations",
+            "editing_sessions",
+            "director_asset_index_revisions",
+            "projects",
+        ):
+            connection.execute(
+                f"DELETE FROM {table} WHERE project_id = ?",
+                (project_id,),
+            )
+        connection.commit()
+    finally:
+        connection.close()
+
+
 @pytest.fixture
 def postgres_url() -> str:
     value = os.environ.get("VIDEOBOX_TEST_POSTGRES_URL")
@@ -314,6 +338,301 @@ def test_postgres_pre_c1_terminal_tombstone_backfills_exact_replay(
             "retryable": False,
         },
     ]
+
+
+def test_postgres_pre_c2_retry_column_migrates_without_losing_existing_run(
+    tmp_path: Path,
+    postgres_url: str,
+) -> None:
+    store = PostgresProjectStore(tmp_path, database_url=postgres_url)
+    project = store.bootstrap_project(f"Hermes retry migration {uuid4().hex}")
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=f"timeline-{uuid4().hex}",
+        session_payload={"segments": [], "history": []},
+    )
+    conversation_id = f"conv-{uuid4().hex}"
+    store.create_director_conversation(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+        conversation_id=conversation_id,
+    )
+    run = store.begin_director_hermes_run(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+        conversation_id=conversation_id,
+        client_message_id=f"message-{uuid4().hex}",
+        user_text="migration source",
+        expected_session_revision=session["session_revision"],
+        expected_asset_index_revision=0,
+    )
+
+    try:
+        connection = store._connection(project.project_id)
+        try:
+            connection.execute(
+                "ALTER TABLE director_hermes_runs "
+                "DROP COLUMN retry_of_run_id"
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        upgraded = PostgresProjectStore(tmp_path, database_url=postgres_url)
+        preserved = upgraded.get_director_hermes_run(
+            project_id=project.project_id,
+            run_id=run["run_id"],
+        )
+        assert preserved["run_id"] == run["run_id"]
+        assert preserved["user_text"] == "migration source"
+        assert preserved["status"] == "pending"
+        assert preserved["retry_of_run_id"] is None
+    finally:
+        recovered = PostgresProjectStore(tmp_path, database_url=postgres_url)
+        _cleanup_postgres_hermes_project(recovered, project.project_id)
+
+
+def test_postgres_pre_message_order_migration_preserves_fixed_clock_exchanges(
+    tmp_path: Path,
+    postgres_url: str,
+) -> None:
+    instant = datetime(2026, 7, 30, tzinfo=UTC)
+    store = PostgresProjectStore(
+        tmp_path,
+        database_url=postgres_url,
+        now=lambda: instant,
+    )
+    project = store.bootstrap_project(
+        f"Director message order migration {uuid4().hex}"
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=f"timeline-{uuid4().hex}",
+        session_payload={"segments": [], "history": []},
+    )
+    conversation_id = f"conv-{uuid4().hex}"
+    store.create_director_conversation(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+        conversation_id=conversation_id,
+    )
+    first = store.append_director_exchange(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+        conversation_id=conversation_id,
+        client_message_id="message-1",
+        user_text="user-1",
+        assistant_text="assistant-1",
+    )
+    store.append_director_exchange(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+        conversation_id=conversation_id,
+        client_message_id="message-2",
+        user_text="user-2",
+        assistant_text="assistant-2",
+    )
+
+    try:
+        connection = store._connection(project.project_id)
+        try:
+            connection.execute(
+                "DROP INDEX IF EXISTS "
+                "director_messages_conversation_order_idx"
+            )
+            connection.execute(
+                "ALTER TABLE director_messages DROP COLUMN message_order"
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        upgraded = PostgresProjectStore(
+            tmp_path,
+            database_url=postgres_url,
+            now=lambda: instant,
+        )
+        replay = upgraded.append_director_exchange(
+            project_id=project.project_id,
+            session_id=session["session_id"],
+            conversation_id=conversation_id,
+            client_message_id="message-1",
+            user_text="user-1",
+            assistant_text="must-not-replace",
+        )
+        assert replay == first
+        assert [
+            message["text"]
+            for message in upgraded.list_director_messages(
+                project_id=project.project_id,
+                conversation_id=conversation_id,
+            )
+        ] == ["user-1", "assistant-1", "user-2", "assistant-2"]
+
+        connection = upgraded._connection(project.project_id)
+        try:
+            order_row = connection.execute(
+                """
+                SELECT COUNT(*) AS message_count,
+                       COUNT(message_order) AS non_null_count,
+                       COUNT(DISTINCT message_order) AS unique_count
+                FROM director_messages
+                WHERE project_id = ? AND conversation_id = ?
+                """,
+                (project.project_id, conversation_id),
+            ).fetchone()
+        finally:
+            connection.close()
+        assert order_row is not None
+        assert (
+            int(order_row["message_count"]),
+            int(order_row["non_null_count"]),
+            int(order_row["unique_count"]),
+        ) == (4, 4, 4)
+
+        repeated = PostgresProjectStore(
+            tmp_path,
+            database_url=postgres_url,
+            now=lambda: instant,
+        )
+        assert [
+            message["text"]
+            for message in repeated.list_director_messages(
+                project_id=project.project_id,
+                conversation_id=conversation_id,
+            )
+        ] == ["user-1", "assistant-1", "user-2", "assistant-2"]
+    finally:
+        recovered = PostgresProjectStore(
+            tmp_path,
+            database_url=postgres_url,
+            now=lambda: instant,
+        )
+        _cleanup_postgres_hermes_project(recovered, project.project_id)
+
+
+@pytest.mark.parametrize("source_status", ("blocked", "interrupted"))
+def test_postgres_retry_is_linked_and_identity_atomic(
+    tmp_path: Path,
+    postgres_url: str,
+    source_status: str,
+) -> None:
+    store = PostgresProjectStore(tmp_path, database_url=postgres_url)
+    project = store.bootstrap_project(
+        f"Hermes retry atomic {source_status} {uuid4().hex}"
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=f"timeline-{uuid4().hex}",
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "segment-1",
+                    "start_sec": 0.0,
+                    "end_sec": 1.0,
+                    "caption_text": "장면",
+                }
+            ],
+            "history": [],
+        },
+    )
+    conversation_id = f"conv-{uuid4().hex}"
+    store.create_director_conversation(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+        conversation_id=conversation_id,
+    )
+    source = store.begin_director_hermes_run(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+        conversation_id=conversation_id,
+        client_message_id=f"source-{uuid4().hex}",
+        user_text="retry exact text",
+        expected_session_revision=session["session_revision"],
+        expected_asset_index_revision=0,
+        selected_segment_id="segment-1",
+    )
+    assert store.complete_director_hermes_run(
+        project_id=project.project_id,
+        run_id=source["run_id"],
+        owner_token=source["owner_token"],
+        status=source_status,
+        assistant_text="terminal",
+        public_text="",
+        retryable=True,
+    )
+
+    try:
+        before_messages = store.list_director_messages(
+            project_id=project.project_id,
+            conversation_id=conversation_id,
+        )
+        with pytest.raises(
+            ValueError,
+            match="hermes_run_retry_identity_mismatch",
+        ):
+            store.begin_director_hermes_run(
+                project_id=project.project_id,
+                session_id=session["session_id"],
+                conversation_id=conversation_id,
+                client_message_id=f"invalid-{uuid4().hex}",
+                user_text="changed text",
+                expected_session_revision=session["session_revision"],
+                expected_asset_index_revision=0,
+                selected_segment_id="segment-1",
+                retry_of_run_id=source["run_id"],
+            )
+        with pytest.raises(KeyError, match="director_hermes_run_missing"):
+            store.begin_director_hermes_run(
+                project_id=project.project_id,
+                session_id=session["session_id"],
+                conversation_id="wrong-conversation",
+                client_message_id=f"wrong-scope-{uuid4().hex}",
+                user_text="retry exact text",
+                expected_session_revision=session["session_revision"],
+                expected_asset_index_revision=0,
+                selected_segment_id="segment-1",
+                retry_of_run_id=source["run_id"],
+            )
+        assert store.list_director_messages(
+            project_id=project.project_id,
+            conversation_id=conversation_id,
+        ) == before_messages
+
+        retried = store.begin_director_hermes_run(
+            project_id=project.project_id,
+            session_id=session["session_id"],
+            conversation_id=conversation_id,
+            client_message_id=f"retry-{uuid4().hex}",
+            user_text="retry exact text",
+            expected_session_revision=session["session_revision"],
+            expected_asset_index_revision=0,
+            selected_segment_id="segment-1",
+            retry_of_run_id=source["run_id"],
+        )
+        durable = store.get_director_hermes_run(
+            project_id=project.project_id,
+            run_id=retried["run_id"],
+        )
+        assert durable["retry_of_run_id"] == source["run_id"]
+        assert durable["status"] == "pending"
+        assert [
+            event["event_type"]
+            for event in store.list_director_hermes_run_events(
+                project_id=project.project_id,
+                conversation_id=conversation_id,
+                run_id=retried["run_id"],
+            )
+        ] == ["run_started"]
+        after_messages = store.list_director_messages(
+            project_id=project.project_id,
+            conversation_id=conversation_id,
+        )
+        assert len(after_messages) == len(before_messages) + 1
+        assert after_messages[-1]["role"] == "user"
+        assert after_messages[-1]["text"] == "retry exact text"
+    finally:
+        _cleanup_postgres_hermes_project(store, project.project_id)
 
 
 def test_sqlite_store_purges_expired_hermes_capability_ledger_rows(tmp_path: Path) -> None:
