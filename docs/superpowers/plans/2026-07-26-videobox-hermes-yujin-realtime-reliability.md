@@ -202,36 +202,72 @@ POST /api/projects/{project_id}/director/conversations/{conversation_id}/hermes-
 
 - [ ] **C3** Complete issue/consume/replay/revoke capability lifecycle with redacted audit evidence.
 
+**2026-07-30 source-grounded amendment:** The authoritative C3 contract is
+`docs/superpowers/specs/2026-07-30-videobox-hermes-yujin-c3-capability-lifecycle-design.md`.
+It replaces the earlier multi-action/base-revision sketch below with two exact
+one-action capabilities bound to the current
+project/conversation/run/session/session-revision/asset-index-revision. It
+reuses the existing API-to-Gateway `reserve -> attach -> stream ->
+release/cancel` topology and the existing durable ledger. It does not add a
+Gateway-to-API callback, an API private key, a second replay ledger, editor
+mutation authority, or a provider call.
+
 **Files:**
 
-- Inspect/reuse: `services/api/src/videobox_api/hermes_capabilities.py`
-- Inspect/reuse: `services/api/src/videobox_api/hermes_capability_authority.py`
-- Inspect/reuse: `services/api/src/videobox_api/routers/hermes_internal.py`
 - Inspect/reuse: `packages/core-engine/src/videobox_core_engine/agent_gateway_contract.py`
 - Modify: `requirements-agent-gateway.txt`
 - Modify: `requirements-container.txt`
-- Modify: `services/agent-gateway/src/videobox_agent_gateway/context_capabilities.py`
+- Modify: `requirements-dev.txt`
+- Create: `services/agent-gateway/src/videobox_agent_gateway/context_capabilities.py`
+- Modify: `services/agent-gateway/src/videobox_agent_gateway/creator_context.py`
 - Modify: `services/agent-gateway/src/videobox_agent_gateway/main.py`
-- Modify: capability API modules only where the public-key verifier and durable ledger require it
+- Modify: `services/api/src/videobox_api/hermes_capabilities.py`
+- Modify: `services/api/src/videobox_api/hermes_capability_authority.py`
+- Modify: `services/api/src/videobox_api/agent_gateway_client.py`
+- Modify: `services/api/src/videobox_api/hermes_run_service.py`
+- Modify: `services/api/src/videobox_api/main.py`
+- Retire: `services/api/src/videobox_api/routers/hermes_internal.py`
+- Modify: `packages/storage-abstractions/src/videobox_storage/local_project_store.py`
+- Modify: `packages/storage-abstractions/src/videobox_storage/sqlite_schema.py`
+- Modify: `packages/storage-abstractions/src/videobox_storage/postgres_schema.py`
 - Create: `services/api/src/videobox_api/hermes_capability_audit.py`
+- Modify: `compose.yaml`
+- Modify: `compose.hermes-yujin.yaml`
+- Modify: `.env.container.example`
+- Modify: `scripts/start-hermes-yujin.ps1`
 - Create: `tests/test_hermes_yujin_capability_lifecycle.py`
+- Modify: `tests/test_agent_gateway_creator_context.py`
+- Modify: `tests/test_agent_gateway_client.py`
+- Modify: `tests/test_hermes_run_service.py`
+- Modify: `tests/test_postgres_project_store.py`
 - Modify: `tests/test_hermes_capability_authority_contract.py`
+- Modify/retire: `tests/test_api_hermes_project_status.py`
+- Modify: `tests/test_hermes_yujin_compose_contract.py`
+- Modify: `tests/test_start_hermes_yujin_script.py`
 
 **Capability claims:**
 
 ```python
 class YujinCapabilityClaims(BaseModel):
+    schema_version: Literal["videobox.yujin-capability.v1"]
+    iss: Literal["videobox-agent-gateway"]
+    sub: Literal["yujin-video-director"]
+    aud: Literal["videobox-api"]
     capability_id: str
     project_id: str
     conversation_id: str
     run_id: str
-    base_revision: str
-    allowed_actions: tuple[Literal["read_context", "publish_proposal"], ...]
-    issued_at: datetime
-    expires_at: datetime
+    session_id: str
+    session_revision: int
+    asset_index_revision: int
+    action: Literal["read_context", "publish_proposal"]
+    iat: int
+    nbf: int
+    exp: int
 ```
 
-Never issue an `apply`, `render`, `export`, DB, filesystem, or raw-media action.
+Each token contains exactly one action. Never issue an `apply`, `render`,
+`export`, DB, filesystem, or raw-media action.
 
 **RED:**
 
@@ -242,6 +278,10 @@ Never issue an `apply`, `render`, `export`, DB, filesystem, or raw-media action.
    - wrong project/run/revision/action denied;
    - cancellation revokes unused capability;
    - successful/failed completion revokes remaining capability;
+   - legacy jti-only SQLite/PostgreSQL rows migrate as non-authorizing
+     tombstones rather than fabricated scoped rows;
+   - ledger recovery reconciliation revokes issued rows without provider retry;
+   - coordinated single-key replacement rejects old-key tokens;
    - audit record contains IDs/outcome only, not token/body/secret.
 2. Add a reverse test that starts from an attempted apply action and proves no capability path can authorize it.
 3. Run focused capability tests and expect RED for uncovered gaps.
@@ -252,21 +292,34 @@ Never issue an `apply`, `render`, `export`, DB, filesystem, or raw-media action.
    - private key exists only in `videobox-agent-gateway`;
    - VideoBox API receives only the public verification key;
    - source, logs, browser, Hermes, and Dashboard receive neither key material;
-   - pin `cryptography==45.0.6` in both gateway and workspace requirements.
+   - pin `cryptography==45.0.6` in gateway, workspace, and development
+     requirements so a clean local `.venv` can run the issuer/verifier tests.
 5. Reuse existing authority/store consume and revoke primitives after verification; do not create a second replay ledger.
-6. Bind consume to the current project/conversation/run/revision and one allowed action.
-7. Store only token hash or capability ID required for replay defense.
-8. Run:
+6. Bind consume to one exact pre-registered issued row and the current
+   project/conversation/run/session/session-revision/asset-index-revision plus
+   one exact action. Remove consume-if-absent behavior.
+7. Use the existing capability ID/JTI as the replay identity. Migrate legacy
+   unscoped rows as non-authorizing tombstones, and derive denial-audit identity
+   only from trusted durable/request metadata.
+8. Keep base Compose issuance disabled. Enable the C3 authority only in the
+   Hermes Yujin overlay, inject the private key into Gateway only and public key
+   into workspace only, and make the start script reject an invalid or
+   mismatched pair without printing key material.
+9. Run focused tests, then run the PostgreSQL lifecycle/migration/concurrency
+   cases against a disposable PostgreSQL 16 container with
+   `VIDEOBOX_TEST_POSTGRES_URL` set. A skipped PostgreSQL case is not a pass:
 
    ```powershell
-   .\.venv\Scripts\python.exe -m pytest tests/test_hermes_yujin_capability_lifecycle.py tests/test_hermes_capability_authority_contract.py tests/test_api_hermes_project_status.py -q
+   .\.venv\Scripts\python.exe -m pytest tests/test_hermes_yujin_capability_lifecycle.py tests/test_hermes_capability_authority_contract.py tests/test_agent_gateway_creator_context.py tests/test_agent_gateway_client.py tests/test_hermes_run_service.py tests/test_postgres_project_store.py tests/test_hermes_yujin_compose_contract.py tests/test_start_hermes_yujin_script.py -q
+   $env:VIDEOBOX_TEST_POSTGRES_URL = "<disposable PostgreSQL 16 test URL>"
+   .\.venv\Scripts\python.exe -m pytest tests/test_postgres_project_store.py -k "hermes_capability" -q
    git diff --check
    ```
 
-9. Mark C3 `[x]`, synchronize progress, and commit:
+10. Mark C3 `[x]`, synchronize progress, and commit:
 
    ```powershell
-   git add requirements-agent-gateway.txt requirements-container.txt services/agent-gateway services/api packages tests docs/superpowers/plans
+   git add requirements-agent-gateway.txt requirements-container.txt requirements-dev.txt services/agent-gateway services/api packages tests compose.yaml compose.hermes-yujin.yaml .env.container.example scripts/start-hermes-yujin.ps1 docs/superpowers/specs/2026-07-30-videobox-hermes-yujin-c3-capability-lifecycle-design.md docs/superpowers/plans
    git commit -m "feat: complete Yujin capability lifecycle"
    ```
 
