@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from math import isfinite
 from datetime import datetime, timedelta
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from videobox_domain_models.yujin_memory import YujinMemoryCandidate
 
 
 class CreateProjectRequest(BaseModel):
@@ -148,6 +149,63 @@ class HermesYujinStatusResponse(BaseModel):
         ):
             raise ValueError("hermes_yujin_status_invariant_invalid")
         return self
+
+
+MemorySourceMessageId = Annotated[
+    str,
+    Field(
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+        strict=True,
+    ),
+]
+
+
+class YujinMemoryCandidateCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    conversation_id: str = Field(
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+        strict=True,
+    )
+    client_request_id: str = Field(
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+        strict=True,
+    )
+    source_message_ids: tuple[MemorySourceMessageId, ...] = Field(
+        min_length=1,
+        max_length=8,
+    )
+    memory_scope: Literal["creator"]
+    category: Literal["pacing", "caption", "audio", "tone", "workflow"]
+    proposed_text: str = Field(
+        min_length=1,
+        max_length=280,
+        strict=True,
+    )
+
+    @model_validator(mode="after")
+    def source_ids_are_unique(
+        self,
+    ) -> "YujinMemoryCandidateCreateRequest":
+        if len(set(self.source_message_ids)) != len(self.source_message_ids):
+            raise ValueError("memory_candidate_source_ids_invalid")
+        return self
+
+
+class YujinMemoryCandidateResponse(YujinMemoryCandidate):
+    pass
+
+
+class YujinMemoryCandidateListResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    candidates: list[YujinMemoryCandidateResponse]
 
 
 class DirectorConversationCreateRequest(BaseModel):

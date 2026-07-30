@@ -13,7 +13,7 @@
 Parent: `docs/superpowers/plans/2026-07-26-videobox-hermes-yujin-master-plan.md`
 Requires: Phase C task C4 complete.
 
-Child progress: **0/5 tasks (0.0%), remaining 100.0%**. These five tasks are D1, D2, D3, D4, and F1.
+Child progress: **1/5 tasks (20.0%), remaining 80.0%**. These five tasks are D1, D2, D3, D4, and F1.
 
 ## Memory policy
 
@@ -48,12 +48,48 @@ No automatic transition from `pending` to `approved`.
 
 ## D1 — Add typed memory candidate and policy DTOs
 
-- [ ] **D1** Add typed memory candidate/policy DTOs with explicit approval as the only write gate.
+- [x] **D1** Add typed memory candidate/policy DTOs with explicit approval as the only write gate.
+
+**2026-07-30 source-grounded D1 amendment:**
+
+- D1 is a local approval-workflow slice only. Candidate create/approve/reject
+  performs Hermes, Gateway, Mem0, provider, network and editing mutation `0`;
+  it does not enqueue or imply a provider write. D2 is the first slice allowed
+  to attempt an approved write.
+- Add the fixed visible scope `creator`. A candidate remains sourced from one
+  exact project/conversation, but it is not project/editing truth. D2 must map
+  this fixed scope to a stable isolated Hermes user/agent namespace instead of
+  exposing a VideoBox internal ID.
+- Candidate IDs are server-generated. Create requires a bounded
+  `client_request_id`; exact replay in the same project/conversation returns
+  the original row, while reuse with different canonical input is a conflict.
+- D1 POST is an explicit user-initiated request to make a pending candidate
+  from already-owned conversation messages. It is not hidden chat inference
+  and Hermes does not write the workflow table directly.
+- Require `1..8` unique source message IDs and verify every ID belongs to the
+  named current project/conversation. Canonicalize them by durable conversation
+  message order before fingerprinting and persistence. Do not reuse
+  `director_preferences` or static `UserPreferenceConsent` as memory authority.
+- Persist candidate state and a body-free lifecycle audit atomically. Invalid
+  policy input persists neither a candidate nor an audit row. Same approve or
+  reject is idempotent; the opposite terminal decision is a fixed conflict.
+- Add tables through the shared SQLite schema used to derive PostgreSQL schema,
+  and verify common Local/PostgreSQL store behavior. A SQLite-only D1 is not
+  complete.
+- Policy limits are deterministic and reusable: supported category and fixed
+  `creator` scope only, short single-line canonical text, bounded UTF-8 size,
+  no full source-message echo, secret/auth/token/password/API-key/JWT,
+  contact/payment identifier, or local/UNC/file path. Public errors never echo
+  rejected text.
+- Candidate listing is deterministic and bounded to the latest 100 rows. D1
+  request-validation and policy errors use fixed non-echo public codes.
 
 **Files:**
 
 - Create: `packages/domain-models/src/videobox_domain_models/yujin_memory.py`
 - Create: `packages/core-engine/src/videobox_core_engine/yujin_memory_policy.py`
+- Modify: `packages/storage-abstractions/src/videobox_storage/sqlite_schema.py`
+- Modify: `packages/storage-abstractions/src/videobox_storage/postgres_schema.py`
 - Modify: `packages/storage-abstractions/src/videobox_storage/local_project_store.py`
 - Create: `services/api/src/videobox_api/routers/yujin_memory.py`
 - Modify: `services/api/src/videobox_api/models.py`
@@ -61,6 +97,7 @@ No automatic transition from `pending` to `approved`.
 - Create: `tests/test_yujin_memory_policy.py`
 - Create: `tests/test_yujin_memory_store.py`
 - Create: `tests/test_api_yujin_memory.py`
+- Modify: `tests/test_postgres_project_store.py`
 
 **Contract:**
 
@@ -75,13 +112,16 @@ class MemoryCandidateStatus(StrEnum):
 
 class YujinMemoryCandidate(BaseModel):
     candidate_id: str
+    client_request_id: str
     project_id: str
     conversation_id: str
+    memory_scope: Literal["creator"]
     source_message_ids: tuple[str, ...]
     category: Literal["pacing", "caption", "audio", "tone", "workflow"]
     proposed_text: str
     status: MemoryCandidateStatus
     created_at: datetime
+    updated_at: datetime
 ```
 
 **Endpoints:**
@@ -97,28 +137,52 @@ POST /api/projects/{project_id}/director/memory-candidates/{candidate_id}/reject
 
 1. Test candidate creation never invokes an external provider.
 2. Test policy rejection for forbidden patterns, excessive length, empty text, raw transcript, unknown category, and cross-project access.
-3. Test approve is the only transition that can schedule a provider write.
+3. Test D1 approve records explicit consent but schedules and performs no
+   provider write; D2 is the only planned provider boundary.
 4. Test repeated approve/reject operations are idempotent and conflicting terminal transitions fail safely.
-5. Run focused tests and expect RED.
+5. Test create idempotency/fingerprint conflicts, exact message ownership,
+   atomic body-free audit, SQLite/PostgreSQL parity, and editing mutation `0`.
+   Also test audit-failure rollback, configured Gateway/provider call `0`,
+   bounded deterministic listing, canonical source order, and validation
+   response non-echo.
+6. Run focused tests and expect RED.
 
 **GREEN:**
 
-6. Store candidates in VideoBox as approval workflow records, not as preference truth used directly by Yujin.
-7. Require explicit endpoint intent for approve/reject; never infer approval from chat wording.
-8. Add audit fields for state changes without storing provider request/response bodies.
-9. Run:
+7. Store candidates in VideoBox as approval workflow records, not as preference truth used directly by Yujin.
+8. Require explicit endpoint intent for approve/reject; never infer approval from chat wording.
+9. Add audit fields for state changes without storing proposed/source/provider request/response bodies.
+10. Run:
 
    ```powershell
    .\.venv\Scripts\python.exe -m pytest tests/test_yujin_memory_policy.py tests/test_yujin_memory_store.py tests/test_api_yujin_memory.py -q
    git diff --check
    ```
 
-10. Mark D1 `[x]`, synchronize progress, and commit:
+11. Mark D1 `[x]`, synchronize progress, and commit:
 
    ```powershell
    git add packages services/api tests docs/superpowers/plans
    git commit -m "feat: add Yujin memory approval policy"
    ```
+
+**2026-07-30 closeout evidence:**
+
+- Candidate create/list/approve/reject is a local approval workflow only.
+  Gateway, Hermes, Mem0, provider, network, and editor mutation remain `0`.
+- Policy and durable-store guards reject raw transcript echoes, secret/token/
+  credential patterns, Korean sensitive labels, contact/payment identifiers,
+  local/UNC/tilde/dot-relative/drive-relative paths, remote/web URIs,
+  post-NFKC length expansion, and hidden control characters.
+- Candidate plus body-free audit writes are atomic. A per-candidate monotonic
+  `event_order` makes the reverse trace deterministic even when lifecycle
+  timestamps are identical.
+- Fresh focused verification: `96 passed`. Related Director/API/PostgreSQL
+  regression: `39 passed, 34 skipped`. A separate disposable PostgreSQL 16
+  D1 workflow test passed and its container was removed.
+- Independent spec and quality/gap/reverse reviews finished with
+  `Critical 0 / Important 0 / Minor 0`, PASS. External provider/Mem0 live
+  calls were not run and are not claimed.
 
 ## D2 — Add Hermes-owned Mem0 Platform adapter
 

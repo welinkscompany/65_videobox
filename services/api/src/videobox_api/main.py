@@ -45,6 +45,7 @@ from videobox_api.routers.hermes_operations import build_hermes_operations_route
 from videobox_api.routers.projects import build_projects_router
 from videobox_api.routers.review import build_review_router
 from videobox_api.routers.timeline import build_timeline_router
+from videobox_api.routers.yujin_memory import build_yujin_memory_router
 from videobox_core_engine.auto_cut import AutoCutPlanner
 from videobox_core_engine.creation_interview import CreationInterviewRuntime, DeterministicCreationInterviewRuntime
 from videobox_core_engine.local_pipeline import LocalPipelineRunner
@@ -369,6 +370,11 @@ def create_app(
 
     @app.exception_handler(RequestValidationError)
     async def request_validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+        if "/director/memory-candidates" in request.url.path:
+            return JSONResponse(
+                status_code=422,
+                content={"detail": "memory_candidate_request_invalid"},
+            )
         if "/hermes-runs" in request.url.path:
             return JSONResponse(
                 status_code=422,
@@ -580,6 +586,7 @@ def create_app(
     app.include_router(build_timeline_router(orchestrator))
     app.include_router(build_editing_session_router(orchestrator, store))
     app.include_router(build_director_proposals_router(store))
+    app.include_router(build_yujin_memory_router(store))
     if app.state.hermes_run_service is not None:
         app.include_router(
             build_hermes_conversation_router(app.state.hermes_run_service)

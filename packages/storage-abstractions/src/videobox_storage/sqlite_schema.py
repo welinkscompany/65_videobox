@@ -78,6 +78,55 @@ HERMES_CAPABILITY_AUDIT_SCHEMA_STATEMENT = """
 
 PROJECT_SCHEMA_STATEMENTS = (
     """
+    CREATE TABLE IF NOT EXISTS yujin_memory_candidates (
+        candidate_id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        conversation_id TEXT NOT NULL,
+        client_request_id TEXT NOT NULL,
+        request_fingerprint TEXT NOT NULL,
+        source_message_ids_json TEXT NOT NULL,
+        memory_scope TEXT NOT NULL CHECK(memory_scope = 'creator'),
+        category TEXT NOT NULL CHECK(category IN (
+            'pacing', 'caption', 'audio', 'tone', 'workflow'
+        )),
+        proposed_text TEXT NOT NULL,
+        status TEXT NOT NULL CHECK(status IN (
+            'pending', 'approved', 'rejected',
+            'stored', 'failed', 'deleted'
+        )),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(project_id, conversation_id, client_request_id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS yujin_memory_candidate_audit (
+        audit_event_id TEXT PRIMARY KEY,
+        candidate_id TEXT NOT NULL,
+        project_id TEXT NOT NULL,
+        event_order INTEGER NOT NULL,
+        action TEXT NOT NULL CHECK(action IN (
+            'create', 'approve', 'reject', 'store', 'fail', 'delete'
+        )),
+        status TEXT NOT NULL CHECK(status IN (
+            'pending', 'approved', 'rejected',
+            'stored', 'failed', 'deleted'
+        )),
+        occurred_at TEXT NOT NULL,
+        UNIQUE(project_id, candidate_id, event_order)
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_yujin_memory_candidates_project_time
+    ON yujin_memory_candidates (project_id, created_at, candidate_id)
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_yujin_memory_audit_candidate_time
+    ON yujin_memory_candidate_audit (
+        project_id, candidate_id, event_order
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS atomic_draft_bundles (
         bundle_id TEXT PRIMARY KEY, project_id TEXT NOT NULL, brief_id TEXT NOT NULL,
         readiness_id TEXT NOT NULL, input_fingerprint TEXT NOT NULL, idempotency_key TEXT NOT NULL,

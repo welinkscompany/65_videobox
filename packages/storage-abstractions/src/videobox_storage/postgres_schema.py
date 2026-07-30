@@ -22,6 +22,8 @@ _PROJECT_SCOPED_IDENTIFIERS = {
     "timelines": "timeline_id",
     "transcripts": "transcript_id",
     "tts_candidates": "candidate_id",
+    "yujin_memory_candidates": "candidate_id",
+    "yujin_memory_candidate_audit": "audit_event_id",
 }
 
 

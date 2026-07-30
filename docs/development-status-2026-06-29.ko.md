@@ -1,6 +1,17 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 311. 2026-07-30 Hermes Yujin C4 operations and Phase C closeout`을 우선 적용한다. Task 22 기술 closeout 근거는 `## 300`, Phase B 근거는 `## 307`, C1/C2/C3 근거는 `## 308`/`## 309`/`## 310`을 유지하며, 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 312. 2026-07-30 Hermes Yujin D1 memory approval workflow closeout`을 우선 적용한다. Task 22 기술 closeout 근거는 `## 300`, Phase B 근거는 `## 307`, Phase C 근거는 `## 308`–`## 311`을 유지하며, 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+
+## 312. 2026-07-30 Hermes Yujin D1 memory approval workflow closeout
+
+- `[x] D1 완료`: VideoBox는 고정 `creator` 범위의 memory candidate와 명시적 approve/reject workflow record만 저장한다. `1..8`개 source message가 현재 project/conversation에 속하는지 확인하고 durable message order로 정렬한 뒤 canonical fingerprint와 bounded `client_request_id`로 idempotency를 보장한다.
+- `정책·원자성`: router와 durable store가 같은 정책을 검증한다. raw transcript echo, secret/token/credential, 한국어 민감 표기, 연락처·결제 식별자, local/UNC/tilde/dot-relative/drive-relative path, remote/web URI, NFKC 후 길이 확장과 hidden control을 차단한다. candidate와 body-free audit는 한 transaction이며 audit 실패 시 모두 rollback한다.
+- `결정·역추적`: 같은 approve/reject는 audit를 늘리지 않는 idempotent replay이고 반대 결정은 고정 conflict다. per-candidate monotonic `event_order`와 unique constraint로 동일 timestamp에서도 create→approve/reject 역방향 기록 순서가 고정된다. SQLite `BEGIN IMMEDIATE`, PostgreSQL row lock/CAS 경계를 함께 검증했다.
+- `범위 제한`: D1의 Gateway, Hermes, Mem0, provider, network, editor mutation은 `0`이다. approved는 아직 provider write를 예약하거나 수행하지 않는다. 기존 Director/editor 수동 편집과 자동 Apply 금지를 유지한다.
+- `리뷰·검증`: 정책 우회와 감사 순서 문제를 독립 spec 및 quality/gap/reverse review에서 찾아 RED→GREEN으로 보완했고 최종 Critical/Important/Minor **0**, PASS다. focused **96 passed**, 관련 Director/API/PostgreSQL 회귀 **39 passed, 34 skipped**, disposable PostgreSQL 16 D1 workflow **1 passed**와 container cleanup, `py_compile`, plan-state verifier, `git diff --check`가 통과했다.
+- `미실행`: 전체 Python/frontend regression, production build, 실제 Mem0/provider 호출, 브라우저 사람 E2E, 사용자 원본 영상 재생·청취, CapCut Desktop 사람 검증, Task 9 사람/환경 acceptance는 실행하지 않았고 통과로 간주하지 않는다.
+- `진행률`: Phase D **1/4 (25.0%), 잔여 75.0%**, Mem0 child **1/5 (20.0%), 잔여 80.0%**, Hermes Yujin initiative **16/20 (80.0%), 잔여 20.0%**다. 기존 VideoBox 공식 누적은 **9/22 (40.9%)**, 잔여 **59.1%**로 유지한다.
+- `다음 작업`: **D2만** 진행한다. 승인된 candidate만 Hermes 소유 Mem0 Platform adapter가 저장하도록 하고, 자격증명·raw provider record·VideoBox internal ID를 browser나 VideoBox 저장소에 노출하지 않는다. fake adapter TDD와 local/test external call 0을 유지한다.
 
 ## 311. 2026-07-30 Hermes Yujin C4 operations and Phase C closeout
 

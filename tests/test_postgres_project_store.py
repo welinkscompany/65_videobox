@@ -77,6 +77,8 @@ def _cleanup_postgres_hermes_project(
     connection = store._connection(project_id)
     try:
         for table in (
+            "yujin_memory_candidate_audit",
+            "yujin_memory_candidates",
             "hermes_capability_audit",
             "hermes_capability_ledger",
             "director_hermes_run_events",
@@ -94,6 +96,96 @@ def _cleanup_postgres_hermes_project(
         connection.commit()
     finally:
         connection.close()
+
+
+def test_postgres_yujin_memory_candidate_workflow_is_atomic_and_serialized(
+    tmp_path: Path,
+    postgres_url: str,
+) -> None:
+    store = PostgresProjectStore(
+        tmp_path / "postgres-yujin-memory",
+        database_url=postgres_url,
+    )
+    project = store.bootstrap_project(
+        f"PostgreSQL Yujin memory {uuid4().hex}"
+    )
+    project_id = project.project_id
+    try:
+        session = store.save_editing_session(
+            project_id=project_id,
+            timeline_id=f"timeline-{uuid4().hex}",
+            session_payload={"segments": [], "history": []},
+        )
+        conversation_id = f"conversation-{uuid4().hex}"
+        store.create_director_conversation(
+            project_id=project_id,
+            session_id=session["session_id"],
+            conversation_id=conversation_id,
+        )
+        first = store.append_director_message(
+            project_id=project_id,
+            session_id=session["session_id"],
+            conversation_id=conversation_id,
+            role="user",
+            text="영상 호흡을 조금 빠르게 해줘.",
+        )
+        second = store.append_director_message(
+            project_id=project_id,
+            session_id=session["session_id"],
+            conversation_id=conversation_id,
+            role="assistant",
+            text="짧은 컷 중심의 편집을 제안합니다.",
+        )
+        request = {
+            "project_id": project_id,
+            "conversation_id": conversation_id,
+            "client_request_id": "postgres-request-1",
+            "source_message_ids": (
+                second["message_id"],
+                first["message_id"],
+            ),
+            "memory_scope": "creator",
+            "category": "pacing",
+            "proposed_text": "짧은 컷 중심의 빠른 호흡을 선호합니다.",
+        }
+
+        created = store.create_yujin_memory_candidate(**request)
+        replayed = store.create_yujin_memory_candidate(**request)
+
+        assert replayed == created
+        assert created["source_message_ids"] == (
+            first["message_id"],
+            second["message_id"],
+        )
+
+        def decide(action: str) -> str:
+            try:
+                return str(
+                    store.transition_yujin_memory_candidate(
+                        project_id=project_id,
+                        candidate_id=created["candidate_id"],
+                        action=action,
+                    )["status"]
+                )
+            except ValueError as error:
+                return str(error)
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            results = list(executor.map(decide, ("approve", "reject")))
+
+        assert results.count("memory_candidate_terminal_conflict") == 1
+        assert len(set(results) & {"approved", "rejected"}) == 1
+        audit = store.list_yujin_memory_candidate_audit(
+            project_id=project_id,
+            candidate_id=created["candidate_id"],
+        )
+        assert [(row["action"], row["status"]) for row in audit] in (
+            [("create", "pending"), ("approve", "approved")],
+            [("create", "pending"), ("reject", "rejected")],
+        )
+        assert [row["event_order"] for row in audit] == [1, 2]
+    finally:
+        _cleanup_postgres_hermes_project(store, project_id)
 
 
 @pytest.fixture

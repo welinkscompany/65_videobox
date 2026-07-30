@@ -23,6 +23,9 @@ from videobox_domain_models.recommendations import RecommendationRecord, Recomme
 from videobox_domain_models.transcripts import TranscriptRecord
 from videobox_core_engine.provider_trace import build_provider_trace
 from videobox_core_engine.exact_preview import ExactPreviewRequest
+from videobox_core_engine.yujin_memory_policy import (
+    validate_yujin_memory_candidate,
+)
 from videobox_core_engine.editor_playback_manifest import (
     build_editor_playback_manifest,
 )
@@ -3888,6 +3891,367 @@ class LocalProjectStore:
         )
         file_path.write_text(json.dumps(updated, indent=2, ensure_ascii=True), encoding="utf-8")
         return updated
+
+    @staticmethod
+    def _yujin_memory_candidate_payload(row: Any) -> dict[str, Any]:
+        return {
+            "candidate_id": str(row["candidate_id"]),
+            "project_id": str(row["project_id"]),
+            "conversation_id": str(row["conversation_id"]),
+            "client_request_id": str(row["client_request_id"]),
+            "source_message_ids": tuple(
+                str(value)
+                for value in json.loads(str(row["source_message_ids_json"]))
+            ),
+            "memory_scope": str(row["memory_scope"]),
+            "category": str(row["category"]),
+            "proposed_text": str(row["proposed_text"]),
+            "status": str(row["status"]),
+            "created_at": str(row["created_at"]),
+            "updated_at": str(row["updated_at"]),
+        }
+
+    @staticmethod
+    def _validate_yujin_memory_source_ids(
+        source_message_ids: tuple[str, ...],
+    ) -> None:
+        if (
+            not 1 <= len(source_message_ids) <= 8
+            or len(set(source_message_ids)) != len(source_message_ids)
+            or any(
+                not isinstance(value, str)
+                or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", value)
+                is None
+                for value in source_message_ids
+            )
+        ):
+            raise ValueError("memory_candidate_source_ids_invalid")
+
+    @staticmethod
+    def _yujin_memory_request_fingerprint(
+        *,
+        conversation_id: str,
+        source_message_ids: tuple[str, ...],
+        memory_scope: str,
+        category: str,
+        proposed_text: str,
+    ) -> str:
+        canonical = json.dumps(
+            {
+                "category": category,
+                "conversation_id": conversation_id,
+                "memory_scope": memory_scope,
+                "proposed_text": proposed_text,
+                "source_message_ids": source_message_ids,
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _lock_yujin_memory_candidate(
+        connection: Any,
+        *,
+        project_id: str,
+        candidate_id: str,
+    ) -> Any:
+        suffix = (
+            ""
+            if isinstance(connection, sqlite3.Connection)
+            else " FOR UPDATE"
+        )
+        return connection.execute(
+            "SELECT * FROM yujin_memory_candidates "
+            "WHERE project_id = ? AND candidate_id = ?" + suffix,
+            (project_id, candidate_id),
+        ).fetchone()
+
+    @staticmethod
+    def _append_yujin_memory_audit(
+        connection: Any,
+        *,
+        candidate_id: str,
+        project_id: str,
+        action: str,
+        status: str,
+        occurred_at: str,
+    ) -> None:
+        row = connection.execute(
+            "SELECT COALESCE(MAX(event_order), 0) + 1 AS next_event_order "
+            "FROM yujin_memory_candidate_audit "
+            "WHERE project_id = ? AND candidate_id = ?",
+            (project_id, candidate_id),
+        ).fetchone()
+        event_order = int(row["next_event_order"])
+        connection.execute(
+            """
+            INSERT INTO yujin_memory_candidate_audit (
+                audit_event_id, candidate_id, project_id,
+                event_order, action, status, occurred_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                f"memory-audit-{uuid.uuid4().hex}",
+                candidate_id,
+                project_id,
+                event_order,
+                action,
+                status,
+                occurred_at,
+            ),
+        )
+
+    def get_yujin_memory_source_texts(
+        self,
+        *,
+        project_id: str,
+        conversation_id: str,
+        source_message_ids: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        self._validate_yujin_memory_source_ids(source_message_ids)
+        connection = self._connection(project_id)
+        try:
+            conversation = connection.execute(
+                "SELECT conversation_id FROM director_conversations "
+                "WHERE project_id = ? AND conversation_id = ?",
+                (project_id, conversation_id),
+            ).fetchone()
+            if conversation is None:
+                raise KeyError("yujin_memory_source_missing")
+            placeholders = ",".join("?" for _ in source_message_ids)
+            rows = connection.execute(
+                "SELECT message_id, text, message_order FROM director_messages "
+                "WHERE project_id = ? AND conversation_id = ? "
+                f"AND message_id IN ({placeholders}) "
+                "ORDER BY message_order, message_id",
+                (project_id, conversation_id, *source_message_ids),
+            ).fetchall()
+            if len(rows) != len(source_message_ids):
+                raise KeyError("yujin_memory_source_missing")
+            return tuple(str(row["text"]) for row in rows)
+        finally:
+            connection.close()
+
+    def create_yujin_memory_candidate(
+        self,
+        *,
+        project_id: str,
+        conversation_id: str,
+        client_request_id: str,
+        source_message_ids: tuple[str, ...],
+        memory_scope: str,
+        category: str,
+        proposed_text: str,
+    ) -> dict[str, Any]:
+        self._validate_yujin_memory_source_ids(source_message_ids)
+        if (
+            re.fullmatch(
+                r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}",
+                client_request_id,
+            )
+            is None
+        ):
+            raise ValueError("memory_candidate_request_id_invalid")
+        if memory_scope != "creator":
+            raise ValueError("memory_candidate_scope_unsupported")
+        if category not in {"pacing", "caption", "audio", "tone", "workflow"}:
+            raise ValueError("memory_candidate_category_unsupported")
+        connection = self._connection(project_id)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            if not isinstance(connection, sqlite3.Connection):
+                connection.execute(
+                    "LOCK TABLE yujin_memory_candidates "
+                    "IN SHARE ROW EXCLUSIVE MODE"
+                )
+            conversation = connection.execute(
+                "SELECT conversation_id FROM director_conversations "
+                "WHERE project_id = ? AND conversation_id = ?",
+                (project_id, conversation_id),
+            ).fetchone()
+            if conversation is None:
+                raise KeyError("yujin_memory_source_missing")
+            placeholders = ",".join("?" for _ in source_message_ids)
+            source_rows = connection.execute(
+                "SELECT message_id, text, message_order FROM director_messages "
+                "WHERE project_id = ? AND conversation_id = ? "
+                f"AND message_id IN ({placeholders}) "
+                "ORDER BY message_order, message_id",
+                (project_id, conversation_id, *source_message_ids),
+            ).fetchall()
+            if len(source_rows) != len(source_message_ids):
+                raise KeyError("yujin_memory_source_missing")
+            canonical_source_message_ids = tuple(
+                str(row["message_id"]) for row in source_rows
+            )
+            proposed_text = validate_yujin_memory_candidate(
+                category=category,
+                proposed_text=proposed_text,
+                source_texts=tuple(
+                    str(row["text"]) for row in source_rows
+                ),
+            )
+            fingerprint = self._yujin_memory_request_fingerprint(
+                conversation_id=conversation_id,
+                source_message_ids=canonical_source_message_ids,
+                memory_scope=memory_scope,
+                category=category,
+                proposed_text=proposed_text,
+            )
+            existing = connection.execute(
+                "SELECT * FROM yujin_memory_candidates "
+                "WHERE project_id = ? AND conversation_id = ? "
+                "AND client_request_id = ?",
+                (project_id, conversation_id, client_request_id),
+            ).fetchone()
+            if existing is not None:
+                if str(existing["request_fingerprint"]) != fingerprint:
+                    raise ValueError("memory_candidate_request_conflict")
+                connection.commit()
+                return self._yujin_memory_candidate_payload(existing)
+
+            candidate_id = f"memory-candidate-{uuid.uuid4().hex}"
+            now = self._now_iso()
+            connection.execute(
+                """
+                INSERT INTO yujin_memory_candidates (
+                    candidate_id, project_id, conversation_id,
+                    client_request_id, request_fingerprint,
+                    source_message_ids_json, memory_scope, category,
+                    proposed_text, status, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+                """,
+                (
+                    candidate_id,
+                    project_id,
+                    conversation_id,
+                    client_request_id,
+                    fingerprint,
+                    json.dumps(
+                        canonical_source_message_ids,
+                        ensure_ascii=True,
+                    ),
+                    memory_scope,
+                    category,
+                    proposed_text,
+                    now,
+                    now,
+                ),
+            )
+            self._append_yujin_memory_audit(
+                connection,
+                candidate_id=candidate_id,
+                project_id=project_id,
+                action="create",
+                status="pending",
+                occurred_at=now,
+            )
+            row = connection.execute(
+                "SELECT * FROM yujin_memory_candidates "
+                "WHERE project_id = ? AND candidate_id = ?",
+                (project_id, candidate_id),
+            ).fetchone()
+            connection.commit()
+            return self._yujin_memory_candidate_payload(row)
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def list_yujin_memory_candidates(
+        self,
+        *,
+        project_id: str,
+    ) -> list[dict[str, Any]]:
+        rows = self._fetchall(
+            project_id,
+            "SELECT * FROM yujin_memory_candidates "
+            "WHERE project_id = ? "
+            "ORDER BY created_at DESC, candidate_id DESC LIMIT 100",
+            (project_id,),
+        )
+        return [self._yujin_memory_candidate_payload(row) for row in rows]
+
+    def transition_yujin_memory_candidate(
+        self,
+        *,
+        project_id: str,
+        candidate_id: str,
+        action: Literal["approve", "reject"],
+    ) -> dict[str, Any]:
+        if action not in {"approve", "reject"}:
+            raise ValueError("memory_candidate_action_invalid")
+        target = "approved" if action == "approve" else "rejected"
+        connection = self._connection(project_id)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            row = self._lock_yujin_memory_candidate(
+                connection,
+                project_id=project_id,
+                candidate_id=candidate_id,
+            )
+            if row is None:
+                raise KeyError("memory_candidate_missing")
+            current = str(row["status"])
+            if current == target:
+                connection.commit()
+                return self._yujin_memory_candidate_payload(row)
+            if current != "pending":
+                raise ValueError("memory_candidate_terminal_conflict")
+            now = self._now_iso()
+            updated = connection.execute(
+                "UPDATE yujin_memory_candidates "
+                "SET status = ?, updated_at = ? "
+                "WHERE project_id = ? AND candidate_id = ? "
+                "AND status = 'pending'",
+                (target, now, project_id, candidate_id),
+            )
+            if updated.rowcount != 1:
+                raise ValueError("memory_candidate_terminal_conflict")
+            self._append_yujin_memory_audit(
+                connection,
+                candidate_id=candidate_id,
+                project_id=project_id,
+                action=action,
+                status=target,
+                occurred_at=now,
+            )
+            result = connection.execute(
+                "SELECT * FROM yujin_memory_candidates "
+                "WHERE project_id = ? AND candidate_id = ?",
+                (project_id, candidate_id),
+            ).fetchone()
+            connection.commit()
+            return self._yujin_memory_candidate_payload(result)
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def list_yujin_memory_candidate_audit(
+        self,
+        *,
+        project_id: str,
+        candidate_id: str,
+    ) -> list[dict[str, Any]]:
+        rows = self._fetchall(
+            project_id,
+            """
+            SELECT audit_event_id, candidate_id, project_id, event_order,
+                   action, status, occurred_at
+            FROM yujin_memory_candidate_audit
+            WHERE project_id = ? AND candidate_id = ?
+            ORDER BY event_order
+            """,
+            (project_id, candidate_id),
+        )
+        return [dict(row) for row in rows]
 
     def create_director_conversation(self, *, project_id: str, session_id: str, conversation_id: str) -> dict[str, Any]:
         self.get_editing_session(project_id=project_id, session_id=session_id)
