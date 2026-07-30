@@ -549,7 +549,7 @@ skip.
 
 - [x] **10.1** Run full relevant verification.
 - [x] **10.2** Update plan/status/handoff only from fresh evidence.
-- [~] **10.3** Commit and push one logically closed C3 implementation.
+- [x] **10.3** Commit and push one logically closed C3 implementation.
 
 **Closeout evidence (2026-07-30):**
 
@@ -564,6 +564,8 @@ skip.
   UI-system verifiers passed. `git diff --check` passed.
 - Independent spec, quality, gap, reverse-runtime and final two-file regression
   review all ended `Critical 0 / Important 0 / Minor 0`.
+- C3 closeout commit `c7d439e` was pushed to
+  `origin/codex/videobox-container-compatibility`.
 - No actual Hermes/provider call, browser human E2E, user-media acceptance,
   CapCut Desktop proof or Task 9 human/environment acceptance was claimed.
 
