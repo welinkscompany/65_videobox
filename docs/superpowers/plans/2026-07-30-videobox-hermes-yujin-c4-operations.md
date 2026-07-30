@@ -154,7 +154,7 @@ Files:
 - [x] Update master/child/implementation/status/handoff from fresh evidence.
 - [x] Mark C4 only complete: initiative `15/20 (75.0%)`, Phase C `4/4`.
 - [x] Keep official `9/22 (40.9%)`, remaining `59.1%`.
-- [ ] Commit, push and verify upstream `0/0`.
+- [x] Commit, push and verify upstream `0/0`.
 
 Exact-file staging only:
 

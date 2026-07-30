@@ -59,8 +59,8 @@ live drill은 실행하지 않았다. 브라우저 사람 E2E, 사용자 원본 
 ## 커밋·푸시 상태
 
 - closeout 작성 시 기준 HEAD: `a9c5c6a`
-- C4 implementation/closeout commit: 현재 turn에서 생성 예정
-- upstream 동기화: commit/push 뒤 `0/0` 확인 예정
+- C4 implementation/closeout commit: `c6488feb0`
+- upstream 동기화: `c6488feb0` push 뒤 `0/0` 확인
 
 ## 재개 안전선
 
