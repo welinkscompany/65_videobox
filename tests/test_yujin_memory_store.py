@@ -24,19 +24,28 @@ def _seed(store: LocalProjectStore, *, name: str = "memory"):
         session_id=session["session_id"],
         conversation_id=f"conversation-{project.project_id}",
     )
-    first = store.append_director_message(
+    run = store.begin_director_hermes_run(
         project_id=project.project_id,
         session_id=session["session_id"],
         conversation_id=conversation["conversation_id"],
-        role="user",
-        text="영상 템포를 조금 빠르게 해줘.",
+        client_message_id=f"memory-seed-{project.project_id}",
+        user_text="영상 템포를 조금 빠르게 해줘.",
+        expected_session_revision=session["session_revision"],
+        expected_asset_index_revision=0,
     )
-    second = store.append_director_message(
+    assert run["dispatch"] is True
+    assert store.complete_director_hermes_run(
         project_id=project.project_id,
-        session_id=session["session_id"],
+        run_id=run["run_id"],
+        owner_token=run["owner_token"],
+        status="completed",
+        assistant_text="빠른 컷과 짧은 호흡을 제안합니다.",
+        public_text="",
+        retryable=False,
+    )
+    first, second = store.list_director_messages(
+        project_id=project.project_id,
         conversation_id=conversation["conversation_id"],
-        role="assistant",
-        text="빠른 컷과 짧은 호흡을 제안합니다.",
     )
     return project.project_id, session, conversation["conversation_id"], first, second
 
@@ -51,6 +60,165 @@ def _create(store: LocalProjectStore, project_id: str, conversation_id: str, *me
         category="pacing",
         proposed_text="빠른 컷과 짧은 호흡을 선호합니다.",
     )
+
+
+def _append_run_messages(
+    store: LocalProjectStore,
+    *,
+    project_id: str,
+    session_id: str,
+    conversation_id: str,
+    status: str,
+    suffix: str,
+) -> tuple[list[dict], dict]:
+    before = {
+        message["message_id"]
+        for message in store.list_director_messages(
+            project_id=project_id,
+            conversation_id=conversation_id,
+        )
+    }
+    run = store.begin_director_hermes_run(
+        project_id=project_id,
+        session_id=session_id,
+        conversation_id=conversation_id,
+        client_message_id=f"authority-{status}-{suffix}",
+        user_text=f"{status} source",
+        expected_session_revision=1,
+        expected_asset_index_revision=0,
+    )
+    if status == "streaming":
+        assert store.append_director_hermes_draft(
+            project_id=project_id,
+            run_id=run["run_id"],
+            owner_token=run["owner_token"],
+            assistant_draft_text="진행 중",
+        )
+    elif status in {"completed", "blocked", "interrupted"}:
+        assert store.complete_director_hermes_run(
+            project_id=project_id,
+            run_id=run["run_id"],
+            owner_token=run["owner_token"],
+            status=status,
+            assistant_text=f"{status} assistant",
+            public_text="",
+            retryable=status != "completed",
+        )
+    return [
+        message
+        for message in store.list_director_messages(
+            project_id=project_id,
+            conversation_id=conversation_id,
+        )
+        if message["message_id"] not in before
+    ], run
+
+
+def test_candidate_sources_must_belong_to_completed_hermes_run_before_audit(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project_id, session, conversation_id, completed_user, completed_assistant = _seed(
+        store
+    )
+    completed_candidates = []
+    for suffix, source in (
+        ("user", completed_user),
+        ("assistant", completed_assistant),
+    ):
+        completed_candidates.append(
+            store.create_yujin_memory_candidate(
+                project_id=project_id,
+                conversation_id=conversation_id,
+                client_request_id=f"completed-subset-{suffix}",
+                source_message_ids=(source["message_id"],),
+                memory_scope="creator",
+                category="pacing",
+                proposed_text="빠른 컷 편집을 선호합니다.",
+            )
+        )
+    assert [candidate["source_message_ids"] for candidate in completed_candidates] == [
+        (completed_user["message_id"],),
+        (completed_assistant["message_id"],),
+    ]
+
+    for status in ("pending", "streaming", "blocked", "interrupted"):
+        invalid_messages, run = _append_run_messages(
+            store,
+            project_id=project_id,
+            session_id=session["session_id"],
+            conversation_id=conversation_id,
+            status=status,
+            suffix="invalid",
+        )
+        for source in invalid_messages:
+            with pytest.raises(
+                KeyError,
+                match="yujin_memory_source_missing",
+            ):
+                store.create_yujin_memory_candidate(
+                    project_id=project_id,
+                    conversation_id=conversation_id,
+                    client_request_id=(
+                        f"invalid-{status}-{source['message_id']}"
+                    ),
+                    source_message_ids=(source["message_id"],),
+                    memory_scope="creator",
+                    category="pacing",
+                    proposed_text="빠른 컷 편집을 선호합니다.",
+                )
+        if status in {"pending", "streaming"}:
+            assert store.complete_director_hermes_run(
+                project_id=project_id,
+                run_id=run["run_id"],
+                owner_token=run["owner_token"],
+                status="interrupted",
+                assistant_text=(
+                    "진행 중 테스트 run 정리"
+                    if status == "streaming"
+                    else "테스트 run 정리"
+                ),
+                public_text="진행 중" if status == "streaming" else "",
+                retryable=True,
+            )
+    legacy_user = store.append_director_message(
+        project_id=project_id,
+        session_id=session["session_id"],
+        conversation_id=conversation_id,
+        role="user",
+        text="연결되지 않은 사용자 메시지",
+    )
+    legacy_assistant = store.append_director_message(
+        project_id=project_id,
+        session_id=session["session_id"],
+        conversation_id=conversation_id,
+        role="assistant",
+        text="연결되지 않은 응답 메시지",
+    )
+
+    for source in (legacy_user, legacy_assistant):
+        with pytest.raises(KeyError, match="yujin_memory_source_missing"):
+            store.create_yujin_memory_candidate(
+                project_id=project_id,
+                conversation_id=conversation_id,
+                client_request_id=f"invalid-{source['message_id']}",
+                source_message_ids=(source["message_id"],),
+                memory_scope="creator",
+                category="pacing",
+                proposed_text="빠른 컷 편집을 선호합니다.",
+            )
+
+    listed_candidates = store.list_yujin_memory_candidates(
+        project_id=project_id
+    )
+    assert {
+        candidate["candidate_id"]
+        for candidate in listed_candidates
+    } == {
+        candidate["candidate_id"]
+        for candidate in completed_candidates
+    }
+    assert len(listed_candidates) == 2
 
 
 def test_candidate_and_redacted_audit_are_durable(tmp_path: Path) -> None:

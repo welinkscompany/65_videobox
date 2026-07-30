@@ -6,6 +6,8 @@ worktree: `videobox-container-compatibility`
 
 상태: D4와 Phase D 기술 closeout 완료
 
+F1 후속 상태: gap remediation 및 독립 재검토 완료, 최종 기술 closeout
+
 ## 결론
 
 D4의 production producer, approved+stored retrieval, bounded creator-context
@@ -56,6 +58,35 @@ warning 1건은 기존 Starlette multipart PendingDeprecationWarning이다.
   `Critical 0 / Important 0 / Minor 0`, PASS
 - Hermes Yujin plan-state verifier와 `git diff --check`: PASS
 
+## F1 gap remediation final closeout (2026-07-30)
+
+- completed-run authority: 같은 project+conversation의 completed Hermes
+  run이 소유한 user/assistant message만 memory candidate source로 허용한다.
+  pending/streaming/blocked/interrupted/legacy source는 candidate와 audit 전에
+  거부한다.
+- Route list supersession: post-create refresh가 이전 initial list보다 새
+  operation을 소유하므로 역순 완료가 candidate/action/draft/scroll을
+  지우지 못한다.
+- SQLite migration concurrency: exact duplicate-column race만 schema
+  재확인 뒤 성공으로 수렴하고 다른 오류는 삼키지 않는다.
+- API fixture는 TestClient의 50ms orphan recovery와 경쟁하는 synthetic
+  `begin -> complete` 창을 제거하고 원하는 durable authority row를 직접
+  seed한다. current-conversation-before-limit aggregate는 즉시 recovery가
+  회수할 pending run이 없다는 것도 확인한다.
+- 현재 GREEN: F1 focused backend `920 passed, 1 skipped`, frontend
+  API/RightDock/panel/Route `4 files / 183 passed`, backend memory store/API
+  `52 passed`, memory store/service/retrieval/API aggregate `81 passed`, API
+  전체 `14 passed`를 `5/5` 반복, current-conversation-before-limit
+  `20/20`, Route `117 passed`, SQLite migration file `3 passed`, exact D2
+  race `10/10`, disposable PostgreSQL 16 Yujin-memory parity `6 passed`. 전용 container
+  `videobox-f1-source-authority-20260730`은 삭제와 부재를 확인했다.
+- 독립 spec/quality/gap/reverse 재검토는 `C0/I0/M0 PASS`다. 최종
+  mandatory gate는 focused backend `920 passed, 1 skipped`, 전체 Python
+  `2640 passed, 47 skipped`, 전체 frontend `52 files / 725 passed`,
+  자동 editor E2E `35/35`, build/provenance/UI/runtime/profile/plan/network,
+  SBOM과 PostgreSQL parity까지 통과했다. 상세 근거는 final handoff를
+  따른다.
+
 ## 리뷰 시 우선 확인할 항목
 
 1. 완료 durable message ID 판정과 late Route epoch fence가 소유권 변경을
@@ -75,11 +106,10 @@ warning 1건은 기존 Starlette multipart PendingDeprecationWarning이다.
 
 - 실제 Mem0/provider add/search/delete 및 삭제 후 부재 확인: 미실행
 - 브라우저 사람 E2E, 사용자 원본 미디어·CapCut 사람 검증: 미실행
-- 전체 Python regression과 provenance verifier: 미실행
 - commit/push: 이 handoff 작성 시점에는 미실행
 
 현재 authoritative 진행률은 Phase D `4/4 (100.0%)`, Mem0 child
-`4/5 (80.0%)`, Hermes Yujin `19/20 (95.0%)`, 잔여 `5.0%`다. 다음
-goal은 F1 최종 통합 closeout이다. 별도 환경과 권한이 있을 때만 live
-canary를 `-Live -ApproveDisposableAdd`로 실행한다. 기존 VideoBox 공식
-누적은 `9/22 (40.9%)`, 잔여 `59.1%`로 유지한다.
+`5/5 (100.0%)`, Hermes Yujin `20/20 (100.0%)`, 잔여 `0.0%`다. 별도
+환경과 권한이 있을 때만 live canary를 `-Live -ApproveDisposableAdd`로
+실행한다. 기존 VideoBox 공식 누적은 `9/22 (40.9%)`, 잔여 `59.1%`로
+유지한다.

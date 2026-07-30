@@ -482,6 +482,145 @@ describe("EditorWorkbenchRoute", () => {
     )).toBeVisible();
   });
 
+  it("keeps the post-create list when an older initial list resolves last", async () => {
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
+      conversation: {
+        conversation_id: "conversation-1",
+        project_id: "project-a",
+        session_id: "session-a",
+      },
+      messages: [{
+        message_id: "message-1",
+        conversation_id: "conversation-1",
+        project_id: "project-a",
+        session_id: "session-a",
+        role: "user",
+        text: "빠른 컷으로 편집해 줘.",
+        proposal_id: null,
+        metadata: {},
+        client_message_id: "client-1",
+        created_at: "2026-07-30T12:00:00Z",
+      }, {
+        message_id: "message-2",
+        conversation_id: "conversation-1",
+        project_id: "project-a",
+        session_id: "session-a",
+        role: "assistant",
+        text: "빠른 컷 편집을 제안합니다.",
+        proposal_id: null,
+        metadata: {
+          hermes_status: "completed",
+          hermes_run_id: "run-1",
+        },
+        client_message_id: null,
+        created_at: "2026-07-30T12:00:01Z",
+      }],
+      proposal: null,
+      references: [],
+    } as never);
+    let resolveInitialList!: (value: unknown) => void;
+    let resolveFreshList!: (value: unknown) => void;
+    vi.mocked(api.listYujinMemoryCandidates)
+      .mockImplementationOnce(() => new Promise((resolve) => {
+        resolveInitialList = resolve;
+      }) as never)
+      .mockImplementationOnce(() => new Promise((resolve) => {
+        resolveFreshList = resolve;
+      }) as never);
+    vi.spyOn(api, "createYujinMemoryCandidate").mockResolvedValue(
+      memoryCandidate({
+        source_message_ids: ["message-1", "message-2"],
+      }) as never,
+    );
+    let resolveStore!: (value: unknown) => void;
+    vi.spyOn(api, "storeYujinMemoryCandidate").mockImplementation(
+      () => new Promise((resolve) => {
+        resolveStore = resolve;
+      }) as never,
+    );
+    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue(
+      "00000000-0000-4000-8000-000000000073",
+    );
+
+    render(
+      <EditorWorkbenchRoute
+        projectId="project-a"
+        sessionId="session-a"
+      />,
+    );
+    await expectEditorRevision(1);
+    await waitFor(() => expect(
+      api.listYujinMemoryCandidates,
+    ).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole(
+      "button", { name: "유진과 편집 항목" },
+    ));
+    const panel = await screen.findByRole(
+      "region", { name: "유진 기억" },
+    );
+    const history = screen.getByRole("log", { name: "유진 대화" });
+    Object.defineProperties(history, {
+      scrollHeight: { configurable: true, value: 200 },
+      clientHeight: { configurable: true, value: 80 },
+      scrollTop: {
+        configurable: true,
+        writable: true,
+        value: 51,
+      },
+    });
+    fireEvent.scroll(history);
+    fireEvent.change(within(panel).getByLabelText("기억 후보"), {
+      target: { value: "빠른 컷 편집을 선호합니다." },
+    });
+    fireEvent.click(within(panel).getByRole(
+      "button", { name: "기억 후보 만들기" },
+    ));
+    await waitFor(() => expect(
+      api.listYujinMemoryCandidates,
+    ).toHaveBeenCalledTimes(2));
+    await act(async () => {
+      resolveFreshList([
+        memoryCandidate({
+          status: "approved",
+          storage_status: "not_requested",
+          source_message_ids: ["message-1", "message-2"],
+        }),
+      ]);
+    });
+    expect(await within(panel).findByText(
+      "빠른 컷 편집을 선호합니다.",
+    )).toBeVisible();
+
+    fireEvent.change(within(panel).getByLabelText("기억 후보"), {
+      target: { value: "다음 후보 초안" },
+    });
+    fireEvent.click(within(panel).getByRole(
+      "button", { name: "저장하기" },
+    ));
+    expect(await within(panel).findByText("저장 중")).toBeVisible();
+
+    await act(async () => {
+      resolveInitialList([]);
+    });
+
+    expect(within(panel).getByText(
+      "빠른 컷 편집을 선호합니다.",
+    )).toBeVisible();
+    expect(within(panel).getByText("저장 중")).toBeVisible();
+    expect(within(panel).getByLabelText("기억 후보"))
+      .toHaveValue("다음 후보 초안");
+    expect(history.scrollTop).toBe(51);
+
+    await act(async () => {
+      resolveStore({
+        candidate_id: "memory-candidate-1",
+        status: "approved",
+        storage_status: "stored",
+        retryable: false,
+      });
+    });
+  });
+
   it("fences late explicit candidate creation after route/project/conversation epoch change", async () => {
     vi.mocked(api.getEditorPlaybackManifest).mockImplementation(
       (projectId, sessionId) => Promise.resolve(

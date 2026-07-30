@@ -15,6 +15,11 @@ Design: `docs/superpowers/specs/2026-07-26-videobox-hermes-yujin-integration-des
 
 Child progress: **6/6 tasks (100.0%), remaining 0.0%**. These six tasks are master IDs P0-1, P0-2, A1, A2, A3, and A4.
 
+> 2026-07-30 final integration closeout: master F1 passed all mandatory
+> non-live regression, frontend/E2E/build, provenance, runtime/profile,
+> topology, SBOM, and independent review gates. Live Hermes/provider and human
+> acceptance remain separately unrun.
+
 ## P0-1 — Confirm drift and official runtime contracts
 
 - [x] **P0-1** Confirm live/source drift, official Hermes CLI/wire contracts, branch/upstream, protected paths, and current dependency pins.

@@ -10,6 +10,66 @@ from videobox_api.main import create_app
 from videobox_agent_gateway.memory_gateway import MemoryWriteOutcome
 
 
+def _append_completed_api_source(
+    store,
+    *,
+    project_id: str,
+    session_id: str,
+    conversation_id: str,
+    expected_session_revision: int,
+    user_text: str,
+    assistant_text: str,
+) -> tuple[dict, dict]:
+    first = store.append_director_message(
+        project_id=project_id,
+        session_id=session_id,
+        conversation_id=conversation_id,
+        role="user",
+        text=user_text,
+    )
+    second = store.append_director_message(
+        project_id=project_id,
+        session_id=session_id,
+        conversation_id=conversation_id,
+        role="assistant",
+        text=assistant_text,
+    )
+    connection = store._connection(project_id)
+    try:
+        connection.execute(
+            """
+            INSERT INTO director_hermes_runs (
+                run_id, conversation_id, client_message_id, project_id,
+                session_id, expected_session_revision,
+                expected_asset_index_revision, user_text, user_message_id,
+                assistant_message_id, assistant_draft_text, status,
+                owner_token, next_event_id, heartbeat_at, created_at,
+                updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, '', 'completed',
+                ?, 1, ?, ?, ?)
+            """,
+            (
+                f"hermes-run-fixture-{first['message_id']}",
+                conversation_id,
+                f"fixture-{first['message_id']}",
+                project_id,
+                session_id,
+                expected_session_revision,
+                first["text"],
+                first["message_id"],
+                second["message_id"],
+                "fixture-owner",
+                "2026-07-30T00:00:00+00:00",
+                "2026-07-30T00:00:00+00:00",
+                "2026-07-30T00:00:00+00:00",
+            ),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+    return first, second
+
+
 def _seed(app, client: TestClient):
     project_id = client.post("/api/projects", json={"name": "memory"}).json()[
         "project_id"
@@ -23,19 +83,14 @@ def _seed(app, client: TestClient):
         f"/api/projects/{project_id}/director/conversations",
         json={"session_id": session["session_id"]},
     ).json()
-    first = app.state.store.append_director_message(
+    first, second = _append_completed_api_source(
+        app.state.store,
         project_id=project_id,
         session_id=session["session_id"],
         conversation_id=conversation["conversation_id"],
-        role="user",
-        text="영상 템포를 조금 빠르게 해줘.",
-    )
-    second = app.state.store.append_director_message(
-        project_id=project_id,
-        session_id=session["session_id"],
-        conversation_id=conversation["conversation_id"],
-        role="assistant",
-        text="빠른 컷과 짧은 호흡을 제안합니다.",
+        expected_session_revision=session["session_revision"],
+        user_text="영상 템포를 조금 빠르게 해줘.",
+        assistant_text="빠른 컷과 짧은 호흡을 제안합니다.",
     )
     return project_id, session, conversation["conversation_id"], first, second
 
@@ -49,6 +104,165 @@ def _payload(conversation_id: str, *message_ids: str) -> dict[str, object]:
         "category": "pacing",
         "proposed_text": "빠른 컷과 짧은 호흡을 선호합니다.",
     }
+
+
+def _append_api_run_messages(
+    app,
+    *,
+    project_id: str,
+    session_id: str,
+    conversation_id: str,
+    status: str,
+) -> tuple[list[dict], dict]:
+    store = app.state.store
+    if status == "completed":
+        first, second = _append_completed_api_source(
+            store,
+            project_id=project_id,
+            session_id=session_id,
+            conversation_id=conversation_id,
+            expected_session_revision=1,
+            user_text="completed source",
+            assistant_text="completed assistant",
+        )
+        return [first, second], {
+            "run_id": f"hermes-run-fixture-{first['message_id']}",
+            "owner_token": "fixture-owner",
+        }
+    first = store.append_director_message(
+        project_id=project_id,
+        session_id=session_id,
+        conversation_id=conversation_id,
+        role="user",
+        text=f"{status} source",
+    )
+    second = None
+    if status in {"blocked", "interrupted"}:
+        second = store.append_director_message(
+            project_id=project_id,
+            session_id=session_id,
+            conversation_id=conversation_id,
+            role="assistant",
+            text=f"{status} assistant",
+        )
+    run_id = f"hermes-run-fixture-{first['message_id']}"
+    connection = store._connection(project_id)
+    try:
+        connection.execute(
+            """
+            INSERT INTO director_hermes_runs (
+                run_id, conversation_id, client_message_id, project_id,
+                session_id, expected_session_revision,
+                expected_asset_index_revision, user_text, user_message_id,
+                assistant_message_id, assistant_draft_text, status,
+                owner_token, next_event_id, heartbeat_at, created_at,
+                updated_at
+            ) VALUES (?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?, ?,
+                ?, 1, ?, ?, ?)
+            """,
+            (
+                run_id,
+                conversation_id,
+                f"fixture-{first['message_id']}",
+                project_id,
+                session_id,
+                first["text"],
+                first["message_id"],
+                second["message_id"] if second is not None else None,
+                "진행 중" if status == "streaming" else "",
+                status,
+                "fixture-owner",
+                "2026-07-30T00:00:00+00:00",
+                "2026-07-30T00:00:00+00:00",
+                "2026-07-30T00:00:00+00:00",
+            ),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+    messages = [first]
+    if second is not None:
+        messages.append(second)
+    return messages, {
+        "run_id": run_id,
+        "owner_token": "fixture-owner",
+    }
+
+
+def test_create_rejects_legacy_unpaired_messages_before_candidate_or_provider(
+    tmp_path: Path,
+) -> None:
+    app = create_app(projects_root=tmp_path)
+    with TestClient(app) as client:
+        project_id, session, conversation_id, _, _ = _seed(app, client)
+        base = f"/api/projects/{project_id}/director/memory-candidates"
+        legacy = app.state.store.append_director_message(
+            project_id=project_id,
+            session_id=session["session_id"],
+            conversation_id=conversation_id,
+            role="user",
+            text="완료 run에 연결되지 않은 메시지",
+        )
+
+        response = client.post(
+            base,
+            json=_payload(conversation_id, legacy["message_id"]),
+        )
+        listed = client.get(f"{base}?conversation_id={conversation_id}")
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "memory_candidate_source_missing"}
+    assert listed.json() == {"candidates": []}
+
+
+def test_create_rejects_noncompleted_run_sources_before_candidate_or_provider(
+    tmp_path: Path,
+) -> None:
+    app = create_app(projects_root=tmp_path)
+    with TestClient(app) as client:
+        project_id, session, _, _, _ = _seed(app, client)
+        base = f"/api/projects/{project_id}/director/memory-candidates"
+        responses = []
+        listed_responses = []
+        for status in ("pending", "streaming", "blocked", "interrupted"):
+            conversation_id = f"authority-{status}"
+            app.state.store.create_director_conversation(
+                project_id=project_id,
+                session_id=session["session_id"],
+                conversation_id=conversation_id,
+            )
+            invalid_messages, _ = _append_api_run_messages(
+                app,
+                project_id=project_id,
+                session_id=session["session_id"],
+                conversation_id=conversation_id,
+                status=status,
+            )
+            responses.extend(
+                client.post(
+                    base,
+                    json={
+                        **_payload(conversation_id, message["message_id"]),
+                        "client_request_id": (
+                            f"invalid-{status}-{index}"
+                        ),
+                    },
+                )
+                    for index, message in enumerate(invalid_messages)
+                )
+            listed_responses.append(
+                client.get(f"{base}?conversation_id={conversation_id}")
+            )
+
+    assert all(response.status_code == 404 for response in responses)
+    assert all(
+        response.json() == {"detail": "memory_candidate_source_missing"}
+        for response in responses
+    )
+    assert all(
+        listed.json() == {"candidates": []}
+        for listed in listed_responses
+    )
 
 
 def test_create_and_list_are_pending_only_with_zero_external_calls_or_edit_mutation(
@@ -150,13 +364,17 @@ def test_list_filters_current_conversation_before_limit_and_restores_storage(
             session_id=session["session_id"],
             conversation_id="conversation-other",
         )
-        other_message = app.state.store.append_director_message(
+        other_messages, _ = _append_api_run_messages(
+            app,
             project_id=project_id,
             session_id=session["session_id"],
             conversation_id=other_conversation["conversation_id"],
-            role="user",
-            text="다른 대화의 편집 요청입니다.",
+            status="completed",
         )
+        other_message = other_messages[0]
+        assert app.state.store.recover_interrupted_director_hermes_runs(
+            project_id=project_id
+        ) == []
         for index in range(101):
             app.state.store.create_yujin_memory_candidate(
                 project_id=project_id,
@@ -437,9 +655,43 @@ def test_configured_gateway_is_never_called_by_d1_endpoints(
             agent_gateway_service_token="service-token-that-is-at-least-thirty-two",
             agent_gateway_http_client_factory=lambda **_: TrapGateway(),
         )
+    project = app.state.store.bootstrap_project("memory")
+    session = app.state.store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id="timeline",
+        session_payload={"segments": [], "history": []},
+    )
+    conversation = app.state.store.create_director_conversation(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+        conversation_id=f"conversation-{project.project_id}",
+    )
+    run = app.state.store.begin_director_hermes_run(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+        conversation_id=conversation["conversation_id"],
+        client_message_id=f"memory-seed-{project.project_id}",
+        user_text="영상 템포를 조금 빠르게 해줘.",
+        expected_session_revision=session["session_revision"],
+        expected_asset_index_revision=0,
+    )
+    assert app.state.store.complete_director_hermes_run(
+        project_id=project.project_id,
+        run_id=run["run_id"],
+        owner_token=run["owner_token"],
+        status="completed",
+        assistant_text="빠른 컷과 짧은 호흡을 제안합니다.",
+        public_text="",
+        retryable=False,
+    )
+    first, _ = app.state.store.list_director_messages(
+        project_id=project.project_id,
+        conversation_id=conversation["conversation_id"],
+    )
     app.state.hermes_run_service.gateway_client = TrapGateway()
     with TestClient(app) as client:
-        project_id, _, conversation_id, first, _ = _seed(app, client)
+        project_id = project.project_id
+        conversation_id = conversation["conversation_id"]
         base = f"/api/projects/{project_id}/director/memory-candidates"
         created = client.post(
             base,
@@ -519,9 +771,9 @@ def test_store_requires_explicit_request_and_returns_no_provider_reference(
             raise AssertionError("first store must add")
 
     app = create_app(projects_root=tmp_path)
-    app.state.yujin_memory_service._gateway = Gateway()
     with TestClient(app) as client:
         project_id, _, conversation_id, first, _ = _seed(app, client)
+        app.state.yujin_memory_service._gateway = Gateway()
         base = f"/api/projects/{project_id}/director/memory-candidates"
         created = client.post(
             base, json=_payload(conversation_id, first["message_id"])
@@ -600,9 +852,9 @@ def test_delete_uses_candidate_handle_only_and_hides_private_mapping(
             return {"deleted": True}
 
     app = create_app(projects_root=tmp_path)
-    app.state.yujin_memory_service._gateway = Gateway()
     with TestClient(app) as client:
         project_id, _, conversation_id, first, _ = _seed(app, client)
+        app.state.yujin_memory_service._gateway = Gateway()
         base = f"/api/projects/{project_id}/director/memory-candidates"
         created = client.post(
             base, json=_payload(conversation_id, first["message_id"])
@@ -666,9 +918,9 @@ def test_delete_retries_after_local_finalize_failure(
             return {"deleted": True}
 
     app = create_app(projects_root=tmp_path)
-    app.state.yujin_memory_service._gateway = Gateway()
     with TestClient(app, raise_server_exceptions=False) as client:
         project_id, _, conversation_id, first, _ = _seed(app, client)
+        app.state.yujin_memory_service._gateway = Gateway()
         base = f"/api/projects/{project_id}/director/memory-candidates"
         created = client.post(
             base, json=_payload(conversation_id, first["message_id"])

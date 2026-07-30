@@ -811,11 +811,16 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       ) {
         throw new Error("yujin_memory_candidate_identity_mismatch");
       }
+      const listOperationId = memoryListOperationId.current + 1;
+      memoryListOperationId.current = listOperationId;
       const candidates = await api.listYujinMemoryCandidates(
         projectId,
         ownership.conversationId,
       );
-      if (!isCurrentMemoryMutation(ownership)) return;
+      if (
+        !isCurrentMemoryMutation(ownership)
+        || memoryListOperationId.current !== listOperationId
+      ) return;
       if (candidates.some((candidate) => (
         candidate.project_id !== projectId
         || candidate.conversation_id !== ownership.conversationId

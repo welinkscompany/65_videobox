@@ -260,7 +260,12 @@ test("Yujin applies one persisted caption only after explicit selection and pres
 
   await page.getByRole("button", { name: "선택한 추천 적용" }).click();
   await expect.poll(() => captionPatches.length).toBe(1);
-  expect(captionPatches[0]).toEqual({ caption_text: "추천 자막으로 바꿉니다.", expected_revision: 7 });
+  expect(captionPatches[0]).toEqual({
+    caption_text: "추천 자막으로 바꿉니다.",
+    expected_revision: 7,
+    proposal_id: "yujin-caption-text",
+    candidate_id: "candidate-caption-text",
+  });
   await expect(page.getByRole("region", { name: "편집 작업판" })).toHaveAttribute("data-editor-revision", "8");
 
   trackOutputPosts = true;

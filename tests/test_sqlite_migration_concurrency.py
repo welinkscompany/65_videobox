@@ -4,6 +4,8 @@ import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+import pytest
+
 from videobox_storage.local_project_store import LocalProjectStore
 from videobox_storage.sqlite_schema import PROJECT_SCHEMA_STATEMENTS
 
@@ -110,3 +112,78 @@ def test_concurrent_connections_migrate_d2_memory_columns_once(
         "attempt_count",
         "storage_status",
     } <= columns
+
+
+class _DuplicateColumnRaceConnection:
+    def __init__(
+        self,
+        *,
+        column_exists_after_race: bool,
+        error_message: str = "duplicate column name: external_ref",
+    ) -> None:
+        self.column_exists_after_race = column_exists_after_race
+        self.error_message = error_message
+        self.schema_reads = 0
+
+    def execute(self, statement: str):
+        if statement == "PRAGMA table_info(yujin_memory_candidates)":
+            self.schema_reads += 1
+            columns = [
+                "operation_id",
+                "provider_event_ref",
+                "provider_memory_ref",
+                "store_client_request_id",
+                "write_claim_token",
+                "write_claimed_at",
+                "provider_call_started_at",
+                "attempt_count",
+                "storage_status",
+            ]
+            if self.schema_reads > 1 and self.column_exists_after_race:
+                columns.append("external_ref")
+            return type(
+                "Rows",
+                (),
+                {
+                    "fetchall": lambda _self: [
+                        (index, column)
+                        for index, column in enumerate(columns)
+                    ]
+                },
+            )()
+        if statement.endswith("ADD COLUMN external_ref TEXT"):
+            raise sqlite3.OperationalError(self.error_message)
+        raise AssertionError(statement)
+
+
+def test_duplicate_column_race_is_accepted_only_after_schema_recheck() -> None:
+    LocalProjectStore._ensure_yujin_memory_operation_columns(
+        _DuplicateColumnRaceConnection(column_exists_after_race=True)
+    )
+
+    with pytest.raises(
+        sqlite3.OperationalError,
+        match="duplicate column name: external_ref",
+    ):
+        LocalProjectStore._ensure_yujin_memory_operation_columns(
+            _DuplicateColumnRaceConnection(column_exists_after_race=False)
+        )
+
+    with pytest.raises(sqlite3.OperationalError, match="database is locked"):
+        LocalProjectStore._ensure_yujin_memory_operation_columns(
+            _DuplicateColumnRaceConnection(
+                column_exists_after_race=True,
+                error_message="database is locked",
+            )
+        )
+
+    with pytest.raises(
+        sqlite3.OperationalError,
+        match="duplicate column name: external_ref",
+    ):
+        LocalProjectStore._ensure_yujin_memory_operation_columns(
+            _DuplicateColumnRaceConnection(
+                column_exists_after_race=True,
+                error_message="duplicate column name: external_ref ",
+            )
+        )

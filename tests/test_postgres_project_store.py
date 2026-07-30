@@ -99,6 +99,53 @@ def _cleanup_postgres_hermes_project(
         connection.close()
 
 
+def _append_completed_yujin_source_messages(
+    store: LocalProjectStore,
+    *,
+    project_id: str,
+    session: dict,
+    conversation_id: str,
+    user_text: str,
+    assistant_text: str = "확인한 편집 취향입니다.",
+) -> tuple[dict, dict]:
+    before = {
+        message["message_id"]
+        for message in store.list_director_messages(
+            project_id=project_id,
+            conversation_id=conversation_id,
+        )
+    }
+    run = store.begin_director_hermes_run(
+        project_id=project_id,
+        session_id=session["session_id"],
+        conversation_id=conversation_id,
+        client_message_id=f"memory-source-{uuid4().hex}",
+        user_text=user_text,
+        expected_session_revision=session["session_revision"],
+        expected_asset_index_revision=0,
+    )
+    assert run["dispatch"] is True
+    assert store.complete_director_hermes_run(
+        project_id=project_id,
+        run_id=run["run_id"],
+        owner_token=run["owner_token"],
+        status="completed",
+        assistant_text=assistant_text,
+        public_text="",
+        retryable=False,
+    )
+    created = [
+        message
+        for message in store.list_director_messages(
+            project_id=project_id,
+            conversation_id=conversation_id,
+        )
+        if message["message_id"] not in before
+    ]
+    assert len(created) == 2
+    return created[0], created[1]
+
+
 def test_postgres_yujin_memory_candidate_workflow_is_atomic_and_serialized(
     tmp_path: Path,
     postgres_url: str,
@@ -123,19 +170,13 @@ def test_postgres_yujin_memory_candidate_workflow_is_atomic_and_serialized(
             session_id=session["session_id"],
             conversation_id=conversation_id,
         )
-        first = store.append_director_message(
+        first, second = _append_completed_yujin_source_messages(
+            store,
             project_id=project_id,
-            session_id=session["session_id"],
+            session=session,
             conversation_id=conversation_id,
-            role="user",
-            text="영상 호흡을 조금 빠르게 해줘.",
-        )
-        second = store.append_director_message(
-            project_id=project_id,
-            session_id=session["session_id"],
-            conversation_id=conversation_id,
-            role="assistant",
-            text="짧은 컷 중심의 편집을 제안합니다.",
+            user_text="영상 호흡을 조금 빠르게 해줘.",
+            assistant_text="짧은 컷 중심의 편집을 제안합니다.",
         )
         request = {
             "project_id": project_id,
@@ -189,6 +230,174 @@ def test_postgres_yujin_memory_candidate_workflow_is_atomic_and_serialized(
         _cleanup_postgres_hermes_project(store, project_id)
 
 
+def test_postgres_yujin_memory_sources_require_completed_run_authority(
+    tmp_path: Path,
+    postgres_url: str,
+) -> None:
+    store = PostgresProjectStore(
+        tmp_path / "postgres-yujin-memory-source-authority",
+        database_url=postgres_url,
+    )
+    project = store.bootstrap_project(
+        f"PostgreSQL Yujin source authority {uuid4().hex}"
+    )
+    project_id = project.project_id
+    try:
+        session = store.save_editing_session(
+            project_id=project_id,
+            timeline_id=f"timeline-{uuid4().hex}",
+            session_payload={"segments": [], "history": []},
+        )
+        conversation_id = f"conversation-{uuid4().hex}"
+        store.create_director_conversation(
+            project_id=project_id,
+            session_id=session["session_id"],
+            conversation_id=conversation_id,
+        )
+        completed_user, completed_assistant = (
+            _append_completed_yujin_source_messages(
+                store,
+                project_id=project_id,
+                session=session,
+                conversation_id=conversation_id,
+                user_text="빠른 컷 편집을 기억해 주세요.",
+            )
+        )
+        completed_candidates = [
+            store.create_yujin_memory_candidate(
+                project_id=project_id,
+                conversation_id=conversation_id,
+                client_request_id=f"completed-{role}",
+                source_message_ids=(message["message_id"],),
+                memory_scope="creator",
+                category="pacing",
+                proposed_text=f"완료된 {role} 근거만 기억합니다.",
+            )
+            for role, message in (
+                ("user", completed_user),
+                ("assistant", completed_assistant),
+            )
+        ]
+
+        for status in ("pending", "streaming", "blocked", "interrupted"):
+            before = {
+                message["message_id"]
+                for message in store.list_director_messages(
+                    project_id=project_id,
+                    conversation_id=conversation_id,
+                )
+            }
+            run = store.begin_director_hermes_run(
+                project_id=project_id,
+                session_id=session["session_id"],
+                conversation_id=conversation_id,
+                client_message_id=f"invalid-{status}-{uuid4().hex}",
+                user_text=f"{status} source",
+                expected_session_revision=session["session_revision"],
+                expected_asset_index_revision=0,
+            )
+            if status == "streaming":
+                assert store.append_director_hermes_draft(
+                    project_id=project_id,
+                    run_id=run["run_id"],
+                    owner_token=run["owner_token"],
+                    assistant_draft_text="진행 중",
+                )
+            elif status in {"blocked", "interrupted"}:
+                assert store.complete_director_hermes_run(
+                    project_id=project_id,
+                    run_id=run["run_id"],
+                    owner_token=run["owner_token"],
+                    status=status,
+                    assistant_text=f"{status} assistant",
+                    public_text="",
+                    retryable=True,
+                )
+            invalid_messages = [
+                message
+                for message in store.list_director_messages(
+                    project_id=project_id,
+                    conversation_id=conversation_id,
+                )
+                if message["message_id"] not in before
+            ]
+            for index, message in enumerate(invalid_messages):
+                with pytest.raises(
+                    KeyError,
+                    match="yujin_memory_source_missing",
+                ):
+                    store.create_yujin_memory_candidate(
+                        project_id=project_id,
+                        conversation_id=conversation_id,
+                        client_request_id=(
+                            f"invalid-{status}-source-{index}"
+                        ),
+                        source_message_ids=(message["message_id"],),
+                        memory_scope="creator",
+                        category="pacing",
+                        proposed_text="검증되지 않은 근거입니다.",
+                    )
+            if status in {"pending", "streaming"}:
+                assert store.complete_director_hermes_run(
+                    project_id=project_id,
+                    run_id=run["run_id"],
+                    owner_token=run["owner_token"],
+                    status="interrupted",
+                    assistant_text=(
+                        "진행 중 테스트 run 정리"
+                        if status == "streaming"
+                        else "테스트 run 정리"
+                    ),
+                    public_text=(
+                        "진행 중" if status == "streaming" else ""
+                    ),
+                    retryable=True,
+                )
+        legacy = store.append_director_message(
+            project_id=project_id,
+            session_id=session["session_id"],
+            conversation_id=conversation_id,
+            role="user",
+            text="run에 연결되지 않은 legacy source",
+        )
+        with pytest.raises(
+            KeyError,
+            match="yujin_memory_source_missing",
+        ):
+            store.create_yujin_memory_candidate(
+                project_id=project_id,
+                conversation_id=conversation_id,
+                client_request_id="invalid-legacy-source",
+                source_message_ids=(legacy["message_id"],),
+                memory_scope="creator",
+                category="pacing",
+                proposed_text="검증되지 않은 근거입니다.",
+            )
+
+        connection = store._connection(project_id)
+        try:
+            assert connection.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM yujin_memory_candidates
+                WHERE project_id = ?
+                """,
+                (project_id,),
+            ).fetchone()["count"] == len(completed_candidates)
+            assert connection.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM yujin_memory_candidate_audit
+                WHERE project_id = ?
+                """,
+                (project_id,),
+            ).fetchone()["count"] == len(completed_candidates)
+        finally:
+            connection.close()
+    finally:
+        _cleanup_postgres_hermes_project(store, project_id)
+
+
 def test_postgres_yujin_memory_store_state_and_audit_match_local_contract(
     tmp_path: Path,
     postgres_url: str,
@@ -213,12 +422,12 @@ def test_postgres_yujin_memory_store_state_and_audit_match_local_contract(
             session_id=session["session_id"],
             conversation_id=conversation_id,
         )
-        message = store.append_director_message(
+        message, _ = _append_completed_yujin_source_messages(
+            store,
             project_id=project_id,
-            session_id=session["session_id"],
+            session=session,
             conversation_id=conversation_id,
-            role="user",
-            text="영상 초반은 짧은 장면을 이어서 템포를 올려 주세요.",
+            user_text="영상 초반은 짧은 장면을 이어서 템포를 올려 주세요.",
         )
         candidate = store.create_yujin_memory_candidate(
             project_id=project_id,
@@ -329,19 +538,19 @@ def test_postgres_yujin_memory_list_filters_conversation_before_limit(
                 session_id=session["session_id"],
                 conversation_id=conversation_id,
             )
-        current_message = store.append_director_message(
+        current_message, _ = _append_completed_yujin_source_messages(
+            store,
             project_id=project_id,
-            session_id=session["session_id"],
+            session=session,
             conversation_id=current_conversation_id,
-            role="user",
-            text="빠른 템포를 기억해 주세요.",
+            user_text="빠른 템포를 기억해 주세요.",
         )
-        other_message = store.append_director_message(
+        other_message, _ = _append_completed_yujin_source_messages(
+            store,
             project_id=project_id,
-            session_id=session["session_id"],
+            session=session,
             conversation_id=other_conversation_id,
-            role="user",
-            text="다른 대화입니다.",
+            user_text="다른 대화입니다.",
         )
         current = store.create_yujin_memory_candidate(
             project_id=project_id,
@@ -430,12 +639,12 @@ def _seed_yujin_memory_retrieval_parity(
             session_id=session["session_id"],
             conversation_id=conversation_id,
         )
-        message = store.append_director_message(
+        message, _ = _append_completed_yujin_source_messages(
+            store,
             project_id=project_id,
-            session_id=session["session_id"],
+            session=session,
             conversation_id=conversation_id,
-            role="user",
-            text="현재 대화의 편집 취향입니다.",
+            user_text="현재 대화의 편집 취향입니다.",
         )
         sources[conversation_id] = message["message_id"]
 
@@ -567,12 +776,12 @@ def _seed_yujin_memory_retrieval_parity(
         session_id=unrelated_session["session_id"],
         conversation_id=unrelated_conversation,
     )
-    unrelated_message = store.append_director_message(
+    unrelated_message, _ = _append_completed_yujin_source_messages(
+        store,
         project_id=unrelated.project_id,
-        session_id=unrelated_session["session_id"],
+        session=unrelated_session,
         conversation_id=unrelated_conversation,
-        role="user",
-        text="다른 프로젝트의 취향입니다.",
+        user_text="다른 프로젝트의 취향입니다.",
     )
     unrelated_candidate = store.create_yujin_memory_candidate(
         project_id=unrelated.project_id,
@@ -717,12 +926,12 @@ def test_postgres_expired_yujin_memory_claims_match_local_retry_paths(
             session_id=session["session_id"],
             conversation_id=conversation_id,
         )
-        message = store.append_director_message(
+        message, _ = _append_completed_yujin_source_messages(
+            store,
             project_id=project_id,
-            session_id=session["session_id"],
+            session=session,
             conversation_id=conversation_id,
-            role="user",
-            text="확인한 기억만 저장해 주세요.",
+            user_text="확인한 기억만 저장해 주세요.",
         )
 
         def create_and_claim(

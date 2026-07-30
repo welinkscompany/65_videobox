@@ -13,12 +13,17 @@
 Parent: `docs/superpowers/plans/2026-07-26-videobox-hermes-yujin-master-plan.md`
 Requires: Phase C task C4 complete.
 
-Child progress: **4/5 tasks (80.0%), remaining 20.0%**. These five tasks are D1, D2, D3, D4, and F1.
+Child progress: **5/5 tasks (100.0%), remaining 0.0%**. These five tasks are D1, D2, D3, D4, and F1.
 
 > 2026-07-30 D4 closeout: the explicit RightDock producer and bounded
 > approved+stored retrieval passed independent spec/quality/gap/reverse review
 > with `Critical 0 / Important 0 / Minor 0`. The live Mem0 canary remains
 > separately unrun because no live environment or authority was supplied.
+>
+> 2026-07-30 F1 closeout: completed-run source authority, post-create list
+> supersession, exact duplicate-column migration recovery, and deterministic
+> API fixtures passed independent review with `Critical 0 / Important 0 /
+> Minor 0`. All mandatory non-live final gates passed.
 
 ## Memory policy
 
@@ -657,7 +662,13 @@ Closeout evidence (2026-07-30):
 
 ## F1 — Final integration audit and closeout
 
-- [ ] **F1** Run independent spec/quality/gap/reverse reviews, required suites, build, provenance, SSOT/handoff, commit, and push.
+- [x] **F1** Run independent spec/quality/gap/reverse reviews, required suites, build, provenance, SSOT/handoff, commit, and push.
+
+Current F1 status: **complete**. The final full Python regression passed
+`2640 passed, 47 skipped`; full frontend passed `52 files / 725 tests`;
+automated editor E2E passed `35/35`; build, provenance, UI-system, runtime,
+profile, plan, network, SBOM, PostgreSQL parity, and independent reviews
+passed. Live provider and human acceptance remain separately unrun.
 
 **Files:**
 
@@ -687,7 +698,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-editor-ui-sou
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-editor-ui-system.ps1
 npm --prefix apps/web test -- --run src/external-runtime-assets.test.ts src/test/network-guard.test.ts src/ui-system.test.tsx
 Push-Location apps/web
-npx --yes @cyclonedx/cyclonedx-npm@4.1.1 --package-lock-only --omit optional --output-file "$env:TEMP\videobox-hermes-yujin-sbom.json"
+npx --yes @cyclonedx/cyclonedx-npm@4.1.1 --package-lock-only --omit optional --ignore-npm-errors --validate --output-file "$env:TEMP\videobox-hermes-yujin-sbom.json"
 Pop-Location
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-hermes-yujin-runtime.ps1 -StaticOnly
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-hermes-yujin-profile.ps1 -StaticOnly

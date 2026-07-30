@@ -15,6 +15,11 @@ Requires: Phase A task A4 complete.
 
 Child progress: **5/5 tasks (100.0%), remaining 0.0%**.
 
+> 2026-07-30 final integration closeout: master F1 passed all mandatory
+> non-live regression, frontend/E2E/build, provenance, runtime/profile,
+> topology, SBOM, and independent review gates. Explicit Apply, current
+> revision, manual fallback, and one-player ownership remain intact.
+
 ## Supported-control rule
 
 Before each task, inspect the actual `EditorCommandPort` and backend DTO. The exposed Inspector control matrix must be generated from real supported operations, not from OpenCut UI concepts or model suggestions.

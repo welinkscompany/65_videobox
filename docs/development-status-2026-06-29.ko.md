@@ -1,6 +1,17 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 315. 2026-07-30 Hermes Yujin D4 and Phase D closeout`을 우선 적용한다. Task 22 기술 closeout 근거는 `## 300`, Phase B 근거는 `## 307`, Phase C 근거는 `## 308`–`## 311`, D1–D3 근거는 `## 312`–`## 314`를 유지하며, 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 316. 2026-07-30 Hermes Yujin F1 final technical closeout`을 우선 적용한다. D4 closeout 근거는 `## 315`, Task 22 기술 closeout 근거는 `## 300`, Phase B 근거는 `## 307`, Phase C 근거는 `## 308`–`## 311`, D1–D3 근거는 `## 312`–`## 314`를 유지하며, 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+
+## 316. 2026-07-30 Hermes Yujin F1 final technical closeout
+
+- `[x] F1·Hermes Yujin 기술 closeout 완료`: F1 통합 감사에서 확인한 세 경계를 TDD로 좁게 보완했다. public memory candidate source는 같은 project+conversation의 `director_hermes_runs`에서 `status='completed'`인 run의 exact user/assistant message ID만 허용한다. pending/streaming/blocked/interrupted와 run에 연결되지 않은 legacy message는 candidate·audit 생성 전에 고정 missing error로 거부한다.
+- `Route race`: post-create candidate 목록 조회가 새 `memoryListOperationId`를 소유한다. 더 오래된 initial list가 역순으로 끝나도 새 candidate/action, draft, conversation scroll을 지우지 않으며 route epoch·conversation mutation fence를 계속 함께 적용한다.
+- `SQLite migration race`: D2 operation column `ALTER TABLE` 경쟁에서는 exact `duplicate column name: <현재 column>`만 잡고 즉시 schema를 다시 읽어 실제 column 존재가 확인될 때만 성공으로 수렴한다. 다른 OperationalError와 schema 재확인 실패는 그대로 전파한다.
+- `fixture 안정화`: TestClient의 50ms Hermes orphan recovery가 API test의 synthetic `begin -> complete` 중간 상태를 interrupt할 수 있었으므로, completed/noncompleted authority fixture를 원하는 durable row로 직접 seed해 제품 코드는 바꾸지 않았다. current-conversation-before-limit aggregate는 즉시 recovery 결과가 빈 목록인지도 확인한다.
+- `현재 검증`: F1 focused backend **920 passed, 1 skipped, warning 1**, frontend API/RightDock/panel/Route **4 files / 183 passed**, memory store/service/retrieval/API aggregate **81 passed**, API 전체 **14 passed를 5/5 반복**, current-conversation-before-limit test **20/20 반복**, memory store/API **52 passed**, EditorWorkbenchRoute 전체 **117 passed**, SQLite migration concurrency 전체 **3 passed**, exact D2 concurrency test **10회 연속 통과**, disposable PostgreSQL 16 전체 Yujin-memory parity **6 passed**다. 전용 container `videobox-f1-source-authority-20260730`은 실행 뒤 삭제와 부재를 확인했다. plan-state verifier와 `git diff --check`도 통과했다. warning 1건은 기존 Starlette multipart PendingDeprecationWarning이다.
+- `최종 검증`: 독립 spec/quality/gap/reverse 재검토 **C0/I0/M0 PASS**, F1 focused backend **920 passed, 1 skipped**, 전체 Python **2640 passed, 47 skipped**, frontend focused **4 files / 183 passed**, 전체 frontend **52 files / 725 passed**, 자동 Chromium editor E2E **35/35**, production build, provenance/UI-system, external-runtime/network/UI **3 files / 8 passed**, runtime/profile/plan static verifier, non-live memory smoke `network_calls=0 provider_calls=0`, disposable PostgreSQL 16 Yujin-memory **6 passed**, CycloneDX 1.6 SBOM **341 components / 348 dependencies**, `git diff --check`가 통과했다. PostgreSQL 전용 container는 삭제와 부재를 확인했다.
+- `비실패·미실행`: 기존 Starlette multipart warning 1건, React act/jsdom navigation/intentional ErrorBoundary stderr, E2E color 경고, 500kB bundle warning, SBOM의 documented optional-WASM npm tree 출력은 비실패다. 실제 Hermes/Mem0 provider live canary, 브라우저 사람 E2E, 사용자 원본 미디어 재생·청취, CapCut Desktop 사람 검증, Task 9 사람/환경 acceptance는 실행하지 않았고 통과로 주장하지 않는다.
+- `진행률·다음`: F1 **1/1**, Mem0 child **5/5 (100.0%)**, Hermes Yujin initiative **20/20 (100.0%)**, 잔여 **0.0%**다. 기존 VideoBox 공식 누적은 **9/22 (40.9%)**, 잔여 **59.1%**로 유지한다. 다음 작업은 모바일 복귀 후 owner dogfood와 Task 9 사람/환경 acceptance다.
 
 ## 315. 2026-07-30 Hermes Yujin D4 and Phase D closeout
 

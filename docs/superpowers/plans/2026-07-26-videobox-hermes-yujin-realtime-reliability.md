@@ -15,6 +15,11 @@ Requires: Phase B task B5 complete.
 
 Child progress: **4/4 tasks (100.0%), remaining 0.0%**.
 
+> 2026-07-30 final integration closeout: master F1 passed all mandatory
+> non-live regression, PostgreSQL parity, runtime/profile/topology, frontend
+> E2E/build, and independent review gates. Live service-stop/provider drills
+> remain separately unrun.
+
 ## C1 — Persist run and event cursors
 
 - [x] **C1** Persist run/event cursors and restore final or interrupted conversation state.

@@ -4084,19 +4084,52 @@ class LocalProjectStore:
             ).fetchone()
             if conversation is None:
                 raise KeyError("yujin_memory_source_missing")
-            placeholders = ",".join("?" for _ in source_message_ids)
-            rows = connection.execute(
-                "SELECT message_id, text, message_order FROM director_messages "
-                "WHERE project_id = ? AND conversation_id = ? "
-                f"AND message_id IN ({placeholders}) "
-                "ORDER BY message_order, message_id",
-                (project_id, conversation_id, *source_message_ids),
-            ).fetchall()
-            if len(rows) != len(source_message_ids):
-                raise KeyError("yujin_memory_source_missing")
+            rows = self._completed_yujin_memory_source_rows(
+                connection,
+                project_id=project_id,
+                conversation_id=conversation_id,
+                source_message_ids=source_message_ids,
+            )
             return tuple(str(row["text"]) for row in rows)
         finally:
             connection.close()
+
+    @staticmethod
+    def _completed_yujin_memory_source_rows(
+        connection: Any,
+        *,
+        project_id: str,
+        conversation_id: str,
+        source_message_ids: tuple[str, ...],
+    ) -> list[Any]:
+        placeholders = ",".join("?" for _ in source_message_ids)
+        rows = connection.execute(
+            """
+            SELECT message.message_id, message.text, message.message_order
+            FROM director_messages AS message
+            WHERE message.project_id = ?
+              AND message.conversation_id = ?
+              AND message.message_id IN ("""
+            + placeholders
+            + """)
+              AND EXISTS (
+                SELECT 1
+                FROM director_hermes_runs AS run
+                WHERE run.project_id = message.project_id
+                  AND run.conversation_id = message.conversation_id
+                  AND run.status = 'completed'
+                  AND (
+                    run.user_message_id = message.message_id
+                    OR run.assistant_message_id = message.message_id
+                  )
+              )
+            ORDER BY message.message_order, message.message_id
+            """,
+            (project_id, conversation_id, *source_message_ids),
+        ).fetchall()
+        if len(rows) != len(source_message_ids):
+            raise KeyError("yujin_memory_source_missing")
+        return rows
 
     def create_yujin_memory_candidate(
         self,
@@ -4137,16 +4170,12 @@ class LocalProjectStore:
             ).fetchone()
             if conversation is None:
                 raise KeyError("yujin_memory_source_missing")
-            placeholders = ",".join("?" for _ in source_message_ids)
-            source_rows = connection.execute(
-                "SELECT message_id, text, message_order FROM director_messages "
-                "WHERE project_id = ? AND conversation_id = ? "
-                f"AND message_id IN ({placeholders}) "
-                "ORDER BY message_order, message_id",
-                (project_id, conversation_id, *source_message_ids),
-            ).fetchall()
-            if len(source_rows) != len(source_message_ids):
-                raise KeyError("yujin_memory_source_missing")
+            source_rows = self._completed_yujin_memory_source_rows(
+                connection,
+                project_id=project_id,
+                conversation_id=conversation_id,
+                source_message_ids=source_message_ids,
+            )
             canonical_source_message_ids = tuple(
                 str(row["message_id"]) for row in source_rows
             )
@@ -10015,10 +10044,26 @@ class LocalProjectStore:
         )
         for column, declaration in additions:
             if column not in columns:
-                connection.execute(
-                    f"ALTER TABLE yujin_memory_candidates "
-                    f"ADD COLUMN {column} {declaration}"
-                )
+                try:
+                    connection.execute(
+                        f"ALTER TABLE yujin_memory_candidates "
+                        f"ADD COLUMN {column} {declaration}"
+                    )
+                except sqlite3.OperationalError as error:
+                    if (
+                        str(error).casefold()
+                        != f"duplicate column name: {column}".casefold()
+                    ):
+                        raise
+                    current_columns = {
+                        str(row[1])
+                        for row in connection.execute(
+                            "PRAGMA table_info(yujin_memory_candidates)"
+                        ).fetchall()
+                    }
+                    if column not in current_columns:
+                        raise
+                columns.add(column)
 
     def _ensure_hermes_capability_lifecycle_schema(
         self,

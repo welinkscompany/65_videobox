@@ -24,13 +24,28 @@ def _approved_candidate(store: LocalProjectStore) -> tuple[str, str]:
         session_id=session["session_id"],
         conversation_id="conversation-memory",
     )
-    message = store.append_director_message(
+    run = store.begin_director_hermes_run(
         project_id=project.project_id,
         session_id=session["session_id"],
         conversation_id=conversation["conversation_id"],
-        role="user",
-        text="영상 템포를 조금 빠르게 해줘.",
+        client_message_id="memory-service-source",
+        user_text="영상 템포를 조금 빠르게 해줘.",
+        expected_session_revision=session["session_revision"],
+        expected_asset_index_revision=0,
     )
+    assert store.complete_director_hermes_run(
+        project_id=project.project_id,
+        run_id=run["run_id"],
+        owner_token=run["owner_token"],
+        status="completed",
+        assistant_text="빠른 컷 편집 취향을 확인했습니다.",
+        public_text="",
+        retryable=False,
+    )
+    message = store.list_director_messages(
+        project_id=project.project_id,
+        conversation_id=conversation["conversation_id"],
+    )[0]
     candidate = store.create_yujin_memory_candidate(
         project_id=project.project_id,
         conversation_id=conversation["conversation_id"],

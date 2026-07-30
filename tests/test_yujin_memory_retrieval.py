@@ -557,13 +557,28 @@ def test_local_store_projects_only_current_approved_stored_private_rows(
         session_id=session["session_id"],
         conversation_id="conversation-a",
     )
-    source = store.append_director_message(
+    run = store.begin_director_hermes_run(
         project_id=project.project_id,
         session_id=session["session_id"],
         conversation_id=conversation["conversation_id"],
-        role="user",
-        text="빠른 편집을 원해요.",
+        client_message_id="retrieval-source",
+        user_text="빠른 편집을 원해요.",
+        expected_session_revision=session["session_revision"],
+        expected_asset_index_revision=0,
     )
+    assert store.complete_director_hermes_run(
+        project_id=project.project_id,
+        run_id=run["run_id"],
+        owner_token=run["owner_token"],
+        status="completed",
+        assistant_text="빠른 편집 취향을 확인했습니다.",
+        public_text="",
+        retryable=False,
+    )
+    source = store.list_director_messages(
+        project_id=project.project_id,
+        conversation_id=conversation["conversation_id"],
+    )[0]
     candidate = store.create_yujin_memory_candidate(
         project_id=project.project_id,
         conversation_id=conversation["conversation_id"],

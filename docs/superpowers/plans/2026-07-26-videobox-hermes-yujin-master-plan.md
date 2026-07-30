@@ -69,7 +69,7 @@ Status symbols:
 
 Only `[x]` counts as complete. Reopen `[x]` to `[~]` if later evidence finds a regression. The child task and this mirror must be updated in the same closeout commit.
 
-Current initiative progress: **19/20 (95.0%), remaining 5.0%**.
+Current initiative progress: **20/20 (100.0%), remaining 0.0%**.
 
 The existing VideoBox official cumulative status remains separately fixed at **9/22 (40.9%), remaining 59.1%** until Task 9 human/environment acceptance. Do not combine that denominator with this initiative.
 
@@ -109,9 +109,9 @@ The existing VideoBox official cumulative status remains separately fixed at **9
 - [x] **D3** Add approve/list/delete UI and ensure pending/rejected candidates are never injected.
 - [x] **D4** Add bounded retrieval injection, unavailable fallback, live canary, and Phase D closeout.
 
-### Final integration closeout (0/1)
+### Final integration closeout (1/1)
 
-- [ ] **F1** Run independent spec/quality/gap/reverse reviews, required suites, build, provenance, SSOT/handoff, commit, and push.
+- [x] **F1** Run independent spec/quality/gap/reverse reviews, required suites, build, provenance, SSOT/handoff, commit, and push.
 
 ## 5. Execution order and gates
 
