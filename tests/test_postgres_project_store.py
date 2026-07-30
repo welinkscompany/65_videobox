@@ -7,7 +7,7 @@ import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from datetime import UTC, datetime
-from threading import Barrier, Event
+from threading import Barrier, Event, get_ident
 from unittest.mock import patch
 from hashlib import sha256
 from pathlib import Path
@@ -143,6 +143,161 @@ def test_publish_terminal_current_truth_lock_sql_is_deterministic_without_postgr
     ]
 
 
+def test_read_context_current_truth_lock_sql_is_deterministic_without_postgres() -> None:
+    calls: list[tuple[str, tuple[str, ...] | None]] = []
+    rows = iter(
+        (
+            {"session_id": "session-a", "session_revision": 3},
+            {"revision": 7},
+        )
+    )
+
+    class RecordingPostgresConnection:
+        def execute(self, statement: str, parameters=None):
+            calls.append(
+                (
+                    " ".join(translate_sql(statement).split()),
+                    parameters,
+                )
+            )
+            if statement.lstrip().startswith("INSERT"):
+                return SimpleNamespace()
+            return SimpleNamespace(fetchone=lambda: next(rows))
+
+    current = LocalProjectStore._read_current_hermes_scope_with_lock(
+        connection=RecordingPostgresConnection(),
+        project_id="project-a",
+        session_id="session-a",
+    )
+
+    assert current == (True, 3, 7)
+    assert calls == [
+        (
+            "SELECT session_id, session_revision FROM editing_sessions "
+            "WHERE project_id = %s AND session_id = %s FOR UPDATE",
+            ("project-a", "session-a"),
+        ),
+        (
+            "INSERT INTO director_asset_index_revisions "
+            "(project_id, revision) VALUES (%s, 0) "
+            "ON CONFLICT (project_id) DO NOTHING",
+            ("project-a",),
+        ),
+        (
+            "SELECT revision FROM director_asset_index_revisions "
+            "WHERE project_id = %s FOR UPDATE",
+            ("project-a",),
+        ),
+    ]
+
+
+def test_postgres_read_context_full_consume_locks_truth_before_ledger(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    instant = datetime(2026, 7, 30, 12, 0, tzinfo=UTC)
+    statements: list[str] = []
+    ledger = {
+        "jti": "cap-read",
+        "project_id": "project-a",
+        "conversation_id": "conversation-a",
+        "run_id": "run-a",
+        "session_id": "session-a",
+        "session_revision": 3,
+        "asset_index_revision": 7,
+        "action": "read_context",
+        "state": "issued",
+        "expires_at": int(instant.timestamp()) + 300,
+    }
+
+    class RecordingPostgresConnection:
+        in_transaction = False
+
+        def execute(self, statement: str, parameters=None):
+            normalized = " ".join(translate_sql(statement).split())
+            statements.append(normalized)
+            if normalized == "BEGIN":
+                self.in_transaction = True
+                return SimpleNamespace()
+            if normalized.startswith(
+                "SELECT session_id, session_revision FROM editing_sessions"
+            ):
+                return SimpleNamespace(
+                    fetchone=lambda: {
+                        "session_id": "session-a",
+                        "session_revision": 3,
+                    }
+                )
+            if normalized.startswith(
+                "SELECT revision FROM director_asset_index_revisions"
+            ):
+                return SimpleNamespace(fetchone=lambda: {"revision": 7})
+            if normalized.startswith(
+                "SELECT * FROM hermes_capability_ledger"
+            ):
+                return SimpleNamespace(fetchone=lambda: ledger)
+            return SimpleNamespace(rowcount=1)
+
+        def commit(self) -> None:
+            self.in_transaction = False
+
+        def rollback(self) -> None:
+            self.in_transaction = False
+
+        def close(self) -> None:
+            return None
+
+    connection = RecordingPostgresConnection()
+    store = LocalProjectStore(
+        tmp_path / "projects",
+        now=lambda: instant,
+    )
+    monkeypatch.setattr(store, "_connection", lambda _project_id: connection)
+    monkeypatch.setattr(
+        store,
+        "_purge_expired_hermes_capabilities",
+        lambda **_: None,
+    )
+
+    result = store.consume_registered_hermes_capability(
+        project_id="project-a",
+        capability_id="cap-read",
+        conversation_id="conversation-a",
+        run_id="run-a",
+        session_id="session-a",
+        session_revision=3,
+        asset_index_revision=7,
+        action="read_context",
+    )
+
+    assert result == "accepted"
+    truth_session = next(
+        index
+        for index, statement in enumerate(statements)
+        if statement.startswith(
+            "SELECT session_id, session_revision FROM editing_sessions"
+        )
+    )
+    truth_asset = next(
+        index
+        for index, statement in enumerate(statements)
+        if statement.startswith(
+            "SELECT revision FROM director_asset_index_revisions"
+        )
+    )
+    ledger_lock = next(
+        index
+        for index, statement in enumerate(statements)
+        if statement.startswith("SELECT * FROM hermes_capability_ledger")
+    )
+    ledger_update = next(
+        index
+        for index, statement in enumerate(statements)
+        if statement.startswith("UPDATE hermes_capability_ledger")
+    )
+    assert truth_session < truth_asset < ledger_lock < ledger_update
+
+
 def test_postgres_store_bootstraps_and_lists_a_project(tmp_path: Path, postgres_url: str) -> None:
     store = PostgresProjectStore(tmp_path, database_url=postgres_url)
 
@@ -195,6 +350,11 @@ def test_postgres_hermes_capability_lifecycle_is_scoped_atomic_and_audited(
         now=lambda: instant,
     )
     project = store.bootstrap_project(f"Hermes C3 lifecycle {uuid4().hex}")
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id="timeline-1",
+        session_payload={"segments": [], "history": []},
+    )
     prefix = uuid4().hex
     read_id = f"{prefix}-read"
     publish_id = f"{prefix}-publish"
@@ -204,9 +364,9 @@ def test_postgres_hermes_capability_lifecycle_is_scoped_atomic_and_audited(
             project_id=project.project_id,
             conversation_id="conversation-1",
             run_id="run-1",
-            session_id="session-1",
-            session_revision=3,
-            asset_index_revision=7,
+            session_id=session["session_id"],
+            session_revision=session["session_revision"],
+            asset_index_revision=0,
             capabilities=(
                 {
                     "capability_id": read_id,
@@ -231,9 +391,9 @@ def test_postgres_hermes_capability_lifecycle_is_scoped_atomic_and_audited(
             capability_id=read_id,
             conversation_id="conversation-1",
             run_id="run-1",
-            session_id="session-1",
-            session_revision=3,
-            asset_index_revision=7,
+            session_id=session["session_id"],
+            session_revision=session["session_revision"],
+            asset_index_revision=0,
             action="read_context",
         ) == "accepted"
         assert store.consume_registered_hermes_capability(
@@ -241,9 +401,9 @@ def test_postgres_hermes_capability_lifecycle_is_scoped_atomic_and_audited(
             capability_id=read_id,
             conversation_id="conversation-1",
             run_id="run-1",
-            session_id="session-1",
-            session_revision=3,
-            asset_index_revision=7,
+            session_id=session["session_id"],
+            session_revision=session["session_revision"],
+            asset_index_revision=0,
             action="read_context",
         ) == "hermes_capability_replayed"
         assert store.revoke_issued_hermes_capabilities(
@@ -794,6 +954,238 @@ def test_postgres_hermes_capability_expired_issued_consume_is_denied_and_audited
             "reason": "hermes_capability_expired",
         }
     finally:
+        _cleanup_postgres_hermes_project(store, project.project_id)
+
+
+@pytest.mark.parametrize(
+    "changed_truth",
+    ("session_revision", "asset_index_revision"),
+)
+def test_postgres_read_context_consume_rechecks_current_truth_before_consume(
+    tmp_path: Path,
+    postgres_url: str,
+    changed_truth: str,
+) -> None:
+    instant = datetime(2026, 7, 30, 12, 0, tzinfo=UTC)
+    store = PostgresProjectStore(
+        tmp_path,
+        database_url=postgres_url,
+        now=lambda: instant,
+    )
+    project = store.bootstrap_project(
+        f"Hermes read consume race {changed_truth} {uuid4().hex}"
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id="timeline-1",
+        session_payload={"segments": [], "history": []},
+    )
+    prefix = uuid4().hex
+    try:
+        store.register_hermes_run_capabilities(
+            project_id=project.project_id,
+            conversation_id="conversation-1",
+            run_id="run-1",
+            session_id=session["session_id"],
+            session_revision=session["session_revision"],
+            asset_index_revision=0,
+            capabilities=(
+                {
+                    "capability_id": f"{prefix}-read",
+                    "action": "read_context",
+                    "expires_at": int(instant.timestamp()) + 300,
+                },
+                {
+                    "capability_id": f"{prefix}-publish",
+                    "action": "publish_proposal",
+                    "expires_at": int(instant.timestamp()) + 300,
+                },
+            ),
+        )
+        if changed_truth == "session_revision":
+            store.update_editing_session(
+                project_id=project.project_id,
+                session_id=session["session_id"],
+                session_payload={"segments": [], "history": []},
+                expected_revision=session["session_revision"],
+            )
+        else:
+            assert store.bump_asset_index_revision(project.project_id) == 1
+
+        result = store.consume_registered_hermes_capability(
+            project_id=project.project_id,
+            capability_id=f"{prefix}-read",
+            conversation_id="conversation-1",
+            run_id="run-1",
+            session_id=session["session_id"],
+            session_revision=session["session_revision"],
+            asset_index_revision=0,
+            action="read_context",
+        )
+
+        assert result == "hermes_capability_scope_forbidden"
+        connection = store._connection(project.project_id)
+        try:
+            state = connection.execute(
+                "SELECT state FROM hermes_capability_ledger "
+                "WHERE project_id = ? AND jti = ?",
+                (project.project_id, f"{prefix}-read"),
+            ).fetchone()["state"]
+            denial = connection.execute(
+                "SELECT outcome, reason FROM hermes_capability_audit "
+                "WHERE project_id = ? AND capability_id = ? "
+                "AND outcome = 'denied' "
+                "AND reason = 'hermes_capability_scope_forbidden'",
+                (project.project_id, f"{prefix}-read"),
+            ).fetchone()
+        finally:
+            connection.close()
+        assert state == "issued"
+        assert dict(denial) == {
+            "outcome": "denied",
+            "reason": "hermes_capability_scope_forbidden",
+        }
+    finally:
+        _cleanup_postgres_hermes_project(store, project.project_id)
+
+
+def test_postgres_current_truth_then_revoke_and_read_consume_settle_without_lock_inversion(
+    tmp_path: Path,
+    postgres_url: str,
+) -> None:
+    instant = datetime(2026, 7, 30, 12, 0, tzinfo=UTC)
+    store = PostgresProjectStore(
+        tmp_path,
+        database_url=postgres_url,
+        now=lambda: instant,
+    )
+    project = store.bootstrap_project(
+        f"Hermes read-revoke lock order {uuid4().hex}"
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=f"timeline-{uuid4().hex}",
+        session_payload={"segments": [], "history": []},
+    )
+    conversation_id = f"conversation-{uuid4().hex}"
+    run_id = f"run-{uuid4().hex}"
+    prefix = uuid4().hex
+    read_id = f"{prefix}-read"
+    terminal_truth_locked = Event()
+    release_terminal = Event()
+    consume_truth_attempted = Event()
+    consume_ledger_locked = Event()
+    inversion_observed = Event()
+    consume_thread_id: list[int] = []
+    original_execute = _PostgresConnection.execute
+
+    def observe_lock_order(self, statement: str, parameters=None):
+        normalized = " ".join(statement.split())
+        is_consume_thread = (
+            bool(consume_thread_id)
+            and get_ident() == consume_thread_id[0]
+        )
+        if is_consume_thread and normalized.startswith(
+            "SELECT session_id, session_revision FROM editing_sessions"
+        ):
+            if consume_ledger_locked.is_set():
+                inversion_observed.set()
+            consume_truth_attempted.set()
+        result = original_execute(self, statement, parameters)
+        if (
+            is_consume_thread
+            and normalized.startswith(
+                "SELECT * FROM hermes_capability_ledger"
+            )
+            and "AND jti = ?" in normalized
+        ):
+            consume_ledger_locked.set()
+        return result
+
+    def consume_read_capability() -> str:
+        consume_thread_id.append(get_ident())
+        return store.consume_registered_hermes_capability(
+            project_id=project.project_id,
+            capability_id=read_id,
+            conversation_id=conversation_id,
+            run_id=run_id,
+            session_id=session["session_id"],
+            session_revision=session["session_revision"],
+            asset_index_revision=0,
+            action="read_context",
+        )
+
+    def revoke_after_current_truth_lock() -> int:
+        connection = store._connection(project.project_id)
+        try:
+            store._begin_hermes_capability_transaction(connection)
+            store._lock_terminal_current_truth(
+                connection=connection,
+                project_id=project.project_id,
+                session_id=session["session_id"],
+            )
+            terminal_truth_locked.set()
+            if not release_terminal.wait(timeout=10):
+                raise TimeoutError("terminal revoke release timed out")
+            revoked = store._revoke_issued_hermes_capabilities_with_connection(
+                connection=connection,
+                project_id=project.project_id,
+                conversation_id=conversation_id,
+                run_id=run_id,
+                occurred_at=instant.isoformat(),
+            )
+            connection.commit()
+            return revoked
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    try:
+        store.register_hermes_run_capabilities(
+            project_id=project.project_id,
+            conversation_id=conversation_id,
+            run_id=run_id,
+            session_id=session["session_id"],
+            session_revision=session["session_revision"],
+            asset_index_revision=0,
+            capabilities=(
+                {
+                    "capability_id": read_id,
+                    "action": "read_context",
+                    "expires_at": int(instant.timestamp()) + 300,
+                },
+                {
+                    "capability_id": f"{prefix}-publish",
+                    "action": "publish_proposal",
+                    "expires_at": int(instant.timestamp()) + 300,
+                },
+            ),
+        )
+        with patch.object(
+            _PostgresConnection,
+            "execute",
+            observe_lock_order,
+        ):
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                terminal_future = executor.submit(
+                    revoke_after_current_truth_lock
+                )
+                assert terminal_truth_locked.wait(timeout=10)
+                consume_future = executor.submit(consume_read_capability)
+                assert consume_truth_attempted.wait(timeout=10)
+                release_terminal.set()
+                assert terminal_future.result(timeout=10) == 2
+                assert (
+                    consume_future.result(timeout=10)
+                    == "hermes_capability_revoked"
+                )
+
+        assert inversion_observed.is_set() is False
+    finally:
+        release_terminal.set()
         _cleanup_postgres_hermes_project(store, project.project_id)
 
 
@@ -1512,12 +1904,17 @@ def test_sqlite_concurrent_registered_hermes_capability_consumption_has_one_winn
 ) -> None:
     store = LocalProjectStore(tmp_path)
     project = store.bootstrap_project("Hermes concurrent SQLite ledger")
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id="timeline-1",
+        session_payload={"segments": [], "history": []},
+    )
     store.register_hermes_run_capabilities(
         project_id=project.project_id,
         conversation_id="conversation-1",
         run_id="run-1",
-        session_id="session-1",
-        session_revision=1,
+        session_id=session["session_id"],
+        session_revision=session["session_revision"],
         asset_index_revision=0,
         capabilities=(
             {
@@ -1540,8 +1937,8 @@ def test_sqlite_concurrent_registered_hermes_capability_consumption_has_one_winn
                     capability_id="concurrent-jti",
                     conversation_id="conversation-1",
                     run_id="run-1",
-                    session_id="session-1",
-                    session_revision=1,
+                    session_id=session["session_id"],
+                    session_revision=session["session_revision"],
                     asset_index_revision=0,
                     action="read_context",
                 ),
@@ -1557,12 +1954,17 @@ def test_postgres_concurrent_registered_hermes_capability_consumption_has_one_wi
 ) -> None:
     store = PostgresProjectStore(tmp_path, database_url=postgres_url)
     project = store.bootstrap_project(f"Hermes concurrent ledger {uuid4().hex}")
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id="timeline-1",
+        session_payload={"segments": [], "history": []},
+    )
     store.register_hermes_run_capabilities(
         project_id=project.project_id,
         conversation_id="conversation-1",
         run_id="run-1",
-        session_id="session-1",
-        session_revision=1,
+        session_id=session["session_id"],
+        session_revision=session["session_revision"],
         asset_index_revision=0,
         capabilities=(
             {
@@ -1586,8 +1988,8 @@ def test_postgres_concurrent_registered_hermes_capability_consumption_has_one_wi
                 capability_id="concurrent-jti",
                 conversation_id="conversation-1",
                 run_id="run-1",
-                session_id="session-1",
-                session_revision=1,
+                session_id=session["session_id"],
+                session_revision=session["session_revision"],
                 asset_index_revision=0,
                 action="read_context",
             )

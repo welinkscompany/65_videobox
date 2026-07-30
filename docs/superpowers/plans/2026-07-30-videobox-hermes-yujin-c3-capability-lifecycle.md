@@ -434,8 +434,19 @@ capability, source copy, OpenCut, Mem0, SaaS, 자동 Apply, Task 9/CapCut 사람
 
 ## Task 8 — Actual PostgreSQL and focused reverse acceptance
 
-- [ ] **8.1** Run all C3 focused tests and actual PostgreSQL with zero relevant
+- [x] **8.1** Run all C3 focused tests and actual PostgreSQL with zero relevant
 skip.
+
+**Execution evidence (2026-07-30):**
+
+- C3 focused set: `435 passed, 30 skipped`; the skips are the PostgreSQL-only
+  cases before `VIDEOBOX_TEST_POSTGRES_URL` is supplied, not claimed as pass.
+- Disposable PostgreSQL 16 C3 selection: `14 passed, 19 deselected`, zero
+  relevant skip; exact container
+  `videobox-codex-c3-postgres-20260730` was removed and verified absent.
+- Reverse acceptance selection: `13 passed`, covering forbidden Apply and
+  other forbidden actions, publish without authority, consume ordering and
+  replay, old/unknown key rejection, and ledger outage reconciliation.
 
 **Steps:**
 
@@ -498,11 +509,29 @@ skip.
 
 ## Task 9 — Independent reviews and remediation
 
-- [ ] **9.1** Independent spec review.
-- [ ] **9.2** Independent code-quality review.
-- [ ] **9.3** Independent gap review.
-- [ ] **9.4** Independent reverse-runtime review.
-- [ ] **9.5** Remediate every Critical/Important finding with RED→GREEN tests.
+- [x] **9.1** Independent spec review.
+- [x] **9.2** Independent code-quality review.
+- [x] **9.3** Independent gap review.
+- [x] **9.4** Independent reverse-runtime review.
+- [x] **9.5** Remediate every Critical/Important finding with RED→GREEN tests.
+
+**Review and remediation evidence (2026-07-30):**
+
+- Final independent spec, quality, and gap/reverse reviews all reported
+  `Critical 0 / Important 0 / Minor 0`.
+- Read consume now rechecks and locks current session and asset-index truth
+  before the capability ledger, preserving the PostgreSQL
+  `session -> asset -> ledger` order and stopping stale context before attach.
+- Capability-preparation failures return one fixed redacted `503`, record
+  stable trusted/null-ID denial audits as appropriate, revoke issued
+  capabilities, and preserve manual fallback with attach/provider/editor
+  mutation zero.
+- The PostgreSQL consume/revoke barrier identifies the consume worker
+  explicitly; the final actual PostgreSQL store suite passed
+  `38 passed, 0 skipped`, and the exact disposable container was removed and
+  verified absent.
+- Final focused remediation set passed `219 passed`; its `33 skipped` cases
+  are PostgreSQL-only and are covered by the preceding actual PostgreSQL run.
 
 **Review boundaries:**
 

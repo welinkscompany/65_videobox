@@ -15,6 +15,7 @@ import uuid
 from videobox_api.hermes_capabilities import (
     ExpectedCapability,
     HermesCapabilityError,
+    HermesCapabilityUnavailableError as HermesVerifierUnavailableError,
 )
 from videobox_api.models import HermesStreamEvent
 from videobox_core_engine.yujin_creator_context import (
@@ -38,6 +39,10 @@ _LOGGER = logging.getLogger(__name__)
 
 class HermesCapacityUnavailable(RuntimeError):
     """The bounded process-local run registry has no admission capacity."""
+
+
+class HermesContextPreparationUnavailable(RuntimeError):
+    """Capability admission failed without exposing internal authority state."""
 
 
 class _Lifecycle(str, Enum):
@@ -588,6 +593,19 @@ class HermesRunService:
                         asset_index_revision=context.asset_index_revision,
                     )
                     self._raise_if_admission_abandoned(admission)
+                    if self.capability_verifier is None:
+                        await asyncio.to_thread(
+                            self.store.record_hermes_capability_denial,
+                            project_id=project_id,
+                            conversation_id=conversation_id,
+                            run_id=run_id,
+                            action="read_context",
+                            reason="hermes_capability_unavailable",
+                            use_registered_capability_id=False,
+                        )
+                        raise RuntimeError(
+                            "hermes_capability_verifier_unavailable"
+                        )
                     await asyncio.to_thread(
                         self.store.register_hermes_run_capabilities,
                         project_id=project_id,
@@ -610,6 +628,15 @@ class HermesRunService:
                         action="read_context",
                     )
                     if expected_payload is None:
+                        await asyncio.to_thread(
+                            self.store.record_hermes_capability_denial,
+                            project_id=project_id,
+                            conversation_id=conversation_id,
+                            run_id=run_id,
+                            action="read_context",
+                            reason="hermes_capability_scope_forbidden",
+                            use_registered_capability_id=False,
+                        )
                         raise RuntimeError(
                             "hermes_capability_expected_missing"
                         )
@@ -631,15 +658,21 @@ class HermesRunService:
                         ),
                         action=str(expected_payload["action"]),
                     )
-                    if self.capability_verifier is None:
-                        raise RuntimeError(
-                            "hermes_capability_verifier_unavailable"
-                        )
                     try:
                         self.capability_verifier.verify(
                             reservation.read_capability_token,
                             expected=expected,
                         )
+                    except HermesVerifierUnavailableError:
+                        await asyncio.to_thread(
+                            self.store.record_hermes_capability_denial,
+                            project_id=project_id,
+                            conversation_id=conversation_id,
+                            run_id=run_id,
+                            action="read_context",
+                            reason="hermes_capability_unavailable",
+                        )
+                        raise
                     except HermesCapabilityError as error:
                         await asyncio.to_thread(
                             self.store.record_hermes_capability_denial,
@@ -676,25 +709,35 @@ class HermesRunService:
                         context=context.model_dump(mode="json"),
                     )
                     self._raise_if_admission_abandoned(admission)
-                except BaseException:
+                except BaseException as error:
+                    cleanup_error: BaseException | None = None
                     try:
                         if gateway_reservation_attempted:
                             await self._release_gateway_run(run_id)
-                    finally:
-                        try:
-                            await asyncio.to_thread(
-                                self.store.complete_director_hermes_run,
-                                project_id=project_id,
-                                run_id=run_id,
-                                owner_token=str(
-                                    durable["owner_token"]
-                                ),
-                                status="blocked",
-                                assistant_text=_BLOCKED_TEXT,
-                                retryable=True,
-                            )
-                        finally:
-                            raise
+                    except BaseException as release_error:
+                        cleanup_error = release_error
+                    try:
+                        await asyncio.to_thread(
+                            self.store.complete_director_hermes_run,
+                            project_id=project_id,
+                            run_id=run_id,
+                            owner_token=str(
+                                durable["owner_token"]
+                            ),
+                            status="blocked",
+                            assistant_text=_BLOCKED_TEXT,
+                            retryable=True,
+                        )
+                    except BaseException as terminal_error:
+                        if cleanup_error is None:
+                            cleanup_error = terminal_error
+                    if isinstance(error, asyncio.CancelledError):
+                        raise
+                    if not isinstance(error, Exception):
+                        raise
+                    raise HermesContextPreparationUnavailable(
+                        "hermes_context_preparation_unavailable"
+                    ) from (cleanup_error or error)
             run = _Run(
                 run_id=str(durable["run_id"]),
                 project_id=project_id,

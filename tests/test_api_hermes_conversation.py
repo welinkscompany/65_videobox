@@ -13,7 +13,10 @@ from videobox_api.agent_gateway_client import (
     AgentGatewayEvent,
     AgentGatewayReservation,
 )
-from videobox_api.hermes_capabilities import HermesCapabilityError
+from videobox_api.hermes_capabilities import (
+    HermesCapabilityError,
+    HermesCapabilityUnavailableError as HermesVerifierUnavailableError,
+)
 from videobox_api.main import create_app
 
 
@@ -58,15 +61,25 @@ class _FailingVerifier:
         )
 
 
+class _UnavailableVerifier:
+    def __init__(self, message: str) -> None:
+        self.message = message
+
+    def verify(self, _token: str, *, expected):
+        raise HermesVerifierUnavailableError(self.message)
+
+
 class _Gateway:
     calls = 0
     preparations = 0
+    attachments = 0
 
     async def reserve_run(self, **kwargs):
         self.preparations += 1
         return _reservation(str(kwargs["run_id"]))
 
     async def attach_run_context(self, **_):
+        self.attachments += 1
         return None
 
     async def stream_run(self, **_):
@@ -84,6 +97,7 @@ def _configured_app(tmp_path: Path):
         agent_gateway_url="http://videobox-agent-gateway:8081",
         agent_gateway_service_token=SERVICE_TOKEN,
         agent_gateway_http_client_factory=lambda **_: None,
+        media_analysis_poll_interval_seconds=3_600,
     )
     gateway = _Gateway()
     app.state.hermes_run_service.gateway_client = gateway
@@ -240,6 +254,172 @@ def test_create_redacts_internal_capability_denial_and_keeps_durable_audit(
         app,
         project_id=project_id,
     ) == ["hermes_capability_signature_invalid"]
+
+
+@pytest.mark.parametrize(
+    "failure",
+    (
+        "registration_conflict",
+        "expected_missing",
+        "verifier_missing",
+        "verifier_missing_audit_outage",
+        "verifier_unavailable",
+        "consume_replayed",
+        "consume_scope_forbidden",
+        "consume_expired",
+        "ledger_outage",
+        "audit_outage",
+    ),
+)
+def test_create_normalizes_capability_admission_failures_to_fixed_503(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+) -> None:
+    app, gateway = _configured_app(tmp_path)
+    sentinel = f"internal-{failure}-secret"
+    with TestClient(app, raise_server_exceptions=False) as client:
+        project_id, session, conversation_id = (
+            _create_project_session_conversation(
+                client,
+                app,
+                name=f"admission {failure}",
+            )
+        )
+        store = app.state.store
+        if failure == "registration_conflict":
+            monkeypatch.setattr(
+                store,
+                "register_hermes_run_capabilities",
+                lambda **_: (_ for _ in ()).throw(ValueError(sentinel)),
+            )
+        elif failure == "expected_missing":
+            monkeypatch.setattr(
+                store,
+                "get_expected_hermes_capability",
+                lambda **_: None,
+            )
+        elif failure in {
+            "verifier_missing",
+            "verifier_missing_audit_outage",
+        }:
+            app.state.hermes_run_service.capability_verifier = None
+            if failure == "verifier_missing_audit_outage":
+                monkeypatch.setattr(
+                    store,
+                    "record_hermes_capability_denial",
+                    lambda **_: (_ for _ in ()).throw(OSError(sentinel)),
+                )
+        elif failure == "verifier_unavailable":
+            app.state.hermes_run_service.capability_verifier = (
+                _UnavailableVerifier(sentinel)
+            )
+        elif failure.startswith("consume_"):
+            reason = {
+                "consume_replayed": "hermes_capability_replayed",
+                "consume_scope_forbidden": (
+                    "hermes_capability_scope_forbidden"
+                ),
+                "consume_expired": "hermes_capability_expired",
+            }[failure]
+            monkeypatch.setattr(
+                store,
+                "consume_registered_hermes_capability",
+                lambda **_: reason,
+            )
+        elif failure == "ledger_outage":
+            monkeypatch.setattr(
+                store,
+                "consume_registered_hermes_capability",
+                lambda **_: (_ for _ in ()).throw(OSError(sentinel)),
+            )
+        elif failure == "audit_outage":
+            app.state.hermes_run_service.capability_verifier = (
+                _FailingVerifier()
+            )
+            monkeypatch.setattr(
+                store,
+                "record_hermes_capability_denial",
+                lambda **_: (_ for _ in ()).throw(OSError(sentinel)),
+            )
+        else:
+            raise AssertionError(f"unhandled admission failure: {failure}")
+
+        response = client.post(
+            f"/api/projects/{project_id}/director/conversations/"
+            f"{conversation_id}/hermes-runs",
+            json={
+                "session_id": session["session_id"],
+                "client_message_id": f"failure-{failure}",
+                "text": "hello",
+                "expected_session_revision": session[
+                    "session_revision"
+                ],
+            },
+        )
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "detail": "hermes_context_preparation_unavailable"
+    }
+    assert sentinel not in response.text
+    assert "header.read.signature" not in response.text
+    assert gateway.attachments == 0
+    assert gateway.calls == 0
+    connection = app.state.store._connection(project_id)
+    try:
+        durable = connection.execute(
+            "SELECT status FROM director_hermes_runs "
+            "WHERE project_id = ?",
+            (project_id,),
+        ).fetchone()
+        states = {
+            str(row["state"])
+            for row in connection.execute(
+                "SELECT state FROM hermes_capability_ledger "
+                "WHERE project_id = ?",
+                (project_id,),
+            ).fetchall()
+        }
+        denials = [
+            {
+                "capability_id": row["capability_id"],
+                "reason": str(row["reason"]),
+            }
+            for row in connection.execute(
+                "SELECT capability_id, reason "
+                "FROM hermes_capability_audit "
+                "WHERE project_id = ? AND outcome = 'denied'",
+                (project_id,),
+            ).fetchall()
+        ]
+    finally:
+        connection.close()
+    assert durable["status"] == "blocked"
+    messages = app.state.store.list_director_messages(
+        project_id=project_id,
+        conversation_id=conversation_id,
+    )
+    assert "Manual Director remains available" in messages[-1]["text"]
+    assert "issued" not in states
+    if failure == "expected_missing":
+        assert denials == [
+            {
+                "capability_id": None,
+                "reason": "hermes_capability_scope_forbidden",
+            }
+        ]
+    elif failure == "verifier_missing":
+        assert denials == [
+            {
+                "capability_id": None,
+                "reason": "hermes_capability_unavailable",
+            }
+        ]
+    elif failure == "verifier_unavailable":
+        assert len(denials) == 1
+        assert denials[0]["capability_id"] is not None
+        assert denials[0]["reason"] == "hermes_capability_unavailable"
 
 
 def test_retry_redacts_internal_capability_denial_and_keeps_durable_audit(
@@ -561,36 +741,36 @@ def test_periodic_maintenance_prunes_31_day_terminal_without_restart(
         media_analysis_poll_interval_seconds=0.01,
     )
     app.state.store._clock = lambda: instant[0]
+    project = app.state.store.bootstrap_project("periodic retention")
+    session = app.state.store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id="timeline",
+        session_payload={"segments": [], "history": []},
+    )
+    app.state.store.create_director_conversation(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+        conversation_id="conv",
+    )
+    run = app.state.store.begin_director_hermes_run(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+        conversation_id="conv",
+        client_message_id="old-in-process",
+        user_text="hello",
+        expected_session_revision=session["session_revision"],
+        expected_asset_index_revision=0,
+    )
+    assert app.state.store.complete_director_hermes_run(
+        project_id=project.project_id,
+        run_id=run["run_id"],
+        owner_token=run["owner_token"],
+        status="completed",
+        assistant_text="answer",
+        public_text="",
+        retryable=False,
+    )
     with TestClient(app):
-        project = app.state.store.bootstrap_project("periodic retention")
-        session = app.state.store.save_editing_session(
-            project_id=project.project_id,
-            timeline_id="timeline",
-            session_payload={"segments": [], "history": []},
-        )
-        app.state.store.create_director_conversation(
-            project_id=project.project_id,
-            session_id=session["session_id"],
-            conversation_id="conv",
-        )
-        run = app.state.store.begin_director_hermes_run(
-            project_id=project.project_id,
-            session_id=session["session_id"],
-            conversation_id="conv",
-            client_message_id="old-in-process",
-            user_text="hello",
-            expected_session_revision=session["session_revision"],
-            expected_asset_index_revision=0,
-        )
-        assert app.state.store.complete_director_hermes_run(
-            project_id=project.project_id,
-            run_id=run["run_id"],
-            owner_token=run["owner_token"],
-            status="completed",
-            assistant_text="answer",
-            public_text="",
-            retryable=False,
-        )
         instant[0] += timedelta(days=31)
         expired = False
         for _ in range(100):

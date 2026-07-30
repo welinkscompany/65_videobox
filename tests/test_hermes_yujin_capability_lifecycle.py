@@ -167,6 +167,9 @@ def _register_capabilities(
     *,
     conversation_id: str = "conversation-1",
     run_id: str = "run-1",
+    session_id: str = "session-1",
+    session_revision: int = 3,
+    asset_index_revision: int = 7,
     read_id: str = "cap-read-0001",
     publish_id: str = "cap-publish-0001",
 ) -> None:
@@ -174,13 +177,38 @@ def _register_capabilities(
         project_id=project_id,
         conversation_id=conversation_id,
         run_id=run_id,
-        session_id="session-1",
-        session_revision=3,
-        asset_index_revision=7,
+        session_id=session_id,
+        session_revision=session_revision,
+        asset_index_revision=asset_index_revision,
         capabilities=_capability_metadata(
             read_id=read_id,
             publish_id=publish_id,
         ),
+    )
+
+
+def _prepare_current_capability_scope(
+    store: LocalProjectStore,
+    project_id: str,
+) -> tuple[str, int, int]:
+    session = store.save_editing_session(
+        project_id=project_id,
+        timeline_id="capability-current-timeline",
+        session_payload={"segments": [], "history": []},
+    )
+    while int(session["session_revision"]) < 3:
+        session = store.update_editing_session(
+            project_id=project_id,
+            session_id=session["session_id"],
+            session_payload={"segments": [], "history": []},
+            expected_revision=session["session_revision"],
+        )
+    while store.get_asset_index_revision(project_id) < 7:
+        store.bump_asset_index_revision(project_id)
+    return (
+        str(session["session_id"]),
+        int(session["session_revision"]),
+        store.get_asset_index_revision(project_id),
     )
 
 
@@ -444,6 +472,77 @@ def test_unknown_missing_wrong_type_and_wrong_scope_claims_fail_closed(
     claims = _valid_claims()
     mutation(claims)
     _assert_reason(_sign(claims), reason)
+
+
+@pytest.mark.parametrize(
+    ("case", "reason"),
+    (
+        ("project", "hermes_capability_scope_forbidden"),
+        ("conversation", "hermes_capability_scope_forbidden"),
+        ("run", "hermes_capability_scope_forbidden"),
+        ("session", "hermes_capability_scope_forbidden"),
+        ("session_revision", "hermes_capability_scope_forbidden"),
+        ("asset_index_revision", "hermes_capability_scope_forbidden"),
+        ("action", "hermes_capability_action_forbidden"),
+        ("audience", "hermes_capability_scope_forbidden"),
+        ("issuer", "hermes_capability_scope_forbidden"),
+        ("subject", "hermes_capability_scope_forbidden"),
+        ("key", "hermes_capability_key_unknown"),
+        ("algorithm", "hermes_capability_malformed"),
+        ("lifetime", "hermes_capability_malformed"),
+        ("type", "hermes_capability_malformed"),
+        ("extra_claim", "hermes_capability_malformed"),
+    ),
+)
+def test_verifier_direct_denial_acceptance_matrix(
+    case: str,
+    reason: str,
+) -> None:
+    claims = _valid_claims()
+    header = {"alg": "EdDSA", "kid": KEY_ID, "typ": "VBC"}
+    if case in {
+        "project",
+        "conversation",
+        "run",
+        "session",
+        "session_revision",
+        "asset_index_revision",
+    }:
+        field = {
+            "project": "project_id",
+            "conversation": "conversation_id",
+            "run": "run_id",
+            "session": "session_id",
+            "session_revision": "session_revision",
+            "asset_index_revision": "asset_index_revision",
+        }[case]
+        claims[field] = (
+            int(claims[field]) + 1
+            if field in {"session_revision", "asset_index_revision"}
+            else f"wrong-{field}"
+        )
+    elif case == "action":
+        claims["action"] = "publish_proposal"
+    elif case == "audience":
+        claims["aud"] = "wrong-audience"
+    elif case == "issuer":
+        claims["iss"] = "wrong-issuer"
+    elif case == "subject":
+        claims["sub"] = "wrong-subject"
+    elif case == "key":
+        header["kid"] = "wrong-key"
+    elif case == "algorithm":
+        header["alg"] = "HS256"
+    elif case == "lifetime":
+        claims["exp"] = int(claims["iat"]) + 301
+    elif case == "type":
+        header["typ"] = "JWT"
+    elif case == "extra_claim":
+        claims["unexpected"] = "forbidden"
+    else:
+        raise AssertionError(f"unhandled verifier matrix case: {case}")
+
+    _assert_reason(_sign(claims, header=header), reason)
 
 
 def test_wrong_algorithm_key_and_signature_fail_closed() -> None:
@@ -793,16 +892,25 @@ def test_sqlite_hermes_capability_consume_requires_exact_registered_scope_and_ne
 ) -> None:
     store = LocalProjectStore(tmp_path, now=lambda: NOW)
     project = store.bootstrap_project("C3 exact consume")
-    _register_capabilities(store, project.project_id)
+    session_id, session_revision, asset_index_revision = (
+        _prepare_current_capability_scope(store, project.project_id)
+    )
+    _register_capabilities(
+        store,
+        project.project_id,
+        session_id=session_id,
+        session_revision=session_revision,
+        asset_index_revision=asset_index_revision,
+    )
 
     wrong_scope = store.consume_registered_hermes_capability(
         project_id=project.project_id,
         capability_id="cap-read-0001",
         conversation_id="conversation-1",
         run_id="run-1",
-        session_id="session-1",
-        session_revision=4,
-        asset_index_revision=7,
+        session_id=session_id,
+        session_revision=session_revision + 1,
+        asset_index_revision=asset_index_revision,
         action="read_context",
     )
     missing = store.consume_registered_hermes_capability(
@@ -810,9 +918,9 @@ def test_sqlite_hermes_capability_consume_requires_exact_registered_scope_and_ne
         capability_id="cap-missing",
         conversation_id="conversation-1",
         run_id="run-1",
-        session_id="session-1",
-        session_revision=3,
-        asset_index_revision=7,
+        session_id=session_id,
+        session_revision=session_revision,
+        asset_index_revision=asset_index_revision,
         action="read_context",
     )
     accepted = store.consume_registered_hermes_capability(
@@ -820,9 +928,9 @@ def test_sqlite_hermes_capability_consume_requires_exact_registered_scope_and_ne
         capability_id="cap-read-0001",
         conversation_id="conversation-1",
         run_id="run-1",
-        session_id="session-1",
-        session_revision=3,
-        asset_index_revision=7,
+        session_id=session_id,
+        session_revision=session_revision,
+        asset_index_revision=asset_index_revision,
         action="read_context",
     )
     replay = store.consume_registered_hermes_capability(
@@ -830,9 +938,9 @@ def test_sqlite_hermes_capability_consume_requires_exact_registered_scope_and_ne
         capability_id="cap-read-0001",
         conversation_id="conversation-1",
         run_id="run-1",
-        session_id="session-1",
-        session_revision=3,
-        asset_index_revision=7,
+        session_id=session_id,
+        session_revision=session_revision,
+        asset_index_revision=asset_index_revision,
         action="read_context",
     )
 
@@ -848,6 +956,124 @@ def test_sqlite_hermes_capability_consume_requires_exact_registered_scope_and_ne
         ("cap-publish-0001", "issued"),
         ("cap-read-0001", "consumed"),
     ]
+
+
+def test_sqlite_read_context_consume_rechecks_current_session_revision(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path, now=lambda: NOW)
+    project = store.bootstrap_project("C3 read consume session race")
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id="timeline-1",
+        session_payload={"segments": [], "history": []},
+    )
+    store.register_hermes_run_capabilities(
+        project_id=project.project_id,
+        conversation_id="conversation-1",
+        run_id="run-1",
+        session_id=session["session_id"],
+        session_revision=session["session_revision"],
+        asset_index_revision=0,
+        capabilities=_capability_metadata(),
+    )
+    advanced = store.update_editing_session(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+        session_payload={"segments": [], "history": []},
+        expected_revision=session["session_revision"],
+    )
+
+    result = store.consume_registered_hermes_capability(
+        project_id=project.project_id,
+        capability_id="cap-read-0001",
+        conversation_id="conversation-1",
+        run_id="run-1",
+        session_id=session["session_id"],
+        session_revision=session["session_revision"],
+        asset_index_revision=0,
+        action="read_context",
+    )
+
+    assert result == "hermes_capability_scope_forbidden"
+    assert store.get_editing_session(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+    )["session_revision"] == advanced["session_revision"]
+    assert store.list_director_proposals(project.project_id) == []
+    with sqlite3.connect(store.database_path(project.project_id)) as connection:
+        state = connection.execute(
+            "SELECT state FROM hermes_capability_ledger "
+            "WHERE project_id = ? AND jti = 'cap-read-0001'",
+            (project.project_id,),
+        ).fetchone()[0]
+        denial = connection.execute(
+            "SELECT outcome, reason FROM hermes_capability_audit "
+            "WHERE project_id = ? AND capability_id = 'cap-read-0001' "
+            "AND reason = 'hermes_capability_scope_forbidden'",
+            (project.project_id,),
+        ).fetchone()
+    assert state == "issued"
+    assert denial == ("denied", "hermes_capability_scope_forbidden")
+
+
+def test_sqlite_read_context_consume_rechecks_current_asset_index_revision(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path, now=lambda: NOW)
+    project = store.bootstrap_project("C3 read consume asset race")
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id="timeline-1",
+        session_payload={"segments": [], "history": []},
+    )
+    store.register_hermes_run_capabilities(
+        project_id=project.project_id,
+        conversation_id="conversation-1",
+        run_id="run-1",
+        session_id=session["session_id"],
+        session_revision=session["session_revision"],
+        asset_index_revision=0,
+        capabilities=_capability_metadata(),
+    )
+    assert store.bump_asset_index_revision(project.project_id) == 1
+    before_session = store.get_editing_session(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+    )
+
+    result = store.consume_registered_hermes_capability(
+        project_id=project.project_id,
+        capability_id="cap-read-0001",
+        conversation_id="conversation-1",
+        run_id="run-1",
+        session_id=session["session_id"],
+        session_revision=session["session_revision"],
+        asset_index_revision=0,
+        action="read_context",
+    )
+
+    assert result == "hermes_capability_scope_forbidden"
+    assert store.get_asset_index_revision(project.project_id) == 1
+    assert store.get_editing_session(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+    ) == before_session
+    assert store.list_director_proposals(project.project_id) == []
+    with sqlite3.connect(store.database_path(project.project_id)) as connection:
+        state = connection.execute(
+            "SELECT state FROM hermes_capability_ledger "
+            "WHERE project_id = ? AND jti = 'cap-read-0001'",
+            (project.project_id,),
+        ).fetchone()[0]
+        denial = connection.execute(
+            "SELECT outcome, reason FROM hermes_capability_audit "
+            "WHERE project_id = ? AND capability_id = 'cap-read-0001' "
+            "AND reason = 'hermes_capability_scope_forbidden'",
+            (project.project_id,),
+        ).fetchone()
+    assert state == "issued"
+    assert denial == ("denied", "hermes_capability_scope_forbidden")
 
 
 def test_sqlite_hermes_capability_expired_issued_consume_denies_without_state_change(
@@ -905,15 +1131,24 @@ def test_sqlite_hermes_capability_concurrent_consume_has_one_winner(
 ) -> None:
     store = LocalProjectStore(tmp_path, now=lambda: NOW)
     project = store.bootstrap_project("C3 concurrent consume")
-    _register_capabilities(store, project.project_id)
+    session_id, session_revision, asset_index_revision = (
+        _prepare_current_capability_scope(store, project.project_id)
+    )
+    _register_capabilities(
+        store,
+        project.project_id,
+        session_id=session_id,
+        session_revision=session_revision,
+        asset_index_revision=asset_index_revision,
+    )
     payload = {
         "project_id": project.project_id,
         "capability_id": "cap-read-0001",
         "conversation_id": "conversation-1",
         "run_id": "run-1",
-        "session_id": "session-1",
-        "session_revision": 3,
-        "asset_index_revision": 7,
+        "session_id": session_id,
+        "session_revision": session_revision,
+        "asset_index_revision": asset_index_revision,
         "action": "read_context",
     }
 
@@ -935,15 +1170,24 @@ def test_sqlite_hermes_capability_revoke_is_issued_only_and_idempotent(
 ) -> None:
     store = LocalProjectStore(tmp_path, now=lambda: NOW)
     project = store.bootstrap_project("C3 revoke")
-    _register_capabilities(store, project.project_id)
+    session_id, session_revision, asset_index_revision = (
+        _prepare_current_capability_scope(store, project.project_id)
+    )
+    _register_capabilities(
+        store,
+        project.project_id,
+        session_id=session_id,
+        session_revision=session_revision,
+        asset_index_revision=asset_index_revision,
+    )
     assert store.consume_registered_hermes_capability(
         project_id=project.project_id,
         capability_id="cap-read-0001",
         conversation_id="conversation-1",
         run_id="run-1",
-        session_id="session-1",
-        session_revision=3,
-        asset_index_revision=7,
+        session_id=session_id,
+        session_revision=session_revision,
+        asset_index_revision=asset_index_revision,
         action="read_context",
     ) == "accepted"
 
@@ -979,7 +1223,16 @@ def test_sqlite_hermes_capability_consume_success_survives_cleanup_failure(
 ) -> None:
     store = LocalProjectStore(tmp_path, now=lambda: NOW)
     project = store.bootstrap_project("C3 consume cleanup failure")
-    _register_capabilities(store, project.project_id)
+    session_id, session_revision, asset_index_revision = (
+        _prepare_current_capability_scope(store, project.project_id)
+    )
+    _register_capabilities(
+        store,
+        project.project_id,
+        session_id=session_id,
+        session_revision=session_revision,
+        asset_index_revision=asset_index_revision,
+    )
     cleanup_calls: list[str] = []
 
     def fail_cleanup(*, project_id: str) -> None:
@@ -997,9 +1250,9 @@ def test_sqlite_hermes_capability_consume_success_survives_cleanup_failure(
         capability_id="cap-read-0001",
         conversation_id="conversation-1",
         run_id="run-1",
-        session_id="session-1",
-        session_revision=3,
-        asset_index_revision=7,
+        session_id=session_id,
+        session_revision=session_revision,
+        asset_index_revision=asset_index_revision,
         action="read_context",
     )
 
@@ -1037,7 +1290,7 @@ def test_sqlite_hermes_capability_audit_is_exact_redacted_and_trusted(
         conversation_id="conversation-unknown",
         run_id="run-unknown",
         action="read_context",
-        reason="hermes_capability_signature_invalid",
+        reason="hermes_capability_scope_forbidden",
     )
 
     expected_fields = {
@@ -1054,6 +1307,7 @@ def test_sqlite_hermes_capability_audit_is_exact_redacted_and_trusted(
     assert set(trusted) == expected_fields
     assert trusted["capability_id"] == "cap-read-0001"
     assert unknown["capability_id"] is None
+    assert unknown["reason"] == "hermes_capability_scope_forbidden"
     with sqlite3.connect(store.database_path(project.project_id)) as connection:
         columns = {
             row[1]

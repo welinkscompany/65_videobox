@@ -16,8 +16,14 @@ from videobox_api.agent_gateway_client import (
     AgentGatewayReservation,
     AgentGatewayUnavailable,
 )
-from videobox_api.hermes_capabilities import HermesCapabilityError
-from videobox_api.hermes_run_service import HermesRunService
+from videobox_api.hermes_capabilities import (
+    HermesCapabilityError,
+    HermesCapabilityUnavailableError as HermesVerifierUnavailableError,
+)
+from videobox_api.hermes_run_service import (
+    HermesContextPreparationUnavailable,
+    HermesRunService,
+)
 from videobox_api.main import _media_analysis_lifespan, _recover_hermes_runs
 from videobox_domain_models.assets import AssetType
 from videobox_domain_models.director_proposals import DirectorCandidate, DirectorProposal
@@ -434,16 +440,22 @@ class _CapabilityVerifier:
         calls: list[str],
         *,
         fail: bool = False,
+        unavailable: bool = False,
         fail_action: str | None = None,
         wrong_scope_action: str | None = None,
     ) -> None:
         self.calls = calls
         self.fail = fail
+        self.unavailable = unavailable
         self.fail_action = fail_action
         self.wrong_scope_action = wrong_scope_action
 
     def verify(self, token: str, *, expected):
         self.calls.append("verify")
+        if self.unavailable:
+            raise HermesVerifierUnavailableError(
+                "private verifier clock unavailable"
+            )
         if self.fail or expected.action == self.fail_action:
             raise HermesCapabilityError(
                 "hermes_capability_signature_invalid"
@@ -533,6 +545,64 @@ def test_admission_capability_order_precedes_dispatch() -> None:
     assert gateway.provider_calls == 1
 
 
+@pytest.mark.parametrize("audit_fails", (False, True))
+def test_missing_capability_verifier_audits_unavailable_before_dispatch(
+    audit_fails: bool,
+) -> None:
+    calls: list[str] = []
+    store = _CapabilityAdmissionStore(calls)
+    gateway = _CapabilityGateway(calls)
+    if audit_fails:
+        def fail_denial(**_kwargs):
+            calls.append("denial")
+            raise OSError("private capability audit failure")
+
+        store.record_hermes_capability_denial = fail_denial
+    service = HermesRunService(
+        store=store,
+        gateway_client=gateway,
+        capability_verifier=None,
+    )
+
+    async def scenario() -> None:
+        with pytest.raises(
+            HermesContextPreparationUnavailable,
+            match="^hermes_context_preparation_unavailable$",
+        ):
+            await service.create_run(
+                project_id="p",
+                session_id="s",
+                conversation_id="c",
+                client_message_id=f"missing-verifier-{audit_fails}",
+                text="q",
+            )
+
+    asyncio.run(scenario())
+
+    assert calls[:3] == ["begin", "reserve", "denial"]
+    assert "register" not in calls
+    assert "expected" not in calls
+    assert "verify" not in calls
+    assert "consume" not in calls
+    assert "attach" not in calls
+    assert gateway.provider_calls == 0
+    assert len(store.completions) == 1
+    assert store.completions[0]["status"] == "blocked"
+    if audit_fails:
+        assert store.denials == []
+    else:
+        assert store.denials == [
+            {
+                "project_id": "p",
+                "conversation_id": "c",
+                "run_id": f"missing-verifier-{audit_fails}",
+                "action": "read_context",
+                "reason": "hermes_capability_unavailable",
+                "use_registered_capability_id": False,
+            }
+        ]
+
+
 @pytest.mark.parametrize(
     "fail_at",
     [
@@ -541,6 +611,7 @@ def test_admission_capability_order_precedes_dispatch() -> None:
         "register",
         "expected",
         "verify",
+        "verify_unavailable",
         "consume",
         "scope",
         "audit",
@@ -560,7 +631,11 @@ def test_capability_admission_failure_releases_revokes_and_blocks_without_dispat
             else None
         ),
     )
-    verifier = _CapabilityVerifier(calls, fail=fail_at == "verify")
+    verifier = _CapabilityVerifier(
+        calls,
+        fail=fail_at == "verify",
+        unavailable=fail_at == "verify_unavailable",
+    )
     service = HermesRunService(
         store=store,
         gateway_client=gateway,
@@ -589,11 +664,102 @@ def test_capability_admission_failure_releases_revokes_and_blocks_without_dispat
     assert "Manual Director remains available" in store.completions[0][
         "assistant_text"
     ]
-    if fail_at == "verify":
+    if fail_at in {"verify", "verify_unavailable"}:
         assert len(store.denials) == 1
         assert store.denials[0]["reason"] == (
-            "hermes_capability_signature_invalid"
+            "hermes_capability_unavailable"
+            if fail_at == "verify_unavailable"
+            else "hermes_capability_signature_invalid"
         )
+
+
+def test_read_context_registration_race_blocks_before_attach_and_provider(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+    store, project_id, session_id = _scope(tmp_path)
+    gateway = _CapabilityGateway(calls)
+    original_register = store.register_hermes_run_capabilities
+
+    def register_then_advance_session(**kwargs):
+        original_register(**kwargs)
+        current = store.get_editing_session(
+            project_id=project_id,
+            session_id=session_id,
+        )
+        store.update_editing_session(
+            project_id=project_id,
+            session_id=session_id,
+            session_payload={
+                "segments": current["segments"],
+                "history": current["history"],
+            },
+            expected_revision=current["session_revision"],
+        )
+
+    monkeypatch.setattr(
+        store,
+        "register_hermes_run_capabilities",
+        register_then_advance_session,
+    )
+    service = HermesRunService(
+        store=store,
+        gateway_client=gateway,
+        capability_verifier=_CapabilityVerifier(calls),
+    )
+
+    async def scenario() -> None:
+        with pytest.raises(
+            HermesContextPreparationUnavailable,
+            match="^hermes_context_preparation_unavailable$",
+        ):
+            await service.create_run(
+                project_id=project_id,
+                session_id=session_id,
+                conversation_id="conv",
+                client_message_id="read-context-session-race",
+                text="q",
+                expected_session_revision=1,
+            )
+
+    asyncio.run(scenario())
+
+    assert "attach" not in calls
+    assert "dispatch" not in calls
+    assert gateway.provider_calls == 0
+    assert len(gateway.releases) == 1
+    assert store.list_director_proposals(project_id) == []
+    session = store.get_editing_session(
+        project_id=project_id,
+        session_id=session_id,
+    )
+    assert session["session_revision"] == 2
+    assert session["history"] == []
+    messages = store.list_director_messages(
+        project_id=project_id,
+        conversation_id="conv",
+    )
+    assert "Manual Director remains available" in messages[-1]["text"]
+    with store._connection(project_id) as connection:
+        states = {
+            str(row["state"])
+            for row in connection.execute(
+                "SELECT state FROM hermes_capability_ledger "
+                "WHERE project_id = ?",
+                (project_id,),
+            ).fetchall()
+        }
+        denials = [
+            str(row["reason"])
+            for row in connection.execute(
+                "SELECT reason FROM hermes_capability_audit "
+                "WHERE project_id = ? AND outcome = 'denied'",
+                (project_id,),
+            ).fetchall()
+        ]
+    assert states == {"revoked"}
+    assert denials == ["hermes_capability_scope_forbidden"]
 
 
 def test_cancelled_admission_after_issuance_releases_revokes_and_blocks() -> None:
@@ -4531,7 +4697,10 @@ def test_hermes_capability_ledger_outage_discards_token_and_releases_without_ret
     service = HermesRunService(store=store, gateway_client=gateway)
 
     async def scenario():
-        with pytest.raises(OSError, match="ledger unavailable") as caught:
+        with pytest.raises(
+            HermesContextPreparationUnavailable,
+            match="^hermes_context_preparation_unavailable$",
+        ) as caught:
             await service.create_run(
                 project_id="project",
                 session_id="session",
