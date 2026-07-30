@@ -60,8 +60,8 @@ CapCut Desktop 사람 검증과 Task 9 사람/환경 acceptance는 실행하지 
 ## 커밋·푸시 상태
 
 - closeout 작성 시 기준 HEAD: `ff2cec166`
-- D2 implementation/closeout commit: 아직 생성 전
-- upstream push: 아직 실행 전
+- D2 implementation/closeout commit: `a252d583d`
+- upstream push: `a252d583d` push 뒤 `0/0` 확인
 
 ## 재개 안전선
 
