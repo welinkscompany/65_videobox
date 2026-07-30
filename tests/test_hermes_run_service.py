@@ -18,6 +18,7 @@ from videobox_api.agent_gateway_client import (
 )
 from videobox_api.hermes_capabilities import HermesCapabilityError
 from videobox_api.hermes_run_service import HermesRunService
+from videobox_api.main import _media_analysis_lifespan, _recover_hermes_runs
 from videobox_domain_models.assets import AssetType
 from videobox_domain_models.director_proposals import DirectorCandidate, DirectorProposal
 from videobox_core_engine.yujin_creator_proposal_adapter import (
@@ -373,6 +374,9 @@ class _CapabilityAdmissionStore:
     def complete_director_hermes_run(self, **kwargs):
         self.calls.append("blocked")
         self.completions.append(kwargs)
+        for capability_id, state in tuple(self.states.items()):
+            if state == "issued":
+                self.states[capability_id] = "revoked"
         return True
 
 
@@ -475,6 +479,23 @@ class _RegistrationBarrierStore(_CapabilityAdmissionStore):
         assert self.registration_release.wait(timeout=3)
 
 
+class _TwoRegistrationBarrierStore(_CapabilityAdmissionStore):
+    def __init__(self, calls: list[str]) -> None:
+        super().__init__(calls)
+        self._registration_count = 0
+        self._registration_lock = threading.Lock()
+        self.registrations_entered = threading.Event()
+        self.registration_release = threading.Event()
+
+    def register_hermes_run_capabilities(self, **kwargs):
+        super().register_hermes_run_capabilities(**kwargs)
+        with self._registration_lock:
+            self._registration_count += 1
+            if self._registration_count == 2:
+                self.registrations_entered.set()
+        assert self.registration_release.wait(timeout=3)
+
+
 def test_admission_capability_order_precedes_dispatch() -> None:
     calls: list[str] = []
     store = _CapabilityAdmissionStore(calls)
@@ -560,7 +581,9 @@ def test_capability_admission_failure_releases_revokes_and_blocks_without_dispat
 
     assert gateway.provider_calls == 0
     assert gateway.releases == [f"failed-{fail_at}"]
-    assert calls.count("revoke") == 1
+    assert calls.count("revoke") == 0
+    assert "blocked" in calls
+    assert set(store.states.values()).issubset({"consumed", "revoked"})
     assert len(store.completions) == 1
     assert store.completions[0]["status"] == "blocked"
     assert "Manual Director remains available" in store.completions[0][
@@ -598,6 +621,8 @@ def test_cancelled_admission_after_issuance_releases_revokes_and_blocks() -> Non
             store.registration_entered.wait,
             1,
         )
+        async with service.reconciliation_scope() as excluded:
+            assert excluded == {"p": ("cancelled-admission",)}
         create_task.cancel()
         await asyncio.sleep(0)
         store.registration_release.set()
@@ -613,10 +638,450 @@ def test_cancelled_admission_after_issuance_releases_revokes_and_blocks() -> Non
     assert "attach" not in calls
     assert gateway.provider_calls == 0
     assert gateway.releases == ["cancelled-admission"]
-    assert calls.count("revoke") == 1
+    assert calls.count("revoke") == 0
     assert set(store.states.values()) == {"revoked"}
     assert len(store.completions) == 1
     assert store.completions[0]["status"] == "blocked"
+
+
+def test_reconciliation_scope_blocks_only_new_durable_begin() -> None:
+    store = _ThreadBlockedStore()
+    gateway = _Gateway()
+    service = HermesRunService(store=store, gateway_client=gateway)
+    context_entered = threading.Event()
+    context_release = threading.Event()
+    context_finished = threading.Event()
+
+    def build_context(**kwargs):
+        context_entered.set()
+        assert context_release.wait(timeout=3)
+        context_finished.set()
+        return SimpleNamespace(
+            session_revision=kwargs["expected_session_revision"],
+            asset_index_revision=0,
+            model_dump=lambda **_: {},
+        )
+
+    service._context_builder = build_context
+
+    async def scenario() -> None:
+        async with service.reconciliation_scope() as excluded:
+            assert excluded == {}
+            create = asyncio.create_task(
+                service.create_run(
+                    project_id="p",
+                    session_id="s",
+                    conversation_id="c",
+                    client_message_id="after-recovery",
+                    text="q",
+                )
+            )
+            assert await asyncio.to_thread(context_entered.wait, 1)
+            assert service.diagnostics()["admissions"] == 1
+            context_release.set()
+            assert await asyncio.to_thread(context_finished.wait, 1)
+            assert not store.begin_entered.is_set()
+            store.begin_release.set()
+        run = await asyncio.wait_for(create, timeout=1)
+        assert run.task is not None
+        await asyncio.wait_for(run.task, timeout=1)
+        await asyncio.wait_for(service.shutdown(), timeout=1)
+
+    asyncio.run(scenario())
+    assert gateway.calls == 1
+
+
+def test_reconciliation_scope_duplicate_cancel_and_shutdown_do_not_deadlock() -> None:
+    store = _ThreadBlockedStore()
+    store.begin_release.set()
+    gateway = _Gateway()
+    service = HermesRunService(store=store, gateway_client=gateway)
+
+    async def scenario() -> None:
+        arguments = {
+            "project_id": "p",
+            "session_id": "s",
+            "conversation_id": "c",
+            "client_message_id": "shared-during-recovery",
+            "text": "q",
+        }
+        async with service.reconciliation_scope():
+            cancelled = asyncio.create_task(service.create_run(**arguments))
+            remaining = asyncio.create_task(service.create_run(**arguments))
+            await asyncio.sleep(0)
+            cancelled.cancel()
+            shutdown = asyncio.create_task(service.shutdown())
+            await asyncio.sleep(0)
+            assert not store.begin_entered.is_set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(cancelled, timeout=1)
+        run = await asyncio.wait_for(remaining, timeout=1)
+        await asyncio.wait_for(shutdown, timeout=1)
+        assert run.terminal is True
+        assert service.diagnostics()["admissions"] == 0
+
+    asyncio.run(scenario())
+    assert gateway.calls == 0
+
+
+def test_reconciliation_scope_groups_same_admission_run_id_by_project() -> None:
+    calls: list[str] = []
+    store = _TwoRegistrationBarrierStore(calls)
+    gateway = _CapabilityGateway(calls)
+    service = HermesRunService(
+        store=store,
+        gateway_client=gateway,
+        capability_verifier=_CapabilityVerifier(calls),
+    )
+
+    async def scenario() -> None:
+        shared = {
+            "session_id": "s",
+            "conversation_id": "c",
+            "client_message_id": "same-run-id",
+            "text": "q",
+        }
+        first = asyncio.create_task(
+            service.create_run(project_id="project-a", **shared)
+        )
+        second = asyncio.create_task(
+            service.create_run(project_id="project-b", **shared)
+        )
+        assert await asyncio.to_thread(
+            store.registrations_entered.wait,
+            1,
+        )
+        async with service.reconciliation_scope() as exclusions:
+            assert exclusions == {
+                "project-a": ("same-run-id",),
+                "project-b": ("same-run-id",),
+            }
+        first.cancel()
+        second.cancel()
+        store.registration_release.set()
+        results = await asyncio.wait_for(
+            asyncio.gather(first, second, return_exceptions=True),
+            timeout=1,
+        )
+        assert all(
+            isinstance(result, asyncio.CancelledError)
+            for result in results
+        )
+        await asyncio.wait_for(service.shutdown(), timeout=1)
+
+    asyncio.run(scenario())
+
+
+def test_recovery_holds_durable_begin_fence_through_store_reconciliation() -> None:
+    class Store(_ThreadBlockedStore):
+        def __init__(self) -> None:
+            super().__init__()
+            self.recovery_entered = threading.Event()
+            self.recovery_release = threading.Event()
+
+        def list_projects(self):
+            self.recovery_entered.set()
+            assert self.recovery_release.wait(timeout=3)
+            return []
+
+    store = Store()
+    store.begin_release.set()
+    service = HermesRunService(store=store, gateway_client=_Gateway())
+    app = SimpleNamespace(
+        state=SimpleNamespace(store=store, hermes_run_service=service)
+    )
+
+    async def scenario() -> None:
+        recovery = asyncio.create_task(_recover_hermes_runs(app))
+        assert await asyncio.to_thread(store.recovery_entered.wait, 1)
+        create = asyncio.create_task(
+            service.create_run(
+                project_id="p",
+                session_id="s",
+                conversation_id="c",
+                client_message_id="after-store-recovery",
+                text="q",
+            )
+        )
+        await asyncio.sleep(0)
+        assert not store.begin_entered.is_set()
+        store.recovery_release.set()
+        await asyncio.wait_for(recovery, timeout=1)
+        run = await asyncio.wait_for(create, timeout=1)
+        assert run.task is not None
+        await asyncio.wait_for(run.task, timeout=1)
+        await asyncio.wait_for(service.shutdown(), timeout=1)
+
+    asyncio.run(scenario())
+
+
+def test_reconciliation_scope_absorbs_repeated_cancel_until_recovery_thread_ends() -> None:
+    class Store(_ThreadBlockedStore):
+        def __init__(self) -> None:
+            super().__init__()
+            self.recovery_entered = threading.Event()
+            self.recovery_release = threading.Event()
+
+        def list_projects(self):
+            return [{"project_id": "p"}]
+
+        def recover_interrupted_director_hermes_runs(self, **_):
+            self.recovery_entered.set()
+            assert self.recovery_release.wait(timeout=3)
+            return []
+
+    store = Store()
+    store.begin_release.set()
+    service = HermesRunService(store=store, gateway_client=_Gateway())
+    app = SimpleNamespace(
+        state=SimpleNamespace(store=store, hermes_run_service=service)
+    )
+
+    async def scenario() -> tuple[bool, bool]:
+        owner = asyncio.create_task(_recover_hermes_runs(app))
+        assert await asyncio.to_thread(store.recovery_entered.wait, 1)
+        create = asyncio.create_task(
+            service.create_run(
+                project_id="p",
+                session_id="s",
+                conversation_id="c",
+                client_message_id="after-repeated-cancel",
+                text="q",
+            )
+        )
+        await asyncio.sleep(0)
+        owner.cancel()
+        await asyncio.sleep(0)
+        owner.cancel()
+        await asyncio.sleep(0.05)
+        begin_before_release = store.begin_entered.is_set()
+        owner_done_before_release = owner.done()
+        store.recovery_release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(owner, timeout=1)
+        run = await asyncio.wait_for(create, timeout=1)
+        assert run.task is not None
+        await asyncio.wait_for(run.task, timeout=1)
+        assert not any(
+            task.get_name() == "videobox-hermes-reconciliation"
+            for task in asyncio.all_tasks()
+            if task is not asyncio.current_task()
+        )
+        await asyncio.wait_for(service.shutdown(), timeout=1)
+        return begin_before_release, owner_done_before_release
+
+    begin_before_release, owner_done_before_release = asyncio.run(scenario())
+    assert begin_before_release is False
+    assert owner_done_before_release is False
+
+
+def test_reconciliation_scope_propagates_recovery_error_without_orphan_task() -> None:
+    class Store(_ThreadBlockedStore):
+        def list_projects(self):
+            raise OSError("recovery ledger unavailable")
+
+    store = Store()
+    service = HermesRunService(store=store, gateway_client=_Gateway())
+    app = SimpleNamespace(
+        state=SimpleNamespace(store=store, hermes_run_service=service)
+    )
+
+    async def scenario() -> None:
+        with pytest.raises(OSError, match="recovery ledger unavailable"):
+            await _recover_hermes_runs(app)
+        assert not any(
+            task.get_name() == "videobox-hermes-reconciliation"
+            for task in asyncio.all_tasks()
+            if task is not asyncio.current_task()
+        )
+        await asyncio.wait_for(service.shutdown(), timeout=1)
+
+    asyncio.run(scenario())
+
+
+def test_reconciliation_scope_survives_lifespan_cancel_until_recovery_thread_ends() -> None:
+    class Store(_ThreadBlockedStore):
+        def __init__(self) -> None:
+            super().__init__()
+            self.recovery_calls = 0
+            self.recovery_entered = threading.Event()
+            self.recovery_release = threading.Event()
+
+        def list_projects(self):
+            return [{"project_id": "p"}]
+
+        def recover_interrupted_director_hermes_runs(self, **_):
+            self.recovery_calls += 1
+            if self.recovery_calls >= 2:
+                self.recovery_entered.set()
+                assert self.recovery_release.wait(timeout=3)
+            return []
+
+        def recover_orphaned_media_analysis_jobs(self, **_):
+            return []
+
+        def prune_director_hermes_run_events(self, **_):
+            return 0
+
+    store = Store()
+    store.begin_release.set()
+    service = HermesRunService(store=store, gateway_client=_Gateway())
+    app = SimpleNamespace(
+        state=SimpleNamespace(
+            store=store,
+            hermes_run_service=service,
+            media_analysis_dispatcher=None,
+            media_analysis_poll_interval_seconds=0.01,
+        )
+    )
+
+    async def scenario() -> None:
+        lifespan = _media_analysis_lifespan(app)
+        await lifespan.__aenter__()
+        assert await asyncio.to_thread(store.recovery_entered.wait, 1)
+        create = asyncio.create_task(
+            service.create_run(
+                project_id="p",
+                session_id="s",
+                conversation_id="c",
+                client_message_id="cancelled-lifespan-recovery",
+                text="q",
+            )
+        )
+        await asyncio.sleep(0)
+        assert service.diagnostics()["admissions"] == 1
+        close = asyncio.create_task(lifespan.__aexit__(None, None, None))
+        await asyncio.sleep(0.05)
+        try:
+            assert not store.begin_entered.is_set()
+            assert not close.done()
+        finally:
+            store.recovery_release.set()
+        await asyncio.wait_for(close, timeout=1)
+        run = await asyncio.wait_for(create, timeout=1)
+        assert run.terminal is True
+
+    asyncio.run(scenario())
+
+
+def test_recover_interrupted_reconciliation_scope_is_project_scoped_for_same_run_id(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path / "projects")
+
+    def project_scope(name: str):
+        project = store.bootstrap_project(name)
+        session = store.save_editing_session(
+            project_id=project.project_id,
+            timeline_id=f"timeline-{name}",
+            session_payload={"segments": [], "history": []},
+        )
+        conversation_id = f"conversation-{name}"
+        store.create_director_conversation(
+            project_id=project.project_id,
+            session_id=session["session_id"],
+            conversation_id=conversation_id,
+        )
+        return project.project_id, session, conversation_id
+
+    project_a, session_a, conversation_a = project_scope("live-a")
+    project_b, session_b, conversation_b = project_scope("orphan-b")
+    gateway = _BlockingGateway()
+    service = HermesRunService(store=store, gateway_client=gateway)
+    now_epoch = int(datetime.now(UTC).timestamp())
+
+    async def scenario() -> tuple[str, str, set[str], set[str]]:
+        live = await service.create_run(
+            project_id=project_a,
+            session_id=session_a["session_id"],
+            conversation_id=conversation_a,
+            client_message_id="live-a",
+            text="q",
+            expected_session_revision=session_a["session_revision"],
+        )
+        await asyncio.wait_for(gateway.entered.wait(), timeout=1)
+        orphan = store.begin_director_hermes_run(
+            project_id=project_b,
+            session_id=session_b["session_id"],
+            conversation_id=conversation_b,
+            client_message_id="orphan-b",
+            user_text="q",
+            expected_session_revision=session_b["session_revision"],
+            expected_asset_index_revision=0,
+        )
+        connection = store._connection(project_b)
+        try:
+            connection.execute(
+                "UPDATE director_hermes_runs SET run_id = ? "
+                "WHERE project_id = ? AND run_id = ?",
+                (live.run_id, project_b, orphan["run_id"]),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+        store.register_hermes_run_capabilities(
+            project_id=project_b,
+            conversation_id=conversation_b,
+            run_id=live.run_id,
+            session_id=session_b["session_id"],
+            session_revision=session_b["session_revision"],
+            asset_index_revision=0,
+            capabilities=(
+                {
+                    "capability_id": "orphan-b-read",
+                    "action": "read_context",
+                    "expires_at": now_epoch + 300,
+                },
+                {
+                    "capability_id": "orphan-b-publish",
+                    "action": "publish_proposal",
+                    "expires_at": now_epoch + 300,
+                },
+            ),
+        )
+        app = SimpleNamespace(
+            state=SimpleNamespace(
+                store=store,
+                hermes_run_service=service,
+            )
+        )
+        await _recover_hermes_runs(app)
+        live_status = store.get_director_hermes_run(
+            project_id=project_a,
+            run_id=live.run_id,
+        )["status"]
+        orphan_status = store.get_director_hermes_run(
+            project_id=project_b,
+            run_id=live.run_id,
+        )["status"]
+
+        def states(project_id: str) -> set[str]:
+            scoped = store._connection(project_id)
+            try:
+                return {
+                    str(row["state"])
+                    for row in scoped.execute(
+                        "SELECT state FROM hermes_capability_ledger "
+                        "WHERE project_id = ? AND run_id = ?",
+                        (project_id, live.run_id),
+                    ).fetchall()
+                }
+            finally:
+                scoped.close()
+
+        live_states = states(project_a)
+        orphan_states = states(project_b)
+        await service.shutdown()
+        return live_status, orphan_status, live_states, orphan_states
+
+    live_status, orphan_status, live_states, orphan_states = asyncio.run(
+        scenario()
+    )
+    assert live_status in {"pending", "streaming"}
+    assert orphan_status == "interrupted"
+    assert live_states == {"consumed", "issued"}
+    assert orphan_states == {"revoked"}
+    assert gateway.calls == 1
 
 
 def test_public_cancel_revokes_only_the_unconsumed_publish_capability() -> None:
@@ -652,7 +1117,7 @@ def test_public_cancel_revokes_only_the_unconsumed_publish_capability() -> None:
     assert gateway.cancellations == ["public-cancel"]
     assert store.states["public-cancel-cap-read"] == "consumed"
     assert store.states["public-cancel-cap-publish"] == "revoked"
-    assert calls.count("revoke") == 1
+    assert calls.count("revoke") == 0
     assert len(store.completions) == 1
     assert store.completions[0]["status"] == "interrupted"
 
@@ -4009,6 +4474,138 @@ def test_terminal_cas_failure_still_publishes_one_blocked_terminal(store_result)
     ) == events[-1].text
 
 
+def test_hermes_capability_ledger_outage_discards_token_and_releases_without_retry() -> None:
+    token_fragment = "ledger-outage-publish-secret"
+
+    class Store:
+        proposal_writes = 0
+
+        def begin_director_hermes_run(self, **_):
+            return {
+                "run_id": "ledger-outage-run",
+                "status": "pending",
+                "owner_token": "owner",
+                "dispatch": True,
+            }
+
+        def register_hermes_run_capabilities(self, **_):
+            raise OSError("ledger unavailable")
+
+        def revoke_issued_hermes_capabilities(self, **_):
+            raise OSError("ledger unavailable")
+
+        def complete_director_hermes_run(self, **_):
+            raise OSError("ledger unavailable")
+
+    class Gateway(_Gateway):
+        def __init__(self):
+            super().__init__()
+            self.releases: list[str] = []
+            self.provider_calls = 0
+
+        async def reserve_run(self, **values):
+            reservation = _gateway_reservation(str(values["run_id"]))
+            return reservation.model_copy(
+                update={
+                    "read_capability_token": (
+                        f"header.{token_fragment}.signature"
+                    ),
+                }
+            )
+
+        async def release_run(self, *, run_id: str):
+            self.releases.append(run_id)
+
+        async def stream_run(self, **_):
+            self.provider_calls += 1
+            yield AgentGatewayEvent(
+                "run_completed",
+                "must not dispatch",
+                publish_capability_token=(
+                    f"header.{token_fragment}.signature"
+                ),
+            )
+
+    store = Store()
+    gateway = Gateway()
+    service = HermesRunService(store=store, gateway_client=gateway)
+
+    async def scenario():
+        with pytest.raises(OSError, match="ledger unavailable") as caught:
+            await service.create_run(
+                project_id="project",
+                session_id="session",
+                conversation_id="conversation",
+                client_message_id="ledger-outage",
+                text="question",
+            )
+        return caught.value
+
+    error = asyncio.run(scenario())
+    assert gateway.releases == ["ledger-outage-run"]
+    assert gateway.provider_calls == 0
+    assert store.proposal_writes == 0
+    assert token_fragment not in repr(error)
+    assert service.diagnostics() == {
+        "closing": False,
+        "active": 0,
+        "waiting": 0,
+        "admissions": 0,
+        "dispatch": 0,
+        "terminal": 0,
+        "cleanup": 0,
+    }
+
+
+def test_hermes_capability_lifespan_reconciles_after_persistent_ledger_outage() -> None:
+    recovered = asyncio.Event()
+
+    class Store:
+        def __init__(self) -> None:
+            self.list_calls = 0
+            self.recovery_calls = 0
+            self.provider_calls = 0
+
+        def list_projects(self):
+            self.list_calls += 1
+            if self.list_calls <= 3:
+                raise OSError("ledger unavailable")
+            return [{"project_id": "project"}]
+
+        def recover_interrupted_director_hermes_runs(self, *, project_id: str):
+            assert project_id == "project"
+            self.recovery_calls += 1
+            recovered.set()
+            return [{"run_id": "old-key-run", "status": "interrupted"}]
+
+        def recover_orphaned_media_analysis_jobs(self, *, project_id: str):
+            return []
+
+        def list_media_analysis(self, *, project_id: str):
+            return []
+
+        def prune_director_hermes_run_events(self, **_):
+            return 0
+
+    store = Store()
+    app = SimpleNamespace(
+        state=SimpleNamespace(
+            store=store,
+            media_analysis_dispatcher=None,
+            media_analysis_poll_interval_seconds=0.01,
+            hermes_run_service=None,
+        )
+    )
+
+    async def scenario() -> None:
+        async with _media_analysis_lifespan(app):
+            await asyncio.wait_for(recovered.wait(), timeout=1)
+
+    asyncio.run(scenario())
+    assert store.recovery_calls >= 1
+    assert store.provider_calls == 0
+
+
 def test_gateway_release_cannot_delay_terminal_delivery() -> None:
     release_entered = asyncio.Event()
     release_allowed = asyncio.Event()
@@ -4211,6 +4808,7 @@ def test_cancelled_admission_cannot_leave_durable_pending_orphan() -> None:
             )
         )
         assert await asyncio.to_thread(store.begin_entered.wait, 1)
+        assert await service.reconciliation_excluded_run_ids() is None
         create.cancel()
         store.begin_release.set()
         with pytest.raises(asyncio.CancelledError):

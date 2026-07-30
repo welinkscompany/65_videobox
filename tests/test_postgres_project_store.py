@@ -797,6 +797,135 @@ def test_postgres_hermes_capability_expired_issued_consume_is_denied_and_audited
         _cleanup_postgres_hermes_project(store, project.project_id)
 
 
+@pytest.mark.parametrize(
+    "inject_recovery_audit_fault",
+    (False, True),
+    ids=("success", "fault-rollback"),
+)
+def test_postgres_recover_interrupted_revokes_issued_capabilities_atomically(
+    tmp_path: Path,
+    postgres_url: str,
+    monkeypatch: pytest.MonkeyPatch,
+    inject_recovery_audit_fault: bool,
+) -> None:
+    instant = datetime(2026, 7, 30, 12, 0, tzinfo=UTC)
+    store = PostgresProjectStore(
+        tmp_path,
+        database_url=postgres_url,
+        now=lambda: instant,
+    )
+    project = store.bootstrap_project(
+        f"Hermes C3 recovery revoke {uuid4().hex}"
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=f"timeline-{uuid4().hex}",
+        session_payload={"segments": [], "history": []},
+    )
+    conversation_id = f"conversation-{uuid4().hex}"
+    store.create_director_conversation(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+        conversation_id=conversation_id,
+    )
+    run = store.begin_director_hermes_run(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+        conversation_id=conversation_id,
+        client_message_id=f"message-{uuid4().hex}",
+        user_text="orphan",
+        expected_session_revision=session["session_revision"],
+        expected_asset_index_revision=0,
+    )
+    prefix = uuid4().hex
+    expires_at = int(instant.timestamp()) + 300
+    try:
+        store.register_hermes_run_capabilities(
+            project_id=project.project_id,
+            conversation_id=conversation_id,
+            run_id=run["run_id"],
+            session_id=session["session_id"],
+            session_revision=session["session_revision"],
+            asset_index_revision=0,
+            capabilities=(
+                {
+                    "capability_id": f"{prefix}-old-key-read",
+                    "action": "read_context",
+                    "expires_at": expires_at,
+                },
+                {
+                    "capability_id": f"{prefix}-old-key-publish",
+                    "action": "publish_proposal",
+                    "expires_at": expires_at,
+                },
+            ),
+        )
+        if inject_recovery_audit_fault:
+            original_append = store._append_hermes_capability_audit
+
+            def fail_after_revoke_audit(connection, **kwargs):
+                event = original_append(connection, **kwargs)
+                if kwargs["reason"] == "hermes_capability_revoked":
+                    raise OSError("postgres recovery revoke audit fault")
+                return event
+
+            monkeypatch.setattr(
+                store,
+                "_append_hermes_capability_audit",
+                fail_after_revoke_audit,
+            )
+            with pytest.raises(
+                OSError,
+                match="postgres recovery revoke audit fault",
+            ):
+                store.recover_interrupted_director_hermes_runs(
+                    project_id=project.project_id
+                )
+            recovered = []
+        else:
+            recovered = store.recover_interrupted_director_hermes_runs(
+                project_id=project.project_id
+            )
+
+        connection = store._connection(project.project_id)
+        try:
+            states = {
+                row["state"]
+                for row in connection.execute(
+                    "SELECT state FROM hermes_capability_ledger "
+                    "WHERE project_id = ? AND run_id = ?",
+                    (project.project_id, run["run_id"]),
+                ).fetchall()
+            }
+            revoke_audits = connection.execute(
+                """
+                SELECT COUNT(*) AS count FROM hermes_capability_audit
+                WHERE project_id = ? AND run_id = ?
+                  AND reason = 'hermes_capability_revoked'
+                """,
+                (project.project_id, run["run_id"]),
+            ).fetchone()
+        finally:
+            connection.close()
+        assert [item["run_id"] for item in recovered] == (
+            [] if inject_recovery_audit_fault else [run["run_id"]]
+        )
+        assert store.get_director_hermes_run(
+            project_id=project.project_id,
+            run_id=run["run_id"],
+        )["status"] == (
+            "pending" if inject_recovery_audit_fault else "interrupted"
+        )
+        assert states == (
+            {"issued"} if inject_recovery_audit_fault else {"revoked"}
+        )
+        assert revoke_audits["count"] == (
+            0 if inject_recovery_audit_fault else 2
+        )
+    finally:
+        _cleanup_postgres_hermes_project(store, project.project_id)
+
+
 def test_postgres_hermes_capability_migrates_pre_c3_rows_without_fabrication(
     tmp_path: Path,
     postgres_url: str,

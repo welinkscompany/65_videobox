@@ -333,7 +333,7 @@ capability, source copy, OpenCut, Mem0, SaaS, 자동 Apply, Task 9/CapCut 사람
 
 ## Task 6 — Cancel, restart reconciliation, DB outage, and key replacement
 
-- [ ] **6.1 RED:** lifecycle cleanup/recovery tests fail.
+- [x] **6.1 RED:** lifecycle cleanup/recovery tests fail.
 
 **Files:**
 
@@ -358,7 +358,7 @@ capability, source copy, OpenCut, Mem0, SaaS, 자동 Apply, Task 9/CapCut 사람
    - cleanup-after-consume failure does not reverse committed success.
 2. Run RED.
 
-- [ ] **6.2 GREEN:** make cleanup durable when possible and honest during outage.
+- [x] **6.2 GREEN:** make cleanup durable when possible and honest during outage.
 
 3. Fold capability revocation and audit into existing cancel/terminal/recovery
    transactions.
@@ -369,7 +369,7 @@ capability, source copy, OpenCut, Mem0, SaaS, 자동 Apply, Task 9/CapCut 사람
 6. Run GREEN:
 
    ```powershell
-   .\.venv\Scripts\python.exe -m pytest tests/test_hermes_yujin_capability_lifecycle.py tests/test_hermes_run_service.py tests/test_postgres_project_store.py -k "hermes_capability or recover_interrupted" -q
+   .\.venv\Scripts\python.exe -m pytest tests/test_hermes_yujin_capability_lifecycle.py tests/test_hermes_run_service.py tests/test_postgres_project_store.py -k "hermes_capability or recover_interrupted or reconciliation_scope or recovery_holds or public_cancel" -q
    git diff --check
    ```
 
@@ -469,7 +469,7 @@ skip.
        if ($LASTEXITCODE -ne 0) { throw "C3 disposable PostgreSQL did not become ready." }
        $c3PgPort = ((docker port $c3PgName 5432/tcp) -split ":")[-1]
        $env:VIDEOBOX_TEST_POSTGRES_URL = "postgresql://postgres:videobox-c3-test@127.0.0.1:$c3PgPort/videobox"
-       .\.venv\Scripts\python.exe -m pytest tests/test_postgres_project_store.py -k "hermes_capability or publish_proposal or publish_terminal" -q
+       .\.venv\Scripts\python.exe -m pytest tests/test_postgres_project_store.py -k "hermes_capability or publish_proposal or publish_terminal or recover_interrupted" -q
        if ($LASTEXITCODE -ne 0) { throw "C3 PostgreSQL capability tests failed." }
    }
    finally {

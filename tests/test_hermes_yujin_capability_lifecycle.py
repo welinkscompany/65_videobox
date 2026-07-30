@@ -973,6 +973,47 @@ def test_sqlite_hermes_capability_revoke_is_issued_only_and_idempotent(
     }
 
 
+def test_sqlite_hermes_capability_consume_success_survives_cleanup_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = LocalProjectStore(tmp_path, now=lambda: NOW)
+    project = store.bootstrap_project("C3 consume cleanup failure")
+    _register_capabilities(store, project.project_id)
+    cleanup_calls: list[str] = []
+
+    def fail_cleanup(*, project_id: str) -> None:
+        cleanup_calls.append(project_id)
+        raise OSError("cleanup unavailable")
+
+    monkeypatch.setattr(
+        store,
+        "_purge_expired_hermes_capabilities",
+        fail_cleanup,
+    )
+
+    result = store.consume_registered_hermes_capability(
+        project_id=project.project_id,
+        capability_id="cap-read-0001",
+        conversation_id="conversation-1",
+        run_id="run-1",
+        session_id="session-1",
+        session_revision=3,
+        asset_index_revision=7,
+        action="read_context",
+    )
+
+    assert result == "accepted"
+    assert cleanup_calls == [project.project_id]
+    with sqlite3.connect(store.database_path(project.project_id)) as connection:
+        state = connection.execute(
+            "SELECT state FROM hermes_capability_ledger "
+            "WHERE project_id = ? AND jti = 'cap-read-0001'",
+            (project.project_id,),
+        ).fetchone()[0]
+    assert state == "consumed"
+
+
 def test_sqlite_hermes_capability_audit_is_exact_redacted_and_trusted(
     tmp_path: Path,
 ) -> None:
@@ -1355,6 +1396,167 @@ def test_sqlite_completed_without_proposal_revokes_unused_publish(
             (project_id,),
         ).fetchone()[0]
     assert publish == "revoked"
+
+
+@pytest.mark.parametrize("status", ("blocked", "interrupted"))
+def test_sqlite_hermes_capability_nonproposal_terminal_revokes_all_issued_atomically(
+    tmp_path: Path,
+    status: str,
+) -> None:
+    store = LocalProjectStore(tmp_path, now=lambda: NOW)
+    (
+        project_id,
+        _session,
+        _conversation_id,
+        authority,
+        _proposal,
+    ) = _terminal_capability_scope(
+        store,
+        project_name=f"C3 {status} terminal revoke",
+    )
+    durable = authority["durable"]
+
+    assert store.complete_director_hermes_run(
+        project_id=project_id,
+        run_id=durable["run_id"],
+        owner_token=durable["owner_token"],
+        status=status,
+        assistant_text="수동 편집을 계속 사용할 수 있습니다.",
+        retryable=True,
+        proposal=None,
+    )
+
+    with sqlite3.connect(store.database_path(project_id)) as connection:
+        states = dict(
+            connection.execute(
+                "SELECT action, state FROM hermes_capability_ledger "
+                "WHERE project_id = ? ORDER BY action",
+                (project_id,),
+            ).fetchall()
+        )
+        revoke_audits = connection.execute(
+            """
+            SELECT COUNT(*) FROM hermes_capability_audit
+            WHERE project_id = ? AND run_id = ?
+              AND reason = 'hermes_capability_revoked'
+            """,
+            (project_id, durable["run_id"]),
+        ).fetchone()[0]
+    assert states == {
+        "publish_proposal": "revoked",
+        "read_context": "revoked",
+    }
+    assert revoke_audits == 2
+
+
+def test_sqlite_recover_interrupted_coordinated_restart_revokes_active_capabilities(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path, now=lambda: NOW)
+    (
+        project_id,
+        _session,
+        _conversation_id,
+        authority,
+        _proposal,
+    ) = _terminal_capability_scope(
+        store,
+        project_name="C3 startup recovery revoke",
+    )
+    durable = authority["durable"]
+
+    recovered = store.recover_interrupted_director_hermes_runs(
+        project_id=project_id
+    )
+
+    assert [item["run_id"] for item in recovered] == [durable["run_id"]]
+    with sqlite3.connect(store.database_path(project_id)) as connection:
+        run_status = connection.execute(
+            "SELECT status FROM director_hermes_runs "
+            "WHERE project_id = ? AND run_id = ?",
+            (project_id, durable["run_id"]),
+        ).fetchone()[0]
+        states = {
+            row[0]
+            for row in connection.execute(
+                "SELECT state FROM hermes_capability_ledger "
+                "WHERE project_id = ? AND run_id = ?",
+                (project_id, durable["run_id"]),
+            ).fetchall()
+        }
+        revoke_audits = connection.execute(
+            """
+            SELECT COUNT(*) FROM hermes_capability_audit
+            WHERE project_id = ? AND run_id = ?
+              AND reason = 'hermes_capability_revoked'
+            """,
+            (project_id, durable["run_id"]),
+        ).fetchone()[0]
+    assert run_status == "interrupted"
+    assert states == {"revoked"}
+    assert revoke_audits == 2
+
+
+def test_sqlite_recover_interrupted_revoke_fault_rolls_back_interruption(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = LocalProjectStore(tmp_path, now=lambda: NOW)
+    (
+        project_id,
+        _session,
+        _conversation_id,
+        authority,
+        _proposal,
+    ) = _terminal_capability_scope(
+        store,
+        project_name="C3 startup recovery atomic fault",
+    )
+    durable = authority["durable"]
+    original_append = store._append_hermes_capability_audit
+
+    def fail_after_revoke_audit(connection, **kwargs):
+        event = original_append(connection, **kwargs)
+        if kwargs["reason"] == "hermes_capability_revoked":
+            raise OSError("recovery revoke audit fault")
+        return event
+
+    monkeypatch.setattr(
+        store,
+        "_append_hermes_capability_audit",
+        fail_after_revoke_audit,
+    )
+
+    with pytest.raises(OSError, match="recovery revoke audit fault"):
+        store.recover_interrupted_director_hermes_runs(
+            project_id=project_id
+        )
+
+    with sqlite3.connect(store.database_path(project_id)) as connection:
+        run_status = connection.execute(
+            "SELECT status FROM director_hermes_runs "
+            "WHERE project_id = ? AND run_id = ?",
+            (project_id, durable["run_id"]),
+        ).fetchone()[0]
+        states = {
+            row[0]
+            for row in connection.execute(
+                "SELECT state FROM hermes_capability_ledger "
+                "WHERE project_id = ? AND run_id = ?",
+                (project_id, durable["run_id"]),
+            ).fetchall()
+        }
+        revoke_audits = connection.execute(
+            """
+            SELECT COUNT(*) FROM hermes_capability_audit
+            WHERE project_id = ? AND run_id = ?
+              AND reason = 'hermes_capability_revoked'
+            """,
+            (project_id, durable["run_id"]),
+        ).fetchone()[0]
+    assert run_status == "pending"
+    assert states == {"issued"}
+    assert revoke_audits == 0
 
 
 @pytest.mark.parametrize("race", ["session_revision", "asset_index"])

@@ -1357,6 +1357,12 @@ class LocalProjectStore:
                 occurred_at=now,
             )
             connection.commit()
+            try:
+                self._purge_expired_hermes_capabilities(
+                    project_id=project_id
+                )
+            except Exception:
+                pass
             return "accepted"
         except Exception:
             if connection.in_transaction:
@@ -1381,46 +1387,13 @@ class LocalProjectStore:
         connection = self._connection(project_id)
         try:
             self._begin_hermes_capability_transaction(connection)
-            lock_suffix = "" if isinstance(connection, sqlite3.Connection) else " FOR UPDATE"
-            rows = connection.execute(
-                """
-                SELECT * FROM hermes_capability_ledger
-                WHERE project_id = ?
-                  AND lifecycle_version = 'videobox.yujin-capability.v1'
-                  AND conversation_id = ?
-                  AND run_id = ?
-                ORDER BY jti
-                """
-                + lock_suffix,
-                (project_id, conversation_id, run_id),
-            ).fetchall()
-            now = self._now_iso()
-            revoked = 0
-            for row in rows:
-                if str(row["state"]) != "issued":
-                    continue
-                updated = connection.execute(
-                    """
-                    UPDATE hermes_capability_ledger
-                    SET state = 'revoked', updated_at = ?
-                    WHERE project_id = ? AND jti = ? AND state = 'issued'
-                    """,
-                    (now, project_id, str(row["jti"])),
-                )
-                if updated.rowcount != 1:
-                    continue
-                revoked += 1
-                self._append_hermes_capability_audit(
-                    connection,
-                    capability_id=str(row["jti"]),
-                    project_id=project_id,
-                    conversation_id=conversation_id,
-                    run_id=run_id,
-                    action=str(row["action"]),
-                    outcome="accepted",
-                    reason=reason,
-                    occurred_at=now,
-                )
+            revoked = self._revoke_issued_hermes_capabilities_with_connection(
+                connection=connection,
+                project_id=project_id,
+                conversation_id=conversation_id,
+                run_id=run_id,
+                occurred_at=self._now_iso(),
+            )
             connection.commit()
             return revoked
         except Exception:
@@ -1429,6 +1402,58 @@ class LocalProjectStore:
             raise
         finally:
             connection.close()
+
+    def _revoke_issued_hermes_capabilities_with_connection(
+        self,
+        *,
+        connection: Any,
+        project_id: str,
+        conversation_id: str,
+        run_id: str,
+        occurred_at: str,
+    ) -> int:
+        lock_suffix = (
+            "" if isinstance(connection, sqlite3.Connection) else " FOR UPDATE"
+        )
+        rows = connection.execute(
+            """
+            SELECT * FROM hermes_capability_ledger
+            WHERE project_id = ?
+              AND lifecycle_version = 'videobox.yujin-capability.v1'
+              AND conversation_id = ?
+              AND run_id = ?
+            ORDER BY jti
+            """
+            + lock_suffix,
+            (project_id, conversation_id, run_id),
+        ).fetchall()
+        revoked = 0
+        for row in rows:
+            if str(row["state"]) != "issued":
+                continue
+            updated = connection.execute(
+                """
+                UPDATE hermes_capability_ledger
+                SET state = 'revoked', updated_at = ?
+                WHERE project_id = ? AND jti = ? AND state = 'issued'
+                """,
+                (occurred_at, project_id, str(row["jti"])),
+            )
+            if updated.rowcount != 1:
+                continue
+            revoked += 1
+            self._append_hermes_capability_audit(
+                connection,
+                capability_id=str(row["jti"]),
+                project_id=project_id,
+                conversation_id=conversation_id,
+                run_id=run_id,
+                action=str(row["action"]),
+                outcome="accepted",
+                reason="hermes_capability_revoked",
+                occurred_at=occurred_at,
+            )
+        return revoked
 
     def record_hermes_capability_denial(
         self,
@@ -6151,6 +6176,15 @@ class LocalProjectStore:
         verified: Mapping[str, Any] | None,
         occurred_at: str,
     ) -> str:
+        if not proposal_exists:
+            self._revoke_issued_hermes_capabilities_with_connection(
+                connection=connection,
+                project_id=project_id,
+                conversation_id=str(active["conversation_id"]),
+                run_id=run_id,
+                occurred_at=occurred_at,
+            )
+            return "accepted"
         lock_suffix = (
             "" if isinstance(connection, sqlite3.Connection) else " FOR UPDATE"
         )
@@ -6172,29 +6206,6 @@ class LocalProjectStore:
             ),
         ).fetchall()
         trusted = rows[0] if len(rows) == 1 else None
-        if not proposal_exists:
-            if trusted is not None and str(trusted["state"]) == "issued":
-                updated = connection.execute(
-                    """
-                    UPDATE hermes_capability_ledger
-                    SET state = 'revoked', updated_at = ?
-                    WHERE project_id = ? AND jti = ? AND state = 'issued'
-                    """,
-                    (occurred_at, project_id, str(trusted["jti"])),
-                )
-                if updated.rowcount == 1:
-                    self._append_hermes_capability_audit(
-                        connection,
-                        capability_id=str(trusted["jti"]),
-                        project_id=project_id,
-                        conversation_id=str(active["conversation_id"]),
-                        run_id=run_id,
-                        action="publish_proposal",
-                        outcome="accepted",
-                        reason="hermes_capability_revoked",
-                        occurred_at=occurred_at,
-                    )
-            return "accepted"
 
         expected_fields = {
             "capability_id",
@@ -6599,9 +6610,15 @@ class LocalProjectStore:
             connection.close()
 
     def recover_interrupted_director_hermes_runs(
-        self, *, project_id: str
+        self,
+        *,
+        project_id: str,
+        exclude_run_ids: tuple[str, ...] = (),
     ) -> list[dict[str, Any]]:
         """Settle startup orphans once; recovery never grants a new provider owner."""
+        excluded = tuple(sorted(set(exclude_run_ids)))
+        for run_id in excluded:
+            self._validate_hermes_authority_id(run_id)
         now = self._now_iso()
         fallback_suffix = (
             "Hermes is temporarily unavailable. "
@@ -6611,15 +6628,25 @@ class LocalProjectStore:
         connection = self._connection(project_id)
         try:
             self._begin_director_hermes_transaction(connection)
+            exclusion_sql = (
+                " AND run_id NOT IN ("
+                + ", ".join("?" for _ in excluded)
+                + ")"
+                if excluded
+                else ""
+            )
             rows = connection.execute(
                 """
                 SELECT run_id, conversation_id, session_id, assistant_draft_text,
                        next_event_id
                 FROM director_hermes_runs
                 WHERE project_id = ? AND status IN ('pending', 'streaming')
+                """
+                + exclusion_sql
+                + """
                 ORDER BY created_at, run_id
                 """,
-                (project_id,),
+                (project_id, *excluded),
             ).fetchall()
             for row in rows:
                 run_id = str(row["run_id"])
@@ -6653,6 +6680,13 @@ class LocalProjectStore:
                 )
                 if changed.rowcount != 1:
                     continue
+                self._revoke_issued_hermes_capabilities_with_connection(
+                    connection=connection,
+                    project_id=project_id,
+                    conversation_id=str(row["conversation_id"]),
+                    run_id=run_id,
+                    occurred_at=now,
+                )
                 assistant_message_order = self._next_director_message_order(
                     connection,
                     conversation_id=str(row["conversation_id"]),

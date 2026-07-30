@@ -121,12 +121,73 @@ async def _poll_media_analysis(app: FastAPI, *, recover_running: bool) -> None:
 async def _recover_hermes_runs(app: FastAPI) -> None:
     """Fail closed across API restarts without redispatching provider work."""
     store: LocalProjectStore = app.state.store
+    hermes_run_service = getattr(
+        app.state,
+        "hermes_run_service",
+        None,
+    )
+    if hermes_run_service is not None:
+        async with hermes_run_service.reconciliation_scope() as exclusions:
+            if exclusions is None:
+                return
+            await _await_owned_hermes_recovery(
+                store=store,
+                excluded_run_ids_by_project=exclusions,
+            )
+        return
+    await _await_owned_hermes_recovery(
+        store=store,
+        excluded_run_ids_by_project={},
+    )
+
+
+async def _await_owned_hermes_recovery(
+    *,
+    store: LocalProjectStore,
+    excluded_run_ids_by_project: dict[str, tuple[str, ...]],
+) -> None:
+    recovery = asyncio.create_task(
+        _recover_hermes_store_runs(
+            store=store,
+            excluded_run_ids_by_project=excluded_run_ids_by_project,
+        ),
+        name="videobox-hermes-reconciliation",
+    )
+    cancellation: asyncio.CancelledError | None = None
+    while not recovery.done():
+        try:
+            await asyncio.shield(recovery)
+        except asyncio.CancelledError as error:
+            if cancellation is None:
+                cancellation = error
+        except BaseException:
+            break
+    recovery_error: BaseException | None = None
+    try:
+        recovery.result()
+    except BaseException as error:
+        recovery_error = error
+    if cancellation is not None:
+        raise cancellation
+    if recovery_error is not None:
+        raise recovery_error
+
+
+async def _recover_hermes_store_runs(
+    *,
+    store: LocalProjectStore,
+    excluded_run_ids_by_project: dict[str, tuple[str, ...]],
+) -> None:
     projects = await asyncio.to_thread(store.list_projects)
     for project in projects:
         project_id = str(project["project_id"])
+        recovery_kwargs = {"project_id": project_id}
+        excluded_run_ids = excluded_run_ids_by_project.get(project_id, ())
+        if excluded_run_ids:
+            recovery_kwargs["exclude_run_ids"] = excluded_run_ids
         await asyncio.to_thread(
             store.recover_interrupted_director_hermes_runs,
-            project_id=project_id,
+            **recovery_kwargs,
         )
 
 
@@ -148,14 +209,25 @@ async def _prune_hermes_run_events(app: FastAPI) -> None:
 async def _media_analysis_lifespan(app: FastAPI):
     """Run recovery and durable retry polling outside request/startup hot paths."""
     stop_event = asyncio.Event()
-    await _recover_hermes_runs(app)
+    try:
+        await _recover_hermes_runs(app)
+    except Exception:
+        # An unavailable ledger cannot be claimed as durably reconciled.
+        # The single bounded worker retries after recovery without dispatching.
+        pass
 
     async def worker() -> None:
         first = True
         while not stop_event.is_set():
-            await _poll_media_analysis(app, recover_running=first)
-            await _prune_hermes_run_events(app)
-            first = False
+            try:
+                await _recover_hermes_runs(app)
+                await _poll_media_analysis(app, recover_running=first)
+                await _prune_hermes_run_events(app)
+                first = False
+            except Exception:
+                # One bounded owner survives database outages and retries the
+                # durable maintenance iteration. CancelledError is not caught.
+                pass
             try:
                 await asyncio.wait_for(stop_event.wait(), timeout=app.state.media_analysis_poll_interval_seconds)
             except TimeoutError:

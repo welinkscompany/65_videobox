@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from enum import Enum
 import logging
@@ -95,6 +96,7 @@ class _Admission:
     waiters: int = 0
     abandoned: bool = False
     task: asyncio.Task | None = None
+    durable_run_id: str | None = None
 
 
 class HermesRunService:
@@ -138,6 +140,7 @@ class HermesRunService:
         self._waiting: deque[str] = deque()
         self._active = 0
         self._lock = asyncio.Lock()
+        self._reconciliation_lock = asyncio.Lock()
         self._closing = False
         self._admission_tasks: set[asyncio.Task] = set()
         self._dispatch_tasks: set[asyncio.Task] = set()
@@ -371,11 +374,6 @@ class HermesRunService:
                 await self.gateway_client.cancel_run(run_id=run.run_id)
             except Exception:
                 pass
-        await self._revoke_issued_capabilities(
-            project_id=run.project_id,
-            conversation_id=run.conversation_id,
-            run_id=run.run_id,
-        )
         await self._terminal(
             run,
             "blocked",
@@ -489,6 +487,38 @@ class HermesRunService:
             "cleanup": sum(not task.done() for task in self._cleanup_tasks),
         }
 
+    async def reconciliation_excluded_run_ids(
+        self,
+    ) -> dict[str, tuple[str, ...]] | None:
+        async with self._lock:
+            if any(
+                admission.durable_run_id is None
+                for admission in self._admissions.values()
+            ):
+                return None
+            excluded_by_project: dict[str, set[str]] = {}
+            for run_id, run in self._runs.items():
+                if not run.terminal:
+                    excluded_by_project.setdefault(
+                        run.project_id, set()
+                    ).add(run_id)
+            for key, admission in self._admissions.items():
+                if admission.durable_run_id is not None:
+                    excluded_by_project.setdefault(key[0], set()).add(
+                        admission.durable_run_id
+                    )
+            return {
+                project_id: tuple(sorted(run_ids))
+                for project_id, run_ids in excluded_by_project.items()
+            }
+
+    @asynccontextmanager
+    async def reconciliation_scope(self):
+        """Fence only durable begin while startup reconciliation owns the DB."""
+
+        async with self._reconciliation_lock:
+            yield await self.reconciliation_excluded_run_ids()
+
     def get_run(self, run_id: str) -> _Run:
         run = self._runs.get(run_id)
         if run is None:
@@ -518,18 +548,23 @@ class HermesRunService:
                 expected_session_revision=expected_session_revision,
                 selected_segment_id=selected_segment_id,
             )
-            durable = await asyncio.to_thread(
-                self.store.begin_director_hermes_run,
-                project_id=project_id,
-                session_id=session_id,
-                conversation_id=conversation_id,
-                client_message_id=client_message_id,
-                user_text=text,
-                expected_session_revision=expected_session_revision,
-                expected_asset_index_revision=context.asset_index_revision,
-                selected_segment_id=selected_segment_id,
-                retry_of_run_id=retry_of_run_id,
-            )
+            async with self._reconciliation_lock:
+                durable = await asyncio.to_thread(
+                    self.store.begin_director_hermes_run,
+                    project_id=project_id,
+                    session_id=session_id,
+                    conversation_id=conversation_id,
+                    client_message_id=client_message_id,
+                    user_text=text,
+                    expected_session_revision=expected_session_revision,
+                    expected_asset_index_revision=(
+                        context.asset_index_revision
+                    ),
+                    selected_segment_id=selected_segment_id,
+                    retry_of_run_id=retry_of_run_id,
+                )
+                async with self._lock:
+                    admission.durable_run_id = str(durable["run_id"])
             if (
                 str(durable.get("status") or "") in {"pending", "streaming"}
                 and not bool(durable.get("dispatch"))
@@ -645,11 +680,6 @@ class HermesRunService:
                     try:
                         if gateway_reservation_attempted:
                             await self._release_gateway_run(run_id)
-                        await self._revoke_issued_capabilities(
-                            project_id=project_id,
-                            conversation_id=conversation_id,
-                            run_id=run_id,
-                        )
                     finally:
                         try:
                             await asyncio.to_thread(
@@ -1479,24 +1509,6 @@ class HermesRunService:
             raise HermesCapacityUnavailable(
                 "hermes_run_admission_abandoned"
             )
-
-    async def _revoke_issued_capabilities(
-        self,
-        *,
-        project_id: str,
-        conversation_id: str,
-        run_id: str,
-    ) -> None:
-        try:
-            await asyncio.to_thread(
-                self.store.revoke_issued_hermes_capabilities,
-                project_id=project_id,
-                conversation_id=conversation_id,
-                run_id=run_id,
-                reason="hermes_capability_revoked",
-            )
-        except Exception:
-            return
 
     async def _terminal_done(
         self, run: _Run, completed: asyncio.Task
