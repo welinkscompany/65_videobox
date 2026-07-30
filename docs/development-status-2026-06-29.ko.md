@@ -1,6 +1,17 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 313. 2026-07-30 Hermes Yujin D2 Mem0 adapter closeout`을 우선 적용한다. Task 22 기술 closeout 근거는 `## 300`, Phase B 근거는 `## 307`, Phase C 근거는 `## 308`–`## 311`, D1 근거는 `## 312`를 유지하며, 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 314. 2026-07-30 Hermes Yujin D3 editor memory UI closeout`을 우선 적용한다. Task 22 기술 closeout 근거는 `## 300`, Phase B 근거는 `## 307`, Phase C 근거는 `## 308`–`## 311`, D1/D2 근거는 `## 312`–`## 313`을 유지하며, 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+
+## 314. 2026-07-30 Hermes Yujin D3 editor memory UI closeout
+
+- `[x] D3 완료`: Editor RightDock는 현재 project와 현재 Director conversation에 이미 durable하게 존재하거나 테스트에서 seed한 짧은 memory candidate만 관리한다. 조회는 conversation 존재·소유권을 확인하고 project+conversation을 `LIMIT 100`보다 먼저 거른다. 공개 read model은 `storage_status`와 `retryable`만 추가하며 provider/event/memory/external ref를 반환하지 않는다. 실제 대화→candidate production E2E는 D3 완료 주장이 아니다.
+- `명시적 동작`: 한 번의 `승인하고 저장` 클릭이 approve→store 두 요청을 순서대로 실행한다. approve는 provider call `0`이고 실패·stale이면 store도 `0`이다. reload의 approved/not-requested는 자동 저장 없이 `저장하기`, live `claimed`는 비클릭 `저장 처리 중`이다. 60초 lease가 지난 claim은 private timestamp/ref 없이 retryable만 공개하고, 별도 클릭에서 pre-call은 add reclaim, call-started는 reconcile만 한다. 저장·삭제 실패도 별도 manual retry를 표시하며 store retry마다 새 request ID를 만든다.
+- `소유권·fallback`: candidate/action/error는 Route가 소유하므로 RightDock/Inspector close-open 뒤에도 candidate와 conversation scroll이 유지된다. 기존 PreviewStage 한 개는 그대로이며 memory 조회·저장·삭제 실패가 유진 대화 composer나 수동 Inspector 편집을 막지 않는다. D4 전에는 candidate retrieval/context injection이 없고 pending/rejected는 provider retrieval `0`이다.
+- `경계 보강`: frontend DTO guard는 exact key/status/category, bounded ID/text, duplicate source ID, strict UTC와 timestamp order, requested project/conversation identity를 검증한다. 모든 memory browser request는 same-origin이고 redirect를 거부한다. source transcript와 private provider 필드는 UI에 렌더링하지 않는다.
+- `검증`: memory store/API backend **49 passed**, typed API memory **20 passed**, D3 focused frontend **4 files / 178 passed**(RightDock memory panel **3**, EditorWorkbenchRoute 전체 **114** 포함)다. expired pre-call/call-started claim의 add/reconcile retry와 late list/approve/store/delete route fence를 포함한다. disposable PostgreSQL 16에서 current-conversation-before-limit **1 passed, 40 deselected**, expired-claim add/reconcile parity **1 passed, 41 deselected**였고 각 전용 container 삭제를 확인했다. Hermes Yujin 20-ID plan-state verifier와 `git diff --check`도 통과했다. 독립 spec/quality/gap/reverse 재검토는 **Critical/Important/Minor 0, PASS**다. 기존 Starlette multipart warning 1건은 비실패 출력이다.
+- `미실행`: 전체 Python regression, 전체 frontend suite, production build, provenance verifier, 실제 Mem0/provider call, 브라우저 사람 E2E, 사용자 원본 영상 재생·청취, CapCut Desktop 사람 검증, Task 9 사람/환경 acceptance는 실행하지 않았고 통과로 간주하지 않는다.
+- `진행률`: Phase D **3/4 (75.0%), 잔여 25.0%**, Mem0 child **3/5 (60.0%), 잔여 40.0%**, Hermes Yujin initiative **18/20 (90.0%), 잔여 10.0%**다. 기존 VideoBox 공식 누적은 **9/22 (40.9%)**, 잔여 **59.1%**로 유지한다.
+- `다음 작업`: **D4만** 진행한다. 분모 변경 없이 정확히 한 개의 production producer를 먼저 추가한다. 현재 RightDock의 명시적 `기억 후보 만들기`만 현재 owned conversation의 완료 message ID와 typed policy-safe 짧은 candidate를 기존 POST에 보내며 page load/message-run 완료/provider 응답/approve/store/retry의 자동 create·approve·store와 provider call은 `0`이다. 이어 approved+stored 기억만 bounded retrieval로 creator context에 주입하고 pending/rejected/deleted/failed/unrelated는 retrieval `0`으로 유지한다. empty/malformed/timeout/Mem0 unavailable은 기억 없이 유진 대화와 수동 편집을 계속하며 live canary는 별도 명시 실행으로 둔다.
 
 ## 313. 2026-07-30 Hermes Yujin D2 Mem0 adapter closeout
 

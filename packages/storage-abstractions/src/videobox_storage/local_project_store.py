@@ -54,6 +54,7 @@ from videobox_core_engine.creation_interview import (
 # recent N per export_type per project so disk usage does not grow unbounded.
 DEFAULT_EXPORT_RETENTION_COUNT = 5
 CAPCUT_DRAFT_HANDOFF_CLAIM_LEASE_SECONDS = 300
+YUJIN_MEMORY_STORE_CLAIM_LEASE_SECONDS = 60
 RETIRED_CREDENTIAL_TABLE = "g" + "emini_provider_keys"
 HERMES_CAPABILITY_DENIAL_REASONS = frozenset(
     {
@@ -3892,11 +3893,32 @@ class LocalProjectStore:
         file_path.write_text(json.dumps(updated, indent=2, ensure_ascii=True), encoding="utf-8")
         return updated
 
-    @staticmethod
-    def _yujin_memory_candidate_payload(row: Any) -> dict[str, Any]:
+    def _yujin_memory_candidate_payload(
+        self,
+        row: Any,
+    ) -> dict[str, Any]:
         status = str(row["status"])
+        storage_status = str(row["storage_status"])
         if status not in {"pending", "approved", "rejected"}:
             raise ValueError("memory_candidate_consent_status_invalid")
+        expired_pre_call_claim = False
+        if (
+            storage_status == "claimed"
+            and row["write_claim_token"] is not None
+        ):
+            try:
+                claimed_at = datetime.fromisoformat(
+                    str(row["write_claimed_at"])
+                )
+                expired_pre_call_claim = (
+                    self._clock().astimezone(UTC)
+                    >= claimed_at.astimezone(UTC)
+                    + timedelta(
+                        seconds=YUJIN_MEMORY_STORE_CLAIM_LEASE_SECONDS
+                    )
+                )
+            except (TypeError, ValueError):
+                expired_pre_call_claim = False
         return {
             "candidate_id": str(row["candidate_id"]),
             "project_id": str(row["project_id"]),
@@ -3910,6 +3932,10 @@ class LocalProjectStore:
             "category": str(row["category"]),
             "proposed_text": str(row["proposed_text"]),
             "status": status,
+            "storage_status": storage_status,
+            "retryable": expired_pre_call_claim
+            or storage_status
+            in {"event_pending", "failed_retryable", "ambiguous"},
             "created_at": str(row["created_at"]),
             "updated_at": str(row["updated_at"]),
         }
@@ -4204,14 +4230,36 @@ class LocalProjectStore:
         self,
         *,
         project_id: str,
+        conversation_id: str | None = None,
     ) -> list[dict[str, Any]]:
-        rows = self._fetchall(
-            project_id,
-            "SELECT * FROM yujin_memory_candidates "
-            "WHERE project_id = ? "
-            "ORDER BY created_at DESC, candidate_id DESC LIMIT 100",
-            (project_id,),
-        )
+        if conversation_id is None:
+            rows = self._fetchall(
+                project_id,
+                "SELECT * FROM yujin_memory_candidates "
+                "WHERE project_id = ? "
+                "ORDER BY created_at DESC, candidate_id DESC LIMIT 100",
+                (project_id,),
+            )
+        else:
+            connection = self._connection(project_id)
+            try:
+                conversation = connection.execute(
+                    "SELECT conversation_id FROM director_conversations "
+                    "WHERE project_id = ? AND conversation_id = ?",
+                    (project_id, conversation_id),
+                ).fetchone()
+                if conversation is None:
+                    raise KeyError(
+                        "memory_candidate_conversation_missing"
+                    )
+                rows = connection.execute(
+                    "SELECT * FROM yujin_memory_candidates "
+                    "WHERE project_id = ? AND conversation_id = ? "
+                    "ORDER BY created_at DESC, candidate_id DESC LIMIT 100",
+                    (project_id, conversation_id),
+                ).fetchall()
+            finally:
+                connection.close()
         return [self._yujin_memory_candidate_payload(row) for row in rows]
 
     def transition_yujin_memory_candidate(
@@ -4332,7 +4380,10 @@ class LocalProjectStore:
                     ) from error
                 claim_expired = (
                     self._clock()
-                    >= claimed_at + timedelta(seconds=60)
+                    >= claimed_at
+                    + timedelta(
+                        seconds=YUJIN_MEMORY_STORE_CLAIM_LEASE_SECONDS
+                    )
                 )
                 recover_started_call = (
                     claim_expired

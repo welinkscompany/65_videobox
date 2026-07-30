@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { startTransition, StrictMode, Suspense, useState } from "react";
 
 import { ApiConflictError, api } from "../../../api";
@@ -234,6 +234,25 @@ const directorProposal = (proposalId = "proposal-1") => ({
   candidates: [{ candidate_id: "candidate-1", visible_reference_code: "P01-B-01", media_type: "broll", asset_id: "broll-1", library_asset_id: null, reason_chips: [], scores: {}, availability: "available", review_status: "ready", preview_uri: "https://preview.invalid/candidate-1.mp4", controls: {}, expected_content_sha256: null, media_revision: "r1", canonical_metadata: {}, license_policy: "local", warning_provenance: [] }],
 });
 
+const memoryCandidate = (
+  patch: Record<string, unknown> = {},
+) => ({
+  candidate_id: "memory-candidate-1",
+  project_id: "project-a",
+  conversation_id: "conversation-1",
+  client_request_id: "memory-request-1",
+  source_message_ids: ["message-1"],
+  memory_scope: "creator",
+  category: "pacing",
+  proposed_text: "빠른 컷 편집을 선호합니다.",
+  status: "pending",
+  storage_status: "not_requested",
+  retryable: false,
+  created_at: "2026-07-30T12:00:00Z",
+  updated_at: "2026-07-30T12:00:00Z",
+  ...patch,
+});
+
 const yujinMediaProposal = (
   kind: "broll" | "bgm" | "sfx" = "broll",
   proposalId = `yujin-${kind}`,
@@ -355,6 +374,567 @@ describe("EditorWorkbenchRoute", () => {
     vi.spyOn(api, "listMediaLibraryAssets").mockResolvedValue({ assets: [] } as never);
     vi.spyOn(api, "listJobs").mockResolvedValue([]);
     vi.spyOn(api, "listTtsCandidates").mockResolvedValue({ candidates: [] });
+    vi.spyOn(api, "listYujinMemoryCandidates").mockResolvedValue([]);
+  });
+
+  it("owns memory state across the drawer and orders one approve click before store", async () => {
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
+      conversation: {
+        conversation_id: "conversation-1",
+        project_id: "project-a",
+        session_id: "session-a",
+      },
+      messages: [],
+      proposal: null,
+      references: [],
+    } as never);
+    vi.mocked(api.listYujinMemoryCandidates).mockResolvedValue([
+      memoryCandidate(),
+    ] as never);
+    const approve = vi.spyOn(
+      api, "approveYujinMemoryCandidate",
+    ).mockResolvedValue(memoryCandidate({
+      status: "approved",
+    }) as never);
+    let resolveStore!: (value: unknown) => void;
+    const store = vi.spyOn(
+      api, "storeYujinMemoryCandidate",
+    ).mockImplementation(() => new Promise((resolve) => {
+      resolveStore = resolve;
+    }) as never);
+    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue(
+      "00000000-0000-4000-8000-000000000031",
+    );
+
+    render(
+      <EditorWorkbenchRoute
+        projectId="project-a"
+        sessionId="session-a"
+      />,
+    );
+    await expectEditorRevision(1);
+    const player = screen.getByRole("region", { name: "미리보기" });
+    fireEvent.click(screen.getByRole(
+      "button", { name: "유진과 편집 항목" },
+    ));
+    const panel = await screen.findByRole(
+      "region", { name: "유진 기억" },
+    );
+    expect(api.listYujinMemoryCandidates).toHaveBeenCalledWith(
+      "project-a", "conversation-1",
+    );
+    expect(store).not.toHaveBeenCalled();
+
+    const pacingCandidate = within(panel).getByText(
+      "빠른 컷 편집을 선호합니다.",
+    ).closest("article");
+    expect(pacingCandidate).not.toBeNull();
+    fireEvent.click(within(pacingCandidate!).getByRole(
+      "button", { name: "승인하고 저장" },
+    ));
+    await waitFor(() => expect(store).toHaveBeenCalledTimes(1));
+    expect(approve).toHaveBeenCalledTimes(1);
+    expect(approve.mock.invocationCallOrder[0])
+      .toBeLessThan(store.mock.invocationCallOrder[0]);
+    expect(store).toHaveBeenCalledWith(
+      "project-a",
+      "memory-candidate-1",
+      "memory-store-00000000-0000-4000-8000-000000000031",
+    );
+    expect(within(panel).getByText("저장 중")).toBeVisible();
+    resolveStore({
+      candidate_id: "memory-candidate-1",
+      status: "approved",
+      storage_status: "stored",
+      retryable: false,
+    });
+    await waitFor(() => expect(
+      within(panel).getByText("저장됨"),
+    ).toBeVisible());
+
+    const history = screen.getByRole("log", { name: "유진 대화" });
+    Object.defineProperties(history, {
+      scrollHeight: { configurable: true, value: 200 },
+      clientHeight: { configurable: true, value: 80 },
+      scrollTop: {
+        configurable: true,
+        writable: true,
+        value: 51,
+      },
+    });
+    fireEvent.scroll(history);
+    fireEvent.click(screen.getByRole("button", { name: "닫기" }));
+    fireEvent.click(screen.getByRole(
+      "button", { name: "유진과 편집 항목" },
+    ));
+
+    expect(await screen.findByText("저장됨")).toBeVisible();
+    expect(screen.getByRole("log", { name: "유진 대화" }).scrollTop)
+      .toBe(51);
+    expect(screen.getByRole("region", { name: "미리보기" }))
+      .toBe(player);
+    expect(document.querySelectorAll(".vb-preview-stage")).toHaveLength(1);
+  });
+
+  it("keeps chat/manual editing usable after save failure and retries only on a new click", async () => {
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
+      conversation: {
+        conversation_id: "conversation-1",
+        project_id: "project-a",
+        session_id: "session-a",
+      },
+      messages: [],
+      proposal: null,
+      references: [],
+    } as never);
+    vi.mocked(api.listYujinMemoryCandidates).mockResolvedValue([
+      memoryCandidate(),
+      memoryCandidate({
+        candidate_id: "memory-rejected",
+        client_request_id: "memory-request-2",
+        proposed_text: "차분한 영상 분위기를 선호합니다.",
+        category: "tone",
+      }),
+    ] as never);
+    vi.spyOn(api, "approveYujinMemoryCandidate").mockImplementation(
+      (_projectId, candidateId) => Promise.resolve(memoryCandidate({
+        candidate_id: candidateId,
+        status: "approved",
+      })) as never,
+    );
+    const reject = vi.spyOn(
+      api, "rejectYujinMemoryCandidate",
+    ).mockResolvedValue(memoryCandidate({
+      candidate_id: "memory-rejected",
+      status: "rejected",
+      category: "tone",
+      proposed_text: "차분한 영상 분위기를 선호합니다.",
+    }) as never);
+    const store = vi.spyOn(api, "storeYujinMemoryCandidate")
+      .mockRejectedValueOnce(new Error("memory unavailable"))
+      .mockResolvedValueOnce({
+        candidate_id: "memory-candidate-1",
+        status: "approved",
+        storage_status: "stored",
+        retryable: false,
+      });
+    vi.spyOn(globalThis.crypto, "randomUUID")
+      .mockReturnValueOnce("00000000-0000-4000-8000-000000000041")
+      .mockReturnValueOnce("00000000-0000-4000-8000-000000000042");
+
+    render(
+      <EditorWorkbenchRoute
+        projectId="project-a"
+        sessionId="session-a"
+      />,
+    );
+    await expectEditorRevision(1);
+    fireEvent.click(screen.getByRole(
+      "button", { name: "유진과 편집 항목" },
+    ));
+    const panel = await screen.findByRole(
+      "region", { name: "유진 기억" },
+    );
+    expect(store).not.toHaveBeenCalled();
+
+    const pacingCandidate = within(panel).getByText(
+      "빠른 컷 편집을 선호합니다.",
+    ).closest("article");
+    expect(pacingCandidate).not.toBeNull();
+    fireEvent.click(within(pacingCandidate!).getByRole(
+      "button", { name: "승인하고 저장" },
+    ));
+    expect(await within(panel).findByRole(
+      "button", { name: "저장 다시 시도" },
+    )).toBeEnabled();
+    expect(store).toHaveBeenCalledTimes(1);
+    expect(screen.getByLabelText("유진에게 요청하기")).toBeEnabled();
+    expect(screen.getByRole("button", { name: "n-1 클립 선택" }))
+      .toBeEnabled();
+
+    fireEvent.click(within(panel).getByRole(
+      "button", { name: "저장 다시 시도" },
+    ));
+    await waitFor(() => expect(store).toHaveBeenCalledTimes(2));
+    expect(store.mock.calls.map((call) => call[2])).toEqual([
+      "memory-store-00000000-0000-4000-8000-000000000041",
+      "memory-store-00000000-0000-4000-8000-000000000042",
+    ]);
+    fireEvent.click(within(panel).getByRole(
+      "button", { name: "거절" },
+    ));
+    await waitFor(() => expect(reject).toHaveBeenCalledWith(
+      "project-a", "memory-rejected",
+    ));
+    expect(store).toHaveBeenCalledTimes(2);
+  });
+
+  it("deletes stored memory only on click and leaves an explicit retry after failure", async () => {
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
+      conversation: {
+        conversation_id: "conversation-1",
+        project_id: "project-a",
+        session_id: "session-a",
+      },
+      messages: [],
+      proposal: null,
+      references: [],
+    } as never);
+    vi.mocked(api.listYujinMemoryCandidates).mockResolvedValue([
+      memoryCandidate({
+        status: "approved",
+        storage_status: "stored",
+      }),
+    ] as never);
+    const remove = vi.spyOn(api, "deleteYujinMemoryCandidate")
+      .mockRejectedValueOnce(new Error("memory unavailable"))
+      .mockResolvedValueOnce({
+        candidate_id: "memory-candidate-1",
+        status: "approved",
+        storage_status: "deleted",
+        retryable: false,
+      });
+
+    render(
+      <EditorWorkbenchRoute
+        projectId="project-a"
+        sessionId="session-a"
+      />,
+    );
+    await expectEditorRevision(1);
+    fireEvent.click(screen.getByRole(
+      "button", { name: "유진과 편집 항목" },
+    ));
+    const panel = await screen.findByRole(
+      "region", { name: "유진 기억" },
+    );
+    expect(remove).not.toHaveBeenCalled();
+
+    fireEvent.click(within(panel).getByRole(
+      "button", { name: "기억 삭제" },
+    ));
+    expect(await within(panel).findByRole(
+      "button", { name: "삭제 다시 시도" },
+    )).toBeEnabled();
+    expect(remove).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(within(panel).getByRole(
+      "button", { name: "삭제 다시 시도" },
+    ));
+    await waitFor(() => expect(remove).toHaveBeenCalledTimes(2));
+    expect(await within(panel).findByText("삭제됨")).toBeVisible();
+  });
+
+  it("does not store when explicit approval fails", async () => {
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
+      conversation: {
+        conversation_id: "conversation-1",
+        project_id: "project-a",
+        session_id: "session-a",
+      },
+      messages: [],
+      proposal: null,
+      references: [],
+    } as never);
+    vi.mocked(api.listYujinMemoryCandidates).mockResolvedValue([
+      memoryCandidate(),
+    ] as never);
+    const approve = vi.spyOn(
+      api, "approveYujinMemoryCandidate",
+    ).mockRejectedValue(new Error("stale candidate"));
+    const store = vi.spyOn(api, "storeYujinMemoryCandidate");
+
+    render(
+      <EditorWorkbenchRoute
+        projectId="project-a"
+        sessionId="session-a"
+      />,
+    );
+    await expectEditorRevision(1);
+    fireEvent.click(screen.getByRole(
+      "button", { name: "유진과 편집 항목" },
+    ));
+    const panel = await screen.findByRole(
+      "region", { name: "유진 기억" },
+    );
+
+    fireEvent.click(within(panel).getByRole(
+      "button", { name: "승인하고 저장" },
+    ));
+    await waitFor(() => expect(approve).toHaveBeenCalledTimes(1));
+    expect(store).not.toHaveBeenCalled();
+    expect(within(panel).getByRole(
+      "button", { name: "승인하고 저장" },
+    )).toBeEnabled();
+  });
+
+  it("retries an expired claimed memory only after an explicit click", async () => {
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
+      conversation: {
+        conversation_id: "conversation-1",
+        project_id: "project-a",
+        session_id: "session-a",
+      },
+      messages: [],
+      proposal: null,
+      references: [],
+    } as never);
+    vi.mocked(api.listYujinMemoryCandidates).mockResolvedValue([
+      memoryCandidate({
+        status: "approved",
+        storage_status: "claimed",
+        retryable: true,
+      }),
+    ] as never);
+    const store = vi.spyOn(
+      api, "storeYujinMemoryCandidate",
+    ).mockResolvedValue({
+      candidate_id: "memory-candidate-1",
+      status: "approved",
+      storage_status: "stored",
+      retryable: false,
+    });
+    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue(
+      "00000000-0000-4000-8000-000000000051",
+    );
+
+    render(
+      <EditorWorkbenchRoute
+        projectId="project-a"
+        sessionId="session-a"
+      />,
+    );
+    await expectEditorRevision(1);
+    fireEvent.click(screen.getByRole(
+      "button", { name: "유진과 편집 항목" },
+    ));
+    const panel = await screen.findByRole(
+      "region", { name: "유진 기억" },
+    );
+    expect(store).not.toHaveBeenCalled();
+
+    fireEvent.click(within(panel).getByRole(
+      "button", { name: "저장 다시 시도" },
+    ));
+    await waitFor(() => expect(store).toHaveBeenCalledWith(
+      "project-a",
+      "memory-candidate-1",
+      "memory-store-00000000-0000-4000-8000-000000000051",
+    ));
+    expect(await within(panel).findByText("저장됨")).toBeVisible();
+  });
+
+  it("ignores late memory list and approval results after route navigation", async () => {
+    vi.mocked(api.getEditorPlaybackManifest).mockImplementation(
+      (projectId, sessionId) => Promise.resolve(
+        manifest(projectId, sessionId),
+      ) as never,
+    );
+    vi.spyOn(api, "reloadDirectorSession").mockImplementation(
+      (projectId, sessionId) => Promise.resolve({
+        conversation: {
+          conversation_id: `conversation-${projectId}`,
+          project_id: projectId,
+          session_id: sessionId,
+        },
+        messages: [],
+        proposal: null,
+        references: [],
+      }) as never,
+    );
+    let resolveListA!: (value: unknown) => void;
+    vi.mocked(api.listYujinMemoryCandidates).mockImplementation(
+      (projectId) => projectId === "project-a"
+        ? new Promise((resolve) => { resolveListA = resolve; }) as never
+        : Promise.resolve([]),
+    );
+    const rendered = render(
+      <EditorWorkbenchRoute
+        projectId="project-a"
+        sessionId="session-a"
+      />,
+    );
+    await expectEditorRevision(1);
+    await waitFor(() => expect(
+      api.listYujinMemoryCandidates,
+    ).toHaveBeenCalledWith("project-a", "conversation-project-a"));
+
+    rendered.rerender(
+      <EditorWorkbenchRoute
+        projectId="project-b"
+        sessionId="session-b"
+      />,
+    );
+    await expectEditorRevision(1);
+    await waitFor(() => expect(
+      api.listYujinMemoryCandidates,
+    ).toHaveBeenCalledWith("project-b", "conversation-project-b"));
+    await act(async () => {
+      resolveListA([memoryCandidate()]);
+    });
+    fireEvent.click(screen.getByRole(
+      "button", { name: "유진과 편집 항목" },
+    ));
+    expect(await screen.findByRole(
+      "region", { name: "유진 기억" },
+    )).not.toHaveTextContent("빠른 컷 편집을 선호합니다.");
+
+    vi.mocked(api.listYujinMemoryCandidates).mockImplementation(
+      (projectId) => Promise.resolve(projectId === "project-a"
+        ? [memoryCandidate({
+          project_id: "project-a",
+          conversation_id: "conversation-project-a",
+        })]
+        : []) as never,
+    );
+    rendered.rerender(
+      <EditorWorkbenchRoute
+        projectId="project-a"
+        sessionId="session-a"
+      />,
+    );
+    await expectEditorRevision(1);
+    let resolveApprove!: (value: unknown) => void;
+    const approvePromise = new Promise((resolve) => {
+      resolveApprove = resolve;
+    });
+    const approve = vi.spyOn(
+      api, "approveYujinMemoryCandidate",
+    ).mockReturnValue(approvePromise as never);
+    const store = vi.spyOn(api, "storeYujinMemoryCandidate");
+    const routePanel = await screen.findByRole(
+      "region", { name: "유진 기억" },
+    );
+    fireEvent.click(within(routePanel).getByRole(
+      "button", { name: "승인하고 저장" },
+    ));
+    await waitFor(() => expect(approve).toHaveBeenCalledTimes(1));
+
+    rendered.rerender(
+      <EditorWorkbenchRoute
+        projectId="project-b"
+        sessionId="session-b"
+      />,
+    );
+    await expectEditorRevision(1);
+    await act(async () => {
+      resolveApprove(memoryCandidate({
+        status: "approved",
+      }));
+    });
+    expect(store).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      action: "store",
+      storageStatus: "claimed",
+      retryable: true,
+      button: "저장 다시 시도",
+      terminalStatus: "stored",
+    },
+    {
+      action: "delete",
+      storageStatus: "stored",
+      retryable: false,
+      button: "기억 삭제",
+      terminalStatus: "deleted",
+    },
+  ] as const)("ignores a late memory $action result after route navigation", async ({
+    action,
+    storageStatus,
+    retryable,
+    button,
+    terminalStatus,
+  }) => {
+    vi.mocked(api.getEditorPlaybackManifest).mockImplementation(
+      (projectId, sessionId) => Promise.resolve(
+        manifest(projectId, sessionId),
+      ) as never,
+    );
+    vi.spyOn(api, "reloadDirectorSession").mockImplementation(
+      (projectId, sessionId) => Promise.resolve({
+        conversation: {
+          conversation_id: `conversation-${projectId}`,
+          project_id: projectId,
+          session_id: sessionId,
+        },
+        messages: [],
+        proposal: null,
+        references: [],
+      }) as never,
+    );
+    vi.mocked(api.listYujinMemoryCandidates).mockImplementation(
+      (projectId) => Promise.resolve(projectId === "project-a"
+        ? [memoryCandidate({
+          project_id: "project-a",
+          conversation_id: "conversation-project-a",
+          status: "approved",
+          storage_status: storageStatus,
+          retryable,
+        })]
+        : []) as never,
+    );
+    let resolveMutation!: (value: unknown) => void;
+    const store = vi.spyOn(
+      api, "storeYujinMemoryCandidate",
+    ).mockImplementation(() => action === "store"
+      ? new Promise((resolve) => { resolveMutation = resolve; }) as never
+      : Promise.resolve({}) as never);
+    const remove = vi.spyOn(
+      api, "deleteYujinMemoryCandidate",
+    ).mockImplementation(() => action === "delete"
+      ? new Promise((resolve) => { resolveMutation = resolve; }) as never
+      : Promise.resolve({}) as never);
+    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue(
+      "00000000-0000-4000-8000-000000000061",
+    );
+
+    const rendered = render(
+      <EditorWorkbenchRoute
+        projectId="project-a"
+        sessionId="session-a"
+      />,
+    );
+    await expectEditorRevision(1);
+    fireEvent.click(screen.getByRole(
+      "button", { name: "유진과 편집 항목" },
+    ));
+    const panel = await screen.findByRole(
+      "region", { name: "유진 기억" },
+    );
+    fireEvent.click(within(panel).getByRole(
+      "button", { name: button },
+    ));
+    await waitFor(() => expect(
+      action === "store" ? store : remove,
+    ).toHaveBeenCalledTimes(1));
+
+    rendered.rerender(
+      <EditorWorkbenchRoute
+        projectId="project-b"
+        sessionId="session-b"
+      />,
+    );
+    await expectEditorRevision(1);
+    await act(async () => {
+      resolveMutation({
+        candidate_id: "memory-candidate-1",
+        status: "approved",
+        storage_status: terminalStatus,
+        retryable: false,
+      });
+    });
+
+    const currentPanel = await screen.findByRole(
+      "region", { name: "유진 기억" },
+    );
+    expect(currentPanel).toHaveTextContent(
+      "현재 대화에는 확인할 기억이 없어요.",
+    );
+    expect(currentPanel).not.toHaveTextContent(
+      terminalStatus === "stored" ? "저장됨" : "삭제됨",
+    );
   });
 
   it.each([

@@ -6,7 +6,8 @@ import { NativeSelect } from "../../../components/ui/native-select";
 import { Textarea } from "../../../components/ui/textarea";
 import { InspectorControls, type ApprovedTtsCandidate, type InspectorAction, type PartialRegenerationControls } from "../inspector/InspectorControls";
 import type { InspectorTarget } from "../inspector/inspectorRegistry";
-import type { RightDockCandidate, RightDockConversationScroll, RightDockMessage, RightDockProposal, YujinRunState } from "./rightDockTypes";
+import type { RightDockCandidate, RightDockConversationScroll, RightDockMemory, RightDockMessage, RightDockProposal, YujinRunState } from "./rightDockTypes";
+import { YujinMemoryPanel } from "./YujinMemoryPanel";
 
 export type { InspectorTarget } from "../inspector/inspectorRegistry";
 
@@ -30,6 +31,7 @@ export type RightDockProps = Readonly<{
   selectedCandidateIds?: readonly string[];
   onSelectedCandidateIdsChange?: (candidateIds: readonly string[]) => void;
   conversationScroll?: RightDockConversationScroll;
+  memory?: RightDockMemory;
   onConversationScrollChange?: (scroll: RightDockConversationScroll) => void;
   selectedSegment?: SelectedSegment;
   inspectorTargets?: readonly InspectorTarget[];
@@ -60,6 +62,7 @@ export function RightDock({
   selectedCandidateIds,
   onSelectedCandidateIdsChange,
   conversationScroll = { key: "default", top: 0, pinnedToBottom: true },
+  memory,
   onConversationScrollChange,
   selectedSegment,
   inspectorTargets = [],
@@ -217,6 +220,8 @@ export function RightDock({
       </div> : <p>아직 추천이 없어요. 직접 편집을 계속하거나 유진에게 요청할 수 있어요.</p>}
       {proposal && proposalIsReady && onApplyProposal ? <Button type="button" disabled={state === "applying" || !selectedCandidatesAreActionable} onClick={() => void onApplyProposal(proposal.proposalId, activeCandidateIds)}>선택한 추천 적용</Button> : null}
     </section>
+
+    {memory ? <YujinMemoryPanel memory={memory} /> : null}
 
     {readOnlyFindings.length ? <section aria-label="검사 결과" className="vb-editor-workbench__summary">
       <h2>검사 결과</h2>

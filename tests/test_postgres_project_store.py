@@ -300,6 +300,228 @@ def test_postgres_yujin_memory_store_state_and_audit_match_local_contract(
         _cleanup_postgres_hermes_project(store, project_id)
 
 
+def test_postgres_yujin_memory_list_filters_conversation_before_limit(
+    tmp_path: Path,
+    postgres_url: str,
+) -> None:
+    store = PostgresProjectStore(
+        tmp_path / "postgres-yujin-memory-d3",
+        database_url=postgres_url,
+    )
+    project = store.bootstrap_project(
+        f"PostgreSQL Yujin memory D3 {uuid4().hex}"
+    )
+    project_id = project.project_id
+    try:
+        session = store.save_editing_session(
+            project_id=project_id,
+            timeline_id=f"timeline-{uuid4().hex}",
+            session_payload={"segments": [], "history": []},
+        )
+        current_conversation_id = f"conversation-current-{uuid4().hex}"
+        other_conversation_id = f"conversation-other-{uuid4().hex}"
+        for conversation_id in (
+            current_conversation_id,
+            other_conversation_id,
+        ):
+            store.create_director_conversation(
+                project_id=project_id,
+                session_id=session["session_id"],
+                conversation_id=conversation_id,
+            )
+        current_message = store.append_director_message(
+            project_id=project_id,
+            session_id=session["session_id"],
+            conversation_id=current_conversation_id,
+            role="user",
+            text="빠른 템포를 기억해 주세요.",
+        )
+        other_message = store.append_director_message(
+            project_id=project_id,
+            session_id=session["session_id"],
+            conversation_id=other_conversation_id,
+            role="user",
+            text="다른 대화입니다.",
+        )
+        current = store.create_yujin_memory_candidate(
+            project_id=project_id,
+            conversation_id=current_conversation_id,
+            client_request_id="postgres-d3-current",
+            source_message_ids=(current_message["message_id"],),
+            memory_scope="creator",
+            category="pacing",
+            proposed_text="빠른 컷 편집을 선호합니다.",
+        )
+        store.transition_yujin_memory_candidate(
+            project_id=project_id,
+            candidate_id=current["candidate_id"],
+            action="approve",
+        )
+        store.claim_yujin_memory_store(
+            project_id=project_id,
+            candidate_id=current["candidate_id"],
+            client_request_id="postgres-d3-store",
+            claim_token="claim-" + "d" * 64,
+        )
+        connection = store._connection(project_id)
+        try:
+            for index in range(101):
+                connection.execute(
+                    """
+                    INSERT INTO yujin_memory_candidates (
+                        candidate_id, project_id, conversation_id,
+                        client_request_id, request_fingerprint,
+                        source_message_ids_json, memory_scope, category,
+                        proposed_text, status, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, 'creator', 'workflow',
+                        ?, 'pending', ?, ?)
+                    """,
+                    (
+                        f"memory-candidate-other-{index:03d}",
+                        project_id,
+                        other_conversation_id,
+                        f"postgres-d3-other-{index}",
+                        f"fingerprint-{index}",
+                        json.dumps([other_message["message_id"]]),
+                        f"다른 대화 후보 {index}",
+                        "9999-01-01T00:00:00+00:00",
+                        "9999-01-01T00:00:00+00:00",
+                    ),
+                )
+            connection.commit()
+        finally:
+            connection.close()
+
+        listed = store.list_yujin_memory_candidates(
+            project_id=project_id,
+            conversation_id=current_conversation_id,
+        )
+
+        assert [item["candidate_id"] for item in listed] == [
+            current["candidate_id"]
+        ]
+        assert listed[0]["storage_status"] == "claimed"
+        assert listed[0]["retryable"] is False
+    finally:
+        _cleanup_postgres_hermes_project(store, project_id)
+
+
+def test_postgres_expired_yujin_memory_claims_match_local_retry_paths(
+    tmp_path: Path,
+    postgres_url: str,
+) -> None:
+    current = datetime(2026, 7, 30, 5, tzinfo=UTC)
+    store = PostgresProjectStore(
+        tmp_path / "postgres-yujin-memory-d3-expired",
+        database_url=postgres_url,
+        now=lambda: current,
+    )
+    project = store.bootstrap_project(
+        f"PostgreSQL Yujin memory D3 expired {uuid4().hex}"
+    )
+    project_id = project.project_id
+    try:
+        session = store.save_editing_session(
+            project_id=project_id,
+            timeline_id=f"timeline-{uuid4().hex}",
+            session_payload={"segments": [], "history": []},
+        )
+        conversation_id = f"conversation-{uuid4().hex}"
+        store.create_director_conversation(
+            project_id=project_id,
+            session_id=session["session_id"],
+            conversation_id=conversation_id,
+        )
+        message = store.append_director_message(
+            project_id=project_id,
+            session_id=session["session_id"],
+            conversation_id=conversation_id,
+            role="user",
+            text="확인한 기억만 저장해 주세요.",
+        )
+
+        def create_and_claim(
+            *,
+            suffix: str,
+            call_started: bool,
+        ) -> dict:
+            candidate = store.create_yujin_memory_candidate(
+                project_id=project_id,
+                conversation_id=conversation_id,
+                client_request_id=f"candidate-{suffix}",
+                source_message_ids=(message["message_id"],),
+                memory_scope="creator",
+                category="workflow",
+                proposed_text=f"명시적으로 확인한 기억 {suffix}만 저장합니다.",
+            )
+            store.transition_yujin_memory_candidate(
+                project_id=project_id,
+                candidate_id=candidate["candidate_id"],
+                action="approve",
+            )
+            claim_token = "claim-" + suffix * 64
+            store.claim_yujin_memory_store(
+                project_id=project_id,
+                candidate_id=candidate["candidate_id"],
+                client_request_id=f"store-{suffix}-1",
+                claim_token=claim_token,
+            )
+            if call_started:
+                store.mark_yujin_memory_store_call_started(
+                    project_id=project_id,
+                    candidate_id=candidate["candidate_id"],
+                    claim_token=claim_token,
+                )
+            return candidate
+
+        pre_call = create_and_claim(suffix="a", call_started=False)
+        started = create_and_claim(suffix="b", call_started=True)
+        live = {
+            item["candidate_id"]: item
+            for item in store.list_yujin_memory_candidates(
+                project_id=project_id,
+                conversation_id=conversation_id,
+            )
+        }
+        current = datetime(2026, 7, 30, 5, 1, 1, tzinfo=UTC)
+        expired = {
+            item["candidate_id"]: item
+            for item in store.list_yujin_memory_candidates(
+                project_id=project_id,
+                conversation_id=conversation_id,
+            )
+        }
+        reclaimed = store.claim_yujin_memory_store(
+            project_id=project_id,
+            candidate_id=pre_call["candidate_id"],
+            client_request_id="store-a-2",
+            claim_token="claim-" + "c" * 64,
+        )
+        reconciled = store.claim_yujin_memory_store(
+            project_id=project_id,
+            candidate_id=started["candidate_id"],
+            client_request_id="store-b-2",
+            claim_token="claim-" + "d" * 64,
+        )
+
+        assert live[pre_call["candidate_id"]]["retryable"] is False
+        assert live[started["candidate_id"]]["retryable"] is False
+        assert expired[pre_call["candidate_id"]]["retryable"] is True
+        assert expired[started["candidate_id"]]["retryable"] is True
+        assert reclaimed["action"] == "add"
+        assert reconciled["action"] == "reconcile"
+        assert reclaimed["candidate"]["retryable"] is False
+        assert reconciled["candidate"]["retryable"] is False
+        assert not {
+            "write_claimed_at",
+            "provider_call_started_at",
+            "provider_event_ref",
+            "provider_memory_ref",
+        } & set(expired[pre_call["candidate_id"]])
+    finally:
+        _cleanup_postgres_hermes_project(store, project_id)
+
+
 @pytest.fixture
 def postgres_url() -> str:
     value = os.environ.get("VIDEOBOX_TEST_POSTGRES_URL")

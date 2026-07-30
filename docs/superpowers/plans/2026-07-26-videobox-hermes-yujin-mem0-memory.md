@@ -13,7 +13,7 @@
 Parent: `docs/superpowers/plans/2026-07-26-videobox-hermes-yujin-master-plan.md`
 Requires: Phase C task C4 complete.
 
-Child progress: **2/5 tasks (40.0%), remaining 60.0%**. These five tasks are D1, D2, D3, D4, and F1.
+Child progress: **3/5 tasks (60.0%), remaining 40.0%**. These five tasks are D1, D2, D3, D4, and F1.
 
 ## Memory policy
 
@@ -443,18 +443,24 @@ class MemoryWriteOutcome(BaseModel):
 
 ## D3 — Add approve, list, and delete UI
 
-- [ ] **D3** Add approve/list/delete UI and ensure pending/rejected candidates are never injected.
+- [x] **D3** Add approve/list/delete UI and ensure pending/rejected candidates are never injected.
 
 **Files:**
 
 - Modify: `apps/web/src/api.ts`
+- Modify: `apps/web/src/api.test.ts`
+- Modify: `services/api/src/videobox_api/models.py`
+- Modify: `services/api/src/videobox_api/routers/yujin_memory.py`
+- Modify: `packages/storage-abstractions/src/videobox_storage/local_project_store.py`
+- Modify: `tests/test_api_yujin_memory.py`
+- Modify: `tests/test_yujin_memory_store.py`
+- Modify: `tests/test_postgres_project_store.py`
 - Modify: `apps/web/src/features/editor/workbench/rightDockTypes.ts`
 - Modify: `apps/web/src/features/editor/workbench/RightDock.tsx`
 - Modify: `apps/web/src/features/editor/workbench/EditorWorkbenchRoute.tsx`
-- Modify: `apps/web/src/features/editor/workbench/right-dock.test.tsx`
 - Modify: `apps/web/src/features/editor/workbench/editor-workbench-route.test.tsx`
+- Create: `apps/web/src/features/editor/workbench/YujinMemoryPanel.tsx`
 - Create: `apps/web/src/features/editor/workbench/yujin-memory-panel.test.tsx`
-- Create or modify the smallest right-dock memory component discovered during implementation
 
 **RED:**
 
@@ -462,30 +468,73 @@ class MemoryWriteOutcome(BaseModel):
    - new candidates render as pending with Approve/Reject;
    - neither pending nor rejected candidate appears in applied memory context;
    - Approve requires one explicit click and shows saving/stored/failed state;
+   - that click sends ordered approve then store requests, while approve
+     failure/stale sends store `0`;
+   - reload of approved/not-requested renders explicit Store and never
+     auto-stores; `claimed` is a non-clickable processing state;
+   - an expired claim alone becomes retryable: pre-call reclaims add and a
+     call-started claim reconciles without blind add; private timestamps and
+     refs remain absent;
    - failed save can be retried only by explicit click;
+   - every retry uses a new client request ID;
    - Delete requires explicit click and removes the stored reference on success;
    - close/open RightDock preserves Route-owned candidate state and scroll;
+   - late list/approve/store/delete completion after route navigation cannot
+     mutate the new route;
    - Mem0 unavailable does not disable chat or manual editor.
-2. Require API type guards to reject unknown status/category/provider fields.
+2. Require API type guards to reject unknown status/category/provider fields,
+   unsafe/oversize/duplicate IDs and text, invalid UTC/order, cross-scope list
+   rows, and non-retryable `claimed`.
+3. Require the backend list to accept a strict current `conversation_id`,
+   verify it belongs to the project, filter project+conversation before
+   `LIMIT 100`, and expose only public `storage_status`/`retryable`.
 
 **GREEN:**
 
-3. Keep candidate state ownership in Route or durable API/store, not component-local transient state.
-4. Render short policy-safe text only; do not expose source transcript or provider record.
-5. Keep the memory section secondary to conversation and creator recommendations.
-6. Run:
+4. Keep candidate state ownership in Route or durable API/store, not component-local transient state.
+5. Render short policy-safe text only; do not expose source transcript or provider record.
+6. Keep the memory section secondary to conversation and creator recommendations.
+7. Keep every memory browser request same-origin and redirect-denied.
+8. Run:
 
    ```powershell
    npm --prefix apps/web test -- --run src/features/editor/workbench/yujin-memory-panel.test.tsx src/features/editor/workbench/right-dock.test.tsx src/features/editor/workbench/editor-workbench-route.test.tsx
    git diff --check
    ```
 
-7. Mark D3 `[x]`, synchronize progress, and commit:
+9. Mark D3 `[x]`, synchronize progress, and commit:
 
    ```powershell
    git add apps/web docs/superpowers/plans
    git commit -m "feat: review Yujin memory in editor"
    ```
+
+**Execution evidence (2026-07-30):**
+
+- Backend list RED `2 failed` → GREEN `2 passed`; current conversation is
+  filtered before the 100-row limit and public storage state is restored.
+- Frontend typed API RED `5 failed` plus guard-review RED `12 failed` and
+  zero-width-text RED `1 failed` → GREEN `20 memory tests`; candidate DTOs are
+  scope-bound and provider/private fields
+  are rejected.
+- RightDock panel RED `3 failed` → GREEN `3 passed`; Route memory slice RED
+  `3 failed` → GREEN `5 passed`, then the complete Route file passed
+  `114/114`, including expired-claim retry and late list/approve/store/delete
+  route fencing.
+- Final focused frontend set passed `4 files / 178 tests`; memory store/API
+  backend passed `49 tests`.
+- Disposable PostgreSQL 16 parity passed `1`, with `40 deselected` and the
+  exact D3 container removed afterward.
+- Disposable PostgreSQL 16 expired-claim parity passed `1`, with `41
+  deselected`; pre-call reclaim used add, call-started recovery used
+  reconcile-only, and the exact test container was removed afterward.
+- Final independent spec/quality/gap/reverse re-review passed with
+  `Critical 0 / Important 0 / Minor 0`.
+- This D3 task did not run the full frontend suite, production build, full
+  Python regression, live Mem0/provider call, or human browser acceptance;
+  those are not claimed here.
+- D3 is a management UI for existing/seeded durable candidates only. It does
+  not claim a production conversation-to-candidate producer or E2E.
 
 ## D4 — Add retrieval injection and close Phase D
 
@@ -497,6 +546,9 @@ class MemoryWriteOutcome(BaseModel):
 - Modify: `services/agent-gateway/src/videobox_agent_gateway/memory_gateway.py`
 - Modify: `services/api/src/videobox_api/yujin_memory_service.py`
 - Modify: `services/api/src/videobox_api/hermes_run_service.py`
+- Modify: `apps/web/src/api.ts`
+- Modify: `apps/web/src/features/editor/workbench/EditorWorkbenchRoute.tsx`
+- Modify: the smallest existing RightDock memory producer surface
 - Create: `tests/test_yujin_memory_retrieval.py`
 - Create: `scripts/smoke-hermes-yujin-mem0.ps1`
 - Create: `docs/handoffs/2026-07-26-videobox-hermes-yujin-phase-d-closeout.ko.md`
@@ -515,22 +567,34 @@ class MemoryWriteOutcome(BaseModel):
 
 **RED:**
 
-1. Test relevant approved retrieval, unrelated result filtering, duplicate collapse, deleted memory exclusion, malformed/oversize record rejection, timeout fallback, and zero-network fake path.
-2. Test that pending/rejected/failed candidates cannot enter context even if a fake provider returns matching text.
-3. Test the prompt/context marks memory as user-approved preference, not system truth or mandatory instruction.
-4. Test a Mem0 outage still produces a Hermes run and manual fallback.
+1. Test exactly one production candidate producer:
+   - only an explicit current-RightDock `기억 후보 만들기` action calls the
+     existing `POST .../memory-candidates`;
+   - it uses only completed message IDs from the current owned conversation
+     and one typed policy-safe short candidate;
+   - route/project/conversation changes fence late results;
+   - page load, message/run completion, provider response, approve, store, and
+     retry produce automatic candidate create/approve/store `0` and provider
+     call `0`.
+2. Test relevant approved retrieval, unrelated result filtering, duplicate collapse, deleted memory exclusion, malformed/oversize record rejection, timeout fallback, and zero-network fake path.
+3. Test that pending/rejected/failed candidates cannot enter context even if a fake provider returns matching text.
+4. Test the prompt/context marks memory as user-approved preference, not system truth or mandatory instruction.
+5. Test a Mem0 outage still produces a Hermes run and manual fallback.
 
 **GREEN:**
 
-5. Search before context serialization with a strict timeout; on any failure continue with an empty tuple.
-6. Never write retrieval output back to VideoBox as a new memory automatically.
-7. Add a live canary that requires explicit `-Live` and a disposable tagged memory:
+6. Implement only the explicit producer above by reusing the existing
+   candidate POST and server ownership/source/policy validation. Do not add a
+   second producer, automatic create, automatic approval, or automatic store.
+7. Search before context serialization with a strict timeout; on any failure continue with an empty tuple.
+8. Never write retrieval output back to VideoBox as a new memory automatically.
+9. Add a live canary that requires explicit `-Live` and a disposable tagged memory:
    - add only after an explicit scripted approval step;
    - retrieve it;
    - delete it;
    - confirm it is no longer returned;
    - print IDs/status only, never credentials or raw provider bodies.
-8. Run non-live gate:
+10. Run non-live gate:
 
    ```powershell
    .\.venv\Scripts\python.exe -m pytest tests/test_yujin_memory_policy.py tests/test_yujin_memory_store.py tests/test_agent_gateway_memory.py tests/test_yujin_memory_service.py tests/test_yujin_memory_retrieval.py tests/test_api_yujin_memory.py -q
@@ -540,7 +604,7 @@ class MemoryWriteOutcome(BaseModel):
    git diff --check
    ```
 
-9. If separately configured and authorized, run:
+11. If separately configured and authorized, run:
 
    ```powershell
    powershell -NoProfile -ExecutionPolicy Bypass -File scripts/smoke-hermes-yujin-mem0.ps1 -Live
@@ -548,7 +612,7 @@ class MemoryWriteOutcome(BaseModel):
 
    Otherwise report live Mem0 write/read/delete as unrun.
 
-10. Perform spec, quality, gap, and reverse reviews. Mark D4 `[x]`, synchronize progress and SSOT, then commit and push:
+12. Perform spec, quality, gap, and reverse reviews. Mark D4 `[x]`, synchronize progress and SSOT, then commit and push:
 
    ```powershell
    git add packages services apps/web scripts tests docs

@@ -280,7 +280,7 @@ poll/reconcile하며 자동 blind add를 금지한다. event ID는 memory ID가 
 
 승인 상태 `pending | approved | rejected`와 저장 상태
 `not_requested | claimed | event_pending | stored | failed_retryable |
-ambiguous`는 별도 durable field다. `POST .../{candidate_id}/store`는 bounded
+ambiguous | deleted`는 별도 durable field다. `POST .../{candidate_id}/store`는 bounded
 `client_request_id`를 요구하고 공개 응답은 candidate handle, 승인 상태, 저장
 상태, retry 가능 여부만 반환한다. 동일 request replay는 provider call `0`,
 동시 request는 하나만 claim한다. call-start 이전 만료 claim만 reclaim/add할 수
@@ -288,6 +288,33 @@ ambiguous`는 별도 durable field다. `POST .../{candidate_id}/store`는 bounde
 reconcile만 수행한다. adapter service token은 workspace→Gateway token과
 분리하며 Gateway와 adapter에만 존재한다. Gateway/chat 시작은 adapter health나
 Mem0 key에 hard-depend하지 않는다.
+
+Editor는 현재 project와 현재 Director conversation에 속한 후보만 조회한다.
+conversation filter는 `LIMIT 100`보다 먼저 적용하며 다른 대화의 후보를 account
+inventory처럼 섞지 않는다. 한 번의 명시적 `승인하고 저장` 클릭은 approve와
+store 두 요청을 그 순서대로 실행한다. approve 실패·stale이면 store는 `0`이고,
+approve 자체도 provider call `0`이다. reload에서 이미 approved이지만
+`not_requested`인 후보는 자동 저장하지 않고 `저장하기`를 표시한다. 실패 뒤
+재시도는 별도 클릭과 새 request ID를 요구하며 `claimed`는 비활성
+`저장 처리 중`으로 표시한다. 단, 60초 lease가 지난 claim은 공개 timestamp나
+provider ref 없이 `retryable=true`만 표시하고, 별도 클릭으로 pre-call claim은
+add reclaim, call-started claim은 reconcile만 수행한다. stored 후보 삭제도
+명시적 클릭만 허용한다.
+후보/action/error 상태는 Route가 소유해 Inspector/RightDock을 닫았다 열어도
+대화 scroll과 함께 보존하고, memory 실패는 대화·수동 편집·단일 player를
+막지 않는다. D4 retrieval이 완료되기 전에는 어떤 후보도 creator context에
+주입하지 않는다.
+
+D3는 이미 durable하게 존재하거나 테스트에서 seed한 candidate의 관리
+surface만 닫는다. 실제 유진 대화가 candidate를 만드는 production
+conversation→candidate E2E는 D3 완료에 포함하지 않는다. D4는 분모를 늘리지
+않고 정확히 한 개의 production producer를 구현해야 한다. 현재 RightDock에서
+사용자가 명시적으로 `기억 후보 만들기`를 실행할 때만, 현재 소유된
+conversation의 완료된 message ID와 typed policy-safe 짧은 candidate를 기존
+`POST .../memory-candidates`에 보낸다. page load, message/run 완료, provider
+응답, approve, store, retry는 candidate를 자동 생성하지 않으며 producer
+자체의 자동 create/approve/store와 provider call은 모두 `0`이다. server는
+기존 ownership·source·policy 검증을 그대로 다시 수행한다.
 
 ## 10. 영상 제작 skills
 

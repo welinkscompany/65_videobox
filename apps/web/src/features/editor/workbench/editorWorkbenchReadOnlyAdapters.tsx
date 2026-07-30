@@ -28,6 +28,7 @@ export function EditorWorkbenchReadOnlyAdapters({ view, session, dock, director,
     composerDisabled={director?.composerDisabled ?? true}
     conversationScroll={director?.conversationScroll}
     messages={director?.messages}
+    memory={director?.memory}
     onApplyProposal={director?.onApplyProposal}
     onDraftChange={onEugeneDraftChange}
     onConversationScrollChange={director?.onConversationScrollChange}

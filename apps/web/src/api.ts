@@ -137,6 +137,37 @@ export type DirectorMessageExchange = { user_message: DirectorMessage; assistant
 export type DirectorMessageSubmitRequest = { session_id: string; client_message_id: string; text: string };
 export type DirectorMessageSendResult = { kind: "exchange"; exchange: DirectorMessageExchange } | { kind: "in_progress"; retryAfterSeconds: number };
 export type DirectorReloadState = { conversation: DirectorConversation | null; messages: DirectorMessage[]; proposal: DirectorProposal | null; references: DirectorReference[] };
+export type YujinMemoryCategory = "pacing" | "caption" | "audio" | "tone" | "workflow";
+export type YujinMemoryConsentStatus = "pending" | "approved" | "rejected";
+export type YujinMemoryStorageStatus =
+  | "not_requested"
+  | "claimed"
+  | "event_pending"
+  | "stored"
+  | "failed_retryable"
+  | "ambiguous"
+  | "deleted";
+export type YujinMemoryCandidate = {
+  candidate_id: string;
+  project_id: string;
+  conversation_id: string;
+  client_request_id: string;
+  source_message_ids: string[];
+  memory_scope: "creator";
+  category: YujinMemoryCategory;
+  proposed_text: string;
+  status: YujinMemoryConsentStatus;
+  storage_status: YujinMemoryStorageStatus;
+  retryable: boolean;
+  created_at: string;
+  updated_at: string;
+};
+export type YujinMemoryStoreResult = {
+  candidate_id: string;
+  status: "approved";
+  storage_status: YujinMemoryStorageStatus;
+  retryable: boolean;
+};
 export type HermesRunCreateRequest = {
   session_id: string;
   client_message_id: string;
@@ -840,6 +871,248 @@ function parseHermesYujinStatus(value: unknown): HermesYujinStatus {
   return payload as HermesYujinStatus;
 }
 
+const yujinMemoryCategories = new Set<YujinMemoryCategory>([
+  "pacing", "caption", "audio", "tone", "workflow",
+]);
+const yujinMemoryConsentStatuses = new Set<YujinMemoryConsentStatus>([
+  "pending", "approved", "rejected",
+]);
+const yujinMemoryStorageStatuses = new Set<YujinMemoryStorageStatus>([
+  "not_requested",
+  "claimed",
+  "event_pending",
+  "stored",
+  "failed_retryable",
+  "ambiguous",
+  "deleted",
+]);
+const yujinMemoryRetryableStatuses = new Set<YujinMemoryStorageStatus>([
+  "event_pending", "failed_retryable", "ambiguous",
+]);
+const yujinMemorySafeId = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+const yujinMemoryCandidateKeys = [
+  "candidate_id",
+  "category",
+  "client_request_id",
+  "conversation_id",
+  "created_at",
+  "memory_scope",
+  "project_id",
+  "proposed_text",
+  "retryable",
+  "source_message_ids",
+  "status",
+  "storage_status",
+  "updated_at",
+] as const;
+const yujinMemoryStoreResultKeys = [
+  "candidate_id", "retryable", "status", "storage_status",
+] as const;
+
+function hasExactKeys(
+  value: Record<string, unknown>,
+  expected: readonly string[],
+) {
+  return JSON.stringify(Object.keys(value).sort())
+    === JSON.stringify([...expected].sort());
+}
+
+function isBoundedMemoryText(value: unknown): value is string {
+  return typeof value === "string"
+    && value.trim().length > 0
+    && value.length <= 280
+    && new TextEncoder().encode(value).length <= 1024
+    && !/[\p{Cc}\p{Cf}\p{Cs}]/u.test(value);
+}
+
+function isSafeYujinMemoryId(value: unknown): value is string {
+  return typeof value === "string" && yujinMemorySafeId.test(value);
+}
+
+function parseYujinMemoryCandidate(
+  value: unknown,
+): YujinMemoryCandidate {
+  if (
+    typeof value !== "object"
+    || value === null
+    || Array.isArray(value)
+  ) {
+    throw new Error("yujin_memory_candidate_invalid");
+  }
+  const candidate = value as Record<string, unknown>;
+  const storageStatus = candidate.storage_status;
+  const createdAt = candidate.created_at;
+  const updatedAt = candidate.updated_at;
+  if (
+    !hasExactKeys(candidate, yujinMemoryCandidateKeys)
+    || !isSafeYujinMemoryId(candidate.candidate_id)
+    || typeof candidate.project_id !== "string"
+    || !candidate.project_id
+    || candidate.project_id.length > 256
+    || !isSafeYujinMemoryId(candidate.conversation_id)
+    || !isSafeYujinMemoryId(candidate.client_request_id)
+    || !Array.isArray(candidate.source_message_ids)
+    || candidate.source_message_ids.length < 1
+    || candidate.source_message_ids.length > 8
+    || candidate.source_message_ids.some(
+      (messageId) => !isSafeYujinMemoryId(messageId),
+    )
+    || new Set(candidate.source_message_ids).size
+      !== candidate.source_message_ids.length
+    || candidate.memory_scope !== "creator"
+    || typeof candidate.category !== "string"
+    || !yujinMemoryCategories.has(
+      candidate.category as YujinMemoryCategory,
+    )
+    || !isBoundedMemoryText(candidate.proposed_text)
+    || typeof candidate.status !== "string"
+    || !yujinMemoryConsentStatuses.has(
+      candidate.status as YujinMemoryConsentStatus,
+    )
+    || typeof storageStatus !== "string"
+    || !yujinMemoryStorageStatuses.has(
+      storageStatus as YujinMemoryStorageStatus,
+    )
+    || typeof candidate.retryable !== "boolean"
+    || (
+      storageStatus !== "claimed"
+      && candidate.retryable !== yujinMemoryRetryableStatuses.has(
+        storageStatus as YujinMemoryStorageStatus,
+      )
+    )
+    || (
+      candidate.status !== "approved"
+      && storageStatus !== "not_requested"
+    )
+    || !isStrictUtcTimestamp(createdAt)
+    || !isStrictUtcTimestamp(updatedAt)
+    || Date.parse(updatedAt) < Date.parse(createdAt)
+  ) {
+    throw new Error("yujin_memory_candidate_invalid");
+  }
+  return candidate as YujinMemoryCandidate;
+}
+
+function parseYujinMemoryStoreResult(
+  value: unknown,
+): YujinMemoryStoreResult {
+  if (
+    typeof value !== "object"
+    || value === null
+    || Array.isArray(value)
+  ) {
+    throw new Error("yujin_memory_store_result_invalid");
+  }
+  const result = value as Record<string, unknown>;
+  const storageStatus = result.storage_status;
+  if (
+    !hasExactKeys(result, yujinMemoryStoreResultKeys)
+    || !isSafeYujinMemoryId(result.candidate_id)
+    || result.status !== "approved"
+    || typeof storageStatus !== "string"
+    || !yujinMemoryStorageStatuses.has(
+      storageStatus as YujinMemoryStorageStatus,
+    )
+    || typeof result.retryable !== "boolean"
+    || (
+      storageStatus !== "claimed"
+      && result.retryable !== yujinMemoryRetryableStatuses.has(
+        storageStatus as YujinMemoryStorageStatus,
+      )
+    )
+  ) {
+    throw new Error("yujin_memory_store_result_invalid");
+  }
+  return result as YujinMemoryStoreResult;
+}
+
+function yujinMemoryRequestInit(
+  init: RequestInit = {},
+): RequestInit {
+  return {
+    ...init,
+    credentials: "same-origin",
+    redirect: "error",
+  };
+}
+
+async function listYujinMemoryCandidatesRequest(
+  projectId: string,
+  conversationId: string,
+): Promise<YujinMemoryCandidate[]> {
+  const payload = await request<unknown>(
+    `/api/projects/${encodeURIComponent(projectId)}`
+    + "/director/memory-candidates"
+    + `?conversation_id=${encodeURIComponent(conversationId)}`,
+    yujinMemoryRequestInit(),
+  );
+  if (
+    typeof payload !== "object"
+    || payload === null
+    || Array.isArray(payload)
+    || !hasExactKeys(payload as Record<string, unknown>, ["candidates"])
+    || !Array.isArray((payload as Record<string, unknown>).candidates)
+  ) {
+    throw new Error("yujin_memory_candidate_invalid");
+  }
+  const candidates = (
+    (payload as { candidates: unknown[] }).candidates
+      .map(parseYujinMemoryCandidate)
+  );
+  if (candidates.some((candidate) => (
+    candidate.project_id !== projectId
+    || candidate.conversation_id !== conversationId
+  ))) {
+    throw new Error("yujin_memory_candidate_invalid");
+  }
+  return candidates;
+}
+
+async function yujinMemoryCandidateActionRequest(
+  projectId: string,
+  candidateId: string,
+  action: "approve" | "reject",
+): Promise<YujinMemoryCandidate> {
+  const payload = await request<unknown>(
+    `/api/projects/${encodeURIComponent(projectId)}`
+    + `/director/memory-candidates/${encodeURIComponent(candidateId)}`
+    + `/${action}`,
+    yujinMemoryRequestInit({ method: "POST" }),
+  );
+  return parseYujinMemoryCandidate(payload);
+}
+
+async function storeYujinMemoryCandidateRequest(
+  projectId: string,
+  candidateId: string,
+  clientRequestId: string,
+): Promise<YujinMemoryStoreResult> {
+  const payload = await request<unknown>(
+    `/api/projects/${encodeURIComponent(projectId)}`
+    + `/director/memory-candidates/${encodeURIComponent(candidateId)}`
+    + "/store",
+    yujinMemoryRequestInit({
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ client_request_id: clientRequestId }),
+    }),
+  );
+  return parseYujinMemoryStoreResult(payload);
+}
+
+async function deleteYujinMemoryCandidateRequest(
+  projectId: string,
+  candidateId: string,
+): Promise<YujinMemoryStoreResult> {
+  const payload = await request<unknown>(
+    `/api/projects/${encodeURIComponent(projectId)}`
+    + `/director/memory-candidates/${encodeURIComponent(candidateId)}`
+    + "/stored-memory",
+    yujinMemoryRequestInit({ method: "DELETE" }),
+  );
+  return parseYujinMemoryStoreResult(payload);
+}
+
 async function getHermesYujinStatusRequest(
   signal?: AbortSignal,
 ): Promise<HermesYujinStatus> {
@@ -1027,6 +1300,33 @@ async function createHermesRunRequest(
 export const api = {
   getHermesYujinStatus: (signal?: AbortSignal) =>
     getHermesYujinStatusRequest(signal),
+  listYujinMemoryCandidates: (
+    projectId: string,
+    conversationId: string,
+  ) => listYujinMemoryCandidatesRequest(projectId, conversationId),
+  approveYujinMemoryCandidate: (
+    projectId: string,
+    candidateId: string,
+  ) => yujinMemoryCandidateActionRequest(
+    projectId, candidateId, "approve",
+  ),
+  rejectYujinMemoryCandidate: (
+    projectId: string,
+    candidateId: string,
+  ) => yujinMemoryCandidateActionRequest(
+    projectId, candidateId, "reject",
+  ),
+  storeYujinMemoryCandidate: (
+    projectId: string,
+    candidateId: string,
+    clientRequestId: string,
+  ) => storeYujinMemoryCandidateRequest(
+    projectId, candidateId, clientRequestId,
+  ),
+  deleteYujinMemoryCandidate: (
+    projectId: string,
+    candidateId: string,
+  ) => deleteYujinMemoryCandidateRequest(projectId, candidateId),
   createCreationBrief: (projectId: string, payload: CreateCreationBriefRequest) =>
     request<CreationBrief>(`/api/projects/${encodeURIComponent(projectId)}/creation-briefs`, {
       method: "POST",

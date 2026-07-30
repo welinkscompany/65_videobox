@@ -199,7 +199,16 @@ class YujinMemoryCandidateCreateRequest(BaseModel):
 
 
 class YujinMemoryCandidateResponse(YujinMemoryCandidate):
-    pass
+    storage_status: Literal[
+        "not_requested",
+        "claimed",
+        "event_pending",
+        "stored",
+        "failed_retryable",
+        "ambiguous",
+        "deleted",
+    ]
+    retryable: bool
 
 
 class YujinMemoryCandidateListResponse(BaseModel):

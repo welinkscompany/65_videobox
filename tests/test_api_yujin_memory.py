@@ -79,6 +79,7 @@ def test_create_and_list_are_pending_only_with_zero_external_calls_or_edit_mutat
             )
             listed = client.get(
                 f"/api/projects/{project_id}/director/memory-candidates"
+                f"?conversation_id={conversation_id}"
             )
             after = app.state.store.get_editing_session(
                 project_id=project_id,
@@ -97,6 +98,8 @@ def test_create_and_list_are_pending_only_with_zero_external_calls_or_edit_mutat
         "category",
         "proposed_text",
         "status",
+        "storage_status",
+        "retryable",
         "created_at",
         "updated_at",
     }
@@ -106,6 +109,92 @@ def test_create_and_list_are_pending_only_with_zero_external_calls_or_edit_mutat
     assert before == after
     assert network_calls == 0
     assert app.state.hermes_run_service is None
+
+
+def test_list_filters_current_conversation_before_limit_and_restores_storage(
+    tmp_path: Path,
+) -> None:
+    app = create_app(projects_root=tmp_path)
+    with TestClient(app) as client:
+        project_id, session, conversation_id, first, _ = _seed(app, client)
+        base = f"/api/projects/{project_id}/director/memory-candidates"
+        current = client.post(
+            base, json=_payload(conversation_id, first["message_id"])
+        ).json()
+        client.post(f"{base}/{current['candidate_id']}/approve")
+        app.state.yujin_memory_service._gateway = SimpleNamespace(
+            add_approved_memory=lambda _request: None
+        )
+        claim_token = "claim-" + "a" * 64
+        app.state.store.claim_yujin_memory_store(
+            project_id=project_id,
+            candidate_id=current["candidate_id"],
+            client_request_id="store-current",
+            claim_token=claim_token,
+        )
+        app.state.store.mark_yujin_memory_store_call_started(
+            project_id=project_id,
+            candidate_id=current["candidate_id"],
+            claim_token=claim_token,
+        )
+        app.state.store.record_yujin_memory_provider_outcome(
+            project_id=project_id,
+            candidate_id=current["candidate_id"],
+            claim_token=claim_token,
+            status="failed_retryable",
+            memory_ref=None,
+            event_ref=None,
+        )
+        other_conversation = app.state.store.create_director_conversation(
+            project_id=project_id,
+            session_id=session["session_id"],
+            conversation_id="conversation-other",
+        )
+        other_message = app.state.store.append_director_message(
+            project_id=project_id,
+            session_id=session["session_id"],
+            conversation_id=other_conversation["conversation_id"],
+            role="user",
+            text="다른 대화의 편집 요청입니다.",
+        )
+        for index in range(101):
+            app.state.store.create_yujin_memory_candidate(
+                project_id=project_id,
+                conversation_id=other_conversation["conversation_id"],
+                client_request_id=f"other-{index:03d}",
+                source_message_ids=(other_message["message_id"],),
+                memory_scope="creator",
+                category="pacing",
+                proposed_text=f"빠른 컷 선호 {index:03d}",
+            )
+
+        listed = client.get(
+            f"{base}?conversation_id={conversation_id}"
+        )
+        missing = client.get(base)
+        unknown = client.get(
+            f"{base}?conversation_id=conversation-missing"
+        )
+
+    assert listed.status_code == 200
+    assert listed.json() == {
+        "candidates": [
+            {
+                **current,
+                "status": "approved",
+                "storage_status": "failed_retryable",
+                "retryable": True,
+                "updated_at": listed.json()["candidates"][0]["updated_at"],
+            }
+        ]
+    }
+    assert "provider" not in listed.text
+    assert "memory_ref" not in listed.text
+    assert missing.status_code == 422
+    assert unknown.status_code == 404
+    assert unknown.json() == {
+        "detail": "memory_candidate_conversation_missing"
+    }
 
 
 def test_approve_reject_are_explicit_idempotent_and_never_schedule_write(
@@ -357,7 +446,10 @@ def test_configured_gateway_is_never_called_by_d1_endpoints(
             json=_payload(conversation_id, first["message_id"]),
         )
         candidate_id = created.json()["candidate_id"]
-        assert client.get(base).status_code == 200
+        assert client.get(
+            base,
+            params={"conversation_id": conversation_id},
+        ).status_code == 200
         assert client.post(f"{base}/{candidate_id}/approve").status_code == 200
         rejected = client.post(
             base,

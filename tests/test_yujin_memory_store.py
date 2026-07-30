@@ -293,6 +293,100 @@ def test_audit_order_is_monotonic_when_lifecycle_timestamps_match(
     ]
 
 
+def test_expired_memory_claims_are_listed_retryable_and_reclaim_on_click(
+    tmp_path: Path,
+) -> None:
+    current = datetime(2026, 7, 30, 5, tzinfo=UTC)
+    store = LocalProjectStore(tmp_path, now=lambda: current)
+    project_id, _, conversation_id, first, _ = _seed(store)
+    candidate = _create(
+        store,
+        project_id,
+        conversation_id,
+        first["message_id"],
+    )
+    store.transition_yujin_memory_candidate(
+        project_id=project_id,
+        candidate_id=candidate["candidate_id"],
+        action="approve",
+    )
+    store.claim_yujin_memory_store(
+        project_id=project_id,
+        candidate_id=candidate["candidate_id"],
+        client_request_id="store-request-1",
+        claim_token="claim-" + "a" * 64,
+    )
+    started = store.create_yujin_memory_candidate(
+        project_id=project_id,
+        conversation_id=conversation_id,
+        client_request_id="request-2",
+        source_message_ids=(first["message_id"],),
+        memory_scope="creator",
+        category="workflow",
+        proposed_text="명시적으로 확인한 뒤 저장합니다.",
+    )
+    store.transition_yujin_memory_candidate(
+        project_id=project_id,
+        candidate_id=started["candidate_id"],
+        action="approve",
+    )
+    store.claim_yujin_memory_store(
+        project_id=project_id,
+        candidate_id=started["candidate_id"],
+        client_request_id="store-started-1",
+        claim_token="claim-" + "c" * 64,
+    )
+    store.mark_yujin_memory_store_call_started(
+        project_id=project_id,
+        candidate_id=started["candidate_id"],
+        claim_token="claim-" + "c" * 64,
+    )
+
+    live = {
+        item["candidate_id"]: item
+        for item in store.list_yujin_memory_candidates(
+            project_id=project_id,
+            conversation_id=conversation_id,
+        )
+    }
+    current = datetime(2026, 7, 30, 5, 1, 1, tzinfo=UTC)
+    expired = {
+        item["candidate_id"]: item
+        for item in store.list_yujin_memory_candidates(
+            project_id=project_id,
+            conversation_id=conversation_id,
+        )
+    }
+    reclaimed = store.claim_yujin_memory_store(
+        project_id=project_id,
+        candidate_id=candidate["candidate_id"],
+        client_request_id="store-request-2",
+        claim_token="claim-" + "b" * 64,
+    )
+    reconciled = store.claim_yujin_memory_store(
+        project_id=project_id,
+        candidate_id=started["candidate_id"],
+        client_request_id="store-started-2",
+        claim_token="claim-" + "d" * 64,
+    )
+
+    assert live[candidate["candidate_id"]]["storage_status"] == "claimed"
+    assert live[candidate["candidate_id"]]["retryable"] is False
+    assert live[started["candidate_id"]]["retryable"] is False
+    assert expired[candidate["candidate_id"]]["storage_status"] == "claimed"
+    assert expired[candidate["candidate_id"]]["retryable"] is True
+    assert expired[started["candidate_id"]]["retryable"] is True
+    assert not {
+        "write_claimed_at",
+        "provider_call_started_at",
+        "provider_memory_ref",
+    } & set(expired[candidate["candidate_id"]])
+    assert reclaimed["action"] == "add"
+    assert reclaimed["candidate"]["retryable"] is False
+    assert reconciled["action"] == "reconcile"
+    assert reconciled["candidate"]["retryable"] is False
+
+
 def test_create_is_idempotent_by_canonical_request_and_conflicts_on_reuse(
     tmp_path: Path,
 ) -> None:

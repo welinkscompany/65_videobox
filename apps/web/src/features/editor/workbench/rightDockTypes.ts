@@ -52,6 +52,26 @@ export type RightDockConversationScroll = Readonly<{
   pinnedToBottom: boolean;
 }>;
 
+export type RightDockMemoryCandidate = Readonly<{
+  candidateId: string;
+  text: string;
+  category: YujinMemoryCategory;
+  status: YujinMemoryConsentStatus;
+  storageStatus: YujinMemoryStorageStatus;
+  retryable: boolean;
+  action: "idle" | "approving" | "rejecting" | "saving" | "deleting";
+  error: "save" | "delete" | null;
+}>;
+
+export type RightDockMemory = Readonly<{
+  candidates: readonly RightDockMemoryCandidate[];
+  loadError: string | null;
+  onApproveAndStore: (candidateId: string) => void | Promise<void>;
+  onReject: (candidateId: string) => void | Promise<void>;
+  onStore: (candidateId: string) => void | Promise<void>;
+  onDelete: (candidateId: string) => void | Promise<void>;
+}>;
+
 export type RightDockDirector = Readonly<{
   state: "script_required" | "idle" | "analysis_running" | "proposal_ready" | "applying" | "blocked" | "error";
   messages: readonly RightDockMessage[];
@@ -60,6 +80,7 @@ export type RightDockDirector = Readonly<{
   runState: YujinRunState;
   selectedCandidateIds: readonly string[];
   conversationScroll: RightDockConversationScroll;
+  memory?: RightDockMemory;
   composerDisabled?: boolean;
   onDraftChange: (draft: string) => void;
   onSelectedCandidateIdsChange: (candidateIds: readonly string[]) => void;
@@ -74,3 +95,8 @@ export type RightDockDirector = Readonly<{
   onRetryRun?: () => void | Promise<void>;
   retryAfterSeconds?: number | null;
 }>;
+import type {
+  YujinMemoryCategory,
+  YujinMemoryConsentStatus,
+  YujinMemoryStorageStatus,
+} from "../../../api";

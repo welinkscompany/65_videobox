@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, status
+from typing import Annotated
+
+from fastapi import APIRouter, HTTPException, Query, status
 
 from videobox_api.models import (
     YujinMemoryCandidateCreateRequest,
@@ -84,13 +86,30 @@ def build_yujin_memory_router(store, memory_service=None) -> APIRouter:
         base,
         response_model=YujinMemoryCandidateListResponse,
     )
-    def list_candidates(project_id: str) -> dict:
+    def list_candidates(
+        project_id: str,
+        conversation_id: Annotated[
+            str,
+            Query(
+                min_length=1,
+                max_length=128,
+                pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+                strict=True,
+            ),
+        ],
+    ) -> dict:
         try:
             return {
                 "candidates": store.list_yujin_memory_candidates(
-                    project_id=project_id
+                    project_id=project_id,
+                    conversation_id=conversation_id,
                 )
             }
+        except KeyError as error:
+            raise HTTPException(
+                status_code=404,
+                detail="memory_candidate_conversation_missing",
+            ) from error
         except ValueError as error:
             raise HTTPException(
                 status_code=503,

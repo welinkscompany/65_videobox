@@ -12,6 +12,219 @@ import {
 } from "./api";
 
 describe("caption style API conflicts", () => {
+  const memoryCandidate = {
+    candidate_id: "memory-candidate-1",
+    project_id: "project/1",
+    conversation_id: "conversation:1",
+    client_request_id: "request-1",
+    source_message_ids: ["message-1"],
+    memory_scope: "creator",
+    category: "pacing",
+    proposed_text: "빠른 컷 편집을 선호합니다.",
+    status: "pending",
+    storage_status: "not_requested",
+    retryable: false,
+    created_at: "2026-07-30T12:00:00Z",
+    updated_at: "2026-07-30T12:00:00Z",
+  } as const;
+
+  it("uses strict conversation-scoped memory candidate actions", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        candidates: [memoryCandidate],
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        ...memoryCandidate,
+        status: "approved",
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        ...memoryCandidate,
+        status: "rejected",
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        candidate_id: memoryCandidate.candidate_id,
+        status: "approved",
+        storage_status: "stored",
+        retryable: false,
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        candidate_id: memoryCandidate.candidate_id,
+        status: "approved",
+        storage_status: "deleted",
+        retryable: false,
+      }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      api.listYujinMemoryCandidates("project/1", "conversation:1"),
+    ).resolves.toEqual([memoryCandidate]);
+    await api.approveYujinMemoryCandidate(
+      "project/1", memoryCandidate.candidate_id,
+    );
+    await api.rejectYujinMemoryCandidate(
+      "project/1", memoryCandidate.candidate_id,
+    );
+    await api.storeYujinMemoryCandidate(
+      "project/1",
+      memoryCandidate.candidate_id,
+      "store-request-1",
+    );
+    await api.deleteYujinMemoryCandidate(
+      "project/1", memoryCandidate.candidate_id,
+    );
+
+    const base = (
+      "/api/projects/project%2F1/director/memory-candidates"
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      `${base}?conversation_id=conversation%3A1`,
+      expect.objectContaining({
+        credentials: "same-origin",
+        redirect: "error",
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      `${base}/memory-candidate-1/approve`,
+      expect.objectContaining({
+        method: "POST",
+        credentials: "same-origin",
+        redirect: "error",
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      `${base}/memory-candidate-1/reject`,
+      expect.objectContaining({
+        method: "POST",
+        credentials: "same-origin",
+        redirect: "error",
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
+      `${base}/memory-candidate-1/store`,
+      expect.objectContaining({
+        method: "POST",
+        credentials: "same-origin",
+        redirect: "error",
+        body: JSON.stringify({ client_request_id: "store-request-1" }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      5,
+      `${base}/memory-candidate-1/stored-memory`,
+      expect.objectContaining({
+        method: "DELETE",
+        credentials: "same-origin",
+        redirect: "error",
+      }),
+    );
+    vi.unstubAllGlobals();
+  });
+
+  it.each([
+    { ...memoryCandidate, status: "stored" },
+    { ...memoryCandidate, category: "provider_internal" },
+    { ...memoryCandidate, provider_ref: "private" },
+    {
+      ...memoryCandidate,
+      source_message_ids: ["message-1", "message-1"],
+    },
+    { ...memoryCandidate, candidate_id: "memory/candidate" },
+    { ...memoryCandidate, project_id: "p".repeat(257) },
+    { ...memoryCandidate, conversation_id: "conversation/unsafe" },
+    { ...memoryCandidate, client_request_id: "request unsafe" },
+    { ...memoryCandidate, source_message_ids: ["message/unsafe"] },
+    { ...memoryCandidate, proposed_text: "가".repeat(281) },
+    { ...memoryCandidate, proposed_text: "빠른\u200b편집" },
+    {
+      ...memoryCandidate,
+      created_at: "2026-07-30T12:00:00+09:00",
+    },
+    {
+      ...memoryCandidate,
+      created_at: "2026-99-99T12:00:00Z",
+    },
+    {
+      ...memoryCandidate,
+      created_at: "2026-07-30T12:00:01Z",
+      updated_at: "2026-07-30T12:00:00Z",
+    },
+    {
+      ...memoryCandidate,
+      status: "approved",
+      storage_status: "not_requested",
+      retryable: true,
+    },
+  ])("rejects unknown memory candidate status, category, or fields", async (candidate) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ candidates: [candidate] }), {
+        status: 200,
+      }),
+    ));
+
+    await expect(
+      api.listYujinMemoryCandidates("project/1", "conversation:1"),
+    ).rejects.toThrow("yujin_memory_candidate_invalid");
+    vi.unstubAllGlobals();
+  });
+
+  it("accepts an expired pre-call claim as retryable without private fields", async () => {
+    const claimed = {
+      ...memoryCandidate,
+      status: "approved",
+      storage_status: "claimed",
+      retryable: true,
+    } as const;
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ candidates: [claimed] }), {
+        status: 200,
+      }),
+    ));
+
+    await expect(
+      api.listYujinMemoryCandidates("project/1", "conversation:1"),
+    ).resolves.toEqual([claimed]);
+    vi.unstubAllGlobals();
+  });
+
+  it.each([
+    { ...memoryCandidate, project_id: "another-project" },
+    { ...memoryCandidate, conversation_id: "another-conversation" },
+  ])("binds listed memory candidates to the requested scope", async (candidate) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ candidates: [candidate] }), {
+        status: 200,
+      }),
+    ));
+
+    await expect(
+      api.listYujinMemoryCandidates("project/1", "conversation:1"),
+    ).rejects.toThrow("yujin_memory_candidate_invalid");
+    vi.unstubAllGlobals();
+  });
+
+  it("rejects provider fields in memory store results", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        candidate_id: "memory-candidate-1",
+        status: "approved",
+        storage_status: "stored",
+        retryable: false,
+        provider_ref: "private",
+      }), { status: 200 }),
+    ));
+
+    await expect(api.storeYujinMemoryCandidate(
+      "project-1",
+      "memory-candidate-1",
+      "store-request-1",
+    )).rejects.toThrow("yujin_memory_store_result_invalid");
+    vi.unstubAllGlobals();
+  });
+
   it("reads the strict global Yujin status from the same-origin route", async () => {
     const status = {
       state: "chat_verified",

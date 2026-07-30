@@ -69,7 +69,7 @@ Status symbols:
 
 Only `[x]` counts as complete. Reopen `[x]` to `[~]` if later evidence finds a regression. The child task and this mirror must be updated in the same closeout commit.
 
-Current initiative progress: **17/20 (85.0%), remaining 15.0%**.
+Current initiative progress: **18/20 (90.0%), remaining 10.0%**.
 
 The existing VideoBox official cumulative status remains separately fixed at **9/22 (40.9%), remaining 59.1%** until Task 9 human/environment acceptance. Do not combine that denominator with this initiative.
 
@@ -102,11 +102,11 @@ The existing VideoBox official cumulative status remains separately fixed at **9
 - [x] **C3** Complete issue/consume/replay/revoke capability lifecycle with redacted audit evidence.
 - [x] **C4** Add dashboard health/restart/fallback operations, failure drills, and Phase C closeout.
 
-### Phase D — Hermes-owned Mem0 auxiliary memory (2/4)
+### Phase D — Hermes-owned Mem0 auxiliary memory (3/4)
 
 - [x] **D1** Add typed memory candidate/policy DTOs with explicit approval as the only write gate.
 - [x] **D2** Add a Hermes-owned Mem0 Platform adapter without exposing credentials or raw provider records.
-- [ ] **D3** Add approve/list/delete UI and ensure pending/rejected candidates are never injected.
+- [x] **D3** Add approve/list/delete UI and ensure pending/rejected candidates are never injected.
 - [ ] **D4** Add bounded retrieval injection, unavailable fallback, live canary, and Phase D closeout.
 
 ### Final integration closeout (0/1)
@@ -247,14 +247,29 @@ User types in RightDock
 Mem0 is an optional side path:
 
 ```text
-Conversation produces a preference candidate
-→ user explicitly approves
-→ Hermes-owned Mem0 adapter writes
+D3 management-only surface lists an existing/seeded durable candidate
+→ current project+conversation list restores only public candidate/storage state
+→ user explicitly clicks Approve and Store
+→ approve completes with provider call 0
+→ only then a new request ID reaches the Hermes-owned Mem0 adapter
+→ failed/stale approve reaches no store; failed store waits for another click
+→ Route preserves candidate and conversation scroll across drawer close/open
+→ stored memory deletion also requires an explicit click
+→ D4 adds exactly one production producer:
+  current RightDock explicit "기억 후보 만들기"
+  → current owned completed message IDs + typed policy-safe short candidate
+  → existing POST memory-candidates
+  → automatic create/approve/store/provider call 0
 → later bounded retrieval returns approved preference text
 → context builder injects only policy-filtered text
 → Mem0 failure returns empty memory context
 → conversation and manual editor continue
 ```
+
+D3 does not claim conversation→candidate production E2E. D4 must add the
+single explicit producer above without changing the 20-task denominator;
+page load, message/run completion, provider response, approval, store, and
+retry must never become a second or automatic producer.
 
 ## 9. Written spec self-review
 

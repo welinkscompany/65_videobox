@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-import { ApiConflictError, api, type BrollAsset, type DirectorCandidate, type DirectorMessage, type DirectorProposal, type HermesRunCreateResponse, type MediaLibraryAsset, type PartialRegenerationJob, type PartialRegenerationPreflight, type PartialRegenerationRun } from "../../../api";
+import { ApiConflictError, api, type BrollAsset, type DirectorCandidate, type DirectorMessage, type DirectorProposal, type HermesRunCreateResponse, type MediaLibraryAsset, type PartialRegenerationJob, type PartialRegenerationPreflight, type PartialRegenerationRun, type YujinMemoryCandidate, type YujinMemoryStoreResult } from "../../../api";
 import { Button } from "../../../components/ui/button";
 import { findLatestSucceededJob } from "../../../lib/formatters";
 import { projectEditorAssets, type EditorAssetCard } from "../assets/editorAssetProjection";
@@ -31,6 +31,17 @@ type DirectorState = Readonly<{
   selectedCandidateIds: readonly string[];
   conversationScroll: RightDockDirector["conversationScroll"];
   isSending?: boolean;
+}>;
+type MemoryCandidateState = Readonly<{
+  candidate: YujinMemoryCandidate;
+  action: "idle" | "approving" | "rejecting" | "saving" | "deleting";
+  error: "save" | "delete" | null;
+}>;
+type MemoryState = Readonly<{
+  key: string;
+  conversationId: string | null;
+  candidates: readonly MemoryCandidateState[];
+  loadError: string | null;
 }>;
 type PartialState = Readonly<{
   key: string;
@@ -76,6 +87,15 @@ function createDirectorState(requestKey: string, sessionId: string | null): Dire
   };
 }
 
+function createMemoryState(requestKey: string): MemoryState {
+  return {
+    key: requestKey,
+    conversationId: null,
+    candidates: [],
+    loadError: null,
+  };
+}
+
 function capDirectorMessages(messages: readonly RightDockMessage[]) {
   return messages.slice(-maxDirectorMessages);
 }
@@ -87,6 +107,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
   const [assets, setAssets] = useState<AssetState>({ key: requestKey, brollAssets: [], libraryAssets: [], error: null });
   const [mutation, setMutation] = useState<MutationState>({ isSaving: false });
   const [director, setDirector] = useState<DirectorState>(() => createDirectorState(requestKey, sessionId));
+  const [memory, setMemory] = useState<MemoryState>(() => createMemoryState(requestKey));
   const [partial, setPartial] = useState<PartialState>({ key: requestKey, ticket: null, preflight: null, run: null, jobId: null, result: null, isResultOpen: false, message: null });
   const [partialRecoveryRetryToken, setPartialRecoveryRetryToken] = useState(0);
   const [partialRecoveryError, setPartialRecoveryError] = useState(false);
@@ -97,9 +118,12 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
   const previewOperationId = useRef(0);
   const pollOperationId = useRef(0);
   const directorOperationId = useRef(0);
+  const memoryListOperationId = useRef(0);
+  const memoryMutationOperationId = useRef(0);
   const partialOperationId = useRef(0);
   const partialRecoveryOperationId = useRef(0);
   const directorMutationInFlight = useRef(false);
+  const memoryMutationInFlight = useRef(false);
   const hermesRunInFlight = useRef(false);
   const hermesAbort = useRef<AbortController | null>(null);
   const activeHermesRouteRun = useRef<ActiveHermesRouteRun | null>(null);
@@ -131,13 +155,17 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     routeEpoch.current = { key: requestKey, value: routeEpoch.current.value + 1 };
     mutationOperationId.current += 1;
     directorOperationId.current += 1;
+    memoryListOperationId.current += 1;
+    memoryMutationOperationId.current += 1;
     partialOperationId.current += 1;
     directorMutationInFlight.current = false;
+    memoryMutationInFlight.current = false;
     currentDirectorConversationId.current = null;
     partialInFlight.current = false;
     mutationInFlight.current = false;
     setMutation({ isSaving: false });
     setDirector(createDirectorState(requestKey, sessionId));
+    setMemory(createMemoryState(requestKey));
     setPartial({ key: requestKey, ticket: null, preflight: null, run: null, jobId: null, result: null, isResultOpen: false, message: null });
     setPartialRecoveryError(false);
   }, [requestKey]);
@@ -305,6 +333,70 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     });
     return () => { active = false; };
   }, [projectId, requestKey, sessionId]);
+  const memoryConversationId = director.key === requestKey
+    ? director.conversationId
+    : null;
+  currentDirectorConversationId.current = memoryConversationId;
+  useEffect(() => {
+    if (!sessionId || !memoryConversationId) {
+      setMemory((current) => (
+        current.key === requestKey
+        && current.conversationId === null
+        && current.candidates.length === 0
+        && current.loadError === null
+          ? current
+          : createMemoryState(requestKey)
+      ));
+      return;
+    }
+    const epoch = routeEpoch.current.value;
+    const operationId = memoryListOperationId.current + 1;
+    memoryListOperationId.current = operationId;
+    let active = true;
+    const isCurrent = () => (
+      active
+      && routeEpoch.current.value === epoch
+      && memoryListOperationId.current === operationId
+      && currentDirectorConversationId.current === memoryConversationId
+    );
+    setMemory({
+      key: requestKey,
+      conversationId: memoryConversationId,
+      candidates: [],
+      loadError: null,
+    });
+    void api.listYujinMemoryCandidates(
+      projectId,
+      memoryConversationId,
+    ).then((candidates) => {
+      if (!isCurrent()) return;
+      if (candidates.some((candidate) => (
+        candidate.project_id !== projectId
+        || candidate.conversation_id !== memoryConversationId
+      ))) {
+        throw new Error("yujin_memory_candidate_identity_mismatch");
+      }
+      setMemory({
+        key: requestKey,
+        conversationId: memoryConversationId,
+        candidates: candidates.map((candidate) => ({
+          candidate,
+          action: "idle",
+          error: null,
+        })),
+        loadError: null,
+      });
+    }).catch(() => {
+      if (!isCurrent()) return;
+      setMemory({
+        key: requestKey,
+        conversationId: memoryConversationId,
+        candidates: [],
+        loadError: "기억을 불러오지 못했어요. 편집과 대화는 계속할 수 있어요.",
+      });
+    });
+    return () => { active = false; };
+  }, [memoryConversationId, projectId, requestKey, sessionId]);
   useEffect(() => {
     const status = state.view?.playback.exactPreview.status;
     if (status !== "pending" && status !== "running") return;
@@ -577,7 +669,286 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     }, activePartial.result),
   );
   const activeDirector = director.key === requestKey ? director : createDirectorState(requestKey, sessionId);
-  currentDirectorConversationId.current = activeDirector.conversationId;
+  const activeMemory = memory.key === requestKey
+    && memory.conversationId === activeDirector.conversationId
+    ? memory
+    : createMemoryState(requestKey);
+  const updateMemoryCandidate = (
+    candidateId: string,
+    update: (current: MemoryCandidateState) => MemoryCandidateState,
+  ) => {
+    setMemory((current) => (
+      current.key === requestKey
+      && current.conversationId === activeDirector.conversationId
+        ? {
+          ...current,
+          candidates: current.candidates.map((candidate) => (
+            candidate.candidate.candidate_id === candidateId
+              ? update(candidate)
+              : candidate
+          )),
+        }
+        : current
+    ));
+  };
+  const mergeMemoryStorageResult = (
+    current: MemoryCandidateState,
+    result: YujinMemoryStoreResult,
+  ): MemoryCandidateState => ({
+    candidate: {
+      ...current.candidate,
+      status: result.status,
+      storage_status: result.storage_status,
+      retryable: result.retryable,
+    },
+    action: "idle",
+    error: null,
+  });
+  const beginMemoryMutation = () => {
+    if (
+      memoryMutationInFlight.current
+      || !activeDirector.conversationId
+    ) return null;
+    const operationId = memoryMutationOperationId.current + 1;
+    memoryMutationOperationId.current = operationId;
+    memoryMutationInFlight.current = true;
+    return {
+      conversationId: activeDirector.conversationId,
+      epoch: routeEpoch.current.value,
+      operationId,
+    };
+  };
+  const isCurrentMemoryMutation = (ownership: Readonly<{
+    conversationId: string;
+    epoch: number;
+    operationId: number;
+  }>) => (
+    routeEpoch.current.value === ownership.epoch
+    && memoryMutationOperationId.current === ownership.operationId
+    && currentDirectorConversationId.current === ownership.conversationId
+  );
+  const finishMemoryMutation = (ownership: Readonly<{
+    conversationId: string;
+    epoch: number;
+    operationId: number;
+  }>) => {
+    if (!isCurrentMemoryMutation(ownership)) return;
+    memoryMutationInFlight.current = false;
+  };
+  const storeMemoryCandidate = async (candidateId: string) => {
+    const selected = activeMemory.candidates.find(
+      (candidate) => candidate.candidate.candidate_id === candidateId,
+    );
+    if (
+      !selected
+      || selected.action !== "idle"
+      || selected.candidate.status !== "approved"
+      || ![
+        "not_requested",
+        "claimed",
+        "event_pending",
+        "failed_retryable",
+        "ambiguous",
+      ].includes(selected.candidate.storage_status)
+      || (
+        selected.candidate.storage_status === "claimed"
+        && !selected.candidate.retryable
+      )
+    ) return;
+    const requestUuid = globalThis.crypto?.randomUUID?.();
+    if (!requestUuid) {
+      updateMemoryCandidate(candidateId, (current) => ({
+        ...current,
+        error: "save",
+      }));
+      return;
+    }
+    const ownership = beginMemoryMutation();
+    if (!ownership) return;
+    updateMemoryCandidate(candidateId, (current) => ({
+      ...current,
+      action: "saving",
+      error: null,
+    }));
+    try {
+      const result = await api.storeYujinMemoryCandidate(
+        projectId,
+        candidateId,
+        `memory-store-${requestUuid}`,
+      );
+      if (!isCurrentMemoryMutation(ownership)) return;
+      if (result.candidate_id !== candidateId) {
+        throw new Error("yujin_memory_store_identity_mismatch");
+      }
+      updateMemoryCandidate(
+        candidateId,
+        (current) => mergeMemoryStorageResult(current, result),
+      );
+    } catch {
+      if (!isCurrentMemoryMutation(ownership)) return;
+      updateMemoryCandidate(candidateId, (current) => ({
+        ...current,
+        action: "idle",
+        error: "save",
+      }));
+    } finally {
+      finishMemoryMutation(ownership);
+    }
+  };
+  const approveAndStoreMemoryCandidate = async (candidateId: string) => {
+    const selected = activeMemory.candidates.find(
+      (candidate) => candidate.candidate.candidate_id === candidateId,
+    );
+    if (
+      !selected
+      || selected.action !== "idle"
+      || selected.candidate.status !== "pending"
+      || selected.candidate.storage_status !== "not_requested"
+    ) return;
+    const ownership = beginMemoryMutation();
+    if (!ownership) return;
+    let approvalCompleted = false;
+    updateMemoryCandidate(candidateId, (current) => ({
+      ...current,
+      action: "approving",
+      error: null,
+    }));
+    try {
+      const approved = await api.approveYujinMemoryCandidate(
+        projectId,
+        candidateId,
+      );
+      if (!isCurrentMemoryMutation(ownership)) return;
+      if (
+        approved.candidate_id !== candidateId
+        || approved.project_id !== projectId
+        || approved.conversation_id !== ownership.conversationId
+        || approved.status !== "approved"
+      ) {
+        throw new Error("yujin_memory_approval_identity_mismatch");
+      }
+      approvalCompleted = true;
+      updateMemoryCandidate(candidateId, () => ({
+        candidate: approved,
+        action: "saving",
+        error: null,
+      }));
+      const requestUuid = globalThis.crypto?.randomUUID?.();
+      if (!requestUuid) {
+        throw new Error("yujin_memory_request_id_unavailable");
+      }
+      const result = await api.storeYujinMemoryCandidate(
+        projectId,
+        candidateId,
+        `memory-store-${requestUuid}`,
+      );
+      if (!isCurrentMemoryMutation(ownership)) return;
+      if (result.candidate_id !== candidateId) {
+        throw new Error("yujin_memory_store_identity_mismatch");
+      }
+      updateMemoryCandidate(
+        candidateId,
+        (current) => mergeMemoryStorageResult(current, result),
+      );
+    } catch {
+      if (!isCurrentMemoryMutation(ownership)) return;
+      updateMemoryCandidate(candidateId, (current) => ({
+        ...current,
+        action: "idle",
+        error: approvalCompleted ? "save" : null,
+      }));
+    } finally {
+      finishMemoryMutation(ownership);
+    }
+  };
+  const rejectMemoryCandidate = async (candidateId: string) => {
+    const selected = activeMemory.candidates.find(
+      (candidate) => candidate.candidate.candidate_id === candidateId,
+    );
+    if (
+      !selected
+      || selected.action !== "idle"
+      || selected.candidate.status !== "pending"
+      || selected.candidate.storage_status !== "not_requested"
+    ) return;
+    const ownership = beginMemoryMutation();
+    if (!ownership) return;
+    updateMemoryCandidate(candidateId, (current) => ({
+      ...current,
+      action: "rejecting",
+      error: null,
+    }));
+    try {
+      const rejected = await api.rejectYujinMemoryCandidate(
+        projectId,
+        candidateId,
+      );
+      if (!isCurrentMemoryMutation(ownership)) return;
+      if (
+        rejected.candidate_id !== candidateId
+        || rejected.project_id !== projectId
+        || rejected.conversation_id !== ownership.conversationId
+        || rejected.status !== "rejected"
+      ) {
+        throw new Error("yujin_memory_rejection_identity_mismatch");
+      }
+      updateMemoryCandidate(candidateId, () => ({
+        candidate: rejected,
+        action: "idle",
+        error: null,
+      }));
+    } catch {
+      if (!isCurrentMemoryMutation(ownership)) return;
+      updateMemoryCandidate(candidateId, (current) => ({
+        ...current,
+        action: "idle",
+        error: null,
+      }));
+    } finally {
+      finishMemoryMutation(ownership);
+    }
+  };
+  const deleteMemoryCandidate = async (candidateId: string) => {
+    const selected = activeMemory.candidates.find(
+      (candidate) => candidate.candidate.candidate_id === candidateId,
+    );
+    if (
+      !selected
+      || selected.action !== "idle"
+      || selected.candidate.status !== "approved"
+      || selected.candidate.storage_status !== "stored"
+    ) return;
+    const ownership = beginMemoryMutation();
+    if (!ownership) return;
+    updateMemoryCandidate(candidateId, (current) => ({
+      ...current,
+      action: "deleting",
+      error: null,
+    }));
+    try {
+      const result = await api.deleteYujinMemoryCandidate(
+        projectId,
+        candidateId,
+      );
+      if (!isCurrentMemoryMutation(ownership)) return;
+      if (result.candidate_id !== candidateId) {
+        throw new Error("yujin_memory_delete_identity_mismatch");
+      }
+      updateMemoryCandidate(
+        candidateId,
+        (current) => mergeMemoryStorageResult(current, result),
+      );
+    } catch {
+      if (!isCurrentMemoryMutation(ownership)) return;
+      updateMemoryCandidate(candidateId, (current) => ({
+        ...current,
+        action: "idle",
+        error: "delete",
+      }));
+    } finally {
+      finishMemoryMutation(ownership);
+    }
+  };
   const isCurrentDirector = (epoch: number, operationId: number) => routeEpoch.current.value === epoch && directorOperationId.current === operationId;
   const streamHermesRun = async ({
     conversationId,
@@ -1121,6 +1492,23 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     runState: activeDirector.runState,
     selectedCandidateIds: activeDirector.selectedCandidateIds,
     conversationScroll: activeDirector.conversationScroll,
+    memory: {
+      candidates: activeMemory.candidates.map((candidate) => ({
+        candidateId: candidate.candidate.candidate_id,
+        text: candidate.candidate.proposed_text,
+        category: candidate.candidate.category,
+        status: candidate.candidate.status,
+        storageStatus: candidate.candidate.storage_status,
+        retryable: candidate.candidate.retryable,
+        action: candidate.action,
+        error: candidate.error,
+      })),
+      loadError: activeMemory.loadError,
+      onApproveAndStore: approveAndStoreMemoryCandidate,
+      onReject: rejectMemoryCandidate,
+      onStore: storeMemoryCandidate,
+      onDelete: deleteMemoryCandidate,
+    },
     composerDisabled: mutation.isSaving || activeDirector.isSending === true || activeDirector.state === "analysis_running" || activeDirector.state === "applying" || ownsActiveHermesRouteRun,
     onDraftChange: (draft) => setDirector((current) => current.key === requestKey ? { ...current, draft } : current),
     onSelectedCandidateIdsChange: (selectedCandidateIds) => setDirector((current) => current.key === requestKey ? { ...current, selectedCandidateIds } : current),
