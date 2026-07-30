@@ -1,8 +1,8 @@
 name: 65_videobox
 
 # Compose ignores extension fields. This declares capability authority
-# ownership; capability issuance, private key, and route remain not deployed.
-# The A1 health-only gateway and internal networks are deployed separately.
+# ownership; base Compose keeps capability issuance and lifecycle disabled.
+# The hermes-yujin overlay is the only deployed C3 authority profile.
 x-videobox-hermes-capability-authority:
   schema_version: v1
   issuer: videobox-agent-gateway
@@ -14,6 +14,10 @@ x-videobox-hermes-capability-authority:
   durable_consume_replay_boundary: ProjectStore.consume_hermes_capability
   capability_gateway_route_status: not_deployed
   signing_private_key_status: not_deployed
+  verification_public_key_status: not_deployed
+  capability_lifecycle_status: disabled
+  gateway_audit_status: disabled
+  key_replacement_mode: not_deployed
   ordinary_api_paths: forbidden
   preauth_hermes_network_status: network_mode_none
   yujin_topology_status: deployed

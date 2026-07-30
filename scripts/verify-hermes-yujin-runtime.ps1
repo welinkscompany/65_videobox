@@ -84,6 +84,9 @@ foreach ($requiredTemplate in @(
     '${HERMES_YUJIN_GATEWAY_PASSWORD:?set in .env.container}'
     '${HERMES_YUJIN_GATEWAY_PASSWORD_HASH:?set in .env.container}'
     '${VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN:?set in .env.container}'
+    '${VIDEOBOX_HERMES_CAPABILITY_PRIVATE_KEY_B64:?set in .env.container}'
+    '${VIDEOBOX_HERMES_CAPABILITY_PUBLIC_KEY_B64:?set in .env.container}'
+    '${VIDEOBOX_HERMES_CAPABILITY_KEY_ID:?set in .env.container}'
 )) {
     Assert-True ($source.Contains($requiredTemplate)) "A required secret template is missing."
 }
@@ -103,6 +106,9 @@ foreach ($name in @(
     "HERMES_YUJIN_GATEWAY_PASSWORD"
     "HERMES_YUJIN_GATEWAY_PASSWORD_HASH"
     "VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN"
+    "VIDEOBOX_HERMES_CAPABILITY_PRIVATE_KEY_B64"
+    "VIDEOBOX_HERMES_CAPABILITY_PUBLIC_KEY_B64"
+    "VIDEOBOX_HERMES_CAPABILITY_KEY_ID"
 )) {
     [void]$baseProcessInfo.EnvironmentVariables.Remove($name)
 }
@@ -137,6 +143,9 @@ $dummyEnvironment = @{
     "HERMES_YUJIN_GATEWAY_PASSWORD" = "static-gateway-password"
     "HERMES_YUJIN_GATEWAY_PASSWORD_HASH" = "static-gateway-password-hash"
     "VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN" = "static-service-token-at-least-32-bytes"
+    "VIDEOBOX_HERMES_CAPABILITY_PRIVATE_KEY_B64" = "ERERERERERERERERERERERERERERERERERERERERERE"
+    "VIDEOBOX_HERMES_CAPABILITY_PUBLIC_KEY_B64" = "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc"
+    "VIDEOBOX_HERMES_CAPABILITY_KEY_ID" = "c3-static-key-2026-07"
 }
 foreach ($name in $dummyEnvironment.Keys) {
     $processInfo.EnvironmentVariables[$name] = $dummyEnvironment[$name]
@@ -187,6 +196,8 @@ Assert-True (
             "HERMES_YUJIN_GATEWAY_USERNAME"
             "HERMES_YUJIN_URL"
             "VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN"
+            "VIDEOBOX_HERMES_CAPABILITY_KEY_ID"
+            "VIDEOBOX_HERMES_CAPABILITY_PRIVATE_KEY_B64"
         ) -join "|"
     )
 ) "Gateway environment contract is invalid."
@@ -198,6 +209,25 @@ Assert-True (
     $workspace.environment.VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN -ceq
     $dummyEnvironment["VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN"]
 ) "Workspace gateway service credential does not match the gateway."
+Assert-True (
+    $workspace.environment.VIDEOBOX_HERMES_CAPABILITY_PUBLIC_KEY_B64 -ceq
+    $dummyEnvironment["VIDEOBOX_HERMES_CAPABILITY_PUBLIC_KEY_B64"]
+) "Workspace capability public key does not match the deployment contract."
+Assert-True (
+    $workspace.environment.VIDEOBOX_HERMES_CAPABILITY_KEY_ID -ceq
+    $gateway.environment.VIDEOBOX_HERMES_CAPABILITY_KEY_ID
+) "Capability key IDs do not match."
+Assert-NoProperty $gateway.environment `
+    "VIDEOBOX_HERMES_CAPABILITY_PUBLIC_KEY_B64" `
+    "Gateway received the capability public key."
+Assert-NoProperty $workspace.environment `
+    "VIDEOBOX_HERMES_CAPABILITY_PRIVATE_KEY_B64" `
+    "Workspace received the capability private key."
+foreach ($name in @($hermes.environment.PSObject.Properties.Name)) {
+    Assert-True (
+        $name -notmatch '^VIDEOBOX_HERMES_CAPABILITY_'
+    ) "Hermes received forbidden capability key material."
+}
 foreach ($name in @($workspace.environment.PSObject.Properties.Name)) {
     Assert-True (
         $name -notmatch '^HERMES(?:_YUJIN|_DASHBOARD)'

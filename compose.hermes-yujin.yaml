@@ -1,8 +1,34 @@
+x-videobox-hermes-capability-authority:
+  schema_version: v1
+  issuer: videobox-agent-gateway
+  issuer_owner: gateway-only
+  issuance_enabled: true
+  signing_secret_delivery: gateway_private_environment_only
+  durable_revocation_storage_primitive: ProjectStore.revoke_issued_hermes_capabilities
+  owner_authorized_revocation_writer_status: deployed
+  durable_consume_replay_boundary: ProjectStore.consume_registered_hermes_capability
+  capability_gateway_route_status: existing_reserve_attach_stream_only
+  signing_private_key_status: gateway_environment_only
+  verification_public_key_status: workspace_environment_only
+  capability_lifecycle_status: deployed
+  gateway_audit_status: deployed_redacted
+  key_replacement_mode: coordinated_single_key_only
+  ordinary_api_paths: forbidden
+  preauth_hermes_network_status: network_mode_none
+  yujin_topology_status: deployed
+  gateway_service_status: capability_lifecycle_deployed
+  gateway_service: videobox-agent-gateway
+  gateway_api_network: videobox-agent-gateway-api-network
+  gateway_network: videobox-agent-gateway-network
+  gateway_route_mode: existing_reserve_attach_stream_only
+
 services:
   videobox-workspace:
     environment:
       VIDEOBOX_AGENT_GATEWAY_URL: http://videobox-agent-gateway:8081
       VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN: ${VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN:?set in .env.container}
+      VIDEOBOX_HERMES_CAPABILITY_PUBLIC_KEY_B64: ${VIDEOBOX_HERMES_CAPABILITY_PUBLIC_KEY_B64:?set in .env.container}
+      VIDEOBOX_HERMES_CAPABILITY_KEY_ID: ${VIDEOBOX_HERMES_CAPABILITY_KEY_ID:?set in .env.container}
     networks: [videobox-agent-gateway-api-network]
 
   videobox-agent-gateway:
@@ -15,8 +41,12 @@ services:
       HERMES_YUJIN_GATEWAY_PASSWORD: ${HERMES_YUJIN_GATEWAY_PASSWORD:?set in .env.container}
       HERMES_YUJIN_URL: http://videobox-hermes-yujin:9120
       VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN: ${VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN:?set in .env.container}
+      VIDEOBOX_HERMES_CAPABILITY_PRIVATE_KEY_B64: ${VIDEOBOX_HERMES_CAPABILITY_PRIVATE_KEY_B64:?set in .env.container}
+      VIDEOBOX_HERMES_CAPABILITY_KEY_ID: ${VIDEOBOX_HERMES_CAPABILITY_KEY_ID:?set in .env.container}
     depends_on:
       videobox-hermes-yujin:
+        condition: service_healthy
+      videobox-workspace:
         condition: service_healthy
     networks: [videobox-agent-gateway-api-network, videobox-agent-gateway-network]
     user: "10001:10001"

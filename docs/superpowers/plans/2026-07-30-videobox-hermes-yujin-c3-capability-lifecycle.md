@@ -377,7 +377,7 @@ capability, source copy, OpenCut, Mem0, SaaS, 자동 Apply, Task 9/CapCut 사람
 
 ## Task 7 — Retire HS256 prototype and wire the profile safely
 
-- [ ] **7.1 RED:** deployment contract tests fail for old route or wrong key placement.
+- [x] **7.1 RED:** deployment contract tests fail for old route or wrong key placement.
 
 **Files:**
 
@@ -412,7 +412,7 @@ capability, source copy, OpenCut, Mem0, SaaS, 자동 Apply, Task 9/CapCut 사람
    .\.venv\Scripts\python.exe -m pytest tests/test_hermes_capability_authority_contract.py tests/test_api_hermes_project_status.py tests/test_hermes_yujin_compose_contract.py tests/test_start_hermes_yujin_script.py -q
    ```
 
-- [ ] **7.2 GREEN:** remove the prototype and validate exact environment ownership.
+- [x] **7.2 GREEN:** remove the prototype and validate exact environment ownership.
 
 3. Remove the router and old conditional verifier injection from `create_app`.
 4. Update the authority contract to distinguish disabled base vs deployed
@@ -424,7 +424,7 @@ capability, source copy, OpenCut, Mem0, SaaS, 자동 Apply, Task 9/CapCut 사람
 
    ```powershell
    .\.venv\Scripts\python.exe -m pytest tests/test_hermes_capability_authority_contract.py tests/test_api_hermes_project_status.py tests/test_hermes_yujin_compose_contract.py tests/test_start_hermes_yujin_script.py -q
-   powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-hermes-yujin-profile.ps1
+   powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-hermes-yujin-profile.ps1 -StaticOnly
    powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-hermes-yujin-runtime.ps1 -StaticOnly
    powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-hermes-yujin-zero-tools.ps1
    git diff --check

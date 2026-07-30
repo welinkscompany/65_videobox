@@ -1,120 +1,104 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-from inspect import getsource
+from inspect import signature
 from pathlib import Path
 
 import pytest
 import yaml
 
-from videobox_api.hermes_capability_authority import (
-    HERMES_CAPABILITY_AUTHORITY_CONTRACT,
-    HermesCapabilityAuthorityConfigurationError,
-    validate_static_hermes_capability_authority_request,
-)
-from videobox_api.hermes_capabilities import HermesCapabilityVerifier
-from videobox_api import main as api_main
+from videobox_api import hermes_capabilities
+from videobox_api import hermes_capability_authority
 from videobox_api.main import create_app
-from videobox_api.routers.hermes_internal import build_hermes_internal_router
-from videobox_storage.local_project_store import LocalProjectStore
-from videobox_storage.postgres_project_store import PostgresProjectStore
 
 
-def test_static_capability_authority_names_the_future_owner_and_existing_durable_boundary() -> None:
-    contract = HERMES_CAPABILITY_AUTHORITY_CONTRACT
-
-    assert contract.schema_version == "v1"
-    assert contract.issuer == "videobox-agent-gateway"
-    assert contract.issuer_owner == "gateway-only"
-    assert contract.issuance_enabled is False
-    assert contract.signing_secret_delivery == "forbidden"
-    assert contract.durable_revocation_storage_primitive == "LocalProjectStore.revoke_hermes_capability"
-    assert contract.owner_authorized_revocation_writer_status == "not_deployed"
-    assert contract.durable_consume_replay_boundary == "ProjectStore.consume_hermes_capability"
-    assert contract.capability_gateway_route_status == "not_deployed"
-    assert contract.signing_private_key_status == "not_deployed"
-    assert contract.preauth_hermes_network_status == "network_mode_none"
-    assert contract.yujin_topology_status == "deployed"
-    assert contract.gateway_service_status == "health_only"
-    assert contract.ordinary_api_paths == "forbidden"
-    assert contract.gateway_service == "videobox-agent-gateway"
-    assert contract.gateway_api_network == "videobox-agent-gateway-api-network"
-    assert contract.gateway_network == "videobox-agent-gateway-network"
-    assert contract.gateway_route_mode == "gateway-only"
-
-
-def test_static_capability_authority_rejects_any_activation_or_non_gateway_input() -> None:
-    validate_static_hermes_capability_authority_request(issuer="videobox-agent-gateway")
-
-    invalid_requests = (
-        {"issuer": "unknown-issuer"},
-        {"issuer": "videobox-agent-gateway", "signing_secret_delivery": "attempted"},
-        {"issuer": "videobox-agent-gateway", "route_path": "/api/projects"},
-        {"issuer": "videobox-agent-gateway", "network": "videobox-internal"},
-        {
-            "issuer": "videobox-agent-gateway",
-            "route_path": "/internal/hermes/projects/{project_id}/status",
-        },
-        {"issuer": "videobox-agent-gateway", "activation_requested": True},
+def test_base_and_yujin_authority_metadata_are_distinct_and_exact() -> None:
+    base = getattr(
+        hermes_capability_authority,
+        "BASE_HERMES_CAPABILITY_AUTHORITY_CONTRACT",
+        None,
     )
-
-    for request in invalid_requests:
-        with pytest.raises(HermesCapabilityAuthorityConfigurationError):
-            validate_static_hermes_capability_authority_request(**request)
-
-
-def test_compose_fields_match_the_canonical_static_authority_contract() -> None:
-    compose = yaml.safe_load(Path("compose.yaml").read_text(encoding="utf-8"))
-
-    assert compose["x-videobox-hermes-capability-authority"] == asdict(
-        HERMES_CAPABILITY_AUTHORITY_CONTRACT
+    deployed = (
+        hermes_capability_authority.HERMES_CAPABILITY_AUTHORITY_CONTRACT
     )
-
-
-def test_gateway_boundary_is_not_an_active_hermes_attachment(tmp_path: Path) -> None:
-    contract = HERMES_CAPABILITY_AUTHORITY_CONTRACT
-    compose = yaml.safe_load(Path("compose.yaml").read_text(encoding="utf-8"))
+    base_compose = yaml.safe_load(
+        Path("compose.yaml").read_text(encoding="utf-8")
+    )
     overlay = yaml.safe_load(
         Path("compose.hermes-yujin.yaml").read_text(encoding="utf-8")
     )
-    default_app = create_app(projects_root=tmp_path)
-    default_paths = {route.path for route in default_app.routes}
-    conditional_router = build_hermes_internal_router(
-        default_app.state.store,
-        HermesCapabilityVerifier(keys={"test-key": b"test-key-must-be-at-least-thirty-two-bytes"}),
+
+    assert base is not None
+    assert base_compose["x-videobox-hermes-capability-authority"] == asdict(
+        base
     )
-    conditional_paths = {route.path for route in conditional_router.routes}
-
-    assert contract.gateway_service not in compose["services"]
-    assert contract.gateway_network not in compose["networks"]
-    assert compose["services"]["videobox-hermes-agent"]["network_mode"] == "none"
-    gateway = overlay["services"][contract.gateway_service]
-    assert gateway["profiles"] == ["hermes-yujin"]
-    assert gateway["networks"] == [contract.gateway_api_network, contract.gateway_network]
-    assert overlay["networks"][contract.gateway_api_network]["internal"] is True
-    assert overlay["networks"][contract.gateway_network]["internal"] is True
-    assert "volumes" not in gateway
-    assert "ports" not in gateway
-    assert "/internal/hermes/projects/{project_id}/status" not in default_paths
-    assert conditional_paths == {"/internal/hermes/projects/{project_id}/status"}
-    assert contract.gateway_route_mode == "gateway-only"
-    gateway_source = Path(
-        "services/agent-gateway/src/videobox_agent_gateway/main.py"
-    ).read_text(encoding="utf-8")
-    for forbidden in ("issue", "revoke", "capability", "signing"):
-        assert forbidden not in gateway_source.lower()
+    assert overlay["x-videobox-hermes-capability-authority"] == asdict(
+        deployed
+    )
+    assert base.issuance_enabled is False
+    assert base.capability_lifecycle_status == "disabled"
+    assert deployed.issuance_enabled is True
+    assert deployed.capability_lifecycle_status == "deployed"
+    assert deployed.gateway_audit_status == "deployed_redacted"
+    assert deployed.owner_authorized_revocation_writer_status == "deployed"
+    assert deployed.key_replacement_mode == "coordinated_single_key_only"
+    assert deployed.signing_private_key_status == "gateway_environment_only"
+    assert (
+        deployed.verification_public_key_status
+        == "workspace_environment_only"
+    )
 
 
-def test_durable_revocation_is_a_storage_primitive_not_an_authorized_writer_route(tmp_path: Path) -> None:
-    default_app = create_app(projects_root=tmp_path)
-    default_paths = {route.path for route in default_app.routes}
-    conditional_source = getsource(build_hermes_internal_router)
-    main_source = getsource(api_main)
+def test_legacy_hs256_signer_router_and_create_app_injection_are_absent(
+    tmp_path: Path,
+) -> None:
+    assert not hasattr(hermes_capabilities, "HermesCapabilitySigner")
+    assert not Path(
+        "services/api/src/videobox_api/routers/hermes_internal.py"
+    ).exists()
+    assert "hermes_capability_verifier" not in signature(
+        create_app
+    ).parameters
+    app = create_app(projects_root=tmp_path)
+    paths = {route.path for route in app.routes}
+    assert "/internal/hermes/projects/{project_id}/status" not in paths
 
-    assert LocalProjectStore.revoke_hermes_capability is PostgresProjectStore.revoke_hermes_capability
-    assert "def revoke_hermes_capability" in getsource(LocalProjectStore)
-    assert "store.consume_hermes_capability" in main_source
-    assert "revoke_hermes_capability" not in conditional_source
-    assert not any("capability" in path or "revoke" in path or "issue" in path for path in default_paths)
-    assert HERMES_CAPABILITY_AUTHORITY_CONTRACT.issuance_enabled is False
-    assert HERMES_CAPABILITY_AUTHORITY_CONTRACT.owner_authorized_revocation_writer_status == "not_deployed"
+
+def test_authority_contract_supports_only_coordinated_single_key_replacement() -> None:
+    contract = hermes_capability_authority.HERMES_CAPABILITY_AUTHORITY_CONTRACT
+
+    assert contract.key_replacement_mode == "coordinated_single_key_only"
+    rendered = repr(asdict(contract)).lower()
+    for forbidden in (
+        "rolling",
+        "overlap",
+        "multi-key",
+        "automatic",
+        "kms",
+    ):
+        assert forbidden not in rendered
+
+
+def test_create_app_wires_the_environment_public_verifier_into_run_service(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "VIDEOBOX_HERMES_CAPABILITY_PUBLIC_KEY_B64",
+        "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc",
+    )
+    monkeypatch.setenv(
+        "VIDEOBOX_HERMES_CAPABILITY_KEY_ID",
+        "c3-test-key-2026-07",
+    )
+
+    app = create_app(
+        projects_root=tmp_path,
+        agent_gateway_url="http://videobox-agent-gateway:8081",
+        agent_gateway_service_token="static-service-token-at-least-32-bytes",
+    )
+
+    assert isinstance(
+        app.state.hermes_run_service.capability_verifier,
+        hermes_capabilities.HermesCapabilityVerifier,
+    )

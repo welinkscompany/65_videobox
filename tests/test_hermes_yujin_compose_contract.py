@@ -23,6 +23,13 @@ PINNED_HERMES_IMAGE = (
 HERMES_NETWORK = "videobox-agent-gateway-network"
 GATEWAY_API_NETWORK = "videobox-agent-gateway-api-network"
 PROVIDER_EGRESS_NETWORK = "videobox-hermes-provider-egress"
+CAPABILITY_PRIVATE_KEY_B64 = (
+    "ERERERERERERERERERERERERERERERERERERERERERE"
+)
+CAPABILITY_PUBLIC_KEY_B64 = (
+    "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc"
+)
+CAPABILITY_KEY_ID = "c3-test-key-2026-07"
 
 
 def _compose() -> dict:
@@ -50,6 +57,13 @@ def _render_compose(*, include_yujin: bool) -> dict:
                 "VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN": (
                     "static-service-token-at-least-32-bytes"
                 ),
+                "VIDEOBOX_HERMES_CAPABILITY_PRIVATE_KEY_B64": (
+                    CAPABILITY_PRIVATE_KEY_B64
+                ),
+                "VIDEOBOX_HERMES_CAPABILITY_PUBLIC_KEY_B64": (
+                    CAPABILITY_PUBLIC_KEY_B64
+                ),
+                "VIDEOBOX_HERMES_CAPABILITY_KEY_ID": CAPABILITY_KEY_ID,
             }
         )
     command.extend(["config", "--format", "json"])
@@ -96,17 +110,43 @@ def test_base_compose_remains_yujin_free_and_overlay_is_explicitly_opt_in() -> N
     }
 
 
-def test_capability_authority_comment_matches_the_deployed_a1_state() -> None:
+def test_c3_key_material_has_exact_overlay_ownership() -> None:
+    base = _render_compose(include_yujin=False)
+    merged = _render_compose(include_yujin=True)
+    gateway = merged["services"]["videobox-agent-gateway"]["environment"]
+    workspace = merged["services"]["videobox-workspace"]["environment"]
+    hermes = merged["services"]["videobox-hermes-yujin"]["environment"]
+
+    assert not any(
+        name.startswith("VIDEOBOX_HERMES_CAPABILITY_")
+        for name in base["services"]["videobox-workspace"]["environment"]
+    )
+    assert gateway["VIDEOBOX_HERMES_CAPABILITY_PRIVATE_KEY_B64"] == (
+        CAPABILITY_PRIVATE_KEY_B64
+    )
+    assert "VIDEOBOX_HERMES_CAPABILITY_PUBLIC_KEY_B64" not in gateway
+    assert workspace["VIDEOBOX_HERMES_CAPABILITY_PUBLIC_KEY_B64"] == (
+        CAPABILITY_PUBLIC_KEY_B64
+    )
+    assert "VIDEOBOX_HERMES_CAPABILITY_PRIVATE_KEY_B64" not in workspace
+    assert gateway["VIDEOBOX_HERMES_CAPABILITY_KEY_ID"] == CAPABILITY_KEY_ID
+    assert workspace["VIDEOBOX_HERMES_CAPABILITY_KEY_ID"] == CAPABILITY_KEY_ID
+    assert not any(
+        name.startswith("VIDEOBOX_HERMES_CAPABILITY_")
+        for name in hermes
+    )
+    assert merged["services"]["videobox-agent-gateway"]["depends_on"][
+        "videobox-workspace"
+    ] == {"condition": "service_healthy", "required": True}
+
+
+def test_capability_authority_comment_distinguishes_base_from_c3_overlay() -> None:
     base_source = COMPOSE_PATH.read_text(encoding="utf-8")
     top_comment = "\n".join(base_source.splitlines()[:8])
 
     assert "future gateway" not in top_comment
-    assert "capability issuance, private key, and route remain not deployed" in (
-        top_comment
-    )
-    assert "health-only gateway and internal networks are deployed separately" in (
-        top_comment
-    )
+    assert "base Compose keeps capability issuance and lifecycle disabled" in top_comment
+    assert "hermes-yujin overlay is the only deployed C3 authority profile" in top_comment
 
 
 def test_hermes_yujin_uses_the_pinned_serve_contract_and_isolated_oauth_state() -> None:
@@ -225,12 +265,26 @@ def test_gateway_gets_plaintext_auth_but_workspace_never_gets_hermes_secrets() -
         "VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN": (
             "${VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN:?set in .env.container}"
         ),
+        "VIDEOBOX_HERMES_CAPABILITY_PRIVATE_KEY_B64": (
+            "${VIDEOBOX_HERMES_CAPABILITY_PRIVATE_KEY_B64:"
+            "?set in .env.container}"
+        ),
+        "VIDEOBOX_HERMES_CAPABILITY_KEY_ID": (
+            "${VIDEOBOX_HERMES_CAPABILITY_KEY_ID:?set in .env.container}"
+        ),
     }
     assert "HERMES_YUJIN_GATEWAY_PASSWORD_HASH" not in gateway["environment"]
     assert workspace["environment"] == {
         "VIDEOBOX_AGENT_GATEWAY_URL": "http://videobox-agent-gateway:8081",
         "VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN": (
             "${VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN:?set in .env.container}"
+        ),
+        "VIDEOBOX_HERMES_CAPABILITY_PUBLIC_KEY_B64": (
+            "${VIDEOBOX_HERMES_CAPABILITY_PUBLIC_KEY_B64:"
+            "?set in .env.container}"
+        ),
+        "VIDEOBOX_HERMES_CAPABILITY_KEY_ID": (
+            "${VIDEOBOX_HERMES_CAPABILITY_KEY_ID:?set in .env.container}"
         ),
     }
     assert "HERMES_YUJIN_GATEWAY_PASSWORD" not in str(workspace)
@@ -296,6 +350,7 @@ def test_agent_gateway_dockerfile_is_minimal_non_root_and_read_only_compatible()
         "uvicorn==0.30.6",
         "httpx==0.28.1",
         "websockets==15.0.1",
+        "cryptography==45.0.6",
     ]
 
 
@@ -681,3 +736,14 @@ def test_env_example_distinguishes_plaintext_and_hash_without_usable_credentials
     assert "hash" in example.lower()
     assert "must match" in example.lower()
     assert "scrypt$" not in example
+    assert (
+        "VIDEOBOX_HERMES_CAPABILITY_PRIVATE_KEY_B64="
+        "replace-before-starting"
+    ) in example
+    assert (
+        "VIDEOBOX_HERMES_CAPABILITY_PUBLIC_KEY_B64="
+        "replace-before-starting"
+    ) in example
+    assert (
+        "VIDEOBOX_HERMES_CAPABILITY_KEY_ID=replace-before-starting"
+    ) in example

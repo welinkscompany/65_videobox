@@ -9,7 +9,7 @@ class HermesCapabilityAuthorityConfigurationError(ValueError):
 
 @dataclass(frozen=True)
 class HermesCapabilityAuthorityContract:
-    """Declaration only; this neither issues capabilities nor opens a route."""
+    """Deployment metadata; it never grants capability authority by itself."""
 
     schema_version: str
     issuer: str
@@ -21,6 +21,10 @@ class HermesCapabilityAuthorityContract:
     durable_consume_replay_boundary: str
     capability_gateway_route_status: str
     signing_private_key_status: str
+    verification_public_key_status: str
+    capability_lifecycle_status: str
+    gateway_audit_status: str
+    key_replacement_mode: str
     ordinary_api_paths: str
     preauth_hermes_network_status: str
     yujin_topology_status: str
@@ -31,7 +35,7 @@ class HermesCapabilityAuthorityContract:
     gateway_route_mode: str
 
 
-HERMES_CAPABILITY_AUTHORITY_CONTRACT = HermesCapabilityAuthorityContract(
+BASE_HERMES_CAPABILITY_AUTHORITY_CONTRACT = HermesCapabilityAuthorityContract(
     schema_version="v1",
     issuer="videobox-agent-gateway",
     issuer_owner="gateway-only",
@@ -42,6 +46,10 @@ HERMES_CAPABILITY_AUTHORITY_CONTRACT = HermesCapabilityAuthorityContract(
     durable_consume_replay_boundary="ProjectStore.consume_hermes_capability",
     capability_gateway_route_status="not_deployed",
     signing_private_key_status="not_deployed",
+    verification_public_key_status="not_deployed",
+    capability_lifecycle_status="disabled",
+    gateway_audit_status="disabled",
+    key_replacement_mode="not_deployed",
     ordinary_api_paths="forbidden",
     preauth_hermes_network_status="network_mode_none",
     yujin_topology_status="deployed",
@@ -50,6 +58,35 @@ HERMES_CAPABILITY_AUTHORITY_CONTRACT = HermesCapabilityAuthorityContract(
     gateway_api_network="videobox-agent-gateway-api-network",
     gateway_network="videobox-agent-gateway-network",
     gateway_route_mode="gateway-only",
+)
+
+HERMES_CAPABILITY_AUTHORITY_CONTRACT = HermesCapabilityAuthorityContract(
+    schema_version="v1",
+    issuer="videobox-agent-gateway",
+    issuer_owner="gateway-only",
+    issuance_enabled=True,
+    signing_secret_delivery="gateway_private_environment_only",
+    durable_revocation_storage_primitive=(
+        "ProjectStore.revoke_issued_hermes_capabilities"
+    ),
+    owner_authorized_revocation_writer_status="deployed",
+    durable_consume_replay_boundary=(
+        "ProjectStore.consume_registered_hermes_capability"
+    ),
+    capability_gateway_route_status="existing_reserve_attach_stream_only",
+    signing_private_key_status="gateway_environment_only",
+    verification_public_key_status="workspace_environment_only",
+    capability_lifecycle_status="deployed",
+    gateway_audit_status="deployed_redacted",
+    key_replacement_mode="coordinated_single_key_only",
+    ordinary_api_paths="forbidden",
+    preauth_hermes_network_status="network_mode_none",
+    yujin_topology_status="deployed",
+    gateway_service_status="capability_lifecycle_deployed",
+    gateway_service="videobox-agent-gateway",
+    gateway_api_network="videobox-agent-gateway-api-network",
+    gateway_network="videobox-agent-gateway-network",
+    gateway_route_mode="existing_reserve_attach_stream_only",
 )
 
 
@@ -63,7 +100,7 @@ def validate_static_hermes_capability_authority_request(
 ) -> None:
     """Allow only an inert declaration for the one future gateway-owned issuer."""
 
-    if issuer != HERMES_CAPABILITY_AUTHORITY_CONTRACT.issuer:
+    if issuer != BASE_HERMES_CAPABILITY_AUTHORITY_CONTRACT.issuer:
         raise HermesCapabilityAuthorityConfigurationError("hermes_capability_issuer_forbidden")
     if signing_secret_delivery is not None:
         raise HermesCapabilityAuthorityConfigurationError("hermes_capability_secret_delivery_forbidden")

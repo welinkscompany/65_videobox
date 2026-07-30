@@ -16,11 +16,16 @@ if ([string]::IsNullOrWhiteSpace($ProfileRoot)) {
 }
 . (Join-Path $PSScriptRoot "hermes-yujin-environment-contract.ps1")
 $pinnedHermesImage = "nousresearch/hermes-agent@sha256:ad79951c26b7707c8c651f30780338d4f9bb17ddca19f6ea78eb27cbf83a3787"
+$pinnedCryptographyRequirement = "cryptography==45.0.6"
+$pythonExecutable = Join-Path $repositoryRoot ".venv/Scripts/python.exe"
 $credentialNames = @(
     "HERMES_YUJIN_GATEWAY_USERNAME"
     "HERMES_YUJIN_GATEWAY_PASSWORD"
     "HERMES_YUJIN_GATEWAY_PASSWORD_HASH"
     "VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN"
+    "VIDEOBOX_HERMES_CAPABILITY_PRIVATE_KEY_B64"
+    "VIDEOBOX_HERMES_CAPABILITY_PUBLIC_KEY_B64"
+    "VIDEOBOX_HERMES_CAPABILITY_KEY_ID"
 )
 
 if (-not (Test-Path -LiteralPath $EnvFile -PathType Leaf)) {
@@ -85,11 +90,78 @@ function Assert-ResolvedCredential {
     if (
         [string]::IsNullOrWhiteSpace($text) -or
         $text -match '\$\{[^}]+\}' -or
-        $text -match '(?i)replace-before-starting|placeholder|change-me|sentinel'
+        $text -match (
+            '(?i)replace-before-starting|replace_me|placeholder|' +
+            'change-me|changeme|sentinel'
+        )
     ) {
         throw "Resolved container credential '$Name' is invalid."
     }
     return $text
+}
+
+function Assert-MatchedCapabilityKeyPair {
+    param(
+        [string]$PrivateKeyB64,
+        [string]$PublicKeyB64
+    )
+
+    if (-not (Test-Path -LiteralPath $pythonExecutable -PathType Leaf)) {
+        throw "Pinned capability validation runtime is unavailable."
+    }
+    $requirementsPath = Join-Path $repositoryRoot "requirements-dev.txt"
+    if (
+        -not (Test-Path -LiteralPath $requirementsPath -PathType Leaf) -or
+        -not ((Get-Content -LiteralPath $requirementsPath) -ccontains $pinnedCryptographyRequirement)
+    ) {
+        throw "Pinned capability validation dependency is unavailable."
+    }
+    $validationCode = (
+        "import base64, os; from importlib.metadata import version; " +
+        "from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey; " +
+        "from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat; " +
+        "private_text=os.environ['VIDEOBOX_HERMES_CAPABILITY_PRIVATE_KEY_B64']; " +
+        "public_text=os.environ['VIDEOBOX_HERMES_CAPABILITY_PUBLIC_KEY_B64']; " +
+        "private=base64.b64decode(private_text+'='*(-len(private_text)%4),altchars=b'-_',validate=True); " +
+        "public=base64.b64decode(public_text+'='*(-len(public_text)%4),altchars=b'-_',validate=True); " +
+        "canonical_private=base64.urlsafe_b64encode(private).rstrip(b'=').decode('ascii'); " +
+        "canonical_public=base64.urlsafe_b64encode(public).rstrip(b'=').decode('ascii'); " +
+        "derived=Ed25519PrivateKey.from_private_bytes(private).public_key().public_bytes(Encoding.Raw,PublicFormat.Raw); " +
+        "raise SystemExit(0 if version('cryptography')=='45.0.6' and len(private)==32 and len(public)==32 and canonical_private==private_text and canonical_public==public_text and derived==public else 1)"
+    )
+    $processInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $processInfo.FileName = $pythonExecutable
+    $processInfo.Arguments = (
+        @("-c", $validationCode) |
+            ForEach-Object { Quote-ProcessArgument $_ }
+    ) -join " "
+    $processInfo.WorkingDirectory = $repositoryRoot
+    $processInfo.UseShellExecute = $false
+    $processInfo.RedirectStandardOutput = $true
+    $processInfo.RedirectStandardError = $true
+    $processInfo.CreateNoWindow = $true
+    $processInfo.EnvironmentVariables[
+        "VIDEOBOX_HERMES_CAPABILITY_PRIVATE_KEY_B64"
+    ] = $PrivateKeyB64
+    $processInfo.EnvironmentVariables[
+        "VIDEOBOX_HERMES_CAPABILITY_PUBLIC_KEY_B64"
+    ] = $PublicKeyB64
+    try {
+        $process = New-Object System.Diagnostics.Process
+        $process.StartInfo = $processInfo
+        [void]$process.Start()
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        $process.WaitForExit()
+        [void]$stdoutTask.GetAwaiter().GetResult()
+        [void]$stderrTask.GetAwaiter().GetResult()
+        if ($process.ExitCode -ne 0) {
+            throw "invalid"
+        }
+    }
+    catch {
+        throw "Resolved Hermes capability key pair is invalid."
+    }
 }
 
 $configArguments = @(
@@ -110,6 +182,9 @@ $configResult = Invoke-CapturedDocker `
         "HERMES_YUJIN_GATEWAY_PASSWORD"
         "HERMES_YUJIN_GATEWAY_PASSWORD_HASH"
         "VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN"
+        "VIDEOBOX_HERMES_CAPABILITY_PRIVATE_KEY_B64"
+        "VIDEOBOX_HERMES_CAPABILITY_PUBLIC_KEY_B64"
+        "VIDEOBOX_HERMES_CAPABILITY_KEY_ID"
         "MISSING"
     )
 if ($configResult.ExitCode -ne 0) {
@@ -135,6 +210,8 @@ $expectedGatewayEnvironmentNames = @(
     "HERMES_YUJIN_GATEWAY_USERNAME"
     "HERMES_YUJIN_URL"
     "VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN"
+    "VIDEOBOX_HERMES_CAPABILITY_KEY_ID"
+    "VIDEOBOX_HERMES_CAPABILITY_PRIVATE_KEY_B64"
 )
 if (($gatewayEnvironmentNames -join "|") -cne ($expectedGatewayEnvironmentNames -join "|")) {
     throw "Agent gateway environment contract is invalid."
@@ -164,6 +241,18 @@ $hermesPasswordHash = Assert-ResolvedCredential `
 $gatewayServiceToken = Assert-ResolvedCredential `
     "VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN" `
     $gateway.environment.VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN
+$capabilityPrivateKeyB64 = Assert-ResolvedCredential `
+    "VIDEOBOX_HERMES_CAPABILITY_PRIVATE_KEY_B64" `
+    $gateway.environment.VIDEOBOX_HERMES_CAPABILITY_PRIVATE_KEY_B64
+$capabilityPublicKeyB64 = Assert-ResolvedCredential `
+    "VIDEOBOX_HERMES_CAPABILITY_PUBLIC_KEY_B64" `
+    $workspace.environment.VIDEOBOX_HERMES_CAPABILITY_PUBLIC_KEY_B64
+$gatewayCapabilityKeyId = Assert-ResolvedCredential `
+    "VIDEOBOX_HERMES_CAPABILITY_KEY_ID" `
+    $gateway.environment.VIDEOBOX_HERMES_CAPABILITY_KEY_ID
+$workspaceCapabilityKeyId = Assert-ResolvedCredential `
+    "VIDEOBOX_HERMES_CAPABILITY_KEY_ID" `
+    $workspace.environment.VIDEOBOX_HERMES_CAPABILITY_KEY_ID
 if ($gatewayPassword.Length -lt 12) {
     throw "Resolved container credential 'HERMES_YUJIN_GATEWAY_PASSWORD' is invalid."
 }
@@ -174,6 +263,15 @@ if (
 ) {
     throw "Resolved container credential 'VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN' is invalid."
 }
+if (
+    $gatewayCapabilityKeyId -cne $workspaceCapabilityKeyId -or
+    $gatewayCapabilityKeyId -notmatch '^[A-Za-z0-9][A-Za-z0-9._:-]{0,254}$'
+) {
+    throw "Resolved Hermes capability key ID is invalid."
+}
+Assert-MatchedCapabilityKeyPair `
+    -PrivateKeyB64 $capabilityPrivateKeyB64 `
+    -PublicKeyB64 $capabilityPublicKeyB64
 if ($hermes.environment.HERMES_TUI_TOOLSETS -cne "context_engine") {
     throw "Hermes toolset contract is invalid."
 }
@@ -194,6 +292,21 @@ if (
 foreach ($name in @($workspace.environment.PSObject.Properties.Name)) {
     if ($name -match '^HERMES(?:_YUJIN|_DASHBOARD)') {
         throw "Workspace received a forbidden Hermes credential."
+    }
+}
+if (
+    $null -ne $gateway.environment.PSObject.Properties[
+        "VIDEOBOX_HERMES_CAPABILITY_PUBLIC_KEY_B64"
+    ] -or
+    $null -ne $workspace.environment.PSObject.Properties[
+        "VIDEOBOX_HERMES_CAPABILITY_PRIVATE_KEY_B64"
+    ]
+) {
+    throw "Hermes capability key ownership is invalid."
+}
+foreach ($name in @($hermes.environment.PSObject.Properties.Name)) {
+    if ($name -match '^VIDEOBOX_HERMES_CAPABILITY_') {
+        throw "Hermes received forbidden capability key material."
     }
 }
 Assert-NoHermesYujinCredentialValueAliases `
@@ -257,7 +370,8 @@ if (
 function Invoke-TargetedComposeUp {
     param(
         [string]$ServiceName,
-        [string]$FailureMessage
+        [string]$FailureMessage,
+        [string[]]$AdditionalArguments = @()
     )
 
     $upArguments = @(
@@ -269,8 +383,9 @@ function Invoke-TargetedComposeUp {
         "up"
         "-d"
         "--build"
-        $ServiceName
     )
+    $upArguments += $AdditionalArguments
+    $upArguments += $ServiceName
     $upExitCode = 1
     Push-Location $repositoryRoot
     try {
@@ -347,7 +462,8 @@ if (-not $hermesWasRunning) {
     try {
         Invoke-TargetedComposeUp `
             -ServiceName "videobox-hermes-yujin" `
-            -FailureMessage "Targeted Hermes Yujin runtime startup failed."
+            -FailureMessage "Targeted Hermes Yujin runtime startup failed." `
+            -AdditionalArguments @("--wait")
     }
     catch {
         throw (
@@ -358,15 +474,132 @@ if (-not $hermesWasRunning) {
     }
 }
 
+$quiesceResult = Invoke-CapturedDocker -DockerArguments @(
+    "compose"
+    "-f", $composeFile
+    "-f", $overlayFile
+    "--profile", "hermes-yujin"
+    "--env-file", $resolvedEnvFile
+    "stop"
+    "videobox-agent-gateway"
+    "videobox-workspace"
+)
+if ($quiesceResult.ExitCode -ne 0) {
+    if ($hermesWasRunning) {
+        throw (
+            "Coordinated capability admission quiesce failed. " +
+            "Pre-existing Hermes service was left running. " +
+            $persistentProfileState + " " +
+            $safeRerunRecovery
+        )
+    }
+    $quiesceFailureStopResult = Invoke-CapturedDocker -DockerArguments @(
+        "compose"
+        "-f", $composeFile
+        "-f", $overlayFile
+        "--profile", "hermes-yujin"
+        "--env-file", $resolvedEnvFile
+        "stop"
+        "videobox-hermes-yujin"
+    )
+    if ($quiesceFailureStopResult.ExitCode -eq 0) {
+        throw (
+            "Coordinated capability admission quiesce failed; the " +
+            "newly started Hermes service was stopped. " +
+            $persistentProfileState + " " +
+            $safeRerunRecovery
+        )
+    }
+    throw (
+        "Coordinated capability admission quiesce failed and automatic " +
+        "stop failed. " +
+        $persistentProfileState + " " +
+        $safeRerunRecovery
+    )
+}
+
 try {
     Invoke-TargetedComposeUp `
-        -ServiceName "videobox-agent-gateway" `
-        -FailureMessage "Targeted Hermes Yujin gateway startup failed."
+        -ServiceName "videobox-workspace" `
+        -FailureMessage "Targeted VideoBox workspace restart failed." `
+        -AdditionalArguments @("--force-recreate", "--wait")
 }
 catch {
     if ($hermesWasRunning) {
         throw (
+            "Targeted VideoBox workspace restart failed; " +
+            "Hermes capability admission remains quiesced. " +
+            "Pre-existing Hermes service was left running. " +
+            $persistentProfileState + " " +
+            $safeRerunRecovery
+        )
+    }
+
+    $workspaceFailureStopResult = Invoke-CapturedDocker -DockerArguments @(
+        "compose"
+        "-f", $composeFile
+        "-f", $overlayFile
+        "--profile", "hermes-yujin"
+        "--env-file", $resolvedEnvFile
+        "stop"
+        "videobox-hermes-yujin"
+    )
+    if ($workspaceFailureStopResult.ExitCode -eq 0) {
+        throw (
+            "Targeted VideoBox workspace restart failed; " +
+            "Hermes capability admission remains quiesced and the " +
+            "newly started Hermes service was stopped. " +
+            $persistentProfileState + " " +
+            $safeRerunRecovery
+        )
+    }
+    throw (
+        "Targeted VideoBox workspace restart failed and automatic stop failed; " +
+        "Hermes capability admission remains quiesced. " +
+        $persistentProfileState + " " +
+        $safeRerunRecovery
+    )
+}
+
+try {
+    Invoke-TargetedComposeUp `
+        -ServiceName "videobox-agent-gateway" `
+        -FailureMessage "Targeted Hermes Yujin gateway startup failed." `
+        -AdditionalArguments @("--force-recreate", "--wait")
+}
+catch {
+    $gatewayStopArguments = @(
+        "compose"
+        "-f", $composeFile
+        "-f", $overlayFile
+        "--profile", "hermes-yujin"
+        "--env-file", $resolvedEnvFile
+        "stop"
+        "videobox-agent-gateway"
+    )
+    $gatewayStopSucceeded = $false
+    try {
+        $gatewayStopResult = Invoke-CapturedDocker `
+            -DockerArguments $gatewayStopArguments
+        $gatewayStopSucceeded = $gatewayStopResult.ExitCode -eq 0
+    }
+    catch {
+        $gatewayStopSucceeded = $false
+    }
+
+    if ($hermesWasRunning) {
+        if (-not $gatewayStopSucceeded) {
+            throw (
+                "Targeted Hermes Yujin gateway startup failed and gateway " +
+                "stop failed; admission quiescence could not be confirmed. " +
+                "Pre-existing Hermes service was left running. " +
+                $persistentProfileState + " " +
+                $safeRerunRecovery
+            )
+        }
+        throw (
             "Targeted Hermes Yujin gateway startup failed. " +
+            "The failed gateway was stopped. " +
             "Pre-existing Hermes service was left running. " +
             $persistentProfileState + " " +
             $safeRerunRecovery
@@ -391,15 +624,38 @@ catch {
         $stopSucceeded = $false
     }
     if ($stopSucceeded) {
+        if (-not $gatewayStopSucceeded) {
+            throw (
+                "Targeted Hermes Yujin gateway startup failed and gateway " +
+                "stop failed; admission quiescence could not be confirmed. " +
+                "The newly started Hermes service was stopped. " +
+                $persistentProfileState + " " +
+                $safeRerunRecovery
+            )
+        }
         throw (
             "Targeted Hermes Yujin gateway startup failed. " +
+            "The failed gateway was stopped. " +
             "The newly started Hermes service was stopped. " +
+            $persistentProfileState + " " +
+            $safeRerunRecovery
+        )
+    }
+    if (-not $gatewayStopSucceeded) {
+        throw (
+            "Targeted Hermes Yujin gateway startup failed and gateway stop " +
+            "failed; admission quiescence could not be confirmed and " +
+            "automatic Hermes stop failed. " +
+            "Recovery: docker compose -f compose.yaml -f compose.hermes-yujin.yaml " +
+            "--profile hermes-yujin --env-file <approved-env-file> " +
+            "stop videobox-hermes-yujin. " +
             $persistentProfileState + " " +
             $safeRerunRecovery
         )
     }
     throw (
         "Targeted Hermes Yujin gateway startup failed and automatic stop failed. " +
+        "The failed gateway was stopped. " +
         "Recovery: docker compose -f compose.yaml -f compose.hermes-yujin.yaml " +
         "--profile hermes-yujin --env-file <approved-env-file> " +
         "stop videobox-hermes-yujin. " +

@@ -2,8 +2,11 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 import asyncio
+import base64
+import binascii
 import inspect
 import os
+import re
 from math import isfinite
 from pathlib import Path
 from urllib.request import urlopen
@@ -37,7 +40,6 @@ from videobox_api.routers.live_smoke_attestation import build_live_smoke_attesta
 from videobox_api.routers.media_library import build_media_library_router
 from videobox_api.routers.media_analysis import build_media_analysis_router
 from videobox_api.routers.outputs import build_outputs_router
-from videobox_api.routers.hermes_internal import build_hermes_internal_router
 from videobox_api.routers.hermes_conversation import build_hermes_conversation_router
 from videobox_api.routers.projects import build_projects_router
 from videobox_api.routers.review import build_review_router
@@ -86,6 +88,54 @@ __all__ = [
     "_build_targeted_segments",
     "_build_stt_provider",
 ]
+
+_HERMES_CAPABILITY_KEY_ID = re.compile(
+    r"[A-Za-z0-9][A-Za-z0-9._:-]{0,254}\Z",
+    re.ASCII,
+)
+
+
+def _hermes_capability_verifier_from_environment(
+) -> HermesCapabilityVerifier | None:
+    public_key_b64 = os.environ.get(
+        "VIDEOBOX_HERMES_CAPABILITY_PUBLIC_KEY_B64",
+        "",
+    )
+    key_id = os.environ.get("VIDEOBOX_HERMES_CAPABILITY_KEY_ID", "")
+    if not public_key_b64 and not key_id:
+        return None
+    if (
+        not public_key_b64
+        or not key_id
+        or _HERMES_CAPABILITY_KEY_ID.fullmatch(key_id) is None
+        or any(
+            marker in key_id.lower()
+            for marker in (
+                "changeme",
+                "replace-before-starting",
+                "replace_me",
+                "placeholder",
+            )
+        )
+        or "=" in public_key_b64
+    ):
+        raise ValueError("hermes_capability_verifier_config_invalid")
+    try:
+        public_key = base64.b64decode(
+            public_key_b64 + "=" * (-len(public_key_b64) % 4),
+            altchars=b"-_",
+            validate=True,
+        )
+    except (binascii.Error, ValueError) as error:
+        raise ValueError(
+            "hermes_capability_verifier_config_invalid"
+        ) from error
+    canonical = (
+        base64.urlsafe_b64encode(public_key).rstrip(b"=").decode("ascii")
+    )
+    if len(public_key) != 32 or canonical != public_key_b64:
+        raise ValueError("hermes_capability_verifier_config_invalid")
+    return HermesCapabilityVerifier(key_id=key_id, public_key=public_key)
 
 
 def _json_safe_validation_value(value):
@@ -308,7 +358,6 @@ def create_app(
     media_analysis_http_client=None,
     allow_test_media_analysis_providers: bool = False,
     creation_interview_runtime: CreationInterviewRuntime | None = None,
-    hermes_capability_verifier: HermesCapabilityVerifier | None = None,
     agent_gateway_url: str | None = None,
     agent_gateway_service_token: str | None = None,
     agent_gateway_http_client_factory=None,
@@ -481,6 +530,9 @@ def create_app(
     if bool(resolved_agent_gateway_url) != bool(resolved_agent_gateway_token):
         raise ValueError("agent_gateway_config_incomplete")
     if resolved_agent_gateway_url and resolved_agent_gateway_token:
+        capability_verifier = (
+            _hermes_capability_verifier_from_environment()
+        )
         client_kwargs = {
             "base_url": resolved_agent_gateway_url,
             "service_token": resolved_agent_gateway_token,
@@ -489,7 +541,9 @@ def create_app(
             client_kwargs["http_client_factory"] = agent_gateway_http_client_factory
         agent_gateway_client = AgentGatewayClient(**client_kwargs)
         app.state.hermes_run_service = HermesRunService(
-            store=store, gateway_client=agent_gateway_client
+            store=store,
+            gateway_client=agent_gateway_client,
+            capability_verifier=capability_verifier,
         )
     else:
         app.state.hermes_run_service = None
@@ -498,18 +552,6 @@ def create_app(
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
-    if hermes_capability_verifier is not None:
-        def consume_hermes_capability(project_id: str, jti: str, expires_at: int) -> str:
-            try:
-                return store.consume_hermes_capability(
-                    project_id=project_id, jti=jti, expires_at=expires_at
-                )
-            except Exception:
-                return "unavailable"
-
-        hermes_capability_verifier.bind_durable_ledger(
-            consume_hermes_capability
-        )
     app.include_router(build_projects_router(store))
     if root_attestation_secret_bytes is not None:
         app.include_router(
@@ -518,8 +560,6 @@ def create_app(
                 secret=root_attestation_secret_bytes,
             )
         )
-    if hermes_capability_verifier is not None:
-        app.include_router(build_hermes_internal_router(store, hermes_capability_verifier))
     app.include_router(build_creation_briefs_router(orchestrator))
     app.include_router(build_draft_readiness_router(orchestrator))
     app.include_router(build_atomic_draft_bundles_router(orchestrator))
