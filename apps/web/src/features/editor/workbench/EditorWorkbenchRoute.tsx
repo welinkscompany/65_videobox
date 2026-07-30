@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-import { ApiConflictError, api, type BrollAsset, type DirectorCandidate, type DirectorMessage, type DirectorProposal, type HermesRunCreateResponse, type MediaLibraryAsset, type PartialRegenerationJob, type PartialRegenerationPreflight, type PartialRegenerationRun, type YujinMemoryCandidate, type YujinMemoryStoreResult } from "../../../api";
+import { ApiConflictError, api, type BrollAsset, type DirectorCandidate, type DirectorMessage, type DirectorProposal, type HermesRunCreateResponse, type MediaLibraryAsset, type PartialRegenerationJob, type PartialRegenerationPreflight, type PartialRegenerationRun, type YujinMemoryCandidate, type YujinMemoryCategory, type YujinMemoryStoreResult } from "../../../api";
 import { Button } from "../../../components/ui/button";
 import { findLatestSucceededJob } from "../../../lib/formatters";
 import { projectEditorAssets, type EditorAssetCard } from "../assets/editorAssetProjection";
@@ -30,6 +30,7 @@ type DirectorState = Readonly<{
   runState: RightDockDirector["runState"];
   selectedCandidateIds: readonly string[];
   conversationScroll: RightDockDirector["conversationScroll"];
+  memorySourceMessageIds: readonly string[];
   isSending?: boolean;
 }>;
 type MemoryCandidateState = Readonly<{
@@ -42,6 +43,10 @@ type MemoryState = Readonly<{
   conversationId: string | null;
   candidates: readonly MemoryCandidateState[];
   loadError: string | null;
+  candidateDraft: string;
+  candidateCategory: YujinMemoryCategory;
+  createAction: "idle" | "creating";
+  createError: string | null;
 }>;
 type PartialState = Readonly<{
   key: string;
@@ -84,6 +89,7 @@ function createDirectorState(requestKey: string, sessionId: string | null): Dire
     runState: { kind: "idle" },
     selectedCandidateIds: [],
     conversationScroll: { key: requestKey, top: 0, pinnedToBottom: true },
+    memorySourceMessageIds: [],
   };
 }
 
@@ -93,6 +99,10 @@ function createMemoryState(requestKey: string): MemoryState {
     conversationId: null,
     candidates: [],
     loadError: null,
+    candidateDraft: "",
+    candidateCategory: "pacing",
+    createAction: "idle",
+    createError: null,
   };
 }
 
@@ -187,7 +197,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     directorOperationId.current = operationId;
     let active = true;
     const isCurrent = () => active && routeEpoch.current.value === epoch && directorOperationId.current === operationId;
-    setDirector((current) => current.key === requestKey ? { ...current, state: "analysis_running", conversationId: null, messages: [], proposal: null, runState: { kind: "idle" } } : current);
+    setDirector((current) => current.key === requestKey ? { ...current, state: "analysis_running", conversationId: null, messages: [], proposal: null, runState: { kind: "idle" }, memorySourceMessageIds: [] } : current);
     void api.reloadDirectorSession(projectId, sessionId).then((recovered) => {
       if (!isCurrent()) return;
       setDirector((current) => current.key === requestKey ? {
@@ -195,12 +205,15 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
         state: recovered.proposal ? "proposal_ready" : "idle",
         conversationId: recovered.conversation?.conversation_id ?? null,
         messages: projectDirectorMessages(recovered.messages),
+        memorySourceMessageIds: completedDurableMemoryMessageIds(
+          recovered.messages,
+        ),
         proposal: recovered.proposal,
         runState: { kind: "idle" },
         selectedCandidateIds: initialDirectorCandidateIds(recovered.proposal),
       } : current);
     }).catch((error: unknown) => {
-      if (isCurrent()) setDirector((current) => current.key === requestKey ? { ...current, state: error instanceof SyntaxError || error instanceof TypeError ? "error" : "blocked", conversationId: null, messages: [], proposal: null } : current);
+      if (isCurrent()) setDirector((current) => current.key === requestKey ? { ...current, state: error instanceof SyntaxError || error instanceof TypeError ? "error" : "blocked", conversationId: null, messages: [], proposal: null, memorySourceMessageIds: [] } : current);
     });
     return () => { active = false; };
   }, [projectId, requestKey, sessionId]);
@@ -359,12 +372,15 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       && memoryListOperationId.current === operationId
       && currentDirectorConversationId.current === memoryConversationId
     );
-    setMemory({
-      key: requestKey,
-      conversationId: memoryConversationId,
-      candidates: [],
-      loadError: null,
-    });
+    setMemory((current) => (
+      current.key === requestKey
+      && current.conversationId === memoryConversationId
+        ? { ...current, candidates: [], loadError: null }
+        : {
+          ...createMemoryState(requestKey),
+          conversationId: memoryConversationId,
+        }
+    ));
     void api.listYujinMemoryCandidates(
       projectId,
       memoryConversationId,
@@ -376,24 +392,32 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       ))) {
         throw new Error("yujin_memory_candidate_identity_mismatch");
       }
-      setMemory({
-        key: requestKey,
-        conversationId: memoryConversationId,
-        candidates: candidates.map((candidate) => ({
-          candidate,
-          action: "idle",
-          error: null,
-        })),
-        loadError: null,
-      });
+      setMemory((current) => (
+        current.key === requestKey
+        && current.conversationId === memoryConversationId
+          ? {
+            ...current,
+            candidates: candidates.map((candidate) => ({
+              candidate,
+              action: "idle",
+              error: null,
+            })),
+            loadError: null,
+          }
+          : current
+      ));
     }).catch(() => {
       if (!isCurrent()) return;
-      setMemory({
-        key: requestKey,
-        conversationId: memoryConversationId,
-        candidates: [],
-        loadError: "기억을 불러오지 못했어요. 편집과 대화는 계속할 수 있어요.",
-      });
+      setMemory((current) => (
+        current.key === requestKey
+        && current.conversationId === memoryConversationId
+          ? {
+            ...current,
+            candidates: [],
+            loadError: "기억을 불러오지 못했어요. 편집과 대화는 계속할 수 있어요.",
+          }
+          : current
+      ));
     });
     return () => { active = false; };
   }, [memoryConversationId, projectId, requestKey, sessionId]);
@@ -735,6 +759,102 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     if (!isCurrentMemoryMutation(ownership)) return;
     memoryMutationInFlight.current = false;
   };
+  const createMemoryCandidate = async () => {
+    const proposedText = activeMemory.candidateDraft.trim();
+    const sourceMessageIds = Array.from(new Set(
+      activeDirector.memorySourceMessageIds,
+    )).slice(-8);
+    if (
+      activeMemory.createAction !== "idle"
+      || !proposedText
+      || proposedText.length > 280
+      || sourceMessageIds.length < 1
+    ) return;
+    const requestUuid = globalThis.crypto?.randomUUID?.();
+    if (!requestUuid) {
+      setMemory((current) => (
+        current.key === requestKey
+        && current.conversationId === activeDirector.conversationId
+          ? {
+            ...current,
+            createError: "기억 후보를 만들지 못했어요. 대화와 편집은 계속할 수 있어요.",
+          }
+          : current
+      ));
+      return;
+    }
+    const ownership = beginMemoryMutation();
+    if (!ownership) return;
+    setMemory((current) => (
+      current.key === requestKey
+      && current.conversationId === ownership.conversationId
+        ? {
+          ...current,
+          createAction: "creating",
+          createError: null,
+        }
+        : current
+    ));
+    try {
+      const created = await api.createYujinMemoryCandidate(projectId, {
+        conversation_id: ownership.conversationId,
+        client_request_id: `memory-create-${requestUuid}`,
+        source_message_ids: sourceMessageIds,
+        memory_scope: "creator",
+        category: activeMemory.candidateCategory,
+        proposed_text: proposedText,
+      });
+      if (!isCurrentMemoryMutation(ownership)) return;
+      if (
+        created.project_id !== projectId
+        || created.conversation_id !== ownership.conversationId
+      ) {
+        throw new Error("yujin_memory_candidate_identity_mismatch");
+      }
+      const candidates = await api.listYujinMemoryCandidates(
+        projectId,
+        ownership.conversationId,
+      );
+      if (!isCurrentMemoryMutation(ownership)) return;
+      if (candidates.some((candidate) => (
+        candidate.project_id !== projectId
+        || candidate.conversation_id !== ownership.conversationId
+      ))) {
+        throw new Error("yujin_memory_candidate_identity_mismatch");
+      }
+      setMemory((current) => (
+        current.key === requestKey
+        && current.conversationId === ownership.conversationId
+          ? {
+            ...current,
+            candidates: candidates.map((candidate) => ({
+              candidate,
+              action: "idle",
+              error: null,
+            })),
+            candidateDraft: "",
+            createAction: "idle",
+            createError: null,
+            loadError: null,
+          }
+          : current
+      ));
+    } catch {
+      if (!isCurrentMemoryMutation(ownership)) return;
+      setMemory((current) => (
+        current.key === requestKey
+        && current.conversationId === ownership.conversationId
+          ? {
+            ...current,
+            createAction: "idle",
+            createError: "기억 후보를 만들지 못했어요. 대화와 편집은 계속할 수 있어요.",
+          }
+          : current
+      ));
+    } finally {
+      finishMemoryMutation(ownership);
+    }
+  };
   const storeMemoryCandidate = async (candidateId: string) => {
     const selected = activeMemory.candidates.find(
       (candidate) => candidate.candidate.candidate_id === candidateId,
@@ -1059,6 +1179,9 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
         messages: persisted.length
           ? projectDirectorMessages(persisted)
           : current.messages,
+        memorySourceMessageIds: persisted.length
+          ? completedDurableMemoryMessageIds(persisted)
+          : current.memorySourceMessageIds,
         runState: terminal.eventType === "run_completed"
           ? { kind: "complete", runId: run.run_id }
           : {
@@ -1504,6 +1627,27 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
         error: candidate.error,
       })),
       loadError: activeMemory.loadError,
+      candidateDraft: activeMemory.candidateDraft,
+      candidateCategory: activeMemory.candidateCategory,
+      createAction: activeMemory.createAction,
+      createError: activeMemory.createError,
+      canCreateCandidate: Boolean(
+        activeMemory.candidateDraft.trim()
+        && activeDirector.memorySourceMessageIds.length,
+      ),
+      onCandidateDraftChange: (candidateDraft) => setMemory((current) => (
+        current.key === requestKey
+        && current.conversationId === activeDirector.conversationId
+          ? { ...current, candidateDraft, createError: null }
+          : current
+      )),
+      onCandidateCategoryChange: (candidateCategory) => setMemory((current) => (
+        current.key === requestKey
+        && current.conversationId === activeDirector.conversationId
+          ? { ...current, candidateCategory, createError: null }
+          : current
+      )),
+      onCreateCandidate: createMemoryCandidate,
       onApproveAndStore: approveAndStoreMemoryCandidate,
       onReject: rejectMemoryCandidate,
       onStore: storeMemoryCandidate,
@@ -1892,6 +2036,28 @@ export function findHermesRunProposalId(
     (message) => message.role === "assistant"
       && message.metadata.hermes_run_id === runId,
   )?.proposal_id ?? null;
+}
+
+function completedDurableMemoryMessageIds(
+  messages: readonly DirectorMessage[],
+): readonly string[] {
+  const completed: string[] = [];
+  let pendingUserIds: string[] = [];
+  messages.forEach((message) => {
+    if (message.role === "user") {
+      pendingUserIds = [message.message_id];
+      return;
+    }
+    if (
+      message.role === "assistant"
+      && message.metadata.hermes_status === "completed"
+      && typeof message.metadata.hermes_run_id === "string"
+    ) {
+      completed.push(...pendingUserIds, message.message_id);
+    }
+    if (message.role === "assistant") pendingUserIds = [];
+  });
+  return Array.from(new Set(completed)).slice(-8);
 }
 
 function projectDirectorMessages(messages: readonly DirectorMessage[]): readonly RightDockMessage[] {

@@ -160,8 +160,14 @@ def test_domain_candidate_is_frozen_typed_and_pending_only_at_creation() -> None
         "pending",
         "approved",
         "rejected",
+    }
+    assert {status.value for status in domain.MemoryStorageStatus} == {
+        "not_requested",
+        "claimed",
+        "event_pending",
         "stored",
-        "failed",
+        "failed_retryable",
+        "ambiguous",
         "deleted",
     }
     candidate = domain.YujinMemoryCandidate(

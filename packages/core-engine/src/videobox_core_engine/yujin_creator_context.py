@@ -16,6 +16,7 @@ from videobox_domain_models.yujin_creator_context import (
     SegmentSummary,
     SupportedControl,
     TimelineSummary,
+    UserApprovedPreference,
     YujinCreatorContext,
 )
 
@@ -222,11 +223,14 @@ def build_yujin_creator_context(
 
 
 def _fit_context(context: YujinCreatorContext) -> YujinCreatorContext:
+    memories = context.memories
     segments = context.segment_summaries
     candidates = context.media_candidates
     approved_tts = context.approved_tts_candidates
     while len(canonical_creator_context_json(context).encode("utf-8")) > MAX_CONTEXT_BYTES:
-        if candidates:
+        if memories:
+            memories = ()
+        elif candidates:
             candidates = candidates[:-1]
         elif approved_tts:
             approved_tts = approved_tts[:-1]
@@ -236,12 +240,22 @@ def _fit_context(context: YujinCreatorContext) -> YujinCreatorContext:
             raise YujinCreatorContextError("creator_context_size_limit")
         context = context.model_copy(
             update={
+                "memories": memories,
                 "segment_summaries": segments,
                 "media_candidates": candidates,
                 "approved_tts_candidates": approved_tts,
             }
         )
     return context
+
+
+def attach_yujin_memories(
+    context: YujinCreatorContext,
+    memories: tuple[UserApprovedPreference, ...],
+) -> YujinCreatorContext:
+    """Attach bounded advisory memory and drop it before creator data if needed."""
+
+    return _fit_context(context.model_copy(update={"memories": memories}))
 
 
 def _bounded_segments(

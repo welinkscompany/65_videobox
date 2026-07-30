@@ -66,6 +66,14 @@ export type RightDockMemoryCandidate = Readonly<{
 export type RightDockMemory = Readonly<{
   candidates: readonly RightDockMemoryCandidate[];
   loadError: string | null;
+  candidateDraft: string;
+  candidateCategory: YujinMemoryCategory;
+  createAction: "idle" | "creating";
+  createError: string | null;
+  canCreateCandidate: boolean;
+  onCandidateDraftChange: (draft: string) => void;
+  onCandidateCategoryChange: (category: YujinMemoryCategory) => void;
+  onCreateCandidate: () => void | Promise<void>;
   onApproveAndStore: (candidateId: string) => void | Promise<void>;
   onReject: (candidateId: string) => void | Promise<void>;
   onStore: (candidateId: string) => void | Promise<void>;

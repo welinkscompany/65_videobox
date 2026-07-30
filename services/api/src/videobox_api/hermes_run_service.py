@@ -19,6 +19,7 @@ from videobox_api.hermes_capabilities import (
 )
 from videobox_api.models import HermesStreamEvent
 from videobox_core_engine.yujin_creator_context import (
+    attach_yujin_memories,
     build_yujin_creator_context,
 )
 from videobox_core_engine.yujin_creator_proposal_adapter import (
@@ -121,6 +122,7 @@ class HermesRunService:
         monotonic: Callable[[], float] = time.monotonic,
         context_builder: Callable | None = None,
         capability_verifier=None,
+        memory_service=None,
     ) -> None:
         if min(max_active, max_total, max_events, max_event_bytes, max_text_bytes) < 1:
             raise ValueError("hermes_run_limits_invalid")
@@ -139,6 +141,7 @@ class HermesRunService:
         self._clock = monotonic
         self._context_builder = context_builder or build_yujin_creator_context
         self.capability_verifier = capability_verifier
+        self.memory_service = memory_service
         self._runs: dict[str, _Run] = {}
         self._keys: dict[tuple[str, str, str], str] = {}
         self._admissions: dict[tuple[str, str, str], _Admission] = {}
@@ -581,6 +584,18 @@ class HermesRunService:
                 and durable.get("owner_token") is not None
             ):
                 run_id = str(durable["run_id"])
+                if self.memory_service is not None:
+                    memories = (
+                        await self.memory_service.retrieve_for_new_owned_dispatch(
+                            dispatch=bool(durable.get("dispatch")),
+                            owner_token=str(durable["owner_token"]),
+                            project_id=project_id,
+                            conversation_id=conversation_id,
+                            query=text,
+                        )
+                    )
+                    if memories:
+                        context = attach_yujin_memories(context, memories)
                 gateway_reservation_attempted = False
                 try:
                     gateway_reservation_attempted = True

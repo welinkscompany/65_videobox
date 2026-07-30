@@ -406,6 +406,291 @@ def test_postgres_yujin_memory_list_filters_conversation_before_limit(
         _cleanup_postgres_hermes_project(store, project_id)
 
 
+def _seed_yujin_memory_retrieval_parity(
+    store: LocalProjectStore,
+    *,
+    name: str,
+) -> tuple[str, str, list[str]]:
+    project = store.bootstrap_project(name)
+    project_id = project.project_id
+    session = store.save_editing_session(
+        project_id=project_id,
+        timeline_id=f"timeline-{uuid4().hex}",
+        session_payload={"segments": [], "history": []},
+    )
+    current_conversation_id = f"conversation-current-{uuid4().hex}"
+    other_conversation_id = f"conversation-other-{uuid4().hex}"
+    sources: dict[str, str] = {}
+    for conversation_id in (
+        current_conversation_id,
+        other_conversation_id,
+    ):
+        store.create_director_conversation(
+            project_id=project_id,
+            session_id=session["session_id"],
+            conversation_id=conversation_id,
+        )
+        message = store.append_director_message(
+            project_id=project_id,
+            session_id=session["session_id"],
+            conversation_id=conversation_id,
+            role="user",
+            text="현재 대화의 편집 취향입니다.",
+        )
+        sources[conversation_id] = message["message_id"]
+
+    definitions = (
+        (
+            current_conversation_id,
+            "caption",
+            "자막은 두 줄 이내를 선호합니다.",
+            "approved",
+            "stored",
+            "memory-caption",
+            "ext-" + "a" * 64,
+        ),
+        (
+            current_conversation_id,
+            "pacing",
+            "빠른 컷 편집을 선호합니다.",
+            "approved",
+            "stored",
+            "memory-pacing",
+            "ext-" + "b" * 64,
+        ),
+        (
+            current_conversation_id,
+            "workflow",
+            "대기 중인 취향입니다.",
+            "pending",
+            "not_requested",
+            None,
+            None,
+        ),
+        (
+            current_conversation_id,
+            "tone",
+            "거절된 취향입니다.",
+            "rejected",
+            "not_requested",
+            None,
+            None,
+        ),
+        (
+            current_conversation_id,
+            "audio",
+            "저장 실패한 취향입니다.",
+            "approved",
+            "failed_retryable",
+            "memory-failed",
+            "ext-" + "c" * 64,
+        ),
+        (
+            current_conversation_id,
+            "audio",
+            "삭제된 취향입니다.",
+            "approved",
+            "deleted",
+            "memory-deleted",
+            "ext-" + "d" * 64,
+        ),
+        (
+            current_conversation_id,
+            "workflow",
+            "private mapping이 없는 취향입니다.",
+            "approved",
+            "stored",
+            None,
+            None,
+        ),
+        (
+            other_conversation_id,
+            "pacing",
+            "다른 대화의 취향입니다.",
+            "approved",
+            "stored",
+            "memory-other-conversation",
+            "ext-" + "e" * 64,
+        ),
+    )
+    candidate_ids: list[str] = []
+    for index, (
+        conversation_id,
+        category,
+        text,
+        status,
+        storage_status,
+        memory_ref,
+        external_ref,
+    ) in enumerate(definitions):
+        candidate = store.create_yujin_memory_candidate(
+            project_id=project_id,
+            conversation_id=conversation_id,
+            client_request_id=f"retrieval-parity-{index}",
+            source_message_ids=(sources[conversation_id],),
+            memory_scope="creator",
+            category=category,
+            proposed_text=text,
+        )
+        candidate_ids.append(candidate["candidate_id"])
+        connection = store._connection(project_id)
+        try:
+            connection.execute(
+                """
+                UPDATE yujin_memory_candidates
+                SET status = ?, storage_status = ?,
+                    provider_memory_ref = ?, external_ref = ?
+                WHERE project_id = ? AND candidate_id = ?
+                """,
+                (
+                    status,
+                    storage_status,
+                    memory_ref,
+                    external_ref,
+                    project_id,
+                    candidate["candidate_id"],
+                ),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+    unrelated = store.bootstrap_project(f"{name} unrelated")
+    unrelated_session = store.save_editing_session(
+        project_id=unrelated.project_id,
+        timeline_id=f"timeline-{uuid4().hex}",
+        session_payload={"segments": [], "history": []},
+    )
+    unrelated_conversation = f"conversation-unrelated-{uuid4().hex}"
+    store.create_director_conversation(
+        project_id=unrelated.project_id,
+        session_id=unrelated_session["session_id"],
+        conversation_id=unrelated_conversation,
+    )
+    unrelated_message = store.append_director_message(
+        project_id=unrelated.project_id,
+        session_id=unrelated_session["session_id"],
+        conversation_id=unrelated_conversation,
+        role="user",
+        text="다른 프로젝트의 취향입니다.",
+    )
+    unrelated_candidate = store.create_yujin_memory_candidate(
+        project_id=unrelated.project_id,
+        conversation_id=unrelated_conversation,
+        client_request_id="retrieval-parity-unrelated",
+        source_message_ids=(unrelated_message["message_id"],),
+        memory_scope="creator",
+        category="pacing",
+        proposed_text="다른 프로젝트의 빠른 편집 취향입니다.",
+    )
+    connection = store._connection(unrelated.project_id)
+    try:
+        connection.execute(
+            """
+            UPDATE yujin_memory_candidates
+            SET status = 'approved', storage_status = 'stored',
+                provider_memory_ref = ?, external_ref = ?
+            WHERE project_id = ? AND candidate_id = ?
+            """,
+            (
+                "memory-unrelated-project",
+                "ext-" + "f" * 64,
+                unrelated.project_id,
+                unrelated_candidate["candidate_id"],
+            ),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+    return (
+        project_id,
+        current_conversation_id,
+        [project_id, unrelated.project_id],
+    )
+
+
+def test_postgres_yujin_memory_retrieval_rows_match_sqlite_exactly(
+    tmp_path: Path,
+    postgres_url: str,
+) -> None:
+    postgres = PostgresProjectStore(
+        tmp_path / "postgres-yujin-memory-d4-retrieval",
+        database_url=postgres_url,
+    )
+    local = LocalProjectStore(tmp_path / "sqlite-yujin-memory-d4-retrieval")
+    postgres_project_id = ""
+    postgres_project_ids: list[str] = []
+    try:
+        (
+            postgres_project_id,
+            postgres_conversation_id,
+            postgres_project_ids,
+        ) = _seed_yujin_memory_retrieval_parity(
+            postgres,
+            name=f"PostgreSQL Yujin memory D4 {uuid4().hex}",
+        )
+        local_project_id, local_conversation_id, _ = (
+            _seed_yujin_memory_retrieval_parity(
+                local,
+                name=f"SQLite Yujin memory D4 {uuid4().hex}",
+            )
+        )
+
+        postgres_rows = postgres.list_yujin_memory_retrieval_rows(
+            project_id=postgres_project_id,
+            conversation_id=postgres_conversation_id,
+        )
+        local_rows = local.list_yujin_memory_retrieval_rows(
+            project_id=local_project_id,
+            conversation_id=local_conversation_id,
+        )
+
+        def projection(rows: list[dict]) -> list[dict]:
+            return [
+                {
+                    "status": row["status"],
+                    "storage_status": row["storage_status"],
+                    "memory_ref": row["memory_ref"],
+                    "external_ref": row["external_ref"],
+                    "text": row["text"],
+                    "category": row["category"],
+                }
+                for row in rows
+            ]
+
+        assert projection(postgres_rows) == projection(local_rows) == [
+            {
+                "status": "approved",
+                "storage_status": "stored",
+                "memory_ref": "memory-caption",
+                "external_ref": "ext-" + "a" * 64,
+                "text": "자막은 두 줄 이내를 선호합니다.",
+                "category": "caption",
+            },
+            {
+                "status": "approved",
+                "storage_status": "stored",
+                "memory_ref": "memory-pacing",
+                "external_ref": "ext-" + "b" * 64,
+                "text": "빠른 컷 편집을 선호합니다.",
+                "category": "pacing",
+            },
+        ]
+        assert {
+            row["project_id"] for row in postgres_rows
+        } == {postgres_project_id}
+        assert {
+            row["conversation_id"] for row in postgres_rows
+        } == {postgres_conversation_id}
+        assert postgres.list_yujin_memory_retrieval_rows(
+            project_id=postgres_project_id,
+            conversation_id="missing",
+        ) == []
+    finally:
+        for project_id in reversed(postgres_project_ids):
+            _cleanup_postgres_hermes_project(postgres, project_id)
+
+
 def test_postgres_expired_yujin_memory_claims_match_local_retry_paths(
     tmp_path: Path,
     postgres_url: str,

@@ -135,6 +135,19 @@ class SupportedControl(_StrictModel):
     mode: Literal["recommendation_only", "read_only"]
 
 
+class UserApprovedPreference(_StrictModel):
+    kind: Literal["user_approved_preference"]
+    category: Literal["pacing", "caption", "audio", "tone", "workflow"]
+    text: str = Field(min_length=1, max_length=280)
+
+    @field_validator("text")
+    @classmethod
+    def text_fits_utf8_limit(cls, value: str) -> str:
+        if len(value.encode("utf-8")) > 1024:
+            raise ValueError("memory_text_too_large")
+        return value
+
+
 class GatewayCreatorContext(_StrictModel):
     schema_version: Literal["videobox.yujin-context.v1"]
     project_id: str = Field(min_length=1, max_length=256)
@@ -151,8 +164,21 @@ class GatewayCreatorContext(_StrictModel):
         default=(),
         max_length=32,
     )
+    memories: tuple[UserApprovedPreference, ...] = Field(
+        default=(),
+        max_length=5,
+    )
     timeline_summary: TimelineSummary
     supported_controls: tuple[SupportedControl, ...] = Field(max_length=7)
+
+    @field_validator("memories")
+    @classmethod
+    def memories_fit_text_budget(
+        cls, value: tuple[UserApprovedPreference, ...]
+    ) -> tuple[UserApprovedPreference, ...]:
+        if sum(len(item.text) for item in value) > 1400:
+            raise ValueError("memory_text_budget_exceeded")
+        return value
 
 
 class GatewayContextAttachRequest(_StrictModel):

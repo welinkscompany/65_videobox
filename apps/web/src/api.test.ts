@@ -28,6 +28,47 @@ describe("caption style API conflicts", () => {
     updated_at: "2026-07-30T12:00:00Z",
   } as const;
 
+  it("creates one typed conversation-owned memory candidate with the existing POST", async () => {
+    const createdMemoryCandidate = {
+      ...memoryCandidate,
+      client_request_id: "memory-create-request-1",
+      source_message_ids: ["message-1", "message-2"],
+    };
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(createdMemoryCandidate), { status: 201 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(api.createYujinMemoryCandidate("project/1", {
+      conversation_id: "conversation:1",
+      client_request_id: "memory-create-request-1",
+      source_message_ids: ["message-1", "message-2"],
+      memory_scope: "creator",
+      category: "pacing",
+      proposed_text: "빠른 컷 편집을 선호합니다.",
+    })).resolves.toEqual(createdMemoryCandidate);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/projects/project%2F1/director/memory-candidates",
+      expect.objectContaining({
+        method: "POST",
+        credentials: "same-origin",
+        redirect: "error",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          conversation_id: "conversation:1",
+          client_request_id: "memory-create-request-1",
+          source_message_ids: ["message-1", "message-2"],
+          memory_scope: "creator",
+          category: "pacing",
+          proposed_text: "빠른 컷 편집을 선호합니다.",
+        }),
+      }),
+    );
+    vi.unstubAllGlobals();
+  });
+
   it("uses strict conversation-scoped memory candidate actions", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({

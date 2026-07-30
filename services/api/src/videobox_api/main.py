@@ -559,22 +559,26 @@ def create_app(
         if agent_gateway_http_client_factory is not None:
             client_kwargs["http_client_factory"] = agent_gateway_http_client_factory
         agent_gateway_client = AgentGatewayClient(**client_kwargs)
+        app.state.yujin_memory_service = YujinMemoryService(
+            store=store,
+            gateway=agent_gateway_client,
+        )
         app.state.hermes_run_service = HermesRunService(
             store=store,
             gateway_client=agent_gateway_client,
             capability_verifier=capability_verifier,
+            memory_service=app.state.yujin_memory_service,
         )
     else:
         app.state.hermes_run_service = None
+        app.state.yujin_memory_service = YujinMemoryService(
+            store=store,
+            gateway=None,
+        )
     app.state.hermes_operational_status = HermesOperationalStatusService(
         agent_gateway_client,
         admission_ready=capability_verifier is not None,
     )
-    app.state.yujin_memory_service = YujinMemoryService(
-        store=store,
-        gateway=agent_gateway_client,
-    )
-
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}

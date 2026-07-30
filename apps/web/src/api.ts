@@ -162,6 +162,14 @@ export type YujinMemoryCandidate = {
   created_at: string;
   updated_at: string;
 };
+export type YujinMemoryCandidateCreate = {
+  conversation_id: string;
+  client_request_id: string;
+  source_message_ids: string[];
+  memory_scope: "creator";
+  category: YujinMemoryCategory;
+  proposed_text: string;
+};
 export type YujinMemoryStoreResult = {
   candidate_id: string;
   status: "approved";
@@ -1068,6 +1076,35 @@ async function listYujinMemoryCandidatesRequest(
   return candidates;
 }
 
+async function createYujinMemoryCandidateRequest(
+  projectId: string,
+  body: YujinMemoryCandidateCreate,
+): Promise<YujinMemoryCandidate> {
+  const payload = await request<unknown>(
+    `/api/projects/${encodeURIComponent(projectId)}`
+    + "/director/memory-candidates",
+    yujinMemoryRequestInit({
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  );
+  const candidate = parseYujinMemoryCandidate(payload);
+  if (
+    candidate.project_id !== projectId
+    || candidate.conversation_id !== body.conversation_id
+    || candidate.client_request_id !== body.client_request_id
+    || candidate.memory_scope !== body.memory_scope
+    || candidate.category !== body.category
+    || candidate.proposed_text !== body.proposed_text
+    || JSON.stringify(candidate.source_message_ids)
+      !== JSON.stringify(body.source_message_ids)
+  ) {
+    throw new Error("yujin_memory_candidate_invalid");
+  }
+  return candidate;
+}
+
 async function yujinMemoryCandidateActionRequest(
   projectId: string,
   candidateId: string,
@@ -1304,6 +1341,10 @@ export const api = {
     projectId: string,
     conversationId: string,
   ) => listYujinMemoryCandidatesRequest(projectId, conversationId),
+  createYujinMemoryCandidate: (
+    projectId: string,
+    body: YujinMemoryCandidateCreate,
+  ) => createYujinMemoryCandidateRequest(projectId, body),
   approveYujinMemoryCandidate: (
     projectId: string,
     candidateId: string,

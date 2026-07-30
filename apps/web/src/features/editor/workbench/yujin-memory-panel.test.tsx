@@ -17,6 +17,14 @@ const pending = {
 } as const;
 
 const memoryCallbacks = () => ({
+  candidateDraft: "",
+  candidateCategory: "pacing" as const,
+  createAction: "idle" as const,
+  createError: null,
+  canCreateCandidate: true,
+  onCandidateDraftChange: vi.fn(),
+  onCandidateCategoryChange: vi.fn(),
+  onCreateCandidate: vi.fn(),
   onApproveAndStore: vi.fn(),
   onReject: vi.fn(),
   onStore: vi.fn(),
@@ -44,6 +52,38 @@ function renderDock(memory: Record<string, unknown>) {
 }
 
 describe("Yujin memory panel", () => {
+  it("has one separate explicit typed producer and never fires it automatically", () => {
+    const callbacks = memoryCallbacks();
+    renderDock({
+      candidates: [],
+      loadError: null,
+      ...callbacks,
+      candidateDraft: "자막은 두 줄 이내를 선호합니다.",
+      candidateCategory: "caption",
+    });
+
+    const panel = screen.getByRole("region", { name: "유진 기억" });
+    expect(callbacks.onCreateCandidate).not.toHaveBeenCalled();
+    fireEvent.change(within(panel).getByLabelText("기억 종류"), {
+      target: { value: "caption" },
+    });
+    fireEvent.change(within(panel).getByLabelText("기억 후보"), {
+      target: { value: "자막은 한 줄을 선호합니다." },
+    });
+    expect(callbacks.onCandidateCategoryChange).toHaveBeenCalledWith("caption");
+    expect(callbacks.onCandidateDraftChange).toHaveBeenCalledWith(
+      "자막은 한 줄을 선호합니다.",
+    );
+    expect(callbacks.onCreateCandidate).not.toHaveBeenCalled();
+
+    fireEvent.click(within(panel).getByRole(
+      "button", { name: "기억 후보 만들기" },
+    ));
+    expect(callbacks.onCreateCandidate).toHaveBeenCalledTimes(1);
+    expect(callbacks.onApproveAndStore).not.toHaveBeenCalled();
+    expect(callbacks.onStore).not.toHaveBeenCalled();
+  });
+
   it("requires explicit approve-and-store or reject and renders no source/provider data", () => {
     const callbacks = memoryCallbacks();
     renderDock({
@@ -80,7 +120,12 @@ describe("Yujin memory panel", () => {
     });
     const panel = screen.getByRole("region", { name: "유진 기억" });
     expect(within(panel).getByText("저장 중")).toBeVisible();
-    expect(within(panel).queryByRole("button")).toBeNull();
+    expect(within(panel).queryByRole(
+      "button", { name: "승인하고 저장" },
+    )).toBeNull();
+    expect(within(panel).getByRole(
+      "button", { name: "기억 후보 만들기" },
+    )).toBeVisible();
 
     rendered.rerender(
       <RightDock

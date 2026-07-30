@@ -146,9 +146,45 @@ def validate_yujin_memory_candidate(
     return display_text
 
 
+def is_yujin_memory_retrieval_query_safe(value: str) -> bool:
+    """Scan the full user prompt before any bounded provider projection."""
+
+    display_text = _display_text(value)
+    if (
+        not display_text
+        or "\r" in value
+        or "\n" in value
+        or any(
+            unicodedata.category(character) in {"Cc", "Cf", "Cs"}
+            for character in display_text
+        )
+        or _RAW_TRANSCRIPT.search(display_text)
+    ):
+        return False
+    return not any(
+        pattern.search(display_text)
+        for pattern in (
+            _SECRET,
+            _KOREAN_SENSITIVE,
+            _JWT,
+            _PROVIDER_TOKEN,
+            _PRIVATE_KEY_PEM,
+            _EMAIL,
+            _PHONE,
+            _INTERNATIONAL_PHONE,
+            _CONTACT_LABEL,
+            _CARD,
+            _PATH,
+            _REMOTE_URI,
+            _WEB_URL,
+        )
+    )
+
+
 __all__ = [
     "MAX_PROPOSED_TEXT_CHARACTERS",
     "MAX_PROPOSED_TEXT_UTF8_BYTES",
     "SUPPORTED_CATEGORIES",
+    "is_yujin_memory_retrieval_query_safe",
     "validate_yujin_memory_candidate",
 ]

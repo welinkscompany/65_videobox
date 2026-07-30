@@ -1,6 +1,15 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 314. 2026-07-30 Hermes Yujin D3 editor memory UI closeout`을 우선 적용한다. Task 22 기술 closeout 근거는 `## 300`, Phase B 근거는 `## 307`, Phase C 근거는 `## 308`–`## 311`, D1/D2 근거는 `## 312`–`## 313`을 유지하며, 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 315. 2026-07-30 Hermes Yujin D4 and Phase D closeout`을 우선 적용한다. Task 22 기술 closeout 근거는 `## 300`, Phase B 근거는 `## 307`, Phase C 근거는 `## 308`–`## 311`, D1–D3 근거는 `## 312`–`## 314`를 유지하며, 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+
+## 315. 2026-07-30 Hermes Yujin D4 and Phase D closeout
+
+- `[x] D4·Phase D 완료`: 현재 RightDock의 명시적 `기억 후보 만들기`만 현재 owned conversation의 완료 durable message ID 1–8개와 typed short candidate를 기존 POST로 한 번 보낸다. page load, run/provider 완료, approve/store/retry는 자동 create·approve·store를 수행하지 않고 late route/project/conversation/epoch 결과는 현재 목록을 갱신하지 않는다.
+- `검색·주입 경계`: 새 owned durable dispatch가 확정된 뒤에만 prompt당 최대 한 번, 750ms, top 5로 검색한다. 전체 원문 prompt의 secret/contact/path/URL 안전성을 먼저 확인하고 exact `기억 후보 만들기`, replay, unsafe prompt는 검색 `0`이다. provider 결과는 현재 project+conversation의 exact local approved+stored private mapping과 다시 대조하며, ID 없는 `user_approved_preference`만 최대 5개·총 1,400자로 주입한다. 48KiB context 예산 초과 시 memory를 가장 먼저 제거한다.
+- `fallback·비변경`: pending/rejected/deleted/failed/unrelated, malformed/oversize/duplicate, empty/timeout/outage는 제외하거나 `memories=()`로 수렴한다. retrieval 결과의 자동 writeback/apply/store는 없고, 대화·수동 편집·단일 PreviewStage·기존 Director fallback은 계속된다. local/test fake 외부 provider call은 `0`이다.
+- `RED→GREEN·검증`: 최초 retrieval 계약은 missing helper/context로 **5 failed**, frontend explicit producer 계약은 **4 failed / 169 passed**, 전체 원문 unsafe tail 보강은 secret/path/URL/bearer 네 경우에서 RED였다. 구현 뒤 focused backend memory **149 passed, warning 1**, 직접 영향 creator-context/Gateway/Hermes/API **188 passed, warning 1**, frontend focused **3 files / 173 passed**, 전체 frontend **52 files / 724 passed**, disposable PostgreSQL 16 retrieval-row SQLite parity **1 passed, warning 1**, production frontend build가 통과했다. PostgreSQL exact container `videobox-d4-retrieval-parity-20260730`은 테스트 뒤 삭제와 부재를 확인했다. 기본 smoke는 `network_calls=0 provider_calls=0 credentials_printed=false`를 출력했고 plan-state verifier와 `git diff --check`도 통과했다. 독립 spec/quality/gap/reverse review는 **Critical/Important/Minor 0, PASS**다.
+- `미실행·진행률`: 전체 Python regression, provenance, live Mem0 add/search/delete 및 삭제 후 부재 확인, 브라우저 사람 E2E, 사용자 미디어·CapCut 사람 검증은 실행하지 않았고 통과로 주장하지 않는다. Phase D **4/4 (100.0%)**, Mem0 child **4/5 (80.0%)**, Hermes Yujin **19/20 (95.0%)**, 잔여 **5.0%**다. 기존 VideoBox 공식 누적은 **9/22 (40.9%)**, 잔여 **59.1%**로 유지한다.
+- `다음 작업`: **F1 최종 통합 closeout만** 진행한다. 전체 Python/frontend/E2E, build, provenance/UI-system, runtime/profile/plan/static topology, SBOM, 독립 최종 review, SSOT/handoff, commit/push를 닫는다. live canary는 별도 자격증명·환경·명시 승인 때만 `-Live -ApproveDisposableAdd`로 실행한다.
 
 ## 314. 2026-07-30 Hermes Yujin D3 editor memory UI closeout
 

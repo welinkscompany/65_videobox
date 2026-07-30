@@ -13,7 +13,12 @@
 Parent: `docs/superpowers/plans/2026-07-26-videobox-hermes-yujin-master-plan.md`
 Requires: Phase C task C4 complete.
 
-Child progress: **3/5 tasks (60.0%), remaining 40.0%**. These five tasks are D1, D2, D3, D4, and F1.
+Child progress: **4/5 tasks (80.0%), remaining 20.0%**. These five tasks are D1, D2, D3, D4, and F1.
+
+> 2026-07-30 D4 closeout: the explicit RightDock producer and bounded
+> approved+stored retrieval passed independent spec/quality/gap/reverse review
+> with `Critical 0 / Important 0 / Minor 0`. The live Mem0 canary remains
+> separately unrun because no live environment or authority was supplied.
 
 ## Memory policy
 
@@ -538,7 +543,36 @@ class MemoryWriteOutcome(BaseModel):
 
 ## D4 — Add retrieval injection and close Phase D
 
-- [ ] **D4** Add bounded retrieval injection, unavailable fallback, live canary, and Phase D closeout.
+- [x] **D4** Add bounded retrieval injection, unavailable fallback, live canary, and Phase D closeout.
+
+Closeout evidence (2026-07-30):
+
+- the only production producer is the explicit current-RightDock
+  `기억 후보 만들기` form; it sends 1–8 unique completed durable message IDs
+  from the current owned conversation and one typed short candidate to the
+  existing POST;
+- retrieval is admitted only for a newly owned durable dispatch, performs at
+  most one 750 ms search, revalidates exact local approved+stored private
+  mapping, injects at most five ID-free preferences within 1,400 characters,
+  and drops the memory section first at the 48 KiB context cap;
+- replay, unsafe full prompts, the exact create action, unrelated or
+  non-approved/non-stored records, malformed/oversize records, timeout and
+  outage all produce search `0` or `memories=()` as applicable, without
+  blocking chat/manual fallback;
+- focused backend memory gate: **149 passed, 1 existing warning**; directly
+  impacted creator-context/Gateway/Hermes/API gate: **188 passed, 1 existing
+  warning**; focused frontend API/RightDock/Route gate: **3 files / 173
+  passed**; full frontend: **52 files / 724 passed**; disposable PostgreSQL 16
+  retrieval-row parity: **1 passed** with exact container cleanup confirmed;
+  production frontend build succeeded;
+  default smoke reported
+  `network_calls=0 provider_calls=0 credentials_printed=false`;
+- independent spec/quality/gap/reverse review passed with
+  `Critical 0 / Important 0 / Minor 0`;
+- live Mem0 add/search/delete, full Python regression, browser human E2E,
+  provenance, commit, and push are not part of this evidence. Live and human
+  proofs remain explicitly unrun; the mandatory full regression/provenance
+  gates remain assigned to F1.
 
 **Files:**
 
@@ -588,7 +622,8 @@ class MemoryWriteOutcome(BaseModel):
    second producer, automatic create, automatic approval, or automatic store.
 7. Search before context serialization with a strict timeout; on any failure continue with an empty tuple.
 8. Never write retrieval output back to VideoBox as a new memory automatically.
-9. Add a live canary that requires explicit `-Live` and a disposable tagged memory:
+9. Add a live canary that requires explicit `-Live
+   -ApproveDisposableAdd` and a disposable tagged memory:
    - add only after an explicit scripted approval step;
    - retrieve it;
    - delete it;
@@ -607,7 +642,7 @@ class MemoryWriteOutcome(BaseModel):
 11. If separately configured and authorized, run:
 
    ```powershell
-   powershell -NoProfile -ExecutionPolicy Bypass -File scripts/smoke-hermes-yujin-mem0.ps1 -Live
+   powershell -NoProfile -ExecutionPolicy Bypass -File scripts/smoke-hermes-yujin-mem0.ps1 -Live -ApproveDisposableAdd
    ```
 
    Otherwise report live Mem0 write/read/delete as unrun.

@@ -1,4 +1,6 @@
 import { Button } from "../../../components/ui/button";
+import { Input } from "../../../components/ui/input";
+import { NativeSelect } from "../../../components/ui/native-select";
 import type {
   RightDockMemory,
   RightDockMemoryCandidate,
@@ -27,6 +29,46 @@ export function YujinMemoryPanel({
     >
       <h2>기억</h2>
       <p>내가 확인한 편집 취향만 저장합니다.</p>
+      <div>
+        <label>
+          기억 종류
+          <NativeSelect
+            value={memory.candidateCategory}
+            disabled={memory.createAction === "creating"}
+            onChange={(event) => memory.onCandidateCategoryChange(
+              event.target.value as RightDockMemoryCandidate["category"],
+            )}
+          >
+            {Object.entries(categoryLabels).map(([value, label]) => (
+              <option key={value} value={value}>{label}</option>
+            ))}
+          </NativeSelect>
+        </label>
+        <label>
+          기억 후보
+          <Input
+            value={memory.candidateDraft}
+            maxLength={280}
+            disabled={memory.createAction === "creating"}
+            onChange={(event) => memory.onCandidateDraftChange(
+              event.target.value,
+            )}
+          />
+        </label>
+        <Button
+          type="button"
+          disabled={
+            memory.createAction === "creating"
+            || !memory.canCreateCandidate
+          }
+          onClick={() => void memory.onCreateCandidate()}
+        >
+          {memory.createAction === "creating"
+            ? "후보 만드는 중"
+            : "기억 후보 만들기"}
+        </Button>
+        {memory.createError ? <p>{memory.createError}</p> : null}
+      </div>
       {memory.loadError ? <p>{memory.loadError}</p> : null}
       {!memory.candidates.length ? (
         <p>현재 대화에는 확인할 기억이 없어요.</p>

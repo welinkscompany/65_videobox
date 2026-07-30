@@ -83,6 +83,7 @@ def _context(**patch: object) -> dict[str, object]:
         ],
         "media_candidates": [],
         "approved_tts_candidates": [],
+        "memories": [],
         "timeline_summary": {
             "duration_sec": 2.0,
             "track_count": 1,

@@ -4262,6 +4262,42 @@ class LocalProjectStore:
                 connection.close()
         return [self._yujin_memory_candidate_payload(row) for row in rows]
 
+    def list_yujin_memory_retrieval_rows(
+        self,
+        *,
+        project_id: str,
+        conversation_id: str,
+    ) -> list[dict[str, Any]]:
+        """Return private approved+stored rows for one owned conversation."""
+
+        connection = self._connection(project_id)
+        try:
+            conversation = connection.execute(
+                "SELECT conversation_id FROM director_conversations "
+                "WHERE project_id = ? AND conversation_id = ?",
+                (project_id, conversation_id),
+            ).fetchone()
+            if conversation is None:
+                return []
+            rows = connection.execute(
+                """
+                SELECT candidate_id, project_id, conversation_id, status,
+                       storage_status, provider_memory_ref AS memory_ref,
+                       external_ref, proposed_text AS text, category
+                FROM yujin_memory_candidates
+                WHERE project_id = ? AND conversation_id = ?
+                  AND status = 'approved' AND storage_status = 'stored'
+                  AND provider_memory_ref IS NOT NULL
+                  AND external_ref IS NOT NULL
+                ORDER BY category, proposed_text, candidate_id
+                LIMIT 100
+                """,
+                (project_id, conversation_id),
+            ).fetchall()
+            return [dict(row) for row in rows]
+        finally:
+            connection.close()
+
     def transition_yujin_memory_candidate(
         self,
         *,

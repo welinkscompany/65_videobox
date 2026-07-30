@@ -25,6 +25,7 @@ from videobox_api.hermes_run_service import (
     HermesRunService,
 )
 from videobox_api.main import _media_analysis_lifespan, _recover_hermes_runs
+from videobox_api.yujin_memory_service import YujinMemoryService
 from videobox_domain_models.assets import AssetType
 from videobox_domain_models.director_proposals import DirectorCandidate, DirectorProposal
 from videobox_core_engine.yujin_creator_proposal_adapter import (
@@ -180,6 +181,147 @@ class _Gateway:
         self.calls += 1
         for event in self.events:
             yield event
+
+
+class _MemorySearchGateway(_Gateway):
+    def __init__(self, *, search_delay: float = 0) -> None:
+        super().__init__()
+        self.search_delay = search_delay
+        self.search_requests = []
+
+    async def search_memory(self, request):
+        self.search_requests.append(request)
+        if self.search_delay:
+            await asyncio.sleep(self.search_delay)
+        return {"memories": []}
+
+
+def _memory_test_context(**kwargs) -> YujinCreatorContext:
+    return YujinCreatorContext.model_validate(
+        {
+            "schema_version": "videobox.yujin-context.v1",
+            "project_id": kwargs["project_id"],
+            "session_id": kwargs["session_id"],
+            "session_revision": kwargs["expected_session_revision"],
+            "asset_index_revision": 0,
+            "timeline_id": "timeline",
+            "timeline_version": "v001",
+            "selected_script_id": None,
+            "selected_segment_id": kwargs.get("selected_segment_id"),
+            "segment_summaries": (),
+            "media_candidates": (),
+            "approved_tts_candidates": (),
+            "memories": (),
+            "timeline_summary": {
+                "duration_sec": 0.0,
+                "track_count": 0,
+                "clip_count": 0,
+                "gap_count": 0,
+            },
+            "supported_controls": (),
+        }
+    )
+
+
+def _retrieval_row(project_id: str) -> dict[str, str]:
+    return {
+        "candidate_id": "candidate-a",
+        "project_id": project_id,
+        "conversation_id": "conv",
+        "status": "approved",
+        "storage_status": "stored",
+        "memory_ref": "memory-a",
+        "external_ref": "ext-" + "a" * 64,
+        "text": "빠른 컷 편집을 선호합니다.",
+        "category": "pacing",
+    }
+
+
+def test_memory_search_runs_once_only_after_new_owned_durable_dispatch(
+    tmp_path: Path,
+) -> None:
+    store, project_id, session_id = _scope(tmp_path)
+    store.list_yujin_memory_retrieval_rows = (
+        lambda **_: [_retrieval_row(project_id)]
+    )
+    gateway = _MemorySearchGateway()
+    memory_service = YujinMemoryService(store=store, gateway=gateway)
+    service = HermesRunService(
+        store=store,
+        gateway_client=gateway,
+        context_builder=_memory_test_context,
+        memory_service=memory_service,
+    )
+
+    async def scenario() -> None:
+        arguments = {
+            "project_id": project_id,
+            "session_id": session_id,
+            "conversation_id": "conv",
+            "client_message_id": "owned-new-dispatch",
+            "text": "편집 템포를 추천해 줘",
+        }
+        run = await service.create_run(**arguments)
+        await asyncio.wait_for(run.task, timeout=1)
+        replay = await service.create_run(**arguments)
+        assert replay is run
+        with pytest.raises(
+            ValueError,
+            match="client_message_id_reused_with_different_content",
+        ):
+            await service.create_run(**{**arguments, "text": "위조 재생"})
+        exact_action = await service.create_run(
+            **{
+                **arguments,
+                "client_message_id": "memory-create-action",
+                "text": "기억 후보 만들기",
+            }
+        )
+        await asyncio.wait_for(exact_action.task, timeout=1)
+        await service.shutdown()
+
+    asyncio.run(scenario())
+
+    assert len(gateway.search_requests) == 1
+    assert gateway.search_requests[0].limit == 5
+    assert gateway.calls == 2
+
+
+def test_memory_search_timeout_does_not_block_run_or_manual_fallback(
+    tmp_path: Path,
+) -> None:
+    store, project_id, session_id = _scope(tmp_path)
+    store.list_yujin_memory_retrieval_rows = (
+        lambda **_: [_retrieval_row(project_id)]
+    )
+    gateway = _MemorySearchGateway(search_delay=1)
+    memory_service = YujinMemoryService(store=store, gateway=gateway)
+    service = HermesRunService(
+        store=store,
+        gateway_client=gateway,
+        context_builder=_memory_test_context,
+        memory_service=memory_service,
+    )
+
+    async def scenario() -> float:
+        started = asyncio.get_running_loop().time()
+        run = await service.create_run(
+            project_id=project_id,
+            session_id=session_id,
+            conversation_id="conv",
+            client_message_id="timeout-dispatch",
+            text="편집 템포를 추천해 줘",
+        )
+        elapsed = asyncio.get_running_loop().time() - started
+        await asyncio.wait_for(run.task, timeout=1)
+        await service.shutdown()
+        return elapsed
+
+    elapsed = asyncio.run(scenario())
+
+    assert elapsed < 0.9
+    assert len(gateway.search_requests) == 1
+    assert gateway.calls == 1
 
 
 class _BlockingGateway:
