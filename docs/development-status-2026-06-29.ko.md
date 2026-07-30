@@ -1,6 +1,17 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 312. 2026-07-30 Hermes Yujin D1 memory approval workflow closeout`을 우선 적용한다. Task 22 기술 closeout 근거는 `## 300`, Phase B 근거는 `## 307`, Phase C 근거는 `## 308`–`## 311`을 유지하며, 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 313. 2026-07-30 Hermes Yujin D2 Mem0 adapter closeout`을 우선 적용한다. Task 22 기술 closeout 근거는 `## 300`, Phase B 근거는 `## 307`, Phase C 근거는 `## 308`–`## 311`, D1 근거는 `## 312`를 유지하며, 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+
+## 313. 2026-07-30 Hermes Yujin D2 Mem0 adapter closeout
+
+- `[x] D2 완료`: approved candidate의 별도 명시적 store 요청만 격리된 Hermes-derived adapter를 거쳐 Mem0 Platform add로 이어진다. approve 자체, pending/rejected, local/test startup은 provider call `0`이다.
+- `중복·복구 경계`: provider 호출 전 durable claim/call-start와 opaque operation/external ref를 저장한다. 응답 유실·timeout은 `ambiguous`로 두고 재시도는 add하지 않고 event/search reconcile만 수행한다. event ref와 memory ref를 분리하고 동일 request replay, 만료 claim, provider 성공 뒤 로컬 crash를 중복 add 없이 복구한다.
+- `삭제·비공개`: browser는 candidate handle만 보내며 server가 private mapping을 확인한다. 첫 삭제와 call-start가 남은 재시도를 구분해 일시적인 0건 검색을 첫 성공으로 오인하지 않고, provider 성공 뒤 로컬 crash는 idempotent하게 `deleted`로 수렴한다. deleted는 terminal이며 같은 candidate 재저장은 provider call `0`으로 거부한다. credential, raw provider record, event/memory/external ref는 browser·public error에 노출하지 않는다.
+- `격리·fallback`: adapter는 exact pinned Hermes image에서 agent loop를 대체하고 `mem0ai==2.0.10`만 고정 설치한다. Mem0 key는 adapter에만, 별도 service token은 gateway와 adapter에만 있으며 gateway는 provider-egress에 연결되지 않는다. 대화형 Hermes automatic memory provider는 비활성이다. 빈 key와 adapter refresh 실패는 stale adapter를 정확히 차단하고 기존 Director/editor 수동 fallback과 자동 Apply 금지를 유지한다.
+- `리뷰·검증`: 독립 spec/quality/gap/reverse review에서 add 응답 유실, pinned SDK event polling, lazy provider startup, stale adapter, 동일 request crash finalize, delete crash·terminal 문제를 RED→GREEN으로 보완했다. 최종 Critical/Important/Minor **0**, PASS다. latest integrated D2 **298 passed, 36 skipped**, core focused with disposable PostgreSQL **168 passed**, compose/profile **83 passed, 1 skipped**, start/recovery **82 passed**, disposable PostgreSQL Yujin memory **2 passed**, actual adapter image build와 network-none import smoke, profile/runtime static verifier, `compileall`, `git diff --check`가 통과했다.
+- `미실행`: 전체 Python regression, 전체 frontend suite, production frontend build, 실제 Mem0/provider call, 브라우저 사람 E2E, 사용자 원본 영상 재생·청취, CapCut Desktop 사람 검증, Task 9 사람/환경 acceptance는 실행하지 않았고 통과로 간주하지 않는다.
+- `진행률`: Phase D **2/4 (50.0%), 잔여 50.0%**, Mem0 child **2/5 (40.0%), 잔여 60.0%**, Hermes Yujin initiative **17/20 (85.0%), 잔여 15.0%**다. 기존 VideoBox 공식 누적은 **9/22 (40.9%)**, 잔여 **59.1%**로 유지한다.
+- `다음 작업`: **D3만** 진행한다. 기존 candidate/store/delete API를 RightDock의 approve/list/delete UI에 연결하고 pending/rejected는 retrieval 0, explicit click 전 provider call 0, failed save/delete의 manual retry, Inspector close/open 뒤 candidate/scroll 보존을 TDD로 고정한다.
 
 ## 312. 2026-07-30 Hermes Yujin D1 memory approval workflow closeout
 

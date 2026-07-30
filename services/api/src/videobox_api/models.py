@@ -208,6 +208,34 @@ class YujinMemoryCandidateListResponse(BaseModel):
     candidates: list[YujinMemoryCandidateResponse]
 
 
+class YujinMemoryStoreRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    client_request_id: str = Field(
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+        strict=True,
+    )
+
+
+class YujinMemoryStoreResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    candidate_id: str
+    status: Literal["approved"]
+    storage_status: Literal[
+        "not_requested",
+        "claimed",
+        "event_pending",
+        "stored",
+        "failed_retryable",
+        "ambiguous",
+        "deleted",
+    ]
+    retryable: bool
+
+
 class DirectorConversationCreateRequest(BaseModel):
     session_id: str = Field(min_length=1)
 

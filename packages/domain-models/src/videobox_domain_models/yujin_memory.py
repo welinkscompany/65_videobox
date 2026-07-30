@@ -17,8 +17,15 @@ class MemoryCandidateStatus(StrEnum):
     PENDING = "pending"
     APPROVED = "approved"
     REJECTED = "rejected"
+
+
+class MemoryStorageStatus(StrEnum):
+    NOT_REQUESTED = "not_requested"
+    CLAIMED = "claimed"
+    EVENT_PENDING = "event_pending"
     STORED = "stored"
-    FAILED = "failed"
+    FAILED_RETRYABLE = "failed_retryable"
+    AMBIGUOUS = "ambiguous"
     DELETED = "deleted"
 
 
@@ -56,5 +63,6 @@ __all__ = [
     "MemoryCandidateStatus",
     "MemoryCategory",
     "MemoryScope",
+    "MemoryStorageStatus",
     "YujinMemoryCandidate",
 ]

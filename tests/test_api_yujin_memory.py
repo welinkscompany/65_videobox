@@ -7,6 +7,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from videobox_api.main import create_app
+from videobox_agent_gateway.memory_gateway import MemoryWriteOutcome
 
 
 def _seed(app, client: TestClient):
@@ -408,3 +409,203 @@ def test_unknown_store_errors_are_fixed_and_never_echoed(
     }
     assert sentinel not in create.text
     assert sentinel not in transition.text
+
+
+def test_store_requires_explicit_request_and_returns_no_provider_reference(
+    tmp_path: Path,
+) -> None:
+    calls = []
+
+    class Gateway:
+        async def add_approved_memory(self, request):
+            calls.append(request)
+            return MemoryWriteOutcome(
+                status="stored", memory_ref="provider-private"
+            )
+
+        async def reconcile_memory(self, request):
+            raise AssertionError("first store must add")
+
+    app = create_app(projects_root=tmp_path)
+    app.state.yujin_memory_service._gateway = Gateway()
+    with TestClient(app) as client:
+        project_id, _, conversation_id, first, _ = _seed(app, client)
+        base = f"/api/projects/{project_id}/director/memory-candidates"
+        created = client.post(
+            base, json=_payload(conversation_id, first["message_id"])
+        ).json()
+        approved = client.post(
+            f"{base}/{created['candidate_id']}/approve"
+        )
+        missing_request = client.post(
+            f"{base}/{created['candidate_id']}/store", json={}
+        )
+        stored = client.post(
+            f"{base}/{created['candidate_id']}/store",
+            json={"client_request_id": "store-request-1"},
+        )
+
+    assert approved.status_code == 200
+    assert len(calls) == 1
+    assert missing_request.status_code == 422
+    assert stored.status_code == 200
+    assert stored.json() == {
+        "candidate_id": created["candidate_id"],
+        "status": "approved",
+        "storage_status": "stored",
+        "retryable": False,
+    }
+    assert "provider-private" not in stored.text
+
+
+def test_store_failure_is_fixed_and_never_echoes_internal_error(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    sentinel = "PRIVATE-PROVIDER-DETAIL"
+    app = create_app(projects_root=tmp_path)
+
+    async def fail(**_kwargs):
+        from videobox_api.yujin_memory_service import MemoryStoreUnavailable
+
+        raise MemoryStoreUnavailable(sentinel)
+
+    monkeypatch.setattr(
+        app.state.yujin_memory_service, "store_candidate", fail
+    )
+    with TestClient(app) as client:
+        project_id, _, conversation_id, first, _ = _seed(app, client)
+        base = f"/api/projects/{project_id}/director/memory-candidates"
+        created = client.post(
+            base, json=_payload(conversation_id, first["message_id"])
+        ).json()
+        response = client.post(
+            f"{base}/{created['candidate_id']}/store",
+            json={"client_request_id": "store-request-1"},
+        )
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "memory_save_unavailable"}
+    assert sentinel not in response.text
+
+
+def test_delete_uses_candidate_handle_only_and_hides_private_mapping(
+    tmp_path: Path,
+) -> None:
+    delete_calls = []
+
+    class Gateway:
+        async def add_approved_memory(self, _request):
+            return MemoryWriteOutcome(
+                status="stored", memory_ref="provider-private"
+            )
+
+        async def reconcile_memory(self, _request):
+            raise AssertionError("first store must add")
+
+        async def delete_memory(self, request):
+            delete_calls.append(request)
+            return {"deleted": True}
+
+    app = create_app(projects_root=tmp_path)
+    app.state.yujin_memory_service._gateway = Gateway()
+    with TestClient(app) as client:
+        project_id, _, conversation_id, first, _ = _seed(app, client)
+        base = f"/api/projects/{project_id}/director/memory-candidates"
+        created = client.post(
+            base, json=_payload(conversation_id, first["message_id"])
+        ).json()
+        candidate_id = created["candidate_id"]
+        assert client.post(f"{base}/{candidate_id}/approve").status_code == 200
+        assert (
+            client.post(
+                f"{base}/{candidate_id}/store",
+                json={"client_request_id": "store-request-1"},
+            ).status_code
+            == 200
+        )
+        deleted = client.delete(f"{base}/{candidate_id}/stored-memory")
+
+    assert deleted.status_code == 200
+    assert deleted.json() == {
+        "candidate_id": candidate_id,
+        "status": "approved",
+        "storage_status": "deleted",
+        "retryable": False,
+    }
+    assert len(delete_calls) == 1
+    assert delete_calls[0].memory_ref == "provider-private"
+    assert delete_calls[0].allow_absent is False
+    assert "provider-private" not in deleted.text
+    assert "external_ref" not in deleted.text
+
+    rejected_restore = client.post(
+        f"{base}/{candidate_id}/store",
+        json={"client_request_id": "store-request-2"},
+    )
+    repeated_delete = client.delete(
+        f"{base}/{candidate_id}/stored-memory"
+    )
+    assert rejected_restore.status_code == 409
+    assert rejected_restore.json() == {
+        "detail": "memory_candidate_deleted"
+    }
+    assert repeated_delete.status_code == 200
+    assert repeated_delete.json() == deleted.json()
+    assert len(delete_calls) == 1
+
+
+def test_delete_retries_after_local_finalize_failure(
+    tmp_path: Path, monkeypatch
+) -> None:
+    delete_calls = []
+
+    class Gateway:
+        async def add_approved_memory(self, _request):
+            return MemoryWriteOutcome(
+                status="stored", memory_ref="provider-private"
+            )
+
+        async def reconcile_memory(self, _request):
+            raise AssertionError("first store must add")
+
+        async def delete_memory(self, request):
+            delete_calls.append(request)
+            return {"deleted": True}
+
+    app = create_app(projects_root=tmp_path)
+    app.state.yujin_memory_service._gateway = Gateway()
+    with TestClient(app, raise_server_exceptions=False) as client:
+        project_id, _, conversation_id, first, _ = _seed(app, client)
+        base = f"/api/projects/{project_id}/director/memory-candidates"
+        created = client.post(
+            base, json=_payload(conversation_id, first["message_id"])
+        ).json()
+        candidate_id = created["candidate_id"]
+        client.post(f"{base}/{candidate_id}/approve")
+        client.post(
+            f"{base}/{candidate_id}/store",
+            json={"client_request_id": "store-request-1"},
+        )
+        original = app.state.store.mark_yujin_memory_deleted
+        monkeypatch.setattr(
+            app.state.store,
+            "mark_yujin_memory_deleted",
+            lambda **_kwargs: (_ for _ in ()).throw(
+                RuntimeError("crash after provider delete")
+            ),
+        )
+        failed = client.delete(f"{base}/{candidate_id}/stored-memory")
+        monkeypatch.setattr(
+            app.state.store, "mark_yujin_memory_deleted", original
+        )
+        retried = client.delete(f"{base}/{candidate_id}/stored-memory")
+        repeated = client.delete(f"{base}/{candidate_id}/stored-memory")
+
+    assert failed.status_code == 503
+    assert failed.json() == {"detail": "memory_delete_unavailable"}
+    assert retried.status_code == 200
+    assert retried.json()["storage_status"] == "deleted"
+    assert repeated.json() == retried.json()
+    assert len(delete_calls) == 2
+    assert [call.allow_absent for call in delete_calls] == [False, True]

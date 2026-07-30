@@ -18,6 +18,15 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+from videobox_api.yujin_memory_service import (
+    ApprovedMemoryStoreRequest,
+    GatewayMemoryDeleteRequest,
+    GatewayMemoryDeleteResult,
+    GatewayMemorySearchRequest,
+    GatewayMemorySearchResult,
+    GatewayMemoryWriteOutcome,
+    MemoryReconcileRequest,
+)
 
 
 class AgentGatewayUnavailable(RuntimeError):
@@ -320,6 +329,114 @@ class AgentGatewayClient:
         except Exception as error:
             raise AgentGatewayUnavailable(
                 "agent_gateway_status_unavailable"
+            ) from error
+
+    async def _memory_post(
+        self, path: str, payload: dict[str, Any]
+    ) -> GatewayMemoryWriteOutcome:
+        try:
+            async with self._factory(
+                base_url=self._base_url, timeout=self._timeout
+            ) as client:
+                response = await client.post(
+                    path,
+                    headers={
+                        "Authorization": f"Bearer {self._token}"
+                    },
+                    json=payload,
+                )
+                if bool(getattr(response, "is_redirect", False)):
+                    raise ValueError("agent_gateway_memory_invalid")
+                response.raise_for_status()
+                content = getattr(response, "content", b"")
+                if (
+                    isinstance(content, (bytes, bytearray))
+                    and len(content) > 16_384
+                ):
+                    raise ValueError("agent_gateway_memory_invalid")
+                return GatewayMemoryWriteOutcome.model_validate(
+                    response.json()
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            raise AgentGatewayUnavailable(
+                "agent_gateway_memory_unavailable"
+            ) from error
+
+    async def add_approved_memory(
+        self, request: ApprovedMemoryStoreRequest
+    ) -> GatewayMemoryWriteOutcome:
+        return await self._memory_post(
+            "/internal/hermes/memory/add", request.model_dump()
+        )
+
+    async def reconcile_memory(
+        self, request: MemoryReconcileRequest
+    ) -> GatewayMemoryWriteOutcome:
+        return await self._memory_post(
+            "/internal/hermes/memory/reconcile",
+            request.model_dump(),
+        )
+
+    async def search_memory(
+        self, request: GatewayMemorySearchRequest
+    ) -> GatewayMemorySearchResult:
+        try:
+            async with self._factory(
+                base_url=self._base_url, timeout=self._timeout
+            ) as client:
+                response = await client.post(
+                    "/internal/hermes/memory/search",
+                    headers={
+                        "Authorization": f"Bearer {self._token}"
+                    },
+                    json=request.model_dump(),
+                )
+                if bool(getattr(response, "is_redirect", False)):
+                    raise ValueError("agent_gateway_memory_invalid")
+                response.raise_for_status()
+                content = getattr(response, "content", b"")
+                if isinstance(content, (bytes, bytearray)) and len(content) > 16_384:
+                    raise ValueError("agent_gateway_memory_invalid")
+                return GatewayMemorySearchResult.model_validate(
+                    response.json()
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            raise AgentGatewayUnavailable(
+                "agent_gateway_memory_unavailable"
+            ) from error
+
+    async def delete_memory(
+        self, request: GatewayMemoryDeleteRequest
+    ) -> GatewayMemoryDeleteResult:
+        try:
+            async with self._factory(
+                base_url=self._base_url, timeout=self._timeout
+            ) as client:
+                response = await client.post(
+                    "/internal/hermes/memory/delete",
+                    headers={
+                        "Authorization": f"Bearer {self._token}"
+                    },
+                    json=request.model_dump(),
+                )
+                if bool(getattr(response, "is_redirect", False)):
+                    raise ValueError("agent_gateway_memory_invalid")
+                response.raise_for_status()
+                content = getattr(response, "content", b"")
+                if isinstance(content, (bytes, bytearray)) and len(content) > 16_384:
+                    raise ValueError("agent_gateway_memory_invalid")
+                return GatewayMemoryDeleteResult.model_validate(
+                    response.json()
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            raise AgentGatewayUnavailable(
+                "agent_gateway_memory_unavailable"
             ) from error
 
     async def reserve_run(

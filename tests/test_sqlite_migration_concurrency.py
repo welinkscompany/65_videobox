@@ -48,3 +48,65 @@ def test_concurrent_connections_migrate_artifact_freshness_columns_once(tmp_path
         finally:
             connection.close()
         assert "source_session_id" in columns
+
+
+def test_concurrent_connections_migrate_d2_memory_columns_once(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project_id = "memory-migration-race"
+    database = store.database_path(project_id)
+    database.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(database)
+    try:
+        connection.execute(
+            """
+            CREATE TABLE yujin_memory_candidates (
+                candidate_id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL,
+                conversation_id TEXT NOT NULL,
+                client_request_id TEXT NOT NULL,
+                request_fingerprint TEXT NOT NULL,
+                source_message_ids_json TEXT NOT NULL,
+                memory_scope TEXT NOT NULL,
+                category TEXT NOT NULL,
+                proposed_text TEXT NOT NULL,
+                status TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    def connect_and_close(_: int) -> None:
+        opened = store._connection(project_id)
+        opened.close()
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(connect_and_close, range(8)))
+
+    connection = sqlite3.connect(database)
+    try:
+        columns = {
+            str(row[1])
+            for row in connection.execute(
+                "PRAGMA table_info(yujin_memory_candidates)"
+            ).fetchall()
+        }
+    finally:
+        connection.close()
+    assert {
+        "external_ref",
+        "operation_id",
+        "provider_event_ref",
+        "provider_memory_ref",
+        "store_client_request_id",
+        "write_claim_token",
+        "write_claimed_at",
+        "provider_call_started_at",
+        "attempt_count",
+        "storage_status",
+    } <= columns

@@ -77,6 +77,7 @@ def _cleanup_postgres_hermes_project(
     connection = store._connection(project_id)
     try:
         for table in (
+            "yujin_memory_operation_audit",
             "yujin_memory_candidate_audit",
             "yujin_memory_candidates",
             "hermes_capability_audit",
@@ -184,6 +185,117 @@ def test_postgres_yujin_memory_candidate_workflow_is_atomic_and_serialized(
             [("create", "pending"), ("reject", "rejected")],
         )
         assert [row["event_order"] for row in audit] == [1, 2]
+    finally:
+        _cleanup_postgres_hermes_project(store, project_id)
+
+
+def test_postgres_yujin_memory_store_state_and_audit_match_local_contract(
+    tmp_path: Path,
+    postgres_url: str,
+) -> None:
+    store = PostgresProjectStore(
+        tmp_path / "postgres-yujin-memory-d2",
+        database_url=postgres_url,
+    )
+    project = store.bootstrap_project(
+        f"PostgreSQL Yujin memory D2 {uuid4().hex}"
+    )
+    project_id = project.project_id
+    try:
+        session = store.save_editing_session(
+            project_id=project_id,
+            timeline_id=f"timeline-{uuid4().hex}",
+            session_payload={"segments": [], "history": []},
+        )
+        conversation_id = f"conversation-{uuid4().hex}"
+        store.create_director_conversation(
+            project_id=project_id,
+            session_id=session["session_id"],
+            conversation_id=conversation_id,
+        )
+        message = store.append_director_message(
+            project_id=project_id,
+            session_id=session["session_id"],
+            conversation_id=conversation_id,
+            role="user",
+            text="영상 초반은 짧은 장면을 이어서 템포를 올려 주세요.",
+        )
+        candidate = store.create_yujin_memory_candidate(
+            project_id=project_id,
+            conversation_id=conversation_id,
+            client_request_id="postgres-d2-candidate",
+            source_message_ids=(message["message_id"],),
+            memory_scope="creator",
+            category="pacing",
+            proposed_text="빠른 컷 편집을 선호합니다.",
+        )
+        store.transition_yujin_memory_candidate(
+            project_id=project_id,
+            candidate_id=candidate["candidate_id"],
+            action="approve",
+        )
+        claim = store.claim_yujin_memory_store(
+            project_id=project_id,
+            candidate_id=candidate["candidate_id"],
+            client_request_id="postgres-d2-store",
+            claim_token="claim-" + "a" * 64,
+        )
+        store.mark_yujin_memory_store_call_started(
+            project_id=project_id,
+            candidate_id=candidate["candidate_id"],
+            claim_token="claim-" + "a" * 64,
+        )
+        store.record_yujin_memory_provider_outcome(
+            project_id=project_id,
+            candidate_id=candidate["candidate_id"],
+            claim_token="claim-" + "a" * 64,
+            status="stored",
+            memory_ref="provider-private",
+            event_ref=None,
+        )
+        store.finalize_yujin_memory_store(
+            project_id=project_id,
+            candidate_id=candidate["candidate_id"],
+        )
+        first_delete_call = (
+            store.mark_yujin_memory_delete_call_started(
+                project_id=project_id,
+                candidate_id=candidate["candidate_id"],
+            )
+        )
+        retried_delete_call = (
+            store.mark_yujin_memory_delete_call_started(
+                project_id=project_id,
+                candidate_id=candidate["candidate_id"],
+            )
+        )
+
+        assert claim["action"] == "add"
+        assert first_delete_call["allow_absent"] is False
+        assert retried_delete_call["allow_absent"] is True
+        assert first_delete_call["memory_ref"] == "provider-private"
+        assert store.get_yujin_memory_store_state(
+            project_id=project_id,
+            candidate_id=candidate["candidate_id"],
+        ) == {
+            "candidate_id": candidate["candidate_id"],
+            "status": "approved",
+            "storage_status": "stored",
+            "retryable": False,
+        }
+        audit = store.list_yujin_memory_operation_audit(
+            project_id=project_id,
+            candidate_id=candidate["candidate_id"],
+        )
+        assert [
+            (item["action"], item["storage_status"]) for item in audit
+        ] == [
+            ("claim", "claimed"),
+            ("call_started", "claimed"),
+            ("outcome", "claimed"),
+            ("finalize", "stored"),
+            ("call_started", "stored"),
+        ]
     finally:
         _cleanup_postgres_hermes_project(store, project_id)
 

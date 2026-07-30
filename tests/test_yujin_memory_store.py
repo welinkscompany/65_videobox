@@ -3,6 +3,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 import inspect
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -427,12 +428,186 @@ def test_postgres_schema_is_derived_and_transition_uses_row_lock() -> None:
         "pending",
         "approved",
         "rejected",
-        "stored",
-        "failed",
-        "deleted",
     ):
         assert f"'{status}'" in schema
     assert "if isinstance(connection, sqlite3.Connection)" in lock_source
     assert "FOR UPDATE" in lock_source
     assert "_lock_yujin_memory_candidate" in transition_source
     assert "AND status = 'pending'" in transition_source
+    for column in (
+        "external_ref",
+        "operation_id",
+        "provider_event_ref",
+        "provider_memory_ref",
+        "store_client_request_id",
+        "write_claim_token",
+        "write_claimed_at",
+        "provider_call_started_at",
+        "attempt_count",
+        "storage_status",
+    ):
+        assert column in schema
+
+
+def test_old_sqlite_candidate_table_gets_private_operation_columns() -> None:
+    connection = sqlite3.connect(":memory:")
+    try:
+        connection.execute(
+            """
+            CREATE TABLE yujin_memory_candidates (
+                candidate_id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL
+            )
+            """
+        )
+        LocalProjectStore._ensure_yujin_memory_operation_columns(
+            connection
+        )
+        columns = {
+            str(row[1])
+            for row in connection.execute(
+                "PRAGMA table_info(yujin_memory_candidates)"
+            ).fetchall()
+        }
+    finally:
+        connection.close()
+
+    assert {
+        "external_ref",
+        "operation_id",
+        "provider_event_ref",
+        "provider_memory_ref",
+        "store_client_request_id",
+        "write_claim_token",
+        "write_claimed_at",
+        "provider_call_started_at",
+        "attempt_count",
+        "storage_status",
+    } <= columns
+
+
+def test_operation_audit_failure_rolls_back_claim(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project_id, _, conversation_id, first, _ = _seed(store)
+    candidate = _create(
+        store, project_id, conversation_id, first["message_id"]
+    )
+    store.transition_yujin_memory_candidate(
+        project_id=project_id,
+        candidate_id=candidate["candidate_id"],
+        action="approve",
+    )
+
+    def fail_audit(*_args, **_kwargs):
+        raise RuntimeError("operation audit unavailable")
+
+    monkeypatch.setattr(
+        store, "_append_yujin_memory_operation_audit", fail_audit
+    )
+    with pytest.raises(RuntimeError, match="operation audit unavailable"):
+        store.claim_yujin_memory_store(
+            project_id=project_id,
+            candidate_id=candidate["candidate_id"],
+            client_request_id="store-request-1",
+            claim_token="claim-" + "a" * 64,
+        )
+
+    assert store.get_yujin_memory_store_state(
+        project_id=project_id,
+        candidate_id=candidate["candidate_id"],
+    ) == {
+        "candidate_id": candidate["candidate_id"],
+        "status": "approved",
+        "storage_status": "not_requested",
+        "retryable": False,
+    }
+
+
+def test_deleted_storage_state_rejects_new_claim_without_audit(
+    tmp_path: Path,
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project_id, _, conversation_id, first, _ = _seed(store)
+    candidate = _create(
+        store, project_id, conversation_id, first["message_id"]
+    )
+    candidate_id = candidate["candidate_id"]
+    store.transition_yujin_memory_candidate(
+        project_id=project_id,
+        candidate_id=candidate_id,
+        action="approve",
+    )
+    claim_token = "claim-" + "a" * 64
+    store.claim_yujin_memory_store(
+        project_id=project_id,
+        candidate_id=candidate_id,
+        client_request_id="store-request-1",
+        claim_token=claim_token,
+    )
+    store.mark_yujin_memory_store_call_started(
+        project_id=project_id,
+        candidate_id=candidate_id,
+        claim_token=claim_token,
+    )
+    store.record_yujin_memory_provider_outcome(
+        project_id=project_id,
+        candidate_id=candidate_id,
+        claim_token=claim_token,
+        status="stored",
+        memory_ref="memory-private",
+        event_ref=None,
+    )
+    store.finalize_yujin_memory_store(
+        project_id=project_id,
+        candidate_id=candidate_id,
+    )
+    first_delete_call = store.mark_yujin_memory_delete_call_started(
+        project_id=project_id,
+        candidate_id=candidate_id,
+    )
+    retried_delete_call = store.mark_yujin_memory_delete_call_started(
+        project_id=project_id,
+        candidate_id=candidate_id,
+    )
+    assert first_delete_call["allow_absent"] is False
+    assert retried_delete_call["allow_absent"] is True
+    assert first_delete_call["memory_ref"] == "memory-private"
+    delete_call_audit = [
+        row
+        for row in store.list_yujin_memory_operation_audit(
+            project_id=project_id,
+            candidate_id=candidate_id,
+        )
+        if row["action"] == "call_started"
+        and row["storage_status"] == "stored"
+    ]
+    assert len(delete_call_audit) == 1
+    assert "memory_ref" not in delete_call_audit[0]
+    assert "external_ref" not in delete_call_audit[0]
+    store.mark_yujin_memory_deleted(
+        project_id=project_id,
+        candidate_id=candidate_id,
+    )
+    before_audit = store.list_yujin_memory_operation_audit(
+        project_id=project_id,
+        candidate_id=candidate_id,
+    )
+
+    with pytest.raises(ValueError, match="memory_candidate_deleted"):
+        store.claim_yujin_memory_store(
+            project_id=project_id,
+            candidate_id=candidate_id,
+            client_request_id="store-request-2",
+            claim_token="claim-" + "b" * 64,
+        )
+
+    assert store.list_yujin_memory_operation_audit(
+        project_id=project_id,
+        candidate_id=candidate_id,
+    ) == before_audit
+    assert store.get_yujin_memory_store_state(
+        project_id=project_id,
+        candidate_id=candidate_id,
+    )["storage_status"] == "deleted"

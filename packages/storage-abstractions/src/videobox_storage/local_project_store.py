@@ -3894,6 +3894,9 @@ class LocalProjectStore:
 
     @staticmethod
     def _yujin_memory_candidate_payload(row: Any) -> dict[str, Any]:
+        status = str(row["status"])
+        if status not in {"pending", "approved", "rejected"}:
+            raise ValueError("memory_candidate_consent_status_invalid")
         return {
             "candidate_id": str(row["candidate_id"]),
             "project_id": str(row["project_id"]),
@@ -3906,7 +3909,7 @@ class LocalProjectStore:
             "memory_scope": str(row["memory_scope"]),
             "category": str(row["category"]),
             "proposed_text": str(row["proposed_text"]),
-            "status": str(row["status"]),
+            "status": status,
             "created_at": str(row["created_at"]),
             "updated_at": str(row["updated_at"]),
         }
@@ -3999,6 +4002,41 @@ class LocalProjectStore:
                 event_order,
                 action,
                 status,
+                occurred_at,
+            ),
+        )
+
+    @staticmethod
+    def _append_yujin_memory_operation_audit(
+        connection: Any,
+        *,
+        candidate_id: str,
+        project_id: str,
+        action: str,
+        storage_status: str,
+        occurred_at: str,
+    ) -> None:
+        row = connection.execute(
+            "SELECT COALESCE(MAX(event_order), 0) + 1 "
+            "AS next_event_order "
+            "FROM yujin_memory_operation_audit "
+            "WHERE project_id = ? AND candidate_id = ?",
+            (project_id, candidate_id),
+        ).fetchone()
+        connection.execute(
+            """
+            INSERT INTO yujin_memory_operation_audit (
+                operation_audit_id, candidate_id, project_id,
+                event_order, action, storage_status, occurred_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                f"memory-operation-audit-{uuid.uuid4().hex}",
+                candidate_id,
+                project_id,
+                int(row["next_event_order"]),
+                action,
+                storage_status,
                 occurred_at,
             ),
         )
@@ -4233,6 +4271,607 @@ class LocalProjectStore:
             raise
         finally:
             connection.close()
+
+    def claim_yujin_memory_store(
+        self,
+        *,
+        project_id: str,
+        candidate_id: str,
+        client_request_id: str,
+        claim_token: str,
+    ) -> dict[str, Any]:
+        if re.fullmatch(r"claim-[0-9a-f]{64}", claim_token) is None:
+            raise ValueError("memory_store_claim_invalid")
+        if (
+            re.fullmatch(
+                r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}",
+                client_request_id,
+            )
+            is None
+        ):
+            raise ValueError("memory_store_request_id_invalid")
+        connection = self._connection(project_id)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            row = self._lock_yujin_memory_candidate(
+                connection,
+                project_id=project_id,
+                candidate_id=candidate_id,
+            )
+            if row is None:
+                raise KeyError("memory_candidate_missing")
+            status = str(row["status"])
+            storage_status = str(row["storage_status"])
+            if storage_status == "deleted":
+                raise ValueError("memory_candidate_deleted")
+            if storage_status == "stored":
+                connection.commit()
+                return {
+                    "action": "stored",
+                    "candidate": self._yujin_memory_candidate_payload(row),
+                    "storage_status": "stored",
+                }
+            if status != "approved":
+                raise ValueError("memory_candidate_not_approved")
+            same_request = (
+                row["store_client_request_id"] is not None
+                and str(row["store_client_request_id"])
+                == client_request_id
+                and storage_status != "not_requested"
+            )
+            recover_started_call = False
+            claim_expired = False
+            if row["write_claim_token"] is not None:
+                try:
+                    claimed_at = datetime.fromisoformat(
+                        str(row["write_claimed_at"])
+                    )
+                except (TypeError, ValueError) as error:
+                    raise ValueError(
+                        "memory_candidate_store_in_progress"
+                    ) from error
+                claim_expired = (
+                    self._clock()
+                    >= claimed_at + timedelta(seconds=60)
+                )
+                recover_started_call = (
+                    claim_expired
+                    and row["provider_call_started_at"] is not None
+                )
+            if (
+                same_request
+                and not claim_expired
+                and row["provider_memory_ref"] is None
+            ):
+                connection.commit()
+                return {
+                    "action": "replay",
+                    "candidate": self._yujin_memory_candidate_payload(row),
+                    "storage_status": storage_status,
+                }
+            if row["write_claim_token"] is not None:
+                if not claim_expired:
+                    raise ValueError(
+                        "memory_candidate_store_in_progress"
+                    )
+
+            external_ref = (
+                str(row["external_ref"])
+                if row["external_ref"] is not None
+                else "ext-"
+                + hashlib.sha256(uuid.uuid4().bytes).hexdigest()
+            )
+            operation_id = (
+                str(row["operation_id"])
+                if row["operation_id"] is not None
+                else "op-"
+                + hashlib.sha256(uuid.uuid4().bytes).hexdigest()
+            )
+            now = self._now_iso()
+            connection.execute(
+                """
+                UPDATE yujin_memory_candidates
+                SET external_ref = ?, operation_id = ?,
+                    store_client_request_id = ?,
+                    write_claim_token = ?, write_claimed_at = ?,
+                    provider_call_started_at = NULL,
+                    attempt_count = attempt_count + 1,
+                    storage_status = 'claimed', updated_at = ?
+                WHERE project_id = ? AND candidate_id = ?
+                """,
+                (
+                    external_ref,
+                    operation_id,
+                    client_request_id,
+                    claim_token,
+                    now,
+                    now,
+                    project_id,
+                    candidate_id,
+                ),
+            )
+            self._append_yujin_memory_operation_audit(
+                connection,
+                candidate_id=candidate_id,
+                project_id=project_id,
+                action="claim",
+                storage_status="claimed",
+                occurred_at=now,
+            )
+            current = connection.execute(
+                "SELECT * FROM yujin_memory_candidates "
+                "WHERE project_id = ? AND candidate_id = ?",
+                (project_id, candidate_id),
+            ).fetchone()
+            connection.commit()
+            if current["provider_memory_ref"] is not None:
+                action = "finalize"
+            elif current["provider_event_ref"] is not None:
+                action = "reconcile"
+            elif recover_started_call:
+                action = "reconcile"
+            elif storage_status == "ambiguous":
+                action = "reconcile"
+            else:
+                action = "add"
+            return {
+                "action": action,
+                "candidate": self._yujin_memory_candidate_payload(current),
+                "text": str(current["proposed_text"]),
+                "category": str(current["category"]),
+                "external_ref": external_ref,
+                "operation_id": operation_id,
+                "event_ref": (
+                    str(current["provider_event_ref"])
+                    if current["provider_event_ref"] is not None
+                    else None
+                ),
+            }
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def mark_yujin_memory_store_call_started(
+        self,
+        *,
+        project_id: str,
+        candidate_id: str,
+        claim_token: str,
+    ) -> None:
+        connection = self._connection(project_id)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            now = self._now_iso()
+            updated = connection.execute(
+                """
+                UPDATE yujin_memory_candidates
+                SET provider_call_started_at = ?, updated_at = ?
+                WHERE project_id = ? AND candidate_id = ?
+                  AND write_claim_token = ?
+                  AND storage_status = 'claimed'
+                """,
+                (
+                    now,
+                    now,
+                    project_id,
+                    candidate_id,
+                    claim_token,
+                ),
+            )
+            if updated.rowcount != 1:
+                raise ValueError("memory_store_claim_conflict")
+            self._append_yujin_memory_operation_audit(
+                connection,
+                candidate_id=candidate_id,
+                project_id=project_id,
+                action="call_started",
+                storage_status="claimed",
+                occurred_at=now,
+            )
+            connection.commit()
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def record_yujin_memory_provider_outcome(
+        self,
+        *,
+        project_id: str,
+        candidate_id: str,
+        claim_token: str,
+        status: str,
+        memory_ref: str | None,
+        event_ref: str | None,
+    ) -> None:
+        if status not in {
+            "stored",
+            "event_pending",
+            "failed_retryable",
+            "ambiguous",
+        }:
+            raise ValueError("memory_write_outcome_invalid")
+        connection = self._connection(project_id)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            row = self._lock_yujin_memory_candidate(
+                connection,
+                project_id=project_id,
+                candidate_id=candidate_id,
+            )
+            if row is None:
+                raise KeyError("memory_candidate_missing")
+            if str(row["write_claim_token"] or "") != claim_token:
+                raise ValueError("memory_store_claim_conflict")
+            if status == "stored":
+                if (
+                    memory_ref is None
+                    or re.fullmatch(
+                        r"[A-Za-z0-9][A-Za-z0-9._:-]{0,255}",
+                        memory_ref,
+                    )
+                    is None
+                    or event_ref is not None
+                ):
+                    raise ValueError("memory_write_outcome_invalid")
+                provider_memory_ref = memory_ref
+                provider_event_ref = None
+                storage_status = "claimed"
+            elif status == "event_pending":
+                if (
+                    event_ref is None
+                    or re.fullmatch(
+                        r"[A-Za-z0-9][A-Za-z0-9._:-]{0,255}",
+                        event_ref,
+                    )
+                    is None
+                    or memory_ref is not None
+                ):
+                    raise ValueError("memory_write_outcome_invalid")
+                provider_memory_ref = None
+                provider_event_ref = event_ref
+                storage_status = "event_pending"
+            else:
+                provider_memory_ref = None
+                provider_event_ref = (
+                    event_ref if status == "ambiguous" else None
+                )
+                storage_status = status
+            now = self._now_iso()
+            connection.execute(
+                """
+                UPDATE yujin_memory_candidates
+                SET provider_memory_ref = ?, provider_event_ref = ?,
+                    write_claim_token = NULL, write_claimed_at = NULL,
+                    provider_call_started_at = NULL,
+                    storage_status = ?, updated_at = ?
+                WHERE project_id = ? AND candidate_id = ?
+                """,
+                (
+                    provider_memory_ref,
+                    provider_event_ref,
+                    storage_status,
+                    now,
+                    project_id,
+                    candidate_id,
+                ),
+            )
+            self._append_yujin_memory_operation_audit(
+                connection,
+                candidate_id=candidate_id,
+                project_id=project_id,
+                action="outcome",
+                storage_status=storage_status,
+                occurred_at=now,
+            )
+            connection.commit()
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def finalize_yujin_memory_store(
+        self,
+        *,
+        project_id: str,
+        candidate_id: str,
+    ) -> dict[str, Any]:
+        connection = self._connection(project_id)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            row = self._lock_yujin_memory_candidate(
+                connection,
+                project_id=project_id,
+                candidate_id=candidate_id,
+            )
+            if row is None:
+                raise KeyError("memory_candidate_missing")
+            if str(row["storage_status"]) == "stored":
+                connection.commit()
+                return self._yujin_memory_candidate_payload(row)
+            if (
+                str(row["status"]) != "approved"
+                or row["provider_memory_ref"] is None
+            ):
+                raise ValueError("memory_store_not_settled")
+            now = self._now_iso()
+            connection.execute(
+                "UPDATE yujin_memory_candidates "
+                "SET storage_status = 'stored', write_claim_token = NULL, "
+                "write_claimed_at = NULL, provider_call_started_at = NULL, "
+                "updated_at = ? "
+                "WHERE project_id = ? AND candidate_id = ? "
+                "AND status = 'approved' "
+                "AND provider_memory_ref IS NOT NULL",
+                (now, project_id, candidate_id),
+            )
+            self._append_yujin_memory_audit(
+                connection,
+                candidate_id=candidate_id,
+                project_id=project_id,
+                action="store",
+                status="approved",
+                occurred_at=now,
+            )
+            self._append_yujin_memory_operation_audit(
+                connection,
+                candidate_id=candidate_id,
+                project_id=project_id,
+                action="finalize",
+                storage_status="stored",
+                occurred_at=now,
+            )
+            current = connection.execute(
+                "SELECT * FROM yujin_memory_candidates "
+                "WHERE project_id = ? AND candidate_id = ?",
+                (project_id, candidate_id),
+            ).fetchone()
+            connection.commit()
+            return self._yujin_memory_candidate_payload(current)
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def release_yujin_memory_store_claim(
+        self,
+        *,
+        project_id: str,
+        candidate_id: str,
+        claim_token: str,
+        storage_status: str = "failed_retryable",
+        event_ref: str | None = None,
+    ) -> None:
+        if storage_status not in {"failed_retryable", "ambiguous"}:
+            raise ValueError("memory_write_outcome_invalid")
+        if event_ref is not None and re.fullmatch(
+            r"[A-Za-z0-9][A-Za-z0-9._:-]{0,255}", event_ref
+        ) is None:
+            raise ValueError("memory_write_outcome_invalid")
+        connection = self._connection(project_id)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            now = self._now_iso()
+            updated = connection.execute(
+                """
+                UPDATE yujin_memory_candidates
+                SET write_claim_token = NULL, write_claimed_at = NULL,
+                    provider_call_started_at = NULL,
+                    storage_status = ?, provider_event_ref = ?
+                WHERE project_id = ? AND candidate_id = ?
+                  AND write_claim_token = ?
+                """,
+                (
+                    storage_status,
+                    event_ref,
+                    project_id,
+                    candidate_id,
+                    claim_token,
+                ),
+            )
+            if updated.rowcount != 1:
+                raise ValueError("memory_store_claim_conflict")
+            self._append_yujin_memory_operation_audit(
+                connection,
+                candidate_id=candidate_id,
+                project_id=project_id,
+                action="release",
+                storage_status=storage_status,
+                occurred_at=now,
+            )
+            connection.commit()
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def get_yujin_memory_store_state(
+        self, *, project_id: str, candidate_id: str
+    ) -> dict[str, Any]:
+        connection = self._connection(project_id)
+        try:
+            row = connection.execute(
+                "SELECT candidate_id, status, storage_status "
+                "FROM yujin_memory_candidates "
+                "WHERE project_id = ? AND candidate_id = ?",
+                (project_id, candidate_id),
+            ).fetchone()
+            if row is None:
+                raise KeyError("memory_candidate_missing")
+            storage_status = str(row["storage_status"])
+            return {
+                "candidate_id": str(row["candidate_id"]),
+                "status": str(row["status"]),
+                "storage_status": storage_status,
+                "retryable": storage_status
+                in {
+                    "event_pending",
+                    "failed_retryable",
+                    "ambiguous",
+                },
+            }
+        finally:
+            connection.close()
+
+    def get_yujin_memory_private_mapping(
+        self, *, project_id: str, candidate_id: str
+    ) -> dict[str, str]:
+        connection = self._connection(project_id)
+        try:
+            row = connection.execute(
+                "SELECT status, storage_status, external_ref, "
+                "provider_memory_ref FROM yujin_memory_candidates "
+                "WHERE project_id = ? AND candidate_id = ?",
+                (project_id, candidate_id),
+            ).fetchone()
+            if row is None:
+                raise KeyError("memory_candidate_missing")
+            if (
+                str(row["status"]) != "approved"
+                or str(row["storage_status"]) != "stored"
+                or row["external_ref"] is None
+                or row["provider_memory_ref"] is None
+            ):
+                raise ValueError("memory_candidate_not_stored")
+            return {
+                "external_ref": str(row["external_ref"]),
+                "memory_ref": str(row["provider_memory_ref"]),
+            }
+        finally:
+            connection.close()
+
+    def mark_yujin_memory_delete_call_started(
+        self, *, project_id: str, candidate_id: str
+    ) -> dict[str, Any]:
+        connection = self._connection(project_id)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            row = self._lock_yujin_memory_candidate(
+                connection,
+                project_id=project_id,
+                candidate_id=candidate_id,
+            )
+            if row is None:
+                raise KeyError("memory_candidate_missing")
+            if (
+                str(row["status"]) != "approved"
+                or str(row["storage_status"]) != "stored"
+                or row["external_ref"] is None
+                or row["provider_memory_ref"] is None
+            ):
+                raise ValueError("memory_candidate_not_stored")
+            prior = connection.execute(
+                "SELECT 1 FROM yujin_memory_operation_audit "
+                "WHERE project_id = ? AND candidate_id = ? "
+                "AND action = 'call_started' "
+                "AND storage_status = 'stored' LIMIT 1",
+                (project_id, candidate_id),
+            ).fetchone()
+            allow_absent = prior is not None
+            if not allow_absent:
+                self._append_yujin_memory_operation_audit(
+                    connection,
+                    candidate_id=candidate_id,
+                    project_id=project_id,
+                    action="call_started",
+                    storage_status="stored",
+                    occurred_at=self._now_iso(),
+                )
+            connection.commit()
+            return {
+                "external_ref": str(row["external_ref"]),
+                "memory_ref": str(row["provider_memory_ref"]),
+                "allow_absent": allow_absent,
+            }
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def mark_yujin_memory_deleted(
+        self, *, project_id: str, candidate_id: str
+    ) -> dict[str, Any]:
+        connection = self._connection(project_id)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            row = self._lock_yujin_memory_candidate(
+                connection,
+                project_id=project_id,
+                candidate_id=candidate_id,
+            )
+            if row is None:
+                raise KeyError("memory_candidate_missing")
+            if str(row["storage_status"]) == "deleted":
+                connection.commit()
+                return self.get_yujin_memory_store_state(
+                    project_id=project_id,
+                    candidate_id=candidate_id,
+                )
+            if (
+                str(row["status"]) != "approved"
+                or str(row["storage_status"]) != "stored"
+            ):
+                raise ValueError("memory_candidate_not_stored")
+            now = self._now_iso()
+            updated = connection.execute(
+                "UPDATE yujin_memory_candidates "
+                "SET storage_status = 'deleted', "
+                "provider_memory_ref = NULL, provider_event_ref = NULL, "
+                "updated_at = ? "
+                "WHERE project_id = ? AND candidate_id = ? "
+                "AND status = 'approved' AND storage_status = 'stored'",
+                (now, project_id, candidate_id),
+            )
+            if updated.rowcount != 1:
+                raise ValueError("memory_delete_conflict")
+            self._append_yujin_memory_operation_audit(
+                connection,
+                candidate_id=candidate_id,
+                project_id=project_id,
+                action="delete",
+                storage_status="deleted",
+                occurred_at=now,
+            )
+            connection.commit()
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+        finally:
+            connection.close()
+        return self.get_yujin_memory_store_state(
+            project_id=project_id,
+            candidate_id=candidate_id,
+        )
+
+    def list_yujin_memory_operation_audit(
+        self, *, project_id: str, candidate_id: str
+    ) -> list[dict[str, Any]]:
+        rows = self._fetchall(
+            project_id,
+            """
+            SELECT operation_audit_id, candidate_id, project_id,
+                   event_order, action, storage_status, occurred_at
+            FROM yujin_memory_operation_audit
+            WHERE project_id = ? AND candidate_id = ?
+            ORDER BY event_order
+            """,
+            (project_id, candidate_id),
+        )
+        return [dict(row) for row in rows]
 
     def list_yujin_memory_candidate_audit(
         self,
@@ -9159,6 +9798,7 @@ class LocalProjectStore:
         try:
             for statement in PROJECT_SCHEMA_STATEMENTS:
                 connection.execute(statement)
+            self._ensure_yujin_memory_operation_columns(connection)
             self._ensure_hermes_capability_lifecycle_schema(connection)
             connection.execute(f"DROP TABLE IF EXISTS {RETIRED_CREDENTIAL_TABLE}")
             self._ensure_recommendation_decision_state_column(connection)
@@ -9230,6 +9870,7 @@ class LocalProjectStore:
                     raise
             for statement in PROJECT_SCHEMA_STATEMENTS:
                 connection.execute(statement)
+            self._ensure_yujin_memory_operation_columns(connection)
             self._ensure_hermes_capability_lifecycle_schema(connection)
             connection.execute(f"DROP TABLE IF EXISTS {RETIRED_CREDENTIAL_TABLE}")
             self._ensure_recommendation_decision_state_column(connection)
@@ -9259,6 +9900,38 @@ class LocalProjectStore:
             connection.execute("ALTER TABLE creation_briefs ADD COLUMN summary_text TEXT NOT NULL DEFAULT ''")
         if columns and "script_asset_owned" not in columns:
             connection.execute("ALTER TABLE creation_briefs ADD COLUMN script_asset_owned INTEGER NOT NULL DEFAULT 0")
+
+    @staticmethod
+    def _ensure_yujin_memory_operation_columns(
+        connection: sqlite3.Connection,
+    ) -> None:
+        columns = {
+            str(row[1])
+            for row in connection.execute(
+                "PRAGMA table_info(yujin_memory_candidates)"
+            ).fetchall()
+        }
+        additions = (
+            ("external_ref", "TEXT"),
+            ("operation_id", "TEXT"),
+            ("provider_event_ref", "TEXT"),
+            ("provider_memory_ref", "TEXT"),
+            ("store_client_request_id", "TEXT"),
+            ("write_claim_token", "TEXT"),
+            ("write_claimed_at", "TEXT"),
+            ("provider_call_started_at", "TEXT"),
+            ("attempt_count", "INTEGER NOT NULL DEFAULT 0"),
+            (
+                "storage_status",
+                "TEXT NOT NULL DEFAULT 'not_requested'",
+            ),
+        )
+        for column, declaration in additions:
+            if column not in columns:
+                connection.execute(
+                    f"ALTER TABLE yujin_memory_candidates "
+                    f"ADD COLUMN {column} {declaration}"
+                )
 
     def _ensure_hermes_capability_lifecycle_schema(
         self,

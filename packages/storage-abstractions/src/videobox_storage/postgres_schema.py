@@ -24,6 +24,7 @@ _PROJECT_SCOPED_IDENTIFIERS = {
     "tts_candidates": "candidate_id",
     "yujin_memory_candidates": "candidate_id",
     "yujin_memory_candidate_audit": "audit_event_id",
+    "yujin_memory_operation_audit": "operation_audit_id",
 }
 
 
@@ -73,6 +74,16 @@ POSTGRES_MIGRATION_STATEMENTS = (
     "ALTER TABLE creation_briefs ADD COLUMN IF NOT EXISTS script_asset_owned INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE director_messages ADD COLUMN IF NOT EXISTS metadata_json TEXT NOT NULL DEFAULT '{}'",
     "ALTER TABLE director_messages ADD COLUMN IF NOT EXISTS message_order BIGINT",
+    "ALTER TABLE yujin_memory_candidates ADD COLUMN IF NOT EXISTS external_ref TEXT",
+    "ALTER TABLE yujin_memory_candidates ADD COLUMN IF NOT EXISTS operation_id TEXT",
+    "ALTER TABLE yujin_memory_candidates ADD COLUMN IF NOT EXISTS provider_event_ref TEXT",
+    "ALTER TABLE yujin_memory_candidates ADD COLUMN IF NOT EXISTS provider_memory_ref TEXT",
+    "ALTER TABLE yujin_memory_candidates ADD COLUMN IF NOT EXISTS store_client_request_id TEXT",
+    "ALTER TABLE yujin_memory_candidates ADD COLUMN IF NOT EXISTS write_claim_token TEXT",
+    "ALTER TABLE yujin_memory_candidates ADD COLUMN IF NOT EXISTS write_claimed_at TEXT",
+    "ALTER TABLE yujin_memory_candidates ADD COLUMN IF NOT EXISTS provider_call_started_at TEXT",
+    "ALTER TABLE yujin_memory_candidates ADD COLUMN IF NOT EXISTS attempt_count INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE yujin_memory_candidates ADD COLUMN IF NOT EXISTS storage_status TEXT NOT NULL DEFAULT 'not_requested'",
     """
     WITH ordered AS (
         SELECT ctid,

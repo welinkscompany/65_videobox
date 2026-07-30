@@ -13,7 +13,7 @@
 Parent: `docs/superpowers/plans/2026-07-26-videobox-hermes-yujin-master-plan.md`
 Requires: Phase C task C4 complete.
 
-Child progress: **1/5 tasks (20.0%), remaining 80.0%**. These five tasks are D1, D2, D3, D4, and F1.
+Child progress: **2/5 tasks (40.0%), remaining 60.0%**. These five tasks are D1, D2, D3, D4, and F1.
 
 ## Memory policy
 
@@ -186,21 +186,165 @@ POST /api/projects/{project_id}/director/memory-candidates/{candidate_id}/reject
 
 ## D2 — Add Hermes-owned Mem0 Platform adapter
 
-- [ ] **D2** Add a Hermes-owned Mem0 Platform adapter without exposing credentials or raw provider records.
+- [x] **D2** Add a Hermes-owned Mem0 Platform adapter without exposing credentials or raw provider records.
+
+### 2026-07-30 source-grounded D2 amendment
+
+The originally planned direct activation of the official Mem0 provider in the
+interactive Yujin profile is forbidden. The exact pinned Hermes image
+`nousresearch/hermes-agent@sha256:ad79951c26b7707c8c651f30780338d4f9bb17ddca19f6ea78eb27cbf83a3787`
+(OCI revision `e89bc58a5ba80ec6be19b43beca37cbb03091afd`, Hermes
+`v2026.7.7.2`) automatically prefetches memory and calls
+`sync_turn(..., infer=True)` for ordinary conversation turns when its Mem0
+provider is active. Its system prompt also permits unrequested `mem0_add`.
+That behavior conflicts with VideoBox's explicit-approval-only contract and
+would make pending/rejected provider-call count greater than zero.
+
+The pinned Hermes RPC surface also has no deterministic public external
+`tool.execute` operation. Asking the model to call `mem0_add` would therefore
+be nondeterministic and retry-unsafe. Mem0 Platform V3 add may return an
+asynchronous `event_id`, not a durable memory ID, so an event ID must never be
+reported or persisted as a memory ID.
+
+Authoritative evidence:
+
+- pinned Hermes Mem0 plugin:
+  `https://raw.githubusercontent.com/NousResearch/hermes-agent/v2026.7.7.2/plugins/memory/mem0/__init__.py`
+- pinned Hermes Mem0 backend:
+  `https://raw.githubusercontent.com/NousResearch/hermes-agent/v2026.7.7.2/plugins/memory/mem0/_backend.py`
+- Hermes programmatic integration:
+  `https://github.com/nousresearch/hermes-agent/blob/main/website/docs/developer-guide/programmatic-integration.md`
+- Mem0 add and event polling:
+  `https://docs.mem0.ai/api-reference/memory/add-memories` and
+  `https://docs.mem0.ai/api-reference/events/get-event`
+
+The amended boundary is:
+
+```text
+explicit VideoBox approve
+→ separate explicit store request
+→ authenticated Agent Gateway
+→ authenticated videobox-hermes-memory-adapter
+→ Mem0 Platform
+```
+
+The memory adapter is an optional process derived from the exact pinned Hermes
+image. It replaces the image entrypoint, pins `mem0ai==2.0.10`, and never runs
+the Hermes agent loop, `MemoryManager`, automatic prefetch, or `sync_turn`.
+The interactive Yujin profile keeps `memory.provider` inactive. Chat and manual
+editing must start and remain usable when the adapter, credential, or provider
+is unavailable.
+
+`MEM0_API_KEY` exists only in the adapter process. The adapter has no host
+port, database/media/OAuth mount, or VideoBox provider-readable identifier.
+It joins only a dedicated internal memory network and provider egress. The
+Gateway receives only the adapter URL and a service credential, has no provider
+egress, and never receives the Mem0 credential. Workspace/browser/frontend
+receive neither.
+
+Candidate approval and provider processing are separate durable state
+machines. `status` remains the consent state
+`pending | approved | rejected`; `storage_status` is
+`not_requested | claimed | event_pending | stored | failed_retryable |
+ambiguous`. Approve remains provider-call zero. Only an approved candidate plus
+an explicit store request may claim a provider operation. A server-generated
+opaque external reference, operation idempotency key, bounded store request ID
+and fingerprint, bounded event reference, bounded memory reference, attempt
+count, claim token/expiry, call-start marker, and body-free audit are persisted
+before/after provider operations. Provider metadata is limited to:
+
+```json
+{
+  "source": "videobox_yujin_approved_v1",
+  "category": "<allowlisted category>",
+  "external_ref": "<server-generated opaque reference>"
+}
+```
+
+Project, conversation, message, candidate, session, revision, media, local
+path, credential, and raw provider fields are never sent to Mem0. The provider
+call uses `infer=False` and the fixed Hermes namespaces
+`videobox-owner-v1`/`videobox-yujin-v1`.
+
+Direct durable memory IDs may settle to `stored`. An add response containing
+only an event ID settles to `event_pending`; subsequent explicit store/retry
+first polls or reconciles it and never blindly repeats add. Timeout is
+`ambiguous`, not success. Exactly one matching result may settle to `stored`;
+zero, multiple, malformed, or text/metadata-mismatched results fail closed.
+Provider event/memory IDs and raw bodies remain internal and never appear in a
+browser response or log.
+
+The public store contract is:
+
+```http
+POST /api/projects/{project_id}/director/memory-candidates/{candidate_id}/store
+Content-Type: application/json
+
+{"client_request_id": "<1..128 exact safe ID>"}
+```
+
+The response contains only `candidate_id`, consent `status`,
+`storage_status`, and `retryable`. It never contains provider, event, memory,
+operation, source-message, conversation, or raw provider fields. Missing or
+cross-project candidates return fixed `404 memory_candidate_missing`;
+pending/rejected candidates, a live claim, or an idempotency conflict return
+fixed `409` codes; unavailable/invalid provider settlement returns fixed
+`503 memory_save_unavailable`. D3 implements one user Approve click as two
+ordered requests, `approve` then `store`, so approve itself always remains
+provider-call zero. A separate explicit Retry click sends a new store request
+ID.
+
+Durable transition truth:
+
+| Consent / storage | Explicit action or observed result | Next storage state | cumulative add |
+|---|---|---|---:|
+| pending / not_requested | approve | approved / not_requested | 0 |
+| approved / not_requested | store CAS; persist claim before I/O | claimed | 0 |
+| claimed, call not started | expired lease reclaim | claimed | at most 1 |
+| claimed, call started | direct durable exact result | stored | 1 |
+| claimed, call started | event reference | event_pending | 1 |
+| claimed, call started | response lost/timeout | ambiguous | 1 |
+| event_pending | explicit retry | poll/reconcile same event | 1 |
+| event success, one exact text/metadata match | settle | stored | 1 |
+| event confirmed failed | settle | failed_retryable | 1 |
+| ambiguous | explicit retry | reconcile only | 1 |
+| stored | any replay | stored locally | 1 |
+
+An expired pre-call claim may be reclaimed. Once `call_started` is durable,
+unknown settlement never permits blind add. `failed_retryable` permits a new
+add only when the previous attempt is durably proven not started or the event
+is durably confirmed failed with zero matching memory; otherwise it reconciles
+only. Same `client_request_id` with the same fingerprint replays; a changed
+fingerprint conflicts. Claim expiry uses a bounded server clock and compare-
+and-swap. Crash/reload must not erase claim, event, ambiguous, or stored truth.
 
 **Files:**
 
 - Modify: `config/hermes/yujin/distribution.yaml`
 - Create: `config/hermes/yujin/skills/videobox-memory/SKILL.md`
 - Create: `services/agent-gateway/src/videobox_agent_gateway/memory_gateway.py`
+- Create: `services/agent-gateway/src/videobox_agent_gateway/hermes_memory_adapter.py`
 - Modify: `services/agent-gateway/src/videobox_agent_gateway/main.py`
 - Modify: `services/api/src/videobox_api/agent_gateway_client.py`
 - Create: `services/api/src/videobox_api/yujin_memory_service.py`
 - Modify: `services/api/src/videobox_api/routers/yujin_memory.py`
-- Modify: `compose.yaml`
+- Modify: `services/api/src/videobox_api/models.py`
+- Modify: `services/api/src/videobox_api/main.py`
+- Modify: `packages/domain-models/src/videobox_domain_models/yujin_memory.py`
+- Modify: `packages/storage-abstractions/src/videobox_storage/local_project_store.py`
+- Modify: `packages/storage-abstractions/src/videobox_storage/sqlite_schema.py`
+- Modify: `packages/storage-abstractions/src/videobox_storage/postgres_schema.py`
+- Create: `docker/hermes-memory-adapter.Dockerfile`
+- Modify: `compose.hermes-yujin.yaml`
 - Modify: `.env.container.example`
 - Create: `tests/test_agent_gateway_memory.py`
+- Create: `tests/test_hermes_memory_adapter.py`
 - Create: `tests/test_yujin_memory_service.py`
+- Modify: `tests/test_api_yujin_memory.py`
+- Modify: `tests/test_agent_gateway_client.py`
+- Modify: `tests/test_yujin_memory_store.py`
+- Modify: `tests/test_postgres_project_store.py`
+- Modify: `tests/test_sqlite_migration_concurrency.py`
 - Modify: `tests/test_hermes_yujin_compose_contract.py`
 - Modify: `tests/test_hermes_yujin_profile_distribution.py`
 
@@ -208,48 +352,92 @@ POST /api/projects/{project_id}/director/memory-candidates/{candidate_id}/reject
 
 ```python
 class HermesMemoryGateway(Protocol):
-    async def add_approved(self, request: ApprovedMemoryWrite) -> StoredMemoryRef: ...
+    async def add_approved(self, request: ApprovedMemoryWrite) -> MemoryWriteOutcome: ...
+    async def reconcile(self, request: MemoryReconcile) -> MemoryWriteOutcome: ...
     async def search(self, request: MemorySearch) -> tuple[RetrievedMemory, ...]: ...
     async def delete(self, request: MemoryDelete) -> None: ...
 ```
 
-VideoBox-visible `StoredMemoryRef` contains only:
+The internal outcome distinguishes a durable reference from an asynchronous
+event. Browser-visible DTOs contain only approval/storage status and retryable
+state; they never contain `memory_id`, `event_id`, or provider raw fields.
+The internal model is a discriminated status union or has an equivalent
+cross-field validator: `stored` requires exactly one bounded memory ref,
+`event_pending` requires exactly one bounded event ref, and failure/ambiguous
+states cannot carry a memory ref. Impossible combinations are rejected.
 
 ```python
-class StoredMemoryRef(BaseModel):
-    provider: Literal["mem0"]
-    memory_id: str
+class MemoryWriteOutcome(BaseModel):
+    status: Literal["stored", "event_pending", "failed_retryable", "ambiguous"]
+    memory_ref: str | None = None
+    event_ref: str | None = None
 ```
 
 **RED:**
 
-1. Use fake Hermes/plugin and fake agent-gateway clients to test add/search/delete success, timeout, malformed response, provider rejection, and unavailable configuration.
-2. Require that non-approved candidate writes are rejected before any gateway call.
-3. Require compose/profile tests to prove:
-   - Mem0 credential exists only in Hermes runtime configuration;
+1. Use fake adapter/provider and fake agent-gateway clients to test direct
+   durable add, asynchronous event polling, reconcile, search/delete success,
+   timeout, malformed/multiple result, provider rejection, and unavailable
+   configuration.
+2. Require pending/rejected/cross-project candidate store requests, approve,
+   list/reload, and startup to perform Gateway/provider call `0`.
+3. Require approved plus explicit store to add exactly once. Replay and two
+   concurrent store requests must keep cumulative add count `1`.
+4. Require event-only add to remain pending. Replay polls/reconciles rather
+   than adds. Timeout/unknown settlement never auto-adds. Only one exact
+   matching durable result becomes stored.
+5. Require compose/profile tests to prove:
+   - Mem0 credential exists only in the isolated memory adapter;
+   - interactive Yujin profile does not activate a memory provider;
+   - adapter derives from the exact Hermes digest and pins `mem0ai==2.0.10`;
+   - adapter has no host port, DB/media/OAuth mount, or ordinary data network;
+   - Gateway has no provider egress and no Mem0 credential;
    - browser/API responses never contain it;
    - no Mem0 client is instantiated in editor/frontend code;
-   - no DB/media mount is added.
-4. Require all ordinary tests to assert external provider call count `0`.
+   - provider payload contains no VideoBox internal ID.
+6. Require all ordinary tests to assert external provider call count `0`.
+7. Require provider success followed by local settle failure to reconcile to
+   one memory, not issue a second add.
+8. Require adapter/provider unavailability to leave candidate approved and
+   chat/manual editing operational.
+9. Require the adapter to use a distinct service token present only in Gateway
+   and adapter. Its client accepts only
+   `http://videobox-hermes-memory-adapter:8082`, sets `trust_env=False`,
+   forbids redirects, bounds connect/read timeout and response size, and maps
+   all transport/provider bodies to fixed errors.
+10. Require Gateway/Yujin health and chat startup to have no hard
+    `depends_on: adapter service_healthy`. Missing key/configuration lazily
+    leaves memory unconfigured with provider call `0`.
+11. Require old SQLite database migration and disposable PostgreSQL parity for
+    all new consent/storage, claim, request-id, event, and audit fields.
 
 **GREEN:**
 
-5. Configure the official Hermes Mem0 plugin in Platform mode inside the isolated Yujin profile.
-6. Implement the bounded command inside `videobox-agent-gateway`; it can invoke only `mem0_add`, `mem0_search`, or `mem0_delete` with typed arguments. Do not expose generic Hermes tool execution.
-7. Call `mem0_add` with approved text, stable Hermes user/agent namespace, `infer=False`, and minimal metadata.
-8. Map provider errors to stable public statuses while logging only operation, candidate ID, duration, and outcome.
-9. Run:
+12. Build the isolated adapter from the exact Hermes image, replace its
+   entrypoint, pin the exact SDK derivative, and expose only authenticated
+   add/reconcile/search/delete endpoints. Do not expose generic Hermes tool
+   execution.
+13. Persist a claim and opaque external reference before calling the Gateway.
+   Use compare-and-swap settlement and body-free monotonic audit. Failed or
+   ambiguous writes keep approval and require an explicit retry.
+14. Call add with approved text, stable Hermes namespace, `infer=False`, and the
+   exact minimal metadata above.
+15. Map provider errors to fixed public statuses while logging only operation,
+    a non-reversible candidate digest, duration, and stable outcome.
+16. Keep delete server-owned: browser submits the candidate handle only; the
+    server resolves and verifies its private mapping.
+17. Run:
 
    ```powershell
-   .\.venv\Scripts\python.exe -m pytest tests/test_agent_gateway_memory.py tests/test_yujin_memory_service.py tests/test_api_yujin_memory.py tests/test_hermes_yujin_compose_contract.py tests/test_hermes_yujin_profile_distribution.py -q
+   .\.venv\Scripts\python.exe -m pytest tests/test_agent_gateway_memory.py tests/test_hermes_memory_adapter.py tests/test_yujin_memory_service.py tests/test_api_yujin_memory.py tests/test_agent_gateway_client.py tests/test_yujin_memory_store.py tests/test_postgres_project_store.py tests/test_sqlite_migration_concurrency.py tests/test_hermes_yujin_compose_contract.py tests/test_hermes_yujin_profile_distribution.py -q
    powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-hermes-yujin-profile.ps1 -StaticOnly
    git diff --check
    ```
 
-10. Mark D2 `[x]`, synchronize progress, and commit:
+18. Mark D2 `[x]`, synchronize progress, and commit:
 
    ```powershell
-   git add config/hermes/yujin compose.yaml .env.container.example services/agent-gateway services/api tests docs/superpowers/plans
+   git add config/hermes/yujin compose.hermes-yujin.yaml .env.container.example docker/hermes-memory-adapter.Dockerfile services/agent-gateway services/api tests docs/superpowers/plans docs/superpowers/specs
    git commit -m "feat: connect approved memory to Hermes Mem0"
    ```
 

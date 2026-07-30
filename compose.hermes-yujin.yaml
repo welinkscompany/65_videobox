@@ -43,12 +43,14 @@ services:
       VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN: ${VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN:?set in .env.container}
       VIDEOBOX_HERMES_CAPABILITY_PRIVATE_KEY_B64: ${VIDEOBOX_HERMES_CAPABILITY_PRIVATE_KEY_B64:?set in .env.container}
       VIDEOBOX_HERMES_CAPABILITY_KEY_ID: ${VIDEOBOX_HERMES_CAPABILITY_KEY_ID:?set in .env.container}
+      HERMES_MEMORY_ADAPTER_URL: http://videobox-hermes-memory-adapter:8082
+      VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN: ${VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN:?set in .env.container}
     depends_on:
       videobox-hermes-yujin:
         condition: service_healthy
       videobox-workspace:
         condition: service_healthy
-    networks: [videobox-agent-gateway-api-network, videobox-agent-gateway-network]
+    networks: [videobox-agent-gateway-api-network, videobox-agent-gateway-network, videobox-hermes-memory-network]
     user: "10001:10001"
     read_only: true
     tmpfs: [/tmp]
@@ -59,6 +61,34 @@ services:
     cpus: 0.5
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8081/health', timeout=3).read()"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  videobox-hermes-memory-adapter:
+    profiles: [hermes-yujin]
+    build:
+      context: .
+      dockerfile: docker/hermes-memory-adapter.Dockerfile
+    environment:
+      MEM0_API_KEY: ${MEM0_API_KEY:-}
+      VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN: ${VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN:?set in .env.container}
+    networks: [videobox-hermes-memory-network, videobox-hermes-provider-egress]
+    user: "10000:10000"
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    mem_limit: 256m
+    cpus: 0.5
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8082/health', timeout=3).read()"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -106,4 +136,6 @@ networks:
   videobox-agent-gateway-api-network:
     internal: true
   videobox-agent-gateway-network:
+    internal: true
+  videobox-hermes-memory-network:
     internal: true

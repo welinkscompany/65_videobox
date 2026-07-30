@@ -8,10 +8,13 @@ from videobox_api.models import (
     YujinMemoryCandidateCreateRequest,
     YujinMemoryCandidateListResponse,
     YujinMemoryCandidateResponse,
+    YujinMemoryStoreRequest,
+    YujinMemoryStoreResponse,
 )
 from videobox_core_engine.yujin_memory_policy import (
     validate_yujin_memory_candidate,
 )
+from videobox_api.yujin_memory_service import MemoryStoreUnavailable
 
 _PUBLIC_POLICY_ERRORS = frozenset(
     {
@@ -28,7 +31,7 @@ _PUBLIC_POLICY_ERRORS = frozenset(
 )
 
 
-def build_yujin_memory_router(store) -> APIRouter:
+def build_yujin_memory_router(store, memory_service=None) -> APIRouter:
     router = APIRouter()
     base = "/api/projects/{project_id}/director/memory-candidates"
 
@@ -82,11 +85,17 @@ def build_yujin_memory_router(store) -> APIRouter:
         response_model=YujinMemoryCandidateListResponse,
     )
     def list_candidates(project_id: str) -> dict:
-        return {
-            "candidates": store.list_yujin_memory_candidates(
-                project_id=project_id
-            )
-        }
+        try:
+            return {
+                "candidates": store.list_yujin_memory_candidates(
+                    project_id=project_id
+                )
+            }
+        except ValueError as error:
+            raise HTTPException(
+                status_code=503,
+                detail="memory_candidate_unavailable",
+            ) from error
 
     def transition(
         *,
@@ -135,6 +144,74 @@ def build_yujin_memory_router(store) -> APIRouter:
             candidate_id=candidate_id,
             action="reject",
         )
+
+    @router.post(
+        base + "/{candidate_id}/store",
+        response_model=YujinMemoryStoreResponse,
+    )
+    async def store_candidate(
+        project_id: str,
+        candidate_id: str,
+        body: YujinMemoryStoreRequest,
+    ) -> dict:
+        if memory_service is None:
+            raise HTTPException(
+                status_code=503, detail="memory_save_unavailable"
+            )
+        try:
+            return await memory_service.store_candidate(
+                project_id=project_id,
+                candidate_id=candidate_id,
+                client_request_id=body.client_request_id,
+            )
+        except KeyError as error:
+            raise HTTPException(
+                status_code=404, detail="memory_candidate_missing"
+            ) from error
+        except ValueError as error:
+            detail = str(error)
+            if detail in {
+                "memory_candidate_deleted",
+                "memory_candidate_not_approved",
+                "memory_candidate_store_in_progress",
+            }:
+                raise HTTPException(status_code=409, detail=detail) from error
+            raise HTTPException(
+                status_code=503, detail="memory_save_unavailable"
+            ) from error
+        except MemoryStoreUnavailable as error:
+            raise HTTPException(
+                status_code=503, detail="memory_save_unavailable"
+            ) from error
+
+    @router.delete(
+        base + "/{candidate_id}/stored-memory",
+        response_model=YujinMemoryStoreResponse,
+    )
+    async def delete_stored_memory(
+        project_id: str, candidate_id: str
+    ) -> dict:
+        if memory_service is None:
+            raise HTTPException(
+                status_code=503, detail="memory_delete_unavailable"
+            )
+        try:
+            return await memory_service.delete_candidate_memory(
+                project_id=project_id,
+                candidate_id=candidate_id,
+            )
+        except KeyError as error:
+            raise HTTPException(
+                status_code=404, detail="memory_candidate_missing"
+            ) from error
+        except ValueError as error:
+            raise HTTPException(
+                status_code=409, detail="memory_candidate_not_stored"
+            ) from error
+        except MemoryStoreUnavailable as error:
+            raise HTTPException(
+                status_code=503, detail="memory_delete_unavailable"
+            ) from error
 
     return router
 

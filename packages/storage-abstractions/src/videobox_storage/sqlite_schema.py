@@ -90,9 +90,24 @@ PROJECT_SCHEMA_STATEMENTS = (
             'pacing', 'caption', 'audio', 'tone', 'workflow'
         )),
         proposed_text TEXT NOT NULL,
+        external_ref TEXT,
+        operation_id TEXT,
+        provider_event_ref TEXT,
+        provider_memory_ref TEXT,
+        store_client_request_id TEXT,
+        write_claim_token TEXT,
+        write_claimed_at TEXT,
+        provider_call_started_at TEXT,
+        attempt_count INTEGER NOT NULL DEFAULT 0,
+        storage_status TEXT NOT NULL DEFAULT 'not_requested' CHECK(
+            storage_status IN (
+                'not_requested', 'claimed', 'event_pending', 'stored',
+                'failed_retryable', 'ambiguous'
+                , 'deleted'
+            )
+        ),
         status TEXT NOT NULL CHECK(status IN (
-            'pending', 'approved', 'rejected',
-            'stored', 'failed', 'deleted'
+            'pending', 'approved', 'rejected'
         )),
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
@@ -109,8 +124,26 @@ PROJECT_SCHEMA_STATEMENTS = (
             'create', 'approve', 'reject', 'store', 'fail', 'delete'
         )),
         status TEXT NOT NULL CHECK(status IN (
-            'pending', 'approved', 'rejected',
-            'stored', 'failed', 'deleted'
+            'pending', 'approved', 'rejected'
+        )),
+        occurred_at TEXT NOT NULL,
+        UNIQUE(project_id, candidate_id, event_order)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS yujin_memory_operation_audit (
+        operation_audit_id TEXT PRIMARY KEY,
+        candidate_id TEXT NOT NULL,
+        project_id TEXT NOT NULL,
+        event_order INTEGER NOT NULL,
+        action TEXT NOT NULL CHECK(action IN (
+            'claim', 'call_started', 'outcome', 'finalize', 'release',
+            'delete'
+        )),
+        storage_status TEXT NOT NULL CHECK(storage_status IN (
+            'claimed', 'event_pending', 'stored',
+            'failed_retryable', 'ambiguous'
+            , 'deleted'
         )),
         occurred_at TEXT NOT NULL,
         UNIQUE(project_id, candidate_id, event_order)
@@ -123,6 +156,12 @@ PROJECT_SCHEMA_STATEMENTS = (
     """
     CREATE INDEX IF NOT EXISTS idx_yujin_memory_audit_candidate_time
     ON yujin_memory_candidate_audit (
+        project_id, candidate_id, event_order
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_yujin_memory_operation_audit_order
+    ON yujin_memory_operation_audit (
         project_id, candidate_id, event_order
     )
     """,

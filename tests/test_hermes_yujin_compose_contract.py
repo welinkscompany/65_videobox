@@ -23,6 +23,8 @@ PINNED_HERMES_IMAGE = (
 HERMES_NETWORK = "videobox-agent-gateway-network"
 GATEWAY_API_NETWORK = "videobox-agent-gateway-api-network"
 PROVIDER_EGRESS_NETWORK = "videobox-hermes-provider-egress"
+MEMORY_NETWORK = "videobox-hermes-memory-network"
+MEMORY_ADAPTER_SERVICE = "videobox-hermes-memory-adapter"
 CAPABILITY_PRIVATE_KEY_B64 = (
     "ERERERERERERERERERERERERERERERERERERERERERE"
 )
@@ -64,6 +66,9 @@ def _render_compose(*, include_yujin: bool) -> dict:
                     CAPABILITY_PUBLIC_KEY_B64
                 ),
                 "VIDEOBOX_HERMES_CAPABILITY_KEY_ID": CAPABILITY_KEY_ID,
+                "VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN": (
+                    "static-memory-token-at-least-32-bytes"
+                ),
             }
         )
     command.extend(["config", "--format", "json"])
@@ -96,11 +101,15 @@ def test_base_compose_remains_yujin_free_and_overlay_is_explicitly_opt_in() -> N
     assert set(merged["services"]) >= {
         "videobox-agent-gateway",
         "videobox-hermes-yujin",
+        MEMORY_ADAPTER_SERVICE,
     }
     assert merged["services"]["videobox-agent-gateway"]["profiles"] == [
         "hermes-yujin"
     ]
     assert merged["services"]["videobox-hermes-yujin"]["profiles"] == [
+        "hermes-yujin"
+    ]
+    assert merged["services"][MEMORY_ADAPTER_SERVICE]["profiles"] == [
         "hermes-yujin"
     ]
     assert set(merged["services"]["videobox-workspace"]["networks"]) == {
@@ -216,7 +225,7 @@ def test_hermes_yujin_receives_only_hashed_auth_and_has_honest_http_health() -> 
     assert hermes["logging"]["driver"] == "local"
 
 
-def test_gateway_is_the_only_two_network_application_bridge() -> None:
+def test_gateway_bridges_api_hermes_and_memory_without_provider_egress() -> None:
     compose = _overlay()
     gateway = compose["services"]["videobox-agent-gateway"]
     workspace = compose["services"]["videobox-workspace"]
@@ -225,15 +234,21 @@ def test_gateway_is_the_only_two_network_application_bridge() -> None:
         "context": ".",
         "dockerfile": "docker/agent-gateway.Dockerfile",
     }
-    assert gateway["networks"] == [GATEWAY_API_NETWORK, HERMES_NETWORK]
+    assert gateway["networks"] == [
+        GATEWAY_API_NETWORK,
+        HERMES_NETWORK,
+        MEMORY_NETWORK,
+    ]
     assert workspace["networks"] == [GATEWAY_API_NETWORK]
     assert compose["networks"][GATEWAY_API_NETWORK] == {"internal": True}
     assert compose["networks"][HERMES_NETWORK] == {"internal": True}
+    assert compose["networks"][MEMORY_NETWORK] == {"internal": True}
 
     assert PROVIDER_EGRESS_NETWORK not in gateway["networks"]
     assert "videobox-edge" not in gateway["networks"]
     assert "videobox-internal" not in gateway["networks"]
     assert HERMES_NETWORK not in workspace["networks"]
+    assert MEMORY_NETWORK not in workspace["networks"]
     assert PROVIDER_EGRESS_NETWORK not in workspace["networks"]
     assert "ports" not in gateway
     assert "volumes" not in gateway
@@ -272,6 +287,12 @@ def test_gateway_gets_plaintext_auth_but_workspace_never_gets_hermes_secrets() -
         "VIDEOBOX_HERMES_CAPABILITY_KEY_ID": (
             "${VIDEOBOX_HERMES_CAPABILITY_KEY_ID:?set in .env.container}"
         ),
+        "HERMES_MEMORY_ADAPTER_URL": (
+            "http://videobox-hermes-memory-adapter:8082"
+        ),
+        "VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN": (
+            "${VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN:?set in .env.container}"
+        ),
     }
     assert "HERMES_YUJIN_GATEWAY_PASSWORD_HASH" not in gateway["environment"]
     assert workspace["environment"] == {
@@ -298,6 +319,76 @@ def test_gateway_gets_plaintext_auth_but_workspace_never_gets_hermes_secrets() -
     assert gateway["mem_limit"] == "256m"
     assert gateway["cpus"] == 0.5
     assert gateway["logging"]["driver"] == "local"
+
+
+def test_memory_adapter_is_the_only_mem0_provider_boundary() -> None:
+    compose = _overlay()
+    services = compose["services"]
+    adapter = services[MEMORY_ADAPTER_SERVICE]
+
+    assert adapter["build"] == {
+        "context": ".",
+        "dockerfile": "docker/hermes-memory-adapter.Dockerfile",
+    }
+    assert adapter["networks"] == [MEMORY_NETWORK, PROVIDER_EGRESS_NETWORK]
+    assert adapter["environment"] == {
+        "MEM0_API_KEY": "${MEM0_API_KEY:-}",
+        "VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN": (
+            "${VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN:?set in .env.container}"
+        ),
+    }
+    assert "ports" not in adapter
+    assert "expose" not in adapter
+    assert "volumes" not in adapter
+    assert "depends_on" not in adapter
+    assert adapter["read_only"] is True
+    assert adapter["tmpfs"] == ["/tmp"]
+    assert adapter["cap_drop"] == ["ALL"]
+    assert adapter["security_opt"] == ["no-new-privileges:true"]
+
+    for service_name, service in services.items():
+        environment = service.get("environment", {})
+        if service_name != MEMORY_ADAPTER_SERVICE:
+            assert "MEM0_API_KEY" not in environment
+        if service_name not in {
+            MEMORY_ADAPTER_SERVICE,
+            "videobox-agent-gateway",
+        }:
+            assert "VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN" not in environment
+        if service_name not in {
+            MEMORY_ADAPTER_SERVICE,
+            "videobox-hermes-yujin",
+        }:
+            assert PROVIDER_EGRESS_NETWORK not in service.get("networks", [])
+
+
+def test_memory_adapter_is_optional_and_never_blocks_chat_startup() -> None:
+    overlay = _overlay()
+    gateway = overlay["services"]["videobox-agent-gateway"]
+    hermes = overlay["services"]["videobox-hermes-yujin"]
+    rendered = _render_compose(include_yujin=True)
+
+    assert MEMORY_ADAPTER_SERVICE not in gateway.get("depends_on", {})
+    assert MEMORY_ADAPTER_SERVICE not in hermes.get("depends_on", {})
+    assert rendered["services"][MEMORY_ADAPTER_SERVICE]["environment"][
+        "MEM0_API_KEY"
+    ] == ""
+
+
+def test_memory_adapter_image_is_derived_from_exact_hermes_pin_without_agent_loop() -> None:
+    dockerfile = (
+        ROOT / "docker" / "hermes-memory-adapter.Dockerfile"
+    ).read_text(encoding="utf-8")
+
+    assert dockerfile.startswith(f"FROM {PINNED_HERMES_IMAGE}\n")
+    assert "mem0ai==2.0.10" in dockerfile
+    assert "COPY services/agent-gateway/src" in dockerfile
+    assert "uvicorn" in dockerfile
+    assert "videobox_agent_gateway.hermes_memory_adapter:app" in dockerfile
+    assert "--port\", \"8082\"" in dockerfile
+    assert "hermes " not in dockerfile.lower()
+    assert "serve" not in dockerfile.lower()
+    assert "COPY . ." not in dockerfile
 
 
 def test_hermes_runtime_is_pinned_to_the_zero_schema_context_engine() -> None:
@@ -537,6 +628,10 @@ def test_static_verifier_uses_child_dummy_env_and_checks_the_source_topology() -
         GATEWAY_API_NETWORK,
         HERMES_NETWORK,
         PROVIDER_EGRESS_NETWORK,
+        MEMORY_NETWORK,
+        MEMORY_ADAPTER_SERVICE,
+        "VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN",
+        "MEM0_API_KEY",
         PINNED_HERMES_IMAGE,
         "/api/status",
     ):

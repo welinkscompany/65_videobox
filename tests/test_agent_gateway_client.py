@@ -8,6 +8,8 @@ import pytest
 from videobox_api.agent_gateway_client import AgentGatewayClient
 from videobox_api.agent_gateway_client import AgentGatewayReservation
 from videobox_api.agent_gateway_client import AgentGatewayUnavailable
+from videobox_api.yujin_memory_service import ApprovedMemoryStoreRequest
+from videobox_api.yujin_memory_service import GatewayMemoryDeleteRequest
 
 
 SERVICE_TOKEN = "workspace-service-token-that-is-at-least-32"
@@ -588,3 +590,95 @@ def test_completion_text_must_equal_the_assembled_delta_truth() -> None:
 
     with pytest.raises(AgentGatewayUnavailable):
         asyncio.run(collect())
+
+
+def test_memory_add_uses_authenticated_narrow_gateway_contract() -> None:
+    http = _Http()
+
+    async def post(path, **kwargs):
+        http.calls.append(("POST", path, kwargs))
+        return _PostResponse(
+            {
+                "status": "stored",
+                "memory_ref": "memory-private",
+                "event_ref": None,
+            }
+        )
+
+    http.post = post
+    client = AgentGatewayClient(
+        base_url="http://videobox-agent-gateway:8081",
+        service_token=SERVICE_TOKEN,
+        http_client_factory=lambda **_: http,
+    )
+    outcome = asyncio.run(
+        client.add_approved_memory(
+            ApprovedMemoryStoreRequest(
+                text="빠른 컷을 선호합니다.",
+                category="pacing",
+                external_ref="ext-" + "a" * 64,
+                operation_id="op-" + "b" * 64,
+            )
+        )
+    )
+
+    assert outcome.status == "stored"
+    assert http.calls == [
+        (
+            "POST",
+            "/internal/hermes/memory/add",
+            {
+                "headers": {
+                    "Authorization": f"Bearer {SERVICE_TOKEN}"
+                },
+                "json": {
+                    "text": "빠른 컷을 선호합니다.",
+                    "category": "pacing",
+                    "external_ref": "ext-" + "a" * 64,
+                    "operation_id": "op-" + "b" * 64,
+                },
+            },
+        )
+    ]
+
+
+def test_memory_delete_uses_authenticated_private_gateway_contract() -> None:
+    http = _Http()
+
+    async def post(path, **kwargs):
+        http.calls.append(("POST", path, kwargs))
+        return _PostResponse({"deleted": True})
+
+    http.post = post
+    client = AgentGatewayClient(
+        base_url="http://videobox-agent-gateway:8081",
+        service_token=SERVICE_TOKEN,
+        http_client_factory=lambda **_: http,
+    )
+    outcome = asyncio.run(
+        client.delete_memory(
+            GatewayMemoryDeleteRequest(
+                memory_ref="memory-private",
+                external_ref="ext-" + "a" * 64,
+                allow_absent=False,
+            )
+        )
+    )
+
+    assert outcome.deleted is True
+    assert http.calls == [
+        (
+            "POST",
+            "/internal/hermes/memory/delete",
+            {
+                "headers": {
+                    "Authorization": f"Bearer {SERVICE_TOKEN}"
+                },
+                "json": {
+                    "memory_ref": "memory-private",
+                    "external_ref": "ext-" + "a" * 64,
+                    "allow_absent": False,
+                },
+            },
+        )
+    ]

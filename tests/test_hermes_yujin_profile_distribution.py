@@ -29,7 +29,7 @@ OVERLAY_PATH = ROOT / "compose.hermes-yujin.yaml"
 
 EXPECTED_MANIFEST = {
     "name": "videobox-yujin",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "hermes_requires": ">=0.18.0",
     "distribution_owned": ["SOUL.md", "config.yaml", "skills/"],
 }
@@ -39,6 +39,7 @@ EXPECTED_FILES = {
     "config.yaml",
     "skills/videobox-editor/SKILL.md",
     "skills/videobox-creator/SKILL.md",
+    "skills/videobox-memory/SKILL.md",
 }
 PARTIAL_PROFILE_STATE = (
     "Profile install may have left a partial profile in the "
@@ -221,6 +222,42 @@ def test_creator_skill_overlay_variants_name_every_required_strict_field() -> No
     assert "`overlay_kind: explanation_card`, `title`, `body`, `text`" in skill
     assert "`overlay_kind: image`, 현재 context의 image `asset_id`, `text`" in skill
     assert "`overlay_kind: table`, `columns`, `rows`, `text`" in skill
+
+
+def test_memory_skill_forbids_interactive_capture_and_requires_explicit_approval() -> None:
+    skill = (
+        PROFILE_ROOT / "skills" / "videobox-memory" / "SKILL.md"
+    ).read_text(encoding="utf-8")
+
+    for required in (
+        "명시적 승인",
+        "자동 수집",
+        "자동 저장",
+        "pending",
+        "rejected",
+        "failed",
+        "명시적 재시도",
+        "수동 대체",
+        "VideoBox",
+    ):
+        assert required in skill
+    for forbidden in (
+        "MEM0_API_KEY",
+        "memory.provider: mem0",
+        "mem0_add",
+        "mem0_search",
+        "mem0_delete",
+        "다시 승인",
+    ):
+        assert forbidden not in skill
+
+
+def test_interactive_yujin_profile_does_not_activate_a_memory_provider() -> None:
+    profile_text = (PROFILE_ROOT / "config.yaml").read_text(encoding="utf-8")
+    profile = yaml.safe_load(profile_text)
+
+    assert "memory" not in profile
+    assert "mem0" not in profile_text.lower()
 
 
 def test_profile_is_mounted_read_only_only_in_the_opt_in_overlay() -> None:
@@ -703,3 +740,34 @@ def test_start_verifies_before_validate_only_exit_and_installs_before_gateway() 
     )
     assert "compose.yaml" in source
     assert "compose.hermes-yujin.yaml" in source
+
+
+def test_start_treats_memory_adapter_as_best_effort_after_chat() -> None:
+    source = START_SCRIPT.read_text(encoding="utf-8")
+
+    for required in (
+        "VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN",
+        "HERMES_MEMORY_ADAPTER_URL",
+        "MEM0_API_KEY",
+        "Optional Hermes memory adapter startup failed;",
+        "chat remains available.",
+        "Memory storage is disabled; interactive Yujin chat remains available.",
+    ):
+        assert required in source
+
+    gateway_start = source.index(
+        '-ServiceName "videobox-agent-gateway"'
+    )
+    memory_start = source.index(
+        '-ServiceName "videobox-hermes-memory-adapter"'
+    )
+    assert gateway_start < memory_start
+    assert '--force-recreate' in source[memory_start : memory_start + 300]
+    assert (
+        'Assert-ResolvedCredential `\n'
+        '    "MEM0_API_KEY"'
+    ) not in source
+    assert (
+        '"stop"\n'
+        '        "videobox-hermes-memory-adapter"'
+    ) not in source

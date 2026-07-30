@@ -15,6 +15,8 @@ SCRIPT = ROOT / "scripts" / "start-hermes-yujin.ps1"
 PROFILE_ROOT = ROOT / "config" / "hermes" / "yujin"
 VALID_PASSWORD = "valid-dummy-password"
 VALID_SERVICE_TOKEN = "valid-service-token-that-is-at-least-32"
+VALID_MEMORY_ADAPTER_TOKEN = "valid-memory-token-that-is-at-least-32"
+VALID_MEM0_API_KEY = "valid-mem0-test-key"
 VALID_CAPABILITY_PRIVATE_KEY_B64 = (
     "ERERERERERERERERERERERERERERERERERERERERERE"
 )
@@ -60,6 +62,8 @@ def _env_text(*extra_lines: str) -> str:
             f"{VALID_CAPABILITY_PUBLIC_KEY_B64}"
         ),
         f"VIDEOBOX_HERMES_CAPABILITY_KEY_ID={VALID_CAPABILITY_KEY_ID}",
+        f"VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN={VALID_MEMORY_ADAPTER_TOKEN}",
+        "MEM0_API_KEY=",
     ]
     lines.extend(extra_lines)
     return "\n".join(lines) + "\n"
@@ -101,6 +105,8 @@ def _assert_no_values_leaked(result: subprocess.CompletedProcess[str]) -> None:
         "${MISSING}",
         VALID_CAPABILITY_PRIVATE_KEY_B64,
         VALID_CAPABILITY_PUBLIC_KEY_B64,
+        VALID_MEMORY_ADAPTER_TOKEN,
+        VALID_MEM0_API_KEY,
     ):
         assert forbidden not in output
 
@@ -114,6 +120,8 @@ def _rendered_model(
     capability_private_key_b64: str = VALID_CAPABILITY_PRIVATE_KEY_B64,
     capability_public_key_b64: str = VALID_CAPABILITY_PUBLIC_KEY_B64,
     capability_key_id: str = VALID_CAPABILITY_KEY_ID,
+    memory_adapter_token: str = VALID_MEMORY_ADAPTER_TOKEN,
+    mem0_api_key: str = "",
 ) -> dict[str, object]:
     return {
         "services": {
@@ -127,6 +135,20 @@ def _rendered_model(
                         capability_private_key_b64
                     ),
                     "VIDEOBOX_HERMES_CAPABILITY_KEY_ID": capability_key_id,
+                    "HERMES_MEMORY_ADAPTER_URL": (
+                        "http://videobox-hermes-memory-adapter:8082"
+                    ),
+                    "VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN": (
+                        memory_adapter_token
+                    ),
+                }
+            },
+            "videobox-hermes-memory-adapter": {
+                "environment": {
+                    "MEM0_API_KEY": mem0_api_key,
+                    "VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN": (
+                        memory_adapter_token
+                    ),
                 }
             },
             "videobox-hermes-yujin": {
@@ -158,6 +180,7 @@ def _write_fake_docker(
     gateway_stop_exit_code: int,
     profile_install_exit_code: int,
     quiesce_stop_exit_code: int,
+    memory_adapter_stop_exit_code: int,
 ) -> Path:
     fake_docker = tmp_path / "docker.cmd"
     fake_docker.write_text(
@@ -175,12 +198,20 @@ def _write_fake_docker(
         ")\r\n"
         'echo %* | findstr /c:"--status" >nul\r\n'
         "if not errorlevel 1 (\r\n"
-        '  if /I "%FAKE_DOCKER_PREEXISTING%"=="true" '
+        '  echo %* | findstr /c:"videobox-hermes-memory-adapter" >nul\r\n'
+        "  if not errorlevel 1 (\r\n"
+        '    if /I "%FAKE_DOCKER_MEMORY_PREEXISTING%"=="true" '
+        "echo videobox-hermes-memory-adapter\r\n"
+        "  ) else (\r\n"
+        '    if /I "%FAKE_DOCKER_PREEXISTING%"=="true" '
         "echo videobox-hermes-yujin\r\n"
+        "  )\r\n"
         "  exit /b 0\r\n"
         ")\r\n"
         'echo %* | findstr /c:"stop" >nul\r\n'
         "if errorlevel 1 goto not_stop\r\n"
+        'echo %* | findstr /c:"videobox-hermes-memory-adapter" >nul\r\n'
+        f"if not errorlevel 1 exit /b {memory_adapter_stop_exit_code}\r\n"
         'echo %* | findstr /c:"videobox-workspace" >nul\r\n'
         f"if not errorlevel 1 exit /b {quiesce_stop_exit_code}\r\n"
         'echo %* | findstr /c:"videobox-agent-gateway" >nul\r\n'
@@ -208,6 +239,8 @@ def _write_fake_docker(
         '"\r\n'
         "  exit /b %FAKE_DOCKER_GATEWAY_UP_EXIT%\r\n"
         ")\r\n"
+        'echo %* | findstr /c:"videobox-hermes-memory-adapter" >nul\r\n'
+        "if not errorlevel 1 exit /b %FAKE_DOCKER_MEMORY_UP_EXIT%\r\n"
         'powershell -NoProfile -Command "[Console]::Error.Write(('
         "'u' * 1048576))"
         '"\r\n'
@@ -228,6 +261,8 @@ def _run_fake_start(
     capability_private_key_b64: str = VALID_CAPABILITY_PRIVATE_KEY_B64,
     capability_public_key_b64: str = VALID_CAPABILITY_PUBLIC_KEY_B64,
     capability_key_id: str = VALID_CAPABILITY_KEY_ID,
+    memory_adapter_token: str = VALID_MEMORY_ADAPTER_TOKEN,
+    mem0_api_key: str = "",
     validate_only: bool = False,
     config_stderr: str = "quiet",
     hermes_up_exit_code: int = 0,
@@ -238,6 +273,9 @@ def _run_fake_start(
     gateway_stop_exit_code: int = 0,
     quiesce_stop_exit_code: int = 0,
     preexisting_hermes: bool = False,
+    preexisting_memory_adapter: bool = False,
+    memory_adapter_up_exit_code: int = 0,
+    memory_adapter_stop_exit_code: int = 0,
     profile_root: Path | None = None,
     timeout_seconds: float = 8,
 ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
@@ -255,6 +293,8 @@ def _run_fake_start(
                 capability_private_key_b64,
                 capability_public_key_b64,
                 capability_key_id,
+                memory_adapter_token,
+                mem0_api_key,
             )
         ),
         encoding="utf-8",
@@ -265,6 +305,7 @@ def _run_fake_start(
         gateway_stop_exit_code=gateway_stop_exit_code,
         profile_install_exit_code=profile_install_exit_code,
         quiesce_stop_exit_code=quiesce_stop_exit_code,
+        memory_adapter_stop_exit_code=memory_adapter_stop_exit_code,
     )
     command = [
         "powershell",
@@ -301,6 +342,10 @@ def _run_fake_start(
                 quiesce_stop_exit_code
             ),
             "FAKE_DOCKER_PREEXISTING": str(preexisting_hermes).lower(),
+            "FAKE_DOCKER_MEMORY_PREEXISTING": str(
+                preexisting_memory_adapter
+            ).lower(),
+            "FAKE_DOCKER_MEMORY_UP_EXIT": str(memory_adapter_up_exit_code),
         },
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -401,26 +446,243 @@ def test_start_streams_large_stderr_without_pipe_deadlock(
     )
 
     assert result.returncode == expected_returncode
-    assert len(invocations) == (8 if expected_returncode == 0 else 5)
-    assert '"ps"' in invocations[2]
-    assert "run --rm --no-deps" in invocations[3]
-    assert "profile install /opt/videobox-yujin-profile" in invocations[3]
-    assert " up " in f" {invocations[4]} "
-    assert "--wait" in invocations[4]
+    assert len(invocations) == (9 if expected_returncode == 0 else 6)
+    assert invocations[2].endswith(
+        '"stop" "videobox-hermes-memory-adapter"'
+    )
+    assert '"ps"' in invocations[3]
+    assert "run --rm --no-deps" in invocations[4]
+    assert "profile install /opt/videobox-yujin-profile" in invocations[4]
+    assert " up " in f" {invocations[5]} "
+    assert "--wait" in invocations[5]
     assert "u" * 65536 in result.stderr
     if expected_returncode == 0:
-        assert "videobox-hermes-yujin" in invocations[4]
-        assert '"stop"' in invocations[5]
-        assert '"videobox-agent-gateway"' in invocations[5]
-        assert '"videobox-workspace"' in invocations[5]
-        assert "videobox-workspace" in invocations[6]
-        assert "--force-recreate" in invocations[6]
-        assert "--wait" in invocations[6]
-        assert "videobox-agent-gateway" in invocations[7]
+        assert "videobox-hermes-yujin" in invocations[5]
+        assert '"stop"' in invocations[6]
+        assert '"videobox-agent-gateway"' in invocations[6]
+        assert '"videobox-workspace"' in invocations[6]
+        assert "videobox-workspace" in invocations[7]
+        assert "--force-recreate" in invocations[7]
         assert "--wait" in invocations[7]
+        assert "videobox-agent-gateway" in invocations[8]
+        assert "--wait" in invocations[8]
         assert "targeted for startup" in result.stdout
     else:
         assert "Targeted Hermes Yujin runtime startup failed." in result.stderr
+    _assert_no_values_leaked(result)
+
+
+def test_enabled_memory_adapter_starts_after_chat_with_fresh_contract(
+    tmp_path: Path,
+) -> None:
+    result, invocations = _run_fake_start(
+        tmp_path,
+        mem0_api_key=VALID_MEM0_API_KEY,
+    )
+
+    assert result.returncode == 0
+    gateway_up = next(
+        call
+        for call in invocations
+        if " up " in f" {call} " and "videobox-agent-gateway" in call
+    )
+    memory_up = next(
+        call
+        for call in invocations
+        if " up " in f" {call} "
+        and "videobox-hermes-memory-adapter" in call
+    )
+    assert invocations.index(gateway_up) < invocations.index(memory_up)
+    assert "--force-recreate" in memory_up
+    assert "--wait" in memory_up
+    _assert_no_values_leaked(result)
+
+
+def test_memory_adapter_failure_is_non_blocking_and_never_stops_chat(
+    tmp_path: Path,
+) -> None:
+    result, invocations = _run_fake_start(
+        tmp_path,
+        mem0_api_key=VALID_MEM0_API_KEY,
+        preexisting_memory_adapter=True,
+        memory_adapter_up_exit_code=57,
+    )
+
+    assert result.returncode == 0
+    output = f"{result.stdout}\n{result.stderr}"
+    assert (
+        "Optional Hermes memory adapter startup failed; "
+        "chat remains available."
+    ) in output
+    memory_up = next(
+        call
+        for call in invocations
+        if " up " in f" {call} "
+        and "videobox-hermes-memory-adapter" in call
+    )
+    adapter_stop_calls = [
+        call
+        for call in invocations
+        if '"stop"' in call
+        and "videobox-hermes-memory-adapter" in call
+    ]
+    assert len(adapter_stop_calls) == 1
+    assert invocations.index(memory_up) < invocations.index(
+        adapter_stop_calls[0]
+    )
+    assert "videobox-agent-gateway" not in adapter_stop_calls[0]
+    assert "videobox-hermes-yujin" not in adapter_stop_calls[0]
+    assert "targeted for startup" in result.stdout
+    _assert_no_values_leaked(result)
+
+
+def test_memory_adapter_refresh_and_stop_failure_warns_without_stopping_chat(
+    tmp_path: Path,
+) -> None:
+    result, invocations = _run_fake_start(
+        tmp_path,
+        mem0_api_key=VALID_MEM0_API_KEY,
+        preexisting_memory_adapter=True,
+        memory_adapter_up_exit_code=57,
+        memory_adapter_stop_exit_code=61,
+    )
+
+    assert result.returncode == 0
+    output = f"{result.stdout}\n{result.stderr}"
+    compact_output = re.sub(r"\s+", " ", output)
+    assert "Optional Hermes memory adapter startup failed;" in output
+    assert (
+        "stale memory adapter could not be stopped; "
+        "chat remains available."
+    ) in compact_output
+    assert any(
+        '"stop"' in call
+        and call.endswith('"videobox-hermes-memory-adapter"')
+        for call in invocations
+    )
+    memory_up_index = next(
+        index
+        for index, call in enumerate(invocations)
+        if " up " in f" {call} "
+        and "videobox-hermes-memory-adapter" in call
+    )
+    assert all(
+        not (
+            '"stop"' in call
+            and (
+                "videobox-agent-gateway" in call
+                or "videobox-workspace" in call
+                or "videobox-hermes-yujin" in call
+            )
+        )
+        for call in invocations[memory_up_index + 1 :]
+    )
+    assert "targeted for startup" in result.stdout
+    _assert_no_values_leaked(result)
+
+
+def test_preexisting_memory_adapter_is_refreshed_without_touching_chat(
+    tmp_path: Path,
+) -> None:
+    result, invocations = _run_fake_start(
+        tmp_path,
+        mem0_api_key=VALID_MEM0_API_KEY,
+        preexisting_memory_adapter=True,
+    )
+
+    assert result.returncode == 0
+    memory_up_calls = [
+        call
+        for call in invocations
+        if " up " in f" {call} "
+        and "videobox-hermes-memory-adapter" in call
+    ]
+    assert len(memory_up_calls) == 1
+    assert "--force-recreate" in memory_up_calls[0]
+    assert all(
+        not (
+            '"stop"' in call
+            and "videobox-hermes-memory-adapter" in call
+        )
+        for call in invocations
+    )
+    _assert_no_values_leaked(result)
+
+
+def test_empty_mem0_key_skips_adapter_without_blocking_chat(
+    tmp_path: Path,
+) -> None:
+    result, invocations = _run_fake_start(
+        tmp_path,
+        mem0_api_key="",
+        preexisting_memory_adapter=True,
+    )
+
+    assert result.returncode == 0
+    assert (
+        "Memory storage is disabled; interactive Yujin chat remains available."
+        in result.stdout
+    )
+    assert all(
+        not (
+            (" up " in f" {call} " or '"ps"' in call)
+            and "videobox-hermes-memory-adapter" in call
+        )
+        for call in invocations
+    )
+    adapter_stop_calls = [
+        call
+        for call in invocations
+        if '"stop"' in call
+        and "videobox-hermes-memory-adapter" in call
+    ]
+    gateway_up = next(
+        call
+        for call in invocations
+        if " up " in f" {call} " and "videobox-agent-gateway" in call
+    )
+    assert len(adapter_stop_calls) == 1
+    assert "videobox-agent-gateway" not in adapter_stop_calls[0]
+    assert "videobox-hermes-yujin" not in adapter_stop_calls[0]
+    assert invocations.index(adapter_stop_calls[0]) < invocations.index(
+        gateway_up
+    )
+    _assert_no_values_leaked(result)
+
+
+def test_empty_mem0_key_stop_failure_aborts_before_touching_chat(
+    tmp_path: Path,
+) -> None:
+    result, invocations = _run_fake_start(
+        tmp_path,
+        mem0_api_key="",
+        preexisting_memory_adapter=True,
+        memory_adapter_stop_exit_code=61,
+    )
+
+    assert result.returncode != 0
+    assert (
+        "Memory storage disable failed; existing chat services were left unchanged."
+        in result.stderr
+    )
+    assert len(invocations) == 3
+    assert '"config"' in invocations[0]
+    assert '"run"' in invocations[1]
+    assert invocations[2].endswith(
+        '"stop" "videobox-hermes-memory-adapter"'
+    )
+    assert all(" up " not in f" {call} " for call in invocations)
+    assert all(
+        not (
+            '"stop"' in call
+            and (
+                "videobox-agent-gateway" in call
+                or "videobox-workspace" in call
+                or "videobox-hermes-yujin" in call
+            )
+        )
+        for call in invocations
+    )
     _assert_no_values_leaked(result)
 
 
@@ -449,7 +711,11 @@ def test_hermes_start_failure_reports_persistent_profile_and_safe_rerun(
     assert all('"down"' not in call for call in invocations)
     assert all('"volume"' not in call for call in invocations)
     assert all('"-v"' not in call for call in invocations)
-    assert all('"stop"' not in call for call in invocations)
+    assert all(
+        '"stop"' not in call
+        or call.endswith('"stop" "videobox-hermes-memory-adapter"')
+        for call in invocations
+    )
 
 
 def test_profile_install_failure_preserves_existing_admission_without_quiesce(
@@ -462,7 +728,11 @@ def test_profile_install_failure_preserves_existing_admission_without_quiesce(
 
     assert result.returncode != 0
     assert "profile installation failed" in result.stderr
-    assert all('"stop"' not in call for call in invocations)
+    assert all(
+        '"stop"' not in call
+        or call.endswith('"stop" "videobox-hermes-memory-adapter"')
+        for call in invocations
+    )
     assert all("videobox-workspace" not in call or '"config"' in call for call in invocations)
     assert all(
         not (" up " in f" {call} " and "videobox-agent-gateway" in call)

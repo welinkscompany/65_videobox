@@ -253,6 +253,42 @@ Hermes는 mutation tool을 직접 호출하지 않는다.
 - 기억만으로 편집 apply, 승인, render, export를 결정하지 않는다.
 - 사용자는 Dashboard가 아니라 VideoBox memory surface에서 자신의 기억 목록을 보고 삭제할 수 있다. 이 surface는 provider 설정 화면과 분리한다.
 
+### 9.5 2026-07-30 pinned-runtime correction
+
+고정 Hermes `v2026.7.7.2`의 공식 Mem0 provider를 대화형 유진 profile에
+활성화하면 매 turn 자동 prefetch와 `sync_turn(..., infer=True)`가 실행된다.
+이 동작은 9.3의 자동 수집·저장 금지와 충돌한다. 또한 현재 Hermes RPC에는
+외부에서 결정적으로 `mem0_add/search/delete`만 호출하는 public tool execution
+계약이 없고, Mem0 Platform add는 durable memory ID 대신 비동기 event ID를
+반환할 수 있다.
+
+따라서 대화형 유진 profile은 Mem0 provider를 비활성 상태로 유지한다. 정확히
+고정된 Hermes image에서 파생하되 agent loop/MemoryManager를 시작하지 않는
+별도 `videobox-hermes-memory-adapter`만 Mem0 credential과 provider egress를
+소유한다. 이 adapter는 인증된 Gateway의 add/reconcile/search/delete만 받으며
+DB, media, OAuth state, host port를 가지지 않는다. Mem0 장애나 미설정은
+유진 chat, Director, manual editor 시작 조건이 아니다.
+
+승인과 provider 처리는 분리한다. approve 자체는 provider call `0`이고,
+approved candidate에 대한 별도 명시적 store만 durable operation claim 이후
+provider를 호출한다. 비동기 event, timeout, 중복·동시 요청은 먼저
+poll/reconcile하며 자동 blind add를 금지한다. event ID는 memory ID가 아니고,
+정확히 한 개의 소유권·본문 일치 memory만 stored가 된다. provider metadata는
+고정 source, allowlisted category, server-generated opaque external reference만
+허용하며 VideoBox project/conversation/message/candidate/session/revision ID는
+전달하지 않는다.
+
+승인 상태 `pending | approved | rejected`와 저장 상태
+`not_requested | claimed | event_pending | stored | failed_retryable |
+ambiguous`는 별도 durable field다. `POST .../{candidate_id}/store`는 bounded
+`client_request_id`를 요구하고 공개 응답은 candidate handle, 승인 상태, 저장
+상태, retry 가능 여부만 반환한다. 동일 request replay는 provider call `0`,
+동시 request는 하나만 claim한다. call-start 이전 만료 claim만 reclaim/add할 수
+있고, call-start 이후 timeout/응답 유실은 ambiguous로 남겨 explicit retry가
+reconcile만 수행한다. adapter service token은 workspace→Gateway token과
+분리하며 Gateway와 adapter에만 존재한다. Gateway/chat 시작은 adapter health나
+Mem0 key에 hard-depend하지 않는다.
+
 ## 10. 영상 제작 skills
 
 Phase B의 유진 skills는 기존 backend와 EditorCommandPort가 실제 지원하는 범위만 노출한다.

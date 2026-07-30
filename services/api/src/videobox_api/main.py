@@ -78,6 +78,7 @@ from videobox_api.hermes_capabilities import HermesCapabilityVerifier
 from videobox_api.agent_gateway_client import AgentGatewayClient
 from videobox_api.hermes_run_service import HermesRunService
 from videobox_api.hermes_operational_status import HermesOperationalStatusService
+from videobox_api.yujin_memory_service import YujinMemoryService
 
 # Re-exported for backward compatibility: tests/test_api.py and a few other
 # test modules import these names directly from videobox_api.main rather
@@ -370,6 +371,14 @@ def create_app(
 
     @app.exception_handler(RequestValidationError)
     async def request_validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+        if (
+            "/director/memory-candidates/" in request.url.path
+            and request.url.path.endswith("/store")
+        ):
+            return JSONResponse(
+                status_code=422,
+                content={"detail": "memory_store_request_invalid"},
+            )
         if "/director/memory-candidates" in request.url.path:
             return JSONResponse(
                 status_code=422,
@@ -561,6 +570,10 @@ def create_app(
         agent_gateway_client,
         admission_ready=capability_verifier is not None,
     )
+    app.state.yujin_memory_service = YujinMemoryService(
+        store=store,
+        gateway=agent_gateway_client,
+    )
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -586,7 +599,11 @@ def create_app(
     app.include_router(build_timeline_router(orchestrator))
     app.include_router(build_editing_session_router(orchestrator, store))
     app.include_router(build_director_proposals_router(store))
-    app.include_router(build_yujin_memory_router(store))
+    app.include_router(
+        build_yujin_memory_router(
+            store, app.state.yujin_memory_service
+        )
+    )
     if app.state.hermes_run_service is not None:
         app.include_router(
             build_hermes_conversation_router(app.state.hermes_run_service)

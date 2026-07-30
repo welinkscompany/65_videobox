@@ -27,6 +27,20 @@ from videobox_agent_gateway.creator_context import (
     prompt_envelope,
 )
 from videobox_agent_gateway.hermes_rpc_client import HermesRpcClient
+from videobox_agent_gateway.memory_gateway import (
+    ApprovedMemoryWrite,
+    HermesMemoryAdapterClient,
+    MemoryReconcile,
+    MemoryDelete,
+    MemoryDeleteResult,
+    MemorySearch,
+    MemorySearchResult,
+    MemoryWriteOutcome,
+    adapter_reconcile,
+    adapter_delete,
+    adapter_search,
+    adapter_write,
+)
 
 
 class GatewayReservationRequest(BaseModel):
@@ -552,12 +566,17 @@ def create_app(
     hermes_http_probe: Callable[[], Awaitable[bool]] | None = None,
     operational_clock: Callable[[], datetime] | None = None,
     observation_epoch: str | None = None,
+    memory_gateway=None,
 ) -> FastAPI:
     if hermes_client is not None and service_token is not None:
         if not _valid_service_token(service_token):
             raise ValueError("gateway_service_token_invalid")
         if context_ledger is None and capability_issuer is None:
             raise ValueError("gateway_capability_issuer_required")
+    if memory_gateway is not None and (
+        service_token is None or not _valid_service_token(service_token)
+    ):
+        raise ValueError("gateway_service_token_invalid")
     app = FastAPI(
         title="VideoBox Agent Gateway",
         docs_url=None,
@@ -569,6 +588,19 @@ def create_app(
         clock=operational_clock,
         observation_epoch=observation_epoch,
     )
+
+    def require_service_token(authorization: str | None) -> None:
+        if service_token is None:
+            raise HTTPException(
+                status_code=401, detail="gateway_auth_required"
+            )
+        expected = f"Bearer {service_token}"
+        if authorization is None or not hmac.compare_digest(
+            authorization, expected
+        ):
+            raise HTTPException(
+                status_code=401, detail="gateway_auth_required"
+            )
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(
@@ -625,13 +657,6 @@ def create_app(
         ledger = context_ledger or CreatorContextLedger(
             capability_issuer=capability_issuer,
         )
-
-        def require_service_token(authorization: str | None) -> None:
-            expected = f"Bearer {service_token}"
-            if authorization is None or not hmac.compare_digest(
-                authorization, expected
-            ):
-                raise HTTPException(status_code=401, detail="gateway_auth_required")
 
         @app.post("/internal/hermes/runs")
         async def reserve_run(
@@ -750,6 +775,92 @@ def create_app(
             ledger.release(run_id=run_id)
             return Response(status_code=204)
 
+    if memory_gateway is not None:
+
+        @app.post(
+            "/internal/hermes/memory/add",
+            response_model=MemoryWriteOutcome,
+        )
+        async def add_approved_memory(
+            body: ApprovedMemoryWrite,
+            authorization: str | None = Header(default=None),
+        ) -> MemoryWriteOutcome:
+            require_service_token(authorization)
+            try:
+                return await memory_gateway.add_approved(
+                    adapter_write(body)
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                raise HTTPException(
+                    status_code=503,
+                    detail="gateway_memory_unavailable",
+                ) from None
+
+        @app.post(
+            "/internal/hermes/memory/reconcile",
+            response_model=MemoryWriteOutcome,
+        )
+        async def reconcile_memory(
+            body: MemoryReconcile,
+            authorization: str | None = Header(default=None),
+        ) -> MemoryWriteOutcome:
+            require_service_token(authorization)
+            try:
+                return await memory_gateway.reconcile(
+                    adapter_reconcile(body)
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                raise HTTPException(
+                    status_code=503,
+                    detail="gateway_memory_unavailable",
+                ) from None
+
+        @app.post(
+            "/internal/hermes/memory/search",
+            response_model=MemorySearchResult,
+        )
+        async def search_memory(
+            body: MemorySearch,
+            authorization: str | None = Header(default=None),
+        ) -> MemorySearchResult:
+            require_service_token(authorization)
+            try:
+                return await memory_gateway.search(
+                    adapter_search(body)
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                raise HTTPException(
+                    status_code=503,
+                    detail="gateway_memory_unavailable",
+                ) from None
+
+        @app.post(
+            "/internal/hermes/memory/delete",
+            response_model=MemoryDeleteResult,
+        )
+        async def delete_memory(
+            body: MemoryDelete,
+            authorization: str | None = Header(default=None),
+        ) -> MemoryDeleteResult:
+            require_service_token(authorization)
+            try:
+                return await memory_gateway.delete(
+                    adapter_delete(body)
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                raise HTTPException(
+                    status_code=503,
+                    detail="gateway_memory_unavailable",
+                ) from None
+
     return app
 
 
@@ -763,6 +874,19 @@ def _app_from_environment() -> FastAPI:
         "",
     )
     key_id = os.environ.get("VIDEOBOX_HERMES_CAPABILITY_KEY_ID", "")
+    memory_url = os.environ.get("HERMES_MEMORY_ADAPTER_URL", "")
+    memory_token = os.environ.get(
+        "VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN", ""
+    )
+    memory_gateway = None
+    if memory_url and memory_token:
+        try:
+            memory_gateway = HermesMemoryAdapterClient(
+                base_url=memory_url,
+                service_token=memory_token,
+            )
+        except ValueError:
+            memory_gateway = None
     if not all(
         (
             url,
@@ -773,7 +897,10 @@ def _app_from_environment() -> FastAPI:
             key_id,
         )
     ):
-        return create_app()
+        return create_app(
+            service_token=token if memory_gateway is not None else None,
+            memory_gateway=memory_gateway,
+        )
     try:
         private_key = _parse_capability_private_key(private_key_b64)
         _validate_capability_key_id(key_id)
@@ -794,6 +921,7 @@ def _app_from_environment() -> FastAPI:
         service_token=token,
         capability_issuer=capability_issuer,
         hermes_http_probe=hermes_client.probe_http_ready,
+        memory_gateway=memory_gateway,
     )
 
 
