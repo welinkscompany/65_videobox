@@ -38,6 +38,7 @@ const uiFiles = [
   "features/editor/workbench/EditorWorkbenchRoute.tsx",
   "features/editor/workbench/RightDock.tsx",
   "features/jobs/JobRecovery.tsx",
+  "features/jobs/HermesYujinStatus.tsx",
   "features/media/DraftGapMedia.tsx",
   "features/media/MediaWorkspacePage.tsx",
   "features/review/TimelineReviewPage.tsx",

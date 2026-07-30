@@ -12,6 +12,165 @@ import {
 } from "./api";
 
 describe("caption style API conflicts", () => {
+  it("reads the strict global Yujin status from the same-origin route", async () => {
+    const status = {
+      state: "chat_verified",
+      http_ready: true,
+      provider_ready: true,
+      chat_verified: true,
+      checked_at: "2026-07-30T12:00:00Z",
+      last_chat_verified_at: "2026-07-30T11:59:59+00:00",
+      restart_available: false,
+      status_basis: "application_path",
+    };
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(status), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+
+    await expect(api.getHermesYujinStatus(controller.signal)).resolves.toEqual(status);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/hermes-yujin/status",
+      { signal: controller.signal },
+    );
+    vi.unstubAllGlobals();
+  });
+
+  it.each([
+    {
+      state: "ready",
+      http_ready: true,
+      provider_ready: true,
+      chat_verified: true,
+      checked_at: "2026-07-30T12:00:00Z",
+      last_chat_verified_at: null,
+      restart_available: false,
+      status_basis: "application_path",
+    },
+    {
+      state: "http_ready",
+      http_ready: true,
+      provider_ready: false,
+      chat_verified: false,
+      checked_at: "2026-07-30T21:00:00+09:00",
+      last_chat_verified_at: null,
+      restart_available: false,
+      status_basis: "application_path",
+    },
+    {
+      state: "http_ready",
+      http_ready: true,
+      provider_ready: false,
+      chat_verified: false,
+      checked_at: "2026-07-30T12:00:00Z",
+      last_chat_verified_at: null,
+      restart_available: true,
+      status_basis: "application_path",
+    },
+    {
+      state: "http_ready",
+      http_ready: true,
+      provider_ready: false,
+      chat_verified: false,
+      checked_at: "2026-07-30T12:00:00Z",
+      last_chat_verified_at: null,
+      restart_available: false,
+      status_basis: "docker_compose",
+    },
+    {
+      state: "http_ready",
+      http_ready: true,
+      provider_ready: false,
+      chat_verified: false,
+      checked_at: "2026-07-30T12:00:00Z",
+      last_chat_verified_at: null,
+      restart_available: false,
+      status_basis: "application_path",
+      internal_detail: "must be rejected",
+    },
+    {
+      state: "chat_verified",
+      http_ready: true,
+      provider_ready: true,
+      chat_verified: false,
+      checked_at: "2026-07-30T12:00:00Z",
+      last_chat_verified_at: "2026-07-30T11:59:59Z",
+      restart_available: false,
+      status_basis: "application_path",
+    },
+    {
+      state: "http_ready",
+      http_ready: true,
+      provider_ready: false,
+      chat_verified: false,
+      checked_at: "2026-02-30T12:00:00Z",
+      last_chat_verified_at: null,
+      restart_available: false,
+      status_basis: "application_path",
+    },
+    {
+      state: "chat_verified",
+      http_ready: true,
+      provider_ready: true,
+      chat_verified: true,
+      checked_at: "2026-07-30T12:00:00Z",
+      last_chat_verified_at: "2026-07-30T12:00:01Z",
+      restart_available: false,
+      status_basis: "application_path",
+    },
+    {
+      state: "degraded",
+      http_ready: true,
+      provider_ready: true,
+      chat_verified: false,
+      checked_at: "2026-07-30T12:00:00Z",
+      last_chat_verified_at: "2026-07-30T11:59:59Z",
+      restart_available: false,
+      status_basis: "application_path",
+    },
+  ])("rejects a malformed or expanded Yujin status DTO", async (status) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify(status), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+
+    await expect(api.getHermesYujinStatus()).rejects.toThrow(
+      "hermes_yujin_status_invalid",
+    );
+    vi.unstubAllGlobals();
+  });
+
+  it.each([false, true])("accepts degraded status with HTTP=%s only when provider and chat are false", async (httpReady) => {
+    const status = {
+      state: "degraded",
+      http_ready: httpReady,
+      provider_ready: false,
+      chat_verified: false,
+      checked_at: "2026-07-30T12:00:00Z",
+      last_chat_verified_at: "2026-07-30T11:59:59Z",
+      restart_available: false,
+      status_basis: "application_path",
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify(status), { status: 200 }),
+      ),
+    );
+
+    await expect(api.getHermesYujinStatus()).resolves.toEqual(status);
+    vi.unstubAllGlobals();
+  });
+
   it("loads the editor manifest from the explicit project and session boundary", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ session_id: "s" }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);

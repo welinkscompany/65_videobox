@@ -37,6 +37,7 @@ def _canary_handler(
     events_content_type: str = "text/event-stream; charset=utf-8",
     redirect_conversation: bool = False,
     events_delay_seconds: float = 0,
+    oversized_conversation: bool = False,
 ) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, _format: str, *_args: object) -> None:
@@ -52,11 +53,23 @@ def _canary_handler(
                     self.send_header("Location", "/redirect-target")
                     self.end_headers()
                     return
+                if oversized_conversation:
+                    body = (
+                        b'{"conversation_id":"'
+                        + b"x" * 70000
+                        + b'"}'
+                    )
+                    self.send_response(201)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
                 assert body == {"session_id": "session-a"}
                 self._json(201, {"conversation_id": "conversation-1"})
                 return
             if self.path == "/api/projects/project-a/director/conversations/conversation-1/hermes-runs":
                 assert body["session_id"] == "session-a"
+                assert body["expected_session_revision"] == 7
                 assert body["text"] == "이 연결이 준비되었는지 짧게 알려 주세요."
                 self._json(
                     201,
@@ -121,6 +134,8 @@ def _run_with_server(
             "project-a",
             "-SessionId",
             "session-a",
+            "-ExpectedSessionRevision",
+            "7",
             *arguments,
         )
     finally:
@@ -155,6 +170,7 @@ def test_live_command_surface_is_windows_powershell_compatible_and_api_only() ->
                 return
             if self.path == "/api/projects/project-a/director/conversations/conversation-1/hermes-runs":
                 assert body["session_id"] == "session-a"
+                assert body["expected_session_revision"] == 7
                 assert body["text"] == "이 연결이 준비되었는지 짧게 알려 주세요."
                 self._json(
                     201,
@@ -203,6 +219,8 @@ def test_live_command_surface_is_windows_powershell_compatible_and_api_only() ->
             "project-a",
             "-SessionId",
             "session-a",
+            "-ExpectedSessionRevision",
+            "7",
         )
     finally:
         server.shutdown()
@@ -267,6 +285,30 @@ def test_live_canary_bounds_every_request_and_sse_read_with_timeout_sec() -> Non
     ]
 
 
+def test_live_canary_rejects_oversized_chunked_json_before_parsing() -> None:
+    calls: list[tuple[str, str]] = []
+    result = _run_with_server(
+        _canary_handler(calls, oversized_conversation=True),
+    )
+
+    assert result.returncode != 0
+    assert "HERMES_YUJIN_CANARY_FAILED:conversation_create_request" in result.stderr
+    assert calls == [
+        ("POST", "/api/projects/project-a/director/conversations"),
+    ]
+
+
+def test_live_canary_uses_streaming_bounded_no_proxy_http_client() -> None:
+    source = SCRIPT.read_text(encoding="utf-8")
+
+    assert "Invoke-WebRequest" not in source
+    assert "ResponseHeadersRead" in source
+    assert "ReadAsStreamAsync" in source
+    assert "ReadAsStringAsync" not in source
+    assert "$handler.UseProxy = $false" in source
+    assert "$handler.AllowAutoRedirect = $false" in source
+
+
 def test_live_canary_rejects_a_base_uri_path_before_network() -> None:
     calls: list[tuple[str, str]] = []
     result = _run_with_server(
@@ -277,3 +319,35 @@ def test_live_canary_rejects_a_base_uri_path_before_network() -> None:
     assert result.returncode != 0
     assert "HERMES_YUJIN_CANARY_FAILED:base_uri_shape_invalid" in result.stderr
     assert calls == []
+
+
+def test_live_canary_rejects_non_loopback_before_network() -> None:
+    result = _run(
+        "-Live",
+        "-BaseUri",
+        "https://example.com",
+        "-ProjectId",
+        "project-a",
+        "-SessionId",
+        "session-a",
+        "-ExpectedSessionRevision",
+        "7",
+    )
+
+    assert result.returncode != 0
+    assert "HERMES_YUJIN_CANARY_FAILED:base_uri_loopback_required" in result.stderr
+
+
+def test_live_canary_requires_positive_expected_revision_before_network() -> None:
+    result = _run(
+        "-Live",
+        "-BaseUri",
+        "http://127.0.0.1:8000",
+        "-ProjectId",
+        "project-a",
+        "-SessionId",
+        "session-a",
+    )
+
+    assert result.returncode != 0
+    assert "HERMES_YUJIN_CANARY_FAILED:expected_session_revision_required" in result.stderr

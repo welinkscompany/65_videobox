@@ -4,6 +4,7 @@ param(
     [string]$BaseUri = "http://127.0.0.1:8000",
     [string]$ProjectId,
     [string]$SessionId,
+    [int]$ExpectedSessionRevision = 0,
     [ValidateRange(1, 60)]
     [int]$TimeoutSec = 10
 )
@@ -20,7 +21,7 @@ function Assert-True {
     }
 }
 
-function Invoke-RedactedWebRequest {
+function Invoke-RedactedHttpRequest {
     param(
         [Parameter(Mandatory = $true)]
         [Uri]$Uri,
@@ -32,29 +33,115 @@ function Invoke-RedactedWebRequest {
         [Parameter(Mandatory = $true)]
         [string]$FailureMarker
     )
-    $parameters = @{
-        Uri = $Uri
-        Method = $Method
-        Headers = $Headers
-        UseBasicParsing = $true
-        MaximumRedirection = 0
-        TimeoutSec = $TimeoutSec
+    Add-Type -AssemblyName System.Net.Http
+    $handler = New-Object System.Net.Http.HttpClientHandler
+    $handler.AllowAutoRedirect = $false
+    $handler.UseProxy = $false
+    $client = New-Object System.Net.Http.HttpClient($handler)
+    $client.Timeout = [System.Threading.Timeout]::InfiniteTimeSpan
+    $httpMethod = if ($Method -ceq "Get") {
+        [System.Net.Http.HttpMethod]::Get
     }
-    if (-not [string]::IsNullOrWhiteSpace($ContentType)) {
-        $parameters.ContentType = $ContentType
+    else {
+        [System.Net.Http.HttpMethod]::Post
+    }
+    $request = New-Object System.Net.Http.HttpRequestMessage(
+        $httpMethod,
+        $Uri
+    )
+    foreach ($name in $Headers.Keys) {
+        [void]$request.Headers.TryAddWithoutValidation(
+            [string]$name,
+            [string]$Headers[$name]
+        )
     }
     if ($null -ne $Body) {
-        $parameters.Body = $Body
+        $bytes = if ($Body -is [byte[]]) {
+            $Body
+        }
+        else {
+            [Text.Encoding]::UTF8.GetBytes([string]$Body)
+        }
+        $request.Content = New-Object System.Net.Http.ByteArrayContent(
+            @(,$bytes)
+        )
+        if (-not [string]::IsNullOrWhiteSpace($ContentType)) {
+            $request.Content.Headers.ContentType = (
+                [System.Net.Http.Headers.MediaTypeHeaderValue]::Parse(
+                    $ContentType
+                )
+            )
+        }
     }
+    $cancellation = New-Object System.Threading.CancellationTokenSource
+    $cancellation.CancelAfter([TimeSpan]::FromSeconds($TimeoutSec))
+    $response = $null
+    $stream = $null
+    $memory = $null
     try {
-        $response = Invoke-WebRequest @parameters
-        if ([int]$response.StatusCode -ge 300 -and [int]$response.StatusCode -lt 400) {
+        $response = $client.SendAsync(
+            $request,
+            [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead,
+            $cancellation.Token
+        ).GetAwaiter().GetResult()
+        if (
+            [int]$response.StatusCode -ge 300 -and
+            [int]$response.StatusCode -lt 400
+        ) {
             throw "redirect_denied"
         }
-        return $response
+        $contentLength = $response.Content.Headers.ContentLength
+        if ($null -ne $contentLength -and [long]$contentLength -gt 65536) {
+            throw "body_oversized"
+        }
+        $stream = $response.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
+        $memory = New-Object System.IO.MemoryStream
+        $buffer = New-Object byte[] 4096
+        $total = 0
+        while ($true) {
+            $read = $stream.ReadAsync(
+                $buffer,
+                0,
+                $buffer.Length,
+                $cancellation.Token
+            ).GetAwaiter().GetResult()
+            if ($read -eq 0) {
+                break
+            }
+            $total += $read
+            if ($total -gt 65536) {
+                throw "body_oversized"
+            }
+            $memory.Write($buffer, 0, $read)
+        }
+        $strictUtf8 = New-Object System.Text.UTF8Encoding($false, $true)
+        return [pscustomobject]@{
+            StatusCode = [int]$response.StatusCode
+            Content = $strictUtf8.GetString($memory.ToArray())
+            Headers = @{
+                "Content-Type" = (
+                    [string]$response.Content.Headers.ContentType
+                )
+            }
+        }
     }
     catch {
         throw "HERMES_YUJIN_CANARY_FAILED:$FailureMarker"
+    }
+    finally {
+        if ($null -ne $memory) {
+            $memory.Dispose()
+        }
+        if ($null -ne $stream) {
+            $stream.Dispose()
+        }
+        if ($null -ne $response) {
+            $response.Dispose()
+        }
+        $cancellation.Dispose()
+        $request.Dispose()
+        $client.Dispose()
+        $handler.Dispose()
     }
 }
 
@@ -69,9 +156,18 @@ if (-not $Live) {
 
 Assert-True (-not [string]::IsNullOrWhiteSpace($ProjectId)) "project_id_required"
 Assert-True (-not [string]::IsNullOrWhiteSpace($SessionId)) "session_id_required"
+Assert-True ($ExpectedSessionRevision -gt 0) "expected_session_revision_required"
 $resolvedBaseUri = $null
 Assert-True ([Uri]::TryCreate($BaseUri, [UriKind]::Absolute, [ref]$resolvedBaseUri)) "base_uri_invalid"
 Assert-True ($resolvedBaseUri.Scheme -in @("http", "https")) "base_uri_scheme_invalid"
+Assert-True (
+    $resolvedBaseUri.Host.ToLowerInvariant() -in @(
+        "127.0.0.1",
+        "localhost",
+        "::1",
+        "[::1]"
+    )
+) "base_uri_loopback_required"
 Assert-True (
     [string]::IsNullOrEmpty($resolvedBaseUri.UserInfo) -and
     $resolvedBaseUri.AbsolutePath -ceq "/" -and
@@ -85,7 +181,7 @@ $conversationPath = "/api/projects/$escapedProjectId/director/conversations"
 $conversationUri = [Uri]::new($resolvedBaseUri, $conversationPath)
 $conversationBody = @{ session_id = $SessionId } | ConvertTo-Json -Compress
 $networkCalls += 1
-$conversationResponse = Invoke-RedactedWebRequest `
+$conversationResponse = Invoke-RedactedHttpRequest `
     -Uri $conversationUri `
     -Method Post `
     -ContentType "application/json; charset=utf-8" `
@@ -113,11 +209,12 @@ $harmlessKoreanPrompt = [Text.Encoding]::UTF8.GetString(
 )
 $runBody = @{
     session_id = $SessionId
+    expected_session_revision = $ExpectedSessionRevision
     client_message_id = $clientMessageId
     text = $harmlessKoreanPrompt
 } | ConvertTo-Json -Compress
 $networkCalls += 1
-$runResponse = Invoke-RedactedWebRequest `
+$runResponse = Invoke-RedactedHttpRequest `
     -Uri $runUri `
     -Method Post `
     -ContentType "application/json; charset=utf-8" `
@@ -136,7 +233,7 @@ Assert-True ([string]$run.events_url -ceq $expectedEventsPath) "events_url_misma
 
 $eventsUri = [Uri]::new($resolvedBaseUri, $expectedEventsPath)
 $networkCalls += 1
-$eventsResponse = Invoke-RedactedWebRequest `
+$eventsResponse = Invoke-RedactedHttpRequest `
     -Uri $eventsUri `
     -Method Get `
     -Headers @{ Accept = "text/event-stream" } `

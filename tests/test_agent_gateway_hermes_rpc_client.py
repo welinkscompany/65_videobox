@@ -759,6 +759,97 @@ def test_hermes_ssrf_matrix_is_rejected_before_transport(url: str) -> None:
     assert calls == []
 
 
+def test_http_readiness_probe_is_bounded_and_never_reads_the_body() -> None:
+    calls: list[tuple[str, str]] = []
+    factory_arguments: list[dict[str, object]] = []
+
+    class ProbeResponse:
+        status_code = 200
+
+        @property
+        def content(self):
+            pytest.fail("probe must not read the Hermes response body")
+
+        @property
+        def text(self):
+            pytest.fail("probe must not decode the Hermes response body")
+
+        async def aread(self):
+            pytest.fail("probe must not buffer the Hermes response body")
+
+    class ProbeStream:
+        async def __aenter__(self):
+            return ProbeResponse()
+
+        async def __aexit__(self, *_):
+            return None
+
+    class ProbeHttp:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return None
+
+        def stream(self, method: str, path: str):
+            calls.append((method, path))
+            return ProbeStream()
+
+    def factory(**kwargs):
+        factory_arguments.append(kwargs)
+        return ProbeHttp()
+
+    client = HermesRpcClient(
+        base_url="http://videobox-hermes-yujin:9120",
+        username="u",
+        password="p",
+        http_client_factory=factory,
+        timeout_seconds=30,
+    )
+
+    assert asyncio.run(client.probe_http_ready()) is True
+    assert calls == [("GET", "/api/status")]
+    assert factory_arguments[0]["base_url"] == (
+        "http://videobox-hermes-yujin:9120"
+    )
+    assert 0 < float(factory_arguments[0]["timeout"]) <= 3
+
+
+@pytest.mark.parametrize("status_code", [301, 401, 500])
+def test_http_readiness_probe_returns_false_without_leaking_failures(
+    status_code: int,
+) -> None:
+    class ProbeResponse:
+        def __init__(self) -> None:
+            self.status_code = status_code
+
+    class ProbeStream:
+        async def __aenter__(self):
+            return ProbeResponse()
+
+        async def __aexit__(self, *_):
+            return None
+
+    class ProbeHttp:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return None
+
+        def stream(self, _method: str, _path: str):
+            return ProbeStream()
+
+    client = HermesRpcClient(
+        base_url="http://videobox-hermes-yujin:9120",
+        username="u",
+        password="p",
+        http_client_factory=lambda **_: ProbeHttp(),
+    )
+
+    assert asyncio.run(client.probe_http_ready()) is False
+
+
 @pytest.mark.parametrize(
     "event",
     [

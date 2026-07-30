@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from math import isfinite
+from datetime import datetime, timedelta
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -85,6 +86,68 @@ class HermesProjectStatusResponse(BaseModel):
     updated_at: str
     has_editing_session: bool
     latest_session_revision: int | None = None
+
+
+class HermesYujinStatusResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    state: Literal[
+        "not_configured",
+        "stopped",
+        "starting",
+        "http_ready",
+        "provider_ready",
+        "chat_verified",
+        "degraded",
+    ]
+    http_ready: bool
+    provider_ready: bool
+    chat_verified: bool
+    checked_at: datetime
+    last_chat_verified_at: datetime | None = None
+    restart_available: Literal[False] = False
+    status_basis: Literal["application_path"] = "application_path"
+
+    @model_validator(mode="after")
+    def timestamps_are_aware_and_ordered(
+        self,
+    ) -> "HermesYujinStatusResponse":
+        timestamps = (self.checked_at, self.last_chat_verified_at)
+        if any(
+            value is not None
+            and (
+                value.tzinfo is None
+                or value.utcoffset() is None
+                or value.utcoffset() != timedelta(0)
+            )
+            for value in timestamps
+        ) or (
+            self.last_chat_verified_at is not None
+            and self.last_chat_verified_at > self.checked_at
+        ):
+            raise ValueError("hermes_yujin_status_timestamp_invalid")
+        exact = {
+            "not_configured": (False, False, False),
+            "stopped": (False, False, False),
+            "starting": (False, False, False),
+            "http_ready": (True, False, False),
+            "provider_ready": (True, True, False),
+            "chat_verified": (True, True, True),
+        }
+        readiness = (
+            self.http_ready,
+            self.provider_ready,
+            self.chat_verified,
+        )
+        if (
+            self.state in exact
+            and readiness != exact[self.state]
+        ) or (
+            self.state == "degraded"
+            and (self.provider_ready or self.chat_verified)
+        ):
+            raise ValueError("hermes_yujin_status_invariant_invalid")
+        return self
 
 
 class DirectorConversationCreateRequest(BaseModel):

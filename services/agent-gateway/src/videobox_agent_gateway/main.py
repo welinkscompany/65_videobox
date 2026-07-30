@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
+from datetime import UTC, datetime, timedelta
 import hmac
 import json
 import os
 import re
+import threading
 import uuid
 
 from fastapi import FastAPI, Header, HTTPException, Request
@@ -73,6 +76,190 @@ _CAPABILITY_KEY_ID = re.compile(
     r"[A-Za-z0-9][A-Za-z0-9._:-]{0,254}\Z",
     re.ASCII,
 )
+_OBSERVATION_EPOCH = re.compile(
+    r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z",
+    re.ASCII,
+)
+_OPERATIONAL_EVIDENCE_TTL = timedelta(minutes=10)
+_HEALTH_PROBE_TIMEOUT_SECONDS = 3.0
+_DEGRADING_FAILURE_CODES = frozenset(
+    {
+        "hermes_timeout",
+        "hermes_unavailable",
+        "hermes_ticket_expired",
+    }
+)
+
+
+def _strict_utc_now(clock: Callable[[], datetime]) -> datetime:
+    value = clock()
+    if (
+        type(value) is not datetime
+        or value.tzinfo is None
+        or value.utcoffset() != timedelta(0)
+    ):
+        raise ValueError("gateway_operational_clock_must_be_utc")
+    return value.astimezone(UTC)
+
+
+def _utc_text(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    return value.isoformat().replace("+00:00", "Z")
+
+
+class _GatewayRunObservation:
+    def __init__(
+        self,
+        *,
+        observer: "_GatewayOperationalObserver",
+        generation: int,
+    ) -> None:
+        self._observer = observer
+        self._generation = generation
+        self._sequence = 0
+
+    def _next_order(self) -> tuple[int, int]:
+        self._sequence += 1
+        return (self._generation, self._sequence)
+
+    def public_delta(self) -> None:
+        self._observer._record_public_delta(self._next_order())
+
+    def public_completion(self) -> None:
+        self._observer._record_public_completion(self._next_order())
+
+    def final_failure(self, reason: str) -> None:
+        self._observer._record_final_failure(
+            self._next_order(),
+            reason=reason,
+        )
+
+
+class _GatewayOperationalObserver:
+    """Process-local, redacted readiness evidence with monotonic ordering."""
+
+    def __init__(
+        self,
+        *,
+        clock: Callable[[], datetime] | None = None,
+        observation_epoch: str | None = None,
+    ) -> None:
+        self._clock = clock or (lambda: datetime.now(UTC))
+        epoch = observation_epoch or f"gateway-{uuid.uuid4().hex}"
+        if _OBSERVATION_EPOCH.fullmatch(epoch) is None:
+            raise ValueError("gateway_observation_epoch_invalid")
+        self._epoch = epoch
+        self._process_started_at = _strict_utc_now(self._clock)
+        self._lock = threading.Lock()
+        self._generation = 0
+        self._version = 0
+        self._last_order = (0, 0)
+        self._provider_ready = False
+        self._chat_ready = False
+        self._degraded = False
+        self._provider_observed_at: datetime | None = None
+        self._last_chat_verified_at: datetime | None = None
+        self._evidence_valid_until: datetime | None = None
+
+    def begin_run(self) -> _GatewayRunObservation:
+        with self._lock:
+            self._generation += 1
+            generation = self._generation
+        return _GatewayRunObservation(
+            observer=self,
+            generation=generation,
+        )
+
+    def _record_public_delta(self, order: tuple[int, int]) -> None:
+        now = _strict_utc_now(self._clock)
+        with self._lock:
+            if order <= self._last_order:
+                return
+            self._last_order = order
+            self._version += 1
+            self._provider_observed_at = now
+            self._evidence_valid_until = (
+                now + _OPERATIONAL_EVIDENCE_TTL
+            )
+            if not self._degraded:
+                self._provider_ready = True
+
+    def _record_public_completion(self, order: tuple[int, int]) -> None:
+        now = _strict_utc_now(self._clock)
+        with self._lock:
+            if order <= self._last_order:
+                return
+            self._last_order = order
+            self._version += 1
+            self._provider_ready = True
+            self._chat_ready = True
+            self._degraded = False
+            self._provider_observed_at = now
+            self._last_chat_verified_at = now
+            self._evidence_valid_until = (
+                now + _OPERATIONAL_EVIDENCE_TTL
+            )
+
+    def _record_final_failure(
+        self,
+        order: tuple[int, int],
+        *,
+        reason: str,
+    ) -> None:
+        if reason not in _DEGRADING_FAILURE_CODES:
+            return
+        now = _strict_utc_now(self._clock)
+        with self._lock:
+            if (
+                order <= self._last_order
+                or self._last_chat_verified_at is None
+            ):
+                return
+            self._last_order = order
+            self._version += 1
+            self._provider_ready = False
+            self._chat_ready = False
+            self._degraded = True
+            self._evidence_valid_until = (
+                now + _OPERATIONAL_EVIDENCE_TTL
+            )
+
+    def snapshot(self) -> dict[str, object]:
+        now = _strict_utc_now(self._clock)
+        with self._lock:
+            evidence_current = (
+                self._evidence_valid_until is not None
+                and now < self._evidence_valid_until
+            )
+            return {
+                "provider_ready": (
+                    self._provider_ready if evidence_current else False
+                ),
+                "chat_ready": (
+                    self._chat_ready if evidence_current else False
+                ),
+                "degraded": (
+                    self._degraded if evidence_current else False
+                ),
+                "observation_epoch": self._epoch,
+                "process_started_at": _utc_text(
+                    self._process_started_at
+                ),
+                "provider_observed_at": _utc_text(
+                    self._provider_observed_at
+                ),
+                "last_chat_verified_at": _utc_text(
+                    self._last_chat_verified_at
+                ),
+                "evidence_valid_until": _utc_text(
+                    self._evidence_valid_until
+                ),
+            }
+
+    def version(self) -> int:
+        with self._lock:
+            return self._version
 
 
 def _valid_service_token(value: str) -> bool:
@@ -93,10 +280,16 @@ async def _stream_public_lines(
     text: str,
     run_id: str | None = None,
     publish_capability_token: str | None = None,
+    operational_observer: _GatewayOperationalObserver | None = None,
 ) -> AsyncIterator[bytes]:
     """Translate the strict Hermes stream into public NDJSON frames."""
 
     stream = None
+    run_observation = (
+        operational_observer.begin_run()
+        if operational_observer is not None
+        else None
+    )
     try:
         assembled = ""
         assembled_bytes = 0
@@ -143,6 +336,8 @@ async def _stream_public_lines(
                 safe_prefix = candidate[:safe_count]
                 quarantine = candidate[safe_count:]
                 if safe_prefix:
+                    if run_observation is not None:
+                        run_observation.public_delta()
                     emitted += safe_prefix
                     for public_chunk in _bounded_text_chunks(
                         safe_prefix, _MAX_PUBLIC_DELTA_BYTES
@@ -159,10 +354,14 @@ async def _stream_public_lines(
                 raise ValueError("gateway_output_unsafe")
             final_suffix = final_text[len(emitted):]
             if final_suffix:
+                if run_observation is not None:
+                    run_observation.public_delta()
                 for public_chunk in _bounded_text_chunks(
                     final_suffix, _MAX_PUBLIC_DELTA_BYTES
                 ):
                     yield _encode_public("text_delta", public_chunk)
+            if run_observation is not None:
+                run_observation.public_completion()
             yield _encode_public(
                 "run_completed",
                 final_text,
@@ -171,7 +370,9 @@ async def _stream_public_lines(
             return
         else:
             raise ValueError("gateway_completion_missing")
-    except Exception:
+    except Exception as error:
+        if run_observation is not None:
+            run_observation.final_failure(str(error))
         yield b'{"event_type":"blocked","text":"","retryable":true}\n'
     finally:
         if stream is not None:
@@ -348,6 +549,9 @@ def create_app(
     service_token: str | None = None,
     context_ledger: CreatorContextLedger | None = None,
     capability_issuer: YujinCapabilityIssuer | None = None,
+    hermes_http_probe: Callable[[], Awaitable[bool]] | None = None,
+    operational_clock: Callable[[], datetime] | None = None,
+    observation_epoch: str | None = None,
 ) -> FastAPI:
     if hermes_client is not None and service_token is not None:
         if not _valid_service_token(service_token):
@@ -360,6 +564,11 @@ def create_app(
         redoc_url=None,
         openapi_url=None,
     )
+    gateway_configured = hermes_client is not None and bool(service_token)
+    observer = _GatewayOperationalObserver(
+        clock=operational_clock,
+        observation_epoch=observation_epoch,
+    )
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(
@@ -371,13 +580,45 @@ def create_app(
         )
 
     @app.get("/health")
-    def health() -> dict[str, bool | str]:
+    async def health() -> dict[str, object]:
+        observation_version_before_probe = observer.version()
+        hermes_http_ready = False
+        if gateway_configured and hermes_http_probe is not None:
+            try:
+                hermes_http_ready = bool(
+                    await asyncio.wait_for(
+                        hermes_http_probe(),
+                        timeout=_HEALTH_PROBE_TIMEOUT_SECONDS,
+                    )
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                hermes_http_ready = False
+        observation = observer.snapshot()
+        if (
+            not hermes_http_ready
+            and observer.version() != observation_version_before_probe
+            and (
+                bool(observation["provider_ready"])
+                or bool(observation["chat_ready"])
+            )
+        ):
+            hermes_http_ready = True
+        elif not hermes_http_ready:
+            observation = {
+                **observation,
+                "provider_ready": False,
+                "chat_ready": False,
+            }
         return {
             "status": "ready",
             "scope": "gateway_http_process",
-            "hermes_http_ready": False,
-            "provider_ready": False,
-            "chat_ready": False,
+            "gateway_configured": gateway_configured,
+            "capability_routes_ready": gateway_configured,
+            "hermes_http_ready": hermes_http_ready,
+            **observation,
+            "status_basis": "gateway_observation",
         }
 
     if hermes_client is not None and service_token:
@@ -478,6 +719,7 @@ def create_app(
                         context_json=context_json,
                     ),
                     publish_capability_token=publish_capability_token,
+                    operational_observer=observer,
                 ),
                 media_type="application/x-ndjson",
             )
@@ -544,12 +786,14 @@ def _app_from_environment() -> FastAPI:
         )
     except (TypeError, ValueError):
         return create_app()
+    hermes_client = HermesRpcClient(
+        base_url=url, username=username, password=password
+    )
     return create_app(
-        hermes_client=HermesRpcClient(
-            base_url=url, username=username, password=password
-        ),
+        hermes_client=hermes_client,
         service_token=token,
         capability_issuer=capability_issuer,
+        hermes_http_probe=hermes_client.probe_http_ready,
     )
 
 

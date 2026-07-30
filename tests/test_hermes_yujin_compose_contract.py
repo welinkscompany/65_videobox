@@ -445,10 +445,21 @@ def test_gateway_health_is_process_readiness_and_never_returns_auth_env(
     assert response.json() == {
         "status": "ready",
         "scope": "gateway_http_process",
+        "gateway_configured": False,
+        "capability_routes_ready": False,
         "hermes_http_ready": False,
         "provider_ready": False,
         "chat_ready": False,
+        "degraded": False,
+        "observation_epoch": response.json()["observation_epoch"],
+        "process_started_at": response.json()["process_started_at"],
+        "provider_observed_at": None,
+        "last_chat_verified_at": None,
+        "evidence_valid_until": None,
+        "status_basis": "gateway_observation",
     }
+    assert response.json()["observation_epoch"]
+    assert response.json()["process_started_at"].endswith("Z")
     assert "must-not-be-returned" not in response.text
     route_paths = {route.path for route in module.app.routes}
     assert route_paths == {"/health"}

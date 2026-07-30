@@ -15,6 +15,7 @@ class HermesTransportError(RuntimeError):
 
 
 _MAX_RPC_FRAME_BYTES = 64_000
+_HTTP_PROBE_TIMEOUT_SECONDS = 3.0
 
 
 @dataclass(frozen=True)
@@ -214,6 +215,29 @@ class HermesRpcClient:
             if not ticket:
                 raise HermesTransportError("hermes_unavailable")
             return ticket
+
+    async def probe_http_ready(self) -> bool:
+        """Check only Hermes HTTP readiness without reading its response body."""
+
+        timeout = min(
+            max(float(self._timeout), 0.001),
+            _HTTP_PROBE_TIMEOUT_SECONDS,
+        )
+        try:
+            async with asyncio.timeout(timeout):
+                async with self._http_factory(
+                    base_url=self._base_url,
+                    timeout=timeout,
+                ) as http:
+                    async with http.stream(
+                        "GET",
+                        "/api/status",
+                    ) as response:
+                        return response.status_code == 200
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            return False
 
     async def interrupt(self, *, run_id: str) -> bool:
         async with self._active_lock:

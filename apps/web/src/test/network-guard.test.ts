@@ -4,6 +4,7 @@ import { assertLocalNetwork, installNetworkGuard, isAllowedLocalUrl } from "@/li
 describe("local network guard", () => {
   it("allows relative and explicit loopback URLs only", () => {
     expect(isAllowedLocalUrl("/api/projects")).toBe(true)
+    expect(isAllowedLocalUrl("/api/hermes-yujin/status")).toBe(true)
     expect(isAllowedLocalUrl("http://127.0.0.1:8000/health")).toBe(true)
     expect(() => assertLocalNetwork("https://example.com/font.woff2")).toThrow("External network is blocked")
     expect(() => assertLocalNetwork("//example.com/x")).toThrow("External network is blocked")

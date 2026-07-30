@@ -145,6 +145,24 @@ export type HermesRunCreateRequest = {
   selected_segment_id?: string | null;
 };
 export type HermesRunCreateResponse = { run_id: string; conversation_id: string; events_url: string };
+export type HermesYujinStatusState =
+  | "not_configured"
+  | "stopped"
+  | "starting"
+  | "http_ready"
+  | "provider_ready"
+  | "chat_verified"
+  | "degraded";
+export type HermesYujinStatus = {
+  state: HermesYujinStatusState;
+  http_ready: boolean;
+  provider_ready: boolean;
+  chat_verified: boolean;
+  checked_at: string;
+  last_chat_verified_at: string | null;
+  restart_available: false;
+  status_basis: "application_path";
+};
 export type ArtifactFreshness = { source_session_revision: number; is_current?: boolean; invalidated_at?: string | null; invalidated_reason?: string | null };
 
 export type TimelineClip = {
@@ -730,6 +748,108 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
+const hermesYujinStatusStates = new Set<HermesYujinStatusState>([
+  "not_configured",
+  "stopped",
+  "starting",
+  "http_ready",
+  "provider_ready",
+  "chat_verified",
+  "degraded",
+]);
+const hermesYujinStatusKeys = [
+  "chat_verified",
+  "checked_at",
+  "http_ready",
+  "last_chat_verified_at",
+  "provider_ready",
+  "restart_available",
+  "state",
+  "status_basis",
+] as const;
+const hermesYujinReadinessByState: Partial<
+  Record<HermesYujinStatusState, readonly [boolean, boolean, boolean]>
+> = {
+  not_configured: [false, false, false],
+  stopped: [false, false, false],
+  starting: [false, false, false],
+  http_ready: [true, false, false],
+  provider_ready: [true, true, false],
+  chat_verified: [true, true, true],
+};
+
+function isStrictUtcTimestamp(value: unknown): value is string {
+  if (typeof value !== "string") {
+    return false;
+  }
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|\+00:00)$/.exec(value);
+  const timestamp = Date.parse(value);
+  if (match === null || Number.isNaN(timestamp)) {
+    return false;
+  }
+  const parsed = new Date(timestamp);
+  return parsed.getUTCFullYear() === Number(match[1])
+    && parsed.getUTCMonth() + 1 === Number(match[2])
+    && parsed.getUTCDate() === Number(match[3])
+    && parsed.getUTCHours() === Number(match[4])
+    && parsed.getUTCMinutes() === Number(match[5])
+    && parsed.getUTCSeconds() === Number(match[6]);
+}
+
+function parseHermesYujinStatus(value: unknown): HermesYujinStatus {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("hermes_yujin_status_invalid");
+  }
+  const payload = value as Record<string, unknown>;
+  const expectedReadiness = typeof payload.state === "string"
+    ? hermesYujinReadinessByState[payload.state as HermesYujinStatusState]
+    : undefined;
+  if (
+    JSON.stringify(Object.keys(payload).sort()) !== JSON.stringify(hermesYujinStatusKeys)
+    || typeof payload.state !== "string"
+    || !hermesYujinStatusStates.has(payload.state as HermesYujinStatusState)
+    || typeof payload.http_ready !== "boolean"
+    || typeof payload.provider_ready !== "boolean"
+    || typeof payload.chat_verified !== "boolean"
+    || !isStrictUtcTimestamp(payload.checked_at)
+    || (
+      payload.last_chat_verified_at !== null
+      && !isStrictUtcTimestamp(payload.last_chat_verified_at)
+    )
+    || payload.restart_available !== false
+    || payload.status_basis !== "application_path"
+    || (
+      typeof payload.last_chat_verified_at === "string"
+      && Date.parse(payload.last_chat_verified_at) > Date.parse(payload.checked_at as string)
+    )
+    || (
+      expectedReadiness !== undefined
+      && (
+        payload.http_ready !== expectedReadiness[0]
+        || payload.provider_ready !== expectedReadiness[1]
+        || payload.chat_verified !== expectedReadiness[2]
+      )
+    )
+    || (
+      payload.state === "degraded"
+      && (payload.provider_ready || payload.chat_verified)
+    )
+  ) {
+    throw new Error("hermes_yujin_status_invalid");
+  }
+  return payload as HermesYujinStatus;
+}
+
+async function getHermesYujinStatusRequest(
+  signal?: AbortSignal,
+): Promise<HermesYujinStatus> {
+  const payload = await request<unknown>(
+    "/api/hermes-yujin/status",
+    { signal },
+  );
+  return parseHermesYujinStatus(payload);
+}
+
 async function registerCapcutDraftHandoffRequest(path: string): Promise<{ handoff: CapCutDraftHandoff }> {
   const response = await fetch(path, { method: "POST" });
   if (response.status === 400) {
@@ -905,6 +1025,8 @@ async function createHermesRunRequest(
 }
 
 export const api = {
+  getHermesYujinStatus: (signal?: AbortSignal) =>
+    getHermesYujinStatusRequest(signal),
   createCreationBrief: (projectId: string, payload: CreateCreationBriefRequest) =>
     request<CreationBrief>(`/api/projects/${encodeURIComponent(projectId)}/creation-briefs`, {
       method: "POST",

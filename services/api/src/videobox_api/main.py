@@ -41,6 +41,7 @@ from videobox_api.routers.media_library import build_media_library_router
 from videobox_api.routers.media_analysis import build_media_analysis_router
 from videobox_api.routers.outputs import build_outputs_router
 from videobox_api.routers.hermes_conversation import build_hermes_conversation_router
+from videobox_api.routers.hermes_operations import build_hermes_operations_router
 from videobox_api.routers.projects import build_projects_router
 from videobox_api.routers.review import build_review_router
 from videobox_api.routers.timeline import build_timeline_router
@@ -75,6 +76,7 @@ from videobox_storage.user_library_store import UserLibraryStore
 from videobox_api.hermes_capabilities import HermesCapabilityVerifier
 from videobox_api.agent_gateway_client import AgentGatewayClient
 from videobox_api.hermes_run_service import HermesRunService
+from videobox_api.hermes_operational_status import HermesOperationalStatusService
 
 # Re-exported for backward compatibility: tests/test_api.py and a few other
 # test modules import these names directly from videobox_api.main rather
@@ -529,6 +531,8 @@ def create_app(
         )
     if bool(resolved_agent_gateway_url) != bool(resolved_agent_gateway_token):
         raise ValueError("agent_gateway_config_incomplete")
+    agent_gateway_client = None
+    capability_verifier = None
     if resolved_agent_gateway_url and resolved_agent_gateway_token:
         capability_verifier = (
             _hermes_capability_verifier_from_environment()
@@ -547,12 +551,19 @@ def create_app(
         )
     else:
         app.state.hermes_run_service = None
+    app.state.hermes_operational_status = HermesOperationalStatusService(
+        agent_gateway_client,
+        admission_ready=capability_verifier is not None,
+    )
 
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
     app.include_router(build_projects_router(store))
+    app.include_router(
+        build_hermes_operations_router(app.state.hermes_operational_status)
+    )
     if root_attestation_secret_bytes is not None:
         app.include_router(
             build_live_smoke_attestation_router(

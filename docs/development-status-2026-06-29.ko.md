@@ -1,6 +1,18 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 310. 2026-07-30 Hermes Yujin C3 capability lifecycle closeout`을 우선 적용한다. Task 22 기술 closeout 근거는 `## 300`, Phase B 근거는 `## 307`, C1/C2 근거는 `## 308`/`## 309`를 유지하며, 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 311. 2026-07-30 Hermes Yujin C4 operations and Phase C closeout`을 우선 적용한다. Task 22 기술 closeout 근거는 `## 300`, Phase B 근거는 `## 307`, C1/C2/C3 근거는 `## 308`/`## 309`/`## 310`을 유지하며, 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+
+## 311. 2026-07-30 Hermes Yujin C4 operations and Phase C closeout
+
+- `[x] C4·Phase C 완료`: Agent Gateway는 Hermes HTTP readiness와 실제 chat 증거를 분리해 관찰하고, VideoBox API와 ProductShell은 `not_configured`, `stopped`, `starting`, `http_ready`, `chat_verified`, `degraded`, `unreachable`의 고정 typed 상태만 노출한다. 응답에는 container/port/mount/environment/raw error/provider payload를 넣지 않는다.
+- `진실성·시간 경계`: chat verified는 안전한 non-empty delta와 정상 완료가 같은 generation에서 관찰된 경우만 인정한다. 늦은 probe, cancel/stale/replay/unsafe/malformed event는 상태를 오염시키지 않고, failure evidence TTL은 마지막 성공 chat age와 별도로 유지된다. capability verifier가 없으면 health probe 없이 `not_configured`다.
+- `운영 경계`: browser status는 read-only다. 로컬 operator script만 exact `videobox-agent-gateway`, `videobox-hermes-agent`, `videobox-workspace` 세 service를 bounded/no-proxy/redirect-denied 방식으로 관찰한다. restart는 Gateway 한 service와 같은 container ID만 사용하며 recreate, down, rm, volume, 다른 service 작업은 거부한다.
+- `drill·fallback`: default StaticOnly drill은 Docker/network/provider call 0으로 source guard, frontend manual Director, explicit Apply 전 mutation 0, one-player ownership을 검증한다. 별도 live drill은 exact loopback, 명시적 승인 환경변수, fixed service stop/canary/restart/health recovery를 요구하고 `finally` 복구 실패를 최우선 fatal로 보고한다. 현재 `.env.container`가 없어 destructive live drill은 실행하지 않았다.
+- `리뷰·보정`: 독립 spec, code-quality, gap·reverse-runtime review에서 stop 실패 뒤 복구 누락, 늦은 false probe race, UTC/DTO 의미 검증, degraded TTL, verifier-missing probe 0, status body/time/process bounds, static gate read 0, marker 분리, canary delta barrier와 durable replay를 찾아 RED→GREEN으로 보완했다. 최종 Critical/Important/Minor **0**, PASS다.
+- `검증`: focused Python **218 passed**, focused frontend **5 files / 89 passed**, default StaticOnly drill `backend_nodes=7 frontend_files=2 docker_calls=0 network_calls=0 provider_calls=0`, 전체 Python **2458 passed, 41 skipped**, 전체 frontend **51 files / 689 passed**, production build, Hermes profile/runtime/20-ID plan-state/zero-tools verifier, Editor UI OSS source-provenance/UI-system verifier, `git diff --check`가 통과했다. ProductShell 변경에 맞춰 provenance SHA를 `531dd77a47c34c6cc7a70288f2f352b0dd720ff4dcc5fc87ebe8dbb22421223d`로 갱신했고 provenance Python **21 passed**다.
+- `비실패 출력·미실행`: Starlette multipart warning 1건, React `act(...)`, jsdom navigation, intentional ErrorBoundary stderr, 500 kB build warning은 exit 0인 기존 비실패 출력이다. 실제 Hermes/provider 호출, 구성된 Docker service-stop live drill, 브라우저 사람 E2E, 사용자 원본 영상 재생·청취, CapCut Desktop 사람 검증, Task 9 사람/환경 acceptance는 실행하지 않았고 통과로 간주하지 않는다.
+- `진행률`: Phase C/realtime-reliability child는 **4/4 (100.0%)**, Hermes Yujin initiative는 **15/20 (75.0%), 잔여 25.0%**다. 기존 VideoBox 공식 누적은 Task 9 사람/환경 acceptance 전까지 **9/22 (40.9%)**, 잔여 **59.1%**로 유지한다.
+- `다음 작업`: **D1만** 진행한다. VideoBox에는 승인 workflow record만 저장하고 외부 Mem0/provider call 0을 유지하면서, 명시적 approve만 이후 Hermes-owned Mem0 write를 허용하는 typed candidate/policy DTO와 local store/API 경계를 TDD로 추가한다.
 
 ## 310. 2026-07-30 Hermes Yujin C3 capability lifecycle closeout
 

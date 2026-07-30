@@ -13,7 +13,7 @@
 Parent: `docs/superpowers/plans/2026-07-26-videobox-hermes-yujin-master-plan.md`
 Requires: Phase B task B5 complete.
 
-Child progress: **3/4 tasks (75.0%), remaining 25.0%**.
+Child progress: **4/4 tasks (100.0%), remaining 0.0%**.
 
 ## C1 — Persist run and event cursors
 
@@ -328,7 +328,7 @@ Each token contains exactly one action. Never issue an `apply`, `render`,
 
 ## C4 — Add operations, failure drills, and Phase C closeout
 
-- [ ] **C4** Add dashboard health/restart/fallback operations, failure drills, and Phase C closeout.
+- [x] **C4** Add dashboard health/restart/fallback operations, failure drills, and Phase C closeout.
 
 **2026-07-30 source-grounded amendment:** The authoritative C4 contract is
 `docs/superpowers/specs/2026-07-30-videobox-hermes-yujin-c4-operations-design.md`.

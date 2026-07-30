@@ -5,15 +5,137 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field as dataclass_field
+from datetime import datetime
+import re
 import time
 from typing import Any, Literal
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 
 class AgentGatewayUnavailable(RuntimeError):
     pass
+
+
+class AgentGatewayHealth(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        strict=True,
+        frozen=True,
+        hide_input_in_errors=True,
+    )
+
+    status: Literal["ready"]
+    scope: Literal["gateway_http_process"]
+    gateway_configured: bool
+    capability_routes_ready: bool
+    hermes_http_ready: bool
+    provider_ready: bool
+    chat_ready: bool
+    degraded: bool
+    observation_epoch: str = Field(
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+    )
+    process_started_at: datetime
+    provider_observed_at: datetime | None = None
+    last_chat_verified_at: datetime | None = None
+    evidence_valid_until: datetime | None = None
+    status_basis: Literal["gateway_observation"]
+
+    @field_validator(
+        "process_started_at",
+        "provider_observed_at",
+        "last_chat_verified_at",
+        "evidence_valid_until",
+        mode="before",
+    )
+    @classmethod
+    def parse_strict_utc_timestamp(cls, value):
+        if value is None or type(value) is datetime:
+            return value
+        if (
+            type(value) is not str
+            or re.fullmatch(
+                r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}"
+                r"(?:\.\d+)?(?:Z|\+00:00)",
+                value,
+            )
+            is None
+        ):
+            raise ValueError("agent_gateway_health_timestamp_invalid")
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+    @model_validator(mode="after")
+    def timestamps_are_timezone_aware(self) -> "AgentGatewayHealth":
+        timestamps = (
+            self.process_started_at,
+            self.provider_observed_at,
+            self.last_chat_verified_at,
+            self.evidence_valid_until,
+        )
+        if any(
+            value is not None
+            and (
+                value.tzinfo is None
+                or value.utcoffset() is None
+                or value.utcoffset().total_seconds() != 0
+            )
+            for value in timestamps
+        ):
+            raise ValueError("agent_gateway_health_timestamp_invalid")
+        if (
+            self.capability_routes_ready
+            and not self.gateway_configured
+        ) or (
+            self.hermes_http_ready
+            and not (
+                self.gateway_configured
+                and self.capability_routes_ready
+            )
+        ) or (
+            self.provider_ready and not self.hermes_http_ready
+        ) or (
+            self.chat_ready and not self.provider_ready
+        ) or (
+            self.degraded
+            and (
+                not self.gateway_configured
+                or not self.capability_routes_ready
+                or self.provider_ready
+                or self.chat_ready
+                or self.last_chat_verified_at is None
+                or self.evidence_valid_until is None
+            )
+        ) or (
+            self.provider_ready and self.provider_observed_at is None
+        ) or (
+            self.chat_ready and self.last_chat_verified_at is None
+        ):
+            raise ValueError("agent_gateway_health_invariant_invalid")
+        observations = (
+            self.provider_observed_at,
+            self.last_chat_verified_at,
+        )
+        if any(
+            observed_at is not None
+            and (
+                observed_at < self.process_started_at
+                or self.evidence_valid_until is None
+                or observed_at >= self.evidence_valid_until
+            )
+            for observed_at in observations
+        ):
+            raise ValueError("agent_gateway_health_evidence_order_invalid")
+        return self
 
 
 @dataclass(frozen=True)
@@ -140,6 +262,7 @@ class AgentGatewayClient:
         service_token: str,
         http_client_factory: Callable = _default_http_client_factory,
         timeout_seconds: float = 35.0,
+        status_timeout_seconds: float = 3.0,
         epoch_seconds: Callable[[], int] | None = None,
     ) -> None:
         parsed = urlsplit(base_url)
@@ -168,9 +291,36 @@ class AgentGatewayClient:
         self._token = service_token
         self._factory = http_client_factory
         self._timeout = timeout_seconds
+        if (
+            isinstance(status_timeout_seconds, bool)
+            or not isinstance(status_timeout_seconds, (int, float))
+            or not 0 < float(status_timeout_seconds) <= 5
+        ):
+            raise ValueError("agent_gateway_status_timeout_invalid")
+        self._status_timeout = float(status_timeout_seconds)
         self._epoch_seconds = epoch_seconds or (
             lambda: int(time.time())
         )
+
+    async def get_health(self) -> AgentGatewayHealth:
+        try:
+            async with self._factory(
+                base_url=self._base_url,
+                timeout=self._status_timeout,
+            ) as client:
+                response = await client.get("/health")
+                if (
+                    response.status_code != 200
+                    or bool(getattr(response, "is_redirect", False))
+                ):
+                    raise ValueError("agent_gateway_status_invalid")
+                return AgentGatewayHealth.model_validate(response.json())
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            raise AgentGatewayUnavailable(
+                "agent_gateway_status_unavailable"
+            ) from error
 
     async def reserve_run(
         self,

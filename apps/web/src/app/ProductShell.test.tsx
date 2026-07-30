@@ -17,6 +17,16 @@ const projects = [
 describe("product shell", () => {
   it("opens the current-project recovery surface only when the user asks for job status", async () => {
     vi.spyOn(api, "listProjects").mockResolvedValue(projects);
+    const getYujinStatus = vi.spyOn(api, "getHermesYujinStatus").mockResolvedValue({
+      state: "chat_verified",
+      http_ready: true,
+      provider_ready: true,
+      chat_verified: true,
+      checked_at: "2026-07-30T12:00:00Z",
+      last_chat_verified_at: "2026-07-30T11:59:59Z",
+      restart_available: false,
+      status_basis: "application_path",
+    });
     const listJobs = vi.spyOn(api, "listJobs").mockResolvedValue([{
       job_id: "job-internal",
       project_id: "first",
@@ -34,13 +44,18 @@ describe("product shell", () => {
 
     const trigger = await screen.findByRole("button", { name: "작업 상태" });
     expect(listJobs).not.toHaveBeenCalled();
+    expect(getYujinStatus).not.toHaveBeenCalled();
     expect(retry).not.toHaveBeenCalled();
     fireEvent.click(trigger);
 
     expect(await screen.findByRole("dialog", { name: "작업 상태" })).toBeVisible();
     expect(screen.getByText("로컬 작업 상태를 확인하고 실패한 작업을 다시 시작할 수 있어요.")).toBeVisible();
+    expect(await screen.findByRole("region", { name: "유진 연결 상태" })).toBeVisible();
+    expect(screen.getByText("유진과 대화할 준비가 확인됐어요.")).toBeVisible();
     expect(screen.getByRole("region", { name: "작업 복구" })).toBeVisible();
     expect(screen.getByText("음성 받아쓰기")).toBeVisible();
+    expect(getYujinStatus).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: /재시작/ })).not.toBeInTheDocument();
     expect(retry).not.toHaveBeenCalled();
   });
 
