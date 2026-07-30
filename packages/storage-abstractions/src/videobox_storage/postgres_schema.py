@@ -49,6 +49,24 @@ POSTGRES_SCHEMA_STATEMENTS = tuple(_postgres_statement(statement) for statement 
 
 POSTGRES_MIGRATION_STATEMENTS = (
     "DROP TABLE IF EXISTS " + "g" + "emini_provider_keys",
+    "ALTER TABLE hermes_capability_ledger ADD COLUMN IF NOT EXISTS lifecycle_version TEXT NOT NULL DEFAULT 'legacy_retired'",
+    "ALTER TABLE hermes_capability_ledger ADD COLUMN IF NOT EXISTS conversation_id TEXT",
+    "ALTER TABLE hermes_capability_ledger ADD COLUMN IF NOT EXISTS run_id TEXT",
+    "ALTER TABLE hermes_capability_ledger ADD COLUMN IF NOT EXISTS session_id TEXT",
+    "ALTER TABLE hermes_capability_ledger ADD COLUMN IF NOT EXISTS session_revision INTEGER",
+    "ALTER TABLE hermes_capability_ledger ADD COLUMN IF NOT EXISTS asset_index_revision INTEGER",
+    "ALTER TABLE hermes_capability_ledger ADD COLUMN IF NOT EXISTS action TEXT",
+    "ALTER TABLE hermes_capability_ledger ADD COLUMN IF NOT EXISTS updated_at TEXT",
+    "UPDATE hermes_capability_ledger SET updated_at = recorded_at WHERE updated_at IS NULL",
+    "ALTER TABLE hermes_capability_ledger ALTER COLUMN updated_at SET NOT NULL",
+    "DROP INDEX IF EXISTS idx_hermes_capability_ledger_scope",
+    """
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_hermes_capability_v1_scope_action
+    ON hermes_capability_ledger (
+        project_id, conversation_id, run_id, action
+    )
+    WHERE lifecycle_version = 'videobox.yujin-capability.v1'
+    """,
     "ALTER TABLE creation_briefs ADD COLUMN IF NOT EXISTS summary_text TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE creation_briefs ADD COLUMN IF NOT EXISTS script_asset_owned INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE director_messages ADD COLUMN IF NOT EXISTS metadata_json TEXT NOT NULL DEFAULT '{}'",

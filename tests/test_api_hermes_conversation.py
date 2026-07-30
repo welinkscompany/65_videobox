@@ -9,19 +9,65 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
-from videobox_api.agent_gateway_client import AgentGatewayEvent
+from videobox_api.agent_gateway_client import (
+    AgentGatewayEvent,
+    AgentGatewayReservation,
+)
+from videobox_api.hermes_capabilities import HermesCapabilityError
 from videobox_api.main import create_app
 
 
 SERVICE_TOKEN = "service-token-that-is-at-least-thirty-two"
 
 
+def _reservation(run_id: str) -> AgentGatewayReservation:
+    return AgentGatewayReservation.model_validate(
+        {
+            "run_id": run_id,
+            "attach_context": "a" * 64,
+            "expires_in_seconds": 30,
+            "read_capability_token": "header.read.signature",
+            "capabilities": (
+                {
+                    "capability_id": f"{run_id}-cap-read",
+                    "action": "read_context",
+                    "expires_at": 2_000_000_300,
+                },
+                {
+                    "capability_id": f"{run_id}-cap-publish",
+                    "action": "publish_proposal",
+                    "expires_at": 2_000_000_300,
+                },
+            ),
+        }
+    )
+
+
+class _Verifier:
+    def verify(self, _token: str, *, expected):
+        return SimpleNamespace(
+            capability_id=expected.capability_id,
+            action=expected.action,
+        )
+
+
+class _FailingVerifier:
+    def verify(self, _token: str, *, expected):
+        raise HermesCapabilityError(
+            "hermes_capability_signature_invalid"
+        )
+
+
 class _Gateway:
     calls = 0
     preparations = 0
 
-    async def prepare_run(self, **_):
+    async def reserve_run(self, **kwargs):
         self.preparations += 1
+        return _reservation(str(kwargs["run_id"]))
+
+    async def attach_run_context(self, **_):
+        return None
 
     async def stream_run(self, **_):
         self.calls += 1
@@ -41,6 +87,7 @@ def _configured_app(tmp_path: Path):
     )
     gateway = _Gateway()
     app.state.hermes_run_service.gateway_client = gateway
+    app.state.hermes_run_service.capability_verifier = _Verifier()
     app.state.hermes_run_service._context_builder = lambda **kwargs: SimpleNamespace(
         session_revision=kwargs["expected_session_revision"],
         asset_index_revision=0,
@@ -53,6 +100,41 @@ def _configured_app(tmp_path: Path):
         },
     )
     return app, gateway
+
+
+def _create_project_session_conversation(client, app, *, name: str):
+    project_id = client.post(
+        "/api/projects",
+        json={"name": name},
+    ).json()["project_id"]
+    session = app.state.store.save_editing_session(
+        project_id=project_id,
+        timeline_id="timeline",
+        session_payload={"segments": [], "history": []},
+    )
+    conversation_id = client.post(
+        f"/api/projects/{project_id}/director/conversations",
+        json={"session_id": session["session_id"]},
+    ).json()["conversation_id"]
+    return project_id, session, conversation_id
+
+
+def _capability_denial_reasons(app, *, project_id: str) -> list[str]:
+    connection = app.state.store._connection(project_id)
+    try:
+        return [
+            str(row["reason"])
+            for row in connection.execute(
+                """
+                SELECT reason
+                FROM hermes_capability_audit
+                WHERE outcome = 'denied'
+                ORDER BY occurred_at, audit_event_id
+                """
+            ).fetchall()
+        ]
+    finally:
+        connection.close()
 
 
 def test_router_is_absent_without_config_and_external_url_is_rejected(
@@ -121,6 +203,92 @@ def test_create_and_sse_preserve_manual_conversation_and_headers(
             },
         )
         assert manual.status_code == 200
+
+
+def test_create_redacts_internal_capability_denial_and_keeps_durable_audit(
+    tmp_path: Path,
+) -> None:
+    app, _gateway = _configured_app(tmp_path)
+    app.state.hermes_run_service.capability_verifier = _FailingVerifier()
+    with TestClient(app) as client:
+        project_id, session, conversation_id = (
+            _create_project_session_conversation(
+                client,
+                app,
+                name="redacted create denial",
+            )
+        )
+        response = client.post(
+            f"/api/projects/{project_id}/director/conversations/"
+            f"{conversation_id}/hermes-runs",
+            json={
+                "session_id": session["session_id"],
+                "client_message_id": "redacted-create",
+                "text": "hello",
+                "expected_session_revision": session[
+                    "session_revision"
+                ],
+            },
+        )
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "detail": "hermes_context_preparation_unavailable"
+    }
+    assert "signature" not in response.text
+    assert _capability_denial_reasons(
+        app,
+        project_id=project_id,
+    ) == ["hermes_capability_signature_invalid"]
+
+
+def test_retry_redacts_internal_capability_denial_and_keeps_durable_audit(
+    tmp_path: Path,
+) -> None:
+    app, _gateway = _configured_app(tmp_path)
+    with TestClient(app) as client:
+        project_id, session, conversation_id = (
+            _create_project_session_conversation(
+                client,
+                app,
+                name="redacted retry denial",
+            )
+        )
+        source = app.state.store.begin_director_hermes_run(
+            project_id=project_id,
+            session_id=session["session_id"],
+            conversation_id=conversation_id,
+            client_message_id="retry-source",
+            user_text="hello",
+            expected_session_revision=session["session_revision"],
+            expected_asset_index_revision=0,
+            selected_segment_id=None,
+        )
+        assert app.state.store.complete_director_hermes_run(
+            project_id=project_id,
+            run_id=source["run_id"],
+            owner_token=source["owner_token"],
+            status="blocked",
+            assistant_text="Manual Director remains available",
+            retryable=True,
+        )
+        app.state.hermes_run_service.capability_verifier = (
+            _FailingVerifier()
+        )
+        response = client.post(
+            f"/api/projects/{project_id}/director/conversations/"
+            f"{conversation_id}/hermes-runs/{source['run_id']}/retry"
+        )
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "detail": "hermes_context_preparation_unavailable"
+    }
+    assert "signature" not in response.text
+    assert _capability_denial_reasons(
+        app,
+        project_id=project_id,
+    ) == ["hermes_capability_signature_invalid"]
 
 
 def test_cancel_and_retry_are_scoped_durable_and_keep_manual_editing_available(

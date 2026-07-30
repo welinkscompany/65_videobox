@@ -5,8 +5,9 @@ import json
 import os
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from datetime import UTC, datetime
-from threading import Barrier
+from threading import Barrier, Event
 from unittest.mock import patch
 from hashlib import sha256
 from pathlib import Path
@@ -22,6 +23,7 @@ from videobox_domain_models.director_proposals import DirectorCandidate, Directo
 from videobox_domain_models.jobs import JobStatus, JobType
 from videobox_core_engine.editing_session import select_segment_tts_replacement
 from videobox_storage.postgres_project_store import PostgresProjectStore, _PostgresConnection
+from videobox_storage.postgres_compat import translate_sql
 from videobox_storage.local_project_store import EditingSessionRevisionConflict, LocalProjectStore
 
 
@@ -75,6 +77,8 @@ def _cleanup_postgres_hermes_project(
     connection = store._connection(project_id)
     try:
         for table in (
+            "hermes_capability_audit",
+            "hermes_capability_ledger",
             "director_hermes_run_events",
             "director_hermes_runs",
             "director_messages",
@@ -100,6 +104,45 @@ def postgres_url() -> str:
     return value
 
 
+def test_publish_terminal_current_truth_lock_sql_is_deterministic_without_postgres() -> None:
+    calls: list[tuple[str, tuple[str, ...] | None]] = []
+
+    class RecordingPostgresConnection:
+        def execute(self, statement: str, parameters=None):
+            calls.append(
+                (
+                    " ".join(translate_sql(statement).split()),
+                    parameters,
+                )
+            )
+            return SimpleNamespace()
+
+    LocalProjectStore._lock_terminal_current_truth(
+        connection=RecordingPostgresConnection(),
+        project_id="project-a",
+        session_id="session-a",
+    )
+
+    assert calls == [
+        (
+            "SELECT session_id FROM editing_sessions "
+            "WHERE project_id = %s AND session_id = %s FOR UPDATE",
+            ("project-a", "session-a"),
+        ),
+        (
+            "INSERT INTO director_asset_index_revisions "
+            "(project_id, revision) VALUES (%s, 0) "
+            "ON CONFLICT (project_id) DO NOTHING",
+            ("project-a",),
+        ),
+        (
+            "SELECT revision FROM director_asset_index_revisions "
+            "WHERE project_id = %s FOR UPDATE",
+            ("project-a",),
+        ),
+    ]
+
+
 def test_postgres_store_bootstraps_and_lists_a_project(tmp_path: Path, postgres_url: str) -> None:
     store = PostgresProjectStore(tmp_path, database_url=postgres_url)
 
@@ -115,37 +158,714 @@ def test_postgres_store_bootstraps_and_lists_a_project(tmp_path: Path, postgres_
     }
 
 
-def test_postgres_store_durably_consumes_and_revokes_hermes_capabilities(
+def test_postgres_legacy_jti_only_hermes_capability_methods_never_create_authority(
     tmp_path: Path, postgres_url: str
 ) -> None:
     store = PostgresProjectStore(tmp_path, database_url=postgres_url)
     project = store.bootstrap_project(f"Hermes ledger {uuid4().hex}")
 
     assert store.consume_hermes_capability(
-        project_id=project.project_id, jti="consumed-jti", expires_at=1_900_000_000
-    ) == "accepted"
-    assert store.consume_hermes_capability(
-        project_id=project.project_id, jti="consumed-jti", expires_at=1_900_000_000
-    ) == "consumed"
-
+        project_id=project.project_id,
+        jti="missing-jti",
+        expires_at=1_900_000_000,
+    ) == "missing"
     store.revoke_hermes_capability(
-        project_id=project.project_id, jti="revoked-jti", expires_at=1_900_000_000
+        project_id=project.project_id,
+        jti="missing-jti",
+        expires_at=1_900_000_000,
     )
-    assert store.consume_hermes_capability(
-        project_id=project.project_id, jti="revoked-jti", expires_at=1_900_000_000
-    ) == "revoked"
-    store.revoke_hermes_capability(project_id=project.project_id, jti="expired-jti", expires_at=1)
-    assert store.consume_hermes_capability(
-        project_id=project.project_id, jti="fresh-jti", expires_at=1_900_000_000
-    ) == "accepted"
     connection = store._connection(project.project_id)
     try:
         assert connection.execute(
             "SELECT jti FROM hermes_capability_ledger WHERE project_id = ? AND jti = ?",
-            (project.project_id, "expired-jti"),
+            (project.project_id, "missing-jti"),
         ).fetchone() is None
     finally:
         connection.close()
+
+
+def test_postgres_hermes_capability_lifecycle_is_scoped_atomic_and_audited(
+    tmp_path: Path,
+    postgres_url: str,
+) -> None:
+    instant = datetime(2026, 7, 30, 12, 0, tzinfo=UTC)
+    store = PostgresProjectStore(
+        tmp_path,
+        database_url=postgres_url,
+        now=lambda: instant,
+    )
+    project = store.bootstrap_project(f"Hermes C3 lifecycle {uuid4().hex}")
+    prefix = uuid4().hex
+    read_id = f"{prefix}-read"
+    publish_id = f"{prefix}-publish"
+    expires_at = int(instant.timestamp()) + 300
+    try:
+        store.register_hermes_run_capabilities(
+            project_id=project.project_id,
+            conversation_id="conversation-1",
+            run_id="run-1",
+            session_id="session-1",
+            session_revision=3,
+            asset_index_revision=7,
+            capabilities=(
+                {
+                    "capability_id": read_id,
+                    "action": "read_context",
+                    "expires_at": expires_at,
+                },
+                {
+                    "capability_id": publish_id,
+                    "action": "publish_proposal",
+                    "expires_at": expires_at,
+                },
+            ),
+        )
+        assert store.get_expected_hermes_capability(
+            project_id=project.project_id,
+            conversation_id="conversation-1",
+            run_id="run-1",
+            action="read_context",
+        )["capability_id"] == read_id
+        assert store.consume_registered_hermes_capability(
+            project_id=project.project_id,
+            capability_id=read_id,
+            conversation_id="conversation-1",
+            run_id="run-1",
+            session_id="session-1",
+            session_revision=3,
+            asset_index_revision=7,
+            action="read_context",
+        ) == "accepted"
+        assert store.consume_registered_hermes_capability(
+            project_id=project.project_id,
+            capability_id=read_id,
+            conversation_id="conversation-1",
+            run_id="run-1",
+            session_id="session-1",
+            session_revision=3,
+            asset_index_revision=7,
+            action="read_context",
+        ) == "hermes_capability_replayed"
+        assert store.revoke_issued_hermes_capabilities(
+            project_id=project.project_id,
+            conversation_id="conversation-1",
+            run_id="run-1",
+            reason="hermes_capability_revoked",
+        ) == 1
+        assert store.revoke_issued_hermes_capabilities(
+            project_id=project.project_id,
+            conversation_id="conversation-1",
+            run_id="run-1",
+            reason="hermes_capability_revoked",
+        ) == 0
+        denial = store.record_hermes_capability_denial(
+            project_id=project.project_id,
+            conversation_id="missing-conversation",
+            run_id="missing-run",
+            action="read_context",
+            reason="hermes_capability_signature_invalid",
+        )
+        assert denial["capability_id"] is None
+
+        connection = store._connection(project.project_id)
+        try:
+            rows = connection.execute(
+                """
+                SELECT jti, lifecycle_version, state
+                FROM hermes_capability_ledger
+                WHERE project_id = ?
+                ORDER BY jti
+                """,
+                (project.project_id,),
+            ).fetchall()
+            audit_columns = {
+                str(row["column_name"])
+                for row in connection.execute(
+                    """
+                    SELECT column_name
+                    FROM information_schema.columns
+                    WHERE table_schema = current_schema()
+                      AND table_name = 'hermes_capability_audit'
+                    """
+                ).fetchall()
+            }
+        finally:
+            connection.close()
+        assert {(row["jti"], row["state"]) for row in rows} == {
+            (read_id, "consumed"),
+            (publish_id, "revoked"),
+        }
+        assert {row["lifecycle_version"] for row in rows} == {
+            "videobox.yujin-capability.v1"
+        }
+        assert audit_columns == {
+            "audit_event_id",
+            "capability_id",
+            "project_id",
+            "conversation_id",
+            "run_id",
+            "action",
+            "outcome",
+            "reason",
+            "occurred_at",
+        }
+    finally:
+        _cleanup_postgres_hermes_project(store, project.project_id)
+
+
+@pytest.mark.parametrize(
+    "inject_publish_audit_fault",
+    (False, True),
+    ids=("success", "fault-rollback"),
+)
+def test_postgres_publish_proposal_consume_is_atomic_with_terminal(
+    tmp_path: Path,
+    postgres_url: str,
+    monkeypatch: pytest.MonkeyPatch,
+    inject_publish_audit_fault: bool,
+) -> None:
+    instant = datetime(2026, 7, 30, 12, 0, tzinfo=UTC)
+    store = PostgresProjectStore(
+        tmp_path,
+        database_url=postgres_url,
+        now=lambda: instant,
+    )
+    project = store.bootstrap_project(
+        f"Hermes C3 publish terminal {uuid4().hex}"
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=f"timeline-{uuid4().hex}",
+        session_payload={
+            "segments": [{"segment_id": "segment-1"}],
+            "history": [],
+        },
+    )
+    conversation_id = f"conversation-{uuid4().hex}"
+    store.create_director_conversation(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+        conversation_id=conversation_id,
+    )
+    durable = store.begin_director_hermes_run(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+        conversation_id=conversation_id,
+        client_message_id=f"message-{uuid4().hex}",
+        user_text="proposal",
+        expected_session_revision=session["session_revision"],
+        expected_asset_index_revision=0,
+    )
+    prefix = uuid4().hex
+    publish_id = f"{prefix}-publish"
+    expires_at = int(instant.timestamp()) + 300
+    proposal_id = f"proposal-{uuid4().hex}"
+    candidate = DirectorCandidate(
+        candidate_id=f"candidate-{uuid4().hex}",
+        visible_reference_code="P00-C01",
+        media_type="broll",
+        asset_id="candidate-only",
+        library_asset_id=None,
+        reason_chips=("candidate",),
+        scores={},
+        availability="candidate_only",
+        review_status="pending",
+        preview_uri=None,
+        controls={},
+        expected_content_sha256=None,
+        media_revision="candidate-r1",
+        canonical_metadata={},
+    )
+    proposal = DirectorProposal(
+        proposal_id=proposal_id,
+        revision_code="P00",
+        revision=0,
+        base_session_revision=session["session_revision"],
+        asset_index_revision=0,
+        source_session_id=session["session_id"],
+        target_segment_ids=("segment-1",),
+        source_script_segment_ids=("segment-1",),
+        status="candidate_only",
+        diff={"proposal_mode": "candidate_only"},
+        expires_at=None,
+        candidates=(candidate,),
+    )
+    try:
+        store.register_hermes_run_capabilities(
+            project_id=project.project_id,
+            conversation_id=conversation_id,
+            run_id=durable["run_id"],
+            session_id=session["session_id"],
+            session_revision=session["session_revision"],
+            asset_index_revision=0,
+            capabilities=(
+                {
+                    "capability_id": f"{prefix}-read",
+                    "action": "read_context",
+                    "expires_at": expires_at,
+                },
+                {
+                    "capability_id": publish_id,
+                    "action": "publish_proposal",
+                    "expires_at": expires_at,
+                },
+            ),
+        )
+        if inject_publish_audit_fault:
+            original_append = store._append_hermes_capability_audit
+
+            def fail_after_consumed_audit(connection, **kwargs):
+                event = original_append(connection, **kwargs)
+                if kwargs["reason"] == "hermes_capability_consumed":
+                    raise OSError("postgres publish audit fault")
+                return event
+
+            monkeypatch.setattr(
+                store,
+                "_append_hermes_capability_audit",
+                fail_after_consumed_audit,
+            )
+        completion_kwargs = {
+            "project_id": project.project_id,
+            "run_id": durable["run_id"],
+            "owner_token": durable["owner_token"],
+            "status": "completed",
+            "assistant_text": "candidate",
+            "retryable": False,
+            "proposal": proposal,
+            "verified_publish_capability": {
+                "capability_id": publish_id,
+                "project_id": project.project_id,
+                "conversation_id": conversation_id,
+                "run_id": durable["run_id"],
+                "session_id": session["session_id"],
+                "session_revision": session["session_revision"],
+                "asset_index_revision": 0,
+                "action": "publish_proposal",
+                "issued_at": int(instant.timestamp()),
+                "not_before": int(instant.timestamp()),
+                "expires_at": expires_at,
+            },
+        }
+        if inject_publish_audit_fault:
+            with pytest.raises(
+                OSError,
+                match="postgres publish audit fault",
+            ):
+                store.complete_director_hermes_run(**completion_kwargs)
+        else:
+            assert store.complete_director_hermes_run(**completion_kwargs)
+        connection = store._connection(project.project_id)
+        try:
+            publish = connection.execute(
+                """
+                SELECT state FROM hermes_capability_ledger
+                WHERE project_id = ? AND jti = ?
+                """,
+                (project.project_id, publish_id),
+            ).fetchone()
+            accepted_audit = connection.execute(
+                """
+                SELECT COUNT(*) AS count FROM hermes_capability_audit
+                WHERE project_id = ? AND capability_id = ?
+                  AND reason = 'hermes_capability_consumed'
+                """,
+                (project.project_id, publish_id),
+            ).fetchone()
+            run = connection.execute(
+                """
+                SELECT status FROM director_hermes_runs
+                WHERE project_id = ? AND run_id = ?
+                """,
+                (project.project_id, durable["run_id"]),
+            ).fetchone()
+            terminal_count = connection.execute(
+                """
+                SELECT COUNT(*) AS count FROM director_hermes_run_events
+                WHERE project_id = ? AND run_id = ?
+                  AND event_type IN ('run_completed', 'blocked')
+                """,
+                (project.project_id, durable["run_id"]),
+            ).fetchone()
+        finally:
+            connection.close()
+        if inject_publish_audit_fault:
+            assert publish["state"] == "issued"
+            assert accepted_audit["count"] == 0
+            assert run["status"] == "pending"
+            assert terminal_count["count"] == 0
+            with pytest.raises(KeyError, match="Director proposal not found"):
+                store.get_director_proposal(
+                    project.project_id,
+                    proposal_id,
+                )
+        else:
+            assert publish["state"] == "consumed"
+            assert accepted_audit["count"] == 1
+            assert run["status"] == "completed"
+            assert terminal_count["count"] == 1
+            assert store.get_director_proposal(
+                project.project_id,
+                proposal_id,
+            ).status == "candidate_only"
+    finally:
+        connection = store._connection(project.project_id)
+        try:
+            connection.execute(
+                "DELETE FROM director_proposal_lifecycle_events "
+                "WHERE proposal_id = ?",
+                (proposal_id,),
+            )
+            connection.execute(
+                "DELETE FROM director_proposals "
+                "WHERE project_id = ? AND proposal_id = ?",
+                (project.project_id, proposal_id),
+            )
+            connection.execute(
+                "DELETE FROM director_proposal_revisions "
+                "WHERE project_id = ?",
+                (project.project_id,),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+        _cleanup_postgres_hermes_project(store, project.project_id)
+
+
+def test_postgres_publish_terminal_serializes_current_truth_before_session_writer(
+    tmp_path: Path,
+    postgres_url: str,
+) -> None:
+    instant = datetime(2026, 7, 30, 12, 0, tzinfo=UTC)
+    store = PostgresProjectStore(
+        tmp_path,
+        database_url=postgres_url,
+        now=lambda: instant,
+    )
+    project = store.bootstrap_project(
+        f"Hermes C3 publish current truth {uuid4().hex}"
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=f"timeline-{uuid4().hex}",
+        session_payload={
+            "segments": [{"segment_id": "segment-1"}],
+            "history": [],
+        },
+    )
+    conversation_id = f"conversation-{uuid4().hex}"
+    store.create_director_conversation(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+        conversation_id=conversation_id,
+    )
+    durable = store.begin_director_hermes_run(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+        conversation_id=conversation_id,
+        client_message_id=f"message-{uuid4().hex}",
+        user_text="proposal",
+        expected_session_revision=session["session_revision"],
+        expected_asset_index_revision=0,
+    )
+    prefix = uuid4().hex
+    publish_id = f"{prefix}-publish"
+    expires_at = int(instant.timestamp()) + 300
+    proposal_id = f"proposal-{uuid4().hex}"
+    proposal = DirectorProposal(
+        proposal_id=proposal_id,
+        revision_code="P00",
+        revision=0,
+        base_session_revision=session["session_revision"],
+        asset_index_revision=0,
+        source_session_id=session["session_id"],
+        target_segment_ids=("segment-1",),
+        source_script_segment_ids=("segment-1",),
+        status="candidate_only",
+        diff={"proposal_mode": "candidate_only"},
+        expires_at=None,
+        candidates=(
+            DirectorCandidate(
+                candidate_id=f"candidate-{uuid4().hex}",
+                visible_reference_code="P00-C01",
+                media_type="broll",
+                asset_id="candidate-only",
+                library_asset_id=None,
+                reason_chips=("candidate",),
+                scores={},
+                availability="candidate_only",
+                review_status="pending",
+                preview_uri=None,
+                controls={},
+                expected_content_sha256=None,
+                media_revision="candidate-r1",
+                canonical_metadata={},
+            ),
+        ),
+    )
+    verified = {
+        "capability_id": publish_id,
+        "project_id": project.project_id,
+        "conversation_id": conversation_id,
+        "run_id": durable["run_id"],
+        "session_id": session["session_id"],
+        "session_revision": session["session_revision"],
+        "asset_index_revision": 0,
+        "action": "publish_proposal",
+        "issued_at": int(instant.timestamp()),
+        "not_before": int(instant.timestamp()),
+        "expires_at": expires_at,
+    }
+    truth_checked = Event()
+    release_terminal = Event()
+    original_decide = store._decide_terminal_publish_capability
+
+    def pause_after_current_truth(**kwargs):
+        decision = original_decide(**kwargs)
+        truth_checked.set()
+        if not release_terminal.wait(timeout=10):
+            raise TimeoutError("terminal current-truth gate timed out")
+        return decision
+
+    try:
+        store.register_hermes_run_capabilities(
+            project_id=project.project_id,
+            conversation_id=conversation_id,
+            run_id=durable["run_id"],
+            session_id=session["session_id"],
+            session_revision=session["session_revision"],
+            asset_index_revision=0,
+            capabilities=(
+                {
+                    "capability_id": f"{prefix}-read",
+                    "action": "read_context",
+                    "expires_at": expires_at,
+                },
+                {
+                    "capability_id": publish_id,
+                    "action": "publish_proposal",
+                    "expires_at": expires_at,
+                },
+            ),
+        )
+        with patch.object(
+            store,
+            "_decide_terminal_publish_capability",
+            pause_after_current_truth,
+        ):
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                terminal_future = executor.submit(
+                    store.complete_director_hermes_run,
+                    project_id=project.project_id,
+                    run_id=durable["run_id"],
+                    owner_token=durable["owner_token"],
+                    status="completed",
+                    assistant_text="candidate",
+                    retryable=False,
+                    proposal=proposal,
+                    verified_publish_capability=verified,
+                )
+                assert truth_checked.wait(timeout=10)
+                writer_payload = deepcopy(session)
+                writer_payload["history"] = ["concurrent-edit"]
+                writer_future = executor.submit(
+                    store.update_editing_session,
+                    project_id=project.project_id,
+                    session_id=session["session_id"],
+                    session_payload=writer_payload,
+                    expected_revision=session["session_revision"],
+                )
+                writer_finished_while_terminal_paused = False
+                try:
+                    writer_result = writer_future.result(timeout=1)
+                    writer_finished_while_terminal_paused = True
+                except FutureTimeoutError:
+                    writer_result = None
+                finally:
+                    release_terminal.set()
+                terminal_result = terminal_future.result(timeout=10)
+                if writer_result is None:
+                    writer_result = writer_future.result(timeout=10)
+
+        assert writer_finished_while_terminal_paused is False
+        assert terminal_result is True
+        assert writer_result["session_revision"] == 2
+        assert store.get_asset_index_revision(project.project_id) == 0
+        assert store.get_director_proposal(
+            project.project_id,
+            proposal_id,
+        ).status == "candidate_only"
+    finally:
+        release_terminal.set()
+        connection = store._connection(project.project_id)
+        try:
+            connection.execute(
+                "DELETE FROM director_proposal_lifecycle_events "
+                "WHERE proposal_id = ?",
+                (proposal_id,),
+            )
+            connection.execute(
+                "DELETE FROM director_proposals "
+                "WHERE project_id = ? AND proposal_id = ?",
+                (project.project_id, proposal_id),
+            )
+            connection.execute(
+                "DELETE FROM director_proposal_revisions "
+                "WHERE project_id = ?",
+                (project.project_id,),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+        _cleanup_postgres_hermes_project(store, project.project_id)
+
+
+def test_postgres_hermes_capability_expired_issued_consume_is_denied_and_audited(
+    tmp_path: Path,
+    postgres_url: str,
+) -> None:
+    clock = [datetime(2026, 7, 30, 12, 0, tzinfo=UTC)]
+    store = PostgresProjectStore(
+        tmp_path,
+        database_url=postgres_url,
+        now=lambda: clock[0],
+    )
+    project = store.bootstrap_project(f"Hermes C3 expired {uuid4().hex}")
+    prefix = uuid4().hex
+    expires_at = int(clock[0].timestamp()) + 300
+    try:
+        store.register_hermes_run_capabilities(
+            project_id=project.project_id,
+            conversation_id="conversation-1",
+            run_id="run-1",
+            session_id="session-1",
+            session_revision=3,
+            asset_index_revision=7,
+            capabilities=(
+                {
+                    "capability_id": f"{prefix}-read",
+                    "action": "read_context",
+                    "expires_at": expires_at,
+                },
+                {
+                    "capability_id": f"{prefix}-publish",
+                    "action": "publish_proposal",
+                    "expires_at": expires_at,
+                },
+            ),
+        )
+        clock[0] = datetime.fromtimestamp(expires_at + 1, tz=UTC)
+
+        assert store.consume_registered_hermes_capability(
+            project_id=project.project_id,
+            capability_id=f"{prefix}-read",
+            conversation_id="conversation-1",
+            run_id="run-1",
+            session_id="session-1",
+            session_revision=3,
+            asset_index_revision=7,
+            action="read_context",
+        ) == "hermes_capability_expired"
+
+        connection = store._connection(project.project_id)
+        try:
+            row = connection.execute(
+                """
+                SELECT state FROM hermes_capability_ledger
+                WHERE project_id = ? AND jti = ?
+                """,
+                (project.project_id, f"{prefix}-read"),
+            ).fetchone()
+            denial = connection.execute(
+                """
+                SELECT capability_id, outcome, reason
+                FROM hermes_capability_audit
+                WHERE project_id = ? AND capability_id = ?
+                  AND reason = 'hermes_capability_expired'
+                """,
+                (project.project_id, f"{prefix}-read"),
+            ).fetchone()
+        finally:
+            connection.close()
+        assert row["state"] == "issued"
+        assert dict(denial) == {
+            "capability_id": f"{prefix}-read",
+            "outcome": "denied",
+            "reason": "hermes_capability_expired",
+        }
+    finally:
+        _cleanup_postgres_hermes_project(store, project.project_id)
+
+
+def test_postgres_hermes_capability_migrates_pre_c3_rows_without_fabrication(
+    tmp_path: Path,
+    postgres_url: str,
+) -> None:
+    legacy_project_id = f"legacy-{uuid4().hex}"
+    connection = _PostgresConnection(postgres_url)
+    try:
+        connection.execute("DROP TABLE IF EXISTS hermes_capability_audit")
+        connection.execute("DROP TABLE IF EXISTS hermes_capability_ledger")
+        connection.execute(
+            """
+            CREATE TABLE hermes_capability_ledger (
+                project_id TEXT NOT NULL,
+                jti TEXT NOT NULL,
+                state TEXT NOT NULL,
+                expires_at BIGINT NOT NULL,
+                recorded_at TEXT NOT NULL,
+                PRIMARY KEY (project_id, jti)
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO hermes_capability_ledger (
+                project_id, jti, state, expires_at, recorded_at
+            ) VALUES (?, 'legacy-jti', 'revoked', 1900000000, ?)
+            """,
+            (legacy_project_id, datetime(2026, 7, 30, tzinfo=UTC).isoformat()),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    store = PostgresProjectStore(tmp_path, database_url=postgres_url)
+    connection = store._connection(legacy_project_id)
+    try:
+        legacy = connection.execute(
+            """
+            SELECT * FROM hermes_capability_ledger
+            WHERE project_id = ? AND jti = 'legacy-jti'
+            """,
+            (legacy_project_id,),
+        ).fetchone()
+        audit_count = connection.execute(
+            "SELECT COUNT(*) AS count FROM hermes_capability_audit"
+        ).fetchone()["count"]
+    finally:
+        connection.close()
+    assert legacy["lifecycle_version"] == "legacy_retired"
+    assert legacy["state"] == "revoked"
+    assert all(
+        legacy[field] is None
+        for field in (
+            "conversation_id",
+            "run_id",
+            "session_id",
+            "session_revision",
+            "asset_index_revision",
+            "action",
+        )
+    )
+    assert legacy["updated_at"] == legacy["recorded_at"]
+    assert audit_count == 0
+    assert store.get_expected_hermes_capability(
+        project_id=legacy_project_id,
+        conversation_id="conversation-1",
+        run_id="run-1",
+        action="read_context",
+    ) is None
 
 
 def test_postgres_hermes_events_use_durable_cursor_and_terminal_cas(
@@ -635,78 +1355,206 @@ def test_postgres_retry_is_linked_and_identity_atomic(
         _cleanup_postgres_hermes_project(store, project.project_id)
 
 
-def test_sqlite_store_purges_expired_hermes_capability_ledger_rows(tmp_path: Path) -> None:
+def test_sqlite_legacy_jti_only_hermes_capability_methods_never_create_authority(
+    tmp_path: Path,
+) -> None:
     instant = datetime(2026, 7, 19, tzinfo=UTC)
     store = LocalProjectStore(tmp_path, now=lambda: instant)
-    project = store.bootstrap_project("Hermes expiry cleanup")
+    project = store.bootstrap_project("Hermes legacy JTI-only denial")
 
-    store.revoke_hermes_capability(project_id=project.project_id, jti="expired-jti", expires_at=1)
     assert store.consume_hermes_capability(
         project_id=project.project_id,
-        jti="fresh-jti",
+        jti="missing-jti",
         expires_at=int(instant.timestamp()) + 120,
-    ) == "accepted"
+    ) == "missing"
+    store.revoke_hermes_capability(
+        project_id=project.project_id,
+        jti="missing-jti",
+        expires_at=int(instant.timestamp()) + 120,
+    )
 
     with sqlite3.connect(store.database_path(project.project_id)) as connection:
         rows = connection.execute("SELECT jti FROM hermes_capability_ledger ORDER BY jti").fetchall()
-    assert rows == [("fresh-jti",)]
+    assert rows == []
 
 
-def test_sqlite_concurrent_hermes_capability_consumption_has_one_winner(tmp_path: Path) -> None:
+def test_sqlite_concurrent_registered_hermes_capability_consumption_has_one_winner(
+    tmp_path: Path,
+) -> None:
     store = LocalProjectStore(tmp_path)
     project = store.bootstrap_project("Hermes concurrent SQLite ledger")
-    barrier = Barrier(2)
-    original_connection = store._connection
-
-    class GateConnection:
-        def __init__(self, connection) -> None:
-            self._connection = connection
-
-        def execute(self, statement: str, parameters=None):
-            if "INSERT INTO hermes_capability_ledger" in statement:
-                barrier.wait(timeout=10)
-            return self._connection.execute(statement, parameters or ())
-
-        def __getattr__(self, name: str):
-            return getattr(self._connection, name)
-
-    def gated_connection(project_id: str):
-        return GateConnection(original_connection(project_id))
-
-    with patch.object(store, "_connection", side_effect=gated_connection):
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            results = list(
-                executor.map(
-                    lambda _: store.consume_hermes_capability(
-                        project_id=project.project_id,
-                        jti="concurrent-jti",
-                        expires_at=1_900_000_000,
-                    ),
-                    range(2),
-                )
+    store.register_hermes_run_capabilities(
+        project_id=project.project_id,
+        conversation_id="conversation-1",
+        run_id="run-1",
+        session_id="session-1",
+        session_revision=1,
+        asset_index_revision=0,
+        capabilities=(
+            {
+                "capability_id": "concurrent-jti",
+                "action": "read_context",
+                "expires_at": 1_900_000_000,
+            },
+            {
+                "capability_id": "publish-jti",
+                "action": "publish_proposal",
+                "expires_at": 1_900_000_000,
+            },
+        ),
+    )
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(
+            executor.map(
+                lambda _: store.consume_registered_hermes_capability(
+                    project_id=project.project_id,
+                    capability_id="concurrent-jti",
+                    conversation_id="conversation-1",
+                    run_id="run-1",
+                    session_id="session-1",
+                    session_revision=1,
+                    asset_index_revision=0,
+                    action="read_context",
+                ),
+                range(2),
             )
+        )
 
-    assert sorted(results) == ["accepted", "consumed"]
+    assert sorted(results) == ["accepted", "hermes_capability_replayed"]
 
 
-def test_postgres_concurrent_hermes_capability_consumption_has_one_winner(
+def test_postgres_concurrent_registered_hermes_capability_consumption_has_one_winner(
     tmp_path: Path, postgres_url: str
 ) -> None:
     store = PostgresProjectStore(tmp_path, database_url=postgres_url)
     project = store.bootstrap_project(f"Hermes concurrent ledger {uuid4().hex}")
+    store.register_hermes_run_capabilities(
+        project_id=project.project_id,
+        conversation_id="conversation-1",
+        run_id="run-1",
+        session_id="session-1",
+        session_revision=1,
+        asset_index_revision=0,
+        capabilities=(
+            {
+                "capability_id": "concurrent-jti",
+                "action": "read_context",
+                "expires_at": 1_900_000_000,
+            },
+            {
+                "capability_id": "publish-jti",
+                "action": "publish_proposal",
+                "expires_at": 1_900_000_000,
+            },
+        ),
+    )
 
     results = _run_two_requests_at_same_insert(
-        statement_marker="INSERT INTO hermes_capability_ledger",
+        statement_marker="BEGIN",
         request=lambda: {
-            "state": store.consume_hermes_capability(
+            "state": store.consume_registered_hermes_capability(
                 project_id=project.project_id,
-                jti="concurrent-jti",
-                expires_at=1_784_000_000,
+                capability_id="concurrent-jti",
+                conversation_id="conversation-1",
+                run_id="run-1",
+                session_id="session-1",
+                session_revision=1,
+                asset_index_revision=0,
+                action="read_context",
             )
         },
     )
 
-    assert sorted(item["state"] for item in results) == ["accepted", "consumed"]
+    assert sorted(item["state"] for item in results) == [
+        "accepted",
+        "hermes_capability_replayed",
+    ]
+
+
+def test_postgres_concurrent_same_scope_hermes_capability_registration_has_one_pair(
+    tmp_path: Path,
+    postgres_url: str,
+) -> None:
+    instant = datetime(2026, 7, 30, 12, 0, tzinfo=UTC)
+    store = PostgresProjectStore(
+        tmp_path,
+        database_url=postgres_url,
+        now=lambda: instant,
+    )
+    project = store.bootstrap_project(
+        f"Hermes concurrent registration {uuid4().hex}"
+    )
+    prefix = uuid4().hex
+    barrier = Barrier(2)
+    original_execute = _PostgresConnection.execute
+
+    def gate_begin(self, statement: str, parameters=None):
+        if statement.strip() == "BEGIN":
+            barrier.wait(timeout=10)
+        return original_execute(self, statement, parameters)
+
+    def register(index: int) -> str:
+        try:
+            store.register_hermes_run_capabilities(
+                project_id=project.project_id,
+                conversation_id="conversation-1",
+                run_id="run-1",
+                session_id="session-1",
+                session_revision=3,
+                asset_index_revision=7,
+                capabilities=(
+                    {
+                        "capability_id": f"{prefix}-{index}-read",
+                        "action": "read_context",
+                        "expires_at": int(instant.timestamp()) + 300,
+                    },
+                    {
+                        "capability_id": f"{prefix}-{index}-publish",
+                        "action": "publish_proposal",
+                        "expires_at": int(instant.timestamp()) + 300,
+                    },
+                ),
+            )
+        except ValueError as exc:
+            assert str(exc) == "hermes_capability_registration_conflict"
+            return "conflict"
+        return "accepted"
+
+    try:
+        with patch.object(_PostgresConnection, "execute", gate_begin):
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                results = list(executor.map(register, range(2)))
+
+        connection = store._connection(project.project_id)
+        try:
+            rows = connection.execute(
+                """
+                SELECT jti, action FROM hermes_capability_ledger
+                WHERE project_id = ?
+                  AND lifecycle_version = 'videobox.yujin-capability.v1'
+                ORDER BY action
+                """,
+                (project.project_id,),
+            ).fetchall()
+            audit_count = connection.execute(
+                """
+                SELECT COUNT(*) AS count FROM hermes_capability_audit
+                WHERE project_id = ?
+                  AND reason = 'hermes_capability_registered'
+                """,
+                (project.project_id,),
+            ).fetchone()["count"]
+        finally:
+            connection.close()
+        assert sorted(results) == ["accepted", "conflict"]
+        assert len(rows) == 2
+        assert {row["action"] for row in rows} == {
+            "read_context",
+            "publish_proposal",
+        }
+        assert audit_count == 2
+    finally:
+        _cleanup_postgres_hermes_project(store, project.project_id)
 
 
 def test_postgres_concurrent_creation_brief_reuses_one_idempotency_winner(

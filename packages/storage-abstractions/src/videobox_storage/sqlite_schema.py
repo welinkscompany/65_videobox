@@ -42,6 +42,39 @@ ARTIFACT_SOURCE_SESSION_BACKFILL_STATEMENTS = tuple(
     for table in ARTIFACT_FRESHNESS_TABLES
 )
 
+HERMES_CAPABILITY_LEDGER_SCHEMA_STATEMENT = """
+    CREATE TABLE IF NOT EXISTS hermes_capability_ledger (
+        project_id TEXT NOT NULL,
+        jti TEXT NOT NULL,
+        lifecycle_version TEXT NOT NULL DEFAULT 'legacy_retired',
+        conversation_id TEXT,
+        run_id TEXT,
+        session_id TEXT,
+        session_revision INTEGER,
+        asset_index_revision INTEGER,
+        action TEXT,
+        state TEXT NOT NULL,
+        expires_at INTEGER NOT NULL,
+        recorded_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (project_id, jti)
+    )
+    """
+
+HERMES_CAPABILITY_AUDIT_SCHEMA_STATEMENT = """
+    CREATE TABLE IF NOT EXISTS hermes_capability_audit (
+        audit_event_id TEXT PRIMARY KEY,
+        capability_id TEXT,
+        project_id TEXT NOT NULL,
+        conversation_id TEXT,
+        run_id TEXT,
+        action TEXT,
+        outcome TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        occurred_at TEXT NOT NULL
+    )
+    """
+
 
 PROJECT_SCHEMA_STATEMENTS = (
     """
@@ -422,16 +455,8 @@ PROJECT_SCHEMA_STATEMENTS = (
         invalidated_at TEXT, invalidated_reason TEXT
     )
     """,
-    """
-    CREATE TABLE IF NOT EXISTS hermes_capability_ledger (
-        project_id TEXT NOT NULL,
-        jti TEXT NOT NULL,
-        state TEXT NOT NULL,
-        expires_at INTEGER NOT NULL,
-        recorded_at TEXT NOT NULL,
-        PRIMARY KEY (project_id, jti)
-    )
-    """,
+    HERMES_CAPABILITY_LEDGER_SCHEMA_STATEMENT,
+    HERMES_CAPABILITY_AUDIT_SCHEMA_STATEMENT,
     """
     CREATE TABLE IF NOT EXISTS director_hermes_runs (
         run_id TEXT PRIMARY KEY,
@@ -503,5 +528,13 @@ PROJECT_SCHEMA_STATEMENTS = (
     """
     CREATE INDEX IF NOT EXISTS idx_hermes_capability_ledger_expiry
     ON hermes_capability_ledger (project_id, expires_at)
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_hermes_capability_audit_project_time
+    ON hermes_capability_audit (project_id, occurred_at)
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_hermes_capability_audit_run_time
+    ON hermes_capability_audit (project_id, run_id, occurred_at)
     """,
 )

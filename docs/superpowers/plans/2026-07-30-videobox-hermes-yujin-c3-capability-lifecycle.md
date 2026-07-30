@@ -30,7 +30,7 @@ capability, source copy, OpenCut, Mem0, SaaS, 자동 Apply, Task 9/CapCut 사람
 
 ## Task 1 — Dependency and exact Ed25519 token contract
 
-- [ ] **1.1 RED:** clean development dependency and token contract tests fail.
+- [x] **1.1 RED:** clean development dependency and token contract tests fail.
 
 **Files:**
 
@@ -54,7 +54,8 @@ capability, source copy, OpenCut, Mem0, SaaS, 자동 Apply, Task 9/CapCut 사람
      future/expired token denial;
    - `apply`, `render`, `export`, DB, filesystem, raw-media action cannot be
      issued or verified;
-   - private key is never accepted by the API verifier constructor.
+   - API verifier exposes no `private_key` parameter. Raw 32-byte private and
+     public material cannot be structurally distinguished; deployed runtime key ownership is verified in Task 7.
 2. Run and capture RED:
 
    ```powershell
@@ -63,7 +64,7 @@ capability, source copy, OpenCut, Mem0, SaaS, 자동 Apply, Task 9/CapCut 사람
 
    Expected: missing dependency/module or missing Ed25519 contract failures.
 
-- [ ] **1.2 GREEN:** implement only the pure issuer/verifier contract.
+- [x] **1.2 GREEN:** implement only the pure issuer/verifier contract.
 
 3. Pin `cryptography==45.0.6` in all three requirement files and install the
    updated development requirements into `.venv`.
@@ -92,7 +93,7 @@ capability, source copy, OpenCut, Mem0, SaaS, 자동 Apply, Task 9/CapCut 사람
 
 ## Task 2 — Durable scoped ledger, audit, and legacy migration
 
-- [ ] **2.1 RED:** exact registration/consume/revoke/audit/migration tests fail.
+- [x] **2.1 RED:** exact registration/consume/revoke/audit/migration tests fail.
 
 **Files:**
 
@@ -126,7 +127,7 @@ capability, source copy, OpenCut, Mem0, SaaS, 자동 Apply, Task 9/CapCut 사람
    .\.venv\Scripts\python.exe -m pytest tests/test_hermes_yujin_capability_lifecycle.py tests/test_postgres_project_store.py -k "hermes_capability and not postgres" -q
    ```
 
-- [ ] **2.2 GREEN:** implement one durable authority ledger and audit.
+- [x] **2.2 GREEN:** implement one durable authority ledger and audit.
 
 4. Rebuild/migrate `hermes_capability_ledger` with:
    - existing `(project_id, jti)` identity retained;
@@ -155,7 +156,7 @@ capability, source copy, OpenCut, Mem0, SaaS, 자동 Apply, Task 9/CapCut 사람
 
 ## Task 3 — Gateway issue, reservation ownership, and token non-exposure
 
-- [ ] **3.1 RED:** Gateway reserve/attach/stream tests expose missing lifecycle.
+- [x] **3.1 RED:** Gateway reserve/attach/stream tests expose missing lifecycle.
 
 **Files:**
 
@@ -186,7 +187,7 @@ capability, source copy, OpenCut, Mem0, SaaS, 자동 Apply, Task 9/CapCut 사람
    .\.venv\Scripts\python.exe -m pytest tests/test_agent_gateway_api.py tests/test_agent_gateway_creator_context.py tests/test_agent_gateway_hermes_rpc_client.py -q
    ```
 
-- [ ] **3.2 GREEN:** extend the existing reservation, not the network topology.
+- [x] **3.2 GREEN:** extend the existing reservation, not the network topology.
 
 3. Inject `YujinCapabilityIssuer` into `CreatorContextLedger/create_app`.
 4. Make `reserve` return a structured bundle containing:
@@ -213,7 +214,7 @@ capability, source copy, OpenCut, Mem0, SaaS, 자동 Apply, Task 9/CapCut 사람
 
 ## Task 4 — API reservation/register/read-consume/attach order
 
-- [ ] **4.1 RED:** reverse-order and failure-path client/service tests fail.
+- [x] **4.1 RED:** reverse-order and failure-path client/service tests fail.
 
 **Files:**
 
@@ -252,7 +253,7 @@ capability, source copy, OpenCut, Mem0, SaaS, 자동 Apply, Task 9/CapCut 사람
    .\.venv\Scripts\python.exe -m pytest tests/test_agent_gateway_client.py tests/test_hermes_run_service.py -q
    ```
 
-- [ ] **4.2 GREEN:** split prepare into explicit reservation and attach phases.
+- [x] **4.2 GREEN:** split prepare into explicit reservation and attach phases.
 
 4. Add strict `AgentGatewayReservation`/capability metadata models.
 5. Split `prepare_run` internally into:
@@ -273,7 +274,7 @@ capability, source copy, OpenCut, Mem0, SaaS, 자동 Apply, Task 9/CapCut 사람
 
 ## Task 5 — Publish verification and atomic terminal transaction
 
-- [ ] **5.1 RED:** proposal persistence is impossible without exact publish consume.
+- [x] **5.1 RED:** proposal persistence is impossible without exact publish consume.
 
 **Files:**
 
@@ -305,7 +306,7 @@ capability, source copy, OpenCut, Mem0, SaaS, 자동 Apply, Task 9/CapCut 사람
    .\.venv\Scripts\python.exe -m pytest tests/test_hermes_yujin_capability_lifecycle.py tests/test_hermes_run_service.py tests/test_postgres_project_store.py -k "hermes_capability or publish_proposal" -q
    ```
 
-- [ ] **5.2 GREEN:** bind verified publish authority to terminal CAS.
+- [x] **5.2 GREEN:** bind verified publish authority to terminal CAS.
 
 3. Extend `AgentGatewayEvent` with process-local terminal capability data that
    is never serialized to public SSE/messages/proposals.
@@ -468,7 +469,7 @@ skip.
        if ($LASTEXITCODE -ne 0) { throw "C3 disposable PostgreSQL did not become ready." }
        $c3PgPort = ((docker port $c3PgName 5432/tcp) -split ":")[-1]
        $env:VIDEOBOX_TEST_POSTGRES_URL = "postgresql://postgres:videobox-c3-test@127.0.0.1:$c3PgPort/videobox"
-       .\.venv\Scripts\python.exe -m pytest tests/test_postgres_project_store.py -k "hermes_capability" -q
+       .\.venv\Scripts\python.exe -m pytest tests/test_postgres_project_store.py -k "hermes_capability or publish_proposal or publish_terminal" -q
        if ($LASTEXITCODE -ne 0) { throw "C3 PostgreSQL capability tests failed." }
    }
    finally {

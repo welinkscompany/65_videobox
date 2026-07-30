@@ -2,17 +2,20 @@
 
 from __future__ import annotations
 
+import base64
 from collections.abc import AsyncIterator, Iterator
 import hmac
 import json
 import os
 import re
+import uuid
 
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
+from videobox_agent_gateway.context_capabilities import YujinCapabilityIssuer
 from videobox_agent_gateway.creator_context import (
     CreatorContextLedger,
     GatewayContextAttachRequest,
@@ -65,6 +68,11 @@ _MAX_PUBLIC_EVENTS = 512
 _QUARANTINE_CHARS = 256
 _MAX_UNRESOLVED_QUARANTINE_BYTES = 4_096
 _MAX_PUBLIC_DELTA_BYTES = 32_000
+_CAPABILITY_PRIVATE_KEY_B64 = re.compile(r"[A-Za-z0-9_-]{43}\Z", re.ASCII)
+_CAPABILITY_KEY_ID = re.compile(
+    r"[A-Za-z0-9][A-Za-z0-9._:-]{0,254}\Z",
+    re.ASCII,
+)
 
 
 def _valid_service_token(value: str) -> bool:
@@ -80,10 +88,15 @@ def _valid_service_token(value: str) -> bool:
 
 
 async def _stream_public_lines(
-    hermes_client, *, text: str, run_id: str | None = None
+    hermes_client,
+    *,
+    text: str,
+    run_id: str | None = None,
+    publish_capability_token: str | None = None,
 ) -> AsyncIterator[bytes]:
     """Translate the strict Hermes stream into public NDJSON frames."""
 
+    stream = None
     try:
         assembled = ""
         assembled_bytes = 0
@@ -150,12 +163,24 @@ async def _stream_public_lines(
                     final_suffix, _MAX_PUBLIC_DELTA_BYTES
                 ):
                     yield _encode_public("text_delta", public_chunk)
-            yield _encode_public("run_completed", final_text)
+            yield _encode_public(
+                "run_completed",
+                final_text,
+                publish_capability_token=publish_capability_token,
+            )
             return
         else:
             raise ValueError("gateway_completion_missing")
     except Exception:
         yield b'{"event_type":"blocked","text":"","retryable":true}\n'
+    finally:
+        if stream is not None:
+            close = getattr(stream, "aclose", None)
+            if callable(close):
+                try:
+                    await close()
+                except Exception:
+                    pass
 
 
 def _earliest_unresolved_sensitive_start(text: str) -> int | None:
@@ -282,10 +307,20 @@ def _skip_whitespace(text: str, start: int) -> int:
     return start
 
 
-def _encode_public(event_type: str, text: str) -> bytes:
+def _encode_public(
+    event_type: str,
+    text: str,
+    *,
+    publish_capability_token: str | None = None,
+) -> bytes:
+    payload: dict[str, str] = {"event_type": event_type, "text": text}
+    if publish_capability_token is not None:
+        if event_type != "run_completed":
+            raise ValueError("gateway_capability_frame_invalid")
+        payload["publish_capability_token"] = publish_capability_token
     return (
         json.dumps(
-            {"event_type": event_type, "text": text},
+            payload,
             ensure_ascii=False,
             separators=(",", ":"),
         )
@@ -312,10 +347,13 @@ def create_app(
     hermes_client=None,
     service_token: str | None = None,
     context_ledger: CreatorContextLedger | None = None,
+    capability_issuer: YujinCapabilityIssuer | None = None,
 ) -> FastAPI:
     if hermes_client is not None and service_token is not None:
         if not _valid_service_token(service_token):
             raise ValueError("gateway_service_token_invalid")
+        if context_ledger is None and capability_issuer is None:
+            raise ValueError("gateway_capability_issuer_required")
     app = FastAPI(
         title="VideoBox Agent Gateway",
         docs_url=None,
@@ -343,7 +381,9 @@ def create_app(
         }
 
     if hermes_client is not None and service_token:
-        ledger = context_ledger or CreatorContextLedger()
+        ledger = context_ledger or CreatorContextLedger(
+            capability_issuer=capability_issuer,
+        )
 
         def require_service_token(authorization: str | None) -> None:
             expected = f"Bearer {service_token}"
@@ -356,11 +396,11 @@ def create_app(
         async def reserve_run(
             body: GatewayReservationRequest,
             authorization: str | None = Header(default=None),
-        ) -> dict[str, str | int]:
+        ) -> dict[str, object]:
             require_service_token(authorization)
             identity = GatewayRunIdentity.model_validate(body.model_dump())
             try:
-                ticket = ledger.reserve(identity)
+                reservation = ledger.reserve(identity)
             except OverflowError as error:
                 raise HTTPException(
                     status_code=503, detail="gateway_reservation_unavailable"
@@ -371,8 +411,14 @@ def create_app(
                 ) from error
             return {
                 "run_id": identity.run_id,
-                "attach_context": ticket,
-                "expires_in_seconds": 30,
+                "attach_context": reservation.attach_context,
+                "expires_in_seconds": reservation.expires_in_seconds,
+                "read_capability_token": (
+                    reservation.read_capability_token
+                ),
+                "capabilities": [
+                    item.as_dict() for item in reservation.capabilities
+                ],
             }
 
         @app.post(
@@ -414,7 +460,11 @@ def create_app(
         ) -> StreamingResponse:
             require_service_token(authorization)
             try:
-                _identity, context_json = ledger.consume(run_id=run_id)
+                (
+                    _identity,
+                    context_json,
+                    publish_capability_token,
+                ) = ledger.consume(run_id=run_id)
             except ValueError as error:
                 raise HTTPException(
                     status_code=409, detail="gateway_stream_rejected"
@@ -427,6 +477,7 @@ def create_app(
                         user_text=body.text,
                         context_json=context_json,
                     ),
+                    publish_capability_token=publish_capability_token,
                 ),
                 media_type="application/x-ndjson",
             )
@@ -465,14 +516,78 @@ def _app_from_environment() -> FastAPI:
     username = os.environ.get("HERMES_YUJIN_GATEWAY_USERNAME", "")
     password = os.environ.get("HERMES_YUJIN_GATEWAY_PASSWORD", "")
     token = os.environ.get("VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN", "")
-    if not all((url, username, password, token)):
+    private_key_b64 = os.environ.get(
+        "VIDEOBOX_HERMES_CAPABILITY_PRIVATE_KEY_B64",
+        "",
+    )
+    key_id = os.environ.get("VIDEOBOX_HERMES_CAPABILITY_KEY_ID", "")
+    if not all(
+        (
+            url,
+            username,
+            password,
+            token,
+            private_key_b64,
+            key_id,
+        )
+    ):
+        return create_app()
+    try:
+        private_key = _parse_capability_private_key(private_key_b64)
+        _validate_capability_key_id(key_id)
+        capability_issuer = YujinCapabilityIssuer(
+            key_id=key_id,
+            private_key=private_key,
+            capability_id_factory=(
+                lambda: f"capability-{uuid.uuid4().hex}"
+            ),
+        )
+    except (TypeError, ValueError):
         return create_app()
     return create_app(
         hermes_client=HermesRpcClient(
             base_url=url, username=username, password=password
         ),
         service_token=token,
+        capability_issuer=capability_issuer,
     )
+
+
+def _parse_capability_private_key(value: object) -> bytes:
+    if (
+        type(value) is not str
+        or _CAPABILITY_PRIVATE_KEY_B64.fullmatch(value) is None
+    ):
+        raise ValueError("gateway_capability_private_key_invalid")
+    try:
+        decoded = base64.b64decode(
+            value + "=",
+            altchars=b"-_",
+            validate=True,
+        )
+    except Exception as error:
+        raise ValueError(
+            "gateway_capability_private_key_invalid"
+        ) from error
+    canonical = (
+        base64.urlsafe_b64encode(decoded).rstrip(b"=").decode("ascii")
+    )
+    if len(decoded) != 32 or canonical != value:
+        raise ValueError("gateway_capability_private_key_invalid")
+    return decoded
+
+
+def _validate_capability_key_id(value: object) -> str:
+    if (
+        type(value) is not str
+        or _CAPABILITY_KEY_ID.fullmatch(value) is None
+        or any(
+            marker in value.lower()
+            for marker in ("changeme", "replace_me", "placeholder")
+        )
+    ):
+        raise ValueError("gateway_capability_key_id_invalid")
+    return value
 
 
 app = _app_from_environment()

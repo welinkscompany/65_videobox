@@ -1,21 +1,58 @@
 from __future__ import annotations
 
 import asyncio
+import traceback
 
 import pytest
 
 from videobox_api.agent_gateway_client import AgentGatewayClient
+from videobox_api.agent_gateway_client import AgentGatewayReservation
 from videobox_api.agent_gateway_client import AgentGatewayUnavailable
 
 
 SERVICE_TOKEN = "workspace-service-token-that-is-at-least-32"
+NOW_EPOCH = 2_000_000_000
+PUBLISH_TOKEN = "header.publish.signature"
+
+
+def _reservation_payload(
+    *,
+    run_id: str = "run-a",
+    expires_in_seconds: int = 30,
+    expires_at: int = NOW_EPOCH + 300,
+    **patch,
+) -> dict:
+    payload = {
+        "run_id": run_id,
+        "attach_context": "a" * 64,
+        "expires_in_seconds": expires_in_seconds,
+        "read_capability_token": "header.read.signature",
+        "capabilities": [
+            {
+                "capability_id": "cap-read",
+                "action": "read_context",
+                "expires_at": expires_at,
+            },
+            {
+                "capability_id": "cap-publish",
+                "action": "publish_proposal",
+                "expires_at": expires_at,
+            },
+        ],
+    }
+    payload.update(patch)
+    return payload
 
 
 class _Response:
     def __init__(self) -> None:
         self.lines = [
             '{"event_type":"text_delta","text":"answer"}',
-            '{"event_type":"run_completed","text":"answer"}',
+            (
+                '{"event_type":"run_completed","text":"answer",'
+                f'"publish_capability_token":"{PUBLISH_TOKEN}"'
+                "}"
+            ),
         ]
 
     async def __aenter__(self):
@@ -62,19 +99,13 @@ class _PostResponse:
         return self.payload
 
 
-def test_prepare_run_keeps_ticket_in_private_attach_header() -> None:
+def test_reserve_then_attach_keeps_ticket_in_private_attach_header() -> None:
     http = _Http()
 
     async def post(path, **kwargs):
         http.calls.append(("POST", path, kwargs))
         if path == "/internal/hermes/runs":
-            return _PostResponse(
-                {
-                    "run_id": "run-a",
-                    "attach_context": "a" * 64,
-                    "expires_in_seconds": 30,
-                }
-            )
+            return _PostResponse(_reservation_payload())
         return _PostResponse()
 
     http.post = post
@@ -88,14 +119,31 @@ def test_prepare_run_keeps_ticket_in_private_attach_header() -> None:
         "project_id": "project-a",
     }
 
-    asyncio.run(
-        client.prepare_run(
+    reservation = asyncio.run(
+        client.reserve_run(
             project_id="project-a",
             conversation_id="conversation-a",
             run_id="run-a",
             session_id="session-a",
             session_revision=7,
             asset_index_revision=13,
+        )
+    )
+    assert isinstance(reservation, AgentGatewayReservation)
+    assert reservation.expires_in_seconds == 30
+    assert tuple(item.action for item in reservation.capabilities) == (
+        "read_context",
+        "publish_proposal",
+    )
+    asyncio.run(
+        client.attach_run_context(
+            project_id="project-a",
+            conversation_id="conversation-a",
+            run_id="run-a",
+            session_id="session-a",
+            session_revision=7,
+            asset_index_revision=13,
+            reservation=reservation,
             context=context,
         )
     )
@@ -112,7 +160,7 @@ def test_prepare_run_keeps_ticket_in_private_attach_header() -> None:
     assert attach["json"]["context"] == context
 
 
-def test_cancelled_prepare_releases_created_reservation() -> None:
+def test_cancelled_attach_propagates_without_hidden_cleanup_owner() -> None:
     class _CancellingHttp(_Http):
         async def __aexit__(self, *_):
             await asyncio.sleep(0)
@@ -124,11 +172,10 @@ def test_cancelled_prepare_releases_created_reservation() -> None:
         http.calls.append(("POST", path, kwargs))
         if path == "/internal/hermes/runs":
             return _PostResponse(
-                {
-                    "run_id": "run-cancelled",
-                    "attach_context": "b" * 64,
-                    "expires_in_seconds": 30,
-                }
+                _reservation_payload(
+                    run_id="run-cancelled",
+                    attach_context="b" * 64,
+                )
             )
         asyncio.current_task().cancel()
         return _PostResponse()
@@ -141,14 +188,23 @@ def test_cancelled_prepare_releases_created_reservation() -> None:
     )
 
     async def scenario() -> None:
+        reservation = await client.reserve_run(
+            project_id="project-a",
+            conversation_id="conversation-a",
+            run_id="run-cancelled",
+            session_id="session-a",
+            session_revision=7,
+            asset_index_revision=13,
+        )
         with pytest.raises(asyncio.CancelledError):
-            await client.prepare_run(
+            await client.attach_run_context(
                 project_id="project-a",
                 conversation_id="conversation-a",
                 run_id="run-cancelled",
                 session_id="session-a",
                 session_revision=7,
                 asset_index_revision=13,
+                reservation=reservation,
                 context={
                     "schema_version": "videobox.yujin-context.v1",
                     "project_id": "project-a",
@@ -160,7 +216,67 @@ def test_cancelled_prepare_releases_created_reservation() -> None:
     assert [call[0:2] for call in http.calls] == [
         ("POST", "/internal/hermes/runs"),
         ("POST", "/internal/hermes/runs/run-cancelled/context"),
-        ("DELETE", "/internal/hermes/runs/run-cancelled"),
+    ]
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        _reservation_payload(expires_in_seconds=0),
+        _reservation_payload(expires_in_seconds=31),
+        _reservation_payload(expires_at=NOW_EPOCH),
+        _reservation_payload(
+            capabilities=[
+                {
+                    "capability_id": "same",
+                    "action": "read_context",
+                    "expires_at": NOW_EPOCH + 300,
+                },
+                {
+                    "capability_id": "same",
+                    "action": "publish_proposal",
+                    "expires_at": NOW_EPOCH + 300,
+                },
+            ]
+        ),
+        _reservation_payload(publish_capability_token="must-not-exist"),
+        _reservation_payload(read_capability_token="not-a-compact-token"),
+    ],
+)
+def test_reserve_rejects_malformed_or_authority_expanding_shape(
+    payload: dict,
+) -> None:
+    http = _Http()
+
+    async def post(path, **kwargs):
+        http.calls.append(("POST", path, kwargs))
+        return _PostResponse(payload)
+
+    http.post = post
+    client = AgentGatewayClient(
+        base_url="http://videobox-agent-gateway:8081",
+        service_token=SERVICE_TOKEN,
+        http_client_factory=lambda **_: http,
+        epoch_seconds=lambda: NOW_EPOCH,
+    )
+
+    with pytest.raises(
+        AgentGatewayUnavailable,
+        match="^agent_gateway_unavailable$",
+    ):
+        asyncio.run(
+            client.reserve_run(
+                project_id="project-a",
+                conversation_id="conversation-a",
+                run_id="run-a",
+                session_id="session-a",
+                session_revision=7,
+                asset_index_revision=13,
+            )
+        )
+
+    assert [call[0:2] for call in http.calls] == [
+        ("POST", "/internal/hermes/runs"),
     ]
 
 
@@ -216,6 +332,9 @@ def test_internal_url_and_service_credential_only() -> None:
         ("text_delta", "answer"),
         ("run_completed", "answer"),
     ]
+    assert events[0].publish_capability_token is None
+    assert events[1].publish_capability_token == PUBLISH_TOKEN
+    assert PUBLISH_TOKEN not in repr(events[1])
     assert factory_calls == [
         {"base_url": "http://videobox-agent-gateway:8081", "timeout": 35.0}
     ]
@@ -259,6 +378,22 @@ def test_ssrf_matrix_rejected_before_transport(url: str) -> None:
         '{"event_type":"unknown","text":"ignored"}',
         '{"event_type":"blocked","text":"must-be-empty","retryable":true}',
         '{"event_type":"blocked","text":"","retryable":"true"}',
+        (
+            '{"event_type":"text_delta","text":"ok",'
+            f'"publish_capability_token":"{PUBLISH_TOKEN}"'
+            "}"
+        ),
+        (
+            '{"event_type":"blocked","text":"","retryable":true,'
+            f'"publish_capability_token":"{PUBLISH_TOKEN}"'
+            "}"
+        ),
+        '{"event_type":"run_completed","text":""}',
+        (
+            '{"event_type":"run_completed","text":"",'
+            f'"publish_capability_token":"{PUBLISH_TOKEN}",'
+            '"provider":"leak"}'
+        ),
         "not-json",
     ],
 )
@@ -278,6 +413,88 @@ def test_malformed_or_extra_upstream_frames_fail_closed(line: str) -> None:
             event
             async for event in client.stream_run(
                 session_id="s", client_message_id="c", text="hello"
+            )
+        ]
+
+    with pytest.raises(AgentGatewayUnavailable, match="unavailable"):
+        asyncio.run(collect())
+
+
+def test_malformed_terminal_token_is_redacted_from_every_raised_surface() -> None:
+    token_fragment = "publish-secret-fragment"
+    response = _Response()
+    response.lines = [
+        (
+            '{"event_type":"run_completed","text":"",'
+            f'"publish_capability_token":"header.{token_fragment}.bad!"'
+            "}"
+        )
+    ]
+    http = _Http()
+    http.stream = lambda *_args, **_kwargs: response
+    client = AgentGatewayClient(
+        base_url="http://videobox-agent-gateway:8081",
+        service_token=SERVICE_TOKEN,
+        http_client_factory=lambda **_: http,
+    )
+
+    async def collect():
+        return [
+            event
+            async for event in client.stream_run(
+                session_id="s",
+                client_message_id="c",
+                text="hello",
+            )
+        ]
+
+    with pytest.raises(AgentGatewayUnavailable) as caught:
+        asyncio.run(collect())
+
+    error = caught.value
+    rendered = (
+        str(error),
+        repr(error),
+        repr(error.__cause__),
+        repr(error.__context__),
+        "".join(
+            traceback.format_exception(
+                type(error),
+                error,
+                error.__traceback__,
+            )
+        ),
+    )
+    assert error.__cause__ is None
+    assert error.__context__ is None
+    assert all(token_fragment not in surface for surface in rendered)
+
+
+def test_multiple_terminal_frames_fail_before_terminal_is_exposed() -> None:
+    response = _Response()
+    response.lines = [
+        (
+            '{"event_type":"run_completed","text":"",'
+            f'"publish_capability_token":"{PUBLISH_TOKEN}"'
+            "}"
+        ),
+        '{"event_type":"blocked","text":"","retryable":true}',
+    ]
+    http = _Http()
+    http.stream = lambda *_args, **_kwargs: response
+    client = AgentGatewayClient(
+        base_url="http://videobox-agent-gateway:8081",
+        service_token=SERVICE_TOKEN,
+        http_client_factory=lambda **_: http,
+    )
+
+    async def collect():
+        return [
+            event
+            async for event in client.stream_run(
+                session_id="s",
+                client_message_id="c",
+                text="hello",
             )
         ]
 
@@ -347,7 +564,11 @@ def test_completion_text_must_equal_the_assembled_delta_truth() -> None:
     response = _Response()
     response.lines = [
         '{"event_type":"text_delta","text":"safe"}',
-        '{"event_type":"run_completed","text":"different"}',
+        (
+            '{"event_type":"run_completed","text":"different",'
+            f'"publish_capability_token":"{PUBLISH_TOKEN}"'
+            "}"
+        ),
     ]
     http = _Http()
     http.stream = lambda *_args, **_kwargs: response

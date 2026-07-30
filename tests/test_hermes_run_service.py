@@ -11,7 +11,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from videobox_api.agent_gateway_client import AgentGatewayEvent
+from videobox_api.agent_gateway_client import (
+    AgentGatewayEvent,
+    AgentGatewayReservation,
+    AgentGatewayUnavailable,
+)
+from videobox_api.hermes_capabilities import HermesCapabilityError
 from videobox_api.hermes_run_service import HermesRunService
 from videobox_domain_models.assets import AssetType
 from videobox_domain_models.director_proposals import DirectorCandidate, DirectorProposal
@@ -57,6 +62,73 @@ def _bounded_test_context(monkeypatch: pytest.MonkeyPatch) -> None:
         "videobox_api.hermes_run_service.build_yujin_creator_context",
         build,
     )
+    original_init = HermesRunService.__init__
+
+    def test_init(self, *args, **kwargs):
+        store = kwargs["store"]
+        gateway = kwargs["gateway_client"]
+        if not hasattr(store, "register_hermes_run_capabilities"):
+            registrations: dict[str, dict] = {}
+
+            def register_hermes_run_capabilities(**values):
+                registrations[str(values["run_id"])] = values
+
+            def get_expected_hermes_capability(**values):
+                registered = registrations.get(str(values["run_id"]))
+                if registered is None:
+                    return None
+                metadata = next(
+                    item
+                    for item in registered["capabilities"]
+                    if item["action"] == values["action"]
+                )
+                return {
+                    "capability_id": metadata["capability_id"],
+                    "project_id": registered["project_id"],
+                    "conversation_id": registered["conversation_id"],
+                    "run_id": registered["run_id"],
+                    "session_id": registered["session_id"],
+                    "session_revision": registered[
+                        "session_revision"
+                    ],
+                    "asset_index_revision": registered[
+                        "asset_index_revision"
+                    ],
+                    "action": metadata["action"],
+                    "state": "issued",
+                    "expires_at": metadata["expires_at"],
+                }
+
+            store.register_hermes_run_capabilities = (
+                register_hermes_run_capabilities
+            )
+            store.get_expected_hermes_capability = (
+                get_expected_hermes_capability
+            )
+            store.consume_registered_hermes_capability = (
+                lambda **_: "accepted"
+            )
+            store.record_hermes_capability_denial = lambda **values: values
+            store.revoke_issued_hermes_capabilities = lambda **_: 0
+        if not hasattr(gateway, "reserve_run"):
+            async def reserve_run(**values):
+                return _gateway_reservation(str(values["run_id"]))
+
+            gateway.reserve_run = reserve_run
+        if not hasattr(gateway, "attach_run_context"):
+            async def attach_run_context(**values):
+                prepare = getattr(gateway, "prepare_run", None)
+                if prepare is not None:
+                    await prepare(**values)
+
+            gateway.attach_run_context = attach_run_context
+        kwargs.setdefault(
+            "capability_verifier",
+            _CapabilityVerifier([]),
+        )
+        original_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(HermesRunService, "__init__", test_init)
 
 
 def _scope(tmp_path: Path, *, now=None):
@@ -145,6 +217,444 @@ class _ThreadBlockedStore:
     def complete_director_hermes_run(self, **kwargs):
         self.completions.append(kwargs)
         return True
+
+
+def _gateway_reservation(run_id: str) -> AgentGatewayReservation:
+    return AgentGatewayReservation.model_validate(
+        {
+            "run_id": run_id,
+            "attach_context": "a" * 64,
+            "expires_in_seconds": 30,
+            "read_capability_token": "header.read.signature",
+            "capabilities": (
+                {
+                    "capability_id": f"{run_id}-cap-read",
+                    "action": "read_context",
+                    "expires_at": 2_000_000_300,
+                },
+                {
+                    "capability_id": f"{run_id}-cap-publish",
+                    "action": "publish_proposal",
+                    "expires_at": 2_000_000_300,
+                },
+            ),
+        }
+    )
+
+
+def _complete_director_hermes_run_with_publish(
+    store,
+    *,
+    proposal: DirectorProposal,
+    **completion,
+):
+    project_id = str(completion["project_id"])
+    run_id = str(completion["run_id"])
+    durable = store.get_director_hermes_run(
+        project_id=project_id,
+        run_id=run_id,
+    )
+    now_epoch = int(store._clock().timestamp())
+    read_id = f"{run_id}-test-read"
+    publish_id = f"{run_id}-test-publish"
+    store.register_hermes_run_capabilities(
+        project_id=project_id,
+        conversation_id=str(durable["conversation_id"]),
+        run_id=run_id,
+        session_id=str(durable["session_id"]),
+        session_revision=proposal.base_session_revision,
+        asset_index_revision=proposal.asset_index_revision,
+        capabilities=(
+            {
+                "capability_id": read_id,
+                "action": "read_context",
+                "expires_at": now_epoch + 300,
+            },
+            {
+                "capability_id": publish_id,
+                "action": "publish_proposal",
+                "expires_at": now_epoch + 300,
+            },
+        ),
+    )
+    return store.complete_director_hermes_run(
+        **completion,
+        proposal=proposal,
+        verified_publish_capability={
+            "capability_id": publish_id,
+            "project_id": project_id,
+            "conversation_id": str(durable["conversation_id"]),
+            "run_id": run_id,
+            "session_id": str(durable["session_id"]),
+            "session_revision": proposal.base_session_revision,
+            "asset_index_revision": proposal.asset_index_revision,
+            "action": "publish_proposal",
+            "issued_at": now_epoch,
+            "not_before": now_epoch,
+            "expires_at": now_epoch + 300,
+        },
+    )
+
+
+class _CapabilityAdmissionStore:
+    def __init__(self, calls: list[str], *, fail_at: str | None = None) -> None:
+        self.calls = calls
+        self.fail_at = fail_at
+        self.completions: list[dict] = []
+        self.denials: list[dict] = []
+        self.registrations: dict[str, dict] = {}
+        self.states: dict[str, str] = {}
+
+    def begin_director_hermes_run(self, **kwargs):
+        self.calls.append("begin")
+        return {
+            "run_id": str(kwargs["client_message_id"]),
+            "status": "pending",
+            "owner_token": "owner",
+            "dispatch": True,
+        }
+
+    def register_hermes_run_capabilities(self, **kwargs):
+        self.calls.append("register")
+        if self.fail_at == "register":
+            raise OSError("registration unavailable")
+        self.registrations[str(kwargs["run_id"])] = kwargs
+        for capability in kwargs["capabilities"]:
+            self.states[str(capability["capability_id"])] = "issued"
+
+    def get_expected_hermes_capability(self, **kwargs):
+        self.calls.append("expected")
+        if self.fail_at == "expected":
+            return None
+        registered = self.registrations[str(kwargs["run_id"])]
+        metadata = next(
+            capability
+            for capability in registered["capabilities"]
+            if capability["action"] == kwargs["action"]
+        )
+        return {
+            "capability_id": metadata["capability_id"],
+            "project_id": kwargs["project_id"],
+            "conversation_id": kwargs["conversation_id"],
+            "run_id": kwargs["run_id"],
+            "session_id": registered["session_id"],
+            "session_revision": registered["session_revision"],
+            "asset_index_revision": registered["asset_index_revision"],
+            "action": "read_context",
+            "state": "issued",
+            "expires_at": metadata["expires_at"],
+        }
+
+    def consume_registered_hermes_capability(self, **kwargs):
+        self.calls.append("consume")
+        if self.fail_at == "consume":
+            return "hermes_capability_replayed"
+        if self.fail_at == "scope":
+            return "hermes_capability_scope_forbidden"
+        if self.fail_at == "audit":
+            raise OSError("capability audit unavailable")
+        self.states[str(kwargs["capability_id"])] = "consumed"
+        return "accepted"
+
+    def record_hermes_capability_denial(self, **kwargs):
+        self.calls.append("denial")
+        self.denials.append(kwargs)
+        return kwargs
+
+    def revoke_issued_hermes_capabilities(self, **_):
+        self.calls.append("revoke")
+        revoked = 0
+        for capability_id, state in tuple(self.states.items()):
+            if state == "issued":
+                self.states[capability_id] = "revoked"
+                revoked += 1
+        return revoked
+
+    def complete_director_hermes_run(self, **kwargs):
+        self.calls.append("blocked")
+        self.completions.append(kwargs)
+        return True
+
+
+class _CapabilityGateway:
+    def __init__(
+        self,
+        calls: list[str],
+        *,
+        fail_at: str | None = None,
+        block_stream: bool = False,
+    ) -> None:
+        self.calls = calls
+        self.fail_at = fail_at
+        self.block_stream = block_stream
+        self.stream_entered = asyncio.Event()
+        self.stream_release = asyncio.Event()
+        self.provider_calls = 0
+        self.releases: list[str] = []
+        self.cancellations: list[str] = []
+
+    async def reserve_run(self, **kwargs):
+        self.calls.append("reserve")
+        if self.fail_at == "reserve":
+            raise AgentGatewayUnavailable("agent_gateway_unavailable")
+        if self.fail_at == "malformed":
+            return SimpleNamespace(run_id=str(kwargs["run_id"]))
+        return _gateway_reservation(str(kwargs["run_id"]))
+
+    async def attach_run_context(self, **_):
+        self.calls.append("attach")
+        if self.fail_at == "attach":
+            raise AgentGatewayUnavailable("agent_gateway_unavailable")
+
+    async def stream_run(self, **_):
+        self.calls.append("dispatch")
+        self.provider_calls += 1
+        self.stream_entered.set()
+        if self.block_stream:
+            await self.stream_release.wait()
+        yield AgentGatewayEvent("run_completed", "answer")
+
+    async def release_run(self, *, run_id: str):
+        self.calls.append("release")
+        self.releases.append(run_id)
+
+    async def cancel_run(self, *, run_id: str):
+        self.calls.append("cancel")
+        self.cancellations.append(run_id)
+        self.stream_release.set()
+
+
+class _CapabilityVerifier:
+    def __init__(
+        self,
+        calls: list[str],
+        *,
+        fail: bool = False,
+        fail_action: str | None = None,
+        wrong_scope_action: str | None = None,
+    ) -> None:
+        self.calls = calls
+        self.fail = fail
+        self.fail_action = fail_action
+        self.wrong_scope_action = wrong_scope_action
+
+    def verify(self, token: str, *, expected):
+        self.calls.append("verify")
+        if self.fail or expected.action == self.fail_action:
+            raise HermesCapabilityError(
+                "hermes_capability_signature_invalid"
+            )
+        return SimpleNamespace(
+            capability_id=expected.capability_id,
+            project_id=(
+                "wrong-project"
+                if expected.action == self.wrong_scope_action
+                else expected.project_id
+            ),
+            conversation_id=expected.conversation_id,
+            run_id=expected.run_id,
+            session_id=expected.session_id,
+            session_revision=expected.session_revision,
+            asset_index_revision=expected.asset_index_revision,
+            action=expected.action,
+            issued_at=2_000_000_000,
+            not_before=2_000_000_000,
+            expires_at=2_000_000_300,
+        )
+
+
+class _RegistrationBarrierStore(_CapabilityAdmissionStore):
+    def __init__(self, calls: list[str]) -> None:
+        super().__init__(calls)
+        self.registration_entered = threading.Event()
+        self.registration_release = threading.Event()
+
+    def register_hermes_run_capabilities(self, **kwargs):
+        super().register_hermes_run_capabilities(**kwargs)
+        self.registration_entered.set()
+        assert self.registration_release.wait(timeout=3)
+
+
+def test_admission_capability_order_precedes_dispatch() -> None:
+    calls: list[str] = []
+    store = _CapabilityAdmissionStore(calls)
+    gateway = _CapabilityGateway(calls)
+    verifier = _CapabilityVerifier(calls)
+    service = HermesRunService(
+        store=store,
+        gateway_client=gateway,
+        capability_verifier=verifier,
+    )
+
+    async def scenario() -> None:
+        run = await service.create_run(
+            project_id="p",
+            session_id="s",
+            conversation_id="c",
+            client_message_id="ordered",
+            text="q",
+        )
+        await run.task
+        await service.shutdown()
+
+    asyncio.run(scenario())
+
+    assert calls[:8] == [
+        "begin",
+        "reserve",
+        "register",
+        "expected",
+        "verify",
+        "consume",
+        "attach",
+        "dispatch",
+    ]
+    assert gateway.provider_calls == 1
+
+
+@pytest.mark.parametrize(
+    "fail_at",
+    [
+        "reserve",
+        "malformed",
+        "register",
+        "expected",
+        "verify",
+        "consume",
+        "scope",
+        "audit",
+        "attach",
+    ],
+)
+def test_capability_admission_failure_releases_revokes_and_blocks_without_dispatch(
+    fail_at: str,
+) -> None:
+    calls: list[str] = []
+    store = _CapabilityAdmissionStore(calls, fail_at=fail_at)
+    gateway = _CapabilityGateway(
+        calls,
+        fail_at=(
+            fail_at
+            if fail_at in {"reserve", "malformed", "attach"}
+            else None
+        ),
+    )
+    verifier = _CapabilityVerifier(calls, fail=fail_at == "verify")
+    service = HermesRunService(
+        store=store,
+        gateway_client=gateway,
+        capability_verifier=verifier,
+    )
+
+    async def scenario() -> None:
+        with pytest.raises(Exception):
+            await service.create_run(
+                project_id="p",
+                session_id="s",
+                conversation_id="c",
+                client_message_id=f"failed-{fail_at}",
+                text="q",
+            )
+
+    asyncio.run(scenario())
+
+    assert gateway.provider_calls == 0
+    assert gateway.releases == [f"failed-{fail_at}"]
+    assert calls.count("revoke") == 1
+    assert len(store.completions) == 1
+    assert store.completions[0]["status"] == "blocked"
+    assert "Manual Director remains available" in store.completions[0][
+        "assistant_text"
+    ]
+    if fail_at == "verify":
+        assert len(store.denials) == 1
+        assert store.denials[0]["reason"] == (
+            "hermes_capability_signature_invalid"
+        )
+
+
+def test_cancelled_admission_after_issuance_releases_revokes_and_blocks() -> None:
+    calls: list[str] = []
+    store = _RegistrationBarrierStore(calls)
+    gateway = _CapabilityGateway(calls)
+    verifier = _CapabilityVerifier(calls)
+    service = HermesRunService(
+        store=store,
+        gateway_client=gateway,
+        capability_verifier=verifier,
+    )
+
+    async def scenario() -> None:
+        create_task = asyncio.create_task(
+            service.create_run(
+                project_id="p",
+                session_id="s",
+                conversation_id="c",
+                client_message_id="cancelled-admission",
+                text="q",
+            )
+        )
+        assert await asyncio.to_thread(
+            store.registration_entered.wait,
+            1,
+        )
+        create_task.cancel()
+        await asyncio.sleep(0)
+        store.registration_release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await create_task
+
+    asyncio.run(scenario())
+
+    assert calls[:3] == ["begin", "reserve", "register"]
+    assert "expected" not in calls
+    assert "verify" not in calls
+    assert "consume" not in calls
+    assert "attach" not in calls
+    assert gateway.provider_calls == 0
+    assert gateway.releases == ["cancelled-admission"]
+    assert calls.count("revoke") == 1
+    assert set(store.states.values()) == {"revoked"}
+    assert len(store.completions) == 1
+    assert store.completions[0]["status"] == "blocked"
+
+
+def test_public_cancel_revokes_only_the_unconsumed_publish_capability() -> None:
+    calls: list[str] = []
+    store = _CapabilityAdmissionStore(calls)
+    gateway = _CapabilityGateway(calls, block_stream=True)
+    service = HermesRunService(
+        store=store,
+        gateway_client=gateway,
+        capability_verifier=_CapabilityVerifier(calls),
+    )
+
+    async def scenario() -> None:
+        run = await service.create_run(
+            project_id="p",
+            session_id="s",
+            conversation_id="c",
+            client_message_id="public-cancel",
+            text="q",
+        )
+        await gateway.stream_entered.wait()
+        await service.cancel(
+            run.run_id,
+            project_id="p",
+            conversation_id="c",
+        )
+        await asyncio.gather(run.task, return_exceptions=True)
+        await service.shutdown()
+
+    asyncio.run(scenario())
+
+    assert gateway.provider_calls == 1
+    assert gateway.cancellations == ["public-cancel"]
+    assert store.states["public-cancel-cap-read"] == "consumed"
+    assert store.states["public-cancel-cap-publish"] == "revoked"
+    assert calls.count("revoke") == 1
+    assert len(store.completions) == 1
+    assert store.completions[0]["status"] == "interrupted"
 
 
 def test_run_persists_user_before_dispatch_and_final_before_terminal_event(
@@ -1079,7 +1589,8 @@ def test_real_store_output_check_terminal_uses_current_materialized_gap_truth(
         expected_asset_index_revision=context.asset_index_revision,
     )
 
-    result = store.complete_director_hermes_run(
+    result = _complete_director_hermes_run_with_publish(
+        store,
         project_id=project_id,
         run_id=durable["run_id"],
         owner_token=durable["owner_token"],
@@ -1125,7 +1636,8 @@ def test_real_store_output_check_terminal_uses_materialized_not_raw_gap_count(
         expected_asset_index_revision=context.asset_index_revision,
     )
 
-    result = store.complete_director_hermes_run(
+    result = _complete_director_hermes_run_with_publish(
+        store,
         project_id=project_id,
         run_id=durable["run_id"],
         owner_token=durable["owner_token"],
@@ -1182,7 +1694,8 @@ def test_real_store_output_check_terminal_rolls_back_when_gap_truth_changes(
         timeline_payload=timeline,
     )
 
-    result = store.complete_director_hermes_run(
+    result = _complete_director_hermes_run_with_publish(
+        store,
         project_id=project_id,
         run_id=durable["run_id"],
         owner_token=durable["owner_token"],
@@ -1255,7 +1768,8 @@ def test_real_store_output_check_terminal_rejects_file_before_summary_race(
         encoding="utf-8",
     )
 
-    result = store.complete_director_hermes_run(
+    result = _complete_director_hermes_run_with_publish(
+        store,
         project_id=project_id,
         run_id=durable["run_id"],
         owner_token=durable["owner_token"],
@@ -1316,7 +1830,8 @@ def test_real_store_output_check_terminal_materializes_legacy_gap_summary(
         expected_asset_index_revision=context.asset_index_revision,
     )
 
-    result = store.complete_director_hermes_run(
+    result = _complete_director_hermes_run_with_publish(
+        store,
         project_id=project_id,
         run_id=durable["run_id"],
         owner_token=durable["owner_token"],
@@ -1467,7 +1982,8 @@ def test_ready_yujin_terminal_cas_rolls_back_stale_proposal_before_terminal_writ
             storage_uri=str(stored_asset["storage_uri"]),
         ).unlink()
 
-    result = store.complete_director_hermes_run(
+    result = _complete_director_hermes_run_with_publish(
+        store,
         project_id=project_id,
         run_id=durable["run_id"],
         owner_token=durable["owner_token"],
@@ -1528,7 +2044,8 @@ def test_current_ready_yujin_terminal_cas_persists_atomically(
         expected_asset_index_revision=proposal.asset_index_revision,
     )
 
-    assert store.complete_director_hermes_run(
+    assert _complete_director_hermes_run_with_publish(
+        store,
         project_id=project_id,
         run_id=durable["run_id"],
         owner_token=durable["owner_token"],
@@ -1598,7 +2115,8 @@ def test_current_b4_caption_terminal_cas_persists_without_fake_asset_lookup(
         expected_asset_index_revision=proposal.asset_index_revision,
     )
 
-    assert store.complete_director_hermes_run(
+    assert _complete_director_hermes_run_with_publish(
+        store,
         project_id=project_id,
         run_id=durable["run_id"],
         owner_token=durable["owner_token"],
@@ -1722,7 +2240,8 @@ def test_b4_terminal_cas_rejects_forged_caption_and_overlay_controls(
         expected_asset_index_revision=proposal.asset_index_revision,
     )
 
-    result = store.complete_director_hermes_run(
+    result = _complete_director_hermes_run_with_publish(
+        store,
         project_id=project_id,
         run_id=durable["run_id"],
         owner_token=durable["owner_token"],
@@ -1835,7 +2354,8 @@ def test_b4_terminal_cas_rejects_voice_controls_that_disagree_with_attested_iden
         expected_asset_index_revision=proposal.asset_index_revision,
     )
 
-    result = store.complete_director_hermes_run(
+    result = _complete_director_hermes_run_with_publish(
+        store,
         project_id=project_id,
         run_id=durable["run_id"],
         owner_token=durable["owner_token"],
@@ -1873,7 +2393,11 @@ def test_machine_payload_is_never_public_and_candidate_links_atomically(
         [
             AgentGatewayEvent("text_delta", raw[:split]),
             AgentGatewayEvent("text_delta", raw[split:]),
-            AgentGatewayEvent("run_completed", raw),
+            AgentGatewayEvent(
+                "run_completed",
+                raw,
+                publish_capability_token="header.publish.signature",
+            ),
         ]
     )
     service = HermesRunService(
@@ -1933,6 +2457,296 @@ def test_machine_payload_is_never_public_and_candidate_links_atomically(
     assert "operation-1" not in caplog.text
     assert "proposal-yujin-service" not in caplog.text
     assert "산책 영상을" not in caplog.text
+    assert "header.publish.signature" not in caplog.text
+    assert "header.publish.signature" not in "".join(
+        event.model_dump_json() for event in events
+    )
+    with store._connection(project_id) as connection:
+        capability_states = dict(
+            connection.execute(
+                """
+                SELECT action, state FROM hermes_capability_ledger
+                WHERE project_id = ? AND run_id = ?
+                """,
+                (project_id, run.run_id),
+            ).fetchall()
+        )
+        publish_consume_audits = connection.execute(
+            """
+            SELECT COUNT(*) FROM hermes_capability_audit
+            WHERE project_id = ? AND run_id = ?
+              AND action = 'publish_proposal'
+              AND outcome = 'accepted'
+              AND reason = 'hermes_capability_consumed'
+            """,
+            (project_id, run.run_id),
+        ).fetchone()[0]
+    assert capability_states == {
+        "publish_proposal": "consumed",
+        "read_context": "consumed",
+    }
+    assert publish_consume_audits == 1
+
+
+def test_publish_signature_failure_discards_proposal_and_terminalizes_once(
+    tmp_path: Path,
+) -> None:
+    store, project_id, session_id = _scope(tmp_path)
+    session = store.get_editing_session(
+        project_id=project_id,
+        session_id=session_id,
+    )
+    context = _proposal_context().model_copy(
+        update={"project_id": project_id, "session_id": session_id}
+    )
+    raw = _proposal_output(context)
+    calls: list[str] = []
+    gateway = _Gateway(
+        [
+            AgentGatewayEvent(
+                "run_completed",
+                raw,
+                publish_capability_token="bad.publish.signature",
+            )
+        ]
+    )
+    service = HermesRunService(
+        store=store,
+        gateway_client=gateway,
+        context_builder=lambda **_: context,
+        capability_verifier=_CapabilityVerifier(
+            calls,
+            fail_action="publish_proposal",
+        ),
+    )
+
+    async def scenario():
+        run = await service.create_run(
+            project_id=project_id,
+            session_id=session_id,
+            conversation_id="conv",
+            client_message_id="publish-signature-failure",
+            text="추천해줘",
+        )
+        await run.task
+        return run, [
+            event async for event in service.subscribe(run.run_id)
+        ]
+
+    run, events = asyncio.run(scenario())
+
+    terminal = [
+        event
+        for event in events
+        if event.event_type in {"run_completed", "blocked"}
+    ]
+    assert len(terminal) == 1
+    assert MANUAL_FALLBACK in terminal[0].text
+    assert "bad.publish.signature" not in "".join(
+        event.model_dump_json() for event in events
+    )
+    assert store.list_director_proposals(project_id) == []
+    messages = store.list_director_messages(
+        project_id=project_id,
+        conversation_id="conv",
+    )
+    assert messages[-1]["proposal_id"] is None
+    assert "bad.publish.signature" not in messages[-1]["text"]
+    unchanged = store.get_editing_session(
+        project_id=project_id,
+        session_id=session_id,
+    )
+    assert unchanged["session_revision"] == session["session_revision"]
+    assert unchanged["history"] == session["history"]
+    with store._connection(project_id) as connection:
+        publish = connection.execute(
+            """
+            SELECT state FROM hermes_capability_ledger
+            WHERE project_id = ? AND run_id = ?
+              AND action = 'publish_proposal'
+            """,
+            (project_id, run.run_id),
+        ).fetchone()[0]
+        denials = [
+            str(row["reason"])
+            for row in connection.execute(
+                """
+                SELECT reason FROM hermes_capability_audit
+                WHERE project_id = ? AND run_id = ?
+                  AND action = 'publish_proposal'
+                  AND outcome = 'denied'
+                """,
+                (project_id, run.run_id),
+            ).fetchall()
+        ]
+    assert publish == "revoked"
+    assert denials == ["hermes_capability_signature_invalid"]
+    assert gateway.calls == 1
+    assert calls.count("verify") == 2
+
+
+def test_publish_proposal_wrong_verified_scope_audits_and_revokes(
+    tmp_path: Path,
+) -> None:
+    store, project_id, session_id = _scope(tmp_path)
+    context = _proposal_context().model_copy(
+        update={"project_id": project_id, "session_id": session_id}
+    )
+    gateway = _Gateway(
+        [
+            AgentGatewayEvent(
+                "run_completed",
+                _proposal_output(context),
+                publish_capability_token="header.publish.signature",
+            )
+        ]
+    )
+    service = HermesRunService(
+        store=store,
+        gateway_client=gateway,
+        context_builder=lambda **_: context,
+        capability_verifier=_CapabilityVerifier(
+            [],
+            wrong_scope_action="publish_proposal",
+        ),
+    )
+
+    async def scenario():
+        run = await service.create_run(
+            project_id=project_id,
+            session_id=session_id,
+            conversation_id="conv",
+            client_message_id="publish-wrong-scope",
+            text="추천해줘",
+        )
+        await run.task
+        return run, [
+            event async for event in service.subscribe(run.run_id)
+        ]
+
+    run, events = asyncio.run(scenario())
+
+    assert len(
+        [
+            event
+            for event in events
+            if event.event_type in {"run_completed", "blocked"}
+        ]
+    ) == 1
+    assert MANUAL_FALLBACK in events[-1].text
+    assert store.list_director_proposals(project_id) == []
+    with store._connection(project_id) as connection:
+        publish_state = connection.execute(
+            """
+            SELECT state FROM hermes_capability_ledger
+            WHERE project_id = ? AND run_id = ?
+              AND action = 'publish_proposal'
+            """,
+            (project_id, run.run_id),
+        ).fetchone()[0]
+        reasons = [
+            str(row["reason"])
+            for row in connection.execute(
+                """
+                SELECT reason FROM hermes_capability_audit
+                WHERE project_id = ? AND run_id = ?
+                  AND action = 'publish_proposal'
+                  AND outcome = 'denied'
+                """,
+                (project_id, run.run_id),
+            ).fetchall()
+        ]
+    assert publish_state == "revoked"
+    assert reasons == ["hermes_capability_scope_forbidden"]
+
+
+def test_publish_proposal_transaction_fault_retries_one_safe_terminal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store, project_id, session_id = _scope(tmp_path)
+    context = _proposal_context().model_copy(
+        update={"project_id": project_id, "session_id": session_id}
+    )
+    original_append = store._append_hermes_capability_audit
+
+    def fail_after_publish_consume(connection, **kwargs):
+        event = original_append(connection, **kwargs)
+        if kwargs["reason"] == "hermes_capability_consumed" and kwargs[
+            "action"
+        ] == "publish_proposal":
+            raise OSError("publish terminal transaction fault")
+        return event
+
+    monkeypatch.setattr(
+        store,
+        "_append_hermes_capability_audit",
+        fail_after_publish_consume,
+    )
+    gateway = _Gateway(
+        [
+            AgentGatewayEvent(
+                "run_completed",
+                _proposal_output(context),
+                publish_capability_token="header.publish.signature",
+            )
+        ]
+    )
+    service = HermesRunService(
+        store=store,
+        gateway_client=gateway,
+        context_builder=lambda **_: context,
+    )
+
+    async def scenario():
+        run = await service.create_run(
+            project_id=project_id,
+            session_id=session_id,
+            conversation_id="conv",
+            client_message_id="publish-transaction-fault",
+            text="추천해줘",
+        )
+        await run.task
+        return run, [
+            event async for event in service.subscribe(run.run_id)
+        ]
+
+    run, events = asyncio.run(scenario())
+
+    terminal = [
+        event
+        for event in events
+        if event.event_type in {"run_completed", "blocked"}
+    ]
+    assert len(terminal) == 1
+    assert MANUAL_FALLBACK in terminal[0].text
+    assert store.list_director_proposals(project_id) == []
+    message = store.list_director_messages(
+        project_id=project_id,
+        conversation_id="conv",
+    )[-1]
+    assert message["proposal_id"] is None
+    with store._connection(project_id) as connection:
+        publish_state = connection.execute(
+            """
+            SELECT state FROM hermes_capability_ledger
+            WHERE project_id = ? AND run_id = ?
+              AND action = 'publish_proposal'
+            """,
+            (project_id, run.run_id),
+        ).fetchone()[0]
+        consumed_audits = connection.execute(
+            """
+            SELECT COUNT(*) FROM hermes_capability_audit
+            WHERE project_id = ? AND run_id = ?
+              AND action = 'publish_proposal'
+              AND reason = 'hermes_capability_consumed'
+            """,
+            (project_id, run.run_id),
+        ).fetchone()[0]
+    assert publish_state == "revoked"
+    assert consumed_audits == 0
+    assert gateway.calls == 1
 
 
 def test_current_media_projection_is_attested_after_context_recheck(
@@ -1967,7 +2781,13 @@ def test_current_media_projection_is_attested_after_context_recheck(
         }
     )
     gateway = _Gateway(
-        [AgentGatewayEvent("run_completed", _proposal_output(context))]
+        [
+            AgentGatewayEvent(
+                "run_completed",
+                _proposal_output(context),
+                publish_capability_token="header.publish.signature",
+            )
+        ]
     )
     activation_calls: list[dict[str, object]] = []
 
@@ -2895,7 +3715,8 @@ def test_terminal_cas_loser_cannot_save_orphan_candidate(tmp_path: Path) -> None
     ).proposal
     assert proposal is not None
 
-    assert not store.complete_director_hermes_run(
+    assert not _complete_director_hermes_run_with_publish(
+        store,
         project_id=project_id,
         run_id=first["run_id"],
         owner_token=first["owner_token"],
@@ -3001,7 +3822,13 @@ def test_proposal_insert_race_retries_terminal_cas_without_candidate() -> None:
     service = HermesRunService(
         store=store,
         gateway_client=_Gateway(
-            [AgentGatewayEvent("run_completed", _proposal_output(context))]
+            [
+                AgentGatewayEvent(
+                    "run_completed",
+                    _proposal_output(context),
+                    publish_capability_token="header.publish.signature",
+                )
+            ]
         ),
         context_builder=lambda **_: context,
     )
@@ -3051,7 +3878,13 @@ def test_proposal_stale_retries_terminal_cas_without_candidate() -> None:
     service = HermesRunService(
         store=store,
         gateway_client=_Gateway(
-            [AgentGatewayEvent("run_completed", _proposal_output(context))]
+            [
+                AgentGatewayEvent(
+                    "run_completed",
+                    _proposal_output(context),
+                    publish_capability_token="header.publish.signature",
+                )
+            ]
         ),
         context_builder=lambda **_: context,
     )

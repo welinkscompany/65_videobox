@@ -656,6 +656,10 @@ def test_official_password_cookie_ticket_and_rpc_order_are_allowlisted() -> None
         "method": "prompt.submit",
         "params": {"session_id": "sid-1", "text": "질문"},
     }
+    upstream_rpc = json.dumps(websocket.sent, sort_keys=True)
+    assert "capability" not in upstream_rpc
+    assert "private_key" not in upstream_rpc
+    assert "publish_proposal" not in upstream_rpc
     assert [(item.event_type, item.text) for item in events] == [
         ("message.delta", "안녕"),
         ("message.complete", "안녕하세요"),

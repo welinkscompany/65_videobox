@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field as dataclass_field
 import hashlib
 import json
 import secrets
@@ -11,6 +11,11 @@ import time
 from typing import Callable, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from videobox_agent_gateway.context_capabilities import (
+    YujinCapabilityIssuer,
+    YujinCapabilityMetadata,
+)
 
 
 MAX_CONTEXT_BYTES = 48_000
@@ -165,7 +170,20 @@ class _Reservation:
     identity: GatewayRunIdentity
     ticket_digest: bytes | None
     expires_at: float
+    capability_deadline: float
+    publish_capability_token: str = dataclass_field(repr=False)
     context_json: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class GatewayReservation:
+    attach_context: str = dataclass_field(repr=False)
+    read_capability_token: str = dataclass_field(repr=False)
+    expires_in_seconds: int
+    capabilities: tuple[
+        YujinCapabilityMetadata,
+        YujinCapabilityMetadata,
+    ]
 
 
 class CreatorContextLedger:
@@ -174,28 +192,70 @@ class CreatorContextLedger:
     def __init__(
         self,
         *,
+        capability_issuer: YujinCapabilityIssuer,
         clock: Callable[[], float] = time.monotonic,
         token_bytes: Callable[[int], bytes] = secrets.token_bytes,
     ) -> None:
+        self._capability_issuer = capability_issuer
         self._clock = clock
         self._token_bytes = token_bytes
         self._entries: dict[str, _Reservation] = {}
         self._lock = Lock()
 
-    def reserve(self, identity: GatewayRunIdentity) -> str:
+    def reserve(self, identity: GatewayRunIdentity) -> GatewayReservation:
         with self._lock:
             self._prune_expired_locked()
             if identity.run_id in self._entries:
                 raise ValueError("gateway_run_already_reserved")
             if len(self._entries) >= MAX_RESERVATIONS:
                 raise OverflowError("gateway_reservation_capacity")
+            issued = self._capability_issuer.issue_run_capabilities(
+                project_id=identity.project_id,
+                conversation_id=identity.conversation_id,
+                run_id=identity.run_id,
+                session_id=identity.session_id,
+                session_revision=identity.session_revision,
+                asset_index_revision=identity.asset_index_revision,
+            )
+            reserved_at = self._clock()
+            remaining_lifetime = max(
+                0,
+                min(
+                    issued.read_context.metadata.expires_at,
+                    issued.publish_proposal.metadata.expires_at,
+                )
+                - max(
+                    issued.read_context.issued_at,
+                    issued.publish_proposal.issued_at,
+                ),
+            )
+            if remaining_lifetime < 1:
+                raise ValueError("gateway_capability_lifetime_invalid")
+            expires_in_seconds = min(
+                int(TICKET_TTL_SECONDS),
+                remaining_lifetime,
+            )
+            capability_deadline = reserved_at + remaining_lifetime
             ticket = self._token_bytes(32).hex()
             self._entries[identity.run_id] = _Reservation(
                 identity=identity,
                 ticket_digest=self._digest(ticket),
-                expires_at=self._clock() + TICKET_TTL_SECONDS,
+                expires_at=min(
+                    reserved_at + expires_in_seconds,
+                    capability_deadline,
+                ),
+                capability_deadline=capability_deadline,
+                publish_capability_token=issued.publish_proposal.token,
             )
-            return ticket
+            return GatewayReservation(
+                attach_context=ticket,
+                read_capability_token=issued.read_context.token,
+                expires_in_seconds=expires_in_seconds,
+                capabilities=(
+                    issued.read_context.metadata,
+                    issued.publish_proposal.metadata,
+                ),
+            )
 
     def attach(
         self,
@@ -228,17 +288,26 @@ class CreatorContextLedger:
                 raise ValueError("gateway_attach_ticket_invalid")
             reservation.ticket_digest = None
             reservation.context_json = context_json
-            reservation.expires_at = (
-                self._clock() + ATTACHED_CONTEXT_TTL_SECONDS
+            reservation.expires_at = min(
+                self._clock() + ATTACHED_CONTEXT_TTL_SECONDS,
+                reservation.capability_deadline,
             )
 
-    def consume(self, *, run_id: str) -> tuple[GatewayRunIdentity, str]:
+    def consume(
+        self,
+        *,
+        run_id: str,
+    ) -> tuple[GatewayRunIdentity, str, str]:
         with self._lock:
             reservation = self._current_locked(run_id)
             if reservation.context_json is None:
                 raise ValueError("gateway_context_not_attached")
             del self._entries[run_id]
-            return reservation.identity, reservation.context_json
+            return (
+                reservation.identity,
+                reservation.context_json,
+                reservation.publish_capability_token,
+            )
 
     def release(self, *, run_id: str) -> None:
         with self._lock:

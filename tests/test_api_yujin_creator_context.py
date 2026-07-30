@@ -10,6 +10,7 @@ from pydantic import ValidationError
 
 from videobox_api.agent_gateway_client import (
     AgentGatewayEvent,
+    AgentGatewayReservation,
     AgentGatewayUnavailable,
 )
 from videobox_api.hermes_run_service import HermesRunService
@@ -21,6 +22,7 @@ class _Store:
     def __init__(self, order: list[str]) -> None:
         self.order = order
         self.completions: list[dict] = []
+        self.capabilities: dict[str, dict] = {}
 
     def begin_director_hermes_run(self, **_kwargs):
         self.order.append("durable_begin")
@@ -36,6 +38,69 @@ class _Store:
         self.completions.append(kwargs)
         return True
 
+    def register_hermes_run_capabilities(self, **kwargs):
+        self.capabilities[str(kwargs["run_id"])] = kwargs
+
+    def get_expected_hermes_capability(self, **kwargs):
+        registered = self.capabilities[str(kwargs["run_id"])]
+        metadata = next(
+            capability
+            for capability in registered["capabilities"]
+            if capability["action"] == kwargs["action"]
+        )
+        return {
+            "capability_id": metadata["capability_id"],
+            "project_id": registered["project_id"],
+            "conversation_id": registered["conversation_id"],
+            "run_id": registered["run_id"],
+            "session_id": registered["session_id"],
+            "session_revision": registered["session_revision"],
+            "asset_index_revision": registered["asset_index_revision"],
+            "action": metadata["action"],
+            "state": "issued",
+            "expires_at": metadata["expires_at"],
+        }
+
+    def consume_registered_hermes_capability(self, **_kwargs):
+        return "accepted"
+
+    def record_hermes_capability_denial(self, **kwargs):
+        return kwargs
+
+    def revoke_issued_hermes_capabilities(self, **_kwargs):
+        return 0
+
+
+def _reservation(run_id: str) -> AgentGatewayReservation:
+    return AgentGatewayReservation.model_validate(
+        {
+            "run_id": run_id,
+            "attach_context": "a" * 64,
+            "expires_in_seconds": 30,
+            "read_capability_token": "header.read.signature",
+            "capabilities": (
+                {
+                    "capability_id": f"{run_id}-cap-read",
+                    "action": "read_context",
+                    "expires_at": 2_000_000_300,
+                },
+                {
+                    "capability_id": f"{run_id}-cap-publish",
+                    "action": "publish_proposal",
+                    "expires_at": 2_000_000_300,
+                },
+            ),
+        }
+    )
+
+
+class _Verifier:
+    def verify(self, _token: str, *, expected):
+        return SimpleNamespace(
+            capability_id=expected.capability_id,
+            action=expected.action,
+        )
+
 
 class _Gateway:
     def __init__(self, order: list[str], *, fail_prepare: bool = False) -> None:
@@ -44,11 +109,17 @@ class _Gateway:
         self.prepared: list[dict] = []
         self.stream_calls = 0
 
-    async def prepare_run(self, **kwargs):
+    async def reserve_run(self, **kwargs):
         self.order.append("gateway_prepare")
-        self.prepared.append(kwargs)
         if self.fail_prepare:
             raise AgentGatewayUnavailable("agent_gateway_unavailable")
+        return _reservation(str(kwargs["run_id"]))
+
+    async def attach_run_context(self, **kwargs):
+        self.prepared.append(kwargs)
+
+    async def release_run(self, **_kwargs):
+        return None
 
     async def stream_run(self, **_kwargs):
         self.order.append("gateway_stream")
@@ -101,6 +172,7 @@ def test_context_is_built_before_durable_begin_and_attached_before_dispatch() ->
         store=store,
         gateway_client=gateway,
         context_builder=_context_builder(order),
+        capability_verifier=_Verifier(),
     )
 
     async def scenario():
@@ -143,6 +215,7 @@ def test_stale_or_preparation_failure_keeps_prompt_at_zero_and_settles_owned_row
         store=stale_store,
         gateway_client=stale_gateway,
         context_builder=_context_builder(stale_order, stale=True),
+        capability_verifier=_Verifier(),
     )
     with pytest.raises(ValueError, match="revision"):
         asyncio.run(
@@ -165,6 +238,7 @@ def test_stale_or_preparation_failure_keeps_prompt_at_zero_and_settles_owned_row
         store=failed_store,
         gateway_client=failed_gateway,
         context_builder=_context_builder(failed_order),
+        capability_verifier=_Verifier(),
     )
     with pytest.raises(AgentGatewayUnavailable):
         asyncio.run(

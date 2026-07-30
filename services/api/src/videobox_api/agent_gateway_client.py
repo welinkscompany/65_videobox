@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field as dataclass_field
+import time
 from typing import Any, Literal
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class AgentGatewayUnavailable(RuntimeError):
@@ -20,22 +21,99 @@ class AgentGatewayEvent:
     event_type: str
     text: str = ""
     retryable: bool = False
+    publish_capability_token: str | None = dataclass_field(default=None, repr=False)
 
 
 class _GatewayFrame(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
+    model_config = ConfigDict(
+        extra="forbid",
+        strict=True,
+        hide_input_in_errors=True,
+    )
 
     event_type: Literal["text_delta", "run_completed", "blocked"]
     text: str = ""
     retryable: bool = False
+    publish_capability_token: str | None = Field(
+        default=None,
+        min_length=5,
+        max_length=8192,
+        pattern=(
+            r"^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$"
+        ),
+    )
+
+    @model_validator(mode="after")
+    def terminal_capability_is_exact(self) -> "_GatewayFrame":
+        has_publish_field = (
+            "publish_capability_token" in self.model_fields_set
+        )
+        if (
+            self.event_type == "run_completed"
+            and (
+                not has_publish_field
+                or self.publish_capability_token is None
+            )
+        ) or (
+            self.event_type != "run_completed"
+            and has_publish_field
+        ):
+            raise ValueError("agent_gateway_terminal_capability_invalid")
+        return self
 
 
-class _GatewayReservationFrame(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
+def _parse_gateway_frame(line: str) -> _GatewayFrame | None:
+    try:
+        return _GatewayFrame.model_validate_json(line)
+    except Exception:
+        return None
 
-    run_id: str
-    attach_context: str
-    expires_in_seconds: Literal[30]
+
+class AgentGatewayCapabilityMetadata(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
+
+    capability_id: str = Field(
+        min_length=1,
+        max_length=255,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,254}$",
+    )
+    action: Literal["read_context", "publish_proposal"]
+    expires_at: int = Field(gt=0, strict=True)
+
+
+class AgentGatewayReservation(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
+
+    run_id: str = Field(min_length=1, max_length=255)
+    attach_context: str = Field(pattern=r"^[0-9a-f]{64}$")
+    expires_in_seconds: int = Field(ge=1, le=30, strict=True)
+    read_capability_token: str = Field(
+        min_length=5,
+        max_length=8192,
+        pattern=(
+            r"^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$"
+        ),
+    )
+    capabilities: tuple[
+        AgentGatewayCapabilityMetadata,
+        AgentGatewayCapabilityMetadata,
+    ]
+
+    @model_validator(mode="after")
+    def exact_capability_pair(self) -> "AgentGatewayReservation":
+        if (
+            tuple(item.action for item in self.capabilities)
+            != ("read_context", "publish_proposal")
+            or len(
+                {
+                    item.capability_id
+                    for item in self.capabilities
+                }
+            )
+            != 2
+        ):
+            raise ValueError("agent_gateway_reservation_invalid")
+        return self
 
 
 _MAX_LINE_BYTES = 256_000
@@ -62,6 +140,7 @@ class AgentGatewayClient:
         service_token: str,
         http_client_factory: Callable = _default_http_client_factory,
         timeout_seconds: float = 35.0,
+        epoch_seconds: Callable[[], int] | None = None,
     ) -> None:
         parsed = urlsplit(base_url)
         if (
@@ -89,6 +168,111 @@ class AgentGatewayClient:
         self._token = service_token
         self._factory = http_client_factory
         self._timeout = timeout_seconds
+        self._epoch_seconds = epoch_seconds or (
+            lambda: int(time.time())
+        )
+
+    async def reserve_run(
+        self,
+        *,
+        project_id: str,
+        conversation_id: str,
+        run_id: str,
+        session_id: str,
+        session_revision: int,
+        asset_index_revision: int,
+    ) -> AgentGatewayReservation:
+        identity = {
+            "project_id": project_id,
+            "conversation_id": conversation_id,
+            "run_id": run_id,
+            "session_id": session_id,
+            "session_revision": session_revision,
+            "asset_index_revision": asset_index_revision,
+        }
+        try:
+            async with self._factory(
+                base_url=self._base_url, timeout=self._timeout
+            ) as client:
+                reserved = await client.post(
+                    "/internal/hermes/runs",
+                    headers={"Authorization": f"Bearer {self._token}"},
+                    json=identity,
+                )
+                reserved.raise_for_status()
+                payload = reserved.json()
+                if type(payload) is not dict:
+                    raise ValueError("agent_gateway_reservation_invalid")
+                capabilities = payload.get("capabilities")
+                if type(capabilities) is not list:
+                    raise ValueError("agent_gateway_reservation_invalid")
+                reservation = AgentGatewayReservation.model_validate(
+                    {
+                        **payload,
+                        "capabilities": tuple(capabilities),
+                    }
+                )
+                now = self._epoch_seconds()
+                if (
+                    reservation.run_id != run_id
+                    or any(
+                        item.expires_at <= now
+                        or item.expires_at - now
+                        < reservation.expires_in_seconds
+                        for item in reservation.capabilities
+                    )
+                ):
+                    raise ValueError("agent_gateway_reservation_invalid")
+                return reservation
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            raise AgentGatewayUnavailable("agent_gateway_unavailable") from error
+
+    async def attach_run_context(
+        self,
+        *,
+        project_id: str,
+        conversation_id: str,
+        run_id: str,
+        session_id: str,
+        session_revision: int,
+        asset_index_revision: int,
+        reservation: AgentGatewayReservation,
+        context: dict[str, Any],
+    ) -> None:
+        if reservation.run_id != run_id:
+            raise AgentGatewayUnavailable("agent_gateway_unavailable")
+        identity = {
+            "project_id": project_id,
+            "conversation_id": conversation_id,
+            "run_id": run_id,
+            "session_id": session_id,
+            "session_revision": session_revision,
+            "asset_index_revision": asset_index_revision,
+        }
+        try:
+            async with self._factory(
+                base_url=self._base_url,
+                timeout=self._timeout,
+            ) as client:
+                attached = await client.post(
+                    f"/internal/hermes/runs/{run_id}/context",
+                    headers={
+                        "Authorization": f"Bearer {self._token}",
+                        "X-VideoBox-Attach-Ticket": (
+                            reservation.attach_context
+                        ),
+                    },
+                    json={"identity": identity, "context": context},
+                )
+                attached.raise_for_status()
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            raise AgentGatewayUnavailable(
+                "agent_gateway_unavailable"
+            ) from error
 
     async def prepare_run(
         self,
@@ -101,62 +285,37 @@ class AgentGatewayClient:
         asset_index_revision: int,
         context: dict[str, Any],
     ) -> None:
-        identity = {
-            "project_id": project_id,
-            "conversation_id": conversation_id,
-            "run_id": run_id,
-            "session_id": session_id,
-            "session_revision": session_revision,
-            "asset_index_revision": asset_index_revision,
-        }
+        """Compatibility wrapper; HermesRunService owns split admission."""
+
         reservation_created = False
         try:
-            async with self._factory(
-                base_url=self._base_url, timeout=self._timeout
-            ) as client:
-                reserved = await client.post(
-                    "/internal/hermes/runs",
-                    headers={"Authorization": f"Bearer {self._token}"},
-                    json=identity,
-                )
-                reserved.raise_for_status()
-                reservation_created = True
-                reservation = _GatewayReservationFrame.model_validate(
-                    reserved.json()
-                )
-                if (
-                    reservation.run_id != run_id
-                    or len(reservation.attach_context) != 64
-                    or any(
-                        character not in "0123456789abcdef"
-                        for character in reservation.attach_context
-                    )
-                ):
-                    raise ValueError("agent_gateway_reservation_invalid")
-                attached = await client.post(
-                    f"/internal/hermes/runs/{run_id}/context",
-                    headers={
-                        "Authorization": f"Bearer {self._token}",
-                        "X-VideoBox-Attach-Ticket": reservation.attach_context,
-                    },
-                    json={"identity": identity, "context": context},
-                )
-                attached.raise_for_status()
+            reservation = await self.reserve_run(
+                project_id=project_id,
+                conversation_id=conversation_id,
+                run_id=run_id,
+                session_id=session_id,
+                session_revision=session_revision,
+                asset_index_revision=asset_index_revision,
+            )
+            reservation_created = True
+            await self.attach_run_context(
+                project_id=project_id,
+                conversation_id=conversation_id,
+                run_id=run_id,
+                session_id=session_id,
+                session_revision=session_revision,
+                asset_index_revision=asset_index_revision,
+                reservation=reservation,
+                context=context,
+            )
         except asyncio.CancelledError:
             if reservation_created:
-                cleanup = asyncio.create_task(self.release_run(run_id=run_id))
-                try:
-                    await asyncio.shield(cleanup)
-                except asyncio.CancelledError:
-                    # A repeated cancellation may interrupt the waiter, but
-                    # the shielded best-effort release remains independently
-                    # owned until it finishes.
-                    pass
+                await asyncio.shield(self.release_run(run_id=run_id))
             raise
-        except Exception as error:
+        except Exception:
             if reservation_created:
                 await self.release_run(run_id=run_id)
-            raise AgentGatewayUnavailable("agent_gateway_unavailable") from error
+            raise
 
     async def release_run(self, *, run_id: str) -> None:
         try:
@@ -199,6 +358,7 @@ class AgentGatewayClient:
             raise AgentGatewayUnavailable("agent_gateway_unavailable")
         assembled = ""
         assembled_bytes = 0
+        terminal: AgentGatewayEvent | None = None
         try:
             async with self._factory(
                 base_url=self._base_url, timeout=self._timeout
@@ -216,9 +376,17 @@ class AgentGatewayClient:
                     async for line in response.aiter_lines():
                         if not line:
                             continue
+                        if terminal is not None:
+                            raise AgentGatewayUnavailable(
+                                "agent_gateway_unavailable"
+                            )
                         if len(line.encode("utf-8")) > _MAX_LINE_BYTES:
                             raise AgentGatewayUnavailable("agent_gateway_unavailable")
-                        payload = _GatewayFrame.model_validate_json(line)
+                        payload = _parse_gateway_frame(line)
+                        if payload is None:
+                            raise AgentGatewayUnavailable(
+                                "agent_gateway_unavailable"
+                            )
                         payload_bytes = len(payload.text.encode("utf-8"))
                         if (
                             payload.event_type == "text_delta"
@@ -239,13 +407,23 @@ class AgentGatewayClient:
                             or payload.text != assembled
                         ):
                             raise AgentGatewayUnavailable("agent_gateway_unavailable")
-                        yield AgentGatewayEvent(
+                        event = AgentGatewayEvent(
                             event_type=payload.event_type,
                             text=payload.text,
                             retryable=payload.retryable,
+                            publish_capability_token=(
+                                payload.publish_capability_token
+                            ),
                         )
                         if payload.event_type in {"run_completed", "blocked"}:
-                            return
+                            terminal = event
+                        else:
+                            yield event
+                    if terminal is None:
+                        raise AgentGatewayUnavailable(
+                            "agent_gateway_unavailable"
+                        )
+                    yield terminal
         except AgentGatewayUnavailable:
             raise
         except Exception as error:

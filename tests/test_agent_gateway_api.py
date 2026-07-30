@@ -1,22 +1,58 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+from datetime import UTC, datetime
+from itertools import count
 import json
 
 from fastapi.testclient import TestClient
 import pytest
 
 from videobox_agent_gateway.hermes_rpc_client import HermesRpcEvent
-from videobox_agent_gateway.main import _stream_public_lines, create_app
+from videobox_agent_gateway.context_capabilities import YujinCapabilityIssuer
+from videobox_agent_gateway.main import (
+    _app_from_environment,
+    _stream_public_lines,
+    create_app,
+)
 
 
 class _Hermes:
     calls = 0
 
+    def __init__(self) -> None:
+        self.prompts: list[str] = []
+
     async def stream_prompt(self, *, text: str, run_id: str | None = None):
         self.calls += 1
+        self.prompts.append(text)
         yield HermesRpcEvent("message.delta", "a")
         yield HermesRpcEvent("message.complete", "answer")
+
+
+def _capability_issuer() -> YujinCapabilityIssuer:
+    identifiers = count(1)
+    return YujinCapabilityIssuer(
+        key_id="test-key-1",
+        private_key=b"\x11" * 32,
+        now=lambda: datetime(2026, 7, 30, tzinfo=UTC),
+        capability_id_factory=lambda: f"capability-{next(identifiers)}",
+    )
+
+
+def _decode_capability_claims(token: str) -> dict[str, object]:
+    encoded = token.split(".")[1]
+    padded = encoded + ("=" * (-len(encoded) % 4))
+    return json.loads(base64.urlsafe_b64decode(padded))
+
+
+def _live_app(hermes_client, service_token: str):
+    return create_app(
+        hermes_client=hermes_client,
+        service_token=service_token,
+        capability_issuer=_capability_issuer(),
+    )
 
 
 def _prepare_gateway_run(
@@ -75,7 +111,7 @@ def _prepare_gateway_run(
 def test_gateway_has_only_health_and_authenticated_bounded_run_flow() -> None:
     hermes = _Hermes()
     token = "service-secret-that-is-at-least-32-bytes"
-    app = create_app(hermes_client=hermes, service_token=token)
+    app = _live_app(hermes, token)
     client = TestClient(app)
     assert app.openapi_url is None
     assert client.get("/openapi.json").status_code == 404
@@ -104,10 +140,13 @@ def test_gateway_has_only_health_and_authenticated_bounded_run_flow() -> None:
         json=body,
     )
     assert response.headers["content-type"].startswith("application/x-ndjson")
-    assert response.text.splitlines() == [
-        '{"event_type":"text_delta","text":"answer"}',
-        '{"event_type":"run_completed","text":"answer"}',
-    ]
+    frames = [json.loads(line) for line in response.text.splitlines()]
+    assert frames[0] == {"event_type": "text_delta", "text": "answer"}
+    assert frames[1]["event_type"] == "run_completed"
+    assert frames[1]["text"] == "answer"
+    assert _decode_capability_claims(
+        frames[1]["publish_capability_token"]
+    )["action"] == "publish_proposal"
     assert hermes.calls == 1
 
 
@@ -122,7 +161,7 @@ def test_gateway_cancel_is_authenticated_and_targets_only_the_named_run() -> Non
 
     hermes = InterruptibleHermes()
     token = "service-secret-that-is-at-least-32-bytes"
-    client = TestClient(create_app(hermes_client=hermes, service_token=token))
+    client = TestClient(_live_app(hermes, token))
 
     assert client.post(
         "/internal/hermes/runs/run-a/cancel"
@@ -142,6 +181,160 @@ def test_unconfigured_gateway_remains_health_only() -> None:
     assert paths == {"/health"}
 
 
+def test_reserve_returns_read_token_and_metadata_but_terminal_alone_gets_publish_token() -> None:
+    hermes = _Hermes()
+    token = "service-secret-that-is-at-least-32-bytes"
+    client = TestClient(
+        create_app(
+            hermes_client=hermes,
+            service_token=token,
+            capability_issuer=_capability_issuer(),
+        )
+    )
+    headers = {"Authorization": f"Bearer {token}"}
+    identity = {
+        "project_id": "project-a",
+        "conversation_id": "conversation-a",
+        "run_id": "run-capabilities",
+        "session_id": "s",
+        "session_revision": 1,
+        "asset_index_revision": 0,
+    }
+
+    reserved = client.post(
+        "/internal/hermes/runs",
+        headers=headers,
+        json=identity,
+    )
+    assert reserved.status_code == 200
+    reservation = reserved.json()
+    assert set(reservation) == {
+        "run_id",
+        "attach_context",
+        "expires_in_seconds",
+        "read_capability_token",
+        "capabilities",
+    }
+    assert reservation["run_id"] == "run-capabilities"
+    assert reservation["expires_in_seconds"] == 30
+    assert [item["action"] for item in reservation["capabilities"]] == [
+        "read_context",
+        "publish_proposal",
+    ]
+    assert all(
+        set(item) == {"capability_id", "action", "expires_at"}
+        for item in reservation["capabilities"]
+    )
+    read_token = reservation["read_capability_token"]
+    read_claims = _decode_capability_claims(read_token)
+    assert read_claims["action"] == "read_context"
+    assert read_claims["capability_id"] == reservation["capabilities"][0][
+        "capability_id"
+    ]
+    assert (
+        reservation["capabilities"][0]["capability_id"]
+        != reservation["capabilities"][1]["capability_id"]
+    )
+    assert "publish_capability_token" not in json.dumps(reservation)
+
+    context = {
+        "schema_version": "videobox.yujin-context.v1",
+        "project_id": "project-a",
+        "session_id": "s",
+        "session_revision": 1,
+        "asset_index_revision": 0,
+        "timeline_id": "timeline-a",
+        "timeline_version": "v001",
+        "selected_script_id": None,
+        "selected_segment_id": None,
+        "segment_summaries": [],
+        "media_candidates": [],
+        "timeline_summary": {
+            "duration_sec": 0.0,
+            "track_count": 0,
+            "clip_count": 0,
+            "gap_count": 0,
+        },
+        "supported_controls": [],
+    }
+    assert client.post(
+        "/internal/hermes/runs/run-capabilities/context",
+        headers={
+            **headers,
+            "X-VideoBox-Attach-Ticket": reservation["attach_context"],
+        },
+        json={"identity": identity, "context": context},
+    ).status_code == 204
+    streamed = client.post(
+        "/internal/hermes/runs/run-capabilities/stream",
+        headers=headers,
+        json={"client_message_id": "c", "text": "hello"},
+    )
+    frames = [json.loads(line) for line in streamed.text.splitlines()]
+
+    assert frames[0] == {"event_type": "text_delta", "text": "answer"}
+    assert set(frames[1]) == {
+        "event_type",
+        "text",
+        "publish_capability_token",
+    }
+    assert frames[1]["event_type"] == "run_completed"
+    publish_token = frames[1]["publish_capability_token"]
+    publish_claims = _decode_capability_claims(publish_token)
+    assert publish_claims["action"] == "publish_proposal"
+    assert publish_claims["capability_id"] == reservation["capabilities"][1][
+        "capability_id"
+    ]
+    assert read_token not in streamed.text
+    assert read_token not in hermes.prompts[0]
+    assert publish_token not in frames[0].values()
+    assert publish_token not in hermes.prompts[0]
+    assert publish_token not in repr(hermes.__dict__)
+
+
+@pytest.mark.parametrize(
+    ("private_key_b64", "key_id"),
+    [
+        (None, "test-key-1"),
+        ("not-base64", "test-key-1"),
+        (
+            base64.urlsafe_b64encode(b"\x11" * 32).rstrip(b"=").decode("ascii"),
+            "token=bad",
+        ),
+    ],
+)
+def test_environment_missing_or_invalid_capability_key_stays_health_only(
+    monkeypatch: pytest.MonkeyPatch,
+    private_key_b64: str | None,
+    key_id: str,
+) -> None:
+    monkeypatch.setenv(
+        "HERMES_YUJIN_URL",
+        "http://videobox-hermes-yujin:9120",
+    )
+    monkeypatch.setenv("HERMES_YUJIN_GATEWAY_USERNAME", "gateway-user")
+    monkeypatch.setenv("HERMES_YUJIN_GATEWAY_PASSWORD", "gateway-password")
+    monkeypatch.setenv(
+        "VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN",
+        "service-secret-that-is-at-least-32-bytes",
+    )
+    if private_key_b64 is None:
+        monkeypatch.delenv(
+            "VIDEOBOX_HERMES_CAPABILITY_PRIVATE_KEY_B64",
+            raising=False,
+        )
+    else:
+        monkeypatch.setenv(
+            "VIDEOBOX_HERMES_CAPABILITY_PRIVATE_KEY_B64",
+            private_key_b64,
+        )
+    monkeypatch.setenv("VIDEOBOX_HERMES_CAPABILITY_KEY_ID", key_id)
+
+    app = _app_from_environment()
+
+    assert {route.path for route in app.routes} == {"/health"}
+
+
 def test_validation_and_unsafe_output_are_redacted() -> None:
     sentinel = "do-not-reflect-this-secret"
 
@@ -154,7 +347,7 @@ def test_validation_and_unsafe_output_are_redacted() -> None:
             )
 
     token = "service-secret-that-is-at-least-32-bytes"
-    client = TestClient(create_app(hermes_client=UnsafeHermes(), service_token=token))
+    client = TestClient(_live_app(UnsafeHermes(), token))
     headers, stream_path = _prepare_gateway_run(client, token=token)
     invalid = client.post(
         stream_path,
@@ -175,6 +368,9 @@ def test_validation_and_unsafe_output_are_redacted() -> None:
     assert response.text.splitlines() == [
         '{"event_type":"blocked","text":"","retryable":true}'
     ]
+    assert "capability" not in response.text
+    assert "token" not in response.text
+    assert "key" not in response.text
     assert sentinel not in response.text
     assert "/opt/data" not in response.text
 
@@ -187,7 +383,7 @@ def test_unsafe_output_split_across_events_is_quarantined() -> None:
             yield HermesRpcEvent("message.complete", "never publish")
 
     token = "service-secret-that-is-at-least-32-bytes"
-    client = TestClient(create_app(hermes_client=SplitHermes(), service_token=token))
+    client = TestClient(_live_app(SplitHermes(), token))
     headers, stream_path = _prepare_gateway_run(client, token=token)
     response = client.post(
         stream_path,
@@ -206,7 +402,7 @@ def test_excessive_empty_event_stream_is_bounded() -> None:
             yield HermesRpcEvent("message.complete", "answer")
 
     token = "service-secret-that-is-at-least-32-bytes"
-    client = TestClient(create_app(hermes_client=NoisyHermes(), service_token=token))
+    client = TestClient(_live_app(NoisyHermes(), token))
     headers, stream_path = _prepare_gateway_run(client, token=token)
     response = client.post(
         stream_path,
@@ -249,6 +445,116 @@ def test_safe_prefix_streams_before_hermes_completion_barrier() -> None:
         if event["event_type"] == "text_delta"
     ) == safe_text
     assert rest[-1] == {"event_type": "run_completed", "text": safe_text}
+
+
+def test_closing_public_stream_immediately_awaits_upstream_cleanup() -> None:
+    publish_token = "publish-token-must-not-leak"
+
+    class CloseAwareStream:
+        def __init__(self) -> None:
+            self.events = [
+                HermesRpcEvent("message.delta", "safe " * 100),
+                HermesRpcEvent("message.complete", "safe " * 100),
+            ]
+            self.closed = False
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self) -> HermesRpcEvent:
+            if not self.events:
+                raise StopAsyncIteration
+            return self.events.pop(0)
+
+        async def aclose(self) -> None:
+            try:
+                await asyncio.sleep(0)
+            finally:
+                self.closed = True
+
+    class CleanupHermes:
+        def __init__(self) -> None:
+            self.upstream = CloseAwareStream()
+
+        def stream_prompt(
+            self,
+            *,
+            text: str,
+            run_id: str | None = None,
+        ):
+            return self.upstream
+
+    async def scenario() -> tuple[CleanupHermes, bytes]:
+        hermes = CleanupHermes()
+        public_stream = _stream_public_lines(
+            hermes,
+            text="hello",
+            run_id="run-a",
+            publish_capability_token=publish_token,
+        )
+        first = await anext(public_stream)
+        await public_stream.aclose()
+        return hermes, first
+
+    hermes, first = asyncio.run(scenario())
+
+    assert hermes.upstream.closed is True
+    assert b'"event_type":"text_delta"' in first
+    assert publish_token.encode() not in first
+
+
+def test_blocked_stream_awaits_upstream_cleanup_without_token() -> None:
+    publish_token = "publish-token-must-not-leak"
+
+    class ErrorStream:
+        def __init__(self) -> None:
+            self.sent = False
+            self.closed = False
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self) -> HermesRpcEvent:
+            if self.sent:
+                raise StopAsyncIteration
+            self.sent = True
+            return HermesRpcEvent("tool.start", "private")
+
+        async def aclose(self) -> None:
+            await asyncio.sleep(0)
+            self.closed = True
+
+    class ErrorHermes:
+        def __init__(self) -> None:
+            self.upstream = ErrorStream()
+
+        def stream_prompt(
+            self,
+            *,
+            text: str,
+            run_id: str | None = None,
+        ):
+            return self.upstream
+
+    async def scenario() -> tuple[ErrorHermes, list[bytes]]:
+        hermes = ErrorHermes()
+        lines = [
+            line
+            async for line in _stream_public_lines(
+                hermes,
+                text="hello",
+                run_id="run-a",
+                publish_capability_token=publish_token,
+            )
+        ]
+        return hermes, lines
+
+    hermes, lines = asyncio.run(scenario())
+
+    assert hermes.upstream.closed is True
+    assert lines == [b'{"event_type":"blocked","text":"","retryable":true}\n']
+    assert publish_token.encode() not in lines[0]
+    assert b"private" not in lines[0]
 
 
 @pytest.mark.parametrize(
@@ -560,4 +866,8 @@ def test_public_delta_frames_are_chunked_below_api_client_text_limit() -> None:
 )
 def test_weak_or_placeholder_service_tokens_are_rejected(token: str) -> None:
     with pytest.raises(ValueError, match="service_token"):
-        create_app(hermes_client=_Hermes(), service_token=token)
+        create_app(
+            hermes_client=_Hermes(),
+            service_token=token,
+            capability_issuer=_capability_issuer(),
+        )

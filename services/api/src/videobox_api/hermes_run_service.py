@@ -11,6 +11,10 @@ import time
 from typing import AsyncIterator, Callable, Coroutine
 import uuid
 
+from videobox_api.hermes_capabilities import (
+    ExpectedCapability,
+    HermesCapabilityError,
+)
 from videobox_api.models import HermesStreamEvent
 from videobox_core_engine.yujin_creator_context import (
     build_yujin_creator_context,
@@ -109,6 +113,7 @@ class HermesRunService:
         terminal_ttl_seconds: float = 300.0,
         monotonic: Callable[[], float] = time.monotonic,
         context_builder: Callable | None = None,
+        capability_verifier=None,
     ) -> None:
         if min(max_active, max_total, max_events, max_event_bytes, max_text_bytes) < 1:
             raise ValueError("hermes_run_limits_invalid")
@@ -126,6 +131,7 @@ class HermesRunService:
         self.terminal_ttl_seconds = terminal_ttl_seconds
         self._clock = monotonic
         self._context_builder = context_builder or build_yujin_creator_context
+        self.capability_verifier = capability_verifier
         self._runs: dict[str, _Run] = {}
         self._keys: dict[tuple[str, str, str], str] = {}
         self._admissions: dict[tuple[str, str, str], _Admission] = {}
@@ -365,6 +371,11 @@ class HermesRunService:
                 await self.gateway_client.cancel_run(run_id=run.run_id)
             except Exception:
                 pass
+        await self._revoke_issued_capabilities(
+            project_id=run.project_id,
+            conversation_id=run.conversation_id,
+            run_id=run.run_id,
+        )
         await self._terminal(
             run,
             "blocked",
@@ -529,29 +540,131 @@ class HermesRunService:
                 and bool(durable.get("dispatch"))
                 and durable.get("owner_token") is not None
             ):
+                run_id = str(durable["run_id"])
+                gateway_reservation_attempted = False
                 try:
-                    await self.gateway_client.prepare_run(
+                    gateway_reservation_attempted = True
+                    reservation = await self.gateway_client.reserve_run(
                         project_id=project_id,
                         conversation_id=conversation_id,
-                        run_id=str(durable["run_id"]),
+                        run_id=run_id,
                         session_id=session_id,
                         session_revision=context.session_revision,
                         asset_index_revision=context.asset_index_revision,
+                    )
+                    self._raise_if_admission_abandoned(admission)
+                    await asyncio.to_thread(
+                        self.store.register_hermes_run_capabilities,
+                        project_id=project_id,
+                        conversation_id=conversation_id,
+                        run_id=run_id,
+                        session_id=session_id,
+                        session_revision=context.session_revision,
+                        asset_index_revision=context.asset_index_revision,
+                        capabilities=tuple(
+                            item.model_dump(mode="python")
+                            for item in reservation.capabilities
+                        ),
+                    )
+                    self._raise_if_admission_abandoned(admission)
+                    expected_payload = await asyncio.to_thread(
+                        self.store.get_expected_hermes_capability,
+                        project_id=project_id,
+                        conversation_id=conversation_id,
+                        run_id=run_id,
+                        action="read_context",
+                    )
+                    if expected_payload is None:
+                        raise RuntimeError(
+                            "hermes_capability_expected_missing"
+                        )
+                    expected = ExpectedCapability(
+                        capability_id=str(
+                            expected_payload["capability_id"]
+                        ),
+                        project_id=str(expected_payload["project_id"]),
+                        conversation_id=str(
+                            expected_payload["conversation_id"]
+                        ),
+                        run_id=str(expected_payload["run_id"]),
+                        session_id=str(expected_payload["session_id"]),
+                        session_revision=int(
+                            expected_payload["session_revision"]
+                        ),
+                        asset_index_revision=int(
+                            expected_payload["asset_index_revision"]
+                        ),
+                        action=str(expected_payload["action"]),
+                    )
+                    if self.capability_verifier is None:
+                        raise RuntimeError(
+                            "hermes_capability_verifier_unavailable"
+                        )
+                    try:
+                        self.capability_verifier.verify(
+                            reservation.read_capability_token,
+                            expected=expected,
+                        )
+                    except HermesCapabilityError as error:
+                        await asyncio.to_thread(
+                            self.store.record_hermes_capability_denial,
+                            project_id=project_id,
+                            conversation_id=conversation_id,
+                            run_id=run_id,
+                            action="read_context",
+                            reason=str(error),
+                        )
+                        raise
+                    self._raise_if_admission_abandoned(admission)
+                    consume_result = await asyncio.to_thread(
+                        self.store.consume_registered_hermes_capability,
+                        project_id=project_id,
+                        capability_id=expected.capability_id,
+                        conversation_id=conversation_id,
+                        run_id=run_id,
+                        session_id=session_id,
+                        session_revision=context.session_revision,
+                        asset_index_revision=context.asset_index_revision,
+                        action="read_context",
+                    )
+                    if consume_result != "accepted":
+                        raise RuntimeError(str(consume_result))
+                    self._raise_if_admission_abandoned(admission)
+                    await self.gateway_client.attach_run_context(
+                        project_id=project_id,
+                        conversation_id=conversation_id,
+                        run_id=run_id,
+                        session_id=session_id,
+                        session_revision=context.session_revision,
+                        asset_index_revision=context.asset_index_revision,
+                        reservation=reservation,
                         context=context.model_dump(mode="json"),
                     )
+                    self._raise_if_admission_abandoned(admission)
                 except BaseException:
                     try:
-                        await asyncio.to_thread(
-                            self.store.complete_director_hermes_run,
+                        if gateway_reservation_attempted:
+                            await self._release_gateway_run(run_id)
+                        await self._revoke_issued_capabilities(
                             project_id=project_id,
-                            run_id=str(durable["run_id"]),
-                            owner_token=str(durable["owner_token"]),
-                            status="blocked",
-                            assistant_text=_BLOCKED_TEXT,
-                            retryable=True,
+                            conversation_id=conversation_id,
+                            run_id=run_id,
                         )
                     finally:
-                        raise
+                        try:
+                            await asyncio.to_thread(
+                                self.store.complete_director_hermes_run,
+                                project_id=project_id,
+                                run_id=run_id,
+                                owner_token=str(
+                                    durable["owner_token"]
+                                ),
+                                status="blocked",
+                                assistant_text=_BLOCKED_TEXT,
+                                retryable=True,
+                            )
+                        finally:
+                            raise
             run = _Run(
                 run_id=str(durable["run_id"]),
                 project_id=project_id,
@@ -710,6 +823,9 @@ class HermesRunService:
                                 "run_completed",
                                 completed_text,
                                 retryable=False,
+                                publish_capability_token=(
+                                    upstream.publish_capability_token
+                                ),
                             )
                         return
                     else:
@@ -821,6 +937,7 @@ class HermesRunService:
         *,
         retryable: bool,
         durable_status: str | None = None,
+        publish_capability_token: str | None = None,
     ) -> None:
         async with self._lock:
             if run.terminal:
@@ -840,6 +957,9 @@ class HermesRunService:
                         text=text,
                         retryable=retryable,
                         durable_status=durable_status,
+                        publish_capability_token=(
+                            publish_capability_token
+                        ),
                     ),
                     self._terminal_tasks,
                     name=f"videobox-terminal-{run.run_id}",
@@ -856,6 +976,7 @@ class HermesRunService:
         text: str,
         retryable: bool,
         durable_status: str | None,
+        publish_capability_token: str | None,
     ) -> None:
         async with run.persistence_lock:
             await self._finish_terminal_serialized(
@@ -864,6 +985,7 @@ class HermesRunService:
                 text=text,
                 retryable=retryable,
                 durable_status=durable_status,
+                publish_capability_token=publish_capability_token,
             )
 
     async def _finish_terminal_serialized(
@@ -874,8 +996,10 @@ class HermesRunService:
         text: str,
         retryable: bool,
         durable_status: str | None,
+        publish_capability_token: str | None,
     ) -> None:
         proposal = None
+        verified_publish_capability: dict[str, Any] | None = None
         projection: YujinCreatorProjection | None = None
         preflight_failed = False
         if event_type == "run_completed" and run.creator_context is not None:
@@ -905,6 +1029,19 @@ class HermesRunService:
                             )
             text = projection.reply_text
             proposal = projection.proposal
+            if proposal is not None:
+                verified_publish_capability = (
+                    await self._verify_terminal_publish_capability(
+                        run,
+                        publish_capability_token,
+                    )
+                )
+                if verified_publish_capability is None:
+                    projection = self._discard_capability_denied_projection(
+                        projection
+                    )
+                    text = projection.reply_text
+                    proposal = None
         event_type, text, retryable, proposal = self._normalize_terminal(
             run, event_type, text, retryable, proposal
         )
@@ -945,6 +1082,11 @@ class HermesRunService:
                     "assistant_text": text or _BLOCKED_TEXT,
                     "retryable": retryable,
                     "proposal": proposal,
+                    "verified_publish_capability": (
+                        verified_publish_capability
+                        if proposal is not None
+                        else None
+                    ),
                 }
                 if hasattr(self.store, "list_director_hermes_run_events"):
                     completion_kwargs["public_text"] = run.public_text
@@ -953,13 +1095,33 @@ class HermesRunService:
                     **completion_kwargs,
                 )
             except Exception:
-                stored = False
-            if stored in {"proposal_conflict", "proposal_stale"} and projection is not None:
-                projection = (
-                    self._discard_projection_for_collision(projection)
-                    if stored == "proposal_conflict"
-                    else self._discard_stale_projection(projection)
+                stored = (
+                    "publish_transaction_fault"
+                    if proposal is not None
+                    else False
                 )
+            if stored in {
+                "proposal_conflict",
+                "proposal_stale",
+                "publish_capability_denied",
+                "publish_transaction_fault",
+            } and projection is not None:
+                if stored == "proposal_conflict":
+                    projection = self._discard_projection_for_collision(
+                        projection
+                    )
+                elif stored == "proposal_stale":
+                    projection = self._discard_stale_projection(projection)
+                elif stored == "publish_capability_denied":
+                    projection = (
+                        self._discard_capability_denied_projection(
+                            projection
+                        )
+                    )
+                else:
+                    projection = self._discard_stale_projection(
+                        projection
+                    )
                 text = projection.reply_text
                 proposal = None
                 event_type, text, retryable, proposal = self._normalize_terminal(
@@ -989,6 +1151,7 @@ class HermesRunService:
                         "assistant_text": text,
                         "retryable": retryable,
                         "proposal": None,
+                        "verified_publish_capability": None,
                     }
                     if hasattr(self.store, "list_director_hermes_run_events"):
                         completion_kwargs["public_text"] = run.public_text
@@ -1046,6 +1209,78 @@ class HermesRunService:
                 self._release_gateway_run(run.run_id),
                 name=f"videobox-gateway-release-{run.run_id}",
             )
+
+    async def _verify_terminal_publish_capability(
+        self,
+        run: _Run,
+        token: str | None,
+    ) -> dict[str, Any] | None:
+        reason = "hermes_capability_unavailable"
+        try:
+            expected_payload = await asyncio.to_thread(
+                self.store.get_expected_hermes_capability,
+                project_id=run.project_id,
+                conversation_id=run.conversation_id,
+                run_id=run.run_id,
+                action="publish_proposal",
+            )
+            if expected_payload is None:
+                reason = "hermes_capability_scope_forbidden"
+                raise HermesCapabilityError(reason)
+            expected = ExpectedCapability(
+                capability_id=str(expected_payload["capability_id"]),
+                project_id=str(expected_payload["project_id"]),
+                conversation_id=str(
+                    expected_payload["conversation_id"]
+                ),
+                run_id=str(expected_payload["run_id"]),
+                session_id=str(expected_payload["session_id"]),
+                session_revision=int(
+                    expected_payload["session_revision"]
+                ),
+                asset_index_revision=int(
+                    expected_payload["asset_index_revision"]
+                ),
+                action=str(expected_payload["action"]),
+            )
+            if token is None or self.capability_verifier is None:
+                raise HermesCapabilityError(reason)
+            verified = self.capability_verifier.verify(
+                token,
+                expected=expected,
+            )
+            return {
+                field: getattr(verified, field)
+                for field in (
+                    "capability_id",
+                    "project_id",
+                    "conversation_id",
+                    "run_id",
+                    "session_id",
+                    "session_revision",
+                    "asset_index_revision",
+                    "action",
+                    "issued_at",
+                    "not_before",
+                    "expires_at",
+                )
+            }
+        except HermesCapabilityError as error:
+            reason = str(error)
+        except Exception:
+            reason = "hermes_capability_unavailable"
+        try:
+            await asyncio.to_thread(
+                self.store.record_hermes_capability_denial,
+                project_id=run.project_id,
+                conversation_id=run.conversation_id,
+                run_id=run.run_id,
+                action="publish_proposal",
+                reason=reason,
+            )
+        except Exception:
+            pass
+        return None
 
     async def _recheck_projection(
         self,
@@ -1125,6 +1360,24 @@ class HermesRunService:
             schema_version=projection.schema_version,
             operation_count=projection.operation_count,
             validation_outcome="stale_context",
+            manual_fallback=True,
+        )
+
+    @staticmethod
+    def _discard_capability_denied_projection(
+        projection: YujinCreatorProjection,
+    ) -> YujinCreatorProjection:
+        visible = projection.reply_text.strip()
+        return YujinCreatorProjection(
+            reply_text=(
+                f"{visible}\n\n{MANUAL_FALLBACK}"
+                if visible
+                else MANUAL_FALLBACK
+            ),
+            proposal=None,
+            schema_version=projection.schema_version,
+            operation_count=projection.operation_count,
+            validation_outcome="capability_denied",
             manual_fallback=True,
         )
 
@@ -1218,6 +1471,31 @@ class HermesRunService:
         except Exception:
             # The gateway ledger is bounded and independently expires attached
             # context. Cleanup must never delay a durable terminal response.
+            return
+
+    @staticmethod
+    def _raise_if_admission_abandoned(admission: _Admission) -> None:
+        if admission.abandoned:
+            raise HermesCapacityUnavailable(
+                "hermes_run_admission_abandoned"
+            )
+
+    async def _revoke_issued_capabilities(
+        self,
+        *,
+        project_id: str,
+        conversation_id: str,
+        run_id: str,
+    ) -> None:
+        try:
+            await asyncio.to_thread(
+                self.store.revoke_issued_hermes_capabilities,
+                project_id=project_id,
+                conversation_id=conversation_id,
+                run_id=run_id,
+                reason="hermes_capability_revoked",
+            )
+        except Exception:
             return
 
     async def _terminal_done(

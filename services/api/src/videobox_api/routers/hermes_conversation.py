@@ -11,6 +11,7 @@ from fastapi.responses import Response, StreamingResponse
 
 from videobox_api.models import HermesRunCreateRequest, HermesRunCreateResponse
 from videobox_api.agent_gateway_client import AgentGatewayUnavailable
+from videobox_api.hermes_capabilities import HermesCapabilityError
 from videobox_api.hermes_run_service import HermesCapacityUnavailable
 
 
@@ -39,6 +40,11 @@ def build_hermes_conversation_router(run_service) -> APIRouter:
             )
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error.args[0])) from error
+        except HermesCapabilityError as error:
+            raise HTTPException(
+                status_code=503,
+                detail="hermes_context_preparation_unavailable",
+            ) from error
         except ValueError as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
         except HermesCapacityUnavailable as error:
@@ -98,6 +104,11 @@ def build_hermes_conversation_router(run_service) -> APIRouter:
         except KeyError as error:
             raise HTTPException(
                 status_code=404, detail=str(error.args[0])
+            ) from error
+        except HermesCapabilityError as error:
+            raise HTTPException(
+                status_code=503,
+                detail="hermes_context_preparation_unavailable",
             ) from error
         except ValueError as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
