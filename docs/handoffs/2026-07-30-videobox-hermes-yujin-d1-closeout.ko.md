@@ -55,8 +55,8 @@ Starlette multipart warning 1건은 기존 비실패 출력이다.
 ## 커밋·푸시 상태
 
 - closeout 작성 시 기준 HEAD: `aebb7e08b`
-- D1 implementation/closeout commit: closeout 뒤 기록
-- upstream push: closeout 뒤 기록
+- D1 implementation/closeout commit: `7a1559f68`
+- upstream push: `7a1559f68` push 뒤 `0/0` 확인
 
 ## 재개 안전선
 
