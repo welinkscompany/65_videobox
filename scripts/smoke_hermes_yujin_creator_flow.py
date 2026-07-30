@@ -33,10 +33,17 @@ for source_root in (
     sys.path.insert(0, str(source_root))
 
 import httpx
+from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+    Ed25519PrivateKey,
+)
 from fastapi.testclient import TestClient
 
+from videobox_agent_gateway.context_capabilities import (
+    YujinCapabilityIssuer,
+)
 from videobox_agent_gateway.hermes_rpc_client import HermesRpcEvent
 from videobox_agent_gateway.main import create_app as create_agent_gateway_app
+from videobox_api.hermes_capabilities import HermesCapabilityVerifier
 from videobox_api.main import create_app as create_videobox_app
 
 
@@ -482,9 +489,27 @@ def run_non_live() -> dict[str, int | bool]:
     ) as temporary_root:
         projects_root = Path(temporary_root) / "projects"
         fake_hermes = _FakeHermes("")
+        key_id = "creator-smoke-ephemeral-key-v1"
+        private_key_raw = sha256(
+            b"videobox-hermes-yujin-non-live-smoke-key-v1"
+        ).digest()
+        private_key = Ed25519PrivateKey.from_private_bytes(
+            private_key_raw
+        )
+        capability_ids = iter(
+            (
+                "creator-smoke-read-capability",
+                "creator-smoke-publish-capability",
+            )
+        )
         gateway_app = create_agent_gateway_app(
             hermes_client=fake_hermes,
             service_token=SERVICE_TOKEN,
+            capability_issuer=YujinCapabilityIssuer(
+                key_id=key_id,
+                private_key=private_key_raw,
+                capability_id_factory=lambda: next(capability_ids),
+            ),
         )
         app = create_videobox_app(
             projects_root=projects_root,
@@ -493,6 +518,12 @@ def run_non_live() -> dict[str, int | bool]:
             agent_gateway_http_client_factory=_gateway_http_client_factory(
                 gateway_app
             ),
+        )
+        app.state.hermes_run_service.capability_verifier = (
+            HermesCapabilityVerifier(
+                key_id=key_id,
+                public_key=private_key.public_key().public_bytes_raw(),
+            )
         )
         store = app.state.store
         project = store.bootstrap_project(name="Hermes Yujin creator smoke")

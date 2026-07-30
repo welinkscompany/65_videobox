@@ -547,9 +547,25 @@ skip.
 
 ## Task 10 — Full verification, SSOT, commit, and push
 
-- [ ] **10.1** Run full relevant verification.
-- [ ] **10.2** Update plan/status/handoff only from fresh evidence.
-- [ ] **10.3** Commit and push one logically closed C3 implementation.
+- [x] **10.1** Run full relevant verification.
+- [x] **10.2** Update plan/status/handoff only from fresh evidence.
+- [~] **10.3** Commit and push one logically closed C3 implementation.
+
+**Closeout evidence (2026-07-30):**
+
+- C3 focused suite: `468 passed, 33 skipped`; the skips are PostgreSQL-only
+  cases, separately executed against disposable PostgreSQL 16 as `38 passed,
+  0 skipped`, with the exact container removed afterward.
+- Full Python regression after final remediation: `2367 passed, 41 skipped,
+  1 warning`; the warning is the existing Starlette multipart deprecation.
+- Full frontend: `50 files / 668 tests passed`; production build passed with
+  the existing non-failing 500 kB chunk warning.
+- Hermes profile/runtime/plan-state/zero-tools, Editor UI source provenance and
+  UI-system verifiers passed. `git diff --check` passed.
+- Independent spec, quality, gap, reverse-runtime and final two-file regression
+  review all ended `Critical 0 / Important 0 / Minor 0`.
+- No actual Hermes/provider call, browser human E2E, user-media acceptance,
+  CapCut Desktop proof or Task 9 human/environment acceptance was claimed.
 
 **Verification:**
 
@@ -560,11 +576,11 @@ skip.
 .\.venv\Scripts\python.exe -m pytest -q
 npm --prefix apps/web test -- --run
 npm --prefix apps/web run build
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-hermes-yujin-profile.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-hermes-yujin-profile.ps1 -StaticOnly
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-hermes-yujin-runtime.ps1 -StaticOnly
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-hermes-yujin-plan-state.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-hermes-yujin-zero-tools.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-editor-ui-oss-provenance.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-editor-ui-source-provenance.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-editor-ui-system.ps1
 git diff --check
 ```

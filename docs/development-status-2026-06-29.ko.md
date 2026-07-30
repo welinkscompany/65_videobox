@@ -1,6 +1,18 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 309. 2026-07-30 Hermes Yujin C2 realtime recovery closeout`을 우선 적용한다. Task 22 기술 closeout 근거는 `## 300`, Phase B 근거는 `## 307`, C1 근거는 `## 308`을 유지하며, 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 310. 2026-07-30 Hermes Yujin C3 capability lifecycle closeout`을 우선 적용한다. Task 22 기술 closeout 근거는 `## 300`, Phase B 근거는 `## 307`, C1/C2 근거는 `## 308`/`## 309`를 유지하며, 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+
+## 310. 2026-07-30 Hermes Yujin C3 capability lifecycle closeout
+
+- `[x] C3 완료`: Agent Gateway만 보유하는 Ed25519 private key와 VideoBox API만 보유하는 public key로 read/publish capability를 분리했다. 각 capability는 현재 project/conversation/run/session/session revision/asset-index revision과 정확히 한 action에 묶이며, durable issue/consume/replay/revoke ledger와 redacted audit가 재사용과 권한 우회를 막는다.
+- `현재 truth·원자성`: read consume은 session→asset→ledger 순서로 잠그고 현재 revision과 asset truth를 다시 확인한 뒤에만 attach를 허용한다. read admission/preparation의 stale, forged, expired, scope mismatch, replay, concurrent revoke/consume, verifier unavailable과 audit failure는 provider/attach 0으로 닫힌다. publish는 provider stream 뒤 terminal proposal 저장과 같은 transaction에서 한 번만 consume되며, 이 단계의 실패는 proposal/editor mutation 0과 manual fallback으로 닫힌다.
+- `배포·회전`: base Compose에는 authority를 열지 않고 Hermes Yujin overlay에서만 Gateway private key/API public key를 분리 주입한다. start verifier는 형식·pair mismatch를 key material 출력 없이 거부한다. coordinated rotation은 admission을 멈춘 뒤 단일 새 key pair로 함께 교체하고 재시작 reconciliation/revoke를 수행하는 무중첩 절차이며, 안전하지 않은 단독 교체는 fail-closed다.
+- `fallback·비범위`: Eugene/Hermes 경로가 막혀도 기존 Director/editor 수동 편집은 계속 가능하며 자동 Apply는 없다. source copy, OpenCut runtime, provider/API 확대, Hermes-owned Mem0, SaaS, render/export/filesystem capability는 추가하지 않았다.
+- `리뷰·보정`: 독립 spec, quality, gap, reverse-runtime review에서 current-truth lock 재확인, PostgreSQL lock order와 실제 동시성 barrier, verifier missing/unavailable audit, preparation-error redaction, maintenance 격리를 보완했다. 전체 회귀 첫 실행에서 남은 오류 wrapper 기대값과 non-live smoke issuer 2건을 RED→GREEN으로 수정했고 최종 독립 리뷰는 Critical/Important/Minor **0**, PASS다.
+- `검증`: C3 focused **468 passed, 33 skipped**, disposable PostgreSQL 16 C3 전체 **38 passed, skip 0**와 container cleanup, 전체 Python **2367 passed, 41 skipped**, 전체 frontend **50 files / 668 passed**, production build, Hermes profile/runtime/20-ID plan-state/zero-tools verifier, Editor UI OSS source-provenance/UI-system verifier, `py_compile`, `git diff --check`가 통과했다. Starlette multipart warning 1건, React `act(...)`, jsdom navigation, intentional ErrorBoundary stderr와 500 kB build warning은 기존 비실패 출력이다.
+- `미실행`: 실제 Hermes/provider 호출, 브라우저 사람 E2E, 실제 service-stop drill, 사용자 원본 영상 재생·청취, CapCut Desktop 사람 검증, Task 9 사람/환경 acceptance는 실행하지 않았고 통과로 간주하지 않는다.
+- `진행률`: Phase C와 realtime-reliability child는 **3/4 (75.0%), 잔여 25.0%**, Hermes Yujin initiative는 **14/20 (70.0%), 잔여 30.0%**다. 기존 VideoBox 공식 누적은 Task 9 사람/환경 acceptance 전까지 **9/22 (40.9%)**, 잔여 **59.1%**로 유지한다.
+- `다음 작업`: **C4만** 진행한다. dashboard에서 `http_ready`와 `chat_verified`를 분리하고, named Yujin service만 안전하게 재시작하며, 정적·가능한 로컬 장애 drill이 모든 실패 뒤 manual editor fallback을 보존하는지 TDD와 역방향 검증으로 닫는다.
 
 ## 309. 2026-07-30 Hermes Yujin C2 realtime recovery closeout
 

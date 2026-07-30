@@ -13,7 +13,10 @@ from videobox_api.agent_gateway_client import (
     AgentGatewayReservation,
     AgentGatewayUnavailable,
 )
-from videobox_api.hermes_run_service import HermesRunService
+from videobox_api.hermes_run_service import (
+    HermesContextPreparationUnavailable,
+    HermesRunService,
+)
 from videobox_api.models import HermesRunCreateRequest
 from videobox_storage.local_project_store import LocalProjectStore
 
@@ -119,6 +122,8 @@ class _Gateway:
         self.prepared.append(kwargs)
 
     async def release_run(self, **_kwargs):
+        if self.fail_prepare:
+            self.order.append("gateway_release")
         return None
 
     async def stream_run(self, **_kwargs):
@@ -240,7 +245,10 @@ def test_stale_or_preparation_failure_keeps_prompt_at_zero_and_settles_owned_row
         context_builder=_context_builder(failed_order),
         capability_verifier=_Verifier(),
     )
-    with pytest.raises(AgentGatewayUnavailable):
+    with pytest.raises(
+        HermesContextPreparationUnavailable,
+        match="^hermes_context_preparation_unavailable$",
+    ) as caught:
         asyncio.run(
             failed_service.create_run(
                 project_id="project-a",
@@ -251,10 +259,12 @@ def test_stale_or_preparation_failure_keeps_prompt_at_zero_and_settles_owned_row
                 expected_session_revision=7,
             )
         )
+    assert "agent_gateway_unavailable" not in str(caught.value)
     assert failed_order == [
         "context_build",
         "durable_begin",
         "gateway_prepare",
+        "gateway_release",
         "durable_complete",
     ]
     assert failed_store.completions[0]["status"] == "blocked"

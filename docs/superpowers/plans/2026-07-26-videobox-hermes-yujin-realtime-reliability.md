@@ -13,7 +13,7 @@
 Parent: `docs/superpowers/plans/2026-07-26-videobox-hermes-yujin-master-plan.md`
 Requires: Phase B task B5 complete.
 
-Child progress: **2/4 tasks (50.0%), remaining 50.0%**.
+Child progress: **3/4 tasks (75.0%), remaining 25.0%**.
 
 ## C1 — Persist run and event cursors
 
@@ -200,7 +200,7 @@ POST /api/projects/{project_id}/director/conversations/{conversation_id}/hermes-
 
 ## C3 — Complete capability lifecycle
 
-- [ ] **C3** Complete issue/consume/replay/revoke capability lifecycle with redacted audit evidence.
+- [x] **C3** Complete issue/consume/replay/revoke capability lifecycle with redacted audit evidence.
 
 **2026-07-30 source-grounded amendment:** The authoritative C3 contract is
 `docs/superpowers/specs/2026-07-30-videobox-hermes-yujin-c3-capability-lifecycle-design.md`.
