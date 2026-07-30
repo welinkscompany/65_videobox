@@ -330,6 +330,14 @@ Each token contains exactly one action. Never issue an `apply`, `render`,
 
 - [ ] **C4** Add dashboard health/restart/fallback operations, failure drills, and Phase C closeout.
 
+**2026-07-30 source-grounded amendment:** The authoritative C4 contract is
+`docs/superpowers/specs/2026-07-30-videobox-hermes-yujin-c4-operations-design.md`.
+The executable TDD sequence is
+`docs/superpowers/plans/2026-07-30-videobox-hermes-yujin-c4-operations.md`.
+It keeps browser status read-only, moves exact Docker restart to a local
+operator script, preserves the retired project-status route, and separates
+static evidence from explicitly gated live/destructive drills.
+
 **Files:**
 
 - Create: `scripts/get-hermes-yujin-status.ps1`
@@ -394,9 +402,9 @@ degraded
 9. Mark C4 `[x]`, synchronize progress and SSOT, commit and push:
 
    ```powershell
-   git add scripts apps/web services packages tests docs
-   git commit -m "feat: harden Yujin realtime runs"
-   git push origin codex/videobox-container-compatibility
+   # The linked C4 detailed plan supersedes broad directory staging.
+   # Stage only its exact changed-file list, verify protected paths are absent
+   # from the index, then commit and push.
    ```
 
 Expected Phase C outcome: reload/reconnect/cancel/retry behavior is deterministic, capability replay is rejected, operational status tells the truth, and every tested failure leaves manual editing available.
