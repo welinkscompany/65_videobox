@@ -27,6 +27,7 @@ export function PreviewStage({ expectedRevision, exactPreview, captions = [], so
   const [timelineTime, setTimelineTime] = useState(() => exact.kind === "current" ? exact.timelineRange.startSec : 0);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [auditionIssue, setAuditionIssue] = useState<string | null>(null);
 
   const stopActiveMedia = () => {
     const media = mediaRef.current;
@@ -38,11 +39,13 @@ export function PreviewStage({ expectedRevision, exactPreview, captions = [], so
   const showExact = () => {
     if (exact.kind !== "current") return;
     stopActiveMedia();
+    setAuditionIssue(null);
     setMode(coordinatorRef.current.showExact({ id: exactMediaId(exact), url: exact.url, timelineRange: exact.timelineRange }));
     setTimelineTime(exact.timelineRange.startSec);
   };
   const showAudition = (source: AuditionSource) => {
     stopActiveMedia();
+    setAuditionIssue(null);
     setMode(coordinatorRef.current.showAudition(source));
     setTimelineTime(source.timelineRange.startSec);
   };
@@ -82,6 +85,7 @@ export function PreviewStage({ expectedRevision, exactPreview, captions = [], so
 
   const currentMedia = mode.kind === "idle" ? null : mode.media;
   const isImageAudition = mode.kind === "audition" && mode.media.mediaKind === "image";
+  const visibleAuditionIssue = mode.kind === "audition" ? auditionIssue : null;
   const mediaLabel = mode.kind === "audition" ? `${sourceLabel(localSources, auditionRequest, mode.media.id)} 소스 미리보기` : "편집본 미리보기";
   const activeCaption = mode.kind === "exact" ? captions.find((caption) => timelineTime >= caption.startSec && timelineTime < caption.endSec) : null;
   const updateTimeline = (node: MediaNode) => {
@@ -112,18 +116,26 @@ export function PreviewStage({ expectedRevision, exactPreview, captions = [], so
     setRefreshError(null);
     try { await onRefresh(); } catch { setRefreshError("미리보기를 다시 요청하지 못했어요."); } finally { setRefreshing(false); }
   };
+  const checkAuditionVideo = (video: HTMLVideoElement) => {
+    if (mode.kind !== "audition" || mode.media.mediaKind !== "video") return;
+    if (video.videoWidth > 0 && video.videoHeight > 0) return;
+    try { video.pause(); } catch { /* the browser may already have detached an unsupported source */ }
+    setAuditionIssue("이 원본은 여기서 화면을 열 수 없어요. 적용한 뒤 편집본 미리보기에서 확인해 주세요.");
+  };
 
   return <section className="vb-preview-stage" aria-label="미리보기" tabIndex={0} onKeyDown={onStageKeyDown} onBlur={onStageBlur}>
     <header className="vb-preview-stage__header"><div><p className="vb-preview-stage__eyebrow">{mode.kind === "audition" ? "소스 미리보기" : "편집본 미리보기"}</p><h2>{mode.kind === "audition" ? "원본을 확인하는 중" : "현재 편집 결과"}</h2></div>{mode.kind === "audition" && exact.kind === "current" && <button data-native-control="return-exact" type="button" onClick={showExact}>편집본으로 돌아가기</button>}</header>
     <div className="vb-preview-stage__media-shell" aria-busy={exact.kind === "pending" || exact.kind === "running"}>
-      {currentMedia && (isImageAudition
+      {visibleAuditionIssue
+        ? <div className="vb-preview-stage__empty"><strong>원본 화면을 열지 못했어요</strong><p role="alert">{visibleAuditionIssue}</p></div>
+        : currentMedia && (isImageAudition
         ? <img aria-label={mediaLabel} src={currentMedia.url} alt="" />
         : mode.kind === "audition" && mode.media.mediaKind === "audio"
         ? <audio ref={mediaRef as RefObject<HTMLAudioElement>} aria-label={mediaLabel} src={currentMedia.url} controls preload="metadata" onTimeUpdate={(event) => updateTimeline(event.currentTarget)} onSeeking={(event) => updateTimeline(event.currentTarget)} onSeeked={(event) => updateTimeline(event.currentTarget)} />
-        : <video ref={mediaRef as RefObject<HTMLVideoElement>} aria-label={mediaLabel} src={currentMedia.url} controls preload="metadata" playsInline onTimeUpdate={(event) => updateTimeline(event.currentTarget)} onSeeking={(event) => updateTimeline(event.currentTarget)} onSeeked={(event) => updateTimeline(event.currentTarget)} />)}
+        : <video ref={mediaRef as RefObject<HTMLVideoElement>} aria-label={mediaLabel} src={currentMedia.url} controls preload="metadata" playsInline onLoadedMetadata={(event) => checkAuditionVideo(event.currentTarget)} onTimeUpdate={(event) => updateTimeline(event.currentTarget)} onSeeking={(event) => updateTimeline(event.currentTarget)} onSeeked={(event) => updateTimeline(event.currentTarget)} />)}
       {!currentMedia && <div className="vb-preview-stage__empty"><strong>{exact.label}</strong><p>{exact.copy}</p><button data-native-control="refresh-exact" type="button" onClick={() => void refresh()} disabled={!onRefresh || refreshing}>{refreshing ? "미리보기 요청 중" : "미리보기 새로 만들기"}</button>{refreshError && <p role="alert">{refreshError}</p>}</div>}
     </div>
-    {currentMedia && !isImageAudition && <div className="vb-preview-stage__playback"><button data-native-control="toggle-playback" type="button" onClick={togglePlayback} aria-label="재생 또는 일시정지">재생 / 일시정지</button><output aria-live="off">타임라인 {timelineTime.toFixed(1)}초</output></div>}
+    {currentMedia && !isImageAudition && !visibleAuditionIssue && <div className="vb-preview-stage__playback"><button data-native-control="toggle-playback" type="button" onClick={togglePlayback} aria-label="재생 또는 일시정지">재생 / 일시정지</button><output aria-live="off">타임라인 {timelineTime.toFixed(1)}초</output></div>}
     {mode.kind === "exact" && <p className="vb-preview-stage__burned-caption">자막은 영상에 포함되어 재생됩니다.</p>}
     {mode.kind === "exact" && <p role="status" aria-label="현재 자막" aria-live="polite" aria-atomic="true" className="vb-preview-stage__caption-transcript vb-preview-stage__visually-hidden">{activeCaption ? `현재 자막: ${activeCaption.text}` : "현재 자막 없음"}</p>}
     <p role="status" aria-live="polite" className="vb-preview-stage__status">{mode.kind === "audition" ? isImageAudition ? "소스 이미지 미리보기" : `소스 미리보기 · 타임라인 ${timelineTime.toFixed(1)}초` : `${exact.copy} 타임라인 ${timelineTime.toFixed(1)}초`}</p>

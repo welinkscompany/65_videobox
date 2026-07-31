@@ -93,6 +93,37 @@ describe("PreviewStage", () => {
     expect(screen.getByLabelText("편집본 미리보기")).toBeInTheDocument();
   });
 
+  it("guides a browser-incompatible source back to the exact edited preview", () => {
+    render(<PreviewStage {...current} />);
+    fireEvent.click(screen.getByRole("button", { name: "B-roll A 원본 열기" }));
+    const audition = screen.getByLabelText("B-roll A 소스 미리보기") as HTMLVideoElement;
+    Object.defineProperty(audition, "videoWidth", { configurable: true, value: 0 });
+    Object.defineProperty(audition, "videoHeight", { configurable: true, value: 0 });
+
+    fireEvent.loadedMetadata(audition);
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "이 원본은 여기서 화면을 열 수 없어요. 적용한 뒤 편집본 미리보기에서 확인해 주세요.",
+    );
+    expect(screen.queryByRole("button", { name: "재생 또는 일시정지" })).toBeNull();
+    expect(screen.getByRole("button", { name: "편집본으로 돌아가기" })).toBeInTheDocument();
+  });
+
+  it("replaces an audition compatibility notice with current exact-preview recovery", async () => {
+    const rendered = render(<PreviewStage {...current} />);
+    fireEvent.click(screen.getByRole("button", { name: "B-roll A 원본 열기" }));
+    const audition = screen.getByLabelText("B-roll A 소스 미리보기") as HTMLVideoElement;
+    Object.defineProperty(audition, "videoWidth", { configurable: true, value: 0 });
+    Object.defineProperty(audition, "videoHeight", { configurable: true, value: 0 });
+    fireEvent.loadedMetadata(audition);
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+
+    rendered.rerender(<PreviewStage {...current} exactPreview={{ status: "stale", url: "/api/old.mp4", artifactRevision: 3 }} />);
+
+    await waitFor(() => expect(screen.queryByText("원본 화면을 열지 못했어요")).toBeNull());
+    expect(screen.getByRole("button", { name: "미리보기 새로 만들기" })).toBeInTheDocument();
+  });
+
   it("consumes a newer card audition request in its existing player", () => {
     const { container, rerender } = render(<PreviewStage {...current} auditionRequest={null} />);
     rerender(<PreviewStage {...current} auditionRequest={{ requestId: 1, source: { id: "broll:image-1", label: "제품 사진", url: "/api/projects/project-a/assets/image-1/content", mediaKind: "video", timelineRange: { startSec: 3, endSec: 7 } } }} />);

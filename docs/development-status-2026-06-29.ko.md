@@ -1,6 +1,18 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 316. 2026-07-30 Hermes Yujin F1 final technical closeout`을 우선 적용한다. D4 closeout 근거는 `## 315`, Task 22 기술 closeout 근거는 `## 300`, Phase B 근거는 `## 307`, Phase C 근거는 `## 308`–`## 311`, D1–D3 근거는 `## 312`–`## 314`를 유지하며, 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 317. 2026-07-31 owner dogfood 자동 검증 및 release completion protocol`을 우선 적용한다. Hermes Yujin 최종 기술 closeout 근거는 `## 316`, D4 closeout 근거는 `## 315`, Task 22 기술 closeout 근거는 `## 300`, Phase B 근거는 `## 307`, Phase C 근거는 `## 308`–`## 311`, D1–D3 근거는 `## 312`–`## 314`를 유지하며, 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+
+## 317. 2026-07-31 owner dogfood 자동 검증 및 release completion protocol
+
+- `[x] 사용자 원본 read-only dogfood`: `C:\Users\atgro\OneDrive\바탕 화면\영상샘플`의 원본 5개는 수정하지 않았다. 격리 API/data root에 짧은 HEVC 원본을 복사 등록했고 source/project SHA-256 일치, `Range` 응답 `206`과 정확한 1,024 byte 반환을 확인했다.
+- `[x] 실제 미디어 gap TDD 보완`: 샘플 5개 중 4개가 HEVC였다. Chromium은 HEVC 원본에서 시간·오디오는 진행하지만 표시 가능한 video dimensions가 `0x0`이라 검은 화면이 될 수 있었다. `PreviewStage` source audition이 이 상태를 감지하면 재생을 멈추고 “적용한 뒤 편집본 미리보기에서 확인”하도록 안내한다. exact preview가 stale/idle로 돌아갈 때 오래된 source 오류가 남지 않으며, one-player ownership·명시적 apply·manual fallback은 유지한다.
+- `[x] 실제 runtime 확인`: 로컬 VideoBox workspace와 Hermes dashboard 컨테이너가 실행 중인 것을 확인했다. Chromium으로 `/projects`와 인증 전 Hermes `/login`을 열어 console error, failed request, external request가 모두 `0`임을 확인했다. 실제 CapCut Desktop `9.0.0.3858`에서 기존 VideoBox 10분 프로젝트를 열어 narration/TTS, BGM, SFX, caption/text track이 표시되는 것을 확인했으며 편집·export는 수행하지 않았다.
+- `[x] Gate 1–3`: 코드 검토, 계획 gap 검증, 입력→API→project copy→Range→browser playback 및 final MP4/SRT/CapCut draft 역방향 추적을 수행했다. 기존 loop/crop/audio 600초 출력 3개는 모두 H264/AAC `1080x1920`, SRT/timeline/editing-session/CapCut draft를 보유했다.
+- `[x] Gate 4 전체 검증`: 전체 Python **2640 passed, 47 skipped**, 전체 frontend **52 files / 727 passed**, 자동 Chromium editor E2E **35/35**, production build, provenance/UI-system, Hermes runtime/profile/plan static verifier, non-live memory smoke를 통과했다. 첫 E2E 병렬 실행의 1개 5초 mount timeout은 전체 Python 부하가 사라진 뒤 isolated **5/5**와 전체 **35/35**로 재검증했다.
+- `[x] 600초 fresh smoke`: 짧은 격리 root `artifacts/ra31`에서 voice upload, TTS listening approval, BGM/SFX, B-roll, caption/SRT, overlay, loop, final MP4와 CapCut draft를 다시 생성·검증했다. 임의로 깊게 만든 custom `VIDEOBOX_DATA_ROOT`에서는 Windows 260자 destination path로 CapCut draft copy가 실패했으나 기본 로컬 data path는 해당 길이에 도달하지 않는다. 이를 MVP blocker가 아닌 공개된 운영 제약으로 남긴다.
+- `[x] Gate 5–6`: SSOT/handoff를 갱신하고 생성된 `artifacts/owner-dogfood-20260731`, `artifacts/release-audit-20260731-smoke`, `artifacts/ra31`은 release evidence로 보존한다. 기존 보호된 untracked 임시 폴더 3개도 stage/remove/delete하지 않는다. safe-to-delete residue는 `0`이다.
+- `검증 경계`: `.env.container`가 없어 인증된 Hermes provider 대화와 live Mem0 add/search/delete는 실행하지 않았다. CapCut에서 프로젝트가 실제 열리는 것까지 자동 운영 검증했지만 사람의 영상·음악·효과음 취향, 청취 품질, 저작권/게시 승인, 최종 export acceptance는 통과로 주장하지 않는다.
+- `진행률·다음`: Hermes Yujin 기술 initiative는 **20/20 (100.0%)**다. VideoBox 공식 누적은 Task 9 사람/환경 acceptance 기준 **9/22 (40.9%)**, 잔여 **59.1%**로 유지한다. 다음 goal은 사용자가 데스크톱으로 복귀한 뒤 대표 결과물을 직접 보고 들으며 Task 9 acceptance를 닫는 것이다. 인증 정보가 준비되면 Hermes provider 실대화와 live Mem0 canary를 별도 경계에서 실행한다.
 
 ## 316. 2026-07-30 Hermes Yujin F1 final technical closeout
 
