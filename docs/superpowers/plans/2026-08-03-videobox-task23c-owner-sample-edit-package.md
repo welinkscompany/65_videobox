@@ -12,7 +12,7 @@
 
 ## 실행 상태
 
-- [ ] Task 1 기존 편집 smoke의 exact preview·snapshot evidence 확장
+- [x] Task 1 기존 편집 smoke의 exact preview·snapshot evidence 확장
 - [ ] Task 2 사용자 샘플 read-only inventory·공개 API ingest·H264/HEVC preview proof
 - [ ] Task 3 bounded package·reverse manifest·한국어 review checklist
 - [ ] Task 4 CLI·mutation guard·실제 사용자 샘플 검증
@@ -49,7 +49,7 @@
 - Modify: `scripts/verify-production-readiness-smoke.py`
 - Modify: `tests/test_production_readiness_smoke_script.py`
 
-- [ ] `tests/test_production_readiness_smoke_script.py`에 exact preview poll이 `ready`만 성공하고 `failed|stale|timeout`을 bounded error로 거부하는 실패 테스트를 작성한다.
+- [x] `tests/test_production_readiness_smoke_script.py`에 exact preview poll이 `ready`만 성공하고 `failed|stale|timeout`을 bounded error로 거부하는 실패 테스트를 작성한다.
 
 ```python
 def test_smoke_exact_preview_poll_requires_ready_state():
@@ -58,7 +58,7 @@ def test_smoke_exact_preview_poll_requires_ready_state():
     assert smoke._poll_exact_preview(client, project_id="p", generation_id="g", timeout_sec=1)["status"] == "ready"
 ```
 
-- [ ] JSON evidence writer가 timeline/editing-session payload를 UTF-8, stable key order로 쓰고 absolute path를 payload에 새로 넣지 않는 실패 테스트를 작성한다.
+- [x] JSON evidence writer가 timeline/editing-session payload를 UTF-8, stable key order로 쓰고 absolute path를 payload에 새로 넣지 않는 실패 테스트를 작성한다.
 
 ```python
 def test_smoke_writes_timeline_and_session_snapshots(tmp_path):
@@ -68,13 +68,13 @@ def test_smoke_writes_timeline_and_session_snapshots(tmp_path):
     assert json.loads(paths["editing_session"].read_text("utf-8"))["session_id"] == "s"
 ```
 
-- [ ] RED를 실행한다.
+- [x] RED를 실행한다.
 
 Run: `.\.venv\Scripts\python.exe -m pytest tests/test_production_readiness_smoke_script.py -q`
 
 Expected: `_poll_exact_preview`와 `_write_review_snapshots` 부재로 FAIL.
 
-- [ ] `verify-production-readiness-smoke.py`에 아래 helper를 구현한다.
+- [x] `verify-production-readiness-smoke.py`에 아래 helper를 구현한다.
 
 ```python
 def _poll_exact_preview(client: TestClient, *, project_id: str, generation_id: str, timeout_sec: int) -> dict[str, Any]:
@@ -87,8 +87,10 @@ def _probe_media_summary(path: Path, *, ffprobe_binary: str) -> dict[str, Any]:
     """Return bounded duration/format/video/audio codec and pixel-format fields."""
 ```
 
-- [ ] `run_smoke()`에서 caption/overlay 편집 뒤 current session revision으로 `0..5초` exact preview를 시작·poll하고 Range `206`을 확인한다. candidate timeline과 current editing session snapshot, exact preview, final, SRT, CapCut draft, ffprobe summary 경로/SHA를 반환한다.
-- [ ] GREEN을 실행하고 기존 600초 계약이 깨지지 않았는지 확인한다.
+- [x] `run_smoke()`에서 caption/overlay 편집 뒤 current session revision으로 `0..5초` exact preview를 시작·poll하고 Range `206`을 확인한다. candidate timeline과 current editing session snapshot, exact preview, final, SRT, CapCut draft, ffprobe summary 경로/SHA를 반환한다.
+- [x] GREEN을 실행하고 기존 600초 계약이 깨지지 않았는지 확인한다.
+
+완료 증거: focused 회귀 `114 passed`, spec/quality review `Critical 0 / Important 0 / Minor 0`. 실제 600초 end-to-end 실행은 Task 4의 사용자 샘플 검증 단계에서 별도로 수행한다.
 
 Run: `.\.venv\Scripts\python.exe -m pytest tests/test_production_readiness_smoke_script.py tests/test_exact_preview_artifact.py tests/test_api_exact_preview.py -q`
 
