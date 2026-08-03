@@ -93,6 +93,10 @@ def _write_fake_tool(path: Path) -> None:
         'if "%~1 %~2 %~3"=="rev-parse --abbrev-ref --symbolic-full-name" (echo origin/%FAKE_BRANCH%& exit /b 0)\r\n'
         'if "%~1 %~2 %~3"=="rev-list --left-right --count" (echo %FAKE_DIVERGENCE%& exit /b 0)\r\n'
         'if "%~1 %~2"=="status --short" (type "%FAKE_GIT_STATUS%"& exit /b 0)\r\n'
+        'if "%~1 %~2 %~3"=="ls-files --error-unmatch --" if /i "%~4"=="%FAKE_UNTRACKED_CHILD%" exit /b 1\r\n'
+        'if "%~1 %~2 %~3"=="ls-files --error-unmatch --" exit /b 0\r\n'
+        'if "%~1 %~2 %~3 %~4"=="diff --quiet HEAD --" if /i "%~5"=="%FAKE_DIRTY_CHILD%" exit /b 1\r\n'
+        'if "%~1 %~2 %~3 %~4"=="diff --quiet HEAD --" exit /b 0\r\n'
         "exit /b 1\r\n"
         ":docker\r\n"
         'if /i "%~1"=="version" (echo 27.5.1& exit /b %FAKE_DOCKER_EXIT%)\r\n'
@@ -314,6 +318,8 @@ def _run(
         "FAKE_SMOKE_FAIL": "",
         "FAKE_SMOKE_TARGET": "",
         "FAKE_SMOKE_MUTATION": "",
+        "FAKE_UNTRACKED_CHILD": "",
+        "FAKE_DIRTY_CHILD": "",
         **(environment_patch or {}),
     }
     return subprocess.run(
@@ -807,6 +813,20 @@ def test_smoke_readiness_priority_is_fail_closed_and_never_live_ready(tmp_path: 
     assert '"readiness_status": "live_ready"' not in all_output
 
 
+def test_smoke_malformed_dashboard_precedes_missing_credentials(tmp_path: Path) -> None:
+    fixture = _fixture_repository(tmp_path)
+    fixture["env_file"].unlink()
+    with _malformed_http_server() as hermes_uri:
+        result = _run(fixture, mode="Smoke", hermes_uri=hermes_uri)
+
+    payload = _payload(result)
+    assert result.returncode == 1
+    assert payload["static_non_live_checks_passed"] is True
+    assert payload["dashboard_status"] == "invalid"
+    assert payload["credential_status"] == "missing"
+    assert payload["readiness_status"] == "not_ready"
+
+
 def test_smoke_missing_child_has_no_sha_and_remaining_gates_continue(tmp_path: Path) -> None:
     fixture = _fixture_repository(tmp_path)
     (fixture["repository"] / "scripts" / SMOKE_SCRIPTS[0]).unlink()
@@ -823,6 +843,47 @@ def test_smoke_missing_child_has_no_sha_and_remaining_gates_continue(tmp_path: P
     receipt = json.loads(next(fixture["receipt_root"].glob("*.json")).read_text(encoding="utf-8"))
     assert receipt["checks"][0]["script_sha256"] == "unavailable"
     assert all(row["status"] == "pass" for row in receipt["checks"][1:])
+
+
+@pytest.mark.parametrize("git_guard", ["FAKE_DIRTY_CHILD", "FAKE_UNTRACKED_CHILD"])
+def test_smoke_rejects_a_child_not_unchanged_from_head_and_continues_all_gates(
+    tmp_path: Path,
+    git_guard: str,
+) -> None:
+    fixture = _fixture_repository(tmp_path)
+    child_name = "smoke-hermes-yujin-chat.ps1"
+    child_path = fixture["repository"] / "scripts" / child_name
+    child_path.write_text(
+        child_path.read_text(encoding="utf-8-sig") + "# local working-tree edit\n",
+        encoding="utf-8-sig",
+    )
+    relative_child = f"scripts/{child_name}"
+    with _health_server() as hermes_uri:
+        result = _run(
+            fixture,
+            mode="Smoke",
+            hermes_uri=hermes_uri,
+            environment_patch={git_guard: relative_child},
+        )
+
+    payload = _payload(result)
+    assert result.returncode == 1
+    assert payload["readiness_status"] == "not_ready"
+    assert [row["id"] for row in payload["checks"] if row["status"] == "fail"] == [
+        "chat_non_live"
+    ]
+    assert len(fixture["smoke_log"].read_text(encoding="utf-8-sig").splitlines()) == 6
+    receipt_text = next(fixture["receipt_root"].glob("*.json")).read_text(encoding="utf-8")
+    receipt = json.loads(receipt_text)
+    assert receipt["checks"][1]["status"] == "fail"
+    assert receipt["checks"][1]["marker"] == "invalid"
+    assert receipt["checks"][1]["script_sha256"] == hashlib.sha256(child_path.read_bytes()).hexdigest()
+    serialized = json.dumps(payload) + receipt_text
+    assert str(fixture["repository"]) not in serialized
+    assert str(child_path) not in serialized
+    tool_calls = fixture["command_log"].read_text(encoding="utf-8").replace('"', "")
+    assert f"git ls-files --error-unmatch -- {relative_child}" in tool_calls
+    assert f"git diff --quiet HEAD -- {relative_child}" in tool_calls
 
 
 def test_smoke_receipt_write_failure_is_not_reported_as_ready(tmp_path: Path) -> None:

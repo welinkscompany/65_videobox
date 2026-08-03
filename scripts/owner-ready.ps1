@@ -819,9 +819,17 @@ if ($Mode -ceq "Smoke") {
     $receiptChecks = @()
     foreach ($definition in $definitions) {
         $scriptPath = Join-Path $PSScriptRoot $definition.File
+        $relativeScriptPath = "scripts/$($definition.File)"
         $exitCode = 127
         $stdout = ""
         $scriptSha256 = "unavailable"
+        $trackedResult = Invoke-CapturedProcess -FilePath $GitExecutable -Arguments @(
+            "ls-files", "--error-unmatch", "--", $relativeScriptPath
+        )
+        $unchangedResult = Invoke-CapturedProcess -FilePath $GitExecutable -Arguments @(
+            "diff", "--quiet", "HEAD", "--", $relativeScriptPath
+        )
+        $trackedAndUnchanged = $trackedResult.ExitCode -eq 0 -and $unchangedResult.ExitCode -eq 0
         $hashStream = $null
         $sha256 = $null
         try {
@@ -848,7 +856,12 @@ if ($Mode -ceq "Smoke") {
             $stdout = $child.StdOut
         }
         $markerValid = Test-SmokeSuccessMarker -Definition $definition -StdOut $stdout
-        $status = if ($exitCode -eq 0 -and $markerValid -and $scriptSha256 -ne "unavailable") { "pass" } else { "fail" }
+        $status = if (
+            $exitCode -eq 0 -and
+            $markerValid -and
+            $scriptSha256 -ne "unavailable" -and
+            $trackedAndUnchanged
+        ) { "pass" } else { "fail" }
         $action = if ($status -ceq "pass") { "추가 조치가 없습니다." } else { "해당 검증기를 따로 실행해 고정 오류 코드를 확인하세요." }
         $checks += New-OwnerReadyResult -Id $definition.Id -Status $status `
             -Summary $(if ($status -ceq "pass") { "로컬 검증 항목을 확인했습니다." } else { "로컬 검증 항목을 확인하지 못했습니다." }) `
@@ -876,6 +889,9 @@ if ($Mode -ceq "Smoke") {
     }
     $credentialStatus = if (Test-Path -LiteralPath $EnvFile -PathType Leaf) { "present_unverified" } else { "missing" }
     $readinessStatus = if (-not $staticNonLiveChecksPassed) {
+        "not_ready"
+    }
+    elseif ($dashboardStatus -ceq "invalid") {
         "not_ready"
     }
     elseif ($credentialStatus -ceq "missing") {
