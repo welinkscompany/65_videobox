@@ -47,7 +47,7 @@
 - `1ac2af072`: overlay와 한국어 thumbnail evidence 보완
 - `5b1e0454f`: 선택 B-roll asset과 BGM 종류에 typed media controls 결속
 
-문서 closeout commit과 push는 아직 하지 않았다. 문서 작성 시작 시 HEAD는 `5b1e0454f`였고 branch는 upstream보다 22 commit ahead였다.
+문서 작성 시작 시 HEAD는 `5b1e0454f`였고 branch는 upstream보다 22 commit ahead였다. 구현·closeout 문서는 `bfe477aa3`까지 `origin/codex/videobox-container-compatibility`에 push했고 upstream `0/0`을 확인했다.
 
 ## 검증 결과
 

@@ -16,7 +16,7 @@
 - [x] Task 2 사용자 샘플 read-only inventory·공개 API ingest·H264/HEVC preview proof
 - [x] Task 3 bounded package·reverse manifest·한국어 review checklist
 - [x] Task 4 CLI·mutation guard·실제 사용자 샘플 검증
-- [ ] Task 5 독립 review·관련 회귀·SSOT 완료, commit/push 대기
+- [x] Task 5 독립 review·관련 회귀·SSOT·commit/push
 
 ## 설계 결정
 
@@ -245,11 +245,11 @@ Run:
 ```
 
 - [ ] Task 23 final full Python/frontend/build/E2E/provenance는 23D 뒤 final audit로 남기며 이번 slice에서 실행하지 않은 항목은 통과로 주장하지 않는다.
-- [x] `git diff --check`, branch/HEAD/upstream, `git worktree list`, protected residue 3개, package artifact ignore를 확인한다. 문서 closeout 시작 HEAD는 `5b1e0454f`, branch는 upstream보다 22 commit ahead이며 push 전이므로 `0/0`은 commit/push 뒤 root가 다시 확인한다.
+- [x] `git diff --check`, branch/HEAD/upstream, `git worktree list`, protected residue 3개, package artifact ignore를 확인한다. 문서 closeout 시작 HEAD는 `5b1e0454f`, branch는 upstream보다 22 commit ahead였고 closeout push 뒤 upstream `0/0`을 다시 확인했다.
 - [x] SSOT/handoff를 Task 23 **3/4 (75.0%)**, 잔여 **25.0%**, 다음 goal **23D Hermes readiness**로 갱신한다.
-- [ ] 이번 범위만 commit하고 `origin/codex/videobox-container-compatibility`에 push한다.
+- [x] 이번 범위만 commit하고 `origin/codex/videobox-container-compatibility`에 push한다.
 
-Task 5 closeout evidence: 실제 r4는 artifact 8개를 모두 SHA로 역검증했고, H264/HEVC source→project copy, narration source→copy, 선택 H264→편집 asset의 hash 결속을 포함한 source/copy 5쌍이 일치했다. B-roll/BGM/SFX/caption/TTS/explanation overlay는 모두 `true`이며 `owner_approval`, `rights_approval`, `desktop_edit`, `desktop_export`, `automatic_apply`, `memory_write`는 모두 `false`, provider call은 `0`이다. 계획의 10개 focused backend 파일과 `tests/test_thumbnail_generator.py`를 fresh 실행한 결과는 **326 passed, warning 1, no skips/failures**이며 warning은 기존 Starlette `python_multipart` PendingDeprecationWarning이다. Task 23 final full Python/frontend/build/E2E/provenance와 사람/CapCut Desktop acceptance는 실행하지 않았고, commit/push 및 upstream `0/0` 확인은 root의 다음 단계로 남긴다.
+Task 5 closeout evidence: 실제 r4는 artifact 8개를 모두 SHA로 역검증했고, H264/HEVC source→project copy, narration source→copy, 선택 H264→편집 asset의 hash 결속을 포함한 source/copy 5쌍이 일치했다. B-roll/BGM/SFX/caption/TTS/explanation overlay는 모두 `true`이며 `owner_approval`, `rights_approval`, `desktop_edit`, `desktop_export`, `automatic_apply`, `memory_write`는 모두 `false`, provider call은 `0`이다. 계획의 10개 focused backend 파일과 `tests/test_thumbnail_generator.py`를 fresh 실행한 결과는 **326 passed, warning 1, no skips/failures**이며 warning은 기존 Starlette `python_multipart` PendingDeprecationWarning이다. Task 23 final full Python/frontend/build/E2E/provenance와 사람/CapCut Desktop acceptance는 실행하지 않았다. 구현·closeout 문서는 `bfe477aa3`까지 push했고 upstream `0/0`을 확인했다.
 
 ## Acceptance matrix
 
