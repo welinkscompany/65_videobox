@@ -118,6 +118,36 @@ def test_inventory_rejects_nested_supported_media_before_probe(tmp_path: Path) -
         package.inventory_samples(sample_dir, ffprobe_binary="ffprobe")
 
 
+def test_inventory_rejects_direct_directories_without_nested_traversal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package = _load_module()
+    sample_dir = tmp_path / "samples"
+    deep = sample_dir / "nested" / "deeper"
+    deep.mkdir(parents=True)
+    (deep / "video.mp4").write_bytes(b"must-not-be-read")
+    monkeypatch.setattr(
+        Path,
+        "rglob",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("nested traversal")),
+    )
+
+    with pytest.raises(package.OwnerSamplePackageError, match="^sample_not_direct_child$"):
+        package.inventory_samples(sample_dir, ffprobe_binary="ffprobe")
+
+    junction_root = tmp_path / "junction-samples"
+    junction = junction_root / "junction"
+    junction.mkdir(parents=True)
+    original_reparse_check = package._is_reparse_point
+    monkeypatch.setattr(
+        package,
+        "_is_reparse_point",
+        lambda path: path == junction or original_reparse_check(path),
+    )
+    with pytest.raises(package.OwnerSamplePackageError, match="^sample_path_escape$"):
+        package.inventory_samples(junction_root, ffprobe_binary="ffprobe")
+
+
 def test_inventory_rejects_symlink_or_reparse_escape_before_probe(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -193,8 +223,19 @@ def test_inventory_errors_are_bounded_and_do_not_disclose_sample_path(tmp_path: 
 def test_selection_uses_duration_size_filename_and_requires_both_codecs() -> None:
     package = _load_module()
 
-    def record(name: str, codec: str, duration: float, size: int):
-        return package.SampleRecord(name, size, duration, "mov,mp4", codec, "aac", "yuv420p", name * 8)
+    def record(
+        name: str,
+        codec: str,
+        duration: float,
+        size: int,
+        *,
+        container: str = "mov,mp4",
+        audio: str | None = "aac",
+        pixel_format: str | None = "yuv420p",
+    ):
+        return package.SampleRecord(
+            name, size, duration, container, codec, audio, pixel_format, name * 8
+        )
 
     selected = package.select_preview_inputs(
         [
@@ -210,6 +251,28 @@ def test_selection_uses_duration_size_filename_and_requires_both_codecs() -> Non
 
     with pytest.raises(package.OwnerSamplePackageError, match="^required_preview_codec_missing$"):
         package.select_preview_inputs([record("only-h264.mp4", "h264", 1.0, 1)])
+
+    compatible = record(
+        "compatible.mp4", "h264", 10.0, 100, container=" MOV , mp4 ", audio=None
+    )
+    selected = package.select_preview_inputs(
+        [
+            record("wrong-container.mp4", "h264", 1.0, 1, container="matroska,webm"),
+            record("wrong-pixel.mp4", "h264", 2.0, 1, pixel_format="yuv444p"),
+            record("wrong-audio.mp4", "h264", 3.0, 1, audio="opus"),
+            compatible,
+            record("hevc.mp4", "hevc", 1.0, 1),
+        ]
+    )
+    assert selected["h264"] == compatible
+
+    with pytest.raises(package.OwnerSamplePackageError, match="^required_preview_codec_missing$"):
+        package.select_preview_inputs(
+            [
+                record("incompatible.mp4", "h264", 1.0, 1, container="webm"),
+                record("hevc.mp4", "hevc", 1.0, 1),
+            ]
+        )
 
 
 def test_preview_builder_rejects_mislabeled_codec_selection_before_file_or_api_access(
@@ -232,9 +295,29 @@ def test_preview_builder_rejects_mislabeled_codec_selection_before_file_or_api_a
 
 
 def test_preview_proofs_use_public_api_and_preserve_source_and_copy_hashes(
-    real_samples: Path, tmp_path: Path
+    real_samples: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     package = _load_module()
+    renderer_arguments: list[dict] = []
+    original_renderer = package.FFmpegBrowserPreviewRenderer
+    original_content_probe = package._probe_api_content
+    probed_content_urls: list[str] = []
+
+    def capture_renderer(*args, **kwargs):
+        renderer_arguments.append(dict(kwargs))
+        return original_renderer(*args, **kwargs)
+
+    def capture_content_probe(client, *, content_url, projects_root, ffprobe_binary):
+        probed_content_urls.append(content_url)
+        return original_content_probe(
+            client,
+            content_url=content_url,
+            projects_root=projects_root,
+            ffprobe_binary=ffprobe_binary,
+        )
+
+    monkeypatch.setattr(package, "FFmpegBrowserPreviewRenderer", capture_renderer)
+    monkeypatch.setattr(package, "_probe_api_content", capture_content_probe)
     before = {path.name: _fingerprint(path) for path in real_samples.iterdir()}
     records = package.inventory_samples(real_samples, ffprobe_binary="ffprobe")
     selected = package.select_preview_inputs(records)
@@ -253,11 +336,18 @@ def test_preview_proofs_use_public_api_and_preserve_source_and_copy_hashes(
         {"method": "POST", "path": "/api/projects/{project_id}/assets/broll-video"},
     ]
     assert proofs["external_provider_calls"] == 0
+    assert renderer_arguments == [
+        {"ffmpeg_binary": "ffmpeg", "timeout_seconds": package.PREVIEW_RENDER_TIMEOUT_SECONDS}
+    ]
+    assert package.PREVIEW_RENDER_TIMEOUT_SECONDS == 45
+    assert package.PREVIEW_RENDER_TIMEOUT_SECONDS < package.PREVIEW_TIMEOUT_SECONDS
     assert proofs["project_ref"].startswith("projects/")
     assert set(proofs["previews"]) == {"h264", "hevc"}
     for codec, proof in proofs["previews"].items():
         assert proof["source_name"] == selected[codec].name
         assert proof["source_sha256"] == proof["project_copy_sha256"]
+        assert proof["preview_source_sha256"] == proof["project_copy_sha256"]
+        assert proof["profile"] == "h264-yuv420p-aac-1280-v1"
         assert proof["project_copy_ref"].startswith("local://projects/")
         assert proof["range_status"] == 206
         assert proof["output_video_codec"] == "h264"
@@ -269,10 +359,128 @@ def test_preview_proofs_use_public_api_and_preserve_source_and_copy_hashes(
     assert "/browser-preview/content" not in proofs["previews"]["h264"]["content_url"]
     assert proofs["previews"]["hevc"]["preview_kind"] == "proxy"
     assert proofs["previews"]["hevc"]["content_url"].endswith("/browser-preview/content")
+    assert probed_content_urls == [
+        proofs["previews"]["h264"]["content_url"],
+        proofs["previews"]["hevc"]["content_url"],
+    ]
+    assert proofs["previews"]["h264"]["content_sha256"] == proofs["previews"]["h264"][
+        "project_copy_sha256"
+    ]
     assert before == {path.name: _fingerprint(path) for path in real_samples.iterdir()}
     serialized = json.dumps(proofs, ensure_ascii=False)
     assert str(real_samples.resolve()) not in serialized
     assert str((tmp_path / "runtime").resolve()) not in serialized
+
+
+@pytest.mark.parametrize(
+    ("field", "wrong_value", "expected_code"),
+    [
+        ("source_sha256", "0" * 64, "preview_source_identity_mismatch"),
+        ("source_sha256", None, "preview_source_identity_mismatch"),
+        ("profile", "wrong-profile", "preview_profile_mismatch"),
+        ("profile", None, "preview_profile_mismatch"),
+    ],
+)
+def test_preview_proofs_reject_wrong_ready_identity_before_content(
+    real_samples: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+    wrong_value: str | None,
+    expected_code: str,
+) -> None:
+    package = _load_module()
+    selected = package.select_preview_inputs(
+        package.inventory_samples(real_samples, ffprobe_binary="ffprobe")
+    )
+    original_poll = package._poll_preview
+
+    def corrupt_ready_state(*args, **kwargs):
+        state = dict(original_poll(*args, **kwargs))
+        if wrong_value is None:
+            state.pop(field, None)
+        else:
+            state[field] = wrong_value
+        return state
+
+    monkeypatch.setattr(package, "_poll_preview", corrupt_ready_state)
+    monkeypatch.setattr(
+        package,
+        "_probe_api_content",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("content must not be read before identity verification")
+        ),
+    )
+    with pytest.raises(package.OwnerSamplePackageError, match=f"^{expected_code}$"):
+        package.build_preview_proofs(
+            sample_dir=real_samples,
+            selected=selected,
+            projects_root=tmp_path / f"runtime-{field}",
+            ffmpeg_binary="ffmpeg",
+            ffprobe_binary="ffprobe",
+        )
+
+
+def test_h264_public_content_hash_must_match_project_copy(
+    real_samples: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package = _load_module()
+    selected = package.select_preview_inputs(
+        package.inventory_samples(real_samples, ffprobe_binary="ffprobe")
+    )
+    original_probe = package._probe_api_content
+
+    def corrupt_h264_content_hash(client, *, content_url, projects_root, ffprobe_binary):
+        result = original_probe(
+            client,
+            content_url=content_url,
+            projects_root=projects_root,
+            ffprobe_binary=ffprobe_binary,
+        )
+        if "/browser-preview/content" not in content_url:
+            return result[0], result[1], "0" * 64
+        return result
+
+    monkeypatch.setattr(package, "_probe_api_content", corrupt_h264_content_hash)
+    with pytest.raises(package.OwnerSamplePackageError, match="^preview_content_hash_mismatch$"):
+        package.build_preview_proofs(
+            sample_dir=real_samples,
+            selected=selected,
+            projects_root=tmp_path / "runtime-hash",
+            ffmpeg_binary="ffmpeg",
+            ffprobe_binary="ffprobe",
+        )
+
+
+def test_preview_poll_waits_for_terminal_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    package = _load_module()
+
+    class Response:
+        status_code = 200
+
+        def __init__(self, body):
+            self.body = body
+
+        def json(self):
+            return self.body
+
+    class Client:
+        def __init__(self):
+            self.states = [
+                {"status": "running"},
+                {"status": "failed", "error_code": "PREVIEW_RENDER_FAILED"},
+            ]
+            self.calls = 0
+
+        def get(self, endpoint):
+            self.calls += 1
+            return Response(self.states.pop(0))
+
+    client = Client()
+    monkeypatch.setattr(package.time, "sleep", lambda _seconds: None)
+    with pytest.raises(package.OwnerSamplePackageError, match="^preview_not_ready$"):
+        package._poll_preview(client, "/local/status", {"status": "pending"})
+    assert client.calls == 2
 
 
 def test_preview_proofs_fail_closed_when_source_changes(
@@ -370,3 +578,4 @@ def test_runner_source_has_no_direct_sample_copy_or_asset_registration() -> None
     assert "shutil.copy" not in source
     assert ".register_asset(" not in source
     assert ".content_path(" not in source
+    assert ".rglob(" not in source

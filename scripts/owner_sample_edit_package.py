@@ -25,6 +25,7 @@ for source_root in (
 
 from fastapi.testclient import TestClient
 
+from videobox_api.asset_browser_preview_service import BROWSER_PREVIEW_PROFILE
 from videobox_api.main import create_app
 from videobox_core_engine.asset_browser_preview import (
     FFmpegBrowserPreviewRenderer,
@@ -38,6 +39,7 @@ MAX_SAMPLE_COUNT = 100
 MAX_SAMPLE_BYTES = 2 * 1024 * 1024 * 1024
 REPARSE_POINT_ATTRIBUTE = 0x400
 PREVIEW_TIMEOUT_SECONDS = 60.0
+PREVIEW_RENDER_TIMEOUT_SECONDS = 45
 
 
 class OwnerSamplePackageError(RuntimeError):
@@ -108,14 +110,7 @@ def _validated_sample_files(sample_dir: Path) -> list[Path]:
                 raise OwnerSamplePackageError("sample_path_escape")
             continue
         if child.is_dir():
-            try:
-                if any(_is_supported_video(descendant) for descendant in child.rglob("*") if descendant.is_file()):
-                    raise OwnerSamplePackageError("sample_not_direct_child")
-            except OwnerSamplePackageError:
-                raise
-            except OSError as exc:
-                raise OwnerSamplePackageError("sample_read_failed") from exc
-            continue
+            raise OwnerSamplePackageError("sample_not_direct_child")
         if not _is_supported_video(child):
             continue
         try:
@@ -217,12 +212,25 @@ def inventory_samples(sample_dir: Path, *, ffprobe_binary: str) -> list[SampleRe
 
 
 def select_preview_inputs(records: Sequence[SampleRecord]) -> dict[str, SampleRecord]:
-    h264 = [record for record in records if record.video_codec.lower() in {"h264", "avc"}]
+    h264 = [record for record in records if _is_original_browser_ready(record)]
     hevc = [record for record in records if record.video_codec.lower() in {"hevc", "h265"}]
     if not h264 or not hevc:
         raise OwnerSamplePackageError("required_preview_codec_missing")
     key = lambda record: (record.duration_sec, record.size_bytes, record.name.casefold(), record.name)
     return {"h264": min(h264, key=key), "hevc": min(hevc, key=key)}
+
+
+def _is_original_browser_ready(record: SampleRecord) -> bool:
+    container_tokens = {
+        token.strip().lower() for token in record.container.split(",") if token.strip()
+    }
+    return (
+        record.video_codec.lower() in {"h264", "avc"}
+        and bool(container_tokens.intersection({"mov", "mp4"}))
+        and record.pixel_format is not None
+        and record.pixel_format.lower() == "yuv420p"
+        and (record.audio_codec is None or record.audio_codec.lower() == "aac")
+    )
 
 
 def _selected_source(sample_dir: Path, record: SampleRecord) -> Path:
@@ -284,7 +292,7 @@ def _probe_api_content(
     content_url: str,
     projects_root: Path,
     ffprobe_binary: str,
-) -> tuple[str, str | None]:
+) -> tuple[str, str | None, str]:
     projects_root.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="owner-preview-probe-", dir=projects_root) as temporary:
         materialized = Path(temporary) / "preview.mp4"
@@ -300,7 +308,10 @@ def _probe_api_content(
                     target.write(chunk)
         if total_bytes <= 0:
             raise OwnerSamplePackageError("preview_content_empty")
-        return _probe_preview_output(materialized, ffprobe_binary=ffprobe_binary)
+        video_codec, pixel_format = _probe_preview_output(
+            materialized, ffprobe_binary=ffprobe_binary
+        )
+        return video_codec, pixel_format, _sha256(materialized)
 
 
 def build_preview_proofs(
@@ -313,7 +324,7 @@ def build_preview_proofs(
 ) -> dict[str, Any]:
     if (
         set(selected) != {"h264", "hevc"}
-        or selected["h264"].video_codec.lower() not in {"h264", "avc"}
+        or not _is_original_browser_ready(selected["h264"])
         or selected["hevc"].video_codec.lower() not in {"hevc", "h265"}
     ):
         raise OwnerSamplePackageError("required_preview_codec_missing")
@@ -350,7 +361,10 @@ def _build_preview_proofs_unfenced(
     app = create_app(
         projects_root=projects_root,
         asset_browser_preview_probe=FFprobeBrowserPreviewProbe(ffprobe_binary=ffprobe_binary),
-        asset_browser_preview_renderer=FFmpegBrowserPreviewRenderer(ffmpeg_binary=ffmpeg_binary),
+        asset_browser_preview_renderer=FFmpegBrowserPreviewRenderer(
+            ffmpeg_binary=ffmpeg_binary,
+            timeout_seconds=PREVIEW_RENDER_TIMEOUT_SECONDS,
+        ),
     )
     api_import_log = [{"method": "POST", "path": "/api/projects"}]
     previews: dict[str, dict[str, Any]] = {}
@@ -402,6 +416,10 @@ def _build_preview_proofs_unfenced(
             if started.status_code not in {200, 202}:
                 raise OwnerSamplePackageError("preview_start_failed")
             state = _poll_preview(client, endpoint, started.json())
+            if state.get("source_sha256") != copy_sha:
+                raise OwnerSamplePackageError("preview_source_identity_mismatch")
+            if state.get("profile") != BROWSER_PREVIEW_PROFILE:
+                raise OwnerSamplePackageError("preview_profile_mismatch")
             expected_content_url = (
                 f"/api/projects/{project_id}/assets/{asset_id}/content"
                 if codec == "h264"
@@ -412,24 +430,24 @@ def _build_preview_proofs_unfenced(
             ranged = client.get(expected_content_url, headers={"Range": "bytes=0-31"})
             if ranged.status_code != 206:
                 raise OwnerSamplePackageError("preview_range_failed")
-            if codec == "h264":
-                output_codec, output_pixel_format = _probe_preview_output(
-                    stored_resolved, ffprobe_binary=ffprobe_binary
-                )
-            else:
-                output_codec, output_pixel_format = _probe_api_content(
-                    client,
-                    content_url=expected_content_url,
-                    projects_root=projects_root,
-                    ffprobe_binary=ffprobe_binary,
-                )
+            output_codec, output_pixel_format, content_sha = _probe_api_content(
+                client,
+                content_url=expected_content_url,
+                projects_root=projects_root,
+                ffprobe_binary=ffprobe_binary,
+            )
+            if codec == "h264" and content_sha != copy_sha:
+                raise OwnerSamplePackageError("preview_content_hash_mismatch")
             if output_codec != "h264" or output_pixel_format != "yuv420p":
                 raise OwnerSamplePackageError("preview_output_invalid")
             previews[codec] = {
                 "source_name": record.name,
                 "source_sha256": record.sha256,
+                "preview_source_sha256": str(state["source_sha256"]),
+                "profile": str(state["profile"]),
                 "project_copy_ref": storage_uri,
                 "project_copy_sha256": copy_sha,
+                "content_sha256": content_sha,
                 "preview_kind": "original" if codec == "h264" else "proxy",
                 "content_url": expected_content_url,
                 "range_status": ranged.status_code,
