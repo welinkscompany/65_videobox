@@ -935,6 +935,7 @@ def test_package_uses_audio_ducking_and_records_all_controls_and_false_authoriti
     calls = context["calls"]
 
     assert calls["fixture_name"] == "audio_ducking"
+    assert calls["project_name"] == "owner-qa"
     assert Path(calls["narration"]) == package_root / "inputs" / "qa-narration.wav"
     assert Path(calls["broll_source"]).is_file()
     assert Path(calls["broll_source"]).is_relative_to(package_root / "projects")
@@ -959,6 +960,25 @@ def test_package_uses_audio_ducking_and_records_all_controls_and_false_authoriti
     assert manifest["narration"]["source_sha256"] == _sha256(narration)
     assert manifest["narration"]["copy_sha256"] == _sha256(Path(calls["narration"]))
     assert manifest["narration"]["source_sha256"] == manifest["narration"]["copy_sha256"]
+
+
+def test_owner_edit_project_name_keeps_default_exact_preview_under_windows_legacy_path_budget() -> None:
+    package = _load_module()
+    expected_destination = (
+        package.REPOSITORY_ROOT
+        / "artifacts"
+        / "owner-sample-edit-20260803T235959Z"
+        / "edit"
+        / "projects"
+        / "projects"
+        / package.OWNER_EDIT_PROJECT_NAME
+        / "derived"
+        / "exact_previews"
+        / f"exact_preview_{'f' * 32}.mp4"
+    )
+
+    assert package.OWNER_EDIT_PROJECT_NAME == "owner-qa"
+    assert len(str(expected_destination)) <= 259
 
 
 def test_package_manifest_links_all_review_artifacts_to_source_hashes(

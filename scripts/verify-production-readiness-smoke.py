@@ -131,7 +131,15 @@ def require_duration(*, duration_sec: float, expected_sec: float, tolerance_sec:
 
 
 def _run(command: list[str], *, timeout: int = 1_800) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(command, check=True, capture_output=True, text=True, timeout=timeout)
+    return subprocess.run(
+        command,
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=timeout,
+    )
 
 
 def _probe_duration(path: Path, *, ffprobe_binary: str) -> float:

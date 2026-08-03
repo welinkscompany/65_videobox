@@ -82,6 +82,7 @@ CONTROL_CHECKS = {
 }
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 REVISED_CAPTION = "수정된 최종 자막: 열 분 한국어 제작 흐름이 실제 출력까지 유지됩니다."
+OWNER_EDIT_PROJECT_NAME = "owner-qa"
 
 
 class OwnerSamplePackageError(RuntimeError):
@@ -2104,6 +2105,7 @@ def build_owner_sample_package(
             ffmpeg_binary=ffmpeg_binary,
             ffprobe_binary=ffprobe_binary,
             fixture_name="audio_ducking",
+            project_name=OWNER_EDIT_PROJECT_NAME,
             broll_source=owner_h264_copy,
             expected_broll_sha256=selected["h264"].sha256,
         )

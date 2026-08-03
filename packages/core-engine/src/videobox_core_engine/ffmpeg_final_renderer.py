@@ -457,6 +457,8 @@ class FfmpegFinalRenderer:
                 command,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=self.render_timeout_seconds,
             )
         except FileNotFoundError as exc:
@@ -495,6 +497,8 @@ class FfmpegFinalRenderer:
                 ],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=30,
             )
         except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
@@ -516,6 +520,8 @@ class FfmpegFinalRenderer:
                 ],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=min(self.render_timeout_seconds, 60),
             )
         except (FileNotFoundError, subprocess.TimeoutExpired) as exc:

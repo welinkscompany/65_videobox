@@ -168,6 +168,32 @@ def test_smoke_harness_decodes_ffmpeg_subtitles_as_utf8_on_windows() -> None:
     assert smoke._decode_ffmpeg_utf8("수정된 최종 자막".encode("utf-8")) == "수정된 최종 자막"
 
 
+def test_smoke_text_subprocesses_decode_utf8_with_replacement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    smoke = _load_smoke_module()
+    captured: list[dict[str, object]] = []
+
+    def fake_run(command, **kwargs):
+        captured.append(kwargs)
+        return subprocess.CompletedProcess(command, 0, stdout="{}", stderr="잘못된 바이트 �")
+
+    monkeypatch.setattr(smoke.subprocess, "run", fake_run)
+
+    smoke._run(["ffprobe", "한글-영상.mp4"])
+
+    assert captured == [
+        {
+            "check": True,
+            "capture_output": True,
+            "text": True,
+            "encoding": "utf-8",
+            "errors": "replace",
+            "timeout": 1_800,
+        }
+    ]
+
+
 def test_smoke_harness_recreates_only_its_projects_subdirectory_for_a_repeat_run(tmp_path: Path) -> None:
     smoke = _load_smoke_module()
     projects_root = tmp_path / "projects"

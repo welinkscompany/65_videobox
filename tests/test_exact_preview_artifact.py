@@ -622,6 +622,30 @@ def test_exact_preview_publish_staging_name_is_bounded_for_long_windows_paths(tm
     assert staging_names and len(staging_names[0]) <= 32
 
 
+def test_exact_preview_renderer_text_subprocesses_decode_utf8_with_replacement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    def fake_run(command, **kwargs):
+        calls.append(kwargs)
+        stdout = "video\n" if "stream=codec_type" in command else "1.0\n"
+        return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr="잘못된 바이트 �")
+
+    monkeypatch.setattr(
+        "videobox_core_engine.ffmpeg_final_renderer.subprocess.run", fake_run
+    )
+    renderer = FfmpegFinalRenderer(store=LocalProjectStore(tmp_path))
+
+    renderer._run(["ffmpeg", "-i", "한글-영상.mp4"])
+    assert renderer._has_visual_stream(Path("한글-오버레이.mp4")) is True
+    assert renderer._probe_media_duration(Path("한글-영상.mp4")) == 1.0
+
+    assert len(calls) == 3
+    assert all(call.get("encoding") == "utf-8" for call in calls)
+    assert all(call.get("errors") == "replace" for call in calls)
+
+
 def test_exact_preview_retry_creates_a_new_generation_after_failure(tmp_path: Path) -> None:
     store = LocalProjectStore(tmp_path)
     project = store.bootstrap_project(name="preview retry")
